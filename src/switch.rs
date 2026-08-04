@@ -74,7 +74,7 @@ pub fn perform(
     })?;
 
     let mut incoming_is_live = false;
-    let switched = lock::under(host, probe::locks_for(&prepared.store), |held| {
+    let switched: Result<Captured> = lock::under(host, probe::locks_for(&prepared.store), |held| {
         let captured = capture(host, &prepared, outgoing)
             .map_err(|error| error.with_note(&nothing_happened(outgoing)))?;
 

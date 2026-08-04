@@ -31,6 +31,40 @@ impl Execution {
     }
 }
 
+/// One HTTP request, whole.
+///
+/// A request rather than a URL and some arguments beside it, because every part
+/// of one has to travel the same way: an access token is a Credential, and a
+/// header passed on a command line sits in `argv` where any process on the
+/// machine can read it off the process table — the same reason a Credential
+/// never reaches `security`'s command line (ADR 0008).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HttpRequest<'a> {
+    pub url: &'a str,
+    pub headers: &'a [(&'a str, &'a str)],
+    /// The body to send, which is what makes the request a POST. `None` is a
+    /// GET.
+    pub body: Option<&'a str>,
+}
+
+impl<'a> HttpRequest<'a> {
+    pub fn get(url: &'a str, headers: &'a [(&'a str, &'a str)]) -> Self {
+        HttpRequest {
+            url,
+            headers,
+            body: None,
+        }
+    }
+
+    pub fn post(url: &'a str, headers: &'a [(&'a str, &'a str)], body: &'a str) -> Self {
+        HttpRequest {
+            url,
+            headers,
+            body: Some(body),
+        }
+    }
+}
+
 /// A reply from an HTTP request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpResponse {
@@ -138,7 +172,9 @@ pub trait Host {
 
     // ---- network --------------------------------------------------------
 
-    fn http_get(&self, url: &str, headers: &[(&str, &str)]) -> Result<HttpResponse, HostError>;
+    /// Sends one request and reads the whole reply. The only way out to
+    /// Anthropic, and reached by nothing but `--refresh` (ADR 0015).
+    fn http(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, HostError>;
 }
 
 /// Replaces a file's contents in one step, or not at all.

@@ -1,8 +1,10 @@
 //! A Host that keeps the world in memory and records what it was asked to do.
 //!
 //! Behaviour tests drive real command code against this and assert on
-//! observable outcomes: what was printed, what ended up in the keychain, and —
-//! for `status` — that no HTTP request was ever attempted (ADR 0015).
+//! observable outcomes: what was printed, what ended up in the keychain, and
+//! what went out to the network. A machine with no arranged replies has no
+//! network at all, so a command that fetches when it should not fails here
+//! rather than quietly passing (ADR 0015).
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -10,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, TimeZone, Utc};
 
-use super::{Execution, Host, HostError, HttpResponse};
+use super::{Execution, Host, HostError, HttpRequest, HttpResponse};
 use crate::keychain::KeychainError;
 
 /// One effect the fake was asked to perform, in order.
@@ -51,9 +53,33 @@ pub enum Effect {
         program: String,
         config_dir: PathBuf,
     },
-    HttpGet {
+    /// A request that went out to the network.
+    Http {
         url: String,
     },
+}
+
+/// One request the fake was asked to send, kept whole so a test can say what
+/// went out as well as where it went.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sent {
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Option<String>,
+}
+
+impl Sent {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(held, _)| held.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// The access token the request carried, if it carried one.
+    pub fn bearer(&self) -> Option<&str> {
+        self.header("Authorization")?.strip_prefix("Bearer ")
+    }
 }
 
 /// Why the keychain refuses everything, when a test asks it to.
@@ -84,6 +110,9 @@ pub struct FakeHost {
     live_processes: RefCell<BTreeSet<u32>>,
     interactive: RefCell<bool>,
     answers: RefCell<VecDeque<String>>,
+    /// What each endpoint answers, by URL and by the access token that asked.
+    replies: RefCell<BTreeMap<(String, Option<String>), HttpResponse>>,
+    sent: RefCell<Vec<Sent>>,
     effects: RefCell<Vec<Effect>>,
 }
 
@@ -114,6 +143,8 @@ impl FakeHost {
             live_processes: RefCell::new(BTreeSet::new()),
             interactive: RefCell::new(true),
             answers: RefCell::new(VecDeque::new()),
+            replies: RefCell::new(BTreeMap::new()),
+            sent: RefCell::new(Vec::new()),
             effects: RefCell::new(Vec::new()),
         }
     }
@@ -121,8 +152,14 @@ impl FakeHost {
     // ---- arranging the world -------------------------------------------
 
     pub fn with_now(self, now: DateTime<Utc>) -> Self {
-        *self.now.borrow_mut() = now;
+        self.set_now(now);
         self
+    }
+
+    /// Moves the clock, for a test where two commands run at different times —
+    /// a figure read now and looked at again three minutes later.
+    pub fn set_now(&self, now: DateTime<Utc>) {
+        *self.now.borrow_mut() = now;
     }
 
     pub fn with_file(self, path: impl AsRef<Path>, contents: &str) -> Self {
@@ -258,6 +295,34 @@ impl FakeHost {
         self
     }
 
+    /// What an endpoint answers, whoever asks.
+    pub fn with_reply(self, url: &str, status: u16, body: &str) -> Self {
+        self.reply(url, None, status, body);
+        self
+    }
+
+    /// What an endpoint answers the holder of one access token.
+    ///
+    /// One URL serves every Account — which of them is asking is the Bearer
+    /// token — so a test about two Accounts answering differently keys on the
+    /// token rather than on the address.
+    pub fn with_reply_to(self, url: &str, bearer: &str, status: u16, body: &str) -> Self {
+        self.reply(url, Some(bearer), status, body);
+        self
+    }
+
+    /// The same, for a world that is already built — a token that only exists
+    /// once a Rotation has handed it over, for instance.
+    pub fn reply(&self, url: &str, bearer: Option<&str>, status: u16, body: &str) {
+        self.replies.borrow_mut().insert(
+            (url.to_string(), bearer.map(str::to_string)),
+            HttpResponse {
+                status,
+                body: body.to_string(),
+            },
+        );
+    }
+
     // ---- inspecting what happened --------------------------------------
 
     pub fn effects(&self) -> Vec<Effect> {
@@ -276,9 +341,19 @@ impl FakeHost {
             .borrow()
             .iter()
             .filter_map(|effect| match effect {
-                Effect::HttpGet { url } => Some(url.clone()),
+                Effect::Http { url, .. } => Some(url.clone()),
                 _ => None,
             })
+            .collect()
+    }
+
+    /// The requests that went to one endpoint, whole and in order.
+    pub fn sent_to(&self, url: &str) -> Vec<Sent> {
+        self.sent
+            .borrow()
+            .iter()
+            .filter(|request| request.url == url)
+            .cloned()
             .collect()
     }
 
@@ -583,15 +658,34 @@ impl Host for FakeHost {
         Ok(self.answers.borrow_mut().pop_front())
     }
 
-    /// Nothing in this ticket may fetch, so the fake has no canned replies to
-    /// give: a request that reaches here is itself the failure, and is recorded
-    /// either way for `http_calls` to report.
-    fn http_get(&self, url: &str, _headers: &[(&str, &str)]) -> Result<HttpResponse, HostError> {
-        self.record(Effect::HttpGet {
-            url: url.to_string(),
+    /// Answers with whatever the test arranged for this endpoint, and with
+    /// nothing at all otherwise.
+    ///
+    /// A machine with no arranged replies has no network, so a command that
+    /// fetches when it should not fails rather than quietly succeeding — and
+    /// every request is recorded either way, for `http_calls` to report.
+    fn http(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, HostError> {
+        let sent = Sent {
+            url: request.url.to_string(),
+            headers: request
+                .headers
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect(),
+            body: request.body.map(str::to_string),
+        };
+        self.record(Effect::Http {
+            url: sent.url.clone(),
         });
-        Err(HostError::Other(format!(
-            "the fake Host has no network: {url}"
-        )))
+        let asked = sent.url.clone();
+        let bearer = sent.bearer().map(str::to_string);
+        self.sent.borrow_mut().push(sent);
+
+        let replies = self.replies.borrow();
+        replies
+            .get(&(asked.clone(), bearer))
+            .or_else(|| replies.get(&(asked.clone(), None)))
+            .cloned()
+            .ok_or_else(|| HostError::Other(format!("the fake Host has no network: {asked}")))
     }
 }

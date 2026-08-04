@@ -124,7 +124,38 @@ pub fn run_status(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
 /// `perch status --group`: the same cached view, narrowed to the Group the
 /// active Account is in.
 pub fn run_status_group(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
-    run_status_with(host, StatusArgs { json, group: true })
+    run_status_with(
+        host,
+        StatusArgs {
+            json,
+            group: true,
+            ..StatusArgs::default()
+        },
+    )
+}
+
+/// `perch status --refresh`: the one command that fetches (ADR 0015).
+pub fn run_status_refresh(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
+    run_status_with(
+        host,
+        StatusArgs {
+            json,
+            refresh: true,
+            ..StatusArgs::default()
+        },
+    )
+}
+
+/// `perch status --group --refresh`: fetch for every Account you could land on.
+pub fn run_status_group_refresh(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
+    run_status_with(
+        host,
+        StatusArgs {
+            json,
+            group: true,
+            refresh: true,
+        },
+    )
 }
 
 /// `perch status` with whatever combination of flags the test is about.

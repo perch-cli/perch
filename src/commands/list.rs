@@ -19,6 +19,7 @@ use crate::adopt;
 use crate::commands::{CYCLING_AMONG_UNGROUPED, IN_NO_GROUP, say, write_failed};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::observe::Report;
 use crate::registry::{Account, Registry};
 use crate::utilization;
 
@@ -43,7 +44,8 @@ pub enum Scope {
 }
 
 impl Scope {
-    fn accounts<'a>(&self, registry: &'a Registry) -> Vec<&'a Account> {
+    /// The Accounts a listing covers, which is also the set `--refresh` reads.
+    pub fn accounts<'a>(&self, registry: &'a Registry) -> Vec<&'a Account> {
         match self {
             Scope::Everything => registry.accounts.iter().collect(),
             Scope::Group(name) => registry.accounts_in(name),
@@ -72,23 +74,29 @@ impl Scope {
 
 pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
     let registry = adopt::ensure_adopted(host, out)?;
-    render(out, &registry, Scope::Everything, host.now(), args.json)
+    let now = host.now();
+    // `perch list` never fetches (ADR 0015), so there is nothing to report
+    // about a refresh: the empty report renders as "nobody asked".
+    let unasked = Report::default();
+    render(out, &registry, Scope::Everything, now, args.json, &unasked)
 }
 
 /// The listing itself, so `perch status --group` shows the same Accounts the
-/// same way over a narrower set.
+/// same way over a narrower set — and, when it was asked to fetch, says what
+/// came of that in the same breath.
 pub fn render(
     out: &mut dyn Write,
     registry: &Registry,
     scope: Scope,
     now: DateTime<Utc>,
     json: bool,
+    report: &Report,
 ) -> Result<()> {
     let accounts = scope.accounts(registry);
     if json {
-        render_json(out, registry, &scope, &accounts, now)
+        render_json(out, registry, &scope, &accounts, now, report)
     } else {
-        render_human(out, registry, &scope, &accounts, now)
+        render_human(out, registry, &scope, &accounts, now, report)
     }
 }
 
@@ -162,7 +170,10 @@ fn render_human(
     scope: &Scope,
     accounts: &[&Account],
     now: DateTime<Utc>,
+    report: &Report,
 ) -> Result<()> {
+    report.write_notes(out)?;
+
     if let Some(heading) = scope.heading() {
         say(out, &heading)?;
     }
@@ -263,6 +274,7 @@ fn render_json(
     scope: &Scope,
     accounts: &[&Account],
     now: DateTime<Utc>,
+    report: &Report,
 ) -> Result<()> {
     let listed: Vec<serde_json::Value> = accounts
         .iter()
@@ -289,6 +301,7 @@ fn render_json(
         // reaches for the wrong one should not find a plausible value there.
         "active_account": registry.active,
         "accounts": listed,
+        "refresh": report.document(),
     });
 
     writeln!(

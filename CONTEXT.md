@@ -86,8 +86,22 @@ _Avoid_: bucket, usage, quota level
 **Rotation**:
 Anthropic replacing an Account's refresh token with a new one, retiring the old
 one. Reserved for this sense only: moving from one Account to the next is a
-Cycle, never a rotation.
+Cycle, never a rotation, and buying a fresh access token is a Renewal, which
+only sometimes Rotates anything.
 _Avoid_: refresh, renewal
+
+**Renewal**:
+Exchanging an Account's refresh token for a working access token, so Perch can
+ask Anthropic a question as that Account. Only permitted where no client is
+running against the Profile, because a Renewal may Rotate.
+_Avoid_: refresh, token refresh
+
+**Refresh**:
+Reading an Account's Utilization from Anthropic instead of from cache — what
+`perch status --refresh` does, and the only thing that spends network budget.
+Said of a figure and never of a token: a token is Renewed, and what Anthropic
+does to it is a Rotation.
+_Avoid_: fetch, update, poll
 
 **Quarantine**:
 The state of an Account whose Credential is no longer usable and cannot be

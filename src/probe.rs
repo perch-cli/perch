@@ -9,6 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -42,18 +43,43 @@ pub struct Identity {
 }
 
 /// A Credential, kept as the exact bytes the keychain holds. Perch copies it
-/// verbatim and never rewrites it, so the only fields read out are the ones
-/// needed to describe the Account.
+/// verbatim, so the only fields read out are the ones something needs: to
+/// describe the Account, to ask Anthropic a question as it, and to renew it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Credential {
     raw: String,
+    /// What proves the caller is this Account for the length of a session.
+    pub access_token: String,
+    /// What buys a fresh access token, and what Anthropic retires when it
+    /// Rotates one.
+    pub refresh_token: Option<String>,
     pub subscription_type: Option<String>,
+    /// When the access token stops being accepted, in milliseconds.
     pub expires_at: Option<i64>,
 }
+
+/// How long before a Credential expires Perch stops relying on it.
+///
+/// A token that expires while a request is in flight is a request wasted
+/// against a budget that does not refill early (ADR 0015), and the margin costs
+/// nothing: it moves a Rotation Perch was about to need anyway.
+pub const EXPIRY_MARGIN_SECONDS: i64 = 60;
 
 impl Credential {
     pub fn as_str(&self) -> &str {
         &self.raw
+    }
+
+    /// Whether the access token can still be asked a question at `now`.
+    ///
+    /// A Credential that says nothing about when it expires is taken at its
+    /// word: Perch has no evidence it has run out, and Rotating one that has
+    /// not spends the only refresh token there is for nothing.
+    pub fn usable_at(&self, now: DateTime<Utc>) -> bool {
+        match self.expires_at {
+            Some(millis) => millis - now.timestamp_millis() > EXPIRY_MARGIN_SECONDS * 1_000,
+            None => true,
+        }
     }
 }
 
@@ -75,6 +101,8 @@ struct CredentialFile {
 struct OauthBlock {
     #[serde(rename = "accessToken")]
     access_token: Option<String>,
+    #[serde(rename = "refreshToken")]
+    refresh_token: Option<String>,
     #[serde(rename = "subscriptionType")]
     subscription_type: Option<String>,
     #[serde(rename = "expiresAt")]
@@ -259,19 +287,75 @@ pub fn understand_credential(raw: String, held_in: &str, version: &str) -> Resul
         )
     })?;
 
-    if oauth.access_token.is_none() {
+    let Some(access_token) = oauth.access_token else {
         return Err(refusal(
             assumption::CREDENTIAL_SHAPE,
             "the claudeAiOauth block has no accessToken",
             version,
         ));
-    }
+    };
 
     Ok(Credential {
         raw,
+        access_token,
+        refresh_token: oauth.refresh_token,
         subscription_type: oauth.subscription_type,
         expires_at: oauth.expires_at,
     })
+}
+
+/// The key of the credential store that holds the Credential itself.
+pub const CREDENTIAL_KEY: &str = "claudeAiOauth";
+
+/// The bytes to store after a Rotation: this Credential with the three fields a
+/// renewal replaces, and everything else about it left as it was.
+///
+/// The rest of the block is Claude Code's — the scopes it asked for, the
+/// subscription it recorded — and none of it is Perch's to decide. Unlike
+/// `.claude.json`, which is spliced as text because it holds a person's work
+/// (ADR 0001), a Credential is one small object that only ever holds an
+/// Account's tokens, so it is read and written as JSON rather than patched
+/// blind.
+pub fn credential_after_rotation(
+    current: &Credential,
+    access_token: &str,
+    refresh_token: Option<&str>,
+    expires_at: Option<i64>,
+    version: &str,
+) -> Result<String> {
+    let mut document: serde_json::Value =
+        serde_json::from_str(current.as_str()).map_err(|err| {
+            refusal(
+                assumption::CREDENTIAL_SHAPE,
+                &format!("the Credential being renewed is not JSON Perch understands: {err}"),
+                version,
+            )
+        })?;
+
+    let block = document
+        .get_mut(CREDENTIAL_KEY)
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| {
+            refusal(
+                assumption::CREDENTIAL_SHAPE,
+                "the Credential being renewed has no claudeAiOauth block",
+                version,
+            )
+        })?;
+
+    block.insert("accessToken".into(), access_token.into());
+    // A refresh that hands back no new refresh token has not Rotated: the one
+    // already stored is still the live one, and replacing it with nothing would
+    // throw away the only way back.
+    if let Some(token) = refresh_token {
+        block.insert("refreshToken".into(), token.into());
+    }
+    if let Some(at) = expires_at {
+        block.insert("expiresAt".into(), at.into());
+    }
+
+    serde_json::to_string(&document)
+        .map_err(|err| PerchError::Other(format!("could not write the renewed Credential: {err}")))
 }
 
 /// Reads the Identity out of a store's `.claude.json`.
@@ -682,12 +766,85 @@ mod tests {
 
     #[test]
     fn a_credential_never_renders_its_secret() {
-        let credential = Credential {
-            raw: r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-secret"}}"#.into(),
-            subscription_type: None,
-            expires_at: None,
-        };
+        let credential = understood(r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-secret"}}"#);
         let rendered = format!("{credential}");
         assert!(!rendered.contains("sk-ant-oat01-secret"));
+    }
+
+    fn understood(raw: &str) -> Credential {
+        understand_credential(raw.to_string(), "a test", "2.1.221").expect("a Credential")
+    }
+
+    /// Midday on the day the rest of the fixtures are set, in milliseconds.
+    const NOON: i64 = 1_785_844_800_000;
+
+    fn at(millis: i64) -> DateTime<Utc> {
+        DateTime::from_timestamp_millis(millis).expect("a time")
+    }
+
+    #[test]
+    fn a_credential_is_spent_before_it_expires_rather_than_as_it_does() {
+        let hour_left = understood(&format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"a","expiresAt":{}}}}}"#,
+            NOON + 3_600_000
+        ));
+        assert!(hour_left.usable_at(at(NOON)));
+
+        let seconds_left = understood(&format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"a","expiresAt":{}}}}}"#,
+            NOON + 30_000
+        ));
+        assert!(
+            !seconds_left.usable_at(at(NOON)),
+            "a token that expires mid-request is one Perch renews first"
+        );
+    }
+
+    #[test]
+    fn a_credential_that_says_nothing_about_expiring_is_taken_at_its_word() {
+        let credential = understood(r#"{"claudeAiOauth":{"accessToken":"a"}}"#);
+        assert!(credential.usable_at(at(NOON)));
+    }
+
+    #[test]
+    fn a_rotation_replaces_the_tokens_and_leaves_the_rest_of_the_block_alone() {
+        let current = understood(
+            r#"{"claudeAiOauth":{"accessToken":"old-access","refreshToken":"old-refresh","expiresAt":1,"scopes":["user:inference"],"subscriptionType":"max"}}"#,
+        );
+
+        let rotated = credential_after_rotation(
+            &current,
+            "new-access",
+            Some("new-refresh"),
+            Some(NOON + 3_600_000),
+            "2.1.221",
+        )
+        .expect("the block is there to renew");
+
+        let back = understood(&rotated);
+        assert_eq!(back.access_token, "new-access");
+        assert_eq!(back.refresh_token.as_deref(), Some("new-refresh"));
+        assert_eq!(back.expires_at, Some(NOON + 3_600_000));
+        assert_eq!(
+            back.subscription_type.as_deref(),
+            Some("max"),
+            "what Claude Code recorded about the Account survives a renewal"
+        );
+        assert!(rotated.contains("user:inference"), "{rotated}");
+        assert!(!rotated.contains("old-access") && !rotated.contains("old-refresh"));
+    }
+
+    #[test]
+    fn a_renewal_that_hands_back_no_refresh_token_keeps_the_one_there_is() {
+        let current = understood(
+            r#"{"claudeAiOauth":{"accessToken":"old-access","refreshToken":"still-good"}}"#,
+        );
+
+        let rotated = credential_after_rotation(&current, "new-access", None, None, "2.1.221")
+            .expect("the block is there to renew");
+
+        let back = understood(&rotated);
+        assert_eq!(back.refresh_token.as_deref(), Some("still-good"));
+        assert_eq!(back.access_token, "new-access");
     }
 }

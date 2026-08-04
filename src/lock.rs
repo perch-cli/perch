@@ -78,11 +78,16 @@ impl Drop for Held<'_> {
 
 /// Runs `work` with every lock in `locks` held, in the order given, and gives
 /// them all back afterwards however it ends.
-pub fn under<T>(
+///
+/// The work says how it fails, and a lock that could not be taken becomes that
+/// same kind of failure. Callers that answer in something richer than a
+/// [`PerchError`] — an outcome per Account, say — then have one way to fail
+/// rather than two, and nothing has to be carried out of the closure by hand.
+pub fn under<T, E: From<PerchError>>(
     host: &dyn Host,
     locks: Vec<LockSpec>,
-    work: impl FnOnce(&mut Held<'_>) -> Result<T>,
-) -> Result<T> {
+    work: impl FnOnce(&mut Held<'_>) -> std::result::Result<T, E>,
+) -> std::result::Result<T, E> {
     let mut held = Held {
         host,
         taken: Vec::new(),
@@ -95,11 +100,14 @@ pub fn under<T>(
         // contention, which is a different problem with a different answer.
         if let Some(parent) = lock.dir.parent() {
             host.create_dir_all(parent).map_err(|err| {
-                PerchError::Other(format!("could not create {}: {err}", parent.display()))
+                E::from(PerchError::Other(format!(
+                    "could not create {}: {err}",
+                    parent.display()
+                )))
             })?;
         }
 
-        take(host, &lock)?;
+        take(host, &lock).map_err(E::from)?;
         held.taken.push((lock, host.now()));
     }
 
@@ -178,14 +186,14 @@ mod tests {
         let host = FakeHost::new();
         let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
 
-        under(&host, vec![lock.clone()], |held| {
+        let ran: Result<()> = under(&host, vec![lock.clone()], |held| {
             // A keychain that stopped to ask the user for permission, which is
             // the way a Switch stalls in practice.
             host.sleep(6_000);
             held.renew();
             Ok(())
-        })
-        .expect("the work runs");
+        });
+        ran.expect("the work runs");
 
         assert!(
             host.effects().contains(&Effect::Touched(lock.dir.clone())),
@@ -199,15 +207,15 @@ mod tests {
     fn work_that_finishes_inside_the_update_interval_touches_nothing() {
         let host = FakeHost::new();
 
-        under(
+        let ran: Result<()> = under(
             &host,
             vec![a_lock("/Users/someone/.claude.json.lock")],
             |held| {
                 held.renew();
                 Ok(())
             },
-        )
-        .expect("the work runs");
+        );
+        ran.expect("the work runs");
 
         assert!(
             !host
