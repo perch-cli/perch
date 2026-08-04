@@ -5,8 +5,9 @@ login flow again.
 
 ## Status
 
-Early. The walking skeleton is in: Perch adopts the login you already have and
-reports on it. Switching between Accounts is not built yet.
+Early. Perch adopts the login you already have, adds further Accounts without
+disturbing it, and holds Groups of Accounts you have declared interchangeable.
+Switching between Accounts is not built yet.
 
 ```
 $ perch status
@@ -26,6 +27,35 @@ Neither form ever touches the network: Utilization is served from cache with its
 age shown, so `perch status` is cheap enough to put in a shell prompt
 (ADR 0015).
 
+`perch add` gains an Account by running a login in a Profile of its own, so the
+Account you are using stays active and its session is untouched (ADR 0009).
+
+## Groups
+
+A Group is your statement that a set of Accounts is interchangeable — another
+work subscription, never your personal Account. Cycling will only ever move
+between Accounts in one Group (ADR 0002).
+
+```
+$ perch group add work
+$ perch group move overflow@example.com work
+$ perch group list
+work
+  Accounts     overflow@example.com (as `overflow`)
+  Strategy     most-headroom
+  Watcher      off (would act at 80%)
+
+In no Group
+  Accounts     you@example.com
+  Cycling      only moves between these when you say it may
+```
+
+`perch group move <target> none` takes an Account out of every Group, and a
+Group that still holds Accounts is not removed until they have somewhere to go.
+The configuration a Group carries — its strategy and the watcher's fields — is
+stored and validated now and consumed by nothing yet; `perch config` will set
+it, and the watcher is deferred entirely (ADR 0013).
+
 ## Exit codes
 
 | Code | Meaning |
@@ -35,7 +65,9 @@ age shown, so `perch status` is cheap enough to put in a shell prompt
 | 2 | the command line was not understood |
 | 10 | refused: an assumption about the installed Claude Code failed (ADR 0007) |
 | 11 | the keychain is locked, denied, or unavailable |
-| 12 | there is no such thing — no login, no such Account |
+| 12 | there is no such thing — no login, no such Account, no such Group |
+| 13 | it collides with something Perch already holds |
+| 14 | Perch understood it and will not accept it — an ambiguous name, a value out of range |
 
 ## Where things are
 
@@ -53,9 +85,12 @@ Requires macOS. The toolchain is pinned in `rust-toolchain.toml` — Rust 1.97.1
 edition 2024 — so rustup will fetch the right one on first build.
 
 ```
-cargo test --lib --test adoption --test status   # touches nothing on the machine
-cargo test --test contract                       # asserts beliefs against this machine
-cargo test                                       # both
+# touches nothing on the machine
+cargo test --lib --test adoption --test status --test adding --test grouping
+# asserts beliefs against this machine
+cargo test --test contract
+# both
+cargo test
 ```
 
 The contract tests read and write items of their own in the login keychain,

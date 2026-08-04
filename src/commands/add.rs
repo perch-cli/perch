@@ -14,12 +14,12 @@ use std::io::Write;
 use std::path::Path;
 
 use crate::adopt;
-use crate::commands::write_failed;
+use crate::commands::{say, write_failed};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::probe::{self, Credential, Identity};
 use crate::profile;
-use crate::registry::{self, Account, Registry};
+use crate::registry::{self, Account, NO_GROUP, Registry};
 
 #[derive(Debug, Default, Clone)]
 pub struct AddArgs {
@@ -38,6 +38,9 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     // Everything knowable before the login is checked before the login, so a
     // name Perch was always going to refuse never costs a browser round trip.
     registry.refuse_taken_names(args.alias.as_deref(), args.group.as_deref())?;
+    if let Some(group) = &args.group {
+        registry::validate_group_name(group)?;
+    }
     if args.group.is_none() && !args.no_group && !host.is_interactive() {
         return Err(PerchError::Other(
             "There is no terminal to confirm the Group on. Pass `--group <name>` \
@@ -49,6 +52,12 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     let pending = login_in_a_directory_of_its_own(host, out, &registry, &version)?;
     let group = resolve_group(host, out, &args, &pending.identity)?;
     registry.refuse_taken_names(args.alias.as_deref(), group.as_deref())?;
+
+    // Naming a Group on `add` declares it, so an Account is never in a Group
+    // that carries no configuration and that `perch group list` cannot show.
+    if let Some(group) = &group {
+        registry.ensure_group(group)?;
+    }
 
     let account = settle_into_a_profile(host, pending, group.clone())?;
     let email = account.email().to_string();
@@ -164,10 +173,7 @@ fn account_the_login_produced(
     };
 
     if let Some(existing) = registry.account(&identity.email) {
-        let known_as = match registry.alias_of(existing.email()) {
-            Some(alias) => format!("{} (as `{alias}`)", existing.email()),
-            None => existing.email().to_string(),
-        };
+        let known_as = registry.named_for_the_user(existing.email());
         return Err(PerchError::Conflict(format!(
             "Perch already holds {known_as}, in {}.\n\
              Nothing was added — two Profiles for one Account would fight over it.\n\
@@ -218,31 +224,50 @@ fn resolve_group(
         return Ok(Some(group.clone()));
     }
 
-    let question = match &identity.organization_name {
+    // Only offered when it would be a usable Group name: an organization Perch
+    // would go on to refuse is no help as a default.
+    let offered = identity
+        .organization_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|organization| registry::validate_group_name(organization).is_ok())
+        .map(str::to_string);
+
+    let question = match &offered {
         Some(organization) => format!(
-            "Group for {} [{organization}] (Enter to accept, `none` for no Group): ",
+            "Group for {} [{organization}] (Enter to accept, `{NO_GROUP}` for no Group): ",
             identity.email
         ),
         None => format!("Group for {} (Enter for no Group): ", identity.email),
     };
 
-    let answer = ask(host, out, &question)?;
-    let answer = match answer {
-        Some(answer) => answer.trim().to_string(),
-        // End of input after a login that worked. Losing the Account over an
-        // unanswered question would be a poor trade, so it joins no Group and
-        // is told how to fix that.
-        None => {
-            say(out, "\nNo answer given, so the Account is in no Group.")?;
-            return Ok(None);
-        }
-    };
+    // A name Perch cannot accept is asked about again rather than failing the
+    // command: the login has already happened by now, and losing the Account
+    // over a typo would be a poor trade.
+    loop {
+        let answer = match ask(host, out, &question)? {
+            Some(answer) => answer.trim().to_string(),
+            // End of input after a login that worked, for the same reason.
+            None => {
+                say(out, "\nNo answer given, so the Account is in no Group.")?;
+                return Ok(None);
+            }
+        };
 
-    Ok(match answer.as_str() {
-        "" => identity.organization_name.clone(),
-        "none" => None,
-        named => Some(named.to_string()),
-    })
+        let chosen = match answer.as_str() {
+            "" => offered.clone(),
+            named if registry::means_no_group(named) => None,
+            named => Some(named.to_string()),
+        };
+
+        match &chosen {
+            None => return Ok(None),
+            Some(name) => match registry::validate_group_name(name) {
+                Ok(()) => return Ok(chosen),
+                Err(err) => say(out, &format!("{err}"))?,
+            },
+        }
+    }
 }
 
 fn announce(out: &mut dyn Write, registry: &Registry) -> Result<()> {
@@ -302,8 +327,4 @@ fn ask(host: &dyn Host, out: &mut dyn Write, question: &str) -> Result<Option<St
     out.flush().map_err(write_failed)?;
     host.read_line()
         .map_err(|err| PerchError::Other(format!("could not read your answer: {err}")))
-}
-
-fn say(out: &mut dyn Write, line: &str) -> Result<()> {
-    writeln!(out, "{line}").map_err(write_failed)
 }

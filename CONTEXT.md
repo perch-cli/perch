@@ -106,6 +106,18 @@ within a Group. What Perch does when you name no target, and what the watcher
 does on your behalf.
 _Avoid_: rotate, next, advance
 
+**Strategy**:
+Which Account a Cycle prefers when more than one would serve — the one with the
+most headroom, or the one whose Quota Window resets soonest so perishable quota
+is not wasted. Each Group carries its own.
+_Avoid_: policy, mode, algorithm, preference
+
+**Watcher**:
+The foreground process that Cycles on your behalf when the Account you are on
+runs low. It acts only within a Group that has been told it may, and only above
+that Group's threshold.
+_Avoid_: daemon, monitor, background job
+
 **Run**:
 Launching a client against a chosen Profile without changing which Account is
 active. Scoped to the one invocation, so several Accounts can be running at once
