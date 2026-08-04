@@ -14,22 +14,6 @@ use perch::error::{EXIT_CONFLICT, EXIT_GENERAL, EXIT_INVALID, EXIT_NOT_FOUND};
 use perch::host::FakeHost;
 use perch::registry::Strategy;
 
-/// Two Accounts, neither in a Group: the ordinary starting state (ADR 0017).
-fn machine_with_two_accounts() -> FakeHost {
-    let host =
-        logged_in_machine().with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE));
-    run_add(
-        &host,
-        AddArgs {
-            no_group: true,
-            ..AddArgs::default()
-        },
-    )
-    .0
-    .unwrap();
-    host
-}
-
 fn remove_group(host: &FakeHost, name: &str) -> (perch::Result<()>, String) {
     run_group(
         host,
@@ -324,6 +308,28 @@ fn adding_an_account_to_a_group_declares_that_group() {
     );
     let (_, printed) = run_group(&host, GroupCommand::List);
     assert!(printed.contains("work"), "{printed}");
+}
+
+#[test]
+fn a_group_named_in_passing_joins_the_one_that_exists_however_it_is_capitalised() {
+    let host = machine_with_two_accounts();
+    declare_group(&host, "work");
+    let host = host.with_login(login_producing(THIRD_CREDENTIAL, THIRD_IDENTITY_FILE));
+
+    run_add(&host, add_to_group("WORK")).0.unwrap();
+
+    let registry = registry_of(&host);
+    assert_eq!(
+        registry.groups.len(),
+        1,
+        "one Group, not two that differ only in case: {:?}",
+        registry.groups.keys().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        registry.account(THIRD_EMAIL).unwrap().group.as_deref(),
+        Some("work"),
+        "and the Account is in the Group that exists, not beside it"
+    );
 }
 
 #[test]

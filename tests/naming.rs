@@ -1,0 +1,337 @@
+//! Behaviour: naming Accounts, and what a typed Target turns out to mean.
+//!
+//! No command should ever require typing an email address, which is what an
+//! Alias is for. The rest of these tests are about the one namespace Aliases
+//! and Group names share: because a collision is refused when it is created,
+//! the single Target every command takes always has one answer, and
+//! Perch can say which kind of thing it matched.
+
+mod common;
+
+use common::*;
+use perch::commands::add::AddArgs;
+use perch::commands::alias::AliasCommand;
+use perch::commands::group::GroupCommand;
+use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND};
+use perch::host::FakeHost;
+use perch::target::{self, Target};
+
+/// Two Accounts, the second one already named `overflow`.
+fn machine_with_a_named_second_account() -> FakeHost {
+    let host =
+        logged_in_machine().with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE));
+    run_add(
+        &host,
+        AddArgs {
+            no_group: true,
+            alias: Some("overflow".into()),
+            ..AddArgs::default()
+        },
+    )
+    .0
+    .unwrap();
+    host
+}
+
+#[test]
+fn an_alias_names_an_account_and_survives_a_restart() {
+    let host = machine_with_two_accounts();
+
+    let (result, printed) = set_alias(&host, "work", SECOND_EMAIL);
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(
+        printed.contains("work") && printed.contains(SECOND_EMAIL),
+        "the name and what it now reaches should both be said:\n{printed}"
+    );
+    assert_eq!(
+        registry_of(&host).aliases.get("work").map(String::as_str),
+        Some(SECOND_EMAIL),
+        "the name is written down, not held for this command only"
+    );
+}
+
+#[test]
+fn an_alias_can_be_given_to_an_account_that_is_already_named() {
+    let host = machine_with_a_named_second_account();
+
+    let (result, printed) = set_alias(&host, "work", "overflow");
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(
+        printed.contains("overflow"),
+        "the name being given up should be said, not silently dropped:\n{printed}"
+    );
+    let registry = registry_of(&host);
+    assert_eq!(
+        registry.aliases.get("work").map(String::as_str),
+        Some(SECOND_EMAIL)
+    );
+    assert!(
+        !registry.aliases.contains_key("overflow"),
+        "an Account answers to one Alias, so the old name is freed rather than kept alive"
+    );
+}
+
+#[test]
+fn unsetting_an_alias_frees_the_name_for_something_else() {
+    let host = machine_with_a_named_second_account();
+
+    let (result, printed) = unset_alias(&host, "overflow");
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(
+        printed.contains("overflow"),
+        "the freed name should be said:\n{printed}"
+    );
+    assert!(registry_of(&host).aliases.is_empty());
+    assert!(
+        run_group(
+            &host,
+            GroupCommand::Add {
+                name: "overflow".into(),
+            },
+        )
+        .0
+        .is_ok(),
+        "a freed name is free for the other half of the namespace too"
+    );
+}
+
+#[test]
+fn unsetting_a_name_that_reaches_nothing_is_refused() {
+    let host = machine_with_a_named_second_account();
+
+    let (result, _) = unset_alias(&host, "overflw");
+
+    let error = result.expect_err("there is no such Alias");
+    assert_eq!(error.exit_code(), EXIT_NOT_FOUND);
+    assert!(
+        error.to_string().contains("overflow"),
+        "a near miss should be suggested rather than left to be guessed at:\n{error}"
+    );
+}
+
+#[test]
+fn an_alias_colliding_with_a_group_name_is_refused_and_names_the_group() {
+    let host = machine_with_two_accounts();
+    declare_group(&host, "work");
+
+    let (result, _) = set_alias(&host, "work", SECOND_EMAIL);
+
+    let error = result.expect_err("a name cannot be both an Alias and a Group");
+    assert_eq!(error.exit_code(), EXIT_CONFLICT);
+    let message = error.to_string();
+    assert!(
+        message.contains("work") && message.contains("Group"),
+        "the Group standing in the way should be named:\n{message}"
+    );
+    assert!(
+        registry_of(&host).aliases.is_empty(),
+        "and nothing was named"
+    );
+}
+
+#[test]
+fn an_alias_named_while_adding_an_account_goes_through_the_same_namespace() {
+    let host = logged_in_machine();
+    declare_group(&host, "work");
+    let host = host.with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE));
+
+    let (result, _) = run_add(
+        &host,
+        AddArgs {
+            no_group: true,
+            alias: Some("work".into()),
+            ..AddArgs::default()
+        },
+    );
+
+    let error = result.expect_err("`work` is already a Group");
+    assert_eq!(error.exit_code(), EXIT_CONFLICT);
+    assert!(
+        error.to_string().contains("Group"),
+        "the Group standing in the way should be named:\n{error}"
+    );
+}
+
+#[test]
+fn an_alias_that_would_be_ambiguous_is_refused_with_its_own_code() {
+    let host = machine_with_two_accounts();
+
+    for name in ["none", "someone@example.com", "", " work"] {
+        let (result, _) = set_alias(&host, name, SECOND_EMAIL);
+        let error = result.expect_err("this cannot be an Alias");
+        assert_eq!(
+            error.exit_code(),
+            EXIT_INVALID,
+            "a name Perch will not accept is its own outcome, not a general failure: {error}"
+        );
+    }
+
+    assert!(registry_of(&host).aliases.is_empty());
+}
+
+#[test]
+fn a_target_resolves_as_an_alias_then_an_account_then_a_group() {
+    let host = machine_with_a_named_second_account();
+    declare_group(&host, "spare");
+    let registry = registry_of(&host);
+
+    assert_eq!(
+        target::resolve(&registry, "overflow").unwrap(),
+        Target::Alias {
+            name: "overflow".into(),
+            email: SECOND_EMAIL.into(),
+        }
+    );
+    assert_eq!(
+        target::resolve(&registry, SECOND_EMAIL).unwrap(),
+        Target::Account {
+            email: SECOND_EMAIL.into(),
+        }
+    );
+    assert_eq!(
+        target::resolve(&registry, "spare").unwrap(),
+        Target::Group {
+            name: "spare".into(),
+        }
+    );
+}
+
+#[test]
+fn a_command_acting_on_a_target_says_which_kind_matched() {
+    let host = machine_with_a_named_second_account();
+    declare_group(&host, "work");
+
+    let (_, by_alias) = move_to_group(&host, "overflow", "work");
+    let (_, by_email) = move_to_group(&host, SECOND_EMAIL, "work");
+
+    assert!(
+        by_alias.contains("Alias") && by_alias.contains(SECOND_EMAIL),
+        "a Target that matched an Alias should say so, and say what it reached:\n{by_alias}"
+    );
+    assert!(
+        by_email.contains("Account"),
+        "and a Target that matched an Account should say that instead:\n{by_email}"
+    );
+}
+
+#[test]
+fn a_target_perch_cannot_place_is_refused_with_the_names_it_nearly_matched() {
+    let host = machine_with_a_named_second_account();
+    declare_group(&host, "work");
+
+    let (result, _) = move_to_group(&host, "overflw", "work");
+
+    let error = result.expect_err("nothing is called `overflw`");
+    assert_eq!(error.exit_code(), EXIT_NOT_FOUND);
+    let message = error.to_string();
+    assert!(
+        message.contains("overflw") && message.contains("overflow"),
+        "what was typed and what it nearly matched should both be said:\n{message}"
+    );
+}
+
+#[test]
+fn a_target_that_names_nothing_at_all_is_still_refused_helpfully() {
+    let host = machine_with_a_named_second_account();
+    declare_group(&host, "work");
+
+    let (result, _) = move_to_group(&host, "zzzzzz", "work");
+
+    let error = result.expect_err("nothing is called `zzzzzz`");
+    assert_eq!(error.exit_code(), EXIT_NOT_FOUND);
+    assert!(
+        error.to_string().contains("perch group list"),
+        "with no near miss to offer, say where the answer is:\n{error}"
+    );
+}
+
+#[test]
+fn a_group_named_where_one_account_is_meant_is_refused_as_a_group() {
+    let host = machine_with_a_named_second_account();
+    declare_group(&host, "work");
+
+    let (result, _) = set_alias(&host, "spare", "work");
+
+    let error = result.expect_err("an Alias names one Account, and `work` is a Group");
+    assert_eq!(error.exit_code(), EXIT_INVALID);
+    assert!(
+        error.to_string().contains("Group"),
+        "the kind that did match should be said, so the user can see why it was refused:\n{error}"
+    );
+}
+
+#[test]
+fn an_account_is_named_by_its_alias_wherever_perch_talks_about_it() {
+    let host = machine_with_a_named_second_account();
+    declare_group(&host, "work");
+    move_to_group(&host, "overflow", "work").0.unwrap();
+
+    let (_, printed) = run_group(&host, GroupCommand::List);
+
+    assert!(
+        printed.contains("overflow"),
+        "the name the user gave it is how they think of it:\n{printed}"
+    );
+}
+
+#[test]
+fn naming_an_account_makes_no_network_call() {
+    let host = machine_with_two_accounts();
+
+    set_alias(&host, "work", SECOND_EMAIL).0.unwrap();
+    unset_alias(&host, "work").0.unwrap();
+
+    assert!(host.http_calls().is_empty());
+}
+
+#[test]
+fn a_name_that_differs_only_in_case_is_the_same_name() {
+    let host = machine_with_a_named_second_account();
+
+    let (as_a_group, _) = run_group(
+        &host,
+        GroupCommand::Add {
+            name: "Overflow".into(),
+        },
+    );
+
+    let error = as_a_group.expect_err("`Overflow` is `overflow` to anyone typing it");
+    assert_eq!(error.exit_code(), EXIT_CONFLICT);
+    assert!(
+        error.to_string().contains("overflow"),
+        "the name already held should be shown as it is held:\n{error}"
+    );
+
+    declare_group(&host, "spare");
+    let (as_an_alias, _) = set_alias(&host, "SPARE", SECOND_EMAIL);
+
+    assert_eq!(
+        as_an_alias
+            .expect_err("and the same in the other direction")
+            .exit_code(),
+        EXIT_CONFLICT
+    );
+}
+
+#[test]
+fn an_alias_command_on_a_registry_from_before_aliases_finds_nothing() {
+    let host = logged_in_machine().with_file(
+        REGISTRY_PATH,
+        r#"{"version":1,"active":"someone@example.com","accounts":[]}"#,
+    );
+
+    let (result, _) = run_alias(
+        &host,
+        AliasCommand::Unset {
+            name: "work".into(),
+        },
+    );
+
+    assert_eq!(
+        result.expect_err("there are no Aliases at all").exit_code(),
+        EXIT_NOT_FOUND
+    );
+}

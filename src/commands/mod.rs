@@ -3,6 +3,7 @@
 //! no filesystem, and no keychain.
 
 pub mod add;
+pub mod alias;
 pub mod group;
 pub mod status;
 

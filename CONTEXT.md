@@ -24,7 +24,15 @@ _Avoid_: profile, metadata, account info
 **Alias**:
 A short name you give an Account so you never have to type its email address.
 Aliases and Group names share one namespace, so neither can shadow the other.
+An Account answers to one Alias at a time.
 _Avoid_: nickname, label, tag
+
+**Target**:
+What a command is told to act on — an Alias, an Account's email address, or a
+Group name, resolved in that order. Every command that acts on one thing takes
+exactly one, and because the shared namespace makes a collision impossible it
+has exactly one meaning. Which kind matched is said when the command acts.
+_Avoid_: selector, subject, handle
 
 ## Profiles
 

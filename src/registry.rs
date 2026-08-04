@@ -154,14 +154,38 @@ pub fn means_no_group(name: &str) -> bool {
     name.eq_ignore_ascii_case(NO_GROUP)
 }
 
-/// Refuses a Group name that could not be told from something else.
+/// Which of the two things sharing the namespace is being named. A refusal
+/// says which: being told `none` cannot be a name is less use than being told
+/// what Perch was asked to call `none`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NameKind {
+    Alias,
+    Group,
+}
+
+impl NameKind {
+    /// The kind of name, plural, so a refusal states the rule that was broken
+    /// rather than a remark about the one name that broke it.
+    pub fn names(self) -> &'static str {
+        match self {
+            NameKind::Alias => "Alias names",
+            NameKind::Group => "Group names",
+        }
+    }
+}
+
+/// Refuses a name that could not be told from something else.
 ///
-/// A Group name shares one namespace with Aliases and is a valid target for
-/// `switch` and `run`, so it has to be distinguishable from the other things a
-/// target can be: an email address, and the word that means no Group at all.
-pub fn validate_group_name(name: &str) -> Result<()> {
+/// Aliases and Group names share one namespace and are both valid Targets for
+/// `switch` and `run`, so a name has to be distinguishable from the other
+/// things a Target can be: an email address, and the word that means no Group
+/// at all.
+pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
     if name.trim().is_empty() {
-        return Err(PerchError::Invalid("A Group needs a name.".to_string()));
+        return Err(PerchError::Invalid(format!(
+            "{} cannot be empty.",
+            kind.names()
+        )));
     }
     if name != name.trim() {
         return Err(PerchError::Invalid(format!(
@@ -175,7 +199,8 @@ pub fn validate_group_name(name: &str) -> Result<()> {
     }
     if name.contains('@') {
         return Err(PerchError::Invalid(format!(
-            "`{name}` looks like an email address, and a target that could be either a Group or an Account has no single answer."
+            "`{name}` looks like an email address. {} have to be tellable from one, because a Target that could be either has no single answer.",
+            kind.names()
         )));
     }
     Ok(())
@@ -263,13 +288,24 @@ impl Registry {
             .collect()
     }
 
+    /// The Group declared under a name, whatever it was capitalised as. Two
+    /// names that differ only in case are one name here (see
+    /// [`refuse_taken_names`](Self::refuse_taken_names)), so this is how a
+    /// Group typed in passing is matched to the one that exists.
+    pub fn declared_group(&self, name: &str) -> Option<&str> {
+        self.groups
+            .keys()
+            .find(|declared| declared.eq_ignore_ascii_case(name))
+            .map(String::as_str)
+    }
+
     /// Declares a Group, refusing a name that is not usable or already means
     /// something else.
     pub fn declare_group(&mut self, name: &str) -> Result<()> {
-        validate_group_name(name)?;
-        if self.groups.contains_key(name) {
+        validate_name(NameKind::Group, name)?;
+        if let Some(declared) = self.declared_group(name) {
             return Err(PerchError::Conflict(format!(
-                "There is already a Group called `{name}`."
+                "There is already a Group called `{declared}`."
             )));
         }
         self.refuse_taken_names(None, Some(name))?;
@@ -279,11 +315,16 @@ impl Registry {
 
     /// Declares a Group unless it is already there, for the commands that name
     /// a Group in passing rather than to create one — `perch add --group`.
-    pub fn ensure_group(&mut self, name: &str) -> Result<()> {
-        if self.groups.contains_key(name) {
-            return Ok(());
+    ///
+    /// Returns the name to record, which is the spelling the Group was
+    /// declared under: naming `Work` in passing joins `work` rather than
+    /// leaving the Account in a Group nothing else can see.
+    pub fn ensure_group(&mut self, name: &str) -> Result<String> {
+        if let Some(declared) = self.declared_group(name) {
+            return Ok(declared.to_string());
         }
-        self.declare_group(name)
+        self.declare_group(name)?;
+        Ok(name.to_string())
     }
 
     /// Forgets a Group. The caller establishes that nothing is left in it:
@@ -315,16 +356,30 @@ impl Registry {
         }
     }
 
+    /// The Alias held under a name, whatever it was capitalised as, and the
+    /// Account it reaches.
+    pub fn declared_alias(&self, name: &str) -> Option<(&str, &str)> {
+        self.aliases
+            .iter()
+            .find(|(alias, _)| alias.eq_ignore_ascii_case(name))
+            .map(|(alias, email)| (alias.as_str(), email.as_str()))
+    }
+
     /// Refuses an Alias and a Group name that would not both be free.
     ///
     /// Aliases and Group names share one namespace, so neither can shadow the
-    /// other and the single target argument on `switch` and `run` always has
-    /// one answer. The pair is checked together as well as against what is
-    /// already held: a command that sets both at once could otherwise plant
-    /// the collision it is meant to prevent.
+    /// other and the single Target on `switch` and `run` always has one
+    /// answer. The pair is checked together as well as against what is already
+    /// held: a command that sets both at once could otherwise plant the
+    /// collision it is meant to prevent.
+    ///
+    /// Two names that differ only in case are the same name. Nobody remembers
+    /// which way they capitalised a Group months ago, so `work` and `Work`
+    /// reaching different Accounts is the ambiguity this exists to prevent
+    /// even though a lookup could tell them apart.
     pub fn refuse_taken_names(&self, alias: Option<&str>, group: Option<&str>) -> Result<()> {
         if let (Some(alias), Some(group)) = (alias, group)
-            && alias == group
+            && alias.eq_ignore_ascii_case(group)
         {
             return Err(PerchError::Conflict(format!(
                 "`{alias}` cannot be both an Alias and a Group name."
@@ -332,23 +387,23 @@ impl Registry {
         }
 
         if let Some(alias) = alias {
-            if let Some(target) = self.aliases.get(alias) {
+            if let Some((held, target)) = self.declared_alias(alias) {
                 return Err(PerchError::Conflict(format!(
-                    "`{alias}` already names {target}."
+                    "`{held}` already names {target}. Free it with `perch alias {held} --unset` first."
                 )));
             }
-            if self.group_names().contains(alias) {
+            if let Some(declared) = self.declared_group(alias) {
                 return Err(PerchError::Conflict(format!(
-                    "`{alias}` is already a Group name, and a name cannot be both."
+                    "`{declared}` is already a Group name, and a name cannot be both."
                 )));
             }
         }
 
         if let Some(group) = group
-            && let Some(target) = self.aliases.get(group)
+            && let Some((held, target)) = self.declared_alias(group)
         {
             return Err(PerchError::Conflict(format!(
-                "`{group}` is already an Alias for {target}, and a name cannot be both."
+                "`{held}` is already an Alias for {target}, and a name cannot be both."
             )));
         }
 
@@ -356,8 +411,21 @@ impl Registry {
     }
 
     /// Names an Account, having established the name is free.
+    ///
+    /// An Account answers to one Alias, so naming one that already had a name
+    /// replaces it: a name the user has moved on from should not go on
+    /// reaching the Account behind their back.
     pub fn set_alias(&mut self, alias: &str, email: &str) {
+        self.aliases.retain(|_, named| named != email);
         self.aliases.insert(alias.to_string(), email.to_string());
+    }
+
+    /// Frees a name, returning the name as it was held and the Account it used
+    /// to reach.
+    pub fn unset_alias(&mut self, alias: &str) -> Option<(String, String)> {
+        let held = self.declared_alias(alias)?.0.to_string();
+        let email = self.aliases.remove(&held)?;
+        Some((held, email))
     }
 
     pub fn upsert(&mut self, account: Account) {
@@ -575,24 +643,42 @@ mod tests {
     }
 
     #[test]
-    fn a_group_name_that_would_be_ambiguous_is_refused() {
-        for name in [
-            "",
-            " ",
-            "none",
-            "None",
-            " work",
-            "work ",
-            "someone@example.com",
-        ] {
-            assert!(
-                validate_group_name(name).is_err(),
-                "`{name}` should not be usable as a Group name"
-            );
+    fn a_name_that_would_be_ambiguous_is_refused_whichever_half_it_is_for() {
+        for kind in [NameKind::Alias, NameKind::Group] {
+            for name in [
+                "",
+                " ",
+                "none",
+                "None",
+                " work",
+                "work ",
+                "someone@example.com",
+            ] {
+                assert!(
+                    validate_name(kind, name).is_err(),
+                    "`{name}` should not be usable as a {kind:?} name"
+                );
+            }
+            for name in ["work", "Overflow Ltd", "personal-2"] {
+                assert!(validate_name(kind, name).is_ok(), "`{name}` should be fine");
+            }
         }
-        for name in ["work", "Overflow Ltd", "personal-2"] {
-            assert!(validate_group_name(name).is_ok(), "`{name}` should be fine");
-        }
+    }
+
+    #[test]
+    fn naming_an_account_that_is_already_named_replaces_the_name() {
+        let mut registry = Registry::default();
+        registry.set_alias("overflow", "someone@example.com");
+        registry.set_alias("work", "someone@example.com");
+
+        assert_eq!(registry.alias_of("someone@example.com"), Some("work"));
+        assert!(!registry.aliases.contains_key("overflow"));
+        assert_eq!(
+            registry.unset_alias("Work"),
+            Some(("work".to_string(), "someone@example.com".to_string())),
+            "a name is freed however it is capitalised, and says how it was held"
+        );
+        assert!(registry.unset_alias("work").is_none());
     }
 
     #[test]
