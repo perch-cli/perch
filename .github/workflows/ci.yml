@@ -46,8 +46,11 @@ jobs:
       - name: Lint
         run: cargo clippy --all-targets -- -D warnings
 
+      # Every behaviour test binary has to be named here: the contract tests are
+      # deliberately left out, because they need the install step below first.
+      # A new binary that is not added is a suite that silently never runs.
       - name: Unit and behaviour tests
-        run: cargo test --lib --test adoption --test status
+        run: cargo test --lib --test adoption --test adding --test status
 
       # Gives the contract tests a real bundle to assert against. If the install
       # is unavailable they assert the "no Claude Code here" branch instead, so

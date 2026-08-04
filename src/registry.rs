@@ -4,7 +4,7 @@
 //! Versioned from the first commit, because later specs add Groups, Aliases and
 //! Quarantine to the same file and will have to migrate what is already there.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -121,6 +121,68 @@ impl Registry {
         self.active.as_deref().and_then(|email| self.account(email))
     }
 
+    /// Every Group any Account is in. Groups have no existence apart from the
+    /// Accounts that claim them until `perch group` lands.
+    pub fn group_names(&self) -> BTreeSet<&str> {
+        self.accounts
+            .iter()
+            .filter_map(|account| account.group.as_deref())
+            .collect()
+    }
+
+    /// The Alias an Account answers to, if it has been given one.
+    pub fn alias_of(&self, email: &str) -> Option<&str> {
+        self.aliases
+            .iter()
+            .find(|(_, target)| *target == email)
+            .map(|(alias, _)| alias.as_str())
+    }
+
+    /// Refuses an Alias and a Group name that would not both be free.
+    ///
+    /// Aliases and Group names share one namespace, so neither can shadow the
+    /// other and the single target argument on `switch` and `run` always has
+    /// one answer. The pair is checked together as well as against what is
+    /// already held: a command that sets both at once could otherwise plant
+    /// the collision it is meant to prevent.
+    pub fn refuse_taken_names(&self, alias: Option<&str>, group: Option<&str>) -> Result<()> {
+        if let (Some(alias), Some(group)) = (alias, group)
+            && alias == group
+        {
+            return Err(PerchError::Conflict(format!(
+                "`{alias}` cannot be both an Alias and a Group name."
+            )));
+        }
+
+        if let Some(alias) = alias {
+            if let Some(target) = self.aliases.get(alias) {
+                return Err(PerchError::Conflict(format!(
+                    "`{alias}` already names {target}."
+                )));
+            }
+            if self.group_names().contains(alias) {
+                return Err(PerchError::Conflict(format!(
+                    "`{alias}` is already a Group name, and a name cannot be both."
+                )));
+            }
+        }
+
+        if let Some(group) = group
+            && let Some(target) = self.aliases.get(group)
+        {
+            return Err(PerchError::Conflict(format!(
+                "`{group}` is already an Alias for {target}, and a name cannot be both."
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Names an Account, having established the name is free.
+    pub fn set_alias(&mut self, alias: &str, email: &str) {
+        self.aliases.insert(alias.to_string(), email.to_string());
+    }
+
     pub fn upsert(&mut self, account: Account) {
         match self
             .accounts
@@ -152,6 +214,18 @@ pub fn profiles_dir(host: &dyn Host) -> PathBuf {
 /// is hashed into a keychain service name and has to be stable and printable.
 pub fn profile_dir_for(host: &dyn Host, email: &str) -> PathBuf {
     profiles_dir(host).join(slug(email))
+}
+
+/// Where a login lives while Perch is running it.
+///
+/// A Profile is named after the Account it holds, and which Account that is
+/// only becomes knowable once the login has finished — so the login happens
+/// here and its Credential is moved into a Profile afterwards. Nothing outlives
+/// the command: this directory is removed whether the login worked or not.
+pub fn pending_login_dir(host: &dyn Host, started_at: DateTime<Utc>) -> PathBuf {
+    perch_home(host)
+        .join("pending")
+        .join(format!("login-{}", started_at.timestamp_millis()))
 }
 
 pub fn slug(email: &str) -> String {
