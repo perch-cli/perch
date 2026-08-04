@@ -1,10 +1,11 @@
 //! `perch status` — who is active, and where their quota stands.
 //!
-//! Rendered from cache and never from the network (ADR 0015). This is the
+//! Rendered from cache unless it is asked to fetch (ADR 0015). This is the
 //! command people put in a shell prompt, where it may run several times a
-//! minute; fetching here would burn the hourly usage budget needed for
+//! minute; fetching by default would burn the hourly usage budget needed for
 //! switching decisions. Every figure is shown with its age, so a stale number
-//! is visibly stale rather than quietly wrong.
+//! is visibly stale rather than quietly wrong, and `--refresh` is how one stops
+//! being stale.
 //!
 //! `--group` widens the question from "where am I" to "where would I land",
 //! which is the listing [`crate::commands::list`] already draws — so it is
@@ -17,10 +18,11 @@ use serde_json::json;
 
 use crate::adopt;
 use crate::commands::list::{self, Scope};
-use crate::commands::write_failed;
+use crate::commands::{say, write_failed};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::registry::Account;
+use crate::observe::{self, Report};
+use crate::registry::{Account, Registry};
 use crate::utilization;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -29,36 +31,90 @@ pub struct StatusArgs {
     /// Show every Account the active one shares a Group with, rather than the
     /// active Account alone.
     pub group: bool,
+    /// Read current Utilization before showing it, rather than showing what
+    /// was last observed.
+    pub refresh: bool,
 }
 
 pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()> {
-    let registry = adopt::ensure_adopted(host, out)?;
-    let account = registry.active_account().ok_or_else(|| {
-        PerchError::NotFound(
-            "No active Account. Run `claude` and log in, then run Perch again.".to_string(),
-        )
-    })?;
+    let mut registry = adopt::ensure_adopted(host, out)?;
+    let active = active_email(&registry)?;
+
+    // Being in no Group is not a Group (ADR 0017), so from an ungrouped Account
+    // the answer to "where would I land" is every ungrouped Account together
+    // with what Cycling will not do with them unasked.
+    let scope = args.group.then(|| match group_of(&registry, &active) {
+        Some(group) => Scope::Group(group),
+        None => Scope::Ungrouped,
+    });
+
+    let report = if args.refresh {
+        let asking_about = to_refresh(&registry, &scope, &active);
+        observe::refresh(host, &mut registry, &asking_about)
+    } else {
+        Report::default()
+    };
 
     let now = host.now();
-    if args.group {
-        // Being in no Group is not a Group (ADR 0017), so from an ungrouped
-        // Account the answer to "where would I land" is every ungrouped
-        // Account together with what Cycling will not do with them unasked.
-        let scope = match &account.group {
-            Some(group) => Scope::Group(group.clone()),
-            None => Scope::Ungrouped,
-        };
-        return list::render(out, &registry, scope, now, args.json);
-    }
-
-    if args.json {
-        render_json(out, account, now)
-    } else {
-        render_human(out, account, now)
+    match scope {
+        Some(scope) => list::render(out, &registry, scope, now, args.json, &report),
+        None => {
+            let account = registry
+                .account(&active)
+                .expect("the active Account is one Perch holds");
+            if args.json {
+                render_json(out, account, now, &report)
+            } else {
+                render_human(out, account, now, &report)
+            }
+        }
     }
 }
 
-fn render_human(out: &mut dyn Write, account: &Account, now: DateTime<Utc>) -> Result<()> {
+fn active_email(registry: &Registry) -> Result<String> {
+    registry
+        .active_account()
+        .map(|account| account.email().to_string())
+        .ok_or_else(|| {
+            PerchError::NotFound(
+                "No active Account. Run `claude` and log in, then run Perch again.".to_string(),
+            )
+        })
+}
+
+fn group_of(registry: &Registry, email: &str) -> Option<String> {
+    registry
+        .account(email)
+        .and_then(|account| account.group.clone())
+}
+
+/// Which Accounts a refresh covers: exactly the ones about to be shown.
+///
+/// Every read spends from a budget that does not refill early (ADR 0015), so
+/// `perch status --refresh` reads the Account you are on, and `--group` reads
+/// the ones being offered as landing places — never the whole registry.
+fn to_refresh(registry: &Registry, scope: &Option<Scope>, active: &str) -> Vec<String> {
+    match scope {
+        Some(scope) => scope
+            .accounts(registry)
+            .iter()
+            .map(|account| account.email().to_string())
+            .collect(),
+        None => vec![active.to_string()],
+    }
+}
+
+fn render_human(
+    out: &mut dyn Write,
+    account: &Account,
+    now: DateTime<Utc>,
+    report: &Report,
+) -> Result<()> {
+    // What could not be read is said before the figures it explains.
+    for note in report.notes() {
+        say(out, &note)?;
+    }
+
     utilization::write_labelled(out, "Account", account.email())?;
     if let Some(organization) = &account.identity.organization_name {
         utilization::write_labelled(out, "Organization", organization)?;
@@ -70,7 +126,12 @@ fn render_human(out: &mut dyn Write, account: &Account, now: DateTime<Utc>) -> R
     utilization::write_figures(out, account, now)
 }
 
-fn render_json(out: &mut dyn Write, account: &Account, now: DateTime<Utc>) -> Result<()> {
+fn render_json(
+    out: &mut dyn Write,
+    account: &Account,
+    now: DateTime<Utc>,
+    report: &Report,
+) -> Result<()> {
     let document = json!({
         "active": {
             "email": account.email(),
@@ -80,6 +141,7 @@ fn render_json(out: &mut dyn Write, account: &Account, now: DateTime<Utc>) -> Re
             "profile_dir": account.profile.dir,
         },
         "utilization": utilization::document(account, now),
+        "refresh": report.document(),
     });
 
     writeln!(

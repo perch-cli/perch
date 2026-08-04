@@ -5,10 +5,77 @@ use std::process::{Command, Stdio};
 
 use chrono::{DateTime, Utc};
 
-use super::{Execution, Host, HostError, HttpResponse};
+use super::{Execution, Host, HostError, HttpRequest, HttpResponse};
 use crate::keychain::{
     self, KeychainError, SECURITY_BIN, WritePath, classify, decode_password_output,
 };
+
+/// The `curl` binary. Perch shells out for the same reason it shells out to
+/// `security` (ADR 0008): the machine already has one, and a linked HTTP client
+/// would be a second TLS story to keep current.
+const CURL_BIN: &str = "/usr/bin/curl";
+
+/// The options that are the same for every request, and none of which is a
+/// secret. Everything that is one goes in on stdin instead.
+const CURL_ARGS: [&str; 6] = [
+    "--silent",
+    "--show-error",
+    "--write-out",
+    "\n%{http_code}",
+    "--config",
+    "-",
+];
+
+/// The request as a `curl` configuration file, which is what goes in on stdin.
+///
+/// The URL, the headers and the body all arrive this way so that none of them
+/// is ever an argument: an `Authorization` header holds an access token, and
+/// argv is readable by every process on the machine.
+fn curl_config(request: &HttpRequest<'_>) -> String {
+    let mut config = format!("url = {}\n", quoted(request.url));
+    for (name, value) in request.headers {
+        config.push_str(&format!("header = {}\n", quoted(&format!("{name}: {value}"))));
+    }
+    // Giving `curl` data is what makes the request a POST; there is no verb to
+    // set separately.
+    if let Some(body) = request.body {
+        config.push_str(&format!("data-binary = {}\n", quoted(body)));
+    }
+    config
+}
+
+/// A value as a `curl` configuration file quotes one.
+///
+/// Quoted so that spaces and `#` are part of the value rather than punctuation,
+/// with backslashes and quotes escaped so a body full of JSON arrives as it was
+/// written. A literal newline cannot appear inside one — Perch sends compact
+/// JSON and single-line headers, so none ever does.
+fn quoted(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// Runs `curl` with the request on its stdin.
+fn curl(config: &str) -> Result<Execution, HostError> {
+    let mut child = Command::new(CURL_BIN)
+        .args(CURL_ARGS)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    {
+        use std::io::Write;
+        let mut pipe = child.stdin.take().expect("stdin was piped");
+        pipe.write_all(config.as_bytes())?;
+    }
+
+    let output = child.wait_with_output()?;
+    Ok(Execution {
+        status: output.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
+}
 
 /// Runs `security` and turns anything short of success into the distinction
 /// that matters: not found, or locked and denied.
@@ -257,21 +324,8 @@ impl Host for RealHost {
         Ok(Some(line.trim_end_matches(['\r', '\n']).to_string()))
     }
 
-    fn http_get(&self, url: &str, headers: &[(&str, &str)]) -> Result<HttpResponse, HostError> {
-        let mut args: Vec<String> = vec![
-            "--silent".into(),
-            "--show-error".into(),
-            "--write-out".into(),
-            "\n%{http_code}".into(),
-        ];
-        for (name, value) in headers {
-            args.push("-H".into());
-            args.push(format!("{name}: {value}"));
-        }
-        args.push(url.to_string());
-
-        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-        let execution = self.exec("/usr/bin/curl", &borrowed)?;
+    fn http(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, HostError> {
+        let execution = curl(&curl_config(request))?;
         if !execution.succeeded() {
             return Err(HostError::Other(format!(
                 "curl exited {}: {}",
@@ -288,6 +342,35 @@ impl Host for RealHost {
             status: code.trim().parse().unwrap_or(0),
             body: body.to_string(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_access_token_travels_on_stdin_rather_than_in_argv() {
+        let headers = [("Authorization", "Bearer sk-ant-oat01-secret")];
+        let config = curl_config(&HttpRequest::get("https://example.test/usage", &headers));
+        let expected = "header = \"Authorization: Bearer sk-ant-oat01-secret\"";
+
+        assert!(config.contains(expected), "{config}");
+        assert!(
+            !CURL_ARGS.iter().any(|arg| arg.contains("sk-ant")),
+            "nothing about a request may reach the command line"
+        );
+    }
+
+    #[test]
+    fn a_json_body_survives_being_quoted() {
+        let body = r#"{"refresh_token":"sk-ant-ort01-\"odd\""}"#;
+        let config = curl_config(&HttpRequest::post("https://example.test/token", &[], body));
+        let expected = r#"data-binary = "{\"refresh_token\":\"sk-ant-ort01-\\\"odd\\\"\"}""#;
+
+        assert!(config.contains("url = \"https://example.test/token\""));
+        assert!(config.contains(expected), "{config}");
+        assert_eq!(config.lines().count(), 2, "one option per line: {config}");
     }
 }
 

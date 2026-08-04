@@ -7,8 +7,9 @@ login flow again.
 
 Early. Perch adopts the login you already have, adds further Accounts without
 disturbing it, names them, holds Groups of Accounts you have declared
-interchangeable, lists what you have, and switches to an Account you name.
-Choosing an Account for you — `perch switch` with no target — is not built yet.
+interchangeable, lists what you have, reads how full each one is, and switches
+to an Account you name. Choosing an Account for you — `perch switch` with no
+target — is not built yet.
 
 ```
 $ perch status
@@ -24,12 +25,50 @@ Utilization   never observed
 `perch status --json` prints the same information, with an observation time on
 every Utilization figure.
 
-Neither form ever touches the network: Utilization is served from cache with its
-age shown, so `perch status` is cheap enough to put in a shell prompt
-(ADR 0015).
+Neither form touches the network unless you ask it to: Utilization is served
+from cache with its age shown, so `perch status` is cheap enough to put in a
+shell prompt (ADR 0015).
 
 `perch add` gains an Account by running a login in a Profile of its own, so the
 Account you are using stays active and its session is untouched (ADR 0009).
+
+## Reading current Utilization
+
+`perch status --refresh` is the one command that fetches. Everything else — and
+`status` without the flag — reads the figure Perch last observed and says how
+old it is.
+
+```
+$ perch status --refresh
+Account       you@example.com
+Organization  Acme
+Plan          pro
+Utilization   5-hour    42%  (as of just now)
+              7-day     18%  (as of just now)
+              7-day-opus  3%  (as of just now)
+```
+
+Every Quota Window an Account has is recorded — the five-hour window, the
+seven-day one, and one per model — each with how full it is and when it next
+resets. `--refresh` reads the Accounts it is about to show you and no others:
+`perch status --refresh` reads the one you are on, `perch status --group
+--refresh` reads the ones it offers as landing places. Anthropic allows roughly
+28-30 reads an hour per Account and the allowance does not refill early
+(ADR 0015), so nothing spends one on an Account you did not ask about.
+
+Reading an Account's Utilization needs a valid access token for it, so an
+Account whose token has expired has its Credential renewed first — but only when
+no client is running against that Profile (ADR 0005). Anthropic retires a
+refresh token when it issues a new one, so renewing a Credential a running
+Claude Code is holding in memory would log that session out silently, mid-task.
+The Rotated Credential is written back into its own Profile under the same locks
+a Switch takes.
+
+Nothing about a refresh turns `status` into a failure. A throttled read, an
+Account whose Credential Anthropic will not accept, one whose Profile is in use
+— each is reported by name and leaves that Account's cached figure standing,
+while every other Account is still read. `--json` carries the same under
+`refresh`, which is `null` when no refresh was asked for.
 
 ## Switching
 
@@ -177,7 +216,10 @@ it, and the watcher is deferred entirely (ADR 0013).
 - `$PERCH_HOME` overrides `~/.perch`.
 
 Perch never writes a Credential to a file. Credentials live in the keychain, and
-Perch drives `/usr/bin/security` to reach them (ADR 0008).
+Perch drives `/usr/bin/security` to reach them (ADR 0008). It drives
+`/usr/bin/curl` to reach Anthropic, with the URL, the headers and the body all
+handed over on standard input — an access token passed as an argument would sit
+in the process table for anything on the machine to read.
 
 ## Building
 
@@ -187,7 +229,7 @@ edition 2024 — so rustup will fetch the right one on first build.
 ```
 # touches nothing on the machine
 cargo test --lib --test adoption --test status --test adding --test grouping \
-           --test naming --test listing --test switching
+           --test naming --test listing --test switching --test refreshing
 # asserts beliefs against this machine
 cargo test --test contract
 # both

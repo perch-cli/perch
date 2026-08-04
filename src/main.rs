@@ -94,13 +94,22 @@ enum Command {
 
     /// Show the active Account and its cached Utilization.
     ///
-    /// Renders from cache and never touches the network, so it is cheap enough
-    /// for a shell prompt.
+    /// Renders from cache unless you ask it to fetch, so it is cheap enough for
+    /// a shell prompt.
     Status {
         /// Show every Account in the active Account's Group, so you can see
         /// where you would land before switching.
         #[arg(long)]
         group: bool,
+
+        /// Read current Utilization from Anthropic first.
+        ///
+        /// The only thing in Perch that touches the network. Roughly 28-30
+        /// reads an hour are allowed per Account and the allowance does not
+        /// refill early, so a figure that cannot be read falls back to the
+        /// cached one rather than failing.
+        #[arg(long)]
+        refresh: bool,
 
         /// Emit machine-readable output, with an observation time on every
         /// Utilization figure.
@@ -183,7 +192,19 @@ fn main() {
         ),
         Command::Group { action } => group::run(&host, action.into(), &mut out),
         Command::List { json } => list::run(&host, ListArgs { json }, &mut out),
-        Command::Status { group, json } => status::run(&host, StatusArgs { group, json }, &mut out),
+        Command::Status {
+            group,
+            refresh,
+            json,
+        } => status::run(
+            &host,
+            StatusArgs {
+                group,
+                refresh,
+                json,
+            },
+            &mut out,
+        ),
         Command::Switch { target } => switch::run(&host, SwitchArgs { target }, &mut out),
     };
 
