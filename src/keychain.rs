@@ -28,6 +28,11 @@ pub const EXIT_ITEM_NOT_FOUND: i32 = 44;
 /// mid-argument, so writes that long take the argv path instead.
 pub const STDIN_BUFFER_LIMIT: usize = 4096;
 
+/// How much room is left below that limit before a write takes the argv path.
+/// Nothing about the buffer is documented, and overflow corrupts the item
+/// silently, so the fallback happens with headroom rather than at the edge.
+pub const STDIN_SAFETY_MARGIN: usize = 256;
+
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum KeychainError {
     #[error("no such item: {account} under {service}")]
@@ -82,8 +87,12 @@ pub fn add_command_line(service: &str, account: &str, secret: &str) -> String {
 }
 
 /// Which path a write of this size must take.
+///
+/// ADR 0008 says writes *near* the limit fall back, not writes past it: the
+/// failure is silent corruption, and the exact byte at which `security` starts
+/// truncating is an observation about one build of it, not a promise.
 pub fn write_path_for(command_line: &str) -> WritePath {
-    if command_line.len() >= STDIN_BUFFER_LIMIT {
+    if command_line.len() >= STDIN_BUFFER_LIMIT - STDIN_SAFETY_MARGIN {
         WritePath::Argv
     } else {
         WritePath::Stdin
@@ -178,6 +187,15 @@ mod tests {
         let big = "x".repeat(STDIN_BUFFER_LIMIT / 2);
         let line = add_command_line("Claude Code-credentials", "someone", &big);
         assert_eq!(write_path_for(&line), WritePath::Argv);
+    }
+
+    #[test]
+    fn the_fallback_happens_with_headroom_rather_than_at_the_edge() {
+        let just_inside = "y".repeat(STDIN_BUFFER_LIMIT - STDIN_SAFETY_MARGIN + 1);
+        assert_eq!(write_path_for(&just_inside), WritePath::Argv);
+
+        let comfortably_clear = "y".repeat(STDIN_BUFFER_LIMIT - STDIN_SAFETY_MARGIN - 1);
+        assert_eq!(write_path_for(&comfortably_clear), WritePath::Stdin);
     }
 
     #[test]

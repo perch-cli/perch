@@ -41,7 +41,10 @@ fn the_adopted_account_is_recorded_as_active() {
     assert_eq!(registry.active.as_deref(), Some(EMAIL));
     assert_eq!(registry.accounts.len(), 1);
     assert_eq!(registry.accounts[0].plan.as_deref(), Some("pro"));
-    assert_eq!(registry.accounts[0].organization.as_deref(), Some("Acme"));
+    assert_eq!(
+        registry.accounts[0].identity.organization_name.as_deref(),
+        Some("Acme")
+    );
 }
 
 #[test]
@@ -140,6 +143,49 @@ fn a_login_whose_identity_perch_cannot_read_is_refused_rather_than_guessed_at() 
     let error = result.expect_err("Perch cannot name an Account it cannot identify");
     assert_eq!(error.exit_code(), EXIT_PROBE_REFUSED);
     assert!(error.to_string().contains("oauthAccount"));
+}
+
+#[test]
+fn an_identity_file_perch_cannot_parse_is_refused_and_names_the_assumption() {
+    let host = machine_with_claude_code()
+        .with_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, CREDENTIAL)
+        .with_file("/Users/someone/.claude.json", "{ this is not JSON");
+
+    let (result, _) = run_status(&host, false);
+
+    let error = result.expect_err("Perch should not act on a file it cannot read the shape of");
+    assert_eq!(
+        error.exit_code(),
+        EXIT_PROBE_REFUSED,
+        "a file Claude Code owns, in a shape Perch does not know, is an \
+         assumption failing: {error}"
+    );
+    let message = error.to_string();
+    assert!(message.contains("oauthAccount"), "{message}");
+    assert!(message.contains(CLAUDE_VERSION), "{message}");
+}
+
+#[test]
+fn an_identity_file_that_cannot_be_read_is_not_reported_as_a_missing_account() {
+    let host = machine_with_claude_code()
+        .with_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, CREDENTIAL)
+        .with_unreadable_file(
+            "/Users/someone/.claude.json",
+            "Permission denied (os error 13)",
+        );
+
+    let (result, _) = run_status(&host, false);
+
+    let error = result.expect_err("a file that cannot be read is not an answer");
+    let message = error.to_string();
+    assert!(
+        message.contains("Permission denied"),
+        "the real reason should survive: {message}"
+    );
+    assert!(
+        !message.contains("names no account"),
+        "an unreadable file is not the same as one naming nobody: {message}"
+    );
 }
 
 #[test]

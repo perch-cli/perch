@@ -67,10 +67,7 @@ fn store_as_first_profile(host: &dyn Host, findings: &Findings) -> Result<Regist
 
     let mut registry = Registry::default();
     registry.upsert(Account {
-        email: findings.identity.email.clone(),
-        account_uuid: findings.identity.account_uuid.clone(),
-        organization: findings.identity.organization_name.clone(),
-        organization_uuid: findings.identity.organization_uuid.clone(),
+        identity: findings.identity.clone(),
         plan: findings.credential.subscription_type.clone(),
         profile: Profile {
             dir,

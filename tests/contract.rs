@@ -78,6 +78,56 @@ fn the_default_store_is_where_perch_believes_it_is() {
     assert_eq!(store.keychain_account, std::env::var("USER").unwrap());
 }
 
+/// The load-bearing belief: `Claude Code-credentials-<sha256(dir)[0:8]>`. Get it
+/// wrong and Perch stores every Credential in a namespace no Profile is ever
+/// read from, silently.
+///
+/// It can only be checked against reality on a machine whose `CLAUDE_CONFIG_DIR`
+/// is set and logged in — Claude Code has to have written the item for there to
+/// be anything to find. Where that holds, this fails the moment the derivation
+/// drifts; elsewhere it asserts what it can and says what it skipped.
+#[test]
+fn a_non_default_config_directory_finds_its_credential_under_the_derived_name() {
+    if skipping_keychain() {
+        return;
+    }
+    let Some(config_dir) = std::env::var_os("CLAUDE_CONFIG_DIR") else {
+        eprintln!(
+            "skipping: CLAUDE_CONFIG_DIR is unset, so there is no hashed \
+             service name on this machine to check against"
+        );
+        return;
+    };
+
+    let host = RealHost::new();
+    let store = probe::default_store(&host).expect("USER is set");
+    let account = &store.keychain_account;
+
+    match host.keychain_get(&store.keychain_service, account) {
+        Ok(credential) => {
+            assert!(
+                credential.contains("claudeAiOauth"),
+                "the derived name found something that is not a Credential"
+            );
+            assert!(
+                matches!(
+                    host.keychain_get(probe::DEFAULT_SERVICE, account),
+                    Err(KeychainError::NotFound { .. })
+                ),
+                "a non-default config directory must not be using the bare name"
+            );
+        }
+        Err(KeychainError::NotFound { .. }) => {
+            eprintln!(
+                "skipping: {} is not logged in, so the derivation cannot be \
+                 confirmed against a real item",
+                std::path::Path::new(&config_dir).display()
+            );
+        }
+        Err(error) => panic!("the keychain could not be consulted: {error}"),
+    }
+}
+
 #[test]
 fn the_installed_claude_code_stores_what_perch_expects_to_find() {
     if skipping_keychain() {

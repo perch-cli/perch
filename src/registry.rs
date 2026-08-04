@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{PerchError, Result};
 use crate::host::{Host, HostError};
+use crate::probe::Identity;
 
 /// The version this build writes. A registry from the future is refused rather
 /// than silently misread.
@@ -47,20 +48,16 @@ pub struct Profile {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Account {
-    /// The email address of the Account. Also its identifier.
-    pub email: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub account_uuid: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub organization: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub organization_uuid: Option<String>,
-    /// The subscription the Credential reports — `pro`, `max`, and so on.
+    /// Who this Account is. Its email address is also its identifier.
+    pub identity: Identity,
+    /// The subscription the Credential reports — `pro`, `max`, and so on. It
+    /// comes from the Credential rather than the Identity, which is why it is
+    /// not part of one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<String>,
     pub profile: Profile,
     /// Whether the Account is a Cycle candidate. Later specs toggle this.
-    #[serde(default = "yes")]
+    #[serde(default = "enabled_by_default")]
     pub enabled: bool,
     /// An Account whose Credential can no longer be recovered.
     #[serde(default)]
@@ -71,7 +68,7 @@ pub struct Account {
     pub utilization: Option<CachedUtilization>,
 }
 
-fn yes() -> bool {
+fn enabled_by_default() -> bool {
     true
 }
 
@@ -99,9 +96,25 @@ impl Default for Registry {
     }
 }
 
+impl Account {
+    pub fn email(&self) -> &str {
+        &self.identity.email
+    }
+
+    /// The cached Utilization, if any figure has ever been observed. An empty
+    /// set of windows is not an observation.
+    pub fn observed_utilization(&self) -> Option<&CachedUtilization> {
+        self.utilization
+            .as_ref()
+            .filter(|cached| !cached.windows.is_empty())
+    }
+}
+
 impl Registry {
     pub fn account(&self, email: &str) -> Option<&Account> {
-        self.accounts.iter().find(|account| account.email == email)
+        self.accounts
+            .iter()
+            .find(|account| account.email() == email)
     }
 
     pub fn active_account(&self) -> Option<&Account> {
@@ -112,7 +125,7 @@ impl Registry {
         match self
             .accounts
             .iter_mut()
-            .find(|existing| existing.email == account.email)
+            .find(|existing| existing.email() == account.email())
         {
             Some(existing) => *existing = account,
             None => self.accounts.push(account),
@@ -214,10 +227,12 @@ mod tests {
     fn a_registry_round_trips_through_json() {
         let mut registry = Registry::default();
         registry.upsert(Account {
-            email: "someone@example.com".into(),
-            account_uuid: None,
-            organization: Some("Acme".into()),
-            organization_uuid: None,
+            identity: Identity {
+                email: "someone@example.com".into(),
+                account_uuid: None,
+                organization_name: Some("Acme".into()),
+                organization_uuid: None,
+            },
             plan: Some("pro".into()),
             profile: Profile {
                 dir: PathBuf::from("/Users/someone/.perch/profiles/someone-example-com"),

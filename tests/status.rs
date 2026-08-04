@@ -15,9 +15,11 @@ fn adopted_machine(utilization: &str) -> FakeHost {
   "active": "someone@example.com",
   "accounts": [
     {{
-      "email": "someone@example.com",
-      "account_uuid": "account-uuid-1",
-      "organization": "Acme",
+      "identity": {{
+        "email": "someone@example.com",
+        "account_uuid": "account-uuid-1",
+        "organization_name": "Acme"
+      }},
       "plan": "pro",
       "profile": {{
         "dir": "/Users/someone/.perch/profiles/someone-example-com",

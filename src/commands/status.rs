@@ -41,32 +41,27 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
 
 fn render_human(out: &mut dyn Write, account: &Account, now: DateTime<Utc>) -> Result<()> {
     let mut write_line = |label: &str, value: &str| -> Result<()> {
-        writeln!(out, "{label:LABEL_WIDTH$}{value}").map_err(io)
+        writeln!(out, "{label:LABEL_WIDTH$}{value}").map_err(write_failed)
     };
 
-    write_line("Account", &account.email)?;
-    if let Some(organization) = &account.organization {
+    write_line("Account", account.email())?;
+    if let Some(organization) = &account.identity.organization_name {
         write_line("Organization", organization)?;
     }
     if let Some(plan) = &account.plan {
         write_line("Plan", plan)?;
     }
 
-    match &account.utilization {
+    match account.observed_utilization() {
         None => write_line("Utilization", "never observed")?,
-        Some(cached) if cached.windows.is_empty() => write_line("Utilization", "never observed")?,
         Some(cached) => {
             let age = age_phrase(cached.observed_at, now);
             for (index, window) in cached.windows.iter().enumerate() {
                 let label = if index == 0 { "Utilization" } else { "" };
-                let resets = match window.resets_at {
-                    Some(at) => format!(", resets {}", relative_future(at, now)),
-                    None => String::new(),
-                };
                 write_line(
                     label,
                     &format!(
-                        "{:<8} {:>3.0}%  (as of {age}{resets})",
+                        "{:<8} {:>3.0}%  (as of {age})",
                         window.window, window.used_percent
                     ),
                 )?;
@@ -78,13 +73,13 @@ fn render_human(out: &mut dyn Write, account: &Account, now: DateTime<Utc>) -> R
 }
 
 fn render_json(out: &mut dyn Write, account: &Account, now: DateTime<Utc>) -> Result<()> {
-    let utilization = match &account.utilization {
-        Some(cached) if !cached.windows.is_empty() => json!({
+    let utilization = match account.observed_utilization() {
+        Some(cached) => json!({
             "observed_at": cached.observed_at.to_rfc3339(),
             "never_observed": false,
             "windows": windows_json(cached, now),
         }),
-        _ => json!({
+        None => json!({
             "observed_at": serde_json::Value::Null,
             "never_observed": true,
             "windows": [],
@@ -93,9 +88,9 @@ fn render_json(out: &mut dyn Write, account: &Account, now: DateTime<Utc>) -> Re
 
     let document = json!({
         "active": {
-            "email": account.email,
-            "account_uuid": account.account_uuid,
-            "organization": account.organization,
+            "email": account.email(),
+            "account_uuid": account.identity.account_uuid,
+            "organization": account.identity.organization_name,
             "plan": account.plan,
             "profile_dir": account.profile.dir,
         },
@@ -108,7 +103,7 @@ fn render_json(out: &mut dyn Write, account: &Account, now: DateTime<Utc>) -> Re
         serde_json::to_string_pretty(&document)
             .map_err(|err| PerchError::Other(err.to_string()))?
     )
-    .map_err(io)
+    .map_err(write_failed)
 }
 
 /// Every figure carries its own observation time, so a script can decide for
@@ -129,7 +124,7 @@ fn windows_json(cached: &CachedUtilization, now: DateTime<Utc>) -> Vec<serde_jso
         .collect()
 }
 
-fn io(err: std::io::Error) -> PerchError {
+fn write_failed(err: std::io::Error) -> PerchError {
     PerchError::Other(err.to_string())
 }
 
@@ -144,19 +139,6 @@ pub fn age_phrase(observed_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
         45..=5399 => format!("{}m ago", (seconds as f64 / 60.0).round() as i64),
         5400..=86_399 => format!("{}h ago", (seconds as f64 / 3600.0).round() as i64),
         _ => format!("{}d ago", (seconds as f64 / 86_400.0).round() as i64),
-    }
-}
-
-/// "in 42m", "in 3h".
-fn relative_future(at: DateTime<Utc>, now: DateTime<Utc>) -> String {
-    let seconds = (at - now).num_seconds();
-    if seconds <= 0 {
-        return "now".to_string();
-    }
-    match seconds {
-        0..=5399 => format!("in {}m", (seconds as f64 / 60.0).round().max(1.0) as i64),
-        5400..=86_399 => format!("in {}h", (seconds as f64 / 3600.0).round() as i64),
-        _ => format!("in {}d", (seconds as f64 / 86_400.0).round() as i64),
     }
 }
 

@@ -9,11 +9,11 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::{PerchError, Result};
-use crate::host::Host;
+use crate::host::{Host, HostError};
 use crate::keychain::KeychainError;
 
 /// Named assumptions. A refusal quotes one of these, so the failure a user
@@ -29,8 +29,10 @@ pub mod assumption {
 /// unset. Every other config directory gets this plus a hash of its path.
 pub const DEFAULT_SERVICE: &str = "Claude Code-credentials";
 
-/// The non-secret description of an Account, as Claude Code records it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The non-secret description of an Account, as Claude Code records it: what
+/// Claude Code displays to say who you are. Perch stores it verbatim, so the
+/// registry and the probe describe an Account with one type rather than two.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Identity {
     pub email: String,
     pub account_uuid: Option<String>,
@@ -186,7 +188,7 @@ pub fn default_store(host: &dyn Host) -> Result<Store> {
     Ok(Store {
         identity_file: identity_file_for(&config_dir, is_default, host),
         keychain_service: service_name_for(&config_dir, is_default),
-        keychain_account: login_name(host)?,
+        keychain_account: keychain_account_name(host)?,
         config_dir,
     })
 }
@@ -197,7 +199,7 @@ pub fn store_for_profile(host: &dyn Host, config_dir: &Path) -> Result<Store> {
     Ok(Store {
         identity_file: identity_file_for(config_dir, false, host),
         keychain_service: service_name_for(config_dir, false),
-        keychain_account: login_name(host)?,
+        keychain_account: keychain_account_name(host)?,
         config_dir: config_dir.to_path_buf(),
     })
 }
@@ -211,7 +213,7 @@ fn identity_file_for(config_dir: &Path, is_default: bool, host: &dyn Host) -> Pa
     }
 }
 
-fn login_name(host: &dyn Host) -> Result<String> {
+fn keychain_account_name(host: &dyn Host) -> Result<String> {
     host.env_var("USER").ok_or_else(|| {
         refusal(
             assumption::ACCOUNT_NAME,
@@ -270,15 +272,31 @@ pub fn read_credential(
 /// Reads the Identity out of a store's `.claude.json`.
 pub fn read_identity(host: &dyn Host, store: &Store, version: &str) -> Result<Option<Identity>> {
     let contents = match host.read_file(&store.identity_file) {
+        // No file at all is a machine that has never logged in.
+        Err(HostError::NotFound { .. }) => return Ok(None),
+        // A file that is there but cannot be read is a different thing
+        // entirely, and saying "no account" would be the wrong diagnosis.
+        Err(err) => {
+            return Err(PerchError::Other(format!(
+                "could not read {}: {err}",
+                store.identity_file.display()
+            )))
+        }
         Ok(contents) => contents,
-        Err(_) => return Ok(None),
     };
 
-    let parsed: IdentityFile =
-        serde_json::from_str(&contents).map_err(|err| PerchError::Malformed {
-            path: store.identity_file.display().to_string(),
-            detail: err.to_string(),
-        })?;
+    // The identity file is Claude Code's, not Perch's: one it writes in a shape
+    // Perch cannot parse is an assumption failing, not a corrupt file.
+    let parsed: IdentityFile = serde_json::from_str(&contents).map_err(|err| {
+        refusal(
+            assumption::IDENTITY_BLOCK,
+            &format!(
+                "{} is not JSON Perch understands: {err}",
+                store.identity_file.display()
+            ),
+            version,
+        )
+    })?;
 
     let account = match parsed.oauth_account {
         Some(account) => account,
@@ -370,14 +388,14 @@ mod tests {
     }
 
     #[test]
-    fn the_hash_is_the_documented_derivation() {
-        // sha256("/tmp/perch-fixture") — pinned so a change to the derivation
-        // is a deliberate edit rather than an accident.
-        assert_eq!(short_hash(Path::new("/tmp/perch-fixture")).len(), 8);
-        assert_eq!(
-            short_hash(Path::new("/tmp/perch-fixture")),
-            short_hash(Path::new("/tmp/perch-fixture"))
-        );
+    fn the_hash_is_the_first_eight_hex_characters_of_the_sha256_of_the_path() {
+        // Independently computed:
+        //   printf '%s' "/tmp/perch-fixture" | shasum -a 256 | cut -c1-8
+        // Pinned so a change to the derivation — which would send every stored
+        // Credential to a namespace no Profile is ever read from — has to be a
+        // deliberate edit rather than an accident.
+        assert_eq!(short_hash(Path::new("/tmp/perch-fixture")), "1b3b8f67");
+        assert_eq!(short_hash(Path::new("/Users/someone/.claude")), "b38b2c3b");
     }
 
     #[test]

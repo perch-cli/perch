@@ -37,11 +37,11 @@ pub struct FakeHost {
     now: RefCell<DateTime<Utc>>,
     env: RefCell<BTreeMap<String, String>>,
     files: RefCell<BTreeMap<PathBuf, String>>,
+    unreadable: RefCell<BTreeMap<PathBuf, String>>,
     dirs: RefCell<BTreeSet<PathBuf>>,
     keychain: RefCell<BTreeMap<(String, String), String>>,
     keychain_lock: RefCell<Option<KeychainLock>>,
     executions: RefCell<BTreeMap<String, Execution>>,
-    responses: RefCell<BTreeMap<String, HttpResponse>>,
     live_processes: RefCell<BTreeSet<u32>>,
     effects: RefCell<Vec<Effect>>,
 }
@@ -62,11 +62,11 @@ impl FakeHost {
             now: RefCell::new(Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap()),
             env: RefCell::new(env),
             files: RefCell::new(BTreeMap::new()),
+            unreadable: RefCell::new(BTreeMap::new()),
             dirs: RefCell::new(BTreeSet::new()),
             keychain: RefCell::new(BTreeMap::new()),
             keychain_lock: RefCell::new(None),
             executions: RefCell::new(BTreeMap::new()),
-            responses: RefCell::new(BTreeMap::new()),
             live_processes: RefCell::new(BTreeSet::new()),
             effects: RefCell::new(Vec::new()),
         }
@@ -79,22 +79,19 @@ impl FakeHost {
         self
     }
 
-    pub fn with_env(self, key: &str, value: &str) -> Self {
-        self.env
-            .borrow_mut()
-            .insert(key.to_string(), value.to_string());
-        self
-    }
-
-    pub fn without_env(self, key: &str) -> Self {
-        self.env.borrow_mut().remove(key);
-        self
-    }
-
     pub fn with_file(self, path: impl AsRef<Path>, contents: &str) -> Self {
         self.files
             .borrow_mut()
             .insert(path.as_ref().to_path_buf(), contents.to_string());
+        self
+    }
+
+    /// A file that is there but cannot be read — the wrong permissions, most
+    /// often. Distinct from a file that is simply absent.
+    pub fn with_unreadable_file(self, path: impl AsRef<Path>, detail: &str) -> Self {
+        self.unreadable
+            .borrow_mut()
+            .insert(path.as_ref().to_path_buf(), detail.to_string());
         self
     }
 
@@ -122,18 +119,6 @@ impl FakeHost {
         self
     }
 
-    pub fn with_http(self, url: &str, response: HttpResponse) -> Self {
-        self.responses
-            .borrow_mut()
-            .insert(url.to_string(), response);
-        self
-    }
-
-    pub fn with_live_process(self, pid: u32) -> Self {
-        self.live_processes.borrow_mut().insert(pid);
-        self
-    }
-
     // ---- inspecting what happened --------------------------------------
 
     pub fn effects(&self) -> Vec<Effect> {
@@ -153,16 +138,6 @@ impl FakeHost {
 
     pub fn file(&self, path: impl AsRef<Path>) -> Option<String> {
         self.files.borrow().get(path.as_ref()).cloned()
-    }
-
-    pub fn files_under(&self, prefix: impl AsRef<Path>) -> Vec<PathBuf> {
-        let prefix = prefix.as_ref().to_path_buf();
-        self.files
-            .borrow()
-            .keys()
-            .filter(|path| path.starts_with(&prefix))
-            .cloned()
-            .collect()
     }
 
     pub fn keychain_item(&self, service: &str, account: &str) -> Option<String> {
@@ -218,6 +193,9 @@ impl Host for FakeHost {
 
     fn read_file(&self, path: &Path) -> Result<String, HostError> {
         self.record(Effect::ReadFile(path.to_path_buf()));
+        if let Some(detail) = self.unreadable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
+        }
         self.files
             .borrow()
             .get(path)
@@ -320,14 +298,15 @@ impl Host for FakeHost {
         self.live_processes.borrow().contains(&pid)
     }
 
+    /// Nothing in this ticket may fetch, so the fake has no canned replies to
+    /// give: a request that reaches here is itself the failure, and is recorded
+    /// either way for `http_calls` to report.
     fn http_get(&self, url: &str, _headers: &[(&str, &str)]) -> Result<HttpResponse, HostError> {
         self.record(Effect::HttpGet {
             url: url.to_string(),
         });
-        self.responses
-            .borrow()
-            .get(url)
-            .cloned()
-            .ok_or_else(|| HostError::Other(format!("no canned response for {url}")))
+        Err(HostError::Other(format!(
+            "the fake Host has no network: {url}"
+        )))
     }
 }

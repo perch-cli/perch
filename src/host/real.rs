@@ -10,6 +10,29 @@ use crate::keychain::{
     self, classify, decode_password_output, KeychainError, WritePath, SECURITY_BIN,
 };
 
+/// Runs `security` and turns anything short of success into the distinction
+/// that matters: not found, or locked and denied.
+///
+/// `security -i` reports a failed sub-command on stderr while still exiting 0,
+/// so a clean exit is not on its own evidence that the item was written.
+fn security(
+    args: &[&str],
+    stdin: Option<&str>,
+    service: &str,
+    account: &str,
+) -> Result<Execution, KeychainError> {
+    let execution =
+        keychain::run_security(args, stdin).map_err(|err| KeychainError::Unavailable {
+            detail: format!("could not run {SECURITY_BIN}: {err}"),
+        })?;
+
+    if execution.succeeded() && !execution.stderr.to_lowercase().contains("error") {
+        Ok(execution)
+    } else {
+        Err(classify(&execution, service, account))
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RealHost;
 
@@ -62,19 +85,13 @@ impl Host for RealHost {
     }
 
     fn keychain_get(&self, service: &str, account: &str) -> Result<String, KeychainError> {
-        let execution = keychain::run_security(
+        let execution = security(
             &["find-generic-password", "-s", service, "-a", account, "-w"],
             None,
-        )
-        .map_err(|err| KeychainError::Unavailable {
-            detail: format!("could not run {SECURITY_BIN}: {err}"),
-        })?;
-
-        if execution.succeeded() {
-            Ok(decode_password_output(&execution.stdout))
-        } else {
-            Err(classify(&execution, service, account))
-        }
+            service,
+            account,
+        )?;
+        Ok(decode_password_output(&execution.stdout))
     }
 
     fn keychain_set(
@@ -84,52 +101,34 @@ impl Host for RealHost {
         secret: &str,
     ) -> Result<(), KeychainError> {
         let command_line = keychain::add_command_line(service, account, secret);
-        let execution = match keychain::write_path_for(&command_line) {
-            WritePath::Stdin => keychain::run_security(&["-i"], Some(&command_line)),
+        match keychain::write_path_for(&command_line) {
+            WritePath::Stdin => security(&["-i"], Some(&command_line), service, account)?,
             WritePath::Argv => {
                 let hex = keychain::hex_encode(secret.as_bytes());
-                keychain::run_security(
-                    &[
-                        "add-generic-password",
-                        "-U",
-                        "-s",
-                        service,
-                        "-a",
-                        account,
-                        "-X",
-                        &hex,
-                    ],
-                    None,
-                )
+                let args = [
+                    "add-generic-password",
+                    "-U",
+                    "-s",
+                    service,
+                    "-a",
+                    account,
+                    "-X",
+                    &hex,
+                ];
+                security(&args, None, service, account)?
             }
-        }
-        .map_err(|err| KeychainError::Unavailable {
-            detail: format!("could not run {SECURITY_BIN}: {err}"),
-        })?;
-
-        // `security -i` reports a failed sub-command on stderr while exiting 0,
-        // so a clean exit is not on its own evidence that the item was written.
-        if execution.succeeded() && !execution.stderr.to_lowercase().contains("error") {
-            Ok(())
-        } else {
-            Err(classify(&execution, service, account))
-        }
+        };
+        Ok(())
     }
 
     fn keychain_delete(&self, service: &str, account: &str) -> Result<(), KeychainError> {
-        let execution = keychain::run_security(
+        security(
             &["delete-generic-password", "-s", service, "-a", account],
             None,
-        )
-        .map_err(|err| KeychainError::Unavailable {
-            detail: format!("could not run {SECURITY_BIN}: {err}"),
-        })?;
-
-        if execution.succeeded() {
-            Ok(())
-        } else {
-            Err(classify(&execution, service, account))
-        }
+            service,
+            account,
+        )?;
+        Ok(())
     }
 
     fn exec(&self, program: &str, args: &[&str]) -> Result<Execution, HostError> {
