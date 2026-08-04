@@ -16,6 +16,7 @@ pub mod profile;
 pub mod registry;
 pub mod report;
 pub mod target;
+pub mod utilization;
 
 pub use error::{PerchError, Result};
 pub use host::Host;

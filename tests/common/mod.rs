@@ -9,6 +9,7 @@ use std::path::Path;
 use perch::commands::add::AddArgs;
 use perch::commands::alias::AliasCommand;
 use perch::commands::group::GroupCommand;
+use perch::commands::list::ListArgs;
 use perch::commands::status::StatusArgs;
 use perch::host::{Execution, FakeHost};
 use perch::probe;
@@ -110,8 +111,32 @@ pub fn abandoned_login() -> impl Fn(&FakeHost, &Path) -> i32 {
 /// Runs `perch status` against a fake machine, returning what it printed
 /// alongside how it ended.
 pub fn run_status(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
+    run_status_with(
+        host,
+        StatusArgs {
+            json,
+            ..StatusArgs::default()
+        },
+    )
+}
+
+/// `perch status --group`: the same cached view, narrowed to the Group the
+/// active Account is in.
+pub fn run_status_group(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
+    run_status_with(host, StatusArgs { json, group: true })
+}
+
+/// `perch status` with whatever combination of flags the test is about.
+pub fn run_status_with(host: &FakeHost, args: StatusArgs) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
-    let result = perch::commands::status::run(host, StatusArgs { json }, &mut written);
+    let result = perch::commands::status::run(host, args, &mut written);
+    (result, String::from_utf8(written).expect("output is UTF-8"))
+}
+
+/// Runs `perch list`, returning what it printed alongside how it ended.
+pub fn run_list(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
+    let mut written = Vec::new();
+    let result = perch::commands::list::run(host, ListArgs { json }, &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 

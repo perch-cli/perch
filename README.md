@@ -6,8 +6,9 @@ login flow again.
 ## Status
 
 Early. Perch adopts the login you already have, adds further Accounts without
-disturbing it, names them, and holds Groups of Accounts you have declared
-interchangeable. Switching between Accounts is not built yet.
+disturbing it, names them, holds Groups of Accounts you have declared
+interchangeable, and lists what you have. Switching between Accounts is not
+built yet.
 
 ```
 $ perch status
@@ -29,6 +30,40 @@ age shown, so `perch status` is cheap enough to put in a shell prompt
 
 `perch add` gains an Account by running a login in a Profile of its own, so the
 Account you are using stays active and its session is untouched (ADR 0009).
+
+## What you have
+
+`perch list` is the one place that answers it: every Account with its Alias, its
+Group, whether it is a Cycle candidate, and how full it is.
+
+```
+$ perch list
+  Account               Alias     Group  State                 Utilization
+* someone@example.com   -         work   enabled               5-hour    42%  (as of 3m ago)
+                                                               7-day     18%  (as of 3m ago)
+  overflow@example.com  overflow  work   enabled, quarantined  never observed
+  spare@example.com     -         none   disabled              5-hour    91%  (as of 2h ago)
+
+* is the active Account.
+```
+
+An Account nobody has ever read a figure for says `never observed` rather than
+`0%` — no figure and plenty of room are opposite pieces of advice. A
+Quarantined Account stays listed and named, so an Account needing attention is
+never mistaken for one that vanished; whether it is in the Cycling pool is said
+alongside, because enabling a Quarantined Account would not repair it.
+
+`perch status --group` is the same view narrowed to the Group the active
+Account is in, so you can see where you would land before you switch. From an
+Account in no Group it shows every ungrouped Account and says that Cycling will
+not move between them until you say it may (ADR 0017).
+
+`perch list --json` and `perch status --group --json` carry the same
+information, with an observation time on every figure and the scope they were
+narrowed to. Neither makes a network call. `--group` changes the question, so
+it changes the document: `perch status --json` answers about one Account under
+`active`, while the listings answer about a set under `accounts`, with the
+active one named under `active_account`.
 
 ## Names
 
@@ -110,7 +145,8 @@ edition 2024 — so rustup will fetch the right one on first build.
 
 ```
 # touches nothing on the machine
-cargo test --lib --test adoption --test status --test adding --test grouping --test naming
+cargo test --lib --test adoption --test status --test adding --test grouping \
+           --test naming --test listing
 # asserts beliefs against this machine
 cargo test --test contract
 # both
