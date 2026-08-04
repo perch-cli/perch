@@ -70,9 +70,11 @@ fn the_default_store_is_where_perch_believes_it_is() {
         assert_eq!(store.config_dir, host.home_dir().join(".claude"));
         assert_eq!(store.identity_file, host.home_dir().join(".claude.json"));
     } else {
-        assert!(store
-            .keychain_service
-            .starts_with(&format!("{}-", probe::DEFAULT_SERVICE)));
+        assert!(
+            store
+                .keychain_service
+                .starts_with(&format!("{}-", probe::DEFAULT_SERVICE))
+        );
     }
 
     assert_eq!(store.keychain_account, std::env::var("USER").unwrap());

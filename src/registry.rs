@@ -173,7 +173,7 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
             return Err(PerchError::Other(format!(
                 "could not read {}: {err}",
                 path.display()
-            )))
+            )));
         }
     };
 

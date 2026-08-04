@@ -113,7 +113,10 @@ pub fn hex_encode(bytes: &[u8]) -> String {
 
 pub fn hex_decode(text: &str) -> Option<Vec<u8>> {
     let text = text.trim();
-    if text.is_empty() || text.len() % 2 != 0 || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if text.is_empty()
+        || !text.len().is_multiple_of(2)
+        || !text.bytes().all(|b| b.is_ascii_hexdigit())
+    {
         return None;
     }
     (0..text.len())

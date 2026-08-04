@@ -49,7 +49,8 @@ Perch drives `/usr/bin/security` to reach them (ADR 0008).
 
 ## Building
 
-Requires Rust and macOS.
+Requires macOS. The toolchain is pinned in `rust-toolchain.toml` — Rust 1.97.1,
+edition 2024 — so rustup will fetch the right one on first build.
 
 ```
 cargo test --lib --test adoption --test status   # touches nothing on the machine

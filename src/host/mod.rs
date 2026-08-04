@@ -73,7 +73,7 @@ pub trait Host {
 
     fn keychain_get(&self, service: &str, account: &str) -> Result<String, KeychainError>;
     fn keychain_set(&self, service: &str, account: &str, secret: &str)
-        -> Result<(), KeychainError>;
+    -> Result<(), KeychainError>;
     fn keychain_delete(&self, service: &str, account: &str) -> Result<(), KeychainError>;
 
     // ---- processes ------------------------------------------------------

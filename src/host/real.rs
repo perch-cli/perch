@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 
 use super::{Execution, Host, HostError, HttpResponse};
 use crate::keychain::{
-    self, classify, decode_password_output, KeychainError, WritePath, SECURITY_BIN,
+    self, KeychainError, SECURITY_BIN, WritePath, classify, decode_password_output,
 };
 
 /// Runs `security` and turns anything short of success into the distinction
@@ -183,7 +183,7 @@ impl Host for RealHost {
     }
 }
 
-extern "C" {
+unsafe extern "C" {
     #[link_name = "kill"]
     fn libc_kill(pid: i32, sig: i32) -> i32;
 }

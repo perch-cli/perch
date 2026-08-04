@@ -15,9 +15,15 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+
+      # No toolchain action: rust-toolchain.toml pins the channel and its
+      # components, so the version lives in one place rather than two that can
+      # drift apart. rustup on the runner installs it on first use.
+      - name: Toolchain
+        run: |
+          rustup show active-toolchain
+          cargo --version
+
       - uses: Swatinem/rust-cache@v2
 
       - name: Format

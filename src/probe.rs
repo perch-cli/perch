@@ -280,7 +280,7 @@ pub fn read_identity(host: &dyn Host, store: &Store, version: &str) -> Result<Op
             return Err(PerchError::Other(format!(
                 "could not read {}: {err}",
                 store.identity_file.display()
-            )))
+            )));
         }
         Ok(contents) => contents,
     };
