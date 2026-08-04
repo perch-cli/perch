@@ -7,6 +7,7 @@
 use std::path::Path;
 
 use perch::commands::add::AddArgs;
+use perch::commands::alias::AliasCommand;
 use perch::commands::group::GroupCommand;
 use perch::commands::status::StatusArgs;
 use perch::host::{Execution, FakeHost};
@@ -114,6 +115,23 @@ pub fn run_status(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
+/// A machine holding two Accounts, neither in a Group and neither named: the
+/// ordinary starting state once a second Account has been added (ADR 0017).
+pub fn machine_with_two_accounts() -> FakeHost {
+    let host =
+        logged_in_machine().with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE));
+    run_add(
+        &host,
+        AddArgs {
+            no_group: true,
+            ..AddArgs::default()
+        },
+    )
+    .0
+    .expect("the second Account is added");
+    host
+}
+
 /// Runs `perch add`, returning what it printed alongside how it ended.
 pub fn run_add(host: &FakeHost, args: AddArgs) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
@@ -156,6 +174,34 @@ pub fn run_group(host: &FakeHost, command: GroupCommand) -> (perch::Result<()>, 
     let mut written = Vec::new();
     let result = perch::commands::group::run(host, command, &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
+}
+
+/// Runs `perch alias`, returning what it printed alongside how it ended.
+pub fn run_alias(host: &FakeHost, command: AliasCommand) -> (perch::Result<()>, String) {
+    let mut written = Vec::new();
+    let result = perch::commands::alias::run(host, command, &mut written);
+    (result, String::from_utf8(written).expect("output is UTF-8"))
+}
+
+/// `perch alias <name> <target>`.
+pub fn set_alias(host: &FakeHost, name: &str, target: &str) -> (perch::Result<()>, String) {
+    run_alias(
+        host,
+        AliasCommand::Set {
+            name: name.to_string(),
+            target: target.to_string(),
+        },
+    )
+}
+
+/// `perch alias <name> --unset`.
+pub fn unset_alias(host: &FakeHost, name: &str) -> (perch::Result<()>, String) {
+    run_alias(
+        host,
+        AliasCommand::Unset {
+            name: name.to_string(),
+        },
+    )
 }
 
 /// `perch add` with a Group named outright, so nothing is asked.

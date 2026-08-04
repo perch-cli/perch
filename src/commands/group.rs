@@ -17,6 +17,7 @@ use crate::commands::{say, write_failed};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::registry::{self, GroupConfig, NO_GROUP, Registry};
+use crate::target::{self, AccountTarget};
 
 /// What was asked of `perch group`. The help each of these is described by
 /// lives with the command line that parses it.
@@ -49,13 +50,15 @@ pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Resul
             describe_configuration(out, registry.group(&name).expect("just declared"))
         }
         GroupCommand::Remove { name } => {
-            remove(&mut registry, &name)?;
+            let removed = remove(&mut registry, &name)?;
             registry::save(host, &registry)?;
-            say(out, &format!("Removed the Group `{name}`."))
+            say(out, &format!("Removed the Group `{removed}`."))
         }
         GroupCommand::Move { target, group } => {
-            let moved = move_account(&mut registry, &target, &group)?;
+            let account = target::resolve_account(&registry, &target)?;
+            let moved = move_account(&mut registry, &account, &group)?;
             registry::save(host, &registry)?;
+            say(out, &account.matched)?;
             say(out, &moved)
         }
         GroupCommand::List => list(out, &registry),
@@ -66,37 +69,38 @@ pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Resul
 ///
 /// The Accounts standing in the way are listed, because which ones they are is
 /// the whole of what the user has to decide about.
-fn remove(registry: &mut Registry, name: &str) -> Result<()> {
-    if registry.group(name).is_none() {
-        return Err(no_such_group(registry, name));
-    }
+fn remove(registry: &mut Registry, name: &str) -> Result<String> {
+    let declared = match registry.declared_group(name) {
+        Some(declared) => declared.to_string(),
+        None => return Err(no_such_group(registry, name)),
+    };
 
     let held: Vec<String> = registry
-        .accounts_in(name)
+        .accounts_in(&declared)
         .iter()
         .map(|account| registry.named_for_the_user(account.email()))
         .collect();
     if !held.is_empty() {
         return Err(PerchError::Conflict(format!(
-            "The Group `{name}` still holds {}:\n  {}\nMove them first with `perch group move <target> <group>`, or out of every Group with `perch group move <target> {NO_GROUP}`.",
+            "The Group `{declared}` still holds {}:\n  {}\nMove them first with `perch group move <target> <group>`, or out of every Group with `perch group move <target> {NO_GROUP}`.",
             accounts_phrase(held.len()),
             held.join("\n  ")
         )));
     }
 
-    registry.forget_group(name);
-    Ok(())
+    registry.forget_group(&declared);
+    Ok(declared)
 }
 
 /// Moves one Account between Groups, leaving everything else about it alone:
 /// its Profile, its stored Credential and its Alias are what make removing and
 /// re-adding a bad way to do this.
-fn move_account(registry: &mut Registry, target: &str, group: &str) -> Result<String> {
-    let email = account_named(registry, target)?;
+fn move_account(registry: &mut Registry, target: &AccountTarget, group: &str) -> Result<String> {
+    let email = target.email.clone();
     let destination = if registry::means_no_group(group) {
         None
-    } else if registry.group(group).is_some() {
-        Some(group.to_string())
+    } else if let Some(declared) = registry.declared_group(group) {
+        Some(declared.to_string())
     } else {
         return Err(no_such_group(registry, group));
     };
@@ -116,37 +120,24 @@ fn move_account(registry: &mut Registry, target: &str, group: &str) -> Result<St
     })
 }
 
-/// Which Account a target names.
-///
-/// An Alias first, then the email address itself. A Group is deliberately not
-/// an answer here: the thing being moved has to be exactly one Account. The
-/// full resolution order shared by every command, and near-match suggestions
-/// for a target that resolves to nothing, land with Aliases.
-fn account_named(registry: &Registry, target: &str) -> Result<String> {
-    if let Some(email) = registry.aliases.get(target) {
-        return Ok(email.clone());
-    }
-    if let Some(account) = registry.account(target) {
-        return Ok(account.email().to_string());
-    }
-    Err(PerchError::NotFound(format!(
-        "No Account called `{target}`. `perch group list` shows what Perch holds."
-    )))
-}
-
+/// A Group name is not a Target — only a Group will do here — but a typo is a
+/// typo wherever it is made, so it is answered the same way one in a Target
+/// is: with what the user probably meant, and otherwise with what they hold.
 fn no_such_group(registry: &Registry, name: &str) -> PerchError {
-    let declared = registry.group_names();
-    let known = if declared.is_empty() {
-        "No Groups have been declared yet.".to_string()
-    } else {
-        format!(
-            "Groups Perch holds: {}.",
-            declared.into_iter().collect::<Vec<_>>().join(", ")
-        )
+    let declared: Vec<String> = registry.groups.keys().cloned().collect();
+    let help = match target::suggestion(&declared, name) {
+        // A near miss is a typo far more often than it is a Group somebody
+        // meant to declare, so it is not also handed a way to create the typo.
+        Some(suggestion) => suggestion,
+        None if declared.is_empty() => {
+            format!("No Groups have been declared yet. Declare it with `perch group add {name}`.")
+        }
+        None => format!(
+            "Groups Perch holds: {}.\nDeclare it with `perch group add {name}`.",
+            declared.join(", ")
+        ),
     };
-    PerchError::NotFound(format!(
-        "No Group called `{name}`. {known}\nDeclare it with `perch group add {name}`."
-    ))
+    PerchError::NotFound(format!("No Group called `{name}`. {help}"))
 }
 
 /// Every Group with what it holds and what governs it, so the rules Cycling

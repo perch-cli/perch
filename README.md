@@ -6,8 +6,8 @@ login flow again.
 ## Status
 
 Early. Perch adopts the login you already have, adds further Accounts without
-disturbing it, and holds Groups of Accounts you have declared interchangeable.
-Switching between Accounts is not built yet.
+disturbing it, names them, and holds Groups of Accounts you have declared
+interchangeable. Switching between Accounts is not built yet.
 
 ```
 $ perch status
@@ -29,6 +29,30 @@ age shown, so `perch status` is cheap enough to put in a shell prompt
 
 `perch add` gains an Account by running a login in a Profile of its own, so the
 Account you are using stays active and its session is untouched (ADR 0009).
+
+## Names
+
+An Alias is a short name for an Account, so no command ever needs an email
+address.
+
+```
+$ perch alias overflow overflow@example.com
+`overflow@example.com` is an Account.
+`overflow` now names overflow@example.com.
+
+$ perch alias overflow --unset
+`overflow` no longer names overflow@example.com.
+```
+
+Aliases and Group names share one namespace: neither can take a name the other
+already has, and two names that differ only in case are one name. So the one
+Target every command takes is never ambiguous. An Account answers to one Alias
+at a time — naming an Account that already has a name replaces it, and says
+which name it gave up.
+
+A Target resolves as Alias, then Account email, then Group, and the command
+says which one matched before it acts. A Target that matches nothing is refused
+with exit code 12 and the names it nearly matched.
 
 ## Groups
 
@@ -86,7 +110,7 @@ edition 2024 — so rustup will fetch the right one on first build.
 
 ```
 # touches nothing on the machine
-cargo test --lib --test adoption --test status --test adding --test grouping
+cargo test --lib --test adoption --test status --test adding --test grouping --test naming
 # asserts beliefs against this machine
 cargo test --test contract
 # both

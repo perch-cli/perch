@@ -19,7 +19,7 @@ use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::probe::{self, Credential, Identity};
 use crate::profile;
-use crate::registry::{self, Account, NO_GROUP, Registry};
+use crate::registry::{self, Account, NO_GROUP, NameKind, Registry};
 
 #[derive(Debug, Default, Clone)]
 pub struct AddArgs {
@@ -38,8 +38,11 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     // Everything knowable before the login is checked before the login, so a
     // name Perch was always going to refuse never costs a browser round trip.
     registry.refuse_taken_names(args.alias.as_deref(), args.group.as_deref())?;
+    if let Some(alias) = &args.alias {
+        registry::validate_name(NameKind::Alias, alias)?;
+    }
     if let Some(group) = &args.group {
-        registry::validate_group_name(group)?;
+        registry::validate_name(NameKind::Group, group)?;
     }
     if args.group.is_none() && !args.no_group && !host.is_interactive() {
         return Err(PerchError::Other(
@@ -55,9 +58,12 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
 
     // Naming a Group on `add` declares it, so an Account is never in a Group
     // that carries no configuration and that `perch group list` cannot show.
-    if let Some(group) = &group {
-        registry.ensure_group(group)?;
-    }
+    // The Account records the declared spelling, which is what puts it in the
+    // Group that already exists rather than beside it.
+    let group = match &group {
+        Some(name) => Some(registry.ensure_group(name)?),
+        None => None,
+    };
 
     let account = settle_into_a_profile(host, pending, group.clone())?;
     let email = account.email().to_string();
@@ -230,7 +236,7 @@ fn resolve_group(
         .organization_name
         .as_deref()
         .map(str::trim)
-        .filter(|organization| registry::validate_group_name(organization).is_ok())
+        .filter(|organization| registry::validate_name(NameKind::Group, organization).is_ok())
         .map(str::to_string);
 
     let question = match &offered {
@@ -262,7 +268,7 @@ fn resolve_group(
 
         match &chosen {
             None => return Ok(None),
-            Some(name) => match registry::validate_group_name(name) {
+            Some(name) => match registry::validate_name(NameKind::Group, name) {
                 Ok(()) => return Ok(chosen),
                 Err(err) => say(out, &format!("{err}"))?,
             },

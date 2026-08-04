@@ -3,6 +3,7 @@ use std::io::Write;
 use clap::{Parser, Subcommand};
 
 use perch::commands::add::{self, AddArgs};
+use perch::commands::alias::{self, AliasCommand};
 use perch::commands::group::{self, GroupCommand};
 use perch::commands::status::{self, StatusArgs};
 use perch::error::EXIT_OK;
@@ -39,6 +40,23 @@ enum Command {
         /// A short name to reach the Account by, instead of its email address.
         #[arg(long, value_name = "NAME")]
         alias: Option<String>,
+    },
+
+    /// Name an Account, so no command needs its email address.
+    ///
+    /// Aliases and Group names share one namespace, so a name is refused if
+    /// the other half already has it and a Target is never ambiguous.
+    Alias {
+        /// The name to give, or to free with `--unset`.
+        name: String,
+
+        /// The Account to name: its current Alias, or its email address.
+        #[arg(required_unless_present = "unset", conflicts_with = "unset")]
+        target: Option<String>,
+
+        /// Free the name instead of giving it.
+        #[arg(long)]
+        unset: bool,
     },
 
     /// Declare which Accounts are interchangeable.
@@ -117,6 +135,21 @@ fn main() {
                 group,
                 no_group,
                 alias,
+            },
+            &mut out,
+        ),
+        // `--unset` needs no reading of its own: clap requires a Target unless
+        // it was passed, and refuses both together, so the Target's absence is
+        // exactly the flag.
+        Command::Alias {
+            name,
+            target,
+            unset: _,
+        } => alias::run(
+            &host,
+            match target {
+                Some(target) => AliasCommand::Set { name, target },
+                None => AliasCommand::Unset { name },
             },
             &mut out,
         ),
