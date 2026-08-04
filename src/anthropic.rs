@@ -280,7 +280,8 @@ mod tests {
 
     #[test]
     fn every_quota_window_in_the_reply_is_recorded() {
-        let named: Vec<&str> = windows().iter().map(|w| w.window.as_str()).collect();
+        let windows = windows();
+        let named: Vec<&str> = windows.iter().map(|w| w.window.as_str()).collect();
         assert_eq!(
             named,
             vec!["5-hour", "7-day", "7-day-opus", "7-day-sonnet"],
