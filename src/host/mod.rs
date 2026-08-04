@@ -68,6 +68,7 @@ pub trait Host {
     fn write_file(&self, path: &Path, contents: &str) -> Result<(), HostError>;
     fn create_dir_all(&self, path: &Path) -> Result<(), HostError>;
     fn path_exists(&self, path: &Path) -> bool;
+    fn remove_dir_all(&self, path: &Path) -> Result<(), HostError>;
 
     // ---- keychain -------------------------------------------------------
 
@@ -80,9 +81,24 @@ pub trait Host {
 
     fn exec(&self, program: &str, args: &[&str]) -> Result<Execution, HostError>;
 
+    /// Runs a program with the terminal attached and `env` added to its
+    /// environment, returning its exit status. A login is a browser round trip
+    /// the user drives, so this is the one execution Perch does not capture.
+    fn exec_interactive(&self, program: &str, env: &[(&str, &str)]) -> Result<i32, HostError>;
+
     /// Whether a process is still running. A Live Profile's Credential is
     /// untouchable because something else is holding it.
     fn process_alive(&self, pid: u32) -> bool;
+
+    // ---- the person at the terminal -------------------------------------
+
+    /// Whether there is someone to answer a question. Every capability is
+    /// available non-interactively, so a command that would have asked has to
+    /// know when it cannot.
+    fn is_interactive(&self) -> bool;
+
+    /// One line of input, or `None` at end of input.
+    fn read_line(&self) -> Result<Option<String>, HostError>;
 
     // ---- network --------------------------------------------------------
 

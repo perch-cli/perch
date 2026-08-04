@@ -84,6 +84,14 @@ impl Host for RealHost {
         path.exists()
     }
 
+    fn remove_dir_all(&self, path: &Path) -> Result<(), HostError> {
+        match std::fs::remove_dir_all(path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(HostError::Io(err)),
+        }
+    }
+
     fn keychain_get(&self, service: &str, account: &str) -> Result<String, KeychainError> {
         let execution = security(
             &["find-generic-password", "-s", service, "-a", account, "-w"],
@@ -143,10 +151,38 @@ impl Host for RealHost {
         })
     }
 
+    fn exec_interactive(&self, program: &str, env: &[(&str, &str)]) -> Result<i32, HostError> {
+        let mut command = Command::new(program);
+        command
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        for (key, value) in env {
+            command.env(key, value);
+        }
+        let status = command.status()?;
+        Ok(status.code().unwrap_or(-1))
+    }
+
     fn process_alive(&self, pid: u32) -> bool {
         // Signal 0 performs the permission and existence checks without
         // delivering anything.
         unsafe { libc_kill(pid as i32, 0) == 0 }
+    }
+
+    fn is_interactive(&self) -> bool {
+        // Both ends matter: a question needs somewhere to be shown as well as
+        // somewhere to be answered from.
+        unsafe { libc_isatty(0) == 1 && libc_isatty(1) == 1 }
+    }
+
+    fn read_line(&self) -> Result<Option<String>, HostError> {
+        let mut line = String::new();
+        let read = std::io::stdin().read_line(&mut line)?;
+        if read == 0 {
+            return Ok(None);
+        }
+        Ok(Some(line.trim_end_matches(['\r', '\n']).to_string()))
     }
 
     fn http_get(&self, url: &str, headers: &[(&str, &str)]) -> Result<HttpResponse, HostError> {
@@ -186,4 +222,7 @@ impl Host for RealHost {
 unsafe extern "C" {
     #[link_name = "kill"]
     fn libc_kill(pid: i32, sig: i32) -> i32;
+
+    #[link_name = "isatty"]
+    fn libc_isatty(fd: i32) -> i32;
 }

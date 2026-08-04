@@ -12,6 +12,7 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 
 use crate::adopt;
+use crate::commands::write_failed;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::registry::{Account, CachedUtilization};
@@ -122,10 +123,6 @@ fn windows_json(cached: &CachedUtilization, now: DateTime<Utc>) -> Vec<serde_jso
             })
         })
         .collect()
-}
-
-fn write_failed(err: std::io::Error) -> PerchError {
-    PerchError::Other(err.to_string())
 }
 
 /// "just now", "3m ago", "2h ago", "4d ago".

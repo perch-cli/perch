@@ -12,6 +12,7 @@ pub mod error;
 pub mod host;
 pub mod keychain;
 pub mod probe;
+pub mod profile;
 pub mod registry;
 pub mod report;
 
