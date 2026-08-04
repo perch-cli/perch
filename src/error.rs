@@ -18,6 +18,9 @@ pub const EXIT_PROBE_REFUSED: i32 = 10;
 pub const EXIT_KEYCHAIN_UNAVAILABLE: i32 = 11;
 /// Exit code for a target that does not exist — no login, no such Account.
 pub const EXIT_NOT_FOUND: i32 = 12;
+/// Exit code for a request that collides with what Perch already holds: an
+/// Account added twice, a name already spoken for.
+pub const EXIT_CONFLICT: i32 = 13;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PerchError {
@@ -38,6 +41,11 @@ pub enum PerchError {
     /// Something Perch was asked about does not exist.
     #[error("{0}")]
     NotFound(String),
+
+    /// The request collides with something Perch already holds, and naming the
+    /// existing entry is the whole of the answer.
+    #[error("{0}")]
+    Conflict(String),
 
     #[error("Could not read {path}: {source}")]
     FileRead {
@@ -66,6 +74,7 @@ impl PerchError {
             PerchError::ProbeRefused { .. } => EXIT_PROBE_REFUSED,
             PerchError::KeychainUnavailable(_) => EXIT_KEYCHAIN_UNAVAILABLE,
             PerchError::NotFound(_) => EXIT_NOT_FOUND,
+            PerchError::Conflict(_) => EXIT_CONFLICT,
             _ => EXIT_GENERAL,
         }
     }

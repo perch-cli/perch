@@ -12,7 +12,8 @@ use std::io::Write;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::probe::{self, Findings, Verdict};
-use crate::registry::{self, Account, Profile, Registry};
+use crate::profile;
+use crate::registry::{self, Account, Registry};
 
 /// Loads the registry, adopting the existing login the first time Perch runs.
 ///
@@ -45,35 +46,13 @@ fn adopt(host: &dyn Host, out: &mut dyn Write) -> Result<Registry> {
 
 fn store_as_first_profile(host: &dyn Host, findings: &Findings) -> Result<Registry> {
     let dir = registry::profile_dir_for(host, &findings.identity.email);
-    host.create_dir_all(&dir)
-        .map_err(|err| PerchError::Other(format!("could not create {}: {err}", dir.display())))?;
-
-    let store = probe::store_for_profile(host, &dir)?;
-    host.keychain_set(
-        &store.keychain_service,
-        &store.keychain_account,
-        findings.credential.as_str(),
-    )?;
-
-    // `security`'s stdin buffer truncates mid-argument without saying so
-    // (ADR 0008), so the copy is read back before it is trusted.
-    let stored = host.keychain_get(&store.keychain_service, &store.keychain_account)?;
-    if stored != findings.credential.as_str() {
-        return Err(PerchError::KeychainUnavailable(format!(
-            "the Credential written to {} did not read back intact",
-            store.keychain_service
-        )));
-    }
+    let profile = profile::create(host, &dir, findings.credential.as_str())?;
 
     let mut registry = Registry::default();
     registry.upsert(Account {
         identity: findings.identity.clone(),
         plan: findings.credential.subscription_type.clone(),
-        profile: Profile {
-            dir,
-            keychain_service: store.keychain_service,
-            keychain_account: store.keychain_account,
-        },
+        profile,
         enabled: true,
         quarantined: false,
         group: None,
