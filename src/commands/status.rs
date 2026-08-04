@@ -18,7 +18,7 @@ use serde_json::json;
 
 use crate::adopt;
 use crate::commands::list::{self, Scope};
-use crate::commands::{say, write_failed};
+use crate::commands::write_failed;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::observe::{self, Report};
@@ -110,10 +110,7 @@ fn render_human(
     now: DateTime<Utc>,
     report: &Report,
 ) -> Result<()> {
-    // What could not be read is said before the figures it explains.
-    for note in report.notes() {
-        say(out, &note)?;
-    }
+    report.write_notes(out)?;
 
     utilization::write_labelled(out, "Account", account.email())?;
     if let Some(organization) = &account.identity.organization_name {

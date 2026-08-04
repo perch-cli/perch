@@ -1,8 +1,10 @@
 //! A Host that keeps the world in memory and records what it was asked to do.
 //!
 //! Behaviour tests drive real command code against this and assert on
-//! observable outcomes: what was printed, what ended up in the keychain, and —
-//! for `status` — that no HTTP request was ever attempted (ADR 0015).
+//! observable outcomes: what was printed, what ended up in the keychain, and
+//! what went out to the network. A machine with no arranged replies has no
+//! network at all, so a command that fetches when it should not fails here
+//! rather than quietly passing (ADR 0015).
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -51,12 +53,9 @@ pub enum Effect {
         program: String,
         config_dir: PathBuf,
     },
-    /// A request that went out to the network. `posted` because a Rotation is
-    /// a write and a Utilization read is not, and the difference is worth
-    /// seeing in a trace.
+    /// A request that went out to the network.
     Http {
         url: String,
-        posted: bool,
     },
 }
 
@@ -348,12 +347,7 @@ impl FakeHost {
             .collect()
     }
 
-    /// Every request that went out, whole and in order.
-    pub fn sent(&self) -> Vec<Sent> {
-        self.sent.borrow().clone()
-    }
-
-    /// The requests that went to one endpoint.
+    /// The requests that went to one endpoint, whole and in order.
     pub fn sent_to(&self, url: &str) -> Vec<Sent> {
         self.sent
             .borrow()
@@ -682,7 +676,6 @@ impl Host for FakeHost {
         };
         self.record(Effect::Http {
             url: sent.url.clone(),
-            posted: sent.body.is_some(),
         });
         let asked = sent.url.clone();
         let bearer = sent.bearer().map(str::to_string);

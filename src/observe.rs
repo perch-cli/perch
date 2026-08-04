@@ -13,10 +13,13 @@
 //! that lost every figure to one broken Account would answer worse than one
 //! with a single gap in it.
 
+use std::io::Write;
+
 use chrono::{DateTime, Utc};
 use serde_json::json;
 
 use crate::anthropic::{self, QuotaWindows, Refused};
+use crate::commands::say;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::lock;
@@ -53,6 +56,15 @@ pub struct Report {
 /// One step of an observation: what it produced, or the outcome that stopped
 /// it there.
 type Step<T> = std::result::Result<T, Outcome>;
+
+/// Anything that goes wrong away from Anthropic — an unreadable keychain, a
+/// lock nobody gave back — is an Account Perch could not read, said in the
+/// words that failure already used.
+impl From<PerchError> for Outcome {
+    fn from(error: PerchError) -> Outcome {
+        Outcome::Failed(error.to_string())
+    }
+}
 
 impl Attempt {
     /// What is worth saying out loud about this Account, if anything.
@@ -95,6 +107,16 @@ impl Report {
             said.push(not_kept.clone());
         }
         said
+    }
+
+    /// Says them, before whatever figures they explain. Every surface that
+    /// renders Utilization has the same thing to say first, so it is said in
+    /// one place.
+    pub fn write_notes(&self, out: &mut dyn Write) -> Result<()> {
+        for note in self.notes() {
+            say(out, &note)?;
+        }
+        Ok(())
     }
 
     /// The same as a script reads it, and `null` when no refresh was asked for
@@ -141,11 +163,12 @@ pub fn refresh(host: &dyn Host, registry: &mut Registry, emails: &[String]) -> R
 }
 
 fn observe(host: &dyn Host, registry: &Registry, account: &Account) -> Step<QuotaWindows> {
-    let version = probe::claude_version(host).map_err(failed)?;
-    let store = holding(host, registry, account).map_err(failed)?;
+    let version = probe::claude_version(host)?;
+    let store = holding(host, registry, account)?;
     let token = usable_token(host, &store, &version)?;
     confirm(host, &token, account)?;
-    anthropic::utilization(host, &token).map_err(refused)
+    let read = anthropic::utilization(host, &token);
+    read.map_err(reading_refused)
 }
 
 /// Which store holds the Credential to ask with.
@@ -170,33 +193,41 @@ fn usable_token(host: &dyn Host, store: &Store, version: &str) -> Step<String> {
         return Ok(credential.access_token);
     }
 
-    // Renewing is only Perch's to do where nothing is holding the Credential in
-    // memory (ADR 0005): Anthropic retires the old refresh token, which would
-    // log a running Claude Code out silently, mid-task.
-    let running = probe::live_clients(host, &store.config_dir);
-    if !running.is_empty() {
-        let pids: Vec<String> = running.iter().map(u32::to_string).collect();
-        return Err(Outcome::Failed(format!(
-            "its access token has expired and a client is running against that \
-             Profile (pid {}), so renewing it would log that session out. The \
-             cached figure is what you see.",
-            pids.join(", ")
-        )));
-    }
-
+    // Asked before the locks are taken, so an Account that was never going to
+    // be renewed says so without queueing behind anything, and asked again
+    // under them, where the answer is the one that counts.
+    refuse_if_live(host, store)?;
     renew_under_the_lock(host, store, version)
 }
 
+/// Refuses to renew a Credential something else is holding (ADR 0005).
+///
+/// Anthropic retires the old refresh token when it Rotates one, so renewing a
+/// Credential a running Claude Code has in memory logs that session out
+/// silently, mid-task.
+fn refuse_if_live(host: &dyn Host, store: &Store) -> Step<()> {
+    let running = probe::live_clients(host, &store.config_dir);
+    if running.is_empty() {
+        return Ok(());
+    }
+
+    let pids: Vec<String> = running.iter().map(u32::to_string).collect();
+    Err(Outcome::Failed(format!(
+        "its access token has expired and a client is running against that \
+         Profile (pid {}), so renewing it would log that session out. The \
+         cached figure is what you see.",
+        pids.join(", ")
+    )))
+}
+
 fn credential_in(host: &dyn Host, store: &Store, version: &str) -> Step<Credential> {
-    match probe::read_credential(host, store, version) {
-        Ok(Some(credential)) => Ok(credential),
-        Ok(None) => Err(Outcome::Failed(
+    probe::read_credential(host, store, version)?.ok_or_else(|| {
+        Outcome::Failed(
             "Perch holds no Credential for it, so there is nothing to ask \
              Anthropic with."
                 .to_string(),
-        )),
-        Err(error) => Err(failed(error)),
-    }
+        )
+    })
 }
 
 /// Renews the Credential in a store, and puts the Rotation back where it came
@@ -206,13 +237,11 @@ fn credential_in(host: &dyn Host, store: &Store, version: &str) -> Step<Credenti
 /// Claude Code's own double-checked re-read: whoever was holding the lock while
 /// Perch waited for it may have renewed the very Credential Perch was about to.
 fn renew_under_the_lock(host: &dyn Host, store: &Store, version: &str) -> Step<String> {
-    // Why Anthropic refused, carried out of the closure so a throttle is still
-    // a throttle by the time the locks have been given back.
-    let mut refusal: Option<Refused> = None;
-
-    let renewed = lock::under(host, probe::locks_for(store), |held| {
-        let credential = probe::read_credential(host, store, version)?
-            .ok_or_else(|| PerchError::NotFound(NO_CREDENTIAL.to_string()))?;
+    lock::under(host, probe::locks_for(store), |held| {
+        // Both of the questions asked before the locks were taken, asked again
+        // now that nothing can change the answer underneath Perch.
+        refuse_if_live(host, store)?;
+        let credential = credential_in(host, store, version)?;
         if credential.usable_at(host.now()) {
             return Ok(credential.access_token);
         }
@@ -220,13 +249,12 @@ fn renew_under_the_lock(host: &dyn Host, store: &Store, version: &str) -> Step<S
         let refresh_token = credential
             .refresh_token
             .clone()
-            .ok_or_else(|| PerchError::NotFound(NO_REFRESH_TOKEN.to_string()))?;
+            .ok_or_else(|| Outcome::Failed(NO_REFRESH_TOKEN.to_string()))?;
 
-        let fresh = anthropic::renew(host, &refresh_token).map_err(|why| {
-            let said = why.to_string();
-            refusal = Some(why);
-            PerchError::Other(said)
-        })?;
+        // Anthropic may Rotate here. Everything after this line is Perch making
+        // sure the Rotation is not lost.
+        let renewal = anthropic::renew(host, &refresh_token);
+        let fresh = renewal.map_err(not_renewed)?;
 
         held.renew();
         let rotated = probe::credential_after_rotation(
@@ -236,30 +264,36 @@ fn renew_under_the_lock(host: &dyn Host, store: &Store, version: &str) -> Step<S
             fresh.expires_at,
             version,
         )?;
-        profile::store_credential(
-            host,
-            &store.keychain_service,
-            &store.keychain_account,
-            &rotated,
-        )?;
+        // Anthropic has already retired the old refresh token by now, so a
+        // Credential that cannot be stored is one nothing can recover — which
+        // is worth saying plainly rather than leaving as a keychain error.
+        store_it(host, store, &rotated)?;
 
         Ok(fresh.access_token)
-    });
-
-    match (renewed, refusal) {
-        (Ok(token), _) => Ok(token),
-        (Err(_), Some(Refused::Rejected)) => Err(Outcome::Failed(NOT_RENEWED.to_string())),
-        (Err(_), Some(why)) => Err(refused(why)),
-        (Err(error), None) => Err(failed(error)),
-    }
+    })
 }
 
-const NO_CREDENTIAL: &str = "Perch holds no Credential for this Account.";
+fn store_it(host: &dyn Host, store: &Store, rotated: &str) -> Step<()> {
+    profile::store_credential(
+        host,
+        &store.keychain_service,
+        &store.keychain_account,
+        rotated,
+    )
+    .map_err(|error| Outcome::Failed(format!("{error}\n\n{ROTATION_LOST}")))
+}
+
 const NO_REFRESH_TOKEN: &str = "the Credential Perch holds carries no refresh \
                                 token, so it cannot be renewed";
-const NOT_RENEWED: &str = "Anthropic would not renew its Credential, so its \
-                           Utilization could not be read. Log that Account in \
-                           again.";
+const NOT_RENEWABLE: &str = "Anthropic would not renew its Credential, so its \
+                             Utilization could not be read. Log that Account in \
+                             again.";
+const ROTATION_LOST: &str = "Anthropic had already retired the previous refresh \
+                             token, so that Account cannot be renewed again \
+                             until it is logged into.";
+const RATE_LIMITED: &str = "Anthropic is rate-limiting Perch, so nothing about \
+                            this Account could be read. The cached figure is \
+                            what you see.";
 
 /// Refuses to record figures against an Account the token does not belong to.
 ///
@@ -281,7 +315,7 @@ fn confirm(host: &dyn Host, token: &str, account: &Account) -> Step<()> {
         // A profile endpoint Perch no longer recognises is no evidence either
         // way, and no reason to stop reading Utilization.
         Err(Refused::Unrecognised(_)) => Ok(()),
-        Err(why) => Err(refused(why)),
+        Err(why) => Err(getting_ready_refused(why)),
     }
 }
 
@@ -294,16 +328,34 @@ fn keep(registry: &mut Registry, email: &str, windows: QuotaWindows, at: DateTim
     }
 }
 
-fn failed(error: PerchError) -> Outcome {
-    Outcome::Failed(error.to_string())
-}
-
-/// A refusal from Anthropic as an outcome. A throttle is one of its own,
-/// because the cache still answers and the command still worked (ADR 0015).
-fn refused(why: Refused) -> Outcome {
+/// A refusal of the Utilization read itself. A throttle is an outcome of its
+/// own here, because this is the endpoint the allowance ADR 0015 is about
+/// belongs to, and the cache still answers.
+fn reading_refused(why: Refused) -> Outcome {
     match why {
         Refused::Throttled => Outcome::Throttled,
         other => Outcome::Failed(other.to_string()),
+    }
+}
+
+/// A refusal met before the read — deciding whose token this is, or renewing
+/// one. A throttle here is not the Utilization allowance being spent, so it is
+/// not reported as one: two limits said in the same words would teach people
+/// the wrong thing about the one that matters.
+fn getting_ready_refused(why: Refused) -> Outcome {
+    let said = match why {
+        Refused::Throttled => RATE_LIMITED.to_string(),
+        other => other.to_string(),
+    };
+    Outcome::Failed(said)
+}
+
+/// The same, for the renewal, where being turned away means the Account has to
+/// be logged into again rather than tried again.
+fn not_renewed(why: Refused) -> Outcome {
+    match why {
+        Refused::Rejected => Outcome::Failed(NOT_RENEWABLE.to_string()),
+        other => getting_ready_refused(other),
     }
 }
 

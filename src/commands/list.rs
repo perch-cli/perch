@@ -172,10 +172,7 @@ fn render_human(
     now: DateTime<Utc>,
     report: &Report,
 ) -> Result<()> {
-    // What could not be read is said before the figures it explains.
-    for note in report.notes() {
-        say(out, &note)?;
-    }
+    report.write_notes(out)?;
 
     if let Some(heading) = scope.heading() {
         say(out, &heading)?;

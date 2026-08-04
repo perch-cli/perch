@@ -30,7 +30,8 @@ pub struct WindowUtilization {
     pub resets_at: Option<DateTime<Utc>>,
 }
 
-/// Cached Utilization for one Account. Never fetched by `status` (ADR 0015).
+/// Cached Utilization for one Account. What every surface renders, and what
+/// only `perch status --refresh` ever goes and fetches (ADR 0015).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CachedUtilization {
     pub observed_at: DateTime<Utc>,
