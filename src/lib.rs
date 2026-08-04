@@ -10,11 +10,14 @@ pub mod adopt;
 pub mod commands;
 pub mod error;
 pub mod host;
+pub mod json;
 pub mod keychain;
+pub mod lock;
 pub mod probe;
 pub mod profile;
 pub mod registry;
 pub mod report;
+pub mod switch;
 pub mod target;
 pub mod utilization;
 

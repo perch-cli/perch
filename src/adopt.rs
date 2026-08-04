@@ -8,6 +8,7 @@
 //! a case.
 
 use std::io::Write;
+use std::path::Path;
 
 use crate::error::{PerchError, Result};
 use crate::host::Host;
@@ -47,6 +48,7 @@ fn adopt(host: &dyn Host, out: &mut dyn Write) -> Result<Registry> {
 fn store_as_first_profile(host: &dyn Host, findings: &Findings) -> Result<Registry> {
     let dir = registry::profile_dir_for(host, &findings.identity.email);
     let profile = profile::create(host, &dir, findings.credential.as_str())?;
+    carry_the_identity_block(host, findings, &dir)?;
 
     let mut registry = Registry::default();
     registry.upsert(Account {
@@ -62,6 +64,36 @@ fn store_as_first_profile(host: &dyn Host, findings: &Findings) -> Result<Regist
 
     registry::save(host, &registry)?;
     Ok(registry)
+}
+
+/// Keeps the `oauthAccount` block Claude Code wrote for the adopted Account in
+/// that Account's own Profile.
+///
+/// A Profile holds an Account's Credential and how Claude Code describes it,
+/// which is what `perch add` gives every Profile it creates. Adoption is the
+/// only other way an Account arrives, and the file it would copy is right there
+/// — the login being adopted is the one that file describes. Without it, the
+/// Account everybody starts with is the one that comes back from a Switch
+/// described only by the four fields Perch itself records.
+fn carry_the_identity_block(host: &dyn Host, findings: &Findings, dir: &Path) -> Result<()> {
+    let contents = match host.read_file(&findings.store.identity_file) {
+        Ok(contents) => contents,
+        // The probe read an Identity out of this file moments ago, so this is a
+        // file that has gone away underneath us rather than one that was never
+        // there. Adoption still holds the Credential, which is the part that
+        // cannot be reconstructed.
+        Err(_) => return Ok(()),
+    };
+    let Some(block) = probe::oauth_account_block(&contents) else {
+        return Ok(());
+    };
+
+    let kept = probe::store_for_profile(host, dir)?.identity_file;
+    host.write_file(&kept, &probe::fresh_identity_file(block))
+        .map_err(|err| PerchError::FileWrite {
+            path: kept,
+            source: std::io::Error::other(err.to_string()),
+        })
 }
 
 /// Says what was adopted, so the user can confirm Perch picked up the right

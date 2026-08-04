@@ -19,23 +19,43 @@ pub fn create(host: &dyn Host, dir: &Path, credential: &str) -> Result<Profile> 
         .map_err(|err| PerchError::Other(format!("could not create {}: {err}", dir.display())))?;
 
     let store = probe::store_for_profile(host, dir)?;
-    host.keychain_set(&store.keychain_service, &store.keychain_account, credential)?;
-
-    // `security`'s stdin buffer truncates mid-argument without saying so
-    // (ADR 0008), so the copy is read back before it is trusted.
-    let stored = host.keychain_get(&store.keychain_service, &store.keychain_account)?;
-    if stored != credential {
-        return Err(PerchError::KeychainUnavailable(format!(
-            "the Credential written to {} did not read back intact",
-            store.keychain_service
-        )));
-    }
+    store_credential(
+        host,
+        &store.keychain_service,
+        &store.keychain_account,
+        credential,
+    )?;
 
     Ok(Profile {
         dir: dir.to_path_buf(),
         keychain_service: store.keychain_service,
         keychain_account: store.keychain_account,
     })
+}
+
+/// Writes a Credential into a keychain namespace and reads it back before
+/// trusting it.
+///
+/// `security`'s stdin buffer truncates mid-argument without saying so (ADR
+/// 0008), and a Credential that was truncated on the way in is indistinguishable
+/// from one that is simply wrong when it is next used — which would be at the
+/// worst moment, some Switch later. Every write of a Credential goes through
+/// here, so no path can forget the read-back.
+pub fn store_credential(
+    host: &dyn Host,
+    service: &str,
+    account: &str,
+    credential: &str,
+) -> Result<()> {
+    host.keychain_set(service, account, credential)?;
+
+    let stored = host.keychain_get(service, account)?;
+    if stored != credential {
+        return Err(PerchError::KeychainUnavailable(format!(
+            "the Credential written to {service} did not read back intact"
+        )));
+    }
+    Ok(())
 }
 
 /// Forgets a Profile entirely: its stored Credential and its directory.

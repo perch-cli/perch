@@ -7,8 +7,8 @@ login flow again.
 
 Early. Perch adopts the login you already have, adds further Accounts without
 disturbing it, names them, holds Groups of Accounts you have declared
-interchangeable, and lists what you have. Switching between Accounts is not
-built yet.
+interchangeable, lists what you have, and switches to an Account you name.
+Choosing an Account for you — `perch switch` with no target — is not built yet.
 
 ```
 $ perch status
@@ -30,6 +30,45 @@ age shown, so `perch status` is cheap enough to put in a shell prompt
 
 `perch add` gains an Account by running a login in a Profile of its own, so the
 Account you are using stays active and its session is untouched (ADR 0009).
+
+## Switching
+
+`perch switch <target>` makes an Account active everywhere — every terminal, the
+editor extension, the desktop app — with no login flow.
+
+```
+$ perch switch overflow
+`overflow` is an Alias for overflow@example.com.
+Captured you@example.com's live Credential into its own Profile.
+Switched to overflow@example.com (as `overflow`).
+Utilization   5-hour    12%  (as of 4m ago)
+```
+
+It is three steps in one order and never another (ADR 0006). The Credential you
+are leaving is **Captured** back into its own Profile first, because Anthropic
+retires a refresh token whenever it issues a new one — so the copy in an
+Account's Profile is several Rotations behind by the time you switch away, and
+skipping the Capture would quietly poison the Account you are leaving. Then the
+incoming Credential is written to the Default Profile. Then the `oauthAccount`
+block of `.claude.json` is patched to match, and only that block: your project
+history, MCP configuration and settings live in the same file and belong to you
+rather than to the Account (ADR 0001).
+
+All three run inside Claude Code's own OAuth refresh locks, taken in Claude
+Code's order — the refresh lock, the legacy config-home lock, then the config
+file lock — so a refresh cannot land between the Capture and the write. A lock
+somebody is holding is waited on and then given up on; one whose holder died is
+taken over.
+
+Nothing else moves. Your memory, settings, plugins and project history are
+Shared State: a Switch leaves them untouched, which is what makes them follow
+you across Accounts for free.
+
+A Switch onto a Profile a client is already running against is refused with exit
+code 16 rather than writing a Credential something else is holding, and
+switching to the Account that is already active does nothing and exits 15. If a
+Switch fails part way, it says which Account is active now and what is where —
+running it again finishes the job.
 
 ## What you have
 
@@ -127,6 +166,8 @@ it, and the watcher is deferred entirely (ADR 0013).
 | 12 | there is no such thing — no login, no such Account, no such Group |
 | 13 | it collides with something Perch already holds |
 | 14 | Perch understood it and will not accept it — an ambiguous name, a value out of range |
+| 15 | there was nothing to do — you are already on that Account |
+| 16 | refused: a client is running against that Profile, so its Credential is not Perch's to write |
 
 ## Where things are
 
@@ -146,7 +187,7 @@ edition 2024 — so rustup will fetch the right one on first build.
 ```
 # touches nothing on the machine
 cargo test --lib --test adoption --test status --test adding --test grouping \
-           --test naming --test listing
+           --test naming --test listing --test switching
 # asserts beliefs against this machine
 cargo test --test contract
 # both

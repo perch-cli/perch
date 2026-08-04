@@ -11,7 +11,7 @@
 #![cfg(target_os = "macos")]
 
 use perch::error::PerchError;
-use perch::host::{Host, RealHost};
+use perch::host::{Host, HostError, RealHost};
 use perch::keychain::KeychainError;
 use perch::probe::{self, Verdict};
 
@@ -222,6 +222,76 @@ fn a_secret_past_the_stdin_buffer_limit_survives_the_argv_fallback() {
         Ok(secret.as_str()),
         "a large Credential was truncated on the way in or out"
     );
+}
+
+/// The whole lock protocol rests on this one property of the filesystem: two
+/// processes calling `mkdir` on the same path cannot both be told they made it.
+/// Perch's locks are directories rather than files for no other reason.
+#[test]
+fn taking_a_lock_is_a_directory_only_one_caller_can_make() {
+    let host = RealHost::new();
+    let lock = std::env::temp_dir().join(format!("perch-contract-lock-{}", std::process::id()));
+    let _ = host.remove_dir_all(&lock);
+
+    host.create_dir_exclusive(&lock)
+        .expect("the first caller takes it");
+    let contended = host.create_dir_exclusive(&lock);
+    let held_since = host.modified_at(&lock);
+    host.remove_dir_all(&lock).expect("and gives it back");
+
+    assert!(
+        matches!(contended, Err(HostError::AlreadyExists { .. })),
+        "a second caller must be refused, not given the same lock: {contended:?}"
+    );
+    assert!(
+        held_since.is_ok_and(|at| (host.now() - at).num_seconds().abs() < 60),
+        "a lock's age is how staleness is judged, so its directory has to carry one"
+    );
+    assert!(!host.path_exists(&lock));
+}
+
+/// Liveness is read from the marker files Claude Code writes for its running
+/// sessions. If it stops writing them, or names them differently, every Profile
+/// on the machine reads as idle and the refusal that protects a running client
+/// stops firing.
+#[test]
+fn every_session_marker_claude_code_has_left_names_a_process() {
+    let host = RealHost::new();
+    let Ok(store) = probe::default_store(&host) else {
+        return;
+    };
+    let sessions = probe::sessions_dir(&store.config_dir);
+
+    let Ok(markers) = host.list_dir(&sessions) else {
+        eprintln!("skipping: {} does not exist", sessions.display());
+        return;
+    };
+
+    let named_after_a_pid = markers
+        .iter()
+        .filter_map(|marker| marker.file_name()?.to_str()?.strip_suffix(".json"))
+        .filter(|name| name.parse::<u32>().is_ok())
+        .count();
+    if markers.is_empty() {
+        eprintln!(
+            "skipping: no Claude Code session has run against {}",
+            store.config_dir.display()
+        );
+        return;
+    }
+    assert!(
+        named_after_a_pid > 0,
+        "{} holds {} marker(s), none of them named after a process: {markers:?}",
+        sessions.display(),
+        markers.len()
+    );
+
+    for pid in probe::live_clients(&host, &store.config_dir) {
+        assert!(
+            host.process_alive(pid),
+            "a Live Profile is one with a process still behind it"
+        );
+    }
 }
 
 #[test]

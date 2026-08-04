@@ -43,6 +43,11 @@ pub enum HostError {
     #[error("{path} does not exist")]
     NotFound { path: PathBuf },
 
+    /// A directory that was to be created by whoever got there first, and
+    /// somebody else did. The whole of what makes a lock a lock.
+    #[error("{path} already exists")]
+    AlreadyExists { path: PathBuf },
+
     #[error("{0}")]
     Io(#[from] std::io::Error),
 
@@ -70,6 +75,33 @@ pub trait Host {
     fn path_exists(&self, path: &Path) -> bool;
     fn remove_dir_all(&self, path: &Path) -> Result<(), HostError>;
 
+    /// Creates a directory only if nobody else has, reporting
+    /// [`HostError::AlreadyExists`] when somebody has. `mkdir` either creates a
+    /// directory or fails, with no window in between, which is why Claude
+    /// Code's lock artifacts are directories and why Perch's are too.
+    fn create_dir_exclusive(&self, path: &Path) -> Result<(), HostError>;
+
+    /// When a path was last written. A lock artifact's age is what says whether
+    /// the process that took it is still alive or died holding it.
+    fn modified_at(&self, path: &Path) -> Result<DateTime<Utc>, HostError>;
+
+    /// Marks a path as written now, without changing it. How a lock holder says
+    /// it is still there within the interval the protocol allows.
+    fn touch(&self, path: &Path) -> Result<(), HostError>;
+
+    /// What a directory holds, as full paths. Absent directories report
+    /// [`HostError::NotFound`] rather than emptiness: "nothing is running" and
+    /// "nowhere to look" are different answers.
+    fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>, HostError>;
+
+    /// Moves a path over another, replacing it. Within one filesystem this is
+    /// the operation that has no half-way state, which is what
+    /// [`write_atomically`] is built out of.
+    fn rename(&self, from: &Path, to: &Path) -> Result<(), HostError>;
+
+    /// Removes a file. A file that was not there is not a failure.
+    fn remove_file(&self, path: &Path) -> Result<(), HostError>;
+
     // ---- keychain -------------------------------------------------------
 
     fn keychain_get(&self, service: &str, account: &str) -> Result<String, KeychainError>;
@@ -90,6 +122,10 @@ pub trait Host {
     /// untouchable because something else is holding it.
     fn process_alive(&self, pid: u32) -> bool;
 
+    /// Waits. Contending for a lock is the only thing Perch waits on, and it is
+    /// an effect like any other so that tests do not spend the time.
+    fn sleep(&self, millis: u64);
+
     // ---- the person at the terminal -------------------------------------
 
     /// Whether there is someone to answer a question. Every capability is
@@ -103,4 +139,29 @@ pub trait Host {
     // ---- network --------------------------------------------------------
 
     fn http_get(&self, url: &str, headers: &[(&str, &str)]) -> Result<HttpResponse, HostError>;
+}
+
+/// Replaces a file's contents in one step, or not at all.
+///
+/// Used for the files Perch does not own. `.claude.json` holds project history,
+/// MCP configuration and settings — everything that belongs to the person
+/// rather than the Account — and a Switch that died half way through writing it
+/// would cost them all of that. Writing beside it and moving it into place
+/// means the file is either the old one or the new one.
+pub fn write_atomically(host: &dyn Host, path: &Path, contents: &str) -> Result<(), HostError> {
+    let mut beside = path.as_os_str().to_os_string();
+    beside.push(".perch-tmp");
+    let beside = PathBuf::from(beside);
+
+    host.write_file(&beside, contents)?;
+    match host.rename(&beside, path) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            // Nothing has replaced the original, so the half-written copy is
+            // just litter — and litter beside a file Claude Code reads is worth
+            // clearing even on the way out.
+            let _ = host.remove_file(&beside);
+            Err(err)
+        }
+    }
 }
