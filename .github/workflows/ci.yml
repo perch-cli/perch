@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    # macOS throughout: the keychain and the `security` binary are the point,
+    # and the contract tests have to run somewhere they exist.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # No toolchain action: rust-toolchain.toml pins the channel and its
+      # components, so the version lives in one place rather than two that can
+      # drift apart. rustup on the runner installs it on first use.
+      - name: Toolchain
+        run: |
+          rustup show active-toolchain
+          cargo --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Unit and behaviour tests
+        run: cargo test --lib --test adoption --test status
+
+      # Gives the contract tests a real bundle to assert against. If the install
+      # is unavailable they assert the "no Claude Code here" branch instead, so
+      # an outage upstream does not turn every pull request red.
+      - name: Install Claude Code
+        continue-on-error: true
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Contract tests assert the probe's beliefs against the installed Claude
+      # Code and the real keychain (ADR 0007), so drift is found here rather
+      # than by a user being logged out by a background auto-update.
+      - name: Contract tests
+        run: cargo test --test contract -- --nocapture

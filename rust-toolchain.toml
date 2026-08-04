@@ -1,0 +1,6 @@
+[toolchain]
+# Pinned so everyone — and CI — builds Perch with the toolchain it was written
+# against, rather than whatever `stable` happens to be that week.
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]

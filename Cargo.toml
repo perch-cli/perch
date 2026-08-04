@@ -1,0 +1,26 @@
+[package]
+name = "perch"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+description = "Run Claude Code as whichever Claude account you want, without logging in again"
+license = "MIT"
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+color-eyre = "0.6.5"
+crossterm = "0.29.0"
+ratatui = "0.30.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+
+[lib]
+name = "perch"
+path = "src/lib.rs"
+
+[[bin]]
+name = "perch"
+path = "src/main.rs"
