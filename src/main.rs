@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 use perch::commands::status::{self, StatusArgs};
 use perch::error::EXIT_OK;
 use perch::host::RealHost;
+use perch::report;
 
 #[derive(Parser)]
 #[command(
@@ -32,6 +33,8 @@ enum Command {
 }
 
 fn main() {
+    report::install_panic_hook();
+
     let cli = Cli::parse();
     let host = RealHost::new();
     let stdout = std::io::stdout();

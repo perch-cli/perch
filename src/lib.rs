@@ -13,6 +13,7 @@ pub mod host;
 pub mod keychain;
 pub mod probe;
 pub mod registry;
+pub mod report;
 
 pub use error::{PerchError, Result};
 pub use host::Host;
