@@ -1,0 +1,30 @@
+version: 2
+
+updates:
+  # Actions are pinned to commit SHAs, which means they no longer pick up
+  # upstream fixes on their own. Dependabot is what keeps the pins current: it
+  # opens a PR moving the SHA and rewrites the trailing version comment.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    labels:
+      - ready-for-human
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps
+    labels:
+      - ready-for-human
+    # One PR per batch rather than per crate: the lockfile is the unit that
+    # actually gets reviewed, and a dozen open PRs trains you to rubber-stamp.
+    groups:
+      cargo-minor-patch:
+        update-types:
+          - minor
+          - patch
