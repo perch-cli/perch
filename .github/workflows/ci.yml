@@ -52,10 +52,32 @@ jobs:
       # Gives the contract tests a real bundle to assert against. If the install
       # is unavailable they assert the "no Claude Code here" branch instead, so
       # an outage upstream does not turn every pull request red.
+      #
+      # The installer is pinned by checksum but the version deliberately is not:
+      # ADR 0007 wants the contract tests run against whatever Claude Code is
+      # current, so pinning the version would freeze the drift this job exists
+      # to detect. Pin the code that runs, float the product it installs.
+      #
+      # When this step fails on a checksum, Anthropic has almost certainly just
+      # updated install.sh. Diff it, satisfy yourself, then bump INSTALL_SHA.
       - name: Install Claude Code
-        continue-on-error: true
+        env:
+          INSTALL_SHA: cde4f1702d3b1695f92b73d26888364e17bca476e17f0fd676484c951d36c125
         run: |
-          curl -fsSL https://claude.ai/install.sh | bash
+          # An unreachable installer is an upstream outage, not a signal about
+          # this pull request: degrade to the "no Claude Code" branch.
+          if ! curl -fsSL https://claude.ai/install.sh -o /tmp/install.sh; then
+            echo "::warning::installer unreachable; contract tests will assert the absent branch"
+            exit 0
+          fi
+
+          # A checksum mismatch is not an outage. Fail hard rather than warn:
+          # a warning here would let the install quietly stop happening, the
+          # contract tests fall back to the absent branch, and CI stay green
+          # with drift detection switched off.
+          echo "$INSTALL_SHA  /tmp/install.sh" | shasum -a 256 -c -
+
+          bash /tmp/install.sh latest
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       # Contract tests assert the probe's beliefs against the installed Claude
