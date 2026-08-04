@@ -280,7 +280,9 @@ fn a_credential_a_client_is_holding_is_never_renewed() {
 #[test]
 fn a_throttled_read_falls_back_to_the_cached_figure_and_still_succeeds() {
     let host = ready();
-    run_status_refresh(&host, false).0.expect("the first read works");
+    run_status_refresh(&host, false)
+        .0
+        .expect("the first read works");
 
     // The allowance is spent, and does not refill early (ADR 0015).
     host.reply(USAGE_URL, Some(FRESH_TOKEN), 429, "");
@@ -297,7 +299,9 @@ fn a_throttled_read_falls_back_to_the_cached_figure_and_still_succeeds() {
 #[test]
 fn a_throttle_is_named_as_one_in_json() {
     let host = ready();
-    run_status_refresh(&host, false).0.expect("the first read works");
+    run_status_refresh(&host, false)
+        .0
+        .expect("the first read works");
     host.reply(USAGE_URL, Some(FRESH_TOKEN), 429, "");
 
     let (result, printed) = run_status_refresh(&host, true);

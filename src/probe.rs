@@ -354,9 +354,8 @@ pub fn credential_after_rotation(
         block.insert("expiresAt".into(), at.into());
     }
 
-    serde_json::to_string(&document).map_err(|err| {
-        PerchError::Other(format!("could not write the renewed Credential: {err}"))
-    })
+    serde_json::to_string(&document)
+        .map_err(|err| PerchError::Other(format!("could not write the renewed Credential: {err}")))
 }
 
 /// Reads the Identity out of a store's `.claude.json`.

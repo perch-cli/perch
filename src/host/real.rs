@@ -34,7 +34,10 @@ const CURL_ARGS: [&str; 6] = [
 fn curl_config(request: &HttpRequest<'_>) -> String {
     let mut config = format!("url = {}\n", quoted(request.url));
     for (name, value) in request.headers {
-        config.push_str(&format!("header = {}\n", quoted(&format!("{name}: {value}"))));
+        config.push_str(&format!(
+            "header = {}\n",
+            quoted(&format!("{name}: {value}"))
+        ));
     }
     // Giving `curl` data is what makes the request a POST; there is no verb to
     // set separately.
