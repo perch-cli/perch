@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 use perch::commands::add::{self, AddArgs};
 use perch::commands::alias::{self, AliasCommand};
 use perch::commands::group::{self, GroupCommand};
+use perch::commands::list::{self, ListArgs};
 use perch::commands::status::{self, StatusArgs};
 use perch::error::EXIT_OK;
 use perch::host::RealHost;
@@ -69,11 +70,27 @@ enum Command {
         action: GroupAction,
     },
 
+    /// Show every Account with its Alias, Group, state and cached Utilization.
+    ///
+    /// The one place that answers "what do I have". Renders from cache and
+    /// never touches the network.
+    List {
+        /// Emit machine-readable output, with an observation time on every
+        /// Utilization figure.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Show the active Account and its cached Utilization.
     ///
     /// Renders from cache and never touches the network, so it is cheap enough
     /// for a shell prompt.
     Status {
+        /// Show every Account in the active Account's Group, so you can see
+        /// where you would land before switching.
+        #[arg(long)]
+        group: bool,
+
         /// Emit machine-readable output, with an observation time on every
         /// Utilization figure.
         #[arg(long)]
@@ -154,7 +171,8 @@ fn main() {
             &mut out,
         ),
         Command::Group { action } => group::run(&host, action.into(), &mut out),
-        Command::Status { json } => status::run(&host, StatusArgs { json }, &mut out),
+        Command::List { json } => list::run(&host, ListArgs { json }, &mut out),
+        Command::Status { group, json } => status::run(&host, StatusArgs { group, json }, &mut out),
     };
 
     let code = match outcome {

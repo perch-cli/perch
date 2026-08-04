@@ -5,6 +5,7 @@
 pub mod add;
 pub mod alias;
 pub mod group;
+pub mod list;
 pub mod status;
 
 use std::io::Write;
@@ -22,3 +23,12 @@ pub fn write_failed(err: std::io::Error) -> PerchError {
 pub fn say(out: &mut dyn Write, line: &str) -> Result<()> {
     writeln!(out, "{line}").map_err(write_failed)
 }
+
+/// What the Accounts in no Group are shown under. Being in no Group is not a
+/// Group (ADR 0017), so it is never a heading that reads like one.
+pub const IN_NO_GROUP: &str = "In no Group";
+
+/// What Cycling will not do with those Accounts until it is told it may (ADR
+/// 0017), as a clause both surfaces that show them finish a sentence with. One
+/// sentence, because two would sooner or later say two different things.
+pub const CYCLING_AMONG_UNGROUPED: &str = "only moves between these when you say it may";

@@ -13,7 +13,7 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::{say, write_failed};
+use crate::commands::{CYCLING_AMONG_UNGROUPED, IN_NO_GROUP, say, write_failed};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::registry::{self, GroupConfig, NO_GROUP, Registry};
@@ -170,16 +170,12 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
     // them out would make this read as a list of every Account when it is not.
     let ungrouped = registry.ungrouped_accounts();
     if !ungrouped.is_empty() {
-        say(out, "In no Group")?;
+        say(out, IN_NO_GROUP)?;
         for (index, account) in ungrouped.iter().enumerate() {
             let label = if index == 0 { "Accounts" } else { "" };
             write_line(out, label, &registry.named_for_the_user(account.email()))?;
         }
-        write_line(
-            out,
-            "Cycling",
-            "only moves between these when you say it may",
-        )?;
+        write_line(out, "Cycling", CYCLING_AMONG_UNGROUPED)?;
     }
 
     Ok(())

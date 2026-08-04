@@ -5,6 +5,10 @@
 //! minute; fetching here would burn the hourly usage budget needed for
 //! switching decisions. Every figure is shown with its age, so a stale number
 //! is visibly stale rather than quietly wrong.
+//!
+//! `--group` widens the question from "where am I" to "where would I land",
+//! which is the listing [`crate::commands::list`] already draws — so it is
+//! answered there, over the Accounts the active one may be Cycled to.
 
 use std::io::Write;
 
@@ -12,14 +16,19 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 
 use crate::adopt;
+use crate::commands::list::{self, Scope};
 use crate::commands::write_failed;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::registry::{Account, CachedUtilization};
+use crate::registry::Account;
+use crate::utilization;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct StatusArgs {
     pub json: bool,
+    /// Show every Account the active one shares a Group with, rather than the
+    /// active Account alone.
+    pub group: bool,
 }
 
 const LABEL_WIDTH: usize = 14;
@@ -33,6 +42,17 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
     })?;
 
     let now = host.now();
+    if args.group {
+        // Being in no Group is not a Group (ADR 0017), so from an ungrouped
+        // Account the answer to "where would I land" is every ungrouped
+        // Account together with what Cycling will not do with them unasked.
+        let scope = match &account.group {
+            Some(group) => Scope::Group(group.clone()),
+            None => Scope::Ungrouped,
+        };
+        return list::render(out, &registry, scope, now, args.json);
+    }
+
     if args.json {
         render_json(out, account, now)
     } else {
@@ -53,40 +73,15 @@ fn render_human(out: &mut dyn Write, account: &Account, now: DateTime<Utc>) -> R
         write_line("Plan", plan)?;
     }
 
-    match account.observed_utilization() {
-        None => write_line("Utilization", "never observed")?,
-        Some(cached) => {
-            let age = age_phrase(cached.observed_at, now);
-            for (index, window) in cached.windows.iter().enumerate() {
-                let label = if index == 0 { "Utilization" } else { "" };
-                write_line(
-                    label,
-                    &format!(
-                        "{:<8} {:>3.0}%  (as of {age})",
-                        window.window, window.used_percent
-                    ),
-                )?;
-            }
-        }
+    for (index, figure) in utilization::lines(account, now).iter().enumerate() {
+        let label = if index == 0 { "Utilization" } else { "" };
+        write_line(label, figure)?;
     }
 
     Ok(())
 }
 
 fn render_json(out: &mut dyn Write, account: &Account, now: DateTime<Utc>) -> Result<()> {
-    let utilization = match account.observed_utilization() {
-        Some(cached) => json!({
-            "observed_at": cached.observed_at.to_rfc3339(),
-            "never_observed": false,
-            "windows": windows_json(cached, now),
-        }),
-        None => json!({
-            "observed_at": serde_json::Value::Null,
-            "never_observed": true,
-            "windows": [],
-        }),
-    };
-
     let document = json!({
         "active": {
             "email": account.email(),
@@ -95,7 +90,7 @@ fn render_json(out: &mut dyn Write, account: &Account, now: DateTime<Utc>) -> Re
             "plan": account.plan,
             "profile_dir": account.profile.dir,
         },
-        "utilization": utilization,
+        "utilization": utilization::document(account, now),
     });
 
     writeln!(
@@ -105,58 +100,4 @@ fn render_json(out: &mut dyn Write, account: &Account, now: DateTime<Utc>) -> Re
             .map_err(|err| PerchError::Other(err.to_string()))?
     )
     .map_err(write_failed)
-}
-
-/// Every figure carries its own observation time, so a script can decide for
-/// itself whether the number is fresh enough (ADR 0015).
-fn windows_json(cached: &CachedUtilization, now: DateTime<Utc>) -> Vec<serde_json::Value> {
-    cached
-        .windows
-        .iter()
-        .map(|window| {
-            json!({
-                "window": window.window,
-                "used_percent": window.used_percent,
-                "resets_at": window.resets_at.map(|at| at.to_rfc3339()),
-                "observed_at": cached.observed_at.to_rfc3339(),
-                "observed_seconds_ago": (now - cached.observed_at).num_seconds().max(0),
-            })
-        })
-        .collect()
-}
-
-/// "just now", "3m ago", "2h ago", "4d ago".
-pub fn age_phrase(observed_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
-    let seconds = (now - observed_at).num_seconds();
-    if seconds < 0 {
-        return "in the future".to_string();
-    }
-    match seconds {
-        0..=44 => "just now".to_string(),
-        45..=5399 => format!("{}m ago", (seconds as f64 / 60.0).round() as i64),
-        5400..=86_399 => format!("{}h ago", (seconds as f64 / 3600.0).round() as i64),
-        _ => format!("{}d ago", (seconds as f64 / 86_400.0).round() as i64),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use chrono::TimeZone;
-
-    fn at(hour: u32, minute: u32) -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 8, 4, hour, minute, 0).unwrap()
-    }
-
-    #[test]
-    fn ages_read_as_prose() {
-        assert_eq!(age_phrase(at(12, 0), at(12, 0)), "just now");
-        assert_eq!(age_phrase(at(11, 57), at(12, 0)), "3m ago");
-        assert_eq!(age_phrase(at(9, 0), at(12, 0)), "3h ago");
-    }
-
-    #[test]
-    fn a_clock_that_ran_backwards_does_not_claim_freshness() {
-        assert_eq!(age_phrase(at(13, 0), at(12, 0)), "in the future");
-    }
 }
