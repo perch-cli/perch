@@ -6,10 +6,35 @@
 //! `tui` all have to say the same thing about the same figure, so how a figure
 //! reads lives here rather than being spelled out again by each of them.
 
+use std::io::Write;
+
 use chrono::{DateTime, Utc};
 use serde_json::json;
 
+use crate::commands::write_failed;
+use crate::error::Result;
 use crate::registry::{Account, CachedUtilization};
+
+/// How wide the label column is on the surfaces that answer about one Account —
+/// `status`, and `switch` when it says where you landed. They are read one
+/// after the other, so they line up.
+pub const LABEL_WIDTH: usize = 14;
+
+/// Writes a label and a value in that column, for the surfaces that render an
+/// Account as labelled lines.
+pub fn write_labelled(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {
+    writeln!(out, "{label:LABEL_WIDTH$}{value}").map_err(write_failed)
+}
+
+/// Writes the cached Utilization under one `Utilization` label, however many
+/// Quota Windows there turn out to be.
+pub fn write_figures(out: &mut dyn Write, account: &Account, now: DateTime<Utc>) -> Result<()> {
+    for (index, figure) in lines(account, now).iter().enumerate() {
+        let label = if index == 0 { "Utilization" } else { "" };
+        write_labelled(out, label, figure)?;
+    }
+    Ok(())
+}
 
 /// One line per Quota Window, each carrying its own age — or the single line
 /// that says nothing has ever been observed.

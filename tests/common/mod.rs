@@ -11,6 +11,7 @@ use perch::commands::alias::AliasCommand;
 use perch::commands::group::GroupCommand;
 use perch::commands::list::ListArgs;
 use perch::commands::status::StatusArgs;
+use perch::commands::switch::SwitchArgs;
 use perch::host::{Execution, FakeHost};
 use perch::probe;
 
@@ -198,6 +199,20 @@ pub fn move_to_group(host: &FakeHost, target: &str, group: &str) -> (perch::Resu
 pub fn run_group(host: &FakeHost, command: GroupCommand) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
     let result = perch::commands::group::run(host, command, &mut written);
+    (result, String::from_utf8(written).expect("output is UTF-8"))
+}
+
+/// Runs `perch switch <target>`, returning what it printed alongside how it
+/// ended.
+pub fn run_switch(host: &FakeHost, target: &str) -> (perch::Result<()>, String) {
+    let mut written = Vec::new();
+    let result = perch::commands::switch::run(
+        host,
+        SwitchArgs {
+            target: target.to_string(),
+        },
+        &mut written,
+    );
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 

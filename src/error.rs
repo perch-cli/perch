@@ -25,6 +25,12 @@ pub const EXIT_CONFLICT: i32 = 13;
 /// name it will not accept, a configured value outside the range it means
 /// something in.
 pub const EXIT_INVALID: i32 = 14;
+/// Exit code for a request that was already true: the Account asked for is the
+/// one that is already active. Distinct from success, so a script can tell a
+/// Switch that happened from one that was not needed.
+pub const EXIT_NOTHING_TO_DO: i32 = 15;
+/// Exit code for a refusal to touch a Profile a client is running against.
+pub const EXIT_PROFILE_LIVE: i32 = 16;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PerchError {
@@ -56,6 +62,16 @@ pub enum PerchError {
     #[error("{0}")]
     Invalid(String),
 
+    /// What was asked for is already so, and doing it would mean rewriting
+    /// Credentials for nothing.
+    #[error("{0}")]
+    NothingToDo(String),
+
+    /// A client is running against the Profile, so its Credential belongs to
+    /// that client until it exits.
+    #[error("{0}")]
+    ProfileLive(String),
+
     #[error("Could not read {path}: {source}")]
     FileRead {
         path: PathBuf,
@@ -78,6 +94,43 @@ pub enum PerchError {
 }
 
 impl PerchError {
+    /// The same failure, with a line about what it left behind.
+    ///
+    /// A step that fails part way through a sequence has to say what happened
+    /// *and* what the machine is holding now, and those are two different
+    /// pieces of knowledge: the failure belongs to whatever failed, and what it
+    /// left belongs to whatever was running the sequence. The kind is kept, so
+    /// the exit code a script branches on is still the one the failure earned.
+    pub fn with_note(self, note: &str) -> PerchError {
+        match self {
+            PerchError::ProbeRefused {
+                assumption,
+                detail,
+                version,
+            } => PerchError::ProbeRefused {
+                assumption,
+                detail: format!("{detail}\n\n{note}"),
+                version,
+            },
+            PerchError::KeychainUnavailable(message) => {
+                PerchError::KeychainUnavailable(format!("{message}\n\n{note}"))
+            }
+            PerchError::NotFound(message) => PerchError::NotFound(format!("{message}\n\n{note}")),
+            PerchError::Conflict(message) => PerchError::Conflict(format!("{message}\n\n{note}")),
+            PerchError::Invalid(message) => PerchError::Invalid(format!("{message}\n\n{note}")),
+            PerchError::NothingToDo(message) => {
+                PerchError::NothingToDo(format!("{message}\n\n{note}"))
+            }
+            PerchError::ProfileLive(message) => {
+                PerchError::ProfileLive(format!("{message}\n\n{note}"))
+            }
+            // The rest carry structure rather than a message. They all exit as
+            // a general failure already, so folding them into one loses the
+            // shape and nothing a caller could act on.
+            other => PerchError::Other(format!("{other}\n\n{note}")),
+        }
+    }
+
     pub fn exit_code(&self) -> i32 {
         match self {
             PerchError::ProbeRefused { .. } => EXIT_PROBE_REFUSED,
@@ -85,6 +138,8 @@ impl PerchError {
             PerchError::NotFound(_) => EXIT_NOT_FOUND,
             PerchError::Conflict(_) => EXIT_CONFLICT,
             PerchError::Invalid(_) => EXIT_INVALID,
+            PerchError::NothingToDo(_) => EXIT_NOTHING_TO_DO,
+            PerchError::ProfileLive(_) => EXIT_PROFILE_LIVE,
             _ => EXIT_GENERAL,
         }
     }

@@ -31,8 +31,6 @@ pub struct StatusArgs {
     pub group: bool,
 }
 
-const LABEL_WIDTH: usize = 14;
-
 pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()> {
     let registry = adopt::ensure_adopted(host, out)?;
     let account = registry.active_account().ok_or_else(|| {
@@ -61,24 +59,15 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
 }
 
 fn render_human(out: &mut dyn Write, account: &Account, now: DateTime<Utc>) -> Result<()> {
-    let mut write_line = |label: &str, value: &str| -> Result<()> {
-        writeln!(out, "{label:LABEL_WIDTH$}{value}").map_err(write_failed)
-    };
-
-    write_line("Account", account.email())?;
+    utilization::write_labelled(out, "Account", account.email())?;
     if let Some(organization) = &account.identity.organization_name {
-        write_line("Organization", organization)?;
+        utilization::write_labelled(out, "Organization", organization)?;
     }
     if let Some(plan) = &account.plan {
-        write_line("Plan", plan)?;
+        utilization::write_labelled(out, "Plan", plan)?;
     }
 
-    for (index, figure) in utilization::lines(account, now).iter().enumerate() {
-        let label = if index == 0 { "Utilization" } else { "" };
-        write_line(label, figure)?;
-    }
-
-    Ok(())
+    utilization::write_figures(out, account, now)
 }
 
 fn render_json(out: &mut dyn Write, account: &Account, now: DateTime<Utc>) -> Result<()> {

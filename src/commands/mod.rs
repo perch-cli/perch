@@ -7,6 +7,7 @@ pub mod alias;
 pub mod group;
 pub mod list;
 pub mod status;
+pub mod switch;
 
 use std::io::Write;
 

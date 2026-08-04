@@ -7,6 +7,7 @@ use perch::commands::alias::{self, AliasCommand};
 use perch::commands::group::{self, GroupCommand};
 use perch::commands::list::{self, ListArgs};
 use perch::commands::status::{self, StatusArgs};
+use perch::commands::switch::{self, SwitchArgs};
 use perch::error::EXIT_OK;
 use perch::host::RealHost;
 use perch::report;
@@ -79,6 +80,16 @@ enum Command {
         /// Utilization figure.
         #[arg(long)]
         json: bool,
+    },
+
+    /// Make an Account active everywhere, with no login flow.
+    ///
+    /// The Credential you are leaving is Captured back into its own Profile
+    /// first, so a Rotation that happened while it was active is not lost. Your
+    /// memory, settings, plugins and project history are untouched.
+    Switch {
+        /// The Account to switch to: its Alias, or its email address.
+        target: String,
     },
 
     /// Show the active Account and its cached Utilization.
@@ -173,6 +184,7 @@ fn main() {
         Command::Group { action } => group::run(&host, action.into(), &mut out),
         Command::List { json } => list::run(&host, ListArgs { json }, &mut out),
         Command::Status { group, json } => status::run(&host, StatusArgs { group, json }, &mut out),
+        Command::Switch { target } => switch::run(&host, SwitchArgs { target }, &mut out),
     };
 
     let code = match outcome {

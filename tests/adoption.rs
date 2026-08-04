@@ -73,6 +73,35 @@ fn the_credential_is_copied_into_the_profiles_own_namespace() {
 }
 
 #[test]
+fn the_profile_keeps_the_block_claude_code_wrote_for_the_adopted_account() {
+    let host = logged_in_machine();
+
+    run_status(&host, false).0.unwrap();
+
+    let registry = registry::load(&host).unwrap().unwrap();
+    let kept = host
+        .file(registry.accounts[0].profile.dir.join(".claude.json"))
+        .expect("the Profile holds how Claude Code describes this Account");
+    let block = perch::probe::oauth_account_block(&kept).expect("a block");
+
+    assert!(
+        block.contains(&format!("\"emailAddress\": \"{EMAIL}\"")),
+        "{block}"
+    );
+    assert!(
+        block.contains("\"organizationRole\": \"admin\""),
+        "verbatim, including the fields Perch does not record itself — \
+         otherwise the Account everybody starts with comes back from a Switch \
+         described by four fields: {block}"
+    );
+    assert!(
+        !kept.contains("numStartups"),
+        "and nothing else from the live file, which belongs to the person \
+         rather than to the Account: {kept}"
+    );
+}
+
+#[test]
 fn a_machine_with_no_login_is_told_to_log_in_and_gets_no_profile() {
     let host = machine_with_claude_code();
 

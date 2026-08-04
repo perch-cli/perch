@@ -92,6 +92,74 @@ impl Host for RealHost {
         }
     }
 
+    fn create_dir_exclusive(&self, path: &Path) -> Result<(), HostError> {
+        match std::fs::create_dir(path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                Err(HostError::AlreadyExists {
+                    path: path.to_path_buf(),
+                })
+            }
+            Err(err) => Err(HostError::Io(err)),
+        }
+    }
+
+    fn modified_at(&self, path: &Path) -> Result<DateTime<Utc>, HostError> {
+        match std::fs::metadata(path).and_then(|metadata| metadata.modified()) {
+            Ok(modified) => Ok(DateTime::<Utc>::from(modified)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(HostError::NotFound {
+                path: path.to_path_buf(),
+            }),
+            Err(err) => Err(HostError::Io(err)),
+        }
+    }
+
+    /// `utimes` with no times is "now", which is the whole of what a lock
+    /// holder has to say. It works on a directory, which `File::set_times`
+    /// cannot be relied on to.
+    fn touch(&self, path: &Path) -> Result<(), HostError> {
+        let raw = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
+            .map_err(|err| HostError::Other(format!("{} is not a path: {err}", path.display())))?;
+        let outcome = unsafe { libc_utimes(raw.as_ptr(), std::ptr::null()) };
+        if outcome == 0 {
+            Ok(())
+        } else {
+            Err(HostError::Io(std::io::Error::last_os_error()))
+        }
+    }
+
+    fn rename(&self, from: &Path, to: &Path) -> Result<(), HostError> {
+        std::fs::rename(from, to)?;
+        Ok(())
+    }
+
+    fn remove_file(&self, path: &Path) -> Result<(), HostError> {
+        match std::fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(HostError::Io(err)),
+        }
+    }
+
+    fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>, HostError> {
+        let entries = match std::fs::read_dir(path) {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Err(HostError::NotFound {
+                    path: path.to_path_buf(),
+                });
+            }
+            Err(err) => return Err(HostError::Io(err)),
+        };
+
+        let mut found = Vec::new();
+        for entry in entries {
+            found.push(entry?.path());
+        }
+        found.sort();
+        Ok(found)
+    }
+
     fn keychain_get(&self, service: &str, account: &str) -> Result<String, KeychainError> {
         let execution = security(
             &["find-generic-password", "-s", service, "-a", account, "-w"],
@@ -170,6 +238,10 @@ impl Host for RealHost {
         unsafe { libc_kill(pid as i32, 0) == 0 }
     }
 
+    fn sleep(&self, millis: u64) {
+        std::thread::sleep(std::time::Duration::from_millis(millis));
+    }
+
     fn is_interactive(&self) -> bool {
         // Both ends matter: a question needs somewhere to be shown as well as
         // somewhere to be answered from.
@@ -225,4 +297,7 @@ unsafe extern "C" {
 
     #[link_name = "isatty"]
     fn libc_isatty(fd: i32) -> i32;
+
+    #[link_name = "utimes"]
+    fn libc_utimes(path: *const std::ffi::c_char, times: *const std::ffi::c_void) -> i32;
 }

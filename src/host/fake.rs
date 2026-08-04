@@ -19,7 +19,18 @@ pub enum Effect {
     ReadFile(PathBuf),
     WroteFile(PathBuf),
     CreatedDir(PathBuf),
+    /// A directory created only if nobody had: an acquired lock.
+    Took(PathBuf),
     RemovedDir(PathBuf),
+    RemovedFile(PathBuf),
+    Renamed {
+        from: PathBuf,
+        to: PathBuf,
+    },
+    Touched(PathBuf),
+    Slept {
+        millis: u64,
+    },
     KeychainGet {
         service: String,
         account: String,
@@ -65,6 +76,7 @@ pub struct FakeHost {
     unreadable: RefCell<BTreeMap<PathBuf, String>>,
     unwritable: RefCell<BTreeMap<PathBuf, String>>,
     dirs: RefCell<BTreeSet<PathBuf>>,
+    modified: RefCell<BTreeMap<PathBuf, DateTime<Utc>>>,
     keychain: RefCell<BTreeMap<(String, String), String>>,
     keychain_lock: RefCell<Option<KeychainLock>>,
     executions: RefCell<BTreeMap<String, Execution>>,
@@ -94,6 +106,7 @@ impl FakeHost {
             unreadable: RefCell::new(BTreeMap::new()),
             unwritable: RefCell::new(BTreeMap::new()),
             dirs: RefCell::new(BTreeSet::new()),
+            modified: RefCell::new(BTreeMap::new()),
             keychain: RefCell::new(BTreeMap::new()),
             keychain_lock: RefCell::new(None),
             executions: RefCell::new(BTreeMap::new()),
@@ -120,9 +133,24 @@ impl FakeHost {
     /// The same, for a world being arranged from inside a [`Login`], where the
     /// fake is already borrowed and cannot be consumed.
     pub fn set_file(&self, path: impl AsRef<Path>, contents: &str) {
+        self.note_directories_of(path.as_ref());
         self.files
             .borrow_mut()
             .insert(path.as_ref().to_path_buf(), contents.to_string());
+    }
+
+    /// A file exists in the directories above it, so they exist too. Without
+    /// this a directory could hold something and still not be there to list.
+    fn note_directories_of(&self, path: &Path) {
+        let mut dirs = self.dirs.borrow_mut();
+        let mut at = path.parent();
+        while let Some(dir) = at {
+            if dir.as_os_str().is_empty() {
+                break;
+            }
+            dirs.insert(dir.to_path_buf());
+            at = dir.parent();
+        }
     }
 
     /// A file that is there but cannot be read — the wrong permissions, most
@@ -143,6 +171,13 @@ impl FakeHost {
         self
     }
 
+    /// Whatever stopped a path being written to has been put right — the
+    /// permission fixed, the disk freed — so a test can carry on from a failure
+    /// with the world it left rather than a fresh one.
+    pub fn writable_again(&self, path: impl AsRef<Path>) {
+        self.unwritable.borrow_mut().remove(path.as_ref());
+    }
+
     pub fn with_keychain_item(self, service: &str, account: &str, secret: &str) -> Self {
         self.set_keychain_item(service, account, secret);
         self
@@ -155,13 +190,26 @@ impl FakeHost {
         );
     }
 
+    /// An item that is gone from the keychain — an Account whose Credential
+    /// nothing Perch holds can recover.
+    pub fn forget_keychain_item(&self, service: &str, account: &str) {
+        self.keychain
+            .borrow_mut()
+            .remove(&(service.to_string(), account.to_string()));
+    }
+
     /// Every keychain operation now fails as locked or denied, rather than as
     /// "not found" — the distinction ADR 0008 insists on.
     pub fn with_locked_keychain(self, detail: &str) -> Self {
+        self.lock_keychain(detail);
+        self
+    }
+
+    /// The same, for a world that is already built.
+    pub fn lock_keychain(&self, detail: &str) {
         *self.keychain_lock.borrow_mut() = Some(KeychainLock {
             detail: detail.to_string(),
         });
-        self
     }
 
     pub fn with_exec(self, program: &str, args: &[&str], execution: Execution) -> Self {
@@ -176,6 +224,24 @@ impl FakeHost {
     /// abandoned login.
     pub fn with_login(self, login: impl Fn(&FakeHost, &Path) -> i32 + 'static) -> Self {
         *self.login.borrow_mut() = Some(Box::new(login));
+        self
+    }
+
+    /// A directory somebody else already holds, last written when they say.
+    /// A lock artifact, in other words: the age is what decides whether the
+    /// holder is taken to be alive or to have died holding it.
+    pub fn with_dir_held_since(self, path: impl AsRef<Path>, since: DateTime<Utc>) -> Self {
+        self.dirs.borrow_mut().insert(path.as_ref().to_path_buf());
+        self.modified
+            .borrow_mut()
+            .insert(path.as_ref().to_path_buf(), since);
+        self
+    }
+
+    /// A process that is running, so a marker file naming it means a Live
+    /// Profile rather than one a client left behind when it died.
+    pub fn with_live_process(self, pid: u32) -> Self {
+        self.live_processes.borrow_mut().insert(pid);
         self
     }
 
@@ -196,6 +262,13 @@ impl FakeHost {
 
     pub fn effects(&self) -> Vec<Effect> {
         self.effects.borrow().clone()
+    }
+
+    /// Forgets what has happened so far, so a test that asserts on the order of
+    /// effects sees the command it is about rather than the fixtures that set
+    /// the machine up for it.
+    pub fn forget_effects(&self) {
+        self.effects.borrow_mut().clear();
     }
 
     pub fn http_calls(&self) -> Vec<String> {
@@ -232,6 +305,12 @@ impl FakeHost {
 
     fn record(&self, effect: Effect) {
         self.effects.borrow_mut().push(effect);
+    }
+
+    fn mark_written(&self, path: &Path) {
+        self.modified
+            .borrow_mut()
+            .insert(path.to_path_buf(), *self.now.borrow());
     }
 
     fn lock_error(&self) -> Option<KeychainError> {
@@ -285,18 +364,18 @@ impl Host for FakeHost {
         if let Some(detail) = self.unwritable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
-        if let Some(parent) = path.parent() {
-            self.dirs.borrow_mut().insert(parent.to_path_buf());
-        }
+        self.note_directories_of(path);
         self.files
             .borrow_mut()
             .insert(path.to_path_buf(), contents.to_string());
+        self.mark_written(path);
         Ok(())
     }
 
     fn create_dir_all(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::CreatedDir(path.to_path_buf()));
         self.dirs.borrow_mut().insert(path.to_path_buf());
+        self.mark_written(path);
         Ok(())
     }
 
@@ -310,7 +389,88 @@ impl Host for FakeHost {
         self.files
             .borrow_mut()
             .retain(|file, _| !file.starts_with(path));
+        self.modified
+            .borrow_mut()
+            .retain(|written, _| !written.starts_with(path));
         Ok(())
+    }
+
+    fn create_dir_exclusive(&self, path: &Path) -> Result<(), HostError> {
+        self.record(Effect::Took(path.to_path_buf()));
+        if self.path_exists(path) {
+            return Err(HostError::AlreadyExists {
+                path: path.to_path_buf(),
+            });
+        }
+        self.dirs.borrow_mut().insert(path.to_path_buf());
+        self.mark_written(path);
+        Ok(())
+    }
+
+    fn modified_at(&self, path: &Path) -> Result<DateTime<Utc>, HostError> {
+        self.modified
+            .borrow()
+            .get(path)
+            .copied()
+            .ok_or_else(|| HostError::NotFound {
+                path: path.to_path_buf(),
+            })
+    }
+
+    fn touch(&self, path: &Path) -> Result<(), HostError> {
+        self.record(Effect::Touched(path.to_path_buf()));
+        if !self.path_exists(path) {
+            return Err(HostError::NotFound {
+                path: path.to_path_buf(),
+            });
+        }
+        self.mark_written(path);
+        Ok(())
+    }
+
+    fn rename(&self, from: &Path, to: &Path) -> Result<(), HostError> {
+        self.record(Effect::Renamed {
+            from: from.to_path_buf(),
+            to: to.to_path_buf(),
+        });
+        if let Some(detail) = self.unwritable.borrow().get(to) {
+            return Err(HostError::Other(detail.clone()));
+        }
+        let moved = self
+            .files
+            .borrow_mut()
+            .remove(from)
+            .ok_or_else(|| HostError::NotFound {
+                path: from.to_path_buf(),
+            })?;
+        self.files.borrow_mut().insert(to.to_path_buf(), moved);
+        self.mark_written(to);
+        Ok(())
+    }
+
+    fn remove_file(&self, path: &Path) -> Result<(), HostError> {
+        self.record(Effect::RemovedFile(path.to_path_buf()));
+        self.files.borrow_mut().remove(path);
+        self.modified.borrow_mut().remove(path);
+        Ok(())
+    }
+
+    fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>, HostError> {
+        if !self.dirs.borrow().contains(path) {
+            return Err(HostError::NotFound {
+                path: path.to_path_buf(),
+            });
+        }
+        let held = |candidate: &PathBuf| candidate.parent() == Some(path);
+        let mut found: BTreeSet<PathBuf> = self
+            .files
+            .borrow()
+            .keys()
+            .filter(|file| held(file))
+            .cloned()
+            .collect();
+        found.extend(self.dirs.borrow().iter().filter(|dir| held(dir)).cloned());
+        Ok(found.into_iter().collect())
     }
 
     fn keychain_get(&self, service: &str, account: &str) -> Result<String, KeychainError> {
@@ -404,6 +564,15 @@ impl Host for FakeHost {
 
     fn process_alive(&self, pid: u32) -> bool {
         self.live_processes.borrow().contains(&pid)
+    }
+
+    /// Costs no time, but does pass it: waiting for a lock somebody else holds
+    /// is how that lock comes to be stale, and a test should be able to reach
+    /// that without sitting through it.
+    fn sleep(&self, millis: u64) {
+        self.record(Effect::Slept { millis });
+        let waited = *self.now.borrow() + chrono::Duration::milliseconds(millis as i64);
+        *self.now.borrow_mut() = waited;
     }
 
     fn is_interactive(&self) -> bool {
