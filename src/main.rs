@@ -3,6 +3,7 @@ use std::io::Write;
 use clap::{Parser, Subcommand};
 
 use perch::commands::add::{self, AddArgs};
+use perch::commands::group::{self, GroupCommand};
 use perch::commands::status::{self, StatusArgs};
 use perch::error::EXIT_OK;
 use perch::host::RealHost;
@@ -40,6 +41,16 @@ enum Command {
         alias: Option<String>,
     },
 
+    /// Declare which Accounts are interchangeable.
+    ///
+    /// Cycling only ever moves between Accounts in one Group, so a Group is how
+    /// you say that another work subscription is an acceptable landing place
+    /// and your personal Account is not.
+    Group {
+        #[command(subcommand)]
+        action: GroupAction,
+    },
+
     /// Show the active Account and its cached Utilization.
     ///
     /// Renders from cache and never touches the network, so it is cheap enough
@@ -50,6 +61,41 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum GroupAction {
+    /// Declare a Group. It starts empty, with the configuration a Group carries
+    /// by default: the most-headroom strategy, and the watcher switched off.
+    Add {
+        /// The name, which shares one namespace with Aliases.
+        name: String,
+    },
+
+    /// Forget a Group. Refused while it still holds Accounts, which are named.
+    Remove { name: String },
+
+    /// Move an Account into a Group, keeping its Profile, Credential and Alias.
+    Move {
+        /// The Account: its Alias, or its email address.
+        target: String,
+        /// The Group to move it into, or `none` to leave every Group.
+        group: String,
+    },
+
+    /// Show every Group with its Accounts and its configuration.
+    List,
+}
+
+impl From<GroupAction> for GroupCommand {
+    fn from(action: GroupAction) -> Self {
+        match action {
+            GroupAction::Add { name } => GroupCommand::Add { name },
+            GroupAction::Remove { name } => GroupCommand::Remove { name },
+            GroupAction::Move { target, group } => GroupCommand::Move { target, group },
+            GroupAction::List => GroupCommand::List,
+        }
+    }
 }
 
 fn main() {
@@ -74,6 +120,7 @@ fn main() {
             },
             &mut out,
         ),
+        Command::Group { action } => group::run(&host, action.into(), &mut out),
         Command::Status { json } => status::run(&host, StatusArgs { json }, &mut out),
     };
 

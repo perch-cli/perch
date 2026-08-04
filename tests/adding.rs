@@ -12,18 +12,11 @@ use perch::Host;
 use perch::commands::add::AddArgs;
 use perch::error::{EXIT_CONFLICT, EXIT_NOT_FOUND};
 use perch::host::{FakeHost, fake::Effect};
-use perch::registry::{self, Registry};
 
 /// A machine with the first Account already adopted and a second login waiting
 /// to be run.
 fn ready_to_add() -> FakeHost {
     logged_in_machine().with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE))
-}
-
-fn registry_of(host: &FakeHost) -> Registry {
-    registry::load(host)
-        .unwrap()
-        .expect("a registry is written")
 }
 
 /// The config directory the launched login was pointed at.
@@ -214,6 +207,29 @@ fn the_offered_group_is_only_a_default_and_can_be_answered_over() {
             .as_deref(),
         Some("personal"),
         "three subscriptions bought personally must be able to share one Group"
+    );
+}
+
+#[test]
+fn a_group_name_perch_cannot_accept_is_asked_about_again_rather_than_losing_the_account() {
+    // By the time the question is asked the login has already happened, so
+    // failing the command over a typo would cost the Account it just gained.
+    let host = ready_to_add().with_answers(&["overflow@example.com", "overflow"]);
+
+    let (result, printed) = run_add(&host, AddArgs::default());
+
+    assert!(result.is_ok(), "{:?}", result.err());
+    assert!(
+        printed.contains("email address"),
+        "the user should be told why the first answer was no good:\n{printed}"
+    );
+    assert_eq!(
+        registry_of(&host)
+            .account(SECOND_EMAIL)
+            .unwrap()
+            .group
+            .as_deref(),
+        Some("overflow")
     );
 }
 

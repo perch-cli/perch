@@ -72,6 +72,115 @@ fn enabled_by_default() -> bool {
     true
 }
 
+/// How Cycling orders the Accounts in a Group.
+///
+/// Both readings measure headroom the same way — the worst Quota Window an
+/// Account has (ADR 0012) — and differ only in what they do with it. Stored and
+/// validated here; nothing consumes it until ranking lands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Strategy {
+    /// Prefer the Account with the most room left.
+    #[default]
+    MostHeadroom,
+    /// Prefer the Account whose window resets soonest, so perishable quota is
+    /// spent rather than wasted.
+    SoonestReset,
+}
+
+impl Strategy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Strategy::MostHeadroom => "most-headroom",
+            Strategy::SoonestReset => "soonest-reset",
+        }
+    }
+}
+
+/// The watcher's threshold when nobody has said otherwise: high enough that an
+/// unattended Switch means the Account really is running out.
+pub const DEFAULT_WATCHER_THRESHOLD_PERCENT: u8 = 80;
+
+/// What a Group carries besides its Accounts: the rules that would govern
+/// Cycling within it (ADR 0002).
+///
+/// v1 stores and validates these and reads none of them. They are here from the
+/// first Group rather than added later, so a Group written today is a Group the
+/// watcher can be pointed at without migrating anything.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GroupConfig {
+    pub strategy: Strategy,
+    /// Whether the watcher may Switch within this Group unattended. Off unless
+    /// the user says otherwise: nothing changes underneath someone because they
+    /// did not say it could (ADR 0002).
+    pub watcher_may_act: bool,
+    /// The Utilization the watcher would act at, as a percentage.
+    pub watcher_threshold_percent: u8,
+}
+
+impl Default for GroupConfig {
+    fn default() -> Self {
+        GroupConfig {
+            strategy: Strategy::default(),
+            watcher_may_act: false,
+            watcher_threshold_percent: DEFAULT_WATCHER_THRESHOLD_PERCENT,
+        }
+    }
+}
+
+impl GroupConfig {
+    /// Refuses configuration that cannot mean what it says. Serde already
+    /// refuses a strategy Perch does not implement; what is left is the range
+    /// a percentage has to be in.
+    pub fn validate(&self, group: &str) -> Result<()> {
+        if self.watcher_threshold_percent > 100 {
+            return Err(PerchError::Invalid(format!(
+                "Group `{group}` has a watcher threshold of {}, but a Utilization threshold is a percentage between 0 and 100.",
+                self.watcher_threshold_percent
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// The word that addresses "no Group at all" on `perch group move`, and the
+/// answer `perch add` accepts to the Group it offers. A Group cannot be called
+/// this, because then one of the two meanings would be unreachable.
+pub const NO_GROUP: &str = "none";
+
+/// Whether a name is the one that means no Group at all.
+pub fn means_no_group(name: &str) -> bool {
+    name.eq_ignore_ascii_case(NO_GROUP)
+}
+
+/// Refuses a Group name that could not be told from something else.
+///
+/// A Group name shares one namespace with Aliases and is a valid target for
+/// `switch` and `run`, so it has to be distinguishable from the other things a
+/// target can be: an email address, and the word that means no Group at all.
+pub fn validate_group_name(name: &str) -> Result<()> {
+    if name.trim().is_empty() {
+        return Err(PerchError::Invalid("A Group needs a name.".to_string()));
+    }
+    if name != name.trim() {
+        return Err(PerchError::Invalid(format!(
+            "`{name}` starts or ends with a space, which would make it impossible to type reliably."
+        )));
+    }
+    if means_no_group(name) {
+        return Err(PerchError::Invalid(format!(
+            "`{name}` means no Group at all on `perch group move`, so it cannot also name one."
+        )));
+    }
+    if name.contains('@') {
+        return Err(PerchError::Invalid(format!(
+            "`{name}` looks like an email address, and a target that could be either a Group or an Account has no single answer."
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Registry {
     pub version: u32,
@@ -83,6 +192,11 @@ pub struct Registry {
     /// Alias to Account email. Empty until aliases land.
     #[serde(default)]
     pub aliases: BTreeMap<String, String>,
+    /// The Groups the user has declared, with what each one carries. A Group
+    /// exists here even when it holds no Accounts: it is a statement the user
+    /// made, not a summary of where the Accounts happen to be.
+    #[serde(default)]
+    pub groups: BTreeMap<String, GroupConfig>,
 }
 
 impl Default for Registry {
@@ -92,6 +206,7 @@ impl Default for Registry {
             active: None,
             accounts: Vec::new(),
             aliases: BTreeMap::new(),
+            groups: BTreeMap::new(),
         }
     }
 }
@@ -121,13 +236,66 @@ impl Registry {
         self.active.as_deref().and_then(|email| self.account(email))
     }
 
-    /// Every Group any Account is in. Groups have no existence apart from the
-    /// Accounts that claim them until `perch group` lands.
+    /// Every Group name in use. A Group an Account claims is always declared
+    /// too — [`load`] sees to that — so this is the declared set.
     pub fn group_names(&self) -> BTreeSet<&str> {
+        self.groups.keys().map(String::as_str).collect()
+    }
+
+    pub fn group(&self, name: &str) -> Option<&GroupConfig> {
+        self.groups.get(name)
+    }
+
+    /// The Accounts in a Group, in the order they were added.
+    pub fn accounts_in(&self, group: &str) -> Vec<&Account> {
         self.accounts
             .iter()
-            .filter_map(|account| account.group.as_deref())
+            .filter(|account| account.group.as_deref() == Some(group))
             .collect()
+    }
+
+    /// The Accounts that are in no Group — the ordinary starting state, not an
+    /// error (ADR 0017).
+    pub fn ungrouped_accounts(&self) -> Vec<&Account> {
+        self.accounts
+            .iter()
+            .filter(|account| account.group.is_none())
+            .collect()
+    }
+
+    /// Declares a Group, refusing a name that is not usable or already means
+    /// something else.
+    pub fn declare_group(&mut self, name: &str) -> Result<()> {
+        validate_group_name(name)?;
+        if self.groups.contains_key(name) {
+            return Err(PerchError::Conflict(format!(
+                "There is already a Group called `{name}`."
+            )));
+        }
+        self.refuse_taken_names(None, Some(name))?;
+        self.groups.insert(name.to_string(), GroupConfig::default());
+        Ok(())
+    }
+
+    /// Declares a Group unless it is already there, for the commands that name
+    /// a Group in passing rather than to create one — `perch add --group`.
+    pub fn ensure_group(&mut self, name: &str) -> Result<()> {
+        if self.groups.contains_key(name) {
+            return Ok(());
+        }
+        self.declare_group(name)
+    }
+
+    /// Forgets a Group. The caller establishes that nothing is left in it:
+    /// dropping the Group is not a way to empty it.
+    pub fn forget_group(&mut self, name: &str) {
+        self.groups.remove(name);
+    }
+
+    pub fn account_mut(&mut self, email: &str) -> Option<&mut Account> {
+        self.accounts
+            .iter_mut()
+            .find(|account| account.email() == email)
     }
 
     /// The Alias an Account answers to, if it has been given one.
@@ -136,6 +304,15 @@ impl Registry {
             .iter()
             .find(|(_, target)| *target == email)
             .map(|(alias, _)| alias.as_str())
+    }
+
+    /// An Account as the user names it: by its Alias when it has one, so a
+    /// message about it reads the way they would say it.
+    pub fn named_for_the_user(&self, email: &str) -> String {
+        match self.alias_of(email) {
+            Some(alias) => format!("{email} (as `{alias}`)"),
+            None => email.to_string(),
+        }
     }
 
     /// Refuses an Alias and a Group name that would not both be free.
@@ -251,7 +428,7 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
         }
     };
 
-    let registry: Registry =
+    let mut registry: Registry =
         serde_json::from_str(&contents).map_err(|err| PerchError::Malformed {
             path: path.display().to_string(),
             detail: err.to_string(),
@@ -265,7 +442,35 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
         )));
     }
 
+    adopt_groups_only_the_accounts_record(&mut registry);
+
+    // Group configuration is checked on the way in rather than where it is
+    // read, because in v1 nothing reads it: a value that means nothing would
+    // otherwise sit in the file until the watcher shipped and then surprise
+    // someone by acting on it.
+    for (name, config) in &registry.groups {
+        config.validate(name)?;
+    }
+
     Ok(Some(registry))
+}
+
+/// Declares every Group an Account is in but that nothing declared.
+///
+/// A Perch that predates `perch group` recorded a Group only on the Accounts
+/// that joined it. Left alone, such a Group would be one the user has plainly
+/// got — their Accounts are in it — that `perch group list` cannot show and
+/// `perch group remove` says does not exist. It picks up the default
+/// configuration, which is what it would have been created with.
+fn adopt_groups_only_the_accounts_record(registry: &mut Registry) {
+    let claimed: Vec<String> = registry
+        .accounts
+        .iter()
+        .filter_map(|account| account.group.clone())
+        .collect();
+    for name in claimed {
+        registry.groups.entry(name).or_default();
+    }
 }
 
 pub fn save(host: &dyn Host, registry: &Registry) -> Result<()> {
@@ -330,5 +535,73 @@ mod tests {
     fn the_version_is_recorded_so_later_specs_can_migrate() {
         let json = serde_json::to_string(&Registry::default()).unwrap();
         assert!(json.contains("\"version\":1"));
+    }
+
+    #[test]
+    fn a_group_carries_its_configuration_through_json() {
+        let mut registry = Registry::default();
+        registry.declare_group("work").unwrap();
+        registry.groups.get_mut("work").unwrap().strategy = Strategy::SoonestReset;
+
+        let json = serde_json::to_string(&registry).unwrap();
+        assert!(json.contains("soonest-reset"), "{json}");
+        let back: Registry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, registry);
+    }
+
+    #[test]
+    fn a_new_group_leaves_the_watcher_alone_until_asked() {
+        let config = GroupConfig::default();
+        assert!(!config.watcher_may_act);
+        assert_eq!(config.strategy, Strategy::MostHeadroom);
+        assert_eq!(
+            config.watcher_threshold_percent,
+            DEFAULT_WATCHER_THRESHOLD_PERCENT
+        );
+    }
+
+    #[test]
+    fn a_threshold_that_is_not_a_percentage_is_refused() {
+        let config = GroupConfig {
+            watcher_threshold_percent: 101,
+            ..GroupConfig::default()
+        };
+        let message = config.validate("work").unwrap_err().to_string();
+        assert!(
+            message.contains("work") && message.contains("100"),
+            "{message}"
+        );
+        assert!(GroupConfig::default().validate("work").is_ok());
+    }
+
+    #[test]
+    fn a_group_name_that_would_be_ambiguous_is_refused() {
+        for name in [
+            "",
+            " ",
+            "none",
+            "None",
+            " work",
+            "work ",
+            "someone@example.com",
+        ] {
+            assert!(
+                validate_group_name(name).is_err(),
+                "`{name}` should not be usable as a Group name"
+            );
+        }
+        for name in ["work", "Overflow Ltd", "personal-2"] {
+            assert!(validate_group_name(name).is_ok(), "`{name}` should be fine");
+        }
+    }
+
+    #[test]
+    fn a_group_is_declared_once() {
+        let mut registry = Registry::default();
+        registry.declare_group("work").unwrap();
+        assert!(registry.declare_group("work").is_err());
+        registry
+            .ensure_group("work")
+            .expect("naming it again in passing is not a conflict");
     }
 }

@@ -7,6 +7,7 @@
 use std::path::Path;
 
 use perch::commands::add::AddArgs;
+use perch::commands::group::GroupCommand;
 use perch::commands::status::StatusArgs;
 use perch::host::{Execution, FakeHost};
 use perch::probe;
@@ -32,6 +33,22 @@ pub const SECOND_IDENTITY_FILE: &str = r#"{
     "emailAddress": "overflow@example.com",
     "organizationUuid": "organization-uuid-2",
     "organizationName": "Overflow Ltd",
+    "organizationRole": "admin"
+  },
+  "projects": {}
+}"#;
+
+/// A third Account, for the cases that need more than two.
+pub const THIRD_EMAIL: &str = "spare@example.com";
+pub const THIRD_CREDENTIAL: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-third","refreshToken":"sk-ant-ort01-third","expiresAt":1785000000000,"scopes":["user:inference","user:profile"],"subscriptionType":"pro"}}"#;
+
+pub const THIRD_IDENTITY_FILE: &str = r#"{
+  "numStartups": 1,
+  "oauthAccount": {
+    "accountUuid": "account-uuid-3",
+    "emailAddress": "spare@example.com",
+    "organizationUuid": "organization-uuid-3",
+    "organizationName": "Spare Ltd",
     "organizationRole": "admin"
   },
   "projects": {}
@@ -101,6 +118,43 @@ pub fn run_status(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
 pub fn run_add(host: &FakeHost, args: AddArgs) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
     let result = perch::commands::add::run(host, args, &mut written);
+    (result, String::from_utf8(written).expect("output is UTF-8"))
+}
+
+/// The registry as it would be read back by the next command Perch runs.
+pub fn registry_of(host: &FakeHost) -> perch::registry::Registry {
+    perch::registry::load(host)
+        .unwrap()
+        .expect("a registry is written")
+}
+
+/// `perch group add <name>`, for the tests that only need the Group to exist.
+pub fn declare_group(host: &FakeHost, name: &str) {
+    run_group(
+        host,
+        GroupCommand::Add {
+            name: name.to_string(),
+        },
+    )
+    .0
+    .unwrap_or_else(|err| panic!("could not declare `{name}`: {err}"));
+}
+
+/// `perch group move <target> <group>`.
+pub fn move_to_group(host: &FakeHost, target: &str, group: &str) -> (perch::Result<()>, String) {
+    run_group(
+        host,
+        GroupCommand::Move {
+            target: target.to_string(),
+            group: group.to_string(),
+        },
+    )
+}
+
+/// Runs `perch group`, returning what it printed alongside how it ended.
+pub fn run_group(host: &FakeHost, command: GroupCommand) -> (perch::Result<()>, String) {
+    let mut written = Vec::new();
+    let result = perch::commands::group::run(host, command, &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 

@@ -21,6 +21,10 @@ pub const EXIT_NOT_FOUND: i32 = 12;
 /// Exit code for a request that collides with what Perch already holds: an
 /// Account added twice, a name already spoken for.
 pub const EXIT_CONFLICT: i32 = 13;
+/// Exit code for a request Perch understood and refused on its own terms: a
+/// name it will not accept, a configured value outside the range it means
+/// something in.
+pub const EXIT_INVALID: i32 = 14;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PerchError {
@@ -46,6 +50,11 @@ pub enum PerchError {
     /// existing entry is the whole of the answer.
     #[error("{0}")]
     Conflict(String),
+
+    /// The request was understood and is not one Perch will accept — a Group
+    /// name that would be ambiguous, a threshold that is not a percentage.
+    #[error("{0}")]
+    Invalid(String),
 
     #[error("Could not read {path}: {source}")]
     FileRead {
@@ -75,6 +84,7 @@ impl PerchError {
             PerchError::KeychainUnavailable(_) => EXIT_KEYCHAIN_UNAVAILABLE,
             PerchError::NotFound(_) => EXIT_NOT_FOUND,
             PerchError::Conflict(_) => EXIT_CONFLICT,
+            PerchError::Invalid(_) => EXIT_INVALID,
             _ => EXIT_GENERAL,
         }
     }
