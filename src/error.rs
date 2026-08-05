@@ -40,6 +40,10 @@ pub const EXIT_NO_CANDIDATE: i32 = 17;
 /// interchangeable — the ungrouped pool, with the setting that governs it off
 /// (ADR 0017).
 pub const EXIT_NOT_INTERCHANGEABLE: i32 = 18;
+/// Exit code for something asked of an Account whose Credential no longer works.
+/// Distinct from every other refusal because the repair is distinct: no amount
+/// of retrying, enabling or re-targeting fixes it, and `perch relogin` does.
+pub const EXIT_QUARANTINED: i32 = 19;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PerchError {
@@ -91,6 +95,12 @@ pub enum PerchError {
     /// declared. Names both ways to declare it (ADR 0017).
     #[error("{0}")]
     NotInterchangeable(String),
+
+    /// Something was asked of an Account that is Quarantined. Says what it was
+    /// Quarantined for and how to repair it, because those are the two things
+    /// that turn a dead end into a next step.
+    #[error("{0}")]
+    Quarantined(String),
 
     #[error("Could not read {path}: {source}")]
     FileRead {
@@ -150,6 +160,9 @@ impl PerchError {
             PerchError::NotInterchangeable(message) => {
                 PerchError::NotInterchangeable(format!("{message}\n\n{note}"))
             }
+            PerchError::Quarantined(message) => {
+                PerchError::Quarantined(format!("{message}\n\n{note}"))
+            }
             // The rest carry structure rather than a message. They all exit as
             // a general failure already, so folding them into one loses the
             // shape and nothing a caller could act on.
@@ -168,6 +181,7 @@ impl PerchError {
             PerchError::ProfileLive(_) => EXIT_PROFILE_LIVE,
             PerchError::NoCandidate(_) => EXIT_NO_CANDIDATE,
             PerchError::NotInterchangeable(_) => EXIT_NOT_INTERCHANGEABLE,
+            PerchError::Quarantined(_) => EXIT_QUARANTINED,
             _ => EXIT_GENERAL,
         }
     }

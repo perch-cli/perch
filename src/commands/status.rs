@@ -22,7 +22,7 @@ use crate::commands::write_failed;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::observe::{self, Report};
-use crate::registry::{Account, Registry};
+use crate::registry::{self, Account, Registry};
 use crate::utilization;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -119,6 +119,20 @@ fn render_human(
     if let Some(plan) = &account.plan {
         utilization::write_labelled(out, "Plan", plan)?;
     }
+    // Above the figures, because a Quarantined Account's figures describe quota
+    // it cannot currently spend: the state is the news, and the numbers are the
+    // detail.
+    if let Some(why) = account.quarantine {
+        utilization::write_labelled(
+            out,
+            "Quarantine",
+            &format!(
+                "{}. {}",
+                why.because(),
+                registry::how_to_repair(account.email())
+            ),
+        )?;
+    }
 
     utilization::write_figures(out, account, now)
 }
@@ -137,6 +151,10 @@ fn render_json(
             "organization": account.identity.organization_name,
             "plan": account.plan,
             "profile_dir": account.profile_dir(host)?,
+            "quarantined": account.quarantine.map(|why| json!({
+                "reason": why.as_str(),
+                "detail": why.because(),
+            })),
         },
         "utilization": utilization::document(account, now),
         "refresh": report.document(),

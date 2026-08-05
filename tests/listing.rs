@@ -8,7 +8,9 @@ use chrono::{DateTime, TimeZone, Utc};
 use common::*;
 use perch::host::FakeHost;
 use perch::probe::Identity;
-use perch::registry::{Account, CachedUtilization, GroupConfig, Registry, WindowUtilization};
+use perch::registry::{
+    Account, CachedUtilization, GroupConfig, Quarantine, Registry, WindowUtilization,
+};
 
 fn at(hour: u32, minute: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 8, 4, hour, minute, 0).unwrap()
@@ -24,7 +26,7 @@ fn account(email: &str, organization: &str) -> Account {
         },
         plan: Some("pro".to_string()),
         enabled: true,
-        quarantined: false,
+        quarantine: None,
         group: None,
         utilization: None,
     }
@@ -56,7 +58,7 @@ fn machine_holding_three_accounts() -> FakeHost {
 
     let mut overflow = account(SECOND_EMAIL, "Overflow Ltd");
     overflow.group = Some("work".to_string());
-    overflow.quarantined = true;
+    overflow.quarantine = Some(Quarantine::RenewalRejected);
     registry.upsert(overflow);
 
     let mut spare = account(THIRD_EMAIL, "Spare Ltd");
@@ -193,7 +195,11 @@ fn list_json_carries_an_observation_time_on_every_figure() {
     assert_eq!(active["active"], true);
     assert_eq!(active["group"], "work");
     assert_eq!(active["enabled"], true);
-    assert_eq!(active["quarantined"], false);
+    assert!(
+        active["quarantined"].is_null(),
+        "an Account that works says nothing about a Quarantine, which is what a \
+         script reading it as false reads"
+    );
     assert!(active["alias"].is_null());
 
     let windows = active["utilization"]["windows"].as_array().unwrap();
@@ -211,7 +217,12 @@ fn list_json_carries_an_observation_time_on_every_figure() {
 
     let overflow = &accounts[1];
     assert_eq!(overflow["alias"], "overflow");
-    assert_eq!(overflow["quarantined"], true);
+    assert_eq!(
+        overflow["quarantined"]["reason"], "renewal-rejected",
+        "and a broken one says what broke it, so a script can tell a Credential \
+         Anthropic turned down from one Perch never had: {overflow}"
+    );
+    assert!(overflow["quarantined"]["detail"].is_string());
     assert_eq!(overflow["active"], false);
     assert_eq!(
         overflow["utilization"]["never_observed"], true,

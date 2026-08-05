@@ -19,7 +19,7 @@ use crate::commands::say;
 use crate::cycle::{self, Scope};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::registry::{self, Account, Registry};
+use crate::registry::{self, Account, Quarantine, Registry};
 use crate::switch::{self, Captured, Interrupted};
 use crate::target::{self, Target};
 use crate::utilization;
@@ -62,7 +62,16 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
         Err(Interrupted {
             error,
             incoming_is_live,
+            quarantine,
         }) => {
+            // Found out the hard way that the Account cannot be switched to at
+            // all. Recorded before anything else is said about it, so the next
+            // command shows it as broken rather than making the same discovery
+            // from scratch — and so `perch list` names it as something needing
+            // attention rather than as an Account that simply failed once.
+            if let Some(why) = quarantine {
+                record_quarantine(host, &mut registry, incoming.email(), why);
+            }
             // Which Account is active is a fact about which Credential is in
             // the Default Profile. Recording anything else would send the next
             // Switch to Capture this Credential into the wrong Profile, which
@@ -101,11 +110,13 @@ fn decide(
             match found {
                 Target::Group { name } => Scope::Group(name),
                 Target::Alias { email, .. } | Target::Account { email } => {
+                    let incoming = registry
+                        .account(&email)
+                        .cloned()
+                        .expect("resolution named an Account Perch holds");
+                    refuse_a_quarantined_account(registry, &incoming)?;
                     return Ok(Decision {
-                        incoming: registry
-                            .account(&email)
-                            .cloned()
-                            .expect("resolution named an Account Perch holds"),
+                        incoming,
                         caveat: None,
                     });
                 }
@@ -123,6 +134,27 @@ fn decide(
         incoming: choice.account,
         caveat: choice.caveat,
     })
+}
+
+/// Refuses to make a Credential live that is known not to work.
+///
+/// Cycling has never been able to choose a Quarantined Account; naming one is
+/// where the user would otherwise find out by losing the session they were in.
+/// The refusal is a code of its own because the fix is one of its own: no other
+/// refusal in Perch is answered by logging in again, and none of them is
+/// answered by trying the same command a second time.
+fn refuse_a_quarantined_account(registry: &Registry, incoming: &Account) -> Result<()> {
+    let Some(why) = incoming.quarantine else {
+        return Ok(());
+    };
+    Err(PerchError::Quarantined(format!(
+        "{} is Quarantined: {}.\n\
+         Nothing was changed — switching to it would make a Credential live \
+         that no longer works, and cost you the Account you are on. {}",
+        registry.named_for_the_user(incoming.email()),
+        why.because(),
+        registry::how_to_repair(incoming.email()),
+    )))
 }
 
 /// The Account a bare `perch switch` would be leaving, which is the one whose
@@ -158,6 +190,20 @@ fn already_there(
             registry.named_for_the_user(incoming.email())
         ))
     }))
+}
+
+/// Writes down that an Account is Quarantined, on the way out of a Switch that
+/// discovered it.
+///
+/// Best effort, and deliberately so: the failure the user is about to read is
+/// the one that matters, and it already says the Account has to be logged into
+/// again. Losing that failure over a registry Perch could not write would be a
+/// poor trade — the worst a missed write costs is making the same discovery
+/// next time.
+fn record_quarantine(host: &dyn Host, registry: &mut Registry, email: &str, why: Quarantine) {
+    if registry.quarantine(email, why) {
+        let _ = registry::save(host, registry);
+    }
 }
 
 fn record_active(host: &dyn Host, registry: &mut Registry, incoming: &Account) -> Result<()> {

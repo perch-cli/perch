@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::error::{PerchError, Result};
 use crate::host::{Host, HostError};
@@ -20,7 +20,11 @@ use crate::probe::Identity;
 /// Version 2 stopped recording where an Account's Credential is kept: a store
 /// is derived from the Profile's path rather than written down, so a registry
 /// can no longer disagree with the derivation (ADR 0020).
-pub const CURRENT_VERSION: u32 = 2;
+///
+/// Version 3 records *why* an Account is Quarantined rather than only that it
+/// is. A reason is not decoration: it is the difference between an Account the
+/// user can act on and one that is broken for reasons nobody wrote down.
+pub const CURRENT_VERSION: u32 = 3;
 
 /// One Quota Window's Utilization, as observed at a point in time (ADR 0015).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -42,6 +46,80 @@ pub struct CachedUtilization {
     pub windows: Vec<WindowUtilization>,
 }
 
+/// Why an Account's Credential can no longer be used and cannot be recovered
+/// from anything Perch holds.
+///
+/// Recorded rather than merely counted, because "this Account is broken" and
+/// "this Account is broken because Anthropic retired its refresh token" are
+/// different pieces of news: the first leaves the user guessing whether Perch
+/// lost something, and the second says what happened and implies the repair.
+/// Every one of these is terminal — none of them can be undone by trying again,
+/// which is exactly what makes it a Quarantine rather than a failed command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Quarantine {
+    /// Anthropic turned the refresh token down — retired, revoked, or belonging
+    /// to a login that has been ended elsewhere.
+    RenewalRejected,
+    /// Anthropic Rotated the refresh token and the new one could not be stored,
+    /// so the old one is retired and the new one is gone: ADR 0006's crash
+    /// between two writes, arriving as a failed write instead of a crash.
+    RotationLost,
+    /// The Credential carries no refresh token, so the access token that ran out
+    /// was the last thing it could offer.
+    NoRefreshToken,
+    /// Neither of the Profile's Credential Stores holds anything at all.
+    NoCredential,
+    /// A Quarantine a Perch that did not record reasons left behind. Only ever
+    /// read, never written: a registry from before reasons still says the
+    /// Account is broken rather than quietly reading as healthy.
+    #[serde(rename = "unrecorded")]
+    Unrecorded,
+}
+
+impl Quarantine {
+    /// What happened, as the middle of a sentence about the Account: "{named}
+    /// is Quarantined: {because}."
+    pub fn because(&self) -> &'static str {
+        match self {
+            Quarantine::RenewalRejected => "Anthropic would not renew its Credential",
+            Quarantine::RotationLost => {
+                "Anthropic Rotated its refresh token and the new one could not be stored, \
+                 so the one Perch holds is retired"
+            }
+            Quarantine::NoRefreshToken => {
+                "the Credential Perch holds carries no refresh token, so it cannot be renewed"
+            }
+            Quarantine::NoCredential => "Perch holds no Credential for it",
+            Quarantine::Unrecorded => {
+                "its Credential could no longer be used, and Perch did not record reasons \
+                 when it found out"
+            }
+        }
+    }
+
+    /// The reason as a script reads it, which is the spelling the registry
+    /// records.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Quarantine::RenewalRejected => "renewal-rejected",
+            Quarantine::RotationLost => "rotation-lost",
+            Quarantine::NoRefreshToken => "no-refresh-token",
+            Quarantine::NoCredential => "no-credential",
+            Quarantine::Unrecorded => "unrecorded",
+        }
+    }
+}
+
+/// How a Quarantine is asked about and how it is put right, said the same way
+/// wherever an Account is shown as broken.
+pub fn how_to_repair(target: &str) -> String {
+    format!(
+        "`perch relogin {target}` logs it in again in place, keeping its Alias, \
+         its Group and whether Cycling may choose it."
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Account {
     /// Who this Account is. Its email address is also its identifier.
@@ -54,9 +132,18 @@ pub struct Account {
     /// Whether the Account is a Cycle candidate. Later specs toggle this.
     #[serde(default = "enabled_by_default")]
     pub enabled: bool,
-    /// An Account whose Credential can no longer be recovered.
-    #[serde(default)]
-    pub quarantined: bool,
+    /// Why this Account's Credential can no longer be used, when it cannot.
+    ///
+    /// Absent is the ordinary case, so it is left out of the file entirely: a
+    /// registry an older Perch reads back still says every healthy Account is
+    /// healthy.
+    #[serde(
+        default,
+        alias = "quarantined",
+        deserialize_with = "quarantine_as_recorded",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub quarantine: Option<Quarantine>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -65,6 +152,32 @@ pub struct Account {
 
 fn enabled_by_default() -> bool {
     true
+}
+
+/// Reads a Quarantine however the registry that holds it spelled one.
+///
+/// Before version 3 this was a flag, so a registry Perch wrote earlier says
+/// `false` where it now says nothing and `true` where it now names a reason.
+/// Both still have to load: a registry that will not parse is worse than one
+/// whose oldest entry cannot say why.
+fn quarantine_as_recorded<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<Quarantine>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Recorded {
+        Flag(bool),
+        Reason(Quarantine),
+    }
+
+    Ok(match Option::<Recorded>::deserialize(deserializer)? {
+        None | Some(Recorded::Flag(false)) => None,
+        Some(Recorded::Flag(true)) => Some(Quarantine::Unrecorded),
+        Some(Recorded::Reason(reason)) => Some(reason),
+    })
 }
 
 /// How Cycling orders the Accounts in a Group.
@@ -280,6 +393,12 @@ impl Account {
         crate::probe::store_for_profile(host, &self.profile_dir(host)?)
     }
 
+    /// Whether this Account is Quarantined, for the places that only need the
+    /// fact and not the reason.
+    pub fn quarantined(&self) -> bool {
+        self.quarantine.is_some()
+    }
+
     /// The cached Utilization, if any figure has ever been observed. An empty
     /// set of windows is not an observation.
     pub fn observed_utilization(&self) -> Option<&CachedUtilization> {
@@ -467,6 +586,34 @@ impl Registry {
         Some((held, email))
     }
 
+    /// Records that an Account's Credential can no longer be used, and says
+    /// whether that is news.
+    ///
+    /// An Account is never dropped for this: it stays listed, keeps its Alias,
+    /// its Group and its place, and goes on being named. An Account that
+    /// vanishes reads as data loss, and a broken one reads as something needing
+    /// attention — which is what it is.
+    ///
+    /// The first reason stands. A Quarantined Account asked a second question
+    /// fails a second way, and the reason worth keeping is the one that says how
+    /// it broke rather than the last thing that could not be done to it since.
+    pub fn quarantine(&mut self, email: &str, why: Quarantine) -> bool {
+        match self.account_mut(email) {
+            Some(account) if account.quarantine.is_none() => {
+                account.quarantine = Some(why);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Returns an Account to the pool of ones that work, reporting what it was
+    /// Quarantined for. Only a login can do this: nothing else produces a
+    /// Credential to replace the one that stopped working.
+    pub fn release(&mut self, email: &str) -> Option<Quarantine> {
+        self.account_mut(email)?.quarantine.take()
+    }
+
     pub fn upsert(&mut self, account: Account) {
         match self
             .accounts
@@ -640,7 +787,7 @@ mod tests {
             },
             plan: Some("pro".into()),
             enabled: true,
-            quarantined: false,
+            quarantine: None,
             group: None,
             utilization: None,
         });
@@ -655,7 +802,65 @@ mod tests {
     #[test]
     fn the_version_is_recorded_so_later_specs_can_migrate() {
         let json = serde_json::to_string(&Registry::default()).unwrap();
-        assert!(json.contains("\"version\":2"));
+        assert!(json.contains(&format!("\"version\":{CURRENT_VERSION}")));
+    }
+
+    #[test]
+    fn a_quarantine_a_registry_recorded_as_a_flag_still_reads_as_broken() {
+        let earlier = r#"{
+          "version": 2,
+          "accounts": [
+            {"identity": {"email": "broken@example.com"}, "quarantined": true},
+            {"identity": {"email": "fine@example.com"}, "quarantined": false}
+          ]
+        }"#;
+
+        let registry: Registry =
+            serde_json::from_str(earlier).expect("a registry Perch wrote before reasons existed");
+
+        assert_eq!(
+            registry.account("broken@example.com").unwrap().quarantine,
+            Some(Quarantine::Unrecorded),
+            "an Account a flag said was broken is still broken, and says as much \
+             about why as the flag did"
+        );
+        assert!(!registry.account("fine@example.com").unwrap().quarantined());
+    }
+
+    #[test]
+    fn a_healthy_account_records_no_quarantine_at_all() {
+        let mut registry = Registry::default();
+        registry.upsert(Account {
+            identity: Identity {
+                email: "someone@example.com".into(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            enabled: true,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        });
+
+        let json = serde_json::to_string(&registry).unwrap();
+        assert!(!json.contains("quarantine"), "{json}");
+
+        assert!(registry.quarantine("someone@example.com", Quarantine::RotationLost));
+        assert!(
+            !registry.quarantine("someone@example.com", Quarantine::NoCredential),
+            "the reason kept is how it broke, not the last thing that could not \
+             be done to it since"
+        );
+        let mut back: Registry =
+            serde_json::from_str(&serde_json::to_string(&registry).unwrap()).unwrap();
+        assert_eq!(
+            back.release("someone@example.com"),
+            Some(Quarantine::RotationLost),
+            "the reason survives the round trip, and a login is what ends it"
+        );
+        assert!(!back.account("someone@example.com").unwrap().quarantined());
     }
 
     #[test]
@@ -670,7 +875,7 @@ mod tests {
             },
             plan: None,
             enabled: true,
-            quarantined: false,
+            quarantine: None,
             group: None,
             utilization: None,
         });

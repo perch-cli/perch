@@ -26,7 +26,7 @@ use crate::host::{self, Host};
 use crate::lock;
 use crate::probe::{self, Credential, Store};
 use crate::profile;
-use crate::registry::{self, Account};
+use crate::registry::{self, Account, Quarantine};
 
 /// What the Capture found, which is the part of a Switch worth saying out loud:
 /// it is the part that protects the Account being left behind.
@@ -47,6 +47,27 @@ pub struct Interrupted {
     /// which Account Perch must now record as active — being active is a fact
     /// about which Credential is in the Default Profile, not a wish.
     pub incoming_is_live: bool,
+    /// Set when the Switch did not merely fail but found the incoming Account
+    /// unusable for good, so the caller records it rather than letting the same
+    /// discovery be made again from scratch next time.
+    pub quarantine: Option<Quarantine>,
+}
+
+/// A Switch that stopped, with nothing about the incoming Account learned from
+/// it beyond the failure itself.
+fn stopped(error: PerchError) -> Interrupted {
+    // The one failure a Switch diagnoses rather than merely reports is a
+    // Profile with neither store holding a Credential: nothing Perch has can
+    // make that Account switchable again, which is what a Quarantine is. It is
+    // raised where it is found, in `prepare`, and is the only `Quarantined`
+    // failure this module produces.
+    let quarantine =
+        matches!(error, PerchError::Quarantined(_)).then_some(Quarantine::NoCredential);
+    Interrupted {
+        error,
+        incoming_is_live: false,
+        quarantine,
+    }
 }
 
 /// Everything the three steps need, established before any lock is taken.
@@ -69,10 +90,7 @@ pub fn perform(
     incoming: &Account,
     outgoing: Option<&Account>,
 ) -> std::result::Result<Captured, Interrupted> {
-    let prepared = prepare(host, incoming, outgoing).map_err(|error| Interrupted {
-        error,
-        incoming_is_live: false,
-    })?;
+    let prepared = prepare(host, incoming, outgoing).map_err(stopped)?;
 
     let mut incoming_is_live = false;
     let switched: Result<Captured> = lock::under(host, probe::locks_for(&prepared.store), |held| {
@@ -94,6 +112,31 @@ pub fn perform(
     switched.map_err(|error| Interrupted {
         error,
         incoming_is_live,
+        quarantine: None,
+    })
+}
+
+/// Makes an Account's Credential the live one without Capturing what it
+/// replaces.
+///
+/// Every Switch Captures first, because the live Credential is the only good
+/// copy of the outgoing Account's (ADR 0006). A `perch relogin` of the Account
+/// you are on is the one case where that is false in both directions: the
+/// Credential about to be replaced belongs to the Account being repaired, and a
+/// login has already replaced it. Capturing here would write the broken copy
+/// over the fresh one — the one mistake this design cannot recover from,
+/// arriving as tidiness.
+///
+/// The Credential written is the one in the Account's own Profile, read back
+/// out of it rather than passed in, so the same store that a `perch switch`
+/// tomorrow will read is the store this proves works today.
+pub fn make_live(host: &dyn Host, account: &Account) -> Result<()> {
+    let prepared = prepare(host, account, None)?;
+
+    lock::under(host, probe::locks_for(&prepared.store), |held| {
+        profile::store_credential(host, &prepared.store, prepared.credential.as_str())?;
+        held.renew();
+        patch_identity(host, &prepared)
     })
 }
 
@@ -129,11 +172,13 @@ fn prepare(host: &dyn Host, incoming: &Account, outgoing: Option<&Account>) -> R
     // 0020): an Account is switchable to as long as its Credential is
     // somewhere Claude Code would have looked.
     let held = credentials::read(host, &incoming.store(host)?)?.ok_or_else(|| {
-        PerchError::NotFound(format!(
-            "Perch holds no Credential for {}.\n\
-             Nothing was changed. Log that Account in again with `perch relogin {}`.",
+        PerchError::Quarantined(format!(
+            "Perch holds no Credential for {}, so it is Quarantined — it stays \
+             listed and named, and nothing switches to it until it has been \
+             logged into again.\n\
+             Nothing was changed. {}",
             incoming.email(),
-            incoming.email()
+            registry::how_to_repair(incoming.email()),
         ))
     })?;
     let credential = probe::understand_credential(
@@ -216,7 +261,11 @@ fn identity_block_for(host: &dyn Host, incoming: &Account) -> Result<String> {
 }
 
 /// Refuses to touch a Profile something else is holding (ADR 0005).
-fn refuse_if_live(host: &dyn Host, account: &Account, version: &str) -> Result<()> {
+///
+/// Public because `perch relogin` asks it before it spends a login rather than
+/// after: a Profile Perch may not write to is a Profile no browser round trip
+/// was ever going to repair.
+pub fn refuse_if_live(host: &dyn Host, account: &Account, version: &str) -> Result<()> {
     let running = probe::live_clients(host, &account.profile_dir(host)?, version)?;
     if running.is_empty() {
         return Ok(());

@@ -14,11 +14,12 @@ use chrono::{TimeZone, Utc};
 use common::*;
 use perch::error::{
     EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NOT_FOUND, EXIT_NOTHING_TO_DO, EXIT_PROBE_REFUSED,
-    EXIT_PROFILE_LIVE,
+    EXIT_PROFILE_LIVE, EXIT_QUARANTINED,
 };
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
 use perch::probe;
+use perch::registry::Quarantine;
 
 const REFRESH_LOCK: &str = "/Users/someone/.claude/.oauth_refresh.lock";
 const LEGACY_LOCK: &str = "/Users/someone/.claude.lock";
@@ -615,16 +616,27 @@ fn a_target_that_names_nothing_is_refused_before_anything_is_touched() {
 }
 
 #[test]
-fn an_account_whose_credential_perch_no_longer_holds_is_refused_by_name() {
+fn an_account_whose_credential_perch_no_longer_holds_is_quarantined_rather_than_dropped() {
     let host = machine_with_two_accounts();
     host.forget_keychain_item(&profile_service(&host, SECOND_EMAIL), LOGIN_NAME);
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
     let error = result.expect_err("there is no Credential to make live");
-    assert_eq!(error.exit_code(), EXIT_NOT_FOUND);
+    assert_eq!(error.exit_code(), EXIT_QUARANTINED);
     assert!(error.to_string().contains("perch relogin"), "{error}");
     assert_eq!(live_credential(&host).as_deref(), Some(CREDENTIAL));
+
+    assert_eq!(
+        quarantine_of(&host, SECOND_EMAIL),
+        Some(Quarantine::NoCredential),
+        "what Perch found out is written down, so the next command says the \
+         Account is broken rather than discovering it again"
+    );
+    assert!(
+        registry_of(&host).account(SECOND_EMAIL).is_some(),
+        "and the Account is still held: one that vanished would read as data loss"
+    );
 }
 
 #[test]

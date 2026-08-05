@@ -18,6 +18,7 @@ pub mod host;
 pub mod json;
 pub mod keychain;
 pub mod lock;
+pub mod login;
 pub mod observe;
 pub mod probe;
 pub mod profile;

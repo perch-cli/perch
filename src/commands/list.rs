@@ -20,7 +20,7 @@ use crate::commands::{CYCLING_AMONG_UNGROUPED, IN_NO_GROUP, say, write_failed};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::observe::Report;
-use crate::registry::{Account, Registry};
+use crate::registry::{self, Account, Registry};
 use crate::utilization;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -166,11 +166,33 @@ fn state_of(account: &Account) -> String {
     } else {
         "disabled"
     };
-    if account.quarantined {
+    if account.quarantined() {
         format!("{pool}, quarantined")
     } else {
         pool.to_string()
     }
+}
+
+/// What each Quarantined Account is Quarantined for, under the table rather
+/// than in it.
+///
+/// A reason is a sentence and a column is not, and the reason is the half of
+/// the state that says what to do about it — so it is written out in full for
+/// every broken Account, with the one command that repairs it. Nothing is said
+/// at all when nothing is broken, which is the ordinary case.
+fn why_they_are_quarantined(registry: &Registry, accounts: &[&Account]) -> Vec<String> {
+    accounts
+        .iter()
+        .filter_map(|account| {
+            let why = account.quarantine?;
+            Some(format!(
+                "{} is Quarantined: {}. {}",
+                registry.named_for_the_user(account.email()),
+                why.because(),
+                registry::how_to_repair(account.email()),
+            ))
+        })
+        .collect()
 }
 
 fn render_human(
@@ -218,13 +240,20 @@ fn render_human(
         }
     }
 
-    if rows.iter().any(|row| row.active) {
+    let broken = why_they_are_quarantined(registry, accounts);
+    if rows.iter().any(|row| row.active) || !broken.is_empty() {
         say(out, "")?;
+    }
+    if rows.iter().any(|row| row.active) {
         say(out, "* is the active Account.")?;
     }
 
     if matches!(scope, Scope::Ungrouped) {
         say(out, &format!("Cycling {CYCLING_AMONG_UNGROUPED}."))?;
+    }
+
+    for why in broken {
+        say(out, &why)?;
     }
 
     Ok(())
@@ -294,7 +323,13 @@ fn render_json(
                 "alias": registry.alias_of(account.email()),
                 "group": account.group,
                 "enabled": account.enabled,
-                "quarantined": account.quarantined,
+                // Absent reads as false and present reads as true wherever a
+                // script asks whether it is set, so the fact a script already
+                // branches on still branches the same way — and now carries why.
+                "quarantined": account.quarantine.map(|why| json!({
+                    "reason": why.as_str(),
+                    "detail": why.because(),
+                })),
                 "active": registry.active.as_deref() == Some(account.email()),
                 "organization": account.identity.organization_name,
                 "plan": account.plan,
