@@ -57,13 +57,13 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
 
     let now = host.now();
     match scope {
-        Some(scope) => list::render(out, &registry, scope, now, args.json, &report),
+        Some(scope) => list::render(host, out, &registry, scope, now, args.json, &report),
         None => {
             let account = registry
                 .account(&active)
                 .expect("the active Account is one Perch holds");
             if args.json {
-                render_json(out, account, now, &report)
+                render_json(host, out, account, now, &report)
             } else {
                 render_human(out, account, now, &report)
             }
@@ -124,6 +124,7 @@ fn render_human(
 }
 
 fn render_json(
+    host: &dyn Host,
     out: &mut dyn Write,
     account: &Account,
     now: DateTime<Utc>,
@@ -135,7 +136,7 @@ fn render_json(
             "account_uuid": account.identity.account_uuid,
             "organization": account.identity.organization_name,
             "plan": account.plan,
-            "profile_dir": account.profile.dir,
+            "profile_dir": account.profile_dir(host),
         },
         "utilization": utilization::document(account, now),
         "refresh": report.document(),

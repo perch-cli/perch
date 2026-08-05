@@ -11,7 +11,6 @@
 //! nothing else.
 
 use std::io::Write;
-use std::path::Path;
 
 use crate::adopt;
 use crate::commands::{say, write_failed};
@@ -100,20 +99,19 @@ fn settle_into_a_profile(
     group: Option<String>,
 ) -> Result<Account> {
     let dir = registry::profile_dir_for(host, &pending.identity.email);
-    let profile = profile::create(host, &dir, pending.credential.as_str())?;
+    let store = profile::create(host, &dir, pending.credential.as_str())?;
 
     // The Identity travels with the Credential it describes: this directory is
     // the Account's own configuration, and the file the login wrote for it is
     // already exactly what belongs there.
-    if let Err(err) = carry_identity_file(host, &pending.identity_json, &dir) {
-        profile::discard(host, &profile);
+    if let Err(err) = carry_identity_file(host, &pending.identity_json, &store) {
+        profile::discard(host, &store);
         return Err(err);
     }
 
     Ok(Account {
         identity: pending.identity,
         plan: pending.credential.subscription_type.clone(),
-        profile,
         enabled: true,
         quarantined: false,
         group,
@@ -130,15 +128,12 @@ fn login_in_a_directory_of_its_own(
     version: &str,
 ) -> Result<PendingAccount> {
     let dir = registry::pending_login_dir(host, host.now());
-    host.create_dir_all(&dir)
+    // The login writes its Credential in here, so this is as much a place a
+    // Credential lives as a Profile is (ADR 0020).
+    host.create_private_dir_all(&dir)
         .map_err(|err| PerchError::Other(format!("could not create {}: {err}", dir.display())))?;
 
     let store = probe::store_for_profile(host, &dir)?;
-    let ran_in = registry::Profile {
-        dir: dir.clone(),
-        keychain_service: store.keychain_service.clone(),
-        keychain_account: store.keychain_account.clone(),
-    };
 
     announce(out, registry)?;
     let status = host
@@ -146,7 +141,7 @@ fn login_in_a_directory_of_its_own(
         .map_err(|err| PerchError::Other(format!("could not launch a login: {err}")))?;
 
     let produced = account_the_login_produced(host, &store, version, status, registry);
-    profile::discard(host, &ran_in);
+    profile::discard(host, &store);
     produced
 }
 
@@ -184,7 +179,7 @@ fn account_the_login_produced(
             "Perch already holds {known_as}, in {}.\n\
              Nothing was added — two Profiles for one Account would fight over it.\n\
              To repair that Account instead, run `perch relogin {}`.",
-            existing.profile.dir.display(),
+            existing.profile_dir(host).display(),
             existing.email()
         )));
     }
@@ -203,11 +198,10 @@ fn account_the_login_produced(
     })
 }
 
-fn carry_identity_file(host: &dyn Host, contents: &str, dir: &Path) -> Result<()> {
-    let store = probe::store_for_profile(host, dir)?;
+fn carry_identity_file(host: &dyn Host, contents: &str, store: &probe::Store) -> Result<()> {
     host.write_file(&store.identity_file, contents)
         .map_err(|err| PerchError::FileWrite {
-            path: store.identity_file,
+            path: store.identity_file.clone(),
             source: std::io::Error::other(err.to_string()),
         })
 }

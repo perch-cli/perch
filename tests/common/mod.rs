@@ -12,7 +12,8 @@ use perch::commands::group::GroupCommand;
 use perch::commands::list::ListArgs;
 use perch::commands::status::StatusArgs;
 use perch::commands::switch::SwitchArgs;
-use perch::host::{Execution, FakeHost};
+use perch::credentials;
+use perch::host::{Execution, FakeHost, Platform};
 use perch::probe;
 
 pub const CLAUDE_VERSION: &str = "2.1.221";
@@ -90,15 +91,32 @@ pub fn logged_in_machine() -> FakeHost {
         .with_file("/Users/someone/.claude.json", IDENTITY_FILE)
 }
 
+/// A machine that is not a Mac: Claude Code installed and logged in, keeping
+/// its Credential in the file that is the store there (ADR 0020).
+pub fn logged_in_machine_off_macos() -> FakeHost {
+    machine_with_claude_code()
+        .with_platform(Platform::Other)
+        .with_file(CREDENTIALS_PATH, CREDENTIAL)
+        .with_file(IDENTITY_PATH, IDENTITY_FILE)
+}
+
+/// The plaintext Credential Store of the default config directory.
+pub const CREDENTIALS_PATH: &str = "/Users/someone/.claude/.credentials.json";
+
 /// A login that completes, leaving behind exactly what Claude Code would in
-/// the config directory it was pointed at: the Credential in that directory's
-/// own keychain namespace, and the Identity in its `.claude.json`.
+/// the config directory it was pointed at: the Credential in whichever store
+/// that platform's Claude Code writes to, and the Identity in its
+/// `.claude.json`.
 pub fn login_producing(
     credential: &'static str,
     identity_file: &'static str,
 ) -> impl Fn(&FakeHost, &Path) -> i32 {
     move |host, dir| {
-        host.set_keychain_item(&probe::service_name_for(dir, false), LOGIN_NAME, credential);
+        let store = probe::store_for_profile(host, dir).expect("USER is set");
+        let [primary, _] = credentials::stores_for(host, &store);
+        primary
+            .write(host, credential)
+            .expect("the login stores what it produced");
         host.set_file(dir.join(".claude.json"), identity_file);
         0
     }
@@ -194,6 +212,22 @@ pub fn run_add(host: &FakeHost, args: AddArgs) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
     let result = perch::commands::add::run(host, args, &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
+}
+
+/// Where an Account's Profile keeps its things, derived the way every command
+/// derives it now that nothing records it (ADR 0020).
+pub fn store_of(host: &FakeHost, email: &str) -> probe::Store {
+    probe::store_for_profile(host, &perch::registry::profile_dir_for(host, email))
+        .expect("USER is set")
+}
+
+/// The Credential a Profile holds, from whichever of its two Credential Stores
+/// holds one — which is the only question a test about a stored Credential
+/// should be asking.
+pub fn credential_of(host: &FakeHost, email: &str) -> Option<String> {
+    perch::credentials::read(host, &store_of(host, email))
+        .expect("the store could be consulted")
+        .map(|held| held.credential)
 }
 
 /// The registry as it would be read back by the next command Perch runs.

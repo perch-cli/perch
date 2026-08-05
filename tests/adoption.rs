@@ -53,18 +53,13 @@ fn the_credential_is_copied_into_the_profiles_own_namespace() {
 
     run_status(&host, false).0.unwrap();
 
-    let registry = registry::load(&host).unwrap().unwrap();
-    let profile = &registry.accounts[0].profile;
+    let store = store_of(&host, EMAIL);
 
     assert_ne!(
-        profile.keychain_service, DEFAULT_SERVICE,
+        store.keychain_service, DEFAULT_SERVICE,
         "a Profile must have a namespace of its own"
     );
-    assert_eq!(
-        host.keychain_item(&profile.keychain_service, LOGIN_NAME)
-            .as_deref(),
-        Some(CREDENTIAL)
-    );
+    assert_eq!(credential_of(&host, EMAIL).as_deref(), Some(CREDENTIAL));
     assert_eq!(
         host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
         Some(CREDENTIAL),
@@ -78,9 +73,8 @@ fn the_profile_keeps_the_block_claude_code_wrote_for_the_adopted_account() {
 
     run_status(&host, false).0.unwrap();
 
-    let registry = registry::load(&host).unwrap().unwrap();
     let kept = host
-        .file(registry.accounts[0].profile.dir.join(".claude.json"))
+        .file(store_of(&host, EMAIL).identity_file)
         .expect("the Profile holds how Claude Code describes this Account");
     let block = perch::probe::oauth_account_block(&kept).expect("a block");
 

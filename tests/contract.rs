@@ -3,6 +3,9 @@
 //!
 //! These run in CI to find drift before users do. They are macOS-only, because
 //! everything they assert is macOS-specific, and they never print a Credential.
+//! The beliefs that hold on every platform — where the plaintext Credential
+//! Store is, and what a file holding a Credential may be read by — are in
+//! `contract_credentials.rs`.
 //!
 //! On a machine with no Claude Code and no login — a CI runner, for instance —
 //! each test asserts the outcome that situation should produce, rather than

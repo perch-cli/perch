@@ -12,9 +12,17 @@ these — it only chooses between ones you have already logged into.
 _Avoid_: user, login, session
 
 **Credential**:
-The OAuth secret that proves the caller is a given Account. Held by the
-operating system's keychain, not by Perch.
+The OAuth secret that proves the caller is a given Account. Held in a Credential
+Store, not by Perch.
 _Avoid_: token, key, secret
+
+**Credential Store**:
+Where a Credential is kept: the operating system's keychain, or a file of JSON
+readable only by its owner. Which one is not Perch's choice — it is wherever the
+installed Claude Code would put that Account's Credential, so macOS uses the
+keychain and every other platform uses the file. Each Profile has both, one
+primary and one fallback, and a Credential is read from whichever holds it.
+_Avoid_: keychain, vault, backend
 
 **Identity**:
 The non-secret description of an Account — its email address, organization, and
@@ -38,9 +46,9 @@ _Avoid_: selector, subject, handle
 
 **Profile**:
 Perch's local handle on one Account: a directory Claude Code would treat as its
-whole configuration. Because the keychain namespace is derived from the
-directory's path, a Profile is what lets a stored Credential live in the
-keychain rather than in a file Perch invented.
+whole configuration. Because both Credential Stores are derived from the
+directory's path, a Profile is what lets a stored Credential live where Claude
+Code would look for it rather than somewhere Perch invented.
 _Avoid_: slot, vault entry, workspace
 
 **Default Profile**:

@@ -12,7 +12,10 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, TimeZone, Utc};
 
-use super::{Execution, Host, HostError, HttpRequest, HttpResponse};
+use super::{
+    Execution, Host, HostError, HttpRequest, HttpResponse, PRIVATE_DIR_MODE, PRIVATE_FILE_MODE,
+    Platform,
+};
 use crate::keychain::KeychainError;
 
 /// One effect the fake was asked to perform, in order.
@@ -20,6 +23,10 @@ use crate::keychain::KeychainError;
 pub enum Effect {
     ReadFile(PathBuf),
     WroteFile(PathBuf),
+    /// A file created for its owner alone: a Credential, or nothing.
+    WrotePrivateFile(PathBuf),
+    /// A file that was there already and has been narrowed to its owner.
+    MadePrivate(PathBuf),
     CreatedDir(PathBuf),
     /// A directory created only if nobody had: an acquired lock.
     Took(PathBuf),
@@ -82,6 +89,10 @@ impl Sent {
     }
 }
 
+/// What an ordinary directory is created as — `mkdir` under the usual umask.
+/// A directory that will hold a Credential is not this (ADR 0020).
+const ORDINARY_DIR_MODE: u32 = 0o755;
+
 /// Why the keychain refuses everything, when a test asks it to.
 #[derive(Debug, Clone)]
 pub struct KeychainLock {
@@ -97,8 +108,13 @@ pub type Login = Box<dyn Fn(&FakeHost, &Path) -> i32>;
 pub struct FakeHost {
     home: PathBuf,
     now: RefCell<DateTime<Utc>>,
+    platform: RefCell<Platform>,
     env: RefCell<BTreeMap<String, String>>,
     files: RefCell<BTreeMap<PathBuf, String>>,
+    /// The permissions of everything that has any, so a test can say that a
+    /// Credential was never briefly readable by anyone else.
+    modes: RefCell<BTreeMap<PathBuf, u32>>,
+    notes: RefCell<Vec<String>>,
     unreadable: RefCell<BTreeMap<PathBuf, String>>,
     unwritable: RefCell<BTreeMap<PathBuf, String>>,
     dirs: RefCell<BTreeSet<PathBuf>>,
@@ -130,8 +146,13 @@ impl FakeHost {
         FakeHost {
             home,
             now: RefCell::new(Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap()),
+            // The platform Perch was written for first, so a test says which
+            // Credential Store it is about only when that is what it is about.
+            platform: RefCell::new(Platform::MacOs),
             env: RefCell::new(env),
             files: RefCell::new(BTreeMap::new()),
+            modes: RefCell::new(BTreeMap::new()),
+            notes: RefCell::new(Vec::new()),
             unreadable: RefCell::new(BTreeMap::new()),
             unwritable: RefCell::new(BTreeMap::new()),
             dirs: RefCell::new(BTreeSet::new()),
@@ -162,8 +183,24 @@ impl FakeHost {
         *self.now.borrow_mut() = now;
     }
 
+    /// A machine that is not a Mac, where a Credential lives in a file rather
+    /// than in a keychain (ADR 0020).
+    pub fn with_platform(self, platform: Platform) -> Self {
+        *self.platform.borrow_mut() = platform;
+        self
+    }
+
     pub fn with_file(self, path: impl AsRef<Path>, contents: &str) -> Self {
         self.set_file(path, contents);
+        self
+    }
+
+    /// A file somebody else could read: one written by an older Claude Code,
+    /// or restored from a backup that forgot its mode.
+    pub fn with_file_mode(self, path: impl AsRef<Path>, mode: u32) -> Self {
+        self.modes
+            .borrow_mut()
+            .insert(path.as_ref().to_path_buf(), mode);
         self
     }
 
@@ -361,6 +398,18 @@ impl FakeHost {
         self.files.borrow().get(path.as_ref()).cloned()
     }
 
+    /// The permissions a path ended up with, so a test can say that a file
+    /// holding a Credential was created for its owner alone.
+    pub fn mode_of(&self, path: impl AsRef<Path>) -> Option<u32> {
+        self.modes.borrow().get(path.as_ref()).copied()
+    }
+
+    /// What the user was told that they did not ask about, in order and
+    /// without repeats.
+    pub fn notes(&self) -> Vec<String> {
+        self.notes.borrow().clone()
+    }
+
     pub fn keychain_item(&self, service: &str, account: &str) -> Option<String> {
         self.keychain
             .borrow()
@@ -376,6 +425,32 @@ impl FakeHost {
             .keys()
             .map(|(service, _)| service.clone())
             .collect()
+    }
+
+    /// Creates a directory and those above it, giving `mode` to the ones that
+    /// were not already there.
+    ///
+    /// `mkdir -p` leaves an existing directory's mode alone, and a fake that
+    /// stamped every parent instead would report a Profile as private however
+    /// it had been created — which is the one thing these modes are here to
+    /// tell apart (ADR 0020).
+    fn make_dirs(&self, path: &Path, mode: u32) {
+        let mut missing = Vec::new();
+        let mut at = Some(path);
+        while let Some(dir) = at {
+            if dir.as_os_str().is_empty() || self.dirs.borrow().contains(dir) {
+                break;
+            }
+            missing.push(dir.to_path_buf());
+            at = dir.parent();
+        }
+
+        let mut dirs = self.dirs.borrow_mut();
+        let mut modes = self.modes.borrow_mut();
+        for dir in missing {
+            modes.entry(dir.clone()).or_insert(mode);
+            dirs.insert(dir);
+        }
     }
 
     fn record(&self, effect: Effect) {
@@ -420,6 +495,10 @@ impl Host for FakeHost {
         self.env.borrow().get(key).cloned()
     }
 
+    fn platform(&self) -> Platform {
+        *self.platform.borrow()
+    }
+
     fn read_file(&self, path: &Path) -> Result<String, HostError> {
         self.record(Effect::ReadFile(path.to_path_buf()));
         if let Some(detail) = self.unreadable.borrow().get(path) {
@@ -447,9 +526,68 @@ impl Host for FakeHost {
         Ok(())
     }
 
+    /// Records the mode as well as the contents, because "created private" and
+    /// "made private afterwards" are the distinction ADR 0020 turns on and a
+    /// fake that only kept the bytes could not tell them apart.
+    fn write_private_file(&self, path: &Path, contents: &str) -> Result<(), HostError> {
+        self.record(Effect::WrotePrivateFile(path.to_path_buf()));
+        if let Some(detail) = self.unwritable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
+        }
+        if let Some(parent) = path.parent() {
+            self.make_dirs(parent, PRIVATE_DIR_MODE);
+        }
+        self.files
+            .borrow_mut()
+            .insert(path.to_path_buf(), contents.to_string());
+        self.modes
+            .borrow_mut()
+            .insert(path.to_path_buf(), PRIVATE_FILE_MODE);
+        self.mark_written(path);
+        Ok(())
+    }
+
+    fn create_private_dir_all(&self, path: &Path) -> Result<(), HostError> {
+        self.record(Effect::CreatedDir(path.to_path_buf()));
+        self.make_dirs(path, PRIVATE_DIR_MODE);
+        self.mark_written(path);
+        Ok(())
+    }
+
+    /// A path Perch did not create has whatever mode it was given: an ordinary
+    /// one for a directory, and — since a file the fixtures put there stands in
+    /// for one Claude Code wrote — the owner alone for a file.
+    fn file_mode(&self, path: &Path) -> Result<Option<u32>, HostError> {
+        if !self.path_exists(path) {
+            return Err(HostError::NotFound {
+                path: path.to_path_buf(),
+            });
+        }
+        Ok(Some(self.mode_of(path).unwrap_or(
+            if self.dirs.borrow().contains(path) {
+                ORDINARY_DIR_MODE
+            } else {
+                PRIVATE_FILE_MODE
+            },
+        )))
+    }
+
+    fn make_private(&self, path: &Path) -> Result<(), HostError> {
+        self.record(Effect::MadePrivate(path.to_path_buf()));
+        if !self.path_exists(path) {
+            return Err(HostError::NotFound {
+                path: path.to_path_buf(),
+            });
+        }
+        self.modes
+            .borrow_mut()
+            .insert(path.to_path_buf(), PRIVATE_FILE_MODE);
+        Ok(())
+    }
+
     fn create_dir_all(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::CreatedDir(path.to_path_buf()));
-        self.dirs.borrow_mut().insert(path.to_path_buf());
+        self.make_dirs(path, ORDINARY_DIR_MODE);
         self.mark_written(path);
         Ok(())
     }
@@ -467,6 +605,9 @@ impl Host for FakeHost {
         self.modified
             .borrow_mut()
             .retain(|written, _| !written.starts_with(path));
+        self.modes
+            .borrow_mut()
+            .retain(|at, _| !at.starts_with(path));
         Ok(())
     }
 
@@ -527,6 +668,7 @@ impl Host for FakeHost {
         self.record(Effect::RemovedFile(path.to_path_buf()));
         self.files.borrow_mut().remove(path);
         self.modified.borrow_mut().remove(path);
+        self.modes.borrow_mut().remove(path);
         Ok(())
     }
 
@@ -652,6 +794,13 @@ impl Host for FakeHost {
 
     fn is_interactive(&self) -> bool {
         *self.interactive.borrow()
+    }
+
+    fn note(&self, line: &str) {
+        let mut notes = self.notes.borrow_mut();
+        if !notes.iter().any(|said| said == line) {
+            notes.push(line.to_string());
+        }
     }
 
     fn read_line(&self) -> Result<Option<String>, HostError> {

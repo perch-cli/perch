@@ -13,10 +13,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::host::{Host, HostError};
 use crate::json;
-use crate::keychain::KeychainError;
 
 /// Named assumptions. A refusal quotes one of these, so the failure a user
 /// experiences says which belief stopped holding.
@@ -24,6 +24,8 @@ pub mod assumption {
     pub const INSTALLED: &str = "Claude Code is installed and reports a version";
     pub const ACCOUNT_NAME: &str = "the keychain item is stored under the login name";
     pub const CREDENTIAL_SHAPE: &str = "the credential store holds a claudeAiOauth block";
+    pub const CREDENTIAL_LOCATION: &str = "a Credential is kept in the keychain namespace, or the file, that the \
+         config directory derives";
     pub const IDENTITY_BLOCK: &str = "the identity file holds an oauthAccount block";
 }
 
@@ -127,13 +129,22 @@ struct OauthAccount {
     organization_uuid: Option<String>,
 }
 
-/// Where the installed Claude Code keeps one Account's configuration.
+/// Where the installed Claude Code keeps one Account's configuration: its
+/// Identity, and both of the Credential Stores it might hold a Credential in
+/// (ADR 0020).
+///
+/// Not itself a Credential Store, despite the name it has carried since before
+/// there were two of them: this is the config directory and everything derived
+/// from it, and [`crate::credentials::CredentialStore`] is the glossary's term
+/// for the places a Credential goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Store {
     pub config_dir: PathBuf,
     pub identity_file: PathBuf,
     pub keychain_service: String,
     pub keychain_account: String,
+    /// The plaintext store: the primary off macOS, and the fallback on it.
+    pub credentials_file: PathBuf,
 }
 
 /// What the probe found in the default store.
@@ -218,6 +229,7 @@ pub fn default_store(host: &dyn Host) -> Result<Store> {
         identity_file: identity_file_for(&config_dir, is_default, host),
         keychain_service: service_name_for(&config_dir, is_default),
         keychain_account: keychain_account_name(host)?,
+        credentials_file: credentials_file_for(&config_dir),
         config_dir,
     })
 }
@@ -229,8 +241,30 @@ pub fn store_for_profile(host: &dyn Host, config_dir: &Path) -> Result<Store> {
         identity_file: identity_file_for(config_dir, false, host),
         keychain_service: service_name_for(config_dir, false),
         keychain_account: keychain_account_name(host)?,
+        credentials_file: credentials_file_for(config_dir),
         config_dir: config_dir.to_path_buf(),
     })
+}
+
+/// What the plaintext Credential Store is called, inside whichever config
+/// directory it belongs to.
+pub const CREDENTIALS_FILE: &str = ".credentials.json";
+
+/// The plaintext store for a config directory.
+///
+/// Always inside the directory, unlike the identity file, which sits beside the
+/// default one as `~/.claude.json`. That difference is Claude Code's, not
+/// Perch's: the 2.1.222 build joins its config directory to
+/// `.credentials.json` and nothing else, which is what gives each Profile a
+/// Credential of its own off macOS (ADR 0020).
+///
+/// This and [`service_name_for`] are the two halves of
+/// [`assumption::CREDENTIAL_LOCATION`], and the whole of what a Profile's
+/// privacy rests on. Neither is probed at runtime — a store that holds nothing
+/// is a logged-out Profile, not a broken belief — so what guards them is the
+/// contract suite (ADR 0007).
+pub fn credentials_file_for(config_dir: &Path) -> PathBuf {
+    config_dir.join(CREDENTIALS_FILE)
 }
 
 /// `~/.claude.json` for the default directory, `<dir>/.claude.json` otherwise.
@@ -252,19 +286,19 @@ fn keychain_account_name(host: &dyn Host) -> Result<String> {
     })
 }
 
-/// Reads and understands the Credential in a store, or says why it cannot.
+/// Reads and understands the Credential a config directory holds, from
+/// whichever of its two Credential Stores holds one (ADR 0020), or says why it
+/// cannot.
 pub fn read_credential(
     host: &dyn Host,
     store: &Store,
     version: &str,
 ) -> Result<Option<Credential>> {
-    let raw = match host.keychain_get(&store.keychain_service, &store.keychain_account) {
-        Ok(raw) => raw,
-        Err(KeychainError::NotFound { .. }) => return Ok(None),
-        Err(other) => return Err(PerchError::from(other)),
+    let Some(held) = credentials::read(host, store)? else {
+        return Ok(None);
     };
 
-    understand_credential(raw, &store.keychain_service, version).map(Some)
+    understand_credential(held.credential, &held.kept_in.describe(), version).map(Some)
 }
 
 /// Makes sense of the bytes a keychain namespace holds, or says which belief
@@ -751,6 +785,7 @@ mod tests {
             identity_file: PathBuf::from("/Users/someone/.claude.json"),
             keychain_service: DEFAULT_SERVICE.to_string(),
             keychain_account: "someone".to_string(),
+            credentials_file: PathBuf::from("/Users/someone/.claude/.credentials.json"),
         };
 
         let dirs: Vec<PathBuf> = locks_for(&store).into_iter().map(|lock| lock.dir).collect();

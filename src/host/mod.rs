@@ -72,6 +72,30 @@ pub struct HttpResponse {
     pub body: String,
 }
 
+/// The machine, to the only resolution anything in Perch cares about: macOS
+/// keeps secrets in a keychain, and no other platform does (ADR 0020).
+///
+/// An effect rather than a `cfg!`, so the behaviour tests can drive both
+/// Credential Stores whatever they are running on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Platform {
+    MacOs,
+    Other,
+}
+
+/// The permissions a file holding a Credential is created with, and the mode
+/// anything looser is tightened to: the owner, and nobody else (ADR 0020).
+pub const PRIVATE_FILE_MODE: u32 = 0o600;
+
+/// The same for the directory it sits in. A directory others may enter is a
+/// directory whose contents others may open.
+pub const PRIVATE_DIR_MODE: u32 = 0o700;
+
+/// Whether a mode lets anybody but the owner near the file.
+pub fn is_private(mode: u32) -> bool {
+    mode & 0o077 == 0
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
     #[error("{path} does not exist")]
@@ -101,10 +125,38 @@ pub trait Host {
     fn home_dir(&self) -> PathBuf;
     fn env_var(&self, key: &str) -> Option<String>;
 
+    /// Which platform this is, which is what decides where a Credential is
+    /// written (ADR 0020).
+    fn platform(&self) -> Platform;
+
     // ---- filesystem -----------------------------------------------------
 
     fn read_file(&self, path: &Path) -> Result<String, HostError>;
     fn write_file(&self, path: &Path, contents: &str) -> Result<(), HostError>;
+
+    /// Writes a file nobody but its owner can read, creating it — and any
+    /// directory above it — with that mode rather than tightening it
+    /// afterwards.
+    ///
+    /// A `chmod` after the fact leaves the secret on disk and readable for as
+    /// long as the two calls take, which is the whole of what the mode is for
+    /// (ADR 0020).
+    fn write_private_file(&self, path: &Path, contents: &str) -> Result<(), HostError>;
+
+    /// Creates a directory, and any above it, that nobody but its owner may
+    /// enter — for the directories that will come to hold a Credential.
+    ///
+    /// Like `mkdir -p`, a directory that is already there keeps the mode it
+    /// has: this sets a mode at creation and is not a `chmod` in disguise.
+    fn create_private_dir_all(&self, path: &Path) -> Result<(), HostError>;
+
+    /// A file's permission bits, or `None` on a platform that does not answer
+    /// in those terms.
+    fn file_mode(&self, path: &Path) -> Result<Option<u32>, HostError>;
+
+    /// Narrows an existing file to its owner. The one `chmod` Perch performs:
+    /// files it creates get their mode at creation.
+    fn make_private(&self, path: &Path) -> Result<(), HostError>;
     fn create_dir_all(&self, path: &Path) -> Result<(), HostError>;
     fn path_exists(&self, path: &Path) -> bool;
     fn remove_dir_all(&self, path: &Path) -> Result<(), HostError>;
@@ -169,6 +221,15 @@ pub trait Host {
 
     /// One line of input, or `None` at end of input.
     fn read_line(&self) -> Result<Option<String>, HostError>;
+
+    /// Says something the user should know that is not the answer to what they
+    /// asked: a Credential written to the store Perch would rather not have
+    /// used, a file found looser than it should be (ADR 0020).
+    ///
+    /// Said once. These are remarks about the state of the machine rather than
+    /// about the command, and the same remark repeated for each of five
+    /// Accounts teaches nobody anything the first one did not.
+    fn note(&self, line: &str);
 
     // ---- network --------------------------------------------------------
 

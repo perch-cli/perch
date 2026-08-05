@@ -78,13 +78,22 @@ pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
     // `perch list` never fetches (ADR 0015), so there is nothing to report
     // about a refresh: the empty report renders as "nobody asked".
     let unasked = Report::default();
-    render(out, &registry, Scope::Everything, now, args.json, &unasked)
+    render(
+        host,
+        out,
+        &registry,
+        Scope::Everything,
+        now,
+        args.json,
+        &unasked,
+    )
 }
 
 /// The listing itself, so `perch status --group` shows the same Accounts the
 /// same way over a narrower set — and, when it was asked to fetch, says what
 /// came of that in the same breath.
 pub fn render(
+    host: &dyn Host,
     out: &mut dyn Write,
     registry: &Registry,
     scope: Scope,
@@ -94,7 +103,7 @@ pub fn render(
 ) -> Result<()> {
     let accounts = scope.accounts(registry);
     if json {
-        render_json(out, registry, &scope, &accounts, now, report)
+        render_json(host, out, registry, &scope, &accounts, now, report)
     } else {
         render_human(out, registry, &scope, &accounts, now, report)
     }
@@ -269,6 +278,7 @@ fn nothing_here(scope: &Scope) -> String {
 }
 
 fn render_json(
+    host: &dyn Host,
     out: &mut dyn Write,
     registry: &Registry,
     scope: &Scope,
@@ -288,7 +298,7 @@ fn render_json(
                 "active": registry.active.as_deref() == Some(account.email()),
                 "organization": account.identity.organization_name,
                 "plan": account.plan,
-                "profile_dir": account.profile.dir,
+                "profile_dir": account.profile_dir(host),
                 "utilization": utilization::document(account, now),
             })
         })

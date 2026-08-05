@@ -8,9 +8,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use common::*;
 use perch::host::FakeHost;
 use perch::probe::Identity;
-use perch::registry::{
-    Account, CachedUtilization, GroupConfig, Profile, Registry, WindowUtilization,
-};
+use perch::registry::{Account, CachedUtilization, GroupConfig, Registry, WindowUtilization};
 
 fn at(hour: u32, minute: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 8, 4, hour, minute, 0).unwrap()
@@ -25,15 +23,6 @@ fn account(email: &str, organization: &str) -> Account {
             organization_uuid: None,
         },
         plan: Some("pro".to_string()),
-        profile: Profile {
-            dir: format!(
-                "/Users/someone/.perch/profiles/{}",
-                perch::registry::slug(email)
-            )
-            .into(),
-            keychain_service: "Claude Code-credentials-abcd1234".to_string(),
-            keychain_account: "someone".to_string(),
-        },
         enabled: true,
         quarantined: false,
         group: None,

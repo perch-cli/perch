@@ -16,7 +16,11 @@ use crate::probe::Identity;
 
 /// The version this build writes. A registry from the future is refused rather
 /// than silently misread.
-pub const CURRENT_VERSION: u32 = 1;
+///
+/// Version 2 stopped recording where an Account's Credential is kept: a store
+/// is derived from the Profile's path rather than written down, so a registry
+/// can no longer disagree with the derivation (ADR 0020).
+pub const CURRENT_VERSION: u32 = 2;
 
 /// One Quota Window's Utilization, as observed at a point in time (ADR 0015).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -38,15 +42,6 @@ pub struct CachedUtilization {
     pub windows: Vec<WindowUtilization>,
 }
 
-/// Where an Account's Credential lives: a directory Claude Code would accept as
-/// its whole configuration, and the keychain namespace derived from its path.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Profile {
-    pub dir: PathBuf,
-    pub keychain_service: String,
-    pub keychain_account: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Account {
     /// Who this Account is. Its email address is also its identifier.
@@ -56,7 +51,6 @@ pub struct Account {
     /// not part of one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<String>,
-    pub profile: Profile,
     /// Whether the Account is a Cycle candidate. Later specs toggle this.
     #[serde(default = "enabled_by_default")]
     pub enabled: bool,
@@ -240,6 +234,21 @@ impl Default for Registry {
 impl Account {
     pub fn email(&self) -> &str {
         &self.identity.email
+    }
+
+    /// The Profile this Account's Credential lives in.
+    ///
+    /// Derived from the email address the registry already keys on rather than
+    /// recorded beside it: two statements of one fact can disagree, and this is
+    /// the fact every Credential Store is derived from in turn (ADR 0020).
+    pub fn profile_dir(&self, host: &dyn Host) -> PathBuf {
+        profile_dir_for(host, self.email())
+    }
+
+    /// Where the installed Claude Code would keep this Account's configuration
+    /// if it were pointed at its Profile.
+    pub fn store(&self, host: &dyn Host) -> Result<crate::probe::Store> {
+        crate::probe::store_for_profile(host, &self.profile_dir(host))
     }
 
     /// The cached Utilization, if any figure has ever been observed. An empty
@@ -511,6 +520,12 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
         )));
     }
 
+    // A version 1 registry recorded each Account's Profile directory and
+    // keychain namespace. All three are derived now, and serde has already
+    // dropped them on the way in; the version follows so the next save says
+    // what the file actually holds (ADR 0020).
+    registry.version = CURRENT_VERSION;
+
     adopt_groups_only_the_accounts_record(&mut registry);
 
     // Group configuration is checked on the way in rather than where it is
@@ -582,11 +597,6 @@ mod tests {
                 organization_uuid: None,
             },
             plan: Some("pro".into()),
-            profile: Profile {
-                dir: PathBuf::from("/Users/someone/.perch/profiles/someone-example-com"),
-                keychain_service: "Claude Code-credentials-abcd1234".into(),
-                keychain_account: "someone".into(),
-            },
             enabled: true,
             quarantined: false,
             group: None,
@@ -603,7 +613,34 @@ mod tests {
     #[test]
     fn the_version_is_recorded_so_later_specs_can_migrate() {
         let json = serde_json::to_string(&Registry::default()).unwrap();
-        assert!(json.contains("\"version\":1"));
+        assert!(json.contains("\"version\":2"));
+    }
+
+    #[test]
+    fn nothing_about_where_a_credential_is_kept_is_written_down() {
+        let mut registry = Registry::default();
+        registry.upsert(Account {
+            identity: Identity {
+                email: "someone@example.com".into(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            enabled: true,
+            quarantined: false,
+            group: None,
+            utilization: None,
+        });
+
+        let json = serde_json::to_string(&registry).unwrap();
+        for derived in ["keychain_service", "keychain_account", "profile", "dir"] {
+            assert!(
+                !json.contains(derived),
+                "a registry that records `{derived}` can disagree with the \
+                 derivation it restates: {json}"
+            );
+        }
     }
 
     #[test]

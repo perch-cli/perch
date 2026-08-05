@@ -2,67 +2,119 @@
 //!
 //! Both ways an Account enters Perch end here: adoption copies the existing
 //! login in (ADR 0009), and `add` copies in the login it just created. Neither
-//! knows how a directory becomes a keychain namespace — that stays in
-//! [`crate::probe`] — and both get the same read-back guard for free.
+//! knows where a directory keeps its Credential — that is [`crate::probe`] and
+//! [`crate::credentials`] — and both get the same read-back guard for free.
 
 use std::path::Path;
 
+use crate::credentials::{self, CredentialStore};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::probe;
-use crate::registry::Profile;
+use crate::probe::{self, Store};
 
-/// Creates `dir` and stores `credential` in the keychain namespace its path
-/// derives, returning the Profile that now holds it.
-pub fn create(host: &dyn Host, dir: &Path, credential: &str) -> Result<Profile> {
-    host.create_dir_all(dir)
+/// Creates `dir` and stores `credential` where the Claude Code on this machine
+/// would keep it, returning the store that now holds it.
+pub fn create(host: &dyn Host, dir: &Path, credential: &str) -> Result<Store> {
+    // Private from the moment it exists: off macOS the Credential is a file in
+    // here, and a directory others may enter is a directory whose contents
+    // others may open (ADR 0020). Created that way rather than tightened,
+    // because a Profile is Perch's to make and there is no window to leave.
+    host.create_private_dir_all(dir)
         .map_err(|err| PerchError::Other(format!("could not create {}: {err}", dir.display())))?;
 
     let store = probe::store_for_profile(host, dir)?;
-    store_credential(
-        host,
-        &store.keychain_service,
-        &store.keychain_account,
-        credential,
-    )?;
-
-    Ok(Profile {
-        dir: dir.to_path_buf(),
-        keychain_service: store.keychain_service,
-        keychain_account: store.keychain_account,
-    })
+    store_credential(host, &store, credential)?;
+    Ok(store)
 }
 
-/// Writes a Credential into a keychain namespace and reads it back before
-/// trusting it.
+/// Writes a Credential into a Profile's Credential Store and reads it back
+/// before trusting it.
 ///
-/// `security`'s stdin buffer truncates mid-argument without saying so (ADR
-/// 0008), and a Credential that was truncated on the way in is indistinguishable
-/// from one that is simply wrong when it is next used — which would be at the
-/// worst moment, some Switch later. Every write of a Credential goes through
-/// here, so no path can forget the read-back.
-pub fn store_credential(
-    host: &dyn Host,
-    service: &str,
-    account: &str,
-    credential: &str,
-) -> Result<()> {
-    host.keychain_set(service, account, credential)?;
+/// Every write of a Credential goes through here, so no path can forget any of
+/// the three things a write owes (ADR 0020):
+///
+/// - it goes to the platform's primary store, and to the other one only when
+///   that fails, because a store Perch cannot write to is worse than a store it
+///   would rather not use;
+/// - it is read back, because `security`'s stdin buffer truncates mid-argument
+///   without saying so (ADR 0008) and a truncated Credential is
+///   indistinguishable from a wrong one at the worst possible moment, some
+///   Switch later;
+/// - the copy in the store that was *not* written is removed, or the composite
+///   reader would hand a retired refresh token back to Claude Code the next
+///   time it consulted that one — ADR 0006's silent poisoning, arriving by the
+///   back door.
+pub fn store_credential(host: &dyn Host, store: &Store, credential: &str) -> Result<()> {
+    let [primary, fallback] = credentials::stores_for(host, store);
 
-    let stored = host.keychain_get(service, account)?;
-    if stored != credential {
-        return Err(PerchError::KeychainUnavailable(format!(
-            "the Credential written to {service} did not read back intact"
-        )));
+    match write_and_read_back(host, &primary, credential) {
+        Ok(()) => {
+            supersede(host, &fallback);
+            Ok(())
+        }
+        Err(primary_failed) => match write_and_read_back(host, &fallback, credential) {
+            Ok(()) => {
+                host.note(&format!(
+                    "{} could not be written to, so a Credential was stored in {} instead.",
+                    primary.describe(),
+                    fallback.describe()
+                ));
+                // The store that was not written is the one a reader prefers,
+                // so a copy left in it is worse here than the other way round:
+                // it would win over the Credential just written. Safe to do
+                // now and not before, because this one has been read back.
+                supersede(host, &primary);
+                Ok(())
+            }
+            // Both refused. The primary's failure is the one to report: it is
+            // the store this machine was supposed to be using.
+            Err(_) => Err(primary_failed),
+        },
+    }
+}
+
+/// Takes the Credential this write has replaced out of the other store.
+///
+/// Best-effort: the Credential is somewhere Claude Code reads by the time this
+/// runs, and a copy that could not be removed is worth a remark rather than
+/// failing a Switch that has already happened.
+fn supersede(host: &dyn Host, other: &CredentialStore) {
+    if other.forget(host).is_err() {
+        host.note(&format!(
+            "A superseded copy of a Credential could not be removed from {}.",
+            other.describe()
+        ));
+    }
+}
+
+fn write_and_read_back(host: &dyn Host, kept_in: &CredentialStore, credential: &str) -> Result<()> {
+    kept_in.write(host, credential)?;
+
+    if kept_in.read(host)?.as_deref() != Some(credential) {
+        // Reported as a failure of the store it happened in, so the exit code a
+        // script branches on still says which half of the machine to look at.
+        return Err(match kept_in {
+            CredentialStore::Keychain { .. } => PerchError::KeychainUnavailable(format!(
+                "the Credential written to {} did not read back intact",
+                kept_in.describe()
+            )),
+            CredentialStore::Plaintext { path } => PerchError::FileWrite {
+                path: path.clone(),
+                source: std::io::Error::other("the Credential did not read back intact"),
+            },
+        });
     }
     Ok(())
 }
 
-/// Forgets a Profile entirely: its stored Credential and its directory.
+/// Forgets a Profile entirely: its stored Credential, wherever it is, and its
+/// directory.
 ///
 /// Best-effort by design. This runs on the failure path of `add`, where the
 /// interesting error is the one that got us here, not the tidying up.
-pub fn discard(host: &dyn Host, profile: &Profile) {
-    let _ = host.keychain_delete(&profile.keychain_service, &profile.keychain_account);
-    let _ = host.remove_dir_all(&profile.dir);
+pub fn discard(host: &dyn Host, store: &Store) {
+    for kept_in in credentials::stores_for(host, store) {
+        let _ = kept_in.forget(host);
+    }
+    let _ = host.remove_dir_all(&store.config_dir);
 }
