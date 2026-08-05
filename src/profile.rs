@@ -44,6 +44,12 @@ pub fn create(host: &dyn Host, dir: &Path, credential: &str) -> Result<Store> {
 ///   reader would hand a retired refresh token back to Claude Code the next
 ///   time it consulted that one — ADR 0006's silent poisoning, arriving by the
 ///   back door.
+///
+/// ADR 0020 states that last one of a write to the primary store, which is the
+/// case that happens. It is done in both directions because what the Credential
+/// Store *is* — one store holding a Profile's Credential at a time — has to
+/// hold after the rarer write too, and that direction is the more dangerous of
+/// the two: see [`supersede`].
 pub fn store_credential(host: &dyn Host, store: &Store, credential: &str) -> Result<()> {
     let [primary, fallback] = credentials::stores_for(host, store);
 
