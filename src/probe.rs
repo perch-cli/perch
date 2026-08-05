@@ -166,15 +166,75 @@ pub enum Verdict {
     NoLogin { version: String, store: Store },
 }
 
+/// The Claude Code binary Perch runs, resolved by Perch rather than left to
+/// `Command::new`: Rust appends only `.exe` and never consults `PATHEXT`, so
+/// the `claude.cmd` that `npm i -g @anthropic-ai/claude-code` installs works
+/// in every shell and would be invisible to a bare `Command::new("claude")`.
+///
+/// `$PERCH_CLAUDE_BIN` overrides the search and passes through verbatim.
+pub fn claude_bin(host: &dyn Host) -> Result<PathBuf> {
+    if let Some(overridden) = host.env_var("PERCH_CLAUDE_BIN") {
+        return Ok(PathBuf::from(overridden));
+    }
+
+    let Some(path) = host.env_var("PATH") else {
+        return Err(refusal(
+            assumption::INSTALLED,
+            "PATH is unset, so there is nowhere to look for `claude`. \
+             Point PERCH_CLAUDE_BIN at it instead",
+            "not installed",
+        ));
+    };
+
+    let on_windows = host.platform() == crate::host::Platform::Windows;
+    let separator = if on_windows { ';' } else { ':' };
+    // What makes a name executable on Windows is carrying one of PATHEXT's
+    // extensions. Spelled lowercase because that is how npm writes
+    // `claude.cmd`, and the real filesystem answers case-insensitively anyway.
+    let extensions: Vec<String> = if on_windows {
+        host.env_var("PATHEXT")
+            .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_string())
+            .split(';')
+            .filter(|extension| !extension.is_empty())
+            .map(str::to_lowercase)
+            .collect()
+    } else {
+        vec![String::new()]
+    };
+
+    for dir in path.split(separator).filter(|dir| !dir.is_empty()) {
+        for extension in &extensions {
+            // Joined with '/' rather than `Path::join`, which would pick the
+            // separator of whatever platform this build runs on. Windows
+            // accepts either, and a candidate that spells differently per
+            // build would make one machine read as two.
+            let candidate = PathBuf::from(format!("{dir}/claude{extension}"));
+            if host.is_file(&candidate) {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    Err(refusal(
+        assumption::INSTALLED,
+        "no `claude` was found on PATH. Install Claude Code, or point \
+         PERCH_CLAUDE_BIN at it",
+        "not installed",
+    ))
+}
+
 /// Reads the installed version, refusing when there is nothing to read.
 pub fn claude_version(host: &dyn Host) -> Result<String> {
-    let execution = host.exec("claude", &["--version"]).map_err(|err| {
-        refusal(
-            assumption::INSTALLED,
-            &format!("could not run `claude --version`: {err}"),
-            "not installed",
-        )
-    })?;
+    let claude = claude_bin(host)?;
+    let execution = host
+        .exec(&claude.to_string_lossy(), &["--version"])
+        .map_err(|err| {
+            refusal(
+                assumption::INSTALLED,
+                &format!("could not run `claude --version`: {err}"),
+                "not installed",
+            )
+        })?;
 
     if !execution.succeeded() {
         return Err(refusal(
@@ -223,28 +283,36 @@ pub fn short_hash(config_dir: &Path) -> String {
 }
 
 /// The store Claude Code uses right now, honouring `CLAUDE_CONFIG_DIR`.
+///
+/// The default directory sits under home, and its identity file sits beside
+/// it as `~/.claude.json` — so no home is a refusal here, where every other
+/// config directory carries its own identity file and needs no home at all.
 pub fn default_store(host: &dyn Host) -> Result<Store> {
-    let configured = host.env_var("CLAUDE_CONFIG_DIR").map(PathBuf::from);
-    let is_default = configured.is_none();
-    let config_dir = configured.unwrap_or_else(|| host.home_dir().join(".claude"));
-    Ok(Store {
-        identity_file: identity_file_for(&config_dir, is_default, host),
-        keychain_service: service_name_for(&config_dir, is_default),
-        keychain_account: keychain_account_name(host)?,
-        credentials_file: credentials_file_for(&config_dir),
-        config_dir,
-    })
+    match host.env_var("CLAUDE_CONFIG_DIR").map(PathBuf::from) {
+        Some(config_dir) => store_for_directory(host, config_dir, false),
+        None => store_for_directory(host, home(host)?.join(".claude"), true),
+    }
+}
+
+/// The home directory, as a command failure rather than a Host one.
+fn home(host: &dyn Host) -> Result<PathBuf> {
+    host.home_dir()
+        .map_err(|err| PerchError::Other(err.to_string()))
 }
 
 /// The store a Perch Profile presents. A Profile is a real config directory, so
 /// this is the same derivation with `CLAUDE_CONFIG_DIR` pointed at it.
 pub fn store_for_profile(host: &dyn Host, config_dir: &Path) -> Result<Store> {
+    store_for_directory(host, config_dir.to_path_buf(), false)
+}
+
+fn store_for_directory(host: &dyn Host, config_dir: PathBuf, is_default: bool) -> Result<Store> {
     Ok(Store {
-        identity_file: identity_file_for(config_dir, false, host),
-        keychain_service: service_name_for(config_dir, false),
+        identity_file: identity_file_for(&config_dir, is_default, host)?,
+        keychain_service: service_name_for(&config_dir, is_default),
         keychain_account: keychain_account_name(host)?,
-        credentials_file: credentials_file_for(config_dir),
-        config_dir: config_dir.to_path_buf(),
+        credentials_file: credentials_file_for(&config_dir),
+        config_dir,
     })
 }
 
@@ -270,22 +338,29 @@ pub fn credentials_file_for(config_dir: &Path) -> PathBuf {
 }
 
 /// `~/.claude.json` for the default directory, `<dir>/.claude.json` otherwise.
-fn identity_file_for(config_dir: &Path, is_default: bool, host: &dyn Host) -> PathBuf {
+fn identity_file_for(config_dir: &Path, is_default: bool, host: &dyn Host) -> Result<PathBuf> {
     if is_default {
-        host.home_dir().join(".claude.json")
+        Ok(home(host)?.join(".claude.json"))
     } else {
-        config_dir.join(".claude.json")
+        Ok(config_dir.join(".claude.json"))
     }
 }
 
+/// The login name a keychain item is stored under. `USERNAME` is Windows'
+/// spelling of `USER`; off macOS the name is carried in the Store but never
+/// looked up, since the keychain there is a store that holds nothing
+/// (ADR 0020).
 fn keychain_account_name(host: &dyn Host) -> Result<String> {
-    host.env_var("USER").ok_or_else(|| {
-        refusal(
-            assumption::ACCOUNT_NAME,
-            "USER is unset, so the keychain account name cannot be derived",
-            "unknown",
-        )
-    })
+    host.env_var("USER")
+        .or_else(|| host.env_var("USERNAME"))
+        .ok_or_else(|| {
+            refusal(
+                assumption::ACCOUNT_NAME,
+                "neither USER nor USERNAME is set, so the keychain account name \
+                 cannot be derived",
+                "unknown",
+            )
+        })
 }
 
 /// Reads and understands the Credential a config directory holds, from
@@ -700,6 +775,99 @@ fn refusal(assumption: &str, detail: &str, version: &str) -> PerchError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::{FakeHost, Platform};
+
+    #[test]
+    fn claude_is_the_first_match_on_path() {
+        let host = FakeHost::new()
+            .with_env("PATH", "/empty:/usr/local/bin:/usr/bin")
+            .with_file("/usr/local/bin/claude", "")
+            .with_file("/usr/bin/claude", "");
+
+        assert_eq!(
+            claude_bin(&host).unwrap(),
+            PathBuf::from("/usr/local/bin/claude")
+        );
+    }
+
+    #[test]
+    fn perch_claude_bin_overrides_the_search_verbatim() {
+        let host = FakeHost::new()
+            .with_env("PERCH_CLAUDE_BIN", "/somewhere/claude-nightly")
+            .with_env("PATH", "/usr/bin")
+            .with_file("/usr/bin/claude", "");
+
+        assert_eq!(
+            claude_bin(&host).unwrap(),
+            PathBuf::from("/somewhere/claude-nightly")
+        );
+    }
+
+    #[test]
+    fn windows_consults_pathext_for_the_cmd_shim_npm_installs() {
+        let host = FakeHost::new()
+            .with_platform(Platform::Windows)
+            .with_env("PATH", "C:/tools;C:/npm")
+            .with_env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+            .with_file("C:/npm/claude.cmd", "");
+
+        assert_eq!(
+            claude_bin(&host).unwrap(),
+            PathBuf::from("C:/npm/claude.cmd")
+        );
+    }
+
+    #[test]
+    fn windows_with_no_pathext_still_finds_the_exe() {
+        let host = FakeHost::new()
+            .with_platform(Platform::Windows)
+            .with_env("PATH", "C:/bin")
+            .with_file("C:/bin/claude.exe", "");
+
+        assert_eq!(
+            claude_bin(&host).unwrap(),
+            PathBuf::from("C:/bin/claude.exe")
+        );
+    }
+
+    #[test]
+    fn a_directory_named_claude_is_not_the_program() {
+        let host = FakeHost::new()
+            .with_env("PATH", "/usr/bin")
+            // A file inside is what makes /usr/bin/claude a directory here.
+            .with_file("/usr/bin/claude/keep", "");
+
+        assert!(claude_bin(&host).is_err());
+    }
+
+    #[test]
+    fn the_keychain_account_name_knows_windows_spelling() {
+        let host = FakeHost::new()
+            .without_env("USER")
+            .with_env("USERNAME", "someone");
+        assert_eq!(keychain_account_name(&host).unwrap(), "someone");
+
+        let bare = FakeHost::new().without_env("USER");
+        let error = keychain_account_name(&bare).unwrap_err();
+        assert!(
+            matches!(error, PerchError::ProbeRefused { ref assumption, .. }
+                if assumption == assumption::ACCOUNT_NAME),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn no_claude_anywhere_is_a_refusal_naming_the_assumption() {
+        let host = FakeHost::new().with_env("PATH", "/usr/bin");
+
+        let error = claude_bin(&host).unwrap_err();
+        assert!(
+            matches!(error, PerchError::ProbeRefused { ref assumption, .. }
+                if assumption == assumption::INSTALLED),
+            "{error}"
+        );
+        assert!(error.to_string().contains("PERCH_CLAUDE_BIN"), "{error}");
+    }
 
     #[test]
     fn the_default_directory_uses_the_bare_service_name() {

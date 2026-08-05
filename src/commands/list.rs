@@ -289,7 +289,7 @@ fn render_json(
     let listed: Vec<serde_json::Value> = accounts
         .iter()
         .map(|account| {
-            json!({
+            Ok(json!({
                 "email": account.email(),
                 "alias": registry.alias_of(account.email()),
                 "group": account.group,
@@ -298,11 +298,11 @@ fn render_json(
                 "active": registry.active.as_deref() == Some(account.email()),
                 "organization": account.identity.organization_name,
                 "plan": account.plan,
-                "profile_dir": account.profile_dir(host),
+                "profile_dir": account.profile_dir(host)?,
                 "utilization": utilization::document(account, now),
-            })
+            }))
         })
-        .collect();
+        .collect::<Result<_>>()?;
 
     let document = json!({
         "scope": scope.json(),

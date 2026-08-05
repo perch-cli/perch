@@ -62,7 +62,14 @@ fn a_credential_file_others_could_read_is_tightened_and_reported_rather_than_ref
     assert_eq!(host.mode_of(CREDENTIALS_PATH), Some(0o600));
     let notes = host.notes();
     assert_eq!(notes.len(), 1, "said once: {notes:?}");
-    assert!(notes[0].contains(CREDENTIALS_PATH), "{notes:?}");
+    // The note spells the path the way this platform joins it, so the
+    // expectation derives the same spelling rather than writing one by hand.
+    let displayed = perch::probe::default_store(&host)
+        .expect("the store derives")
+        .credentials_file
+        .display()
+        .to_string();
+    assert!(notes[0].contains(&displayed), "{notes:?}");
 }
 
 #[test]
@@ -250,8 +257,9 @@ fn a_version_1_registry_is_read_by_dropping_where_it_said_a_credential_was() {
         registry_of(&host)
             .account(EMAIL)
             .unwrap()
-            .profile_dir(&host),
-        registry::profile_dir_for(&host, EMAIL),
+            .profile_dir(&host)
+            .unwrap(),
+        registry::profile_dir_for(&host, EMAIL).unwrap(),
         "the Profile is derived from the Account, not read back from the file"
     );
 }

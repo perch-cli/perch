@@ -70,8 +70,9 @@ fn the_default_store_is_where_perch_believes_it_is() {
             probe::DEFAULT_SERVICE,
             "the default config directory uses the bare service name"
         );
-        assert_eq!(store.config_dir, host.home_dir().join(".claude"));
-        assert_eq!(store.identity_file, host.home_dir().join(".claude.json"));
+        let home = host.home_dir().expect("HOME is set");
+        assert_eq!(store.config_dir, home.join(".claude"));
+        assert_eq!(store.identity_file, home.join(".claude.json"));
     } else {
         assert!(
             store

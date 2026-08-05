@@ -68,10 +68,10 @@ fn a_login_is_launched_inside_a_new_profile_of_its_own() {
 
     assert_eq!(launched.len(), 1, "one login, launched once");
     let (program, config_dir) = &launched[0];
-    assert_eq!(program, "claude");
+    assert_eq!(program, common::CLAUDE_BIN);
     assert_ne!(
         config_dir,
-        &host.home_dir().join(".claude"),
+        &host.home_dir().unwrap().join(".claude"),
         "a login in the active Account's own directory would log it out"
     );
 }

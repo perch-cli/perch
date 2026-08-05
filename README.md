@@ -212,34 +212,46 @@ it, and the watcher is deferred entirely (ADR 0013).
 
 - `~/.perch/registry.json` — Perch's own state, versioned.
 - `~/.perch/profiles/<account>/` — one directory per Account. Its path is what
-  gives that Account a private keychain namespace (ADR 0001).
-- `$PERCH_HOME` overrides `~/.perch`.
+  gives that Account a private Credential Store (ADR 0001).
+- `$PERCH_HOME` overrides `~/.perch`. Home is `$USERPROFILE` on Windows and
+  `$HOME` elsewhere; a machine that cannot say where home is gets a refusal,
+  never a write into the filesystem root.
+- `$PERCH_CLAUDE_BIN` overrides where `claude` is found. Without it, Perch
+  walks `PATH` itself — consulting `PATHEXT` on Windows, so the `claude.cmd`
+  an npm install leaves works from every shell.
 
-Perch never writes a Credential to a file. Credentials live in the keychain, and
-Perch drives `/usr/bin/security` to reach them (ADR 0008). It drives
-`/usr/bin/curl` to reach Anthropic, with the URL, the headers and the body all
-handed over on standard input — an access token passed as an argument would sit
+A Credential lives wherever the installed Claude Code would put it (ADR 0020):
+the keychain on macOS, reached by driving `/usr/bin/security` (ADR 0008), and
+a `.credentials.json` inside the Profile everywhere else — created readable by
+its owner alone, and tightened if it is ever found looser. Perch drives `curl`
+by absolute path — `/usr/bin/curl`, or `%SystemRoot%\System32\curl.exe` on
+Windows — to reach Anthropic, with the URL, the headers and the body all
+handed over on standard input: an access token passed as an argument would sit
 in the process table for anything on the machine to read.
 
 ## Building
 
-Requires macOS. The toolchain is pinned in `rust-toolchain.toml` — Rust 1.97.1,
+Builds and runs on macOS, Linux and Windows, with the same command surface
+everywhere. The toolchain is pinned in `rust-toolchain.toml` — Rust 1.97.1,
 edition 2024 — so rustup will fetch the right one on first build.
 
 ```
 # touches nothing on the machine
 cargo test --lib --test adoption --test status --test adding --test grouping \
-           --test naming --test listing --test switching --test refreshing
+           --test naming --test listing --test switching --test refreshing \
+           --test storing
 # asserts beliefs against this machine
 cargo test --test contract
 # both
 cargo test
 ```
 
-The contract tests read and write items of their own in the login keychain,
-under `Perch contract test-*`, and delete them again. They never write Claude
-Code's item. Set `PERCH_SKIP_KEYCHAIN_CONTRACT=1` to skip them where the
-keychain cannot be unlocked.
+On macOS the contract tests read and write items of their own in the login
+keychain, under `Perch contract test-*`, and delete them again. They never
+write Claude Code's item. Set `PERCH_SKIP_KEYCHAIN_CONTRACT=1` to skip them
+where the keychain cannot be unlocked — it is macOS-only, because only macOS
+compiles those tests in. The file-store contract tests need no opt-out: they
+touch only a temporary directory of their own.
 
 ## Design
 

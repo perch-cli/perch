@@ -27,8 +27,12 @@ const CONFIG_LOCK: &str = "/Users/someone/.claude.json.lock";
 const FIRST_PROFILE: &str = "/Users/someone/.perch/profiles/someone-example-com";
 const SECOND_PROFILE: &str = "/Users/someone/.perch/profiles/overflow-example-com";
 
-fn profile_service(dir: &str) -> String {
-    probe::service_name_for(Path::new(dir), false)
+/// The keychain namespace of an Account's Profile, derived the way every
+/// command derives it. The spelling of the directory decides the hash, and a
+/// Windows build joins paths with the other separator — so a fixture spelling
+/// the path by hand would name a namespace nothing reads.
+fn profile_service(host: &FakeHost, email: &str) -> String {
+    store_of(host, email).keychain_service
 }
 
 /// What the live store holds right now — the Credential every client reads.
@@ -36,8 +40,8 @@ fn live_credential(host: &FakeHost) -> Option<String> {
     host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME)
 }
 
-fn stored_credential(host: &FakeHost, profile_dir: &str) -> Option<String> {
-    host.keychain_item(&profile_service(profile_dir), LOGIN_NAME)
+fn stored_credential(host: &FakeHost, email: &str) -> Option<String> {
+    host.keychain_item(&profile_service(host, email), LOGIN_NAME)
 }
 
 fn identity_file(host: &FakeHost) -> String {
@@ -51,8 +55,8 @@ fn identity_file(host: &FakeHost) -> String {
 /// test asserts is the sequence a concurrently-running Claude Code would see.
 fn trace(host: &FakeHost) -> Vec<String> {
     let live = DEFAULT_SERVICE.to_string();
-    let first = profile_service(FIRST_PROFILE);
-    let second = profile_service(SECOND_PROFILE);
+    let first = profile_service(host, EMAIL);
+    let second = profile_service(host, SECOND_EMAIL);
 
     let store = |service: &String| -> Option<String> {
         if *service == live {
@@ -187,7 +191,7 @@ fn the_credential_the_outgoing_account_rotated_to_is_captured_before_it_is_repla
     run_switch(&host, SECOND_EMAIL).0.expect("the Switch runs");
 
     assert_eq!(
-        stored_credential(&host, FIRST_PROFILE).as_deref(),
+        stored_credential(&host, EMAIL).as_deref(),
         Some(rotated.as_str()),
         "the Rotation would be lost if the Capture did not happen first"
     );
@@ -494,10 +498,7 @@ fn a_switch_that_cannot_patch_the_identity_says_what_it_left_where() {
     // was Captured before it was replaced, and Perch says who is active by the
     // only measure that matters — whose Credential a client would read.
     assert_eq!(live_credential(&host).as_deref(), Some(SECOND_CREDENTIAL));
-    assert_eq!(
-        stored_credential(&host, FIRST_PROFILE).as_deref(),
-        Some(CREDENTIAL)
-    );
+    assert_eq!(stored_credential(&host, EMAIL).as_deref(), Some(CREDENTIAL));
     assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
     assert_eq!(
         host.file(format!("{IDENTITY_PATH}.perch-tmp")),
@@ -628,7 +629,7 @@ fn a_group_is_not_a_switch_target_in_this_form() {
 #[test]
 fn an_account_whose_credential_perch_no_longer_holds_is_refused_by_name() {
     let host = machine_with_two_accounts();
-    host.forget_keychain_item(&profile_service(SECOND_PROFILE), LOGIN_NAME);
+    host.forget_keychain_item(&profile_service(&host, SECOND_EMAIL), LOGIN_NAME);
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 

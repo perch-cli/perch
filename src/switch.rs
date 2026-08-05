@@ -26,7 +26,7 @@ use crate::host::{self, Host};
 use crate::lock;
 use crate::probe::{self, Credential, Store};
 use crate::profile;
-use crate::registry::Account;
+use crate::registry::{self, Account};
 
 /// What the Capture found, which is the part of a Switch worth saying out loud:
 /// it is the part that protects the Account being left behind.
@@ -120,7 +120,7 @@ fn prepare(host: &dyn Host, incoming: &Account, outgoing: Option<&Account>) -> R
     // the Profile being read from, then the one being written back to.
     refuse_if_live(host, incoming, &version)?;
     if let Some(outgoing) =
-        outgoing.filter(|account| account.profile_dir(host) != incoming.profile_dir(host))
+        outgoing.filter(|account| !registry::same_profile(account.email(), incoming.email()))
     {
         refuse_if_live(host, outgoing, &version)?;
     }
@@ -217,7 +217,7 @@ fn identity_block_for(host: &dyn Host, incoming: &Account) -> Result<String> {
 
 /// Refuses to touch a Profile something else is holding (ADR 0005).
 fn refuse_if_live(host: &dyn Host, account: &Account, version: &str) -> Result<()> {
-    let running = probe::live_clients(host, &account.profile_dir(host), version)?;
+    let running = probe::live_clients(host, &account.profile_dir(host)?, version)?;
     if running.is_empty() {
         return Ok(());
     }
