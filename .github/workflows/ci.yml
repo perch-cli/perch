@@ -50,7 +50,7 @@ jobs:
       # deliberately left out, because they need the install step below first.
       # A new binary that is not added is a suite that silently never runs.
       - name: Unit and behaviour tests
-        run: cargo test --lib --test adoption --test adding --test status --test grouping --test naming --test listing --test switching --test refreshing
+        run: cargo test --lib --test adoption --test adding --test status --test grouping --test naming --test listing --test switching --test refreshing --test storing
 
       # Gives the contract tests a real bundle to assert against. If the install
       # is unavailable they assert the "no Claude Code here" branch instead, so
@@ -87,4 +87,4 @@ jobs:
       # Code and the real keychain (ADR 0007), so drift is found here rather
       # than by a user being logged out by a background auto-update.
       - name: Contract tests
-        run: cargo test --test contract -- --nocapture
+        run: cargo test --test contract --test contract_credentials --test contract_sessions -- --nocapture

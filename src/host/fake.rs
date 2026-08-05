@@ -123,7 +123,9 @@ pub struct FakeHost {
     keychain_lock: RefCell<Option<KeychainLock>>,
     executions: RefCell<BTreeMap<String, Execution>>,
     login: RefCell<Option<Login>>,
-    live_processes: RefCell<BTreeSet<u32>>,
+    /// The running processes, each with when it began — or `None` for one whose
+    /// start the operating system will not say.
+    live_processes: RefCell<BTreeMap<u32, Option<DateTime<Utc>>>>,
     interactive: RefCell<bool>,
     answers: RefCell<VecDeque<String>>,
     /// What each endpoint answers, by URL and by the access token that asked.
@@ -161,7 +163,7 @@ impl FakeHost {
             keychain_lock: RefCell::new(None),
             executions: RefCell::new(BTreeMap::new()),
             login: RefCell::new(None),
-            live_processes: RefCell::new(BTreeSet::new()),
+            live_processes: RefCell::new(BTreeMap::new()),
             interactive: RefCell::new(true),
             answers: RefCell::new(VecDeque::new()),
             replies: RefCell::new(BTreeMap::new()),
@@ -312,10 +314,28 @@ impl FakeHost {
         self
     }
 
-    /// A process that is running, so a marker file naming it means a Live
-    /// Profile rather than one a client left behind when it died.
+    /// A process that is running, and has been since before any session a
+    /// fixture records — so a marker naming it means a Live Profile rather
+    /// than one a client left behind when it died.
     pub fn with_live_process(self, pid: u32) -> Self {
-        self.live_processes.borrow_mut().insert(pid);
+        self.live_processes
+            .borrow_mut()
+            .insert(pid, Some(DateTime::<Utc>::MIN_UTC));
+        self
+    }
+
+    /// A process that is running and began at `at` — a recycled PID is one
+    /// wearing a marker that was written before the process began (ADR 0022).
+    pub fn with_live_process_started_at(self, pid: u32, at: DateTime<Utc>) -> Self {
+        self.live_processes.borrow_mut().insert(pid, Some(at));
+        self
+    }
+
+    /// A process that is running but whose start the operating system will not
+    /// say — the one situation a session marker naming it can be neither
+    /// corroborated nor dismissed in.
+    pub fn with_live_process_of_unknown_start(self, pid: u32) -> Self {
+        self.live_processes.borrow_mut().insert(pid, None);
         self
     }
 
@@ -780,7 +800,11 @@ impl Host for FakeHost {
     }
 
     fn process_alive(&self, pid: u32) -> bool {
-        self.live_processes.borrow().contains(&pid)
+        self.live_processes.borrow().contains_key(&pid)
+    }
+
+    fn process_started_at(&self, pid: u32) -> Option<DateTime<Utc>> {
+        self.live_processes.borrow().get(&pid).copied().flatten()
     }
 
     /// Costs no time, but does pass it: waiting for a lock somebody else holds

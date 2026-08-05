@@ -27,6 +27,8 @@ pub mod assumption {
     pub const CREDENTIAL_LOCATION: &str = "a Credential is kept in the keychain namespace, or the file, that the \
          config directory derives";
     pub const IDENTITY_BLOCK: &str = "the identity file holds an oauthAccount block";
+    pub const SESSION_MARKER: &str =
+        "a session marker names its process and when the session started";
 }
 
 /// The keychain service name Claude Code uses when `CLAUDE_CONFIG_DIR` is
@@ -514,26 +516,84 @@ pub fn sessions_dir(config_dir: &Path) -> PathBuf {
     config_dir.join("sessions")
 }
 
+/// The marker Claude Code writes for a running session, to the extent Perch
+/// reads it. `startedAt` is when the session began, in milliseconds since the
+/// epoch — which means the same thing on every platform, and is why it is the
+/// field matched rather than the platform-encoded `procStart` (ADR 0022).
+#[derive(Deserialize)]
+struct SessionMarker {
+    #[serde(rename = "startedAt")]
+    started_at: Option<i64>,
+}
+
 /// The processes running against a config directory right now.
 ///
 /// A marker file names its process in its own name, and Claude Code leaves them
-/// behind when it dies — so a marker is evidence of a client only when the
-/// process it names is still alive. Anything unreadable is treated as no
-/// evidence: a Profile is Live when something says so, not when nothing does.
-pub fn live_clients(host: &dyn Host, config_dir: &Path) -> Vec<u32> {
+/// behind when it dies — so a marker is evidence of a client only when it is
+/// corroborated (ADR 0022): the process it names began no later than the marker
+/// says the session did. A recycled PID necessarily belongs to a process that
+/// began after the marker was written, so the check is exact rather than
+/// heuristic. A marker that cannot be read or understood is no evidence at all:
+/// a Profile is Live when something says so, not when nothing does.
+///
+/// One situation is neither belief nor dismissal — a running process whose
+/// start the operating system will not say. That marker can be neither
+/// corroborated nor dismissed, and guessing either way is silently wrong on
+/// one side or the other, so the answer is a refusal naming the assumption.
+pub fn live_clients(host: &dyn Host, config_dir: &Path, version: &str) -> Result<Vec<u32>> {
     let markers = match host.list_dir(&sessions_dir(config_dir)) {
         Ok(markers) => markers,
-        Err(_) => return Vec::new(),
+        Err(_) => return Ok(Vec::new()),
     };
 
-    markers
-        .iter()
-        .filter_map(|marker| {
-            let name = marker.file_name()?.to_str()?;
-            let pid: u32 = name.strip_suffix(".json")?.parse().ok()?;
-            host.process_alive(pid).then_some(pid)
-        })
-        .collect()
+    let mut running = Vec::new();
+    for marker in markers {
+        let pid: u32 = match marker
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_suffix(".json"))
+            .and_then(|name| name.parse().ok())
+        {
+            Some(pid) => pid,
+            None => continue,
+        };
+        let Some(session_began) = session_start_in(host, &marker) else {
+            continue;
+        };
+
+        match host.process_started_at(pid) {
+            Some(process_began) => {
+                if process_began.timestamp_millis() <= session_began {
+                    running.push(pid);
+                }
+            }
+            // No start to compare. The process being gone is the ordinary way
+            // that happens — a marker left behind by a client that died.
+            None if !host.process_alive(pid) => {}
+            None => {
+                return Err(refusal(
+                    assumption::SESSION_MARKER,
+                    &format!(
+                        "{} names a running process, but when that process \
+                         began could not be read, so the marker can be neither \
+                         corroborated nor dismissed. If that session is dead, \
+                         delete the file",
+                        marker.display()
+                    ),
+                    version,
+                ));
+            }
+        }
+    }
+    Ok(running)
+}
+
+/// The marker's own record of when its session began. A marker that cannot be
+/// read, or does not say, holds nothing worth corroborating.
+fn session_start_in(host: &dyn Host, marker: &Path) -> Option<i64> {
+    let contents = host.read_file(marker).ok()?;
+    let recorded: SessionMarker = serde_json::from_str(&contents).ok()?;
+    recorded.started_at
 }
 
 /// The key of `.claude.json` that says who the Account is. The only key of that

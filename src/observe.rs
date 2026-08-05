@@ -196,7 +196,7 @@ fn usable_token(host: &dyn Host, store: &Store, version: &str) -> Step<String> {
     // Asked before the locks are taken, so an Account that was never going to
     // be renewed says so without queueing behind anything, and asked again
     // under them, where the answer is the one that counts.
-    refuse_if_live(host, store)?;
+    refuse_if_live(host, store, version)?;
     renew_under_the_lock(host, store, version)
 }
 
@@ -205,8 +205,8 @@ fn usable_token(host: &dyn Host, store: &Store, version: &str) -> Step<String> {
 /// Anthropic retires the old refresh token when it Rotates one, so renewing a
 /// Credential a running Claude Code has in memory logs that session out
 /// silently, mid-task.
-fn refuse_if_live(host: &dyn Host, store: &Store) -> Step<()> {
-    let running = probe::live_clients(host, &store.config_dir);
+fn refuse_if_live(host: &dyn Host, store: &Store, version: &str) -> Step<()> {
+    let running = probe::live_clients(host, &store.config_dir, version)?;
     if running.is_empty() {
         return Ok(());
     }
@@ -240,7 +240,7 @@ fn renew_under_the_lock(host: &dyn Host, store: &Store, version: &str) -> Step<S
     lock::under(host, probe::locks_for(store), |held| {
         // Both of the questions asked before the locks were taken, asked again
         // now that nothing can change the answer underneath Perch.
-        refuse_if_live(host, store)?;
+        refuse_if_live(host, store, version)?;
         let credential = credential_in(host, store, version)?;
         if credential.usable_at(host.now()) {
             return Ok(credential.access_token);

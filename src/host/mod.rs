@@ -208,6 +208,16 @@ pub trait Host {
     /// untouchable because something else is holding it.
     fn process_alive(&self, pid: u32) -> bool;
 
+    /// When a process began, by the operating system's own account — or `None`
+    /// when there is no saying, because the process is gone or the operating
+    /// system will not answer for it.
+    ///
+    /// What corroborates a session marker (ADR 0022): a marker is evidence of
+    /// a client only when the process it names began no later than the marker
+    /// says the session did, because a recycled PID necessarily belongs to a
+    /// process that began after the marker was written.
+    fn process_started_at(&self, pid: u32) -> Option<DateTime<Utc>>;
+
     /// Waits. Contending for a lock is the only thing Perch waits on, and it is
     /// an effect like any other so that tests do not spend the time.
     fn sleep(&self, millis: u64);

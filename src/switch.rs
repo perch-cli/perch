@@ -118,11 +118,11 @@ fn prepare(host: &dyn Host, incoming: &Account, outgoing: Option<&Account>) -> R
 
     // Before anything is written, and in the order the user would care about:
     // the Profile being read from, then the one being written back to.
-    refuse_if_live(host, incoming)?;
+    refuse_if_live(host, incoming, &version)?;
     if let Some(outgoing) =
         outgoing.filter(|account| account.profile_dir(host) != incoming.profile_dir(host))
     {
-        refuse_if_live(host, outgoing)?;
+        refuse_if_live(host, outgoing, &version)?;
     }
 
     // From whichever of the Profile's two Credential Stores holds one (ADR
@@ -216,8 +216,8 @@ fn identity_block_for(host: &dyn Host, incoming: &Account) -> Result<String> {
 }
 
 /// Refuses to touch a Profile something else is holding (ADR 0005).
-fn refuse_if_live(host: &dyn Host, account: &Account) -> Result<()> {
-    let running = probe::live_clients(host, &account.profile_dir(host));
+fn refuse_if_live(host: &dyn Host, account: &Account, version: &str) -> Result<()> {
+    let running = probe::live_clients(host, &account.profile_dir(host), version)?;
     if running.is_empty() {
         return Ok(());
     }
