@@ -31,6 +31,15 @@ pub const EXIT_INVALID: i32 = 14;
 pub const EXIT_NOTHING_TO_DO: i32 = 15;
 /// Exit code for a refusal to touch a Profile a client is running against.
 pub const EXIT_PROFILE_LIVE: i32 = 16;
+/// Exit code for a Cycle with nowhere to land: every Account in the Group is
+/// exhausted, or none of them is a candidate at all. Distinct from "nothing to
+/// do", because waiting is the answer here and there is nothing to wait for
+/// there.
+pub const EXIT_NO_CANDIDATE: i32 = 17;
+/// Exit code for a bare Cycle among Accounts nobody has declared
+/// interchangeable — the ungrouped pool, with the setting that governs it off
+/// (ADR 0017).
+pub const EXIT_NOT_INTERCHANGEABLE: i32 = 18;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PerchError {
@@ -71,6 +80,17 @@ pub enum PerchError {
     /// that client until it exits.
     #[error("{0}")]
     ProfileLive(String),
+
+    /// A Cycle found nowhere worth landing. Says which Account frees up
+    /// soonest, so waiting is a decision the user makes rather than one Perch
+    /// makes for them by switching somewhere useless.
+    #[error("{0}")]
+    NoCandidate(String),
+
+    /// A bare Cycle from an Account whose interchangeability nobody has
+    /// declared. Names both ways to declare it (ADR 0017).
+    #[error("{0}")]
+    NotInterchangeable(String),
 
     #[error("Could not read {path}: {source}")]
     FileRead {
@@ -124,6 +144,12 @@ impl PerchError {
             PerchError::ProfileLive(message) => {
                 PerchError::ProfileLive(format!("{message}\n\n{note}"))
             }
+            PerchError::NoCandidate(message) => {
+                PerchError::NoCandidate(format!("{message}\n\n{note}"))
+            }
+            PerchError::NotInterchangeable(message) => {
+                PerchError::NotInterchangeable(format!("{message}\n\n{note}"))
+            }
             // The rest carry structure rather than a message. They all exit as
             // a general failure already, so folding them into one loses the
             // shape and nothing a caller could act on.
@@ -140,6 +166,8 @@ impl PerchError {
             PerchError::Invalid(_) => EXIT_INVALID,
             PerchError::NothingToDo(_) => EXIT_NOTHING_TO_DO,
             PerchError::ProfileLive(_) => EXIT_PROFILE_LIVE,
+            PerchError::NoCandidate(_) => EXIT_NO_CANDIDATE,
+            PerchError::NotInterchangeable(_) => EXIT_NOT_INTERCHANGEABLE,
             _ => EXIT_GENERAL,
         }
     }

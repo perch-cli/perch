@@ -12,6 +12,7 @@ pub mod adopt;
 pub mod anthropic;
 pub mod commands;
 pub mod credentials;
+pub mod cycle;
 pub mod error;
 pub mod host;
 pub mod json;

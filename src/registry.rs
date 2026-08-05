@@ -70,8 +70,9 @@ fn enabled_by_default() -> bool {
 /// How Cycling orders the Accounts in a Group.
 ///
 /// Both readings measure headroom the same way — the worst Quota Window an
-/// Account has (ADR 0012) — and differ only in what they do with it. Stored and
-/// validated here; nothing consumes it until ranking lands.
+/// Account has (ADR 0012) — and differ only in what they do with it. Ranking
+/// implements the first; the second, and the command that chooses between them,
+/// land with `perch config`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Strategy {
@@ -137,6 +138,26 @@ impl GroupConfig {
         }
         Ok(())
     }
+}
+
+/// The configuration that belongs to no Group, because there is no Group for
+/// it to belong to (ADR 0017).
+///
+/// An ungrouped Account has nothing carrying its settings, and modelling the
+/// Accounts in no Group as a Group with a reserved name would make a Group mean
+/// two contradictory things — a declaration the user made, and one Perch made
+/// for them. So the one setting about those Accounts is global.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GlobalConfig {
+    /// Whether bare `perch switch` may Cycle among the Accounts in no Group.
+    ///
+    /// Off unless the user says otherwise, and deliberately so: being ungrouped
+    /// is the absence of a declaration that Accounts are interchangeable, not a
+    /// weaker form of one. Cycling freely here would move someone from their
+    /// work subscription onto their personal one without their ever having said
+    /// the two were substitutable.
+    pub cycle_ungrouped: bool,
 }
 
 /// The word that addresses "no Group at all" on `perch group move`, and the
@@ -217,6 +238,9 @@ pub struct Registry {
     /// made, not a summary of where the Accounts happen to be.
     #[serde(default)]
     pub groups: BTreeMap<String, GroupConfig>,
+    /// The configuration that hangs off no Group.
+    #[serde(default)]
+    pub global: GlobalConfig,
 }
 
 impl Default for Registry {
@@ -227,6 +251,7 @@ impl Default for Registry {
             accounts: Vec::new(),
             aliases: BTreeMap::new(),
             groups: BTreeMap::new(),
+            global: GlobalConfig::default(),
         }
     }
 }
@@ -666,6 +691,18 @@ mod tests {
         assert!(json.contains("soonest-reset"), "{json}");
         let back: Registry = serde_json::from_str(&json).unwrap();
         assert_eq!(back, registry);
+    }
+
+    #[test]
+    fn cycling_among_ungrouped_accounts_is_off_until_it_is_asked_for() {
+        assert!(!Registry::default().global.cycle_ungrouped);
+        let before_the_setting_existed: Registry =
+            serde_json::from_str(r#"{"version":2}"#).expect("a registry Perch wrote earlier");
+        assert!(
+            !before_the_setting_existed.global.cycle_ungrouped,
+            "a registry written before the setting existed reads as off, not as \
+             a declaration nobody made (ADR 0017)"
+        );
     }
 
     #[test]

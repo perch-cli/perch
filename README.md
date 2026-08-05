@@ -7,9 +7,8 @@ login flow again.
 
 Early. Perch adopts the login you already have, adds further Accounts without
 disturbing it, names them, holds Groups of Accounts you have declared
-interchangeable, lists what you have, reads how full each one is, and switches
-to an Account you name. Choosing an Account for you — `perch switch` with no
-target — is not built yet.
+interchangeable, lists what you have, reads how full each one is, switches to
+an Account you name, and picks one for you when you name none.
 
 ```
 $ perch status
@@ -109,6 +108,65 @@ switching to the Account that is already active does nothing and exits 15. If a
 Switch fails part way, it says which Account is active now and what is where —
 running it again finishes the job.
 
+## Cycling
+
+`perch switch` with no target picks the Account for you. It is the command you
+type mid-task when quota just ran out, so it asks nothing, under any
+circumstances (ADR 0011).
+
+```
+$ perch switch
+Cycling within Group `work`.
+overflow@example.com has the most room: 60% headroom, which is true of every one of its Quota Windows — 7-day is its fullest, as of 4m ago.
+Captured you@example.com's live Credential into its own Profile.
+Switched to overflow@example.com.
+Utilization   5-hour    12%  (as of 4m ago)
+              7-day     40%  (as of 4m ago)
+That figure is what Perch last observed rather than what Anthropic says now. If overflow@example.com turns out fuller than it implied, the figure was stale — `perch status --refresh` reads a current one.
+```
+
+It Cycles **within the current Account's Group** and never leaves it, so a work
+subscription running dry does not land you on your personal Account. `perch
+switch <group>` Cycles within a Group you name instead.
+
+Each Account is ranked by its **worst** Quota Window, and the Account whose
+worst is best wins (ADR 0012). Being blocked by any window blocks you
+completely, so that is the only ranking that measures what actually stops you
+working: the headroom Perch reports is true of every one of that Account's
+windows. Exhausted, disabled and Quarantined Accounts are never chosen, and an
+Account nobody has ever read a figure for is ranked below every Account that
+has one — no figure and plenty of room are opposite pieces of advice.
+
+Ranking reads the cache and never the network, so the figures can be minutes
+old. Landing on an Account that turns out fuller than they implied is the cache
+being stale rather than the Switch going wrong, which is why every Cycle says so
+before you find out.
+
+Three outcomes are honest non-outcomes. They perform no Switch, explain
+themselves, and exit with a code of their own rather than pretending to have
+worked.
+
+```
+$ perch switch
+Cycling within Group `work`.
+Every Account in Group `work` is exhausted, so there is nowhere useful to Switch. Nothing was changed.
+you@example.com frees up soonest, at 2026-08-04 15:00 UTC (in 3h).   # exit 17
+
+$ perch switch
+Cycling within Group `work`.
+you@example.com is already the best Account in Group `work`, with 90% headroom, which is true of every one of its Quota Windows — 5-hour is its fullest, as of 4m ago. Nothing was changed.   # exit 15
+
+$ perch switch
+you@example.com is in no Group, so nothing has declared which Accounts it is interchangeable with. Nothing was changed.
+Either put it in a Group with `perch group move you@example.com <group>`, or declare that every ungrouped Account is interchangeable with `perch config set cycle-ungrouped true`.   # exit 18
+```
+
+That last one is ADR 0017. An Account need not be in a Group — adoption leaves
+the first one ungrouped — but being ungrouped is the *absence* of a declaration
+that Accounts are interchangeable, not a weaker form of one. So bare `perch
+switch` Cycles among ungrouped Accounts only when a global setting says it may,
+and that setting is off until you turn it on.
+
 ## What you have
 
 `perch list` is the one place that answers it: every Account with its Alias, its
@@ -207,6 +265,8 @@ it, and the watcher is deferred entirely (ADR 0013).
 | 14 | Perch understood it and will not accept it — an ambiguous name, a value out of range |
 | 15 | there was nothing to do — you are already on that Account |
 | 16 | refused: a client is running against that Profile, so its Credential is not Perch's to write |
+| 17 | a Cycle found nowhere to land — every Account in the Group is exhausted, or none is a candidate |
+| 18 | a bare Cycle from an Account nobody has declared interchangeable with anything (ADR 0017) |
 
 ## Where things are
 
@@ -238,8 +298,8 @@ edition 2024 — so rustup will fetch the right one on first build.
 ```
 # touches nothing on the machine
 cargo test --lib --test adoption --test status --test adding --test grouping \
-           --test naming --test listing --test switching --test refreshing \
-           --test storing
+           --test naming --test listing --test switching --test cycling \
+           --test refreshing --test storing
 # asserts beliefs against this machine
 cargo test --test contract
 # both
