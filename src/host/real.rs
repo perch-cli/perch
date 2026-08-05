@@ -614,11 +614,18 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
 
 /// When a process began, as `GetProcessTimes` reports it: a creation `FILETIME`
 /// counting 100-nanosecond ticks from 1601.
+///
+/// Only for a process that is still running. A Windows process object outlives
+/// its exit for as long as anything holds a handle, and `GetProcessTimes`
+/// answers for it the whole while — but an exited process is a gone one here,
+/// as it is on unix once reaped, because a start time exists to corroborate a
+/// session marker (ADR 0022) and a process that has exited corroborates
+/// nothing.
 #[cfg(windows)]
 fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
-    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
+    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, STILL_ACTIVE};
     use windows_sys::Win32::System::Threading::{
-        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     };
 
     /// The epoch, in milliseconds after the point `FILETIME` counts from.
@@ -629,6 +636,14 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
         if process.is_null() {
             return None;
         }
+
+        let mut code = 0u32;
+        let running = GetExitCodeProcess(process, &mut code) != 0 && code == STILL_ACTIVE as u32;
+        if !running {
+            CloseHandle(process);
+            return None;
+        }
+
         let mut creation: FILETIME = std::mem::zeroed();
         let mut exit: FILETIME = std::mem::zeroed();
         let mut kernel: FILETIME = std::mem::zeroed();
