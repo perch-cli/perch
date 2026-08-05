@@ -9,6 +9,7 @@ use perch::commands::enable::{self, EnableCommand};
 use perch::commands::group::{self, GroupCommand};
 use perch::commands::list::{self, ListArgs};
 use perch::commands::relogin::{self, ReloginArgs};
+use perch::commands::remove::{self, RemoveArgs};
 use perch::commands::status::{self, StatusArgs};
 use perch::commands::switch::{self, SwitchArgs};
 use perch::error::EXIT_OK;
@@ -116,6 +117,21 @@ enum Command {
     Relogin {
         /// The Account: its Alias, or its email address.
         target: String,
+    },
+
+    /// Give up an Account: forget it, and delete the Credential Perch holds.
+    ///
+    /// The Account stops being listed and stops being a Cycle candidate, and
+    /// the Alias it answered to is free again. Removing the Account you are on
+    /// names the Account Perch will leave active, lands on it first, and asks
+    /// before any of it happens.
+    Remove {
+        /// The Account: its Alias, or its email address.
+        target: String,
+
+        /// Remove it without being asked to confirm.
+        #[arg(long)]
+        yes: bool,
     },
 
     /// Show every Account with its Alias, Group, state and cached Utilization.
@@ -290,6 +306,7 @@ fn main() {
         Command::Group { action } => group::run(&host, action.into(), &mut out),
         Command::List { json } => list::run(&host, ListArgs { json }, &mut out),
         Command::Relogin { target } => relogin::run(&host, ReloginArgs { target }, &mut out),
+        Command::Remove { target, yes } => remove::run(&host, RemoveArgs { target, yes }, &mut out),
         Command::Status {
             group,
             refresh,

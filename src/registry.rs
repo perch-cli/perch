@@ -649,6 +649,25 @@ impl Registry {
         self.account_mut(email)?.quarantine.take()
     }
 
+    /// Forgets an Account: the entry, the Alias that reached it, and its place
+    /// as the active one.
+    ///
+    /// Its Group is left declared. A Group is something the user said rather
+    /// than a summary of where the Accounts happen to be, so emptying one is not
+    /// a reason to withdraw the statement — and `perch group remove` is how it
+    /// is withdrawn.
+    ///
+    /// The Credential is not this to delete: what a Profile holds is the
+    /// caller's to take away before the row that names it goes, so a store that
+    /// will not give it up is met while the Account can still be named.
+    pub fn forget(&mut self, email: &str) {
+        self.accounts.retain(|account| account.email() != email);
+        self.aliases.retain(|_, named| named != email);
+        if self.active.as_deref() == Some(email) {
+            self.active = None;
+        }
+    }
+
     pub fn upsert(&mut self, account: Account) {
         match self
             .accounts

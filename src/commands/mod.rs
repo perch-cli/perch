@@ -9,12 +9,14 @@ pub mod enable;
 pub mod group;
 pub mod list;
 pub mod relogin;
+pub mod remove;
 pub mod status;
 pub mod switch;
 
 use std::io::Write;
 
 use crate::error::{PerchError, Result};
+use crate::host::Host;
 
 /// A command's output going nowhere — a closed pipe, most often. Not a failure
 /// of the thing the command was asked to do, but the command cannot finish
@@ -26,6 +28,19 @@ pub fn write_failed(err: std::io::Error) -> PerchError {
 /// One line to the person running the command.
 pub fn say(out: &mut dyn Write, line: &str) -> Result<()> {
     writeln!(out, "{line}").map_err(write_failed)
+}
+
+/// Puts a question to the person at the terminal and waits for their answer,
+/// or `None` at end of input.
+///
+/// The question is written without a newline and flushed, so the answer is
+/// typed where the question ends. Every command that asks one asks it this way:
+/// a question the terminal has not been shown yet is a command that looks hung.
+pub fn ask(host: &dyn Host, out: &mut dyn Write, question: &str) -> Result<Option<String>> {
+    write!(out, "{question}").map_err(write_failed)?;
+    out.flush().map_err(write_failed)?;
+    host.read_line()
+        .map_err(|err| PerchError::Other(format!("could not read your answer: {err}")))
 }
 
 /// What the Accounts in no Group are shown under. Being in no Group is not a
