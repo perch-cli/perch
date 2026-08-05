@@ -43,14 +43,21 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
 
+      # --all-features so the contract suite is linted too: it is held back from
+      # `cargo test` by a feature, and without this it would go unlinted.
       - name: Lint
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
-      # Every behaviour test binary has to be named here: the contract tests are
-      # deliberately left out, because they need the install step below first.
-      # A new binary that is not added is a suite that silently never runs.
+      # Everything the default feature set builds — lib, bin, doc tests, and
+      # every tests/*.rs Cargo finds. Nothing to add here when a suite is: the
+      # contract tests are the only ones held back, and they are held back by
+      # `required-features` in Cargo.toml rather than by being absent from a
+      # list somebody has to remember to extend.
+      #
+      # --locked because a resolver that is free to update Cargo.lock is a CI
+      # run that tested a dependency set no one has committed.
       - name: Unit and behaviour tests
-        run: cargo test --lib --test adoption --test adding --test status --test grouping --test naming --test listing --test switching --test refreshing
+        run: cargo test --locked
 
       # Gives the contract tests a real bundle to assert against. If the install
       # is unavailable they assert the "no Claude Code here" branch instead, so
@@ -85,6 +92,11 @@ jobs:
 
       # Contract tests assert the probe's beliefs against the installed Claude
       # Code and the real keychain (ADR 0007), so drift is found here rather
-      # than by a user being logged out by a background auto-update.
+      # than by a user being logged out by a background auto-update. Kept as a
+      # step of its own so a failure here reads as upstream drift rather than as
+      # a fault in the pull request.
+      #
+      # --nocapture so the "skipping:" lines are visible: a suite that skipped
+      # itself and a suite that asserted look identical otherwise.
       - name: Contract tests
-        run: cargo test --test contract -- --nocapture
+        run: cargo test --locked --features contract --test contract --test contract_credentials -- --nocapture
