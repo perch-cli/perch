@@ -553,37 +553,36 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
     DateTime::from_timestamp_millis(boot * 1_000 + ticks_after_boot * 1_000 / ticks_per_second)
 }
 
-/// When a process began, as `sysctl` reports it: the `kinfo_proc` for one pid,
-/// whose `p_starttime` is a microsecond-resolution timeval.
+/// When a process began, as libproc reports it: the `proc_bsdinfo` for one
+/// pid, whose `pbi_start_tvsec`/`pbi_start_tvusec` are the start as a
+/// microsecond-resolution timestamp.
+///
+/// `proc_pidinfo` rather than `sysctl KERN_PROC_PID`, because the libc crate
+/// carries a vetted declaration of the former for Apple and none of the
+/// latter's `kinfo_proc` — and hand-writing that struct is precisely the
+/// `unsafe` ADR 0021 exists to avoid.
 #[cfg(target_os = "macos")]
 fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
-    let mut info: libc::kinfo_proc = unsafe { std::mem::zeroed() };
-    let mut size = std::mem::size_of::<libc::kinfo_proc>();
-    let mut name = [
-        libc::CTL_KERN,
-        libc::KERN_PROC,
-        libc::KERN_PROC_PID,
-        pid as libc::c_int,
-    ];
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
 
-    let answered = unsafe {
-        libc::sysctl(
-            name.as_mut_ptr(),
-            name.len() as libc::c_uint,
-            (&raw mut info).cast(),
-            &mut size,
-            std::ptr::null_mut(),
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDTBSDINFO,
             0,
+            (&raw mut info).cast(),
+            size,
         )
     };
-    // A pid nothing is wearing "succeeds" with nothing written, so emptiness
-    // is as much of the check as the return code is.
-    if answered != 0 || size < std::mem::size_of::<libc::kinfo_proc>() {
+    // The return is how many bytes were written; anything short of the whole
+    // struct is a process that is gone, or one that will not be described.
+    if written < size {
         return None;
     }
 
-    let began = info.kp_proc.p_starttime;
-    DateTime::from_timestamp(began.tv_sec, began.tv_usec as u32 * 1_000)
+    let seconds = i64::try_from(info.pbi_start_tvsec).ok()?;
+    DateTime::from_timestamp(seconds, u32::try_from(info.pbi_start_tvusec).ok()? * 1_000)
 }
 
 /// When a process began, as `GetProcessTimes` reports it: a creation `FILETIME`
