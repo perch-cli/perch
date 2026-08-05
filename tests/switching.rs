@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 use chrono::{TimeZone, Utc};
 use common::*;
 use perch::error::{
-    EXIT_INVALID, EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NOT_FOUND, EXIT_NOTHING_TO_DO,
-    EXIT_PROBE_REFUSED, EXIT_PROFILE_LIVE,
+    EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NOT_FOUND, EXIT_NOTHING_TO_DO, EXIT_PROBE_REFUSED,
+    EXIT_PROFILE_LIVE,
 };
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
@@ -612,18 +612,6 @@ fn a_target_that_names_nothing_is_refused_before_anything_is_touched() {
         "a mistyped name is far more common than an imagined one: {error}"
     );
     assert_eq!(live_credential(&host).as_deref(), Some(CREDENTIAL));
-}
-
-#[test]
-fn a_group_is_not_a_switch_target_in_this_form() {
-    let host = machine_with_two_accounts();
-    declare_group(&host, "work");
-
-    let (result, _) = run_switch(&host, "work");
-
-    let error = result.expect_err("a Group names more than one Account");
-    assert_eq!(error.exit_code(), EXIT_INVALID);
-    assert!(error.to_string().contains("`work` is a Group."), "{error}");
 }
 
 #[test]

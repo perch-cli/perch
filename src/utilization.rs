@@ -110,6 +110,32 @@ pub fn age_phrase(observed_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
     }
 }
 
+/// When a Quota Window comes back, said both ways: the clock time to plan
+/// around, and how long that is from now so it can be judged without arithmetic.
+///
+/// "2026-08-04 15:00 UTC (in 3h)". A time already past reads as "any moment
+/// now" rather than as a negative wait — a cached figure can outlive the window
+/// it describes, and a reset that has already happened is good news.
+pub fn reset_phrase(resets_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
+    format!(
+        "{} ({})",
+        resets_at.format("%Y-%m-%d %H:%M UTC"),
+        wait_phrase(resets_at, now)
+    )
+}
+
+fn wait_phrase(resets_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
+    let seconds = (resets_at - now).num_seconds();
+    if seconds <= 0 {
+        return "any moment now".to_string();
+    }
+    match seconds {
+        1..=5399 => format!("in {}m", (seconds as f64 / 60.0).ceil() as i64),
+        5400..=86_399 => format!("in {}h", (seconds as f64 / 3600.0).round() as i64),
+        _ => format!("in {}d", (seconds as f64 / 86_400.0).round() as i64),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +155,25 @@ mod tests {
     #[test]
     fn a_clock_that_ran_backwards_does_not_claim_freshness() {
         assert_eq!(age_phrase(at(13, 0), at(12, 0)), "in the future");
+    }
+
+    #[test]
+    fn a_reset_is_said_as_a_clock_time_and_as_a_wait() {
+        assert_eq!(
+            reset_phrase(at(15, 0), at(12, 0)),
+            "2026-08-04 15:00 UTC (in 3h)"
+        );
+        assert_eq!(
+            reset_phrase(at(12, 20), at(12, 0)),
+            "2026-08-04 12:20 UTC (in 20m)"
+        );
+    }
+
+    #[test]
+    fn a_reset_the_cache_outlived_is_good_news_rather_than_a_negative_wait() {
+        assert_eq!(
+            reset_phrase(at(11, 0), at(12, 0)),
+            "2026-08-04 11:00 UTC (any moment now)"
+        );
     }
 }

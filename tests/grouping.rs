@@ -468,6 +468,22 @@ fn a_stored_strategy_perch_does_not_know_is_refused() {
 }
 
 #[test]
+fn a_group_named_where_one_account_is_wanted_is_refused_by_saying_what_it_is() {
+    let host = machine_with_two_accounts();
+    declare_group(&host, "work");
+
+    let (result, _) = move_to_group(&host, "work", "work");
+
+    let error = result.expect_err("a Group names more than one Account");
+    assert_eq!(error.exit_code(), EXIT_INVALID);
+    assert!(error.to_string().contains("`work` is a Group."), "{error}");
+    assert!(
+        error.to_string().contains("one Account"),
+        "being told what `work` is beats being told it is not an Account: {error}"
+    );
+}
+
+#[test]
 fn managing_groups_makes_no_network_call() {
     let host = machine_with_two_accounts();
 

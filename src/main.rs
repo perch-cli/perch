@@ -84,12 +84,17 @@ enum Command {
 
     /// Make an Account active everywhere, with no login flow.
     ///
+    /// With no target, Perch picks for you: it Cycles within the current
+    /// Account's Group, ranking each Account by its most constrained Quota
+    /// Window, and never asks anything.
+    ///
     /// The Credential you are leaving is Captured back into its own Profile
     /// first, so a Rotation that happened while it was active is not lost. Your
     /// memory, settings, plugins and project history are untouched.
     Switch {
-        /// The Account to switch to: its Alias, or its email address.
-        target: String,
+        /// The Account to switch to — its Alias or its email address — or a
+        /// Group to Cycle within.
+        target: Option<String>,
     },
 
     /// Show the active Account and its cached Utilization.

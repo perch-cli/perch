@@ -64,6 +64,9 @@ pub enum Effect {
     Http {
         url: String,
     },
+    /// A question put to the person at the terminal. Recorded so a command that
+    /// must never ask one — bare `perch switch` (ADR 0011) — can be held to it.
+    Asked,
 }
 
 /// One request the fake was asked to send, kept whole so a test can say what
@@ -846,6 +849,7 @@ impl Host for FakeHost {
     }
 
     fn read_line(&self) -> Result<Option<String>, HostError> {
+        self.record(Effect::Asked);
         Ok(self.answers.borrow_mut().pop_front())
     }
 

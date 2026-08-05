@@ -277,14 +277,22 @@ pub fn run_group(host: &FakeHost, command: GroupCommand) -> (perch::Result<()>, 
 /// Runs `perch switch <target>`, returning what it printed alongside how it
 /// ended.
 pub fn run_switch(host: &FakeHost, target: &str) -> (perch::Result<()>, String) {
-    let mut written = Vec::new();
-    let result = perch::commands::switch::run(
+    run_switch_with(
         host,
         SwitchArgs {
-            target: target.to_string(),
+            target: Some(target.to_string()),
         },
-        &mut written,
-    );
+    )
+}
+
+/// `perch switch` with no target: the Cycle, which picks for you.
+pub fn run_cycle(host: &FakeHost) -> (perch::Result<()>, String) {
+    run_switch_with(host, SwitchArgs { target: None })
+}
+
+fn run_switch_with(host: &FakeHost, args: SwitchArgs) -> (perch::Result<()>, String) {
+    let mut written = Vec::new();
+    let result = perch::commands::switch::run(host, args, &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 

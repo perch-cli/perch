@@ -1,4 +1,4 @@
-//! `perch switch <target>` — make an Account active everywhere.
+//! `perch switch [<target>]` — make an Account active everywhere.
 //!
 //! Every client reads the same Default Profile, so one Switch moves the
 //! terminal you are in, the ones you are not, the editor extension and the
@@ -6,34 +6,44 @@
 //! is [`crate::switch`]; what lives here is deciding which Account was meant,
 //! declining to do it again when it is already done, recording who is active
 //! afterwards, and saying where you landed.
+//!
+//! With no Target the Account is chosen rather than named — a Cycle within the
+//! current Account's Group ([`crate::cycle`]), which is the command someone
+//! types mid-task when quota just ran out. It asks nothing, under any
+//! circumstances (ADR 0011): the interactive picker is a separate command.
 
 use std::io::Write;
 
 use crate::adopt;
 use crate::commands::say;
+use crate::cycle::{self, Scope};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::registry::{self, Account, Registry};
 use crate::switch::{self, Captured, Interrupted};
-use crate::target;
+use crate::target::{self, Target};
 use crate::utilization;
 
 #[derive(Debug, Clone)]
 pub struct SwitchArgs {
-    /// The Account to make active: its Alias, or its email address.
-    pub target: String,
+    /// What to switch to: an Account by Alias or email address, or a Group to
+    /// Cycle within. Without one, Perch Cycles within the current Account's
+    /// Group.
+    pub target: Option<String>,
+}
+
+/// The Account to switch to, and what deciding on it left to be said.
+struct Decision {
+    incoming: Account,
+    /// What the figures the choice was made on cannot promise, said once the
+    /// Switch has landed (ADR 0015).
+    caveat: Option<String>,
 }
 
 pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()> {
     let mut registry = adopt::ensure_adopted(host, out)?;
 
-    let named = target::resolve_account(&registry, &args.target)?;
-    say(out, &named.matched)?;
-
-    let incoming = registry
-        .account(&named.email)
-        .cloned()
-        .expect("resolution named an Account Perch holds");
+    let Decision { incoming, caveat } = decide(&registry, args.target.as_deref(), host.now(), out)?;
     let outgoing = registry.active_account().cloned();
 
     if let Some(nothing_to_do) = already_there(host, &registry, &incoming)? {
@@ -43,7 +53,11 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
     match switch::perform(host, &incoming, outgoing.as_ref()) {
         Ok(captured) => {
             record_active(host, &mut registry, &incoming)?;
-            report(out, &registry, &incoming, &captured, host.now())
+            report(out, &registry, &incoming, &captured, host.now())?;
+            match caveat {
+                Some(caveat) => say(out, &caveat),
+                None => Ok(()),
+            }
         }
         Err(Interrupted {
             error,
@@ -65,6 +79,62 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
             Err(error)
         }
     }
+}
+
+/// Which Account this Switch is for, and how it was arrived at.
+///
+/// A Target that names a Group is not a Target that names nothing: it names a
+/// set of Accounts declared interchangeable, which is exactly what a Cycle
+/// needs. So the three forms — an Account, a Group, and no Target at all —
+/// differ only in how the Account is arrived at, and the Switch that follows is
+/// the same one.
+fn decide(
+    registry: &Registry,
+    target: Option<&str>,
+    now: chrono::DateTime<chrono::Utc>,
+    out: &mut dyn Write,
+) -> Result<Decision> {
+    let scope = match target {
+        Some(target) => {
+            let found = target::resolve(registry, target)?;
+            say(out, &found.matched())?;
+            match found {
+                Target::Group { name } => Scope::Group(name),
+                Target::Alias { email, .. } | Target::Account { email } => {
+                    return Ok(Decision {
+                        incoming: registry
+                            .account(&email)
+                            .cloned()
+                            .expect("resolution named an Account Perch holds"),
+                        caveat: None,
+                    });
+                }
+            }
+        }
+        // Never outside the Group the current Account is in, so a work
+        // subscription running dry does not land on a personal Account.
+        None => cycle::scope_for(registry, leaving(registry)?)?,
+    };
+
+    say(out, &scope.announcement())?;
+    let choice = cycle::choose(registry, &scope, registry.active.as_deref(), now)?;
+    say(out, &choice.because)?;
+    Ok(Decision {
+        incoming: choice.account,
+        caveat: choice.caveat,
+    })
+}
+
+/// The Account a bare `perch switch` would be leaving, which is the one whose
+/// Group decides where it may look.
+fn leaving(registry: &Registry) -> Result<&Account> {
+    registry.active_account().ok_or_else(|| {
+        PerchError::NotFound(
+            "No active Account, so there is no Group to Cycle within. Run \
+             `claude` and log in, then run Perch again."
+                .to_string(),
+        )
+    })
 }
 
 /// The refusal to rewrite Credentials for nothing, when there is nothing to do.
