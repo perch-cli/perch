@@ -12,6 +12,12 @@
 //! others alone and leaves its own cached figure standing, because a display
 //! that lost every figure to one broken Account would answer worse than one
 //! with a single gap in it.
+//!
+//! This is also where Perch finds out that an Account is beyond repair, because
+//! a Renewal is the only thing that asks a refresh token to prove it still
+//! works. A rejection, a Rotation that could not be stored, and a Credential
+//! with nothing left to renew with are all terminal: they Quarantine the
+//! Account rather than failing an Account that might work next time.
 
 use std::io::Write;
 
@@ -25,7 +31,7 @@ use crate::host::Host;
 use crate::lock;
 use crate::probe::{self, Credential, Store};
 use crate::profile;
-use crate::registry::{self, Account, CachedUtilization, Registry};
+use crate::registry::{self, Account, CachedUtilization, Quarantine, Registry};
 
 /// How one Account's turn ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +43,15 @@ pub enum Outcome {
     Throttled,
     /// Nothing was read, and this is why.
     Failed(String),
+    /// The Account's Credential cannot be used and cannot be recovered from
+    /// anything Perch holds, so it is Quarantined. Distinct from a failure
+    /// because trying again is not the answer and never will be: `detail`
+    /// carries whatever the failure underneath said, where there was one worth
+    /// keeping.
+    Quarantined {
+        why: Quarantine,
+        detail: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +95,9 @@ impl Attempt {
                 Refused::Throttled
             )),
             Outcome::Failed(why) => Some(format!("{}: {why}", self.email)),
+            Outcome::Quarantined { why, detail } => {
+                Some(why.said_of(&self.email, &self.email, detail.as_deref()))
+            }
         }
     }
 
@@ -88,6 +106,7 @@ impl Attempt {
             Outcome::Observed => ("observed", None),
             Outcome::Throttled => ("throttled", Some(Refused::Throttled.to_string())),
             Outcome::Failed(why) => ("failed", Some(why.clone())),
+            Outcome::Quarantined { why, .. } => ("quarantined", Some(why.as_str().to_string())),
         };
         json!({"email": self.email, "outcome": outcome, "detail": detail})
     }
@@ -133,7 +152,7 @@ impl Report {
 /// Reads current Utilization for each of `emails` and keeps what came back.
 pub fn refresh(host: &dyn Host, registry: &mut Registry, emails: &[String]) -> Report {
     let mut report = Report::default();
-    let mut anything_read = false;
+    let mut anything_to_keep = false;
 
     for email in emails {
         let Some(account) = registry.account(email).cloned() else {
@@ -142,18 +161,25 @@ pub fn refresh(host: &dyn Host, registry: &mut Registry, emails: &[String]) -> R
         let outcome = match observe(host, registry, &account) {
             Ok(windows) => {
                 keep(registry, email, windows, host.now());
-                anything_read = true;
+                anything_to_keep = true;
                 Outcome::Observed
             }
             Err(outcome) => outcome,
         };
+        // A Quarantine found here is written down here. Anthropic has already
+        // retired what it retired by the time Perch learns of it, so a reason
+        // not recorded is a reason discovered again — at a browser round trip
+        // each time, and read as a fresh mystery each time.
+        if let Outcome::Quarantined { why, .. } = &outcome {
+            anything_to_keep |= registry.quarantine(email, *why);
+        }
         report.attempts.push(Attempt {
             email: email.clone(),
             outcome,
         });
     }
 
-    if anything_read && let Err(error) = registry::save(host, registry) {
+    if anything_to_keep && let Err(error) = registry::save(host, registry) {
         report.not_kept = Some(format!(
             "The figures were read but Perch could not write them to its own \
              record, so the next command will show the ones before them: {error}"
@@ -163,12 +189,32 @@ pub fn refresh(host: &dyn Host, registry: &mut Registry, emails: &[String]) -> R
 }
 
 fn observe(host: &dyn Host, registry: &Registry, account: &Account) -> Step<QuotaWindows> {
+    // An Account already known to be beyond repair is not asked again. Its
+    // Credential cannot be renewed and no answer would be recorded against it,
+    // so a read here would spend an allowance that does not refill early (ADR
+    // 0015) to learn what Perch wrote down last time.
+    if let Some(why) = account.quarantine {
+        return Err(Outcome::Quarantined { why, detail: None });
+    }
+
     let version = probe::claude_version(host)?;
-    let store = holding(host, registry, account)?;
-    let token = usable_token(host, &store, &version)?;
+    let asked = holding(host, registry, account)?;
+    let token = usable_token(host, &asked, &version)?;
     confirm(host, &token, account)?;
     let read = anthropic::utilization(host, &token);
     read.map_err(reading_refused)
+}
+
+/// The store an Account is asked about with, and whose it is.
+///
+/// The two are inseparable, because an empty store means opposite things in the
+/// two cases: an Account's own Profile holding nothing is an Account nothing
+/// Perch has can recover, and the Default Profile holding nothing is a Claude
+/// Code that is logged out.
+struct Asked {
+    store: Store,
+    /// Whether this is the Account's own Profile rather than the Default one.
+    its_own_profile: bool,
 }
 
 /// Which store holds the Credential to ask with.
@@ -177,18 +223,24 @@ fn observe(host: &dyn Host, registry: &Registry, account: &Account) -> Step<Quot
 /// its Credential, and it is ahead of the copy in its own Profile, which only
 /// catches up when a Switch away Captures it (ADR 0006). Every other Account is
 /// asked about with the Credential in its own Profile.
-fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<Store> {
+fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<Asked> {
     if registry.active.as_deref() == Some(account.email()) {
-        probe::default_store(host)
+        Ok(Asked {
+            store: probe::default_store(host)?,
+            its_own_profile: false,
+        })
     } else {
-        account.store(host)
+        Ok(Asked {
+            store: account.store(host)?,
+            its_own_profile: true,
+        })
     }
 }
 
 /// An access token that can still be asked a question, renewing the Credential
 /// when the one there is has run out.
-fn usable_token(host: &dyn Host, store: &Store, version: &str) -> Step<String> {
-    let credential = credential_in(host, store, version)?;
+fn usable_token(host: &dyn Host, asked: &Asked, version: &str) -> Step<String> {
+    let credential = credential_in(host, asked, version)?;
     if credential.usable_at(host.now()) {
         return Ok(credential.access_token);
     }
@@ -196,8 +248,8 @@ fn usable_token(host: &dyn Host, store: &Store, version: &str) -> Step<String> {
     // Asked before the locks are taken, so an Account that was never going to
     // be renewed says so without queueing behind anything, and asked again
     // under them, where the answer is the one that counts.
-    refuse_if_live(host, store, version)?;
-    renew_under_the_lock(host, store, version)
+    refuse_if_live(host, &asked.store, version)?;
+    renew_under_the_lock(host, asked, version)
 }
 
 /// Refuses to renew a Credential something else is holding (ADR 0005).
@@ -220,13 +272,27 @@ fn refuse_if_live(host: &dyn Host, store: &Store, version: &str) -> Step<()> {
     )))
 }
 
-fn credential_in(host: &dyn Host, store: &Store, version: &str) -> Step<Credential> {
-    probe::read_credential(host, store, version)?.ok_or_else(|| {
-        Outcome::Failed(
-            "Perch holds no Credential for it, so there is nothing to ask \
-             Anthropic with."
-                .to_string(),
-        )
+/// The Credential to ask with, or what its absence means.
+///
+/// An Account's own Profile holding nothing is terminal: that Profile is the
+/// only place its Credential ever lives, so nothing Perch holds can make it
+/// answerable again. The Default Profile holding nothing is not terminal at all
+/// — it is a Claude Code that has been logged out, and the Account's own copy is
+/// still there to switch back to.
+fn credential_in(host: &dyn Host, asked: &Asked, version: &str) -> Step<Credential> {
+    probe::read_credential(host, &asked.store, version)?.ok_or_else(|| {
+        if asked.its_own_profile {
+            Outcome::Quarantined {
+                why: Quarantine::NoCredential,
+                detail: None,
+            }
+        } else {
+            Outcome::Failed(
+                "the Default Profile holds no Credential, so Claude Code is \
+                 logged out and there is nothing to ask Anthropic with."
+                    .to_string(),
+            )
+        }
     })
 }
 
@@ -236,20 +302,27 @@ fn credential_in(host: &dyn Host, store: &Store, version: &str) -> Step<Credenti
 /// Under Claude Code's own locks, in Claude Code's own order (ADR 0006), with
 /// Claude Code's own double-checked re-read: whoever was holding the lock while
 /// Perch waited for it may have renewed the very Credential Perch was about to.
-fn renew_under_the_lock(host: &dyn Host, store: &Store, version: &str) -> Step<String> {
+fn renew_under_the_lock(host: &dyn Host, asked: &Asked, version: &str) -> Step<String> {
+    let store = &asked.store;
     lock::under(host, probe::locks_for(store), |held| {
         // Both of the questions asked before the locks were taken, asked again
         // now that nothing can change the answer underneath Perch.
         refuse_if_live(host, store, version)?;
-        let credential = credential_in(host, store, version)?;
+        let credential = credential_in(host, asked, version)?;
         if credential.usable_at(host.now()) {
             return Ok(credential.access_token);
         }
 
+        // An access token that has run out and no refresh token to buy another
+        // with is the end of what this Credential can do. Nothing Perch holds
+        // renews it and nothing it could ask would change that.
         let refresh_token = credential
             .refresh_token
             .clone()
-            .ok_or_else(|| Outcome::Failed(NO_REFRESH_TOKEN.to_string()))?;
+            .ok_or(Outcome::Quarantined {
+                why: Quarantine::NoRefreshToken,
+                detail: None,
+            })?;
 
         // Anthropic may Rotate here. Everything after this line is Perch making
         // sure the Rotation is not lost.
@@ -273,19 +346,20 @@ fn renew_under_the_lock(host: &dyn Host, store: &Store, version: &str) -> Step<S
     })
 }
 
+/// Puts the Rotated Credential back, and Quarantines the Account when it cannot.
+///
+/// Anthropic retired the previous refresh token the moment it handed this one
+/// over, so a Credential that cannot be stored is not a write to try again: the
+/// old one is dead and the new one is gone. This is ADR 0006's crash between two
+/// writes, arriving as a failed write — and the reason ADR 0006 says Quarantine
+/// could not be deferred past v1.
 fn store_it(host: &dyn Host, store: &Store, rotated: &str) -> Step<()> {
-    profile::store_credential(host, store, rotated)
-        .map_err(|error| Outcome::Failed(format!("{error}\n\n{ROTATION_LOST}")))
+    profile::store_credential(host, store, rotated).map_err(|error| Outcome::Quarantined {
+        why: Quarantine::RotationLost,
+        detail: Some(error.to_string()),
+    })
 }
 
-const NO_REFRESH_TOKEN: &str = "the Credential Perch holds carries no refresh \
-                                token, so it cannot be renewed";
-const NOT_RENEWABLE: &str = "Anthropic would not renew its Credential, so its \
-                             Utilization could not be read. Log that Account in \
-                             again.";
-const ROTATION_LOST: &str = "Anthropic had already retired the previous refresh \
-                             token, so that Account cannot be renewed again \
-                             until it is logged into.";
 const RATE_LIMITED: &str = "Anthropic is rate-limiting Perch, so nothing about \
                             this Account could be read. The cached figure is \
                             what you see.";
@@ -345,11 +419,15 @@ fn getting_ready_refused(why: Refused) -> Outcome {
     Outcome::Failed(said)
 }
 
-/// The same, for the renewal, where being turned away means the Account has to
-/// be logged into again rather than tried again.
+/// The same, for the renewal, where being turned away is terminal: a refresh
+/// token Anthropic will not take is one it has retired, revoked, or never
+/// issued, and asking again with the same one gets the same answer forever.
 fn not_renewed(why: Refused) -> Outcome {
     match why {
-        Refused::Rejected => Outcome::Failed(NOT_RENEWABLE.to_string()),
+        Refused::Rejected => Outcome::Quarantined {
+            why: Quarantine::RenewalRejected,
+            detail: None,
+        },
         other => getting_ready_refused(other),
     }
 }

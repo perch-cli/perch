@@ -113,8 +113,14 @@ _Avoid_: fetch, update, poll
 **Quarantine**:
 The state of an Account whose Credential is no longer usable and cannot be
 recovered from anything Perch holds. It stays listed and named as broken until
-you log into it again.
+you log into it again, and carries the reason it broke.
 _Avoid_: dead, expired, invalid
+
+**Repair**:
+Logging a Quarantined Account in again in place, so it keeps its Alias, its
+Group, whether Cycling may choose it and its position rather than being rebuilt.
+What `perch relogin` does, and the only thing that ends a Quarantine.
+_Avoid_: fix, restore, re-add, reauth
 
 ## Making an account active
 

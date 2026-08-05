@@ -26,7 +26,7 @@ use crate::host::{self, Host};
 use crate::lock;
 use crate::probe::{self, Credential, Store};
 use crate::profile;
-use crate::registry::{self, Account};
+use crate::registry::{self, Account, Quarantine};
 
 /// What the Capture found, which is the part of a Switch worth saying out loud:
 /// it is the part that protects the Account being left behind.
@@ -47,6 +47,29 @@ pub struct Interrupted {
     /// which Account Perch must now record as active — being active is a fact
     /// about which Credential is in the Default Profile, not a wish.
     pub incoming_is_live: bool,
+    /// Set when the Switch did not merely fail but found the incoming Account
+    /// unusable for good, so the caller records it rather than letting the same
+    /// discovery be made again from scratch next time.
+    pub quarantine: Option<Quarantine>,
+}
+
+/// A Switch that stopped before it wrote anything, carrying whatever the
+/// failure knew about the incoming Account.
+///
+/// A Switch can find an Account unusable for good — a Profile with neither
+/// store holding a Credential — and when it does, the failure itself says which
+/// Quarantine that is. Nothing here decides: it reads what was diagnosed where
+/// it was diagnosed.
+fn stopped(error: PerchError) -> Interrupted {
+    let quarantine = match &error {
+        PerchError::Quarantined { why, .. } => Some(*why),
+        _ => None,
+    };
+    Interrupted {
+        error,
+        incoming_is_live: false,
+        quarantine,
+    }
 }
 
 /// Everything the three steps need, established before any lock is taken.
@@ -69,10 +92,7 @@ pub fn perform(
     incoming: &Account,
     outgoing: Option<&Account>,
 ) -> std::result::Result<Captured, Interrupted> {
-    let prepared = prepare(host, incoming, outgoing).map_err(|error| Interrupted {
-        error,
-        incoming_is_live: false,
-    })?;
+    let prepared = prepare(host, incoming, outgoing).map_err(stopped)?;
 
     let mut incoming_is_live = false;
     let switched: Result<Captured> = lock::under(host, probe::locks_for(&prepared.store), |held| {
@@ -94,6 +114,31 @@ pub fn perform(
     switched.map_err(|error| Interrupted {
         error,
         incoming_is_live,
+        quarantine: None,
+    })
+}
+
+/// Makes an Account's Credential the live one without Capturing what it
+/// replaces.
+///
+/// Every Switch Captures first, because the live Credential is the only good
+/// copy of the outgoing Account's (ADR 0006). A `perch relogin` of the Account
+/// you are on is the one case where that is false in both directions: the
+/// Credential about to be replaced belongs to the Account being repaired, and a
+/// login has already replaced it. Capturing here would write the broken copy
+/// over the fresh one — the one mistake this design cannot recover from,
+/// arriving as tidiness.
+///
+/// The Credential written is the one in the Account's own Profile, read back
+/// out of it rather than passed in, so the same store that a `perch switch`
+/// tomorrow will read is the store this proves works today.
+pub fn make_live(host: &dyn Host, account: &Account) -> Result<()> {
+    let prepared = prepare(host, account, None)?;
+
+    lock::under(host, probe::locks_for(&prepared.store), |held| {
+        profile::store_credential(host, &prepared.store, prepared.credential.as_str())?;
+        held.renew();
+        patch_identity(host, &prepared)
     })
 }
 
@@ -129,12 +174,17 @@ fn prepare(host: &dyn Host, incoming: &Account, outgoing: Option<&Account>) -> R
     // 0020): an Account is switchable to as long as its Credential is
     // somewhere Claude Code would have looked.
     let held = credentials::read(host, &incoming.store(host)?)?.ok_or_else(|| {
-        PerchError::NotFound(format!(
-            "Perch holds no Credential for {}.\n\
-             Nothing was changed. Log that Account in again with `perch relogin {}`.",
-            incoming.email(),
-            incoming.email()
-        ))
+        PerchError::Quarantined {
+            why: Quarantine::NoCredential,
+            said: format!(
+                "Perch holds no Credential for {}, so it is Quarantined — it \
+                 stays listed and named, and nothing switches to it until it has \
+                 been logged into again.\n\
+                 Nothing was changed. {}",
+                incoming.email(),
+                registry::how_to_repair(incoming.email()),
+            ),
+        }
     })?;
     let credential = probe::understand_credential(
         held.credential,
@@ -216,18 +266,38 @@ fn identity_block_for(host: &dyn Host, incoming: &Account) -> Result<String> {
 }
 
 /// Refuses to touch a Profile something else is holding (ADR 0005).
-fn refuse_if_live(host: &dyn Host, account: &Account, version: &str) -> Result<()> {
-    let running = probe::live_clients(host, &account.profile_dir(host)?, version)?;
+///
+/// Public because `perch relogin` asks it before it spends a login rather than
+/// after: a Profile Perch may not write to is a Profile no browser round trip
+/// was ever going to repair.
+pub fn refuse_if_live(host: &dyn Host, account: &Account, version: &str) -> Result<()> {
+    refuse_if_live_in(
+        host,
+        &account.profile_dir(host)?,
+        &format!("{}'s Profile", account.email()),
+        version,
+    )
+}
+
+/// The same, of a config directory named rather than derived — the Default
+/// Profile, which belongs to no one Account and is where a repair of the Account
+/// you are on has to land.
+pub fn refuse_if_live_in(
+    host: &dyn Host,
+    config_dir: &Path,
+    whose: &str,
+    version: &str,
+) -> Result<()> {
+    let running = probe::live_clients(host, config_dir, version)?;
     if running.is_empty() {
         return Ok(());
     }
 
     let pids: Vec<String> = running.iter().map(u32::to_string).collect();
     Err(PerchError::ProfileLive(format!(
-        "A client is running against {}'s Profile (pid {}).\n\
+        "A client is running against {whose} (pid {}).\n\
          Nothing was changed. That Credential belongs to it until it exits — \
          quit it, or switch to a different Account.",
-        account.email(),
         pids.join(", ")
     )))
 }

@@ -54,7 +54,7 @@ fn store_as_first_profile(host: &dyn Host, findings: &Findings) -> Result<Regist
         identity: findings.identity.clone(),
         plan: findings.credential.subscription_type.clone(),
         enabled: true,
-        quarantined: false,
+        quarantine: None,
         group: None,
         utilization: None,
     });

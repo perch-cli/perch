@@ -8,8 +8,9 @@ login flow again.
 Early. Perch adopts the login you already have, adds further Accounts without
 disturbing it, names them, holds Groups of Accounts you have declared
 interchangeable, lists what you have, reads how full each one is, switches to
-an Account you name, picks one for you when you name none, and takes its
-configuration from a script.
+an Account you name, picks one for you when you name none, logs an Account in
+again when its Credential stops working, and takes its configuration from a
+script.
 
 ```
 $ perch status
@@ -201,6 +202,51 @@ Disabling every Account in a Group is allowed. A bare `perch switch` there then
 reports having no candidate (exit 17) rather than quietly landing you on
 something you had reserved.
 
+## When an Account breaks
+
+A Credential can stop working for good: Anthropic retires a refresh token, a
+Rotation is lost between two writes, a login is ended somewhere else. Perch
+never drops such an Account — an Account that vanishes reads as data loss, and a
+broken one reads as something needing attention. It is **Quarantined**: still
+listed, still named, shown as broken, and shown with the reason.
+
+```
+$ perch status --refresh
+overflow@example.com is Quarantined: Anthropic would not renew its Credential. `perch relogin overflow@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
+```
+
+Cycling never chooses a Quarantined Account, and naming one on `perch switch` is
+refused with exit code 19 rather than making a Credential live that does not
+work — which would cost you the Account you are on. Enabling one does not repair
+it: whether Cycling may choose an Account and whether its Credential works are
+separate facts with separate fixes, so both are always said.
+
+`perch relogin <target>` repairs it, and repairs it **in place**.
+
+```
+$ perch relogin overflow
+`overflow` is an Alias for overflow@example.com.
+Logging in again to repair overflow@example.com. someone@example.com stays active and its session is untouched.
+Quit Claude Code when the login is done to come back here.
+
+Repaired overflow@example.com (as `overflow`) — it is no longer Quarantined, and is a Cycle candidate again if it was one before.
+Alias:   overflow
+Group:   work
+Cycling: may choose it
+```
+
+The Account keeps its Alias, its Group, whether Cycling may choose it and its
+place in the listing — only the Credential is replaced. The login runs in a
+directory of its own, so the Account you are working in is untouched throughout,
+including when the login is abandoned, which changes nothing at all. A login as
+a different Account is refused: an Alias you chose for one Account is not handed
+to another because a browser was signed into somebody else.
+
+Relogging in the Account you are **on** also makes its fresh Credential the live
+one, because a repair only its own Profile can see would leave the Account broken
+everywhere it is actually used (ADR 0023). A healthy Account may be relogged in
+too — nothing about the command depends on the Quarantine.
+
 ## What you have
 
 `perch list` is the one place that answers it: every Account with its Alias, its
@@ -215,13 +261,16 @@ $ perch list
   spare@example.com     -         none   disabled              5-hour    91%  (as of 2h ago)
 
 * is the active Account.
+overflow@example.com (as `overflow`) is Quarantined: Anthropic would not renew its Credential. `perch relogin overflow@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
 ```
 
 An Account nobody has ever read a figure for says `never observed` rather than
 `0%` — no figure and plenty of room are opposite pieces of advice. A
 Quarantined Account stays listed and named, so an Account needing attention is
 never mistaken for one that vanished; whether it is in the Cycling pool is said
-alongside, because enabling a Quarantined Account would not repair it.
+alongside, because enabling a Quarantined Account would not repair it. The
+reason it broke is written out under the table rather than squeezed into a
+column, with the one command that puts it right.
 
 `perch status --group` is the same view narrowed to the Group the active
 Account is in, so you can see where you would land before you switch. From an
@@ -230,7 +279,10 @@ not move between them until you say it may (ADR 0017).
 
 `perch list --json` and `perch status --group --json` carry the same
 information, with an observation time on every figure and the scope they were
-narrowed to. Neither makes a network call. `--group` changes the question, so
+narrowed to. Neither makes a network call. `quarantined` is `null` for an
+Account that works and an object — `reason` and `detail` — for one that does
+not, so a script asking whether it is set reads the same answer it always did
+and now gets the reason with it. `--group` changes the question, so
 it changes the document: `perch status --json` answers about one Account under
 `active`, while the listings answer about a set under `accounts`, with the
 active one named under `active_account`.
@@ -355,6 +407,7 @@ it took.
 | 16 | refused: a client is running against that Profile, so its Credential is not Perch's to write |
 | 17 | a Cycle found nowhere to land — every Account in the Group is exhausted, or none is a candidate |
 | 18 | a bare Cycle from an Account nobody has declared interchangeable with anything (ADR 0017) |
+| 19 | that Account is Quarantined — its Credential no longer works, and `perch relogin` repairs it (ADR 0023) |
 
 ## Where things are
 

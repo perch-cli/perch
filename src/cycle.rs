@@ -310,7 +310,7 @@ pub fn choose(
 
     let mut ranked: Vec<Ranked> = accounts
         .iter()
-        .filter(|account| account.enabled && !account.quarantined)
+        .filter(|account| account.enabled && !account.quarantined())
         .map(|account| Ranked {
             account,
             headroom: headroom_of(account),
@@ -429,7 +429,7 @@ fn staleness(registry: &Registry, best: &Ranked) -> Option<String> {
 /// The scope holds Accounts, but none of them is a candidate.
 fn nobody_is_a_candidate(scope: &Scope, accounts: &[&Account]) -> String {
     let disabled = accounts.iter().filter(|a| !a.enabled).count();
-    let quarantined = accounts.iter().filter(|a| a.quarantined).count();
+    let quarantined = accounts.iter().filter(|a| a.quarantined()).count();
     let mut why = Vec::new();
     if disabled > 0 {
         why.push(format!("{disabled} disabled"));
@@ -530,6 +530,7 @@ fn already_the_best(
 mod tests {
     use super::*;
     use crate::probe::Identity;
+    use crate::registry::Quarantine;
     use chrono::TimeZone;
 
     fn now() -> DateTime<Utc> {
@@ -546,7 +547,7 @@ mod tests {
             },
             plan: None,
             enabled: true,
-            quarantined: false,
+            quarantine: None,
             group: Some("work".to_string()),
             utilization: (!windows.is_empty()).then(|| CachedUtilization {
                 observed_at: now() - chrono::Duration::minutes(4),
@@ -842,10 +843,7 @@ mod tests {
         ]);
         registry.account_mut("here@example.com").unwrap().enabled = false;
         registry.account_mut("off@example.com").unwrap().enabled = false;
-        registry
-            .account_mut("broken@example.com")
-            .unwrap()
-            .quarantined = true;
+        registry.quarantine("broken@example.com", Quarantine::RenewalRejected);
 
         let error = cycle(&registry).expect_err("nobody is a candidate");
 

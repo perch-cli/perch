@@ -13,12 +13,13 @@ use perch::commands::config::ConfigCommand;
 use perch::commands::enable::EnableCommand;
 use perch::commands::group::GroupCommand;
 use perch::commands::list::ListArgs;
+use perch::commands::relogin::ReloginArgs;
 use perch::commands::status::StatusArgs;
 use perch::commands::switch::SwitchArgs;
 use perch::credentials;
 use perch::host::{Execution, FakeHost, Host, Platform};
 use perch::probe;
-use perch::registry::{CachedUtilization, WindowUtilization};
+use perch::registry::{CachedUtilization, Quarantine, WindowUtilization};
 
 pub const CLAUDE_VERSION: &str = "2.1.221";
 pub const LOGIN_NAME: &str = "someone";
@@ -461,9 +462,40 @@ pub fn observed(host: &FakeHost, email: &str, windows: Vec<WindowUtilization>) {
 }
 
 /// Marks an Account as one whose Credential can no longer be used and cannot be
-/// recovered. Quarantine is #13; this is the state it leaves behind.
+/// recovered — the state a rejected Renewal leaves behind, arrived at directly
+/// for the tests that are about what Perch does with it afterwards.
 pub fn quarantine(host: &FakeHost, email: &str) {
+    quarantine_for(host, email, Quarantine::RenewalRejected);
+}
+
+/// The same, for the tests that are about one particular reason.
+pub fn quarantine_for(host: &FakeHost, email: &str, why: Quarantine) {
     let mut registry = registry_of(host);
-    registry.account_mut(email).expect("an Account").quarantined = true;
+    assert!(
+        registry.quarantine(email, why),
+        "{email} is an Account Perch holds and was not already Quarantined"
+    );
     perch::registry::save(host, &registry).expect("the registry is written");
+}
+
+/// Runs `perch relogin <target>`, returning what it printed alongside how it
+/// ended.
+pub fn run_relogin(host: &FakeHost, target: &str) -> (perch::Result<()>, String) {
+    let mut written = Vec::new();
+    let result = perch::commands::relogin::run(
+        host,
+        ReloginArgs {
+            target: target.to_string(),
+        },
+        &mut written,
+    );
+    (result, String::from_utf8(written).expect("output is UTF-8"))
+}
+
+/// Why an Account is Quarantined, as the registry records it.
+pub fn quarantine_of(host: &FakeHost, email: &str) -> Option<Quarantine> {
+    registry_of(host)
+        .account(email)
+        .expect("an Account Perch holds")
+        .quarantine
 }

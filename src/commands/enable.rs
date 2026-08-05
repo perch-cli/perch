@@ -22,7 +22,7 @@ use crate::adopt;
 use crate::commands::say;
 use crate::error::Result;
 use crate::host::Host;
-use crate::registry::{self, Registry};
+use crate::registry::{self, Quarantine, Registry};
 use crate::target::{self, AccountTarget};
 
 /// What was asked. The help each of these is described by lives with the
@@ -65,7 +65,7 @@ fn set(registry: &mut Registry, target: &AccountTarget, command: &EnableCommand)
         .account_mut(&target.email)
         .expect("the Account was just resolved");
     let was = std::mem::replace(&mut account.enabled, candidate);
-    let quarantined = account.quarantined;
+    let quarantine = account.quarantine;
 
     let changed = match (was, candidate) {
         (false, false) => format!("{named} was already disabled."),
@@ -73,7 +73,10 @@ fn set(registry: &mut Registry, target: &AccountTarget, command: &EnableCommand)
         (_, false) => format!("Disabled {named}."),
         (_, true) => format!("Enabled {named}."),
     };
-    format!("{changed} {}", what_that_means(candidate, quarantined))
+    format!(
+        "{changed} {}",
+        what_that_means(candidate, quarantine, &target.email)
+    )
 }
 
 /// What the Account's state now means, which is where the honesty lives.
@@ -82,16 +85,17 @@ fn set(registry: &mut Registry, target: &AccountTarget, command: &EnableCommand)
 /// is promised nothing its Credential cannot deliver: whether it is in the
 /// Cycling pool and whether it works at all are separate facts with separate
 /// fixes, and enabling it is not one of them.
-fn what_that_means(candidate: bool, quarantined: bool) -> &'static str {
-    match (candidate, quarantined) {
-        (_, true) => {
-            "It is Quarantined, though, so nothing switches to it — Cycling or \
-             you — until you have logged into it again."
-        }
-        (true, false) => "It is a Cycle candidate again.",
-        (false, false) => {
-            "Cycling will not choose it — it stays listed and named, and `perch \
+fn what_that_means(candidate: bool, quarantine: Option<Quarantine>, target: &str) -> String {
+    match (candidate, quarantine) {
+        (_, Some(why)) => format!(
+            "It is Quarantined, though — {} — so nothing switches to it, Cycling \
+             or you. {}",
+            why.because(),
+            registry::how_to_repair(target),
+        ),
+        (true, None) => "It is a Cycle candidate again.".to_string(),
+        (false, None) => "Cycling will not choose it — it stays listed and named, and `perch \
              switch` still switches to it when you name it."
-        }
+            .to_string(),
     }
 }

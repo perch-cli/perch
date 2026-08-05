@@ -249,7 +249,10 @@ fn a_version_1_registry_is_read_by_dropping_where_it_said_a_credential_was() {
     let written = host
         .file(REGISTRY_PATH)
         .expect("the registry was rewritten");
-    assert!(written.contains("\"version\": 2"), "{written}");
+    assert!(
+        written.contains(&format!("\"version\": {}", registry::CURRENT_VERSION)),
+        "{written}"
+    );
     for derived in ["keychain_service", "keychain_account", "\"profile\""] {
         assert!(!written.contains(derived), "{derived} survived:\n{written}");
     }

@@ -16,7 +16,8 @@ use crate::adopt;
 use crate::commands::{say, write_failed};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::probe::{self, Credential, Identity};
+use crate::login::{self, Produced};
+use crate::probe::Identity;
 use crate::profile;
 use crate::registry::{self, Account, NO_GROUP, NameKind, Registry};
 
@@ -32,7 +33,6 @@ pub struct AddArgs {
 
 pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     let mut registry = adopt::ensure_adopted(host, out)?;
-    let version = probe::claude_version(host)?;
 
     // Everything knowable before the login is checked before the login, so a
     // name Perch was always going to refuse never costs a browser round trip.
@@ -51,7 +51,8 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
         ));
     }
 
-    let pending = login_in_a_directory_of_its_own(host, out, &registry, &version)?;
+    let pending = login::perform(host, out, &announcement(&registry))?;
+    refuse_an_account_perch_already_holds(host, &registry, &pending.identity)?;
     let group = resolve_group(host, out, &args, &pending.identity)?;
     registry.refuse_taken_names(args.alias.as_deref(), group.as_deref())?;
 
@@ -81,21 +82,12 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     )
 }
 
-/// An Account a login has produced but that Perch does not hold yet: taken out
-/// of the directory the login ran in, not yet settled into a Profile.
-struct PendingAccount {
-    identity: Identity,
-    credential: Credential,
-    /// The `.claude.json` the login wrote, kept verbatim.
-    identity_json: String,
-}
-
 /// Gives the Account a Profile of its own and returns the entry that records
 /// it. A Profile that cannot be completed is discarded rather than left
 /// half-built for the next command to trip over.
 fn settle_into_a_profile(
     host: &dyn Host,
-    pending: PendingAccount,
+    pending: Produced,
     group: Option<String>,
 ) -> Result<Account> {
     let dir = registry::profile_dir_for(host, &pending.identity.email)?;
@@ -104,7 +96,7 @@ fn settle_into_a_profile(
     // The Identity travels with the Credential it describes: this directory is
     // the Account's own configuration, and the file the login wrote for it is
     // already exactly what belongs there.
-    if let Err(err) = carry_identity_file(host, &pending.identity_json, &store) {
+    if let Err(err) = login::carry_identity_file(host, &pending.identity_json, &store) {
         profile::discard(host, &store);
         return Err(err);
     }
@@ -113,101 +105,34 @@ fn settle_into_a_profile(
         identity: pending.identity,
         plan: pending.credential.subscription_type.clone(),
         enabled: true,
-        quarantined: false,
+        quarantine: None,
         group,
         utilization: None,
     })
 }
 
-/// Runs the login somewhere the active Account cannot be reached from, and
-/// takes what it produced. The directory it ran in is removed either way.
-fn login_in_a_directory_of_its_own(
+/// Refuses a login for an Account Perch is already holding a Profile for.
+///
+/// Two Profiles for one Account would fight over it — each holding a refresh
+/// token the other's next Renewal retires — so the way back to a working
+/// Account Perch already has is `perch relogin`, which repairs the Profile
+/// rather than building a second one.
+fn refuse_an_account_perch_already_holds(
     host: &dyn Host,
-    out: &mut dyn Write,
     registry: &Registry,
-    version: &str,
-) -> Result<PendingAccount> {
-    let dir = registry::pending_login_dir(host, host.now())?;
-    // The login writes its Credential in here, so this is as much a place a
-    // Credential lives as a Profile is (ADR 0020).
-    host.create_private_dir_all(&dir)
-        .map_err(|err| PerchError::Other(format!("could not create {}: {err}", dir.display())))?;
-
-    let store = probe::store_for_profile(host, &dir)?;
-
-    announce(out, registry)?;
-    let claude = probe::claude_bin(host)?;
-    let status = host
-        .exec_interactive(
-            &claude.to_string_lossy(),
-            &[("CLAUDE_CONFIG_DIR", &dir.to_string_lossy())],
-        )
-        .map_err(|err| PerchError::Other(format!("could not launch a login: {err}")))?;
-
-    let produced = account_the_login_produced(host, &store, version, status, registry);
-    profile::discard(host, &store);
-    produced
-}
-
-/// Reads the Account the login produced, refusing anything Perch cannot record
-/// as a new Account — including one it already holds.
-fn account_the_login_produced(
-    host: &dyn Host,
-    store: &probe::Store,
-    version: &str,
-    status: i32,
-    registry: &Registry,
-) -> Result<PendingAccount> {
-    let credential = probe::read_credential(host, store, version)?;
-    let identity = probe::read_identity(host, store, version)?;
-
-    let (credential, identity) = match (credential, identity) {
-        (Some(credential), Some(identity)) => (credential, identity),
-        // A login that produced neither is one that was abandoned or refused,
-        // and the exit status is the only extra thing worth saying about it.
-        _ => {
-            let ending = if status == 0 {
-                "The login did not complete".to_string()
-            } else {
-                format!("The login exited {status}")
-            };
-            return Err(PerchError::NotFound(format!(
-                "{ending}, so no Account was added. Nothing changed."
-            )));
-        }
+    identity: &Identity,
+) -> Result<()> {
+    let Some(existing) = registry.account(&identity.email) else {
+        return Ok(());
     };
-
-    if let Some(existing) = registry.account(&identity.email) {
-        let known_as = registry.named_for_the_user(existing.email());
-        return Err(PerchError::Conflict(format!(
-            "Perch already holds {known_as}, in {}.\n\
-             Nothing was added — two Profiles for one Account would fight over it.\n\
-             To repair that Account instead, run `perch relogin {}`.",
-            existing.profile_dir(host)?.display(),
-            existing.email()
-        )));
-    }
-
-    let identity_json = host.read_file(&store.identity_file).map_err(|err| {
-        PerchError::Other(format!(
-            "could not read {}: {err}",
-            store.identity_file.display()
-        ))
-    })?;
-
-    Ok(PendingAccount {
-        identity,
-        credential,
-        identity_json,
-    })
-}
-
-fn carry_identity_file(host: &dyn Host, contents: &str, store: &probe::Store) -> Result<()> {
-    host.write_file(&store.identity_file, contents)
-        .map_err(|err| PerchError::FileWrite {
-            path: store.identity_file.clone(),
-            source: std::io::Error::other(err.to_string()),
-        })
+    Err(PerchError::Conflict(format!(
+        "Perch already holds {}, in {}.\n\
+         Nothing was added — two Profiles for one Account would fight over it.\n\
+         To repair that Account instead, run `perch relogin {}`.",
+        registry.named_for_the_user(existing.email()),
+        existing.profile_dir(host)?.display(),
+        existing.email()
+    )))
 }
 
 /// Which Group the new Account joins.
@@ -274,20 +199,14 @@ fn resolve_group(
     }
 }
 
-fn announce(out: &mut dyn Write, registry: &Registry) -> Result<()> {
-    match registry.active_account() {
-        Some(active) => say(
-            out,
-            &format!(
-                "Logging in to a new Profile. {} stays active and its session is untouched.",
-                active.email()
-            ),
-        )?,
-        None => say(out, "Logging in to a new Profile.")?,
-    }
-    say(
-        out,
-        "Quit Claude Code when the login is done to come back here.\n",
+fn announcement(registry: &Registry) -> String {
+    format!(
+        "Logging in to a new Profile.{}",
+        login::leaving_the_active_account_alone(
+            registry
+                .active_account()
+                .map(crate::registry::Account::email)
+        )
     )
 }
 

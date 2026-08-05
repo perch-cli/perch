@@ -8,6 +8,7 @@ pub mod config;
 pub mod enable;
 pub mod group;
 pub mod list;
+pub mod relogin;
 pub mod status;
 pub mod switch;
 

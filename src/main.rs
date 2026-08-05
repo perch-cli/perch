@@ -8,6 +8,7 @@ use perch::commands::config::{self, ConfigCommand};
 use perch::commands::enable::{self, EnableCommand};
 use perch::commands::group::{self, GroupCommand};
 use perch::commands::list::{self, ListArgs};
+use perch::commands::relogin::{self, ReloginArgs};
 use perch::commands::status::{self, StatusArgs};
 use perch::commands::switch::{self, SwitchArgs};
 use perch::error::EXIT_OK;
@@ -103,6 +104,18 @@ enum Command {
     Group {
         #[command(subcommand)]
         action: GroupAction,
+    },
+
+    /// Log an Account in again, in place.
+    ///
+    /// The way back from a Quarantine: the Account keeps its Alias, its Group,
+    /// whether Cycling may choose it and its place in the listing, and only its
+    /// Credential is replaced. The Account you are working in is untouched,
+    /// unless it is the one being repaired — then its fresh Credential becomes
+    /// the live one, because a repair nothing reads is not a repair.
+    Relogin {
+        /// The Account: its Alias, or its email address.
+        target: String,
     },
 
     /// Show every Account with its Alias, Group, state and cached Utilization.
@@ -276,6 +289,7 @@ fn main() {
         }
         Command::Group { action } => group::run(&host, action.into(), &mut out),
         Command::List { json } => list::run(&host, ListArgs { json }, &mut out),
+        Command::Relogin { target } => relogin::run(&host, ReloginArgs { target }, &mut out),
         Command::Status {
             group,
             refresh,

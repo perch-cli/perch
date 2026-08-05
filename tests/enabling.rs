@@ -225,7 +225,7 @@ fn enabling_a_quarantined_account_does_not_claim_to_have_repaired_it() {
         registry_of(&host)
             .account(SECOND_EMAIL)
             .expect("still held")
-            .quarantined,
+            .quarantined(),
         "and enabling it did not quietly clear it"
     );
 }
