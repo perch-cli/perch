@@ -98,7 +98,7 @@ fn settle_into_a_profile(
     pending: PendingAccount,
     group: Option<String>,
 ) -> Result<Account> {
-    let dir = registry::profile_dir_for(host, &pending.identity.email);
+    let dir = registry::profile_dir_for(host, &pending.identity.email)?;
     let store = profile::create(host, &dir, pending.credential.as_str())?;
 
     // The Identity travels with the Credential it describes: this directory is
@@ -127,7 +127,7 @@ fn login_in_a_directory_of_its_own(
     registry: &Registry,
     version: &str,
 ) -> Result<PendingAccount> {
-    let dir = registry::pending_login_dir(host, host.now());
+    let dir = registry::pending_login_dir(host, host.now())?;
     // The login writes its Credential in here, so this is as much a place a
     // Credential lives as a Profile is (ADR 0020).
     host.create_private_dir_all(&dir)
@@ -136,8 +136,12 @@ fn login_in_a_directory_of_its_own(
     let store = probe::store_for_profile(host, &dir)?;
 
     announce(out, registry)?;
+    let claude = probe::claude_bin(host)?;
     let status = host
-        .exec_interactive("claude", &[("CLAUDE_CONFIG_DIR", &dir.to_string_lossy())])
+        .exec_interactive(
+            &claude.to_string_lossy(),
+            &[("CLAUDE_CONFIG_DIR", &dir.to_string_lossy())],
+        )
         .map_err(|err| PerchError::Other(format!("could not launch a login: {err}")))?;
 
     let produced = account_the_login_produced(host, &store, version, status, registry);
@@ -179,7 +183,7 @@ fn account_the_login_produced(
             "Perch already holds {known_as}, in {}.\n\
              Nothing was added — two Profiles for one Account would fight over it.\n\
              To repair that Account instead, run `perch relogin {}`.",
-            existing.profile_dir(host).display(),
+            existing.profile_dir(host)?.display(),
             existing.email()
         )));
     }

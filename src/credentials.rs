@@ -47,7 +47,7 @@ pub fn stores_for(host: &dyn Host, config: &Store) -> [CredentialStore; 2] {
 
     match host.platform() {
         Platform::MacOs => [keychain, plaintext],
-        Platform::Other => [plaintext, keychain],
+        Platform::Windows | Platform::Other => [plaintext, keychain],
     }
 }
 

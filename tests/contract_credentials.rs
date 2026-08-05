@@ -9,7 +9,11 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use perch::host::{self, Host, RealHost};
+// The module itself only for the permission-bit constants, which only the
+// unix-gated tests assert on.
+#[cfg(unix)]
+use perch::host;
+use perch::host::{Host, RealHost};
 use perch::probe;
 
 /// A Credential in the shape Claude Code stores, holding nothing that is worth
@@ -149,11 +153,16 @@ fn auth_status(config_dir: &Path) -> Option<bool> {
     }
 }
 
-/// The Claude Code `claude` runs, with any symlinks followed.
+/// The Claude Code Perch itself would run — the same PATH (and, on Windows,
+/// PATHEXT) walk, so this test asks the binary the resolution actually finds.
+/// Symlinks are followed where they exist; on Windows `canonicalize` yields a
+/// `\\?\` path that `cmd.exe` cannot launch a `.cmd` shim from, and there is
+/// no symlink to follow anyway.
 fn installed_claude_code() -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    let found = std::env::split_paths(&path)
-        .map(|dir| dir.join("claude"))
-        .find(|candidate| candidate.is_file())?;
-    std::fs::canonicalize(found).ok()
+    let found = perch::probe::claude_bin(&RealHost::new()).ok()?;
+    if cfg!(windows) {
+        Some(found)
+    } else {
+        std::fs::canonicalize(found).ok()
+    }
 }

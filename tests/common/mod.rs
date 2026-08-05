@@ -70,17 +70,24 @@ pub const IDENTITY_FILE: &str = r#"{
   "projects": {}
 }"#;
 
+/// Where the fixtures install Claude Code — the path `claude` resolves to
+/// when PATH is walked.
+pub const CLAUDE_BIN: &str = "/usr/bin/claude";
+
 /// A machine with Claude Code installed but nobody logged in.
 pub fn machine_with_claude_code() -> FakeHost {
-    FakeHost::new().with_exec(
-        "claude",
-        &["--version"],
-        Execution {
-            status: 0,
-            stdout: format!("{CLAUDE_VERSION} (Claude Code)\n"),
-            stderr: String::new(),
-        },
-    )
+    FakeHost::new()
+        .with_env("PATH", "/usr/bin")
+        .with_file(CLAUDE_BIN, "")
+        .with_exec(
+            CLAUDE_BIN,
+            &["--version"],
+            Execution {
+                status: 0,
+                stdout: format!("{CLAUDE_VERSION} (Claude Code)\n"),
+                stderr: String::new(),
+            },
+        )
 }
 
 /// A machine with Claude Code installed and logged in — what everyone
@@ -217,8 +224,8 @@ pub fn run_add(host: &FakeHost, args: AddArgs) -> (perch::Result<()>, String) {
 /// Where an Account's Profile keeps its things, derived the way every command
 /// derives it now that nothing records it (ADR 0020).
 pub fn store_of(host: &FakeHost, email: &str) -> probe::Store {
-    probe::store_for_profile(host, &perch::registry::profile_dir_for(host, email))
-        .expect("USER is set")
+    let dir = perch::registry::profile_dir_for(host, email).expect("home is known");
+    probe::store_for_profile(host, &dir).expect("USER is set")
 }
 
 /// The Credential a Profile holds, from whichever of its two Credential Stores

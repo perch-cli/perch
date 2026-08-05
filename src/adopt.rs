@@ -45,7 +45,7 @@ fn adopt(host: &dyn Host, out: &mut dyn Write) -> Result<Registry> {
 }
 
 fn store_as_first_profile(host: &dyn Host, findings: &Findings) -> Result<Registry> {
-    let dir = registry::profile_dir_for(host, &findings.identity.email);
+    let dir = registry::profile_dir_for(host, &findings.identity.email)?;
     let store = profile::create(host, &dir, findings.credential.as_str())?;
     carry_the_identity_block(host, findings, &store)?;
 

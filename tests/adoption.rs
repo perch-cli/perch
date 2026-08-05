@@ -224,15 +224,18 @@ fn claude_code_being_absent_is_refused_rather_than_assumed_away() {
 
 #[test]
 fn a_version_perch_cannot_read_is_refused() {
-    let host = FakeHost::new().with_exec(
-        "claude",
-        &["--version"],
-        Execution {
-            status: 1,
-            stdout: String::new(),
-            stderr: "boom".into(),
-        },
-    );
+    let host = FakeHost::new()
+        .with_env("PATH", "/usr/bin")
+        .with_file(common::CLAUDE_BIN, "")
+        .with_exec(
+            common::CLAUDE_BIN,
+            &["--version"],
+            Execution {
+                status: 1,
+                stdout: String::new(),
+                stderr: "boom".into(),
+            },
+        );
 
     let (result, _) = run_status(&host, false);
 

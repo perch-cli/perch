@@ -72,14 +72,17 @@ pub struct HttpResponse {
     pub body: String,
 }
 
-/// The machine, to the only resolution anything in Perch cares about: macOS
-/// keeps secrets in a keychain, and no other platform does (ADR 0020).
+/// The machine, to the resolution Perch cares about: macOS keeps secrets in a
+/// keychain and no other platform does (ADR 0020), and Windows finds programs
+/// through `PATHEXT` where everything else marks them executable.
 ///
-/// An effect rather than a `cfg!`, so the behaviour tests can drive both
-/// Credential Stores whatever they are running on.
+/// An effect rather than a `cfg!`, so the behaviour tests can drive every
+/// platform's Credential Store and program search whatever they are running
+/// on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
     MacOs,
+    Windows,
     Other,
 }
 
@@ -122,7 +125,11 @@ pub trait Host {
 
     // ---- environment ----------------------------------------------------
 
-    fn home_dir(&self) -> PathBuf;
+    /// The home directory, from `USERPROFILE` on Windows and `HOME` elsewhere
+    /// — or an error when the platform's variable is unset, because a machine
+    /// that cannot say where home is must be refused rather than quietly
+    /// worked under the filesystem root.
+    fn home_dir(&self) -> Result<PathBuf, HostError>;
     fn env_var(&self, key: &str) -> Option<String>;
 
     /// Which platform this is, which is what decides where a Credential is
@@ -159,6 +166,11 @@ pub trait Host {
     fn make_private(&self, path: &Path) -> Result<(), HostError>;
     fn create_dir_all(&self, path: &Path) -> Result<(), HostError>;
     fn path_exists(&self, path: &Path) -> bool;
+
+    /// Whether a path is a file, rather than absent or a directory — what a
+    /// program search means by "found", where `path_exists` would let a
+    /// directory that happens to carry the name win the walk.
+    fn is_file(&self, path: &Path) -> bool;
     fn remove_dir_all(&self, path: &Path) -> Result<(), HostError>;
 
     /// Creates a directory only if nobody else has, reporting

@@ -241,14 +241,14 @@ impl Account {
     /// Derived from the email address the registry already keys on rather than
     /// recorded beside it: two statements of one fact can disagree, and this is
     /// the fact every Credential Store is derived from in turn (ADR 0020).
-    pub fn profile_dir(&self, host: &dyn Host) -> PathBuf {
+    pub fn profile_dir(&self, host: &dyn Host) -> Result<PathBuf> {
         profile_dir_for(host, self.email())
     }
 
     /// Where the installed Claude Code would keep this Account's configuration
     /// if it were pointed at its Profile.
     pub fn store(&self, host: &dyn Host) -> Result<crate::probe::Store> {
-        crate::probe::store_for_profile(host, &self.profile_dir(host))
+        crate::probe::store_for_profile(host, &self.profile_dir(host)?)
     }
 
     /// The cached Utilization, if any figure has ever been observed. An empty
@@ -450,25 +450,31 @@ impl Registry {
     }
 }
 
-/// `$PERCH_HOME`, or `~/.perch`.
-pub fn perch_home(host: &dyn Host) -> PathBuf {
-    host.env_var("PERCH_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| host.home_dir().join(".perch"))
+/// `$PERCH_HOME`, or `~/.perch` — an error when neither is knowable, because
+/// a machine that cannot say where home is gets a refusal rather than a
+/// registry written into the filesystem root.
+pub fn perch_home(host: &dyn Host) -> Result<PathBuf> {
+    if let Some(overridden) = host.env_var("PERCH_HOME") {
+        return Ok(PathBuf::from(overridden));
+    }
+    let home = host
+        .home_dir()
+        .map_err(|err| PerchError::Other(err.to_string()))?;
+    Ok(home.join(".perch"))
 }
 
-pub fn registry_path(host: &dyn Host) -> PathBuf {
-    perch_home(host).join("registry.json")
+pub fn registry_path(host: &dyn Host) -> Result<PathBuf> {
+    Ok(perch_home(host)?.join("registry.json"))
 }
 
-pub fn profiles_dir(host: &dyn Host) -> PathBuf {
-    perch_home(host).join("profiles")
+pub fn profiles_dir(host: &dyn Host) -> Result<PathBuf> {
+    Ok(perch_home(host)?.join("profiles"))
 }
 
 /// The Profile directory for an Account. The email is slugged because the path
 /// is hashed into a keychain service name and has to be stable and printable.
-pub fn profile_dir_for(host: &dyn Host, email: &str) -> PathBuf {
-    profiles_dir(host).join(slug(email))
+pub fn profile_dir_for(host: &dyn Host, email: &str) -> Result<PathBuf> {
+    Ok(profiles_dir(host)?.join(slug(email)))
 }
 
 /// Where a login lives while Perch is running it.
@@ -477,10 +483,17 @@ pub fn profile_dir_for(host: &dyn Host, email: &str) -> PathBuf {
 /// only becomes knowable once the login has finished — so the login happens
 /// here and its Credential is moved into a Profile afterwards. Nothing outlives
 /// the command: this directory is removed whether the login worked or not.
-pub fn pending_login_dir(host: &dyn Host, started_at: DateTime<Utc>) -> PathBuf {
-    perch_home(host)
+pub fn pending_login_dir(host: &dyn Host, started_at: DateTime<Utc>) -> Result<PathBuf> {
+    Ok(perch_home(host)?
         .join("pending")
-        .join(format!("login-{}", started_at.timestamp_millis()))
+        .join(format!("login-{}", started_at.timestamp_millis())))
+}
+
+/// Whether two Accounts derive the same Profile directory. The derivation is
+/// `profiles_dir` joined with the slugged email, so sharing a slug is sharing
+/// a Profile — kept here beside the derivation so the two cannot drift apart.
+pub fn same_profile(one: &str, other: &str) -> bool {
+    slug(one) == slug(other)
 }
 
 pub fn slug(email: &str) -> String {
@@ -494,7 +507,7 @@ pub fn slug(email: &str) -> String {
 
 /// Reads the registry, or `None` when Perch has never run here.
 pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
-    let path = registry_path(host);
+    let path = registry_path(host)?;
     let contents = match host.read_file(&path) {
         Ok(contents) => contents,
         Err(HostError::NotFound { .. }) => return Ok(None),
@@ -558,7 +571,7 @@ fn adopt_groups_only_the_accounts_record(registry: &mut Registry) {
 }
 
 pub fn save(host: &dyn Host, registry: &Registry) -> Result<()> {
-    let path = registry_path(host);
+    let path = registry_path(host)?;
     let body = serde_json::to_string_pretty(registry)
         .map_err(|err| PerchError::Other(format!("could not serialise the registry: {err}")))?;
     write(host, &path, &format!("{body}\n"))

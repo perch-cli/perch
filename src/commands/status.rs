@@ -136,7 +136,7 @@ fn render_json(
             "account_uuid": account.identity.account_uuid,
             "organization": account.identity.organization_name,
             "plan": account.plan,
-            "profile_dir": account.profile_dir(host),
+            "profile_dir": account.profile_dir(host)?,
         },
         "utilization": utilization::document(account, now),
         "refresh": report.document(),

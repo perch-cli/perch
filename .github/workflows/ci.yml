@@ -15,9 +15,18 @@ env:
 
 jobs:
   check:
-    # macOS throughout: the keychain and the `security` binary are the point,
-    # and the contract tests have to run somewhere they exist.
-    runs-on: macos-latest
+    # This job was macOS-only while the keychain and the `security` binary
+    # were the point. Perch now claims full parity, so every platform runs
+    # everything it can: the keychain contract tests still assert only on
+    # macOS (they are compiled out elsewhere), and the file-store and session
+    # contract tests run everywhere. Windows is the one to watch — its
+    # credential store is the least-established belief in the design, which
+    # is exactly where a canary belongs.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
       # Actions are pinned to commit SHAs, not tags: a tag is mutable and can be
@@ -71,6 +80,7 @@ jobs:
       # When this step fails on a checksum, Anthropic has almost certainly just
       # updated install.sh. Diff it, satisfy yourself, then bump INSTALL_SHA.
       - name: Install Claude Code
+        if: runner.os != 'Windows'
         env:
           INSTALL_SHA: cde4f1702d3b1695f92b73d26888364e17bca476e17f0fd676484c951d36c125
         run: |
@@ -90,11 +100,38 @@ jobs:
           bash /tmp/install.sh latest
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      # The same bargain in PowerShell: pin install.ps1 by Get-FileHash, fail
+      # hard on a mismatch, degrade to the absent branch on an outage. When the
+      # hash check fails, diff the script and bump INSTALL_SHA here too.
+      - name: Install Claude Code (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          INSTALL_SHA: cd17c6b555f761d60373659824bf805e1510538226e4c7028e19d7494937a333
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP "install.ps1"
+          try {
+            Invoke-WebRequest -Uri "https://claude.ai/install.ps1" -OutFile $installer
+          } catch {
+            Write-Output "::warning::installer unreachable; contract tests will assert the absent branch"
+            exit 0
+          }
+
+          $hash = (Get-FileHash -Algorithm SHA256 $installer).Hash.ToLower()
+          if ($hash -ne $env:INSTALL_SHA.ToLower()) {
+            Write-Error "install.ps1 hash $hash does not match the pinned $env:INSTALL_SHA"
+            exit 1
+          }
+
+          & $installer latest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $env:USERPROFILE ".local\bin")
+
       # Contract tests assert the probe's beliefs against the installed Claude
-      # Code and the real keychain (ADR 0007), so drift is found here rather
-      # than by a user being logged out by a background auto-update. Kept as a
-      # step of its own so a failure here reads as upstream drift rather than as
-      # a fault in the pull request.
+      # Code, the real filesystem, and — on macOS — the real keychain (ADR
+      # 0007), so drift is found here rather than by a user being logged out by
+      # a background auto-update. Kept as a step of its own so a failure here
+      # reads as upstream drift rather than as a fault in the pull request.
       #
       # --nocapture so the "skipping:" lines are visible: a suite that skipped
       # itself and a suite that asserted look identical otherwise.

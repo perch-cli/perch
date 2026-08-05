@@ -197,6 +197,20 @@ impl FakeHost {
         self
     }
 
+    /// An environment variable the machine has set.
+    pub fn with_env(self, key: &str, value: &str) -> Self {
+        self.env
+            .borrow_mut()
+            .insert(key.to_string(), value.to_string());
+        self
+    }
+
+    /// A variable the machine does not have — `USER` on Windows, most notably.
+    pub fn without_env(self, key: &str) -> Self {
+        self.env.borrow_mut().remove(key);
+        self
+    }
+
     /// A file somebody else could read: one written by an older Claude Code,
     /// or restored from a backup that forgot its mode.
     pub fn with_file_mode(self, path: impl AsRef<Path>, mode: u32) -> Self {
@@ -507,8 +521,8 @@ impl Host for FakeHost {
         *self.now.borrow()
     }
 
-    fn home_dir(&self) -> PathBuf {
-        self.home.clone()
+    fn home_dir(&self) -> Result<PathBuf, HostError> {
+        Ok(self.home.clone())
     }
 
     fn env_var(&self, key: &str) -> Option<String> {
@@ -614,6 +628,10 @@ impl Host for FakeHost {
 
     fn path_exists(&self, path: &Path) -> bool {
         self.files.borrow().contains_key(path) || self.dirs.borrow().contains(path)
+    }
+
+    fn is_file(&self, path: &Path) -> bool {
+        self.files.borrow().contains_key(path)
     }
 
     fn remove_dir_all(&self, path: &Path) -> Result<(), HostError> {

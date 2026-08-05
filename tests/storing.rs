@@ -250,8 +250,9 @@ fn a_version_1_registry_is_read_by_dropping_where_it_said_a_credential_was() {
         registry_of(&host)
             .account(EMAIL)
             .unwrap()
-            .profile_dir(&host),
-        registry::profile_dir_for(&host, EMAIL),
+            .profile_dir(&host)
+            .unwrap(),
+        registry::profile_dir_for(&host, EMAIL).unwrap(),
         "the Profile is derived from the Account, not read back from the file"
     );
 }

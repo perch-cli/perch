@@ -7,10 +7,9 @@ use std::process::{Command, Stdio};
 
 use chrono::{DateTime, Utc};
 
-use super::{
-    Execution, Host, HostError, HttpRequest, HttpResponse, PRIVATE_DIR_MODE, PRIVATE_FILE_MODE,
-    Platform,
-};
+use super::{Execution, Host, HostError, HttpRequest, HttpResponse, Platform};
+#[cfg(unix)]
+use super::{PRIVATE_DIR_MODE, PRIVATE_FILE_MODE};
 use crate::keychain::{
     self, KeychainError, SECURITY_BIN, WritePath, classify, decode_password_output,
 };
@@ -18,7 +17,28 @@ use crate::keychain::{
 /// The `curl` binary. Perch shells out for the same reason it shells out to
 /// `security` (ADR 0008): the machine already has one, and a linked HTTP client
 /// would be a second TLS story to keep current.
-const CURL_BIN: &str = "/usr/bin/curl";
+///
+/// Always by absolute path, because the path is a security property rather
+/// than a convenience: `Command::new("curl")` would let anything earlier on
+/// `PATH` receive an `Authorization: Bearer` header.
+#[cfg(not(windows))]
+fn curl_bin() -> Result<PathBuf, HostError> {
+    Ok(PathBuf::from("/usr/bin/curl"))
+}
+
+/// The same on Windows, where `curl.exe` ships in `System32`. `%SystemRoot%`
+/// comes from the environment rather than being hardcoded, because Windows
+/// need not be installed at `C:\Windows` — and a machine that cannot say where
+/// it is gets an error, not a walk of `PATH`.
+#[cfg(windows)]
+fn curl_bin() -> Result<PathBuf, HostError> {
+    let root = std::env::var_os("SystemRoot")
+        .filter(|root| !root.is_empty())
+        .ok_or_else(|| {
+            HostError::Other("SystemRoot is unset, so curl cannot be located".to_string())
+        })?;
+    Ok(PathBuf::from(root).join("System32").join("curl.exe"))
+}
 
 /// The options that are the same for every request, and none of which is a
 /// secret. Everything that is one goes in on stdin instead.
@@ -64,7 +84,7 @@ fn quoted(value: &str) -> String {
 
 /// Runs `curl` with the request on its stdin.
 fn curl(config: &str) -> Result<Execution, HostError> {
-    let mut child = Command::new(CURL_BIN)
+    let mut child = Command::new(curl_bin()?)
         .args(CURL_ARGS)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -126,10 +146,8 @@ impl Host for RealHost {
         Utc::now()
     }
 
-    fn home_dir(&self) -> PathBuf {
-        std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/"))
+    fn home_dir(&self) -> Result<PathBuf, HostError> {
+        home_from(HOME_VARIABLE, std::env::var_os(HOME_VARIABLE))
     }
 
     fn env_var(&self, key: &str) -> Option<String> {
@@ -139,6 +157,8 @@ impl Host for RealHost {
     fn platform(&self) -> Platform {
         if cfg!(target_os = "macos") {
             Platform::MacOs
+        } else if cfg!(windows) {
+            Platform::Windows
         } else {
             Platform::Other
         }
@@ -175,7 +195,7 @@ impl Host for RealHost {
         let beside = PathBuf::from(beside);
 
         let written = create_private_file(&beside, contents)
-            .and_then(|()| std::fs::rename(&beside, path).map_err(HostError::Io));
+            .and_then(|()| rename_replacing(&beside, path).map_err(HostError::Io));
         if written.is_err() {
             // A half-written Credential is not something to leave lying about,
             // whatever went wrong.
@@ -214,6 +234,10 @@ impl Host for RealHost {
         path.exists()
     }
 
+    fn is_file(&self, path: &Path) -> bool {
+        path.is_file()
+    }
+
     fn remove_dir_all(&self, path: &Path) -> Result<(), HostError> {
         match std::fs::remove_dir_all(path) {
             Ok(()) => Ok(()),
@@ -244,22 +268,12 @@ impl Host for RealHost {
         }
     }
 
-    /// `utimes` with no times is "now", which is the whole of what a lock
-    /// holder has to say. It works on a directory, which `File::set_times`
-    /// cannot be relied on to.
     fn touch(&self, path: &Path) -> Result<(), HostError> {
-        let raw = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
-            .map_err(|err| HostError::Other(format!("{} is not a path: {err}", path.display())))?;
-        let outcome = unsafe { libc_utimes(raw.as_ptr(), std::ptr::null()) };
-        if outcome == 0 {
-            Ok(())
-        } else {
-            Err(HostError::Io(std::io::Error::last_os_error()))
-        }
+        touch_now(path)
     }
 
     fn rename(&self, from: &Path, to: &Path) -> Result<(), HostError> {
-        std::fs::rename(from, to)?;
+        rename_replacing(from, to)?;
         Ok(())
     }
 
@@ -363,9 +377,7 @@ impl Host for RealHost {
     }
 
     fn process_alive(&self, pid: u32) -> bool {
-        // Signal 0 performs the permission and existence checks without
-        // delivering anything.
-        unsafe { libc_kill(pid as i32, 0) == 0 }
+        process_alive(pid)
     }
 
     fn process_started_at(&self, pid: u32) -> Option<DateTime<Utc>> {
@@ -377,9 +389,10 @@ impl Host for RealHost {
     }
 
     fn is_interactive(&self) -> bool {
+        use std::io::IsTerminal;
         // Both ends matter: a question needs somewhere to be shown as well as
         // somewhere to be answered from.
-        unsafe { libc_isatty(0) == 1 && libc_isatty(1) == 1 }
+        std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
     }
 
     /// To stderr, so a note never lands in the middle of the JSON a script is
@@ -418,6 +431,38 @@ impl Host for RealHost {
             body: body.to_string(),
         })
     }
+}
+
+/// Moves a path over another, replacing it — `std::fs::rename`, everywhere it
+/// is that simple.
+#[cfg(not(windows))]
+fn rename_replacing(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::rename(from, to)
+}
+
+/// The same on Windows, where a rename fails with a sharing violation while
+/// anything holds a handle on the target — routinely Windows Defender,
+/// transiently. The target here can be `.claude.json`, the file the design
+/// goes out of its way not to lose, so a violation is retried briefly and
+/// then failed exactly as it would have been on the first try.
+#[cfg(windows)]
+fn rename_replacing(from: &Path, to: &Path) -> std::io::Result<()> {
+    use windows_sys::Win32::Foundation::ERROR_SHARING_VIOLATION;
+
+    const ATTEMPTS: u32 = 10;
+    const BETWEEN_MILLIS: u64 = 50;
+
+    let mut outcome = std::fs::rename(from, to);
+    for _ in 1..ATTEMPTS {
+        match &outcome {
+            Err(err) if err.raw_os_error() == Some(ERROR_SHARING_VIOLATION as i32) => {
+                std::thread::sleep(std::time::Duration::from_millis(BETWEEN_MILLIS));
+                outcome = std::fs::rename(from, to);
+            }
+            _ => break,
+        }
+    }
+    outcome
 }
 
 /// Creates a directory, and every directory above it, that nobody but its
@@ -492,35 +537,6 @@ fn set_private_mode(path: &Path) -> Result<(), HostError> {
 #[cfg(not(unix))]
 fn set_private_mode(_path: &Path) -> Result<(), HostError> {
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_access_token_travels_on_stdin_rather_than_in_argv() {
-        let headers = [("Authorization", "Bearer sk-ant-oat01-secret")];
-        let config = curl_config(&HttpRequest::get("https://example.test/usage", &headers));
-        let expected = "header = \"Authorization: Bearer sk-ant-oat01-secret\"";
-
-        assert!(config.contains(expected), "{config}");
-        assert!(
-            !CURL_ARGS.iter().any(|arg| arg.contains("sk-ant")),
-            "nothing about a request may reach the command line"
-        );
-    }
-
-    #[test]
-    fn a_json_body_survives_being_quoted() {
-        let body = r#"{"refresh_token":"sk-ant-ort01-\"odd\""}"#;
-        let config = curl_config(&HttpRequest::post("https://example.test/token", &[], body));
-        let expected = r#"data-binary = "{\"refresh_token\":\"sk-ant-ort01-\\\"odd\\\"\"}""#;
-
-        assert!(config.contains("url = \"https://example.test/token\""));
-        assert!(config.contains(expected), "{config}");
-        assert_eq!(config.lines().count(), 2, "one option per line: {config}");
-    }
 }
 
 /// When a process began, in the terms `/proc` speaks: field 22 of
@@ -624,13 +640,209 @@ fn process_started_at(_pid: u32) -> Option<DateTime<Utc>> {
     None
 }
 
-unsafe extern "C" {
-    #[link_name = "kill"]
-    fn libc_kill(pid: i32, sig: i32) -> i32;
+/// The one variable the home directory comes from — `USERPROFILE` on Windows
+/// and `HOME` everywhere else, and never `HOME` on Windows even when it is
+/// set: Git Bash sets it to `/c/Users/...` while PowerShell has
+/// `C:\Users\...`, and a path Perch records from one shell has to resolve
+/// from the other.
+#[cfg(windows)]
+const HOME_VARIABLE: &str = "USERPROFILE";
+#[cfg(not(windows))]
+const HOME_VARIABLE: &str = "HOME";
 
-    #[link_name = "isatty"]
-    fn libc_isatty(fd: i32) -> i32;
+/// The home directory a variable names, or a refusal when it names none — an
+/// unknown home must never quietly become the filesystem root, because
+/// everything Perch reads and writes hangs off it.
+fn home_from(variable: &str, value: Option<std::ffi::OsString>) -> Result<PathBuf, HostError> {
+    value
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            HostError::Other(format!(
+                "{variable} is unset, so there is no home directory to work under"
+            ))
+        })
+}
 
-    #[link_name = "utimes"]
-    fn libc_utimes(path: *const std::ffi::c_char, times: *const std::ffi::c_void) -> i32;
+/// Whether a process exists. Signal 0 performs the permission and existence
+/// checks without delivering anything.
+#[cfg(unix)]
+fn process_alive(pid: u32) -> bool {
+    unsafe { libc::kill(pid as i32, 0) == 0 }
+}
+
+/// Whether a process exists, as `GetExitCodeProcess` tells it: a handle that
+/// can be opened and reports no exit code yet is a running process.
+#[cfg(windows)]
+fn process_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, ERROR_ACCESS_DENIED, GetLastError, STILL_ACTIVE,
+    };
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            // A process that exists but may not be opened still exists, and
+            // "alive" is the safe direction: it makes a Profile look Live,
+            // which stops Perch touching its Credential.
+            return GetLastError() == ERROR_ACCESS_DENIED;
+        }
+        let mut code = 0u32;
+        let told = GetExitCodeProcess(process, &mut code);
+        CloseHandle(process);
+        told != 0 && code == STILL_ACTIVE as u32
+    }
+}
+
+/// Marks a path as written now. `utimes` with no times is "now", which is the
+/// whole of what a lock holder has to say — and it works on a directory, which
+/// `File::set_times` cannot be relied on to.
+#[cfg(unix)]
+fn touch_now(path: &Path) -> Result<(), HostError> {
+    let raw = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
+        .map_err(|err| HostError::Other(format!("{} is not a path: {err}", path.display())))?;
+    let outcome = unsafe { libc::utimes(raw.as_ptr(), std::ptr::null()) };
+    if outcome == 0 {
+        Ok(())
+    } else {
+        Err(HostError::Io(std::io::Error::last_os_error()))
+    }
+}
+
+/// The same, in the terms Windows speaks: a directory's handle can only be
+/// opened with `FILE_FLAG_BACKUP_SEMANTICS`, and `SetFileTime` then stamps the
+/// modification time through it.
+#[cfg(windows)]
+fn touch_now(path: &Path) -> Result<(), HostError> {
+    use std::os::windows::ffi::OsStrExt;
+
+    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, FILE_WRITE_ATTRIBUTES, OPEN_EXISTING, SetFileTime,
+    };
+    use windows_sys::Win32::System::SystemInformation::GetSystemTimeAsFileTime;
+
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    unsafe {
+        let handle = CreateFileW(
+            wide.as_ptr(),
+            FILE_WRITE_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            std::ptr::null_mut(),
+        );
+        if handle == INVALID_HANDLE_VALUE {
+            return Err(HostError::Io(std::io::Error::last_os_error()));
+        }
+
+        let mut now: FILETIME = std::mem::zeroed();
+        GetSystemTimeAsFileTime(&mut now);
+        let stamped = SetFileTime(handle, std::ptr::null(), std::ptr::null(), &now);
+        let failure = std::io::Error::last_os_error();
+        CloseHandle(handle);
+        if stamped == 0 {
+            return Err(HostError::Io(failure));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_access_token_travels_on_stdin_rather_than_in_argv() {
+        let headers = [("Authorization", "Bearer sk-ant-oat01-secret")];
+        let config = curl_config(&HttpRequest::get("https://example.test/usage", &headers));
+        let expected = "header = \"Authorization: Bearer sk-ant-oat01-secret\"";
+
+        assert!(config.contains(expected), "{config}");
+        assert!(
+            !CURL_ARGS.iter().any(|arg| arg.contains("sk-ant")),
+            "nothing about a request may reach the command line"
+        );
+    }
+
+    /// The holder here is what Windows Defender amounts to: a handle on the
+    /// target, shared with nobody, gone a moment later.
+    #[cfg(windows)]
+    #[test]
+    fn a_rename_outwaits_a_briefly_held_target() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let dir = std::env::temp_dir().join(format!("perch-rename-retry-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let from = dir.join("incoming");
+        let to = dir.join("target");
+        std::fs::write(&from, "new").unwrap();
+        std::fs::write(&to, "old").unwrap();
+
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&to)
+            .unwrap();
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            drop(held);
+        });
+
+        let outcome = rename_replacing(&from, &to);
+        releaser.join().unwrap();
+        let contents = std::fs::read_to_string(&to);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        outcome.expect("a transient holder is outwaited rather than failed on");
+        assert_eq!(contents.unwrap(), "new");
+    }
+
+    /// On a real filesystem, because this is the primitive the lock protocol
+    /// leans on: a lock artifact is a **directory**, and its modification time
+    /// is what says whether the holder is alive or died holding it. The
+    /// platform split in `touch_now` (backup semantics on Windows) exists for
+    /// exactly this case.
+    #[test]
+    fn touch_moves_a_directorys_modification_time_forward() {
+        let host = RealHost::new();
+        let dir = std::env::temp_dir().join(format!("perch-touch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let created = host.modified_at(&dir).unwrap();
+        // Long enough that even a coarse filesystem timestamp has to move.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        host.touch(&dir).expect("a directory can be touched");
+        let touched = host.modified_at(&dir).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(touched > created, "touched {touched}, created {created}");
+    }
+
+    #[test]
+    fn an_unset_home_is_a_refusal_rather_than_the_filesystem_root() {
+        assert!(home_from("HOME", None).is_err());
+        assert!(home_from("USERPROFILE", Some("".into())).is_err());
+        assert_eq!(
+            home_from("HOME", Some("/Users/someone".into())).unwrap(),
+            PathBuf::from("/Users/someone")
+        );
+    }
+
+    #[test]
+    fn a_json_body_survives_being_quoted() {
+        let body = r#"{"refresh_token":"sk-ant-ort01-\"odd\""}"#;
+        let config = curl_config(&HttpRequest::post("https://example.test/token", &[], body));
+        let expected = r#"data-binary = "{\"refresh_token\":\"sk-ant-ort01-\\\"odd\\\"\"}""#;
+
+        assert!(config.contains("url = \"https://example.test/token\""));
+        assert!(config.contains(expected), "{config}");
+        assert_eq!(config.lines().count(), 2, "one option per line: {config}");
+    }
 }
