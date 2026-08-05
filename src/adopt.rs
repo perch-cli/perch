@@ -8,11 +8,10 @@
 //! a case.
 
 use std::io::Write;
-use std::path::Path;
 
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::probe::{self, Findings, Verdict};
+use crate::probe::{self, Findings, Store, Verdict};
 use crate::profile;
 use crate::registry::{self, Account, Registry};
 
@@ -47,14 +46,13 @@ fn adopt(host: &dyn Host, out: &mut dyn Write) -> Result<Registry> {
 
 fn store_as_first_profile(host: &dyn Host, findings: &Findings) -> Result<Registry> {
     let dir = registry::profile_dir_for(host, &findings.identity.email);
-    let profile = profile::create(host, &dir, findings.credential.as_str())?;
-    carry_the_identity_block(host, findings, &dir)?;
+    let store = profile::create(host, &dir, findings.credential.as_str())?;
+    carry_the_identity_block(host, findings, &store)?;
 
     let mut registry = Registry::default();
     registry.upsert(Account {
         identity: findings.identity.clone(),
         plan: findings.credential.subscription_type.clone(),
-        profile,
         enabled: true,
         quarantined: false,
         group: None,
@@ -75,7 +73,7 @@ fn store_as_first_profile(host: &dyn Host, findings: &Findings) -> Result<Regist
 /// — the login being adopted is the one that file describes. Without it, the
 /// Account everybody starts with is the one that comes back from a Switch
 /// described only by the four fields Perch itself records.
-fn carry_the_identity_block(host: &dyn Host, findings: &Findings, dir: &Path) -> Result<()> {
+fn carry_the_identity_block(host: &dyn Host, findings: &Findings, store: &Store) -> Result<()> {
     let contents = match host.read_file(&findings.store.identity_file) {
         Ok(contents) => contents,
         // The probe read an Identity out of this file moments ago, so this is a
@@ -88,7 +86,7 @@ fn carry_the_identity_block(host: &dyn Host, findings: &Findings, dir: &Path) ->
         return Ok(());
     };
 
-    let kept = probe::store_for_profile(host, dir)?.identity_file;
+    let kept = store.identity_file.clone();
     host.write_file(&kept, &probe::fresh_identity_file(block))
         .map_err(|err| PerchError::FileWrite {
             path: kept,

@@ -128,15 +128,18 @@ fn an_account_is_moved_without_being_removed_and_re_added() {
     move_to_group(&host, SECOND_EMAIL, "work").0.unwrap();
 
     let after = registry_of(&host).account(SECOND_EMAIL).unwrap().clone();
+    assert_eq!(after.group.as_deref(), Some("work"));
     assert_eq!(
-        after.profile, before.profile,
-        "the Profile and its keychain namespace must not be rebuilt to change a Group"
+        after.identity, before.identity,
+        "the Account is the same one, moved"
     );
+    assert_eq!(after.plan, before.plan);
+    assert_eq!(after.utilization, before.utilization);
     assert_eq!(
-        host.keychain_item(&after.profile.keychain_service, LOGIN_NAME)
-            .as_deref(),
+        credential_of(&host, SECOND_EMAIL).as_deref(),
         Some(SECOND_CREDENTIAL),
-        "and the stored Credential is untouched"
+        "and its Profile was not rebuilt to change a Group: the stored \
+         Credential is untouched"
     );
 }
 

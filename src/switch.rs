@@ -20,12 +20,13 @@
 
 use std::path::Path;
 
+use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::host::{self, Host};
+use crate::lock;
 use crate::probe::{self, Credential, Store};
 use crate::profile;
 use crate::registry::Account;
-use crate::{keychain, lock};
 
 /// What the Capture found, which is the part of a Switch worth saying out loud:
 /// it is the part that protects the Account being left behind.
@@ -79,13 +80,8 @@ pub fn perform(
             .map_err(|error| error.with_note(&nothing_happened(outgoing)))?;
 
         held.renew();
-        profile::store_credential(
-            host,
-            &prepared.store.keychain_service,
-            &prepared.store.keychain_account,
-            prepared.credential.as_str(),
-        )
-        .map_err(|error| error.with_note(&only_captured(&captured, outgoing, incoming)))?;
+        profile::store_credential(host, &prepared.store, prepared.credential.as_str())
+            .map_err(|error| error.with_note(&only_captured(&captured, outgoing, incoming)))?;
         incoming_is_live = true;
 
         held.renew();
@@ -123,26 +119,25 @@ fn prepare(host: &dyn Host, incoming: &Account, outgoing: Option<&Account>) -> R
     // Before anything is written, and in the order the user would care about:
     // the Profile being read from, then the one being written back to.
     refuse_if_live(host, incoming)?;
-    if let Some(outgoing) = outgoing.filter(|account| account.profile.dir != incoming.profile.dir) {
+    if let Some(outgoing) =
+        outgoing.filter(|account| account.profile_dir(host) != incoming.profile_dir(host))
+    {
         refuse_if_live(host, outgoing)?;
     }
 
-    let raw = host
-        .keychain_get(
-            &incoming.profile.keychain_service,
-            &incoming.profile.keychain_account,
-        )
-        .map_err(|err| match err {
-            keychain::KeychainError::NotFound { .. } => PerchError::NotFound(format!(
-                "Perch holds no Credential for {}.\n\
-                 Nothing was changed. Log that Account in again with `perch relogin {}`.",
-                incoming.email(),
-                incoming.email()
-            )),
-            other => PerchError::from(other),
-        })?;
+    // From whichever of the Profile's two Credential Stores holds one (ADR
+    // 0020): an Account is switchable to as long as its Credential is
+    // somewhere Claude Code would have looked.
+    let held = credentials::read(host, &incoming.store(host)?)?.ok_or_else(|| {
+        PerchError::NotFound(format!(
+            "Perch holds no Credential for {}.\n\
+             Nothing was changed. Log that Account in again with `perch relogin {}`.",
+            incoming.email(),
+            incoming.email()
+        ))
+    })?;
     let credential = probe::understand_credential(
-        raw,
+        held.credential,
         &format!("the Credential Perch holds for {}", incoming.email()),
         &version,
     )?;
@@ -166,12 +161,7 @@ fn capture(host: &dyn Host, prepared: &Prepared, outgoing: Option<&Account>) -> 
         return Ok(Captured::NothingLive);
     };
 
-    profile::store_credential(
-        host,
-        &outgoing.profile.keychain_service,
-        &outgoing.profile.keychain_account,
-        live.as_str(),
-    )?;
+    profile::store_credential(host, &outgoing.store(host)?, live.as_str())?;
 
     Ok(Captured::Copied {
         from: outgoing.email().to_string(),
@@ -216,7 +206,7 @@ fn patch_identity(host: &dyn Host, prepared: &Prepared) -> Result<()> {
 /// is preferred verbatim, and one is composed only for the Accounts that have
 /// none, such as the login adoption took over (ADR 0009).
 fn identity_block_for(host: &dyn Host, incoming: &Account) -> Result<String> {
-    let kept = probe::store_for_profile(host, &incoming.profile.dir)?.identity_file;
+    let kept = incoming.store(host)?.identity_file;
     let held = host
         .read_file(&kept)
         .ok()
@@ -227,7 +217,7 @@ fn identity_block_for(host: &dyn Host, incoming: &Account) -> Result<String> {
 
 /// Refuses to touch a Profile something else is holding (ADR 0005).
 fn refuse_if_live(host: &dyn Host, account: &Account) -> Result<()> {
-    let running = probe::live_clients(host, &account.profile.dir);
+    let running = probe::live_clients(host, &account.profile_dir(host));
     if running.is_empty() {
         return Ok(());
     }

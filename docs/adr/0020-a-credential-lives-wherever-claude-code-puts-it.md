@@ -64,7 +64,12 @@ Files holding a Credential are created 0600 and their directories 0700, matching
 what Claude Code does at 39 sites in its own binary. The mode is set at creation
 rather than by a `chmod` afterwards: `write_atomically` writes beside the target
 first, and a create-then-chmod would leave a window in which a refresh token is
-world-readable. A credential file found looser than 0600 is tightened and
+world-readable. The directory half has a trap the file half does not: `mkdir -p`
+leaves an existing directory's mode alone, so a Profile made by an ordinary
+`create_dir_all` and only then written into privately stays 0755, and every test
+that asks after the fact still sees a 0600 file inside it. Whatever creates a
+Profile has to be the thing that makes it private. A credential file found looser
+than 0600 is tightened and
 mentioned once rather than refused, because Claude Code is using that file
 perfectly happily and refusing would make Perch broken while the thing it wraps
 works. Windows has no mode and relies on the profile ACL; a `$PERCH_HOME` pointed
@@ -81,10 +86,29 @@ namespace instead of at a remembered one; ADR 0007's answer to drift is to refus
 loudly rather than to guess, and `short_hash` is pinned by test so the derivation
 cannot move by accident.
 
-Linux is inference, not observation. The Windows build was read directly; the
-Linux build is a different one, and if it has a Secret Service primary there is a
-third backend to write. The composite reader accommodates that without redesign,
-but the belief that the plaintext store honours `CLAUDE_CONFIG_DIR` is the single
-assumption the whole non-macOS design rests on, and it earns the loudest contract
-test. `CLAUDE_CODE_HOST_CREDS_FILE` appears in the binary beside these paths and
-its meaning is not yet known.
+Linux was inference when this was written and is now observation: the 2.1.222
+Linux build was read the way the Windows one had been. Its store resolves to
+`join(<config dir>, ".credentials.json")`, it is written with mode `384` — 0600
+— and then `chmod`ed to the same, and the backend is named `plaintext` in its own
+source, as on Windows. There is no Secret Service primary in it. A distribution's
+own build, or a later one, may still bring a third backend; the composite reader
+accommodates that without redesign, and what would change is which store the
+platform names as primary.
+
+The belief that the plaintext store honours `CLAUDE_CONFIG_DIR` remains the
+single assumption the whole non-macOS design rests on, and it earns the loudest
+contract test. That test plants a Credential that is not one where Perch would
+write it and asks the installed Claude Code who it is, having first watched it
+answer "nobody" for the same directory — so what is asserted is Claude Code's
+behaviour rather than Perch's own derivation restated.
+
+Reading that build answered two neighbouring questions and raised one.
+`CLAUDE_CODE_HOST_CREDS_FILE` names a credentials file supplied by whatever is
+hosting Claude Code, which it ignores "with group/other-readable mode or wrong
+owner" — a path into Claude Code rather than one out of it, and not a store Perch
+writes. `CLAUDE_SECURESTORAGE_CONFIG_DIR` is the one that would hurt: it
+overrides the config directory for the credential store alone, in both the
+plaintext path and the keychain service name, so a machine that set it would
+collapse every Profile onto one store. Nothing sets it, and Perch does not read
+it — a Profile is isolated by `CLAUDE_CONFIG_DIR` or the design does not hold at
+all, and encoding a second config path would hide that rather than fix it.

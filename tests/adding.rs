@@ -104,23 +104,24 @@ fn the_new_credential_lands_in_a_namespace_of_its_own() {
 
     run_add(&host, add_to_group("work")).0.unwrap();
 
-    let registry = registry_of(&host);
-    let first = &registry.account(EMAIL).unwrap().profile;
-    let second = &registry.account(SECOND_EMAIL).unwrap().profile;
+    let first = store_of(&host, EMAIL);
+    let second = store_of(&host, SECOND_EMAIL);
 
-    assert_ne!(first.dir, second.dir);
+    assert_ne!(first.config_dir, second.config_dir);
     assert_ne!(
         first.keychain_service, second.keychain_service,
         "two Accounts must not share one namespace"
     );
+    assert_ne!(
+        first.credentials_file, second.credentials_file,
+        "nor one file, on the platforms where that is the store"
+    );
     assert_eq!(
-        host.keychain_item(&second.keychain_service, LOGIN_NAME)
-            .as_deref(),
+        credential_of(&host, SECOND_EMAIL).as_deref(),
         Some(SECOND_CREDENTIAL)
     );
     assert_eq!(
-        host.keychain_item(&first.keychain_service, LOGIN_NAME)
-            .as_deref(),
+        credential_of(&host, EMAIL).as_deref(),
         Some(CREDENTIAL),
         "the Account you were using keeps its own stored copy"
     );
@@ -368,12 +369,7 @@ fn the_directory_a_login_ran_in_does_not_outlive_the_command() {
     run_add(&host, add_to_group("work")).0.unwrap();
 
     let config_dir = login_directory(&host);
-    let profile_dir = registry_of(&host)
-        .account(SECOND_EMAIL)
-        .unwrap()
-        .profile
-        .dir
-        .clone();
+    let profile_dir = store_of(&host, SECOND_EMAIL).config_dir;
 
     assert_ne!(
         config_dir, profile_dir,
@@ -398,13 +394,8 @@ fn the_new_profile_keeps_the_identity_the_login_wrote() {
 
     run_add(&host, add_to_group("work")).0.unwrap();
 
-    let profile = registry_of(&host)
-        .account(SECOND_EMAIL)
-        .unwrap()
-        .profile
-        .clone();
     let carried = host
-        .file(profile.dir.join(".claude.json"))
+        .file(store_of(&host, SECOND_EMAIL).identity_file)
         .expect("the Profile keeps the Identity Claude Code wrote for it");
     assert!(carried.contains(SECOND_EMAIL));
 }

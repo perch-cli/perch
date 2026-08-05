@@ -1,11 +1,16 @@
 //! The Host implementation that actually touches the machine.
 
+use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use chrono::{DateTime, Utc};
 
-use super::{Execution, Host, HostError, HttpRequest, HttpResponse};
+use super::{
+    Execution, Host, HostError, HttpRequest, HttpResponse, PRIVATE_DIR_MODE, PRIVATE_FILE_MODE,
+    Platform,
+};
 use crate::keychain::{
     self, KeychainError, SECURITY_BIN, WritePath, classify, decode_password_output,
 };
@@ -103,12 +108,16 @@ fn security(
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
-pub struct RealHost;
+#[derive(Debug, Default)]
+pub struct RealHost {
+    /// What has already been said, so a remark about the machine is made once
+    /// however many Accounts provoke it.
+    noted: RefCell<BTreeSet<String>>,
+}
 
 impl RealHost {
     pub fn new() -> Self {
-        RealHost
+        RealHost::default()
     }
 }
 
@@ -127,6 +136,14 @@ impl Host for RealHost {
         std::env::var(key).ok().filter(|value| !value.is_empty())
     }
 
+    fn platform(&self) -> Platform {
+        if cfg!(target_os = "macos") {
+            Platform::MacOs
+        } else {
+            Platform::Other
+        }
+    }
+
     fn read_file(&self, path: &Path) -> Result<String, HostError> {
         match std::fs::read_to_string(path) {
             Ok(contents) => Ok(contents),
@@ -143,6 +160,49 @@ impl Host for RealHost {
         }
         std::fs::write(path, contents)?;
         Ok(())
+    }
+
+    /// Written beside and moved into place, so the file that ends up at `path`
+    /// is one that was created 0600 rather than one that was tightened
+    /// afterwards — even where something looser was already there (ADR 0020).
+    fn write_private_file(&self, path: &Path, contents: &str) -> Result<(), HostError> {
+        if let Some(parent) = path.parent() {
+            create_private_dir_all(parent)?;
+        }
+
+        let mut beside = path.as_os_str().to_os_string();
+        beside.push(".perch-tmp");
+        let beside = PathBuf::from(beside);
+
+        let written = create_private_file(&beside, contents)
+            .and_then(|()| std::fs::rename(&beside, path).map_err(HostError::Io));
+        if written.is_err() {
+            // A half-written Credential is not something to leave lying about,
+            // whatever went wrong.
+            let _ = std::fs::remove_file(&beside);
+        }
+        written
+    }
+
+    fn create_private_dir_all(&self, path: &Path) -> Result<(), HostError> {
+        create_private_dir_all(path)
+    }
+
+    fn file_mode(&self, path: &Path) -> Result<Option<u32>, HostError> {
+        let metadata = match std::fs::metadata(path) {
+            Ok(metadata) => metadata,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Err(HostError::NotFound {
+                    path: path.to_path_buf(),
+                });
+            }
+            Err(err) => return Err(HostError::Io(err)),
+        };
+        Ok(mode_of(&metadata))
+    }
+
+    fn make_private(&self, path: &Path) -> Result<(), HostError> {
+        set_private_mode(path)
     }
 
     fn create_dir_all(&self, path: &Path) -> Result<(), HostError> {
@@ -318,6 +378,14 @@ impl Host for RealHost {
         unsafe { libc_isatty(0) == 1 && libc_isatty(1) == 1 }
     }
 
+    /// To stderr, so a note never lands in the middle of the JSON a script is
+    /// reading off stdout.
+    fn note(&self, line: &str) {
+        if self.noted.borrow_mut().insert(line.to_string()) {
+            eprintln!("perch: {line}");
+        }
+    }
+
     fn read_line(&self) -> Result<Option<String>, HostError> {
         let mut line = String::new();
         let read = std::io::stdin().read_line(&mut line)?;
@@ -346,6 +414,80 @@ impl Host for RealHost {
             body: body.to_string(),
         })
     }
+}
+
+/// Creates a directory, and every directory above it, that nobody but its
+/// owner may enter.
+///
+/// The mode is given to `mkdir` rather than applied afterwards, so a directory
+/// that will hold a Credential is never briefly open (ADR 0020).
+#[cfg(unix)]
+fn create_private_dir_all(path: &Path) -> Result<(), HostError> {
+    use std::os::unix::fs::DirBuilderExt;
+
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(PRIVATE_DIR_MODE)
+        .create(path)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn create_private_dir_all(path: &Path) -> Result<(), HostError> {
+    std::fs::create_dir_all(path)?;
+    Ok(())
+}
+
+/// Creates a file with its mode, refusing to write into one that is already
+/// there: an existing file's mode is whatever it was, and `open` would not
+/// change it.
+#[cfg(unix)]
+fn create_private_file(path: &Path, contents: &str) -> Result<(), HostError> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    // Anything already here is what a write that died left behind, and holding
+    // on to it would mean writing a Credential into a file of unknown mode.
+    let _ = std::fs::remove_file(path);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(PRIVATE_FILE_MODE)
+        .open(path)?;
+    file.write_all(contents.as_bytes())?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn create_private_file(path: &Path, contents: &str) -> Result<(), HostError> {
+    let _ = std::fs::remove_file(path);
+    std::fs::write(path, contents)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn mode_of(metadata: &std::fs::Metadata) -> Option<u32> {
+    use std::os::unix::fs::PermissionsExt;
+    Some(metadata.permissions().mode() & 0o777)
+}
+
+/// A platform that does not describe a file's privacy in permission bits says
+/// nothing rather than something misleading.
+#[cfg(not(unix))]
+fn mode_of(_metadata: &std::fs::Metadata) -> Option<u32> {
+    None
+}
+
+#[cfg(unix)]
+fn set_private_mode(path: &Path) -> Result<(), HostError> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(PRIVATE_FILE_MODE))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_private_mode(_path: &Path) -> Result<(), HostError> {
+    Ok(())
 }
 
 #[cfg(test)]

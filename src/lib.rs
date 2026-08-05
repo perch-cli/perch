@@ -4,12 +4,14 @@
 //! The layout follows the seams the design calls for: [`host`] is the only way
 //! out of the process, [`probe`] is the only place that knows anything about
 //! Claude Code's internals, [`keychain`] is the only place that knows about
-//! `/usr/bin/security`, [`anthropic`] is the only place that knows an endpoint,
-//! and [`registry`] is Perch's own state.
+//! `/usr/bin/security`, [`credentials`] is the only place that knows a
+//! Credential can be in more than one kind of store, [`anthropic`] is the only
+//! place that knows an endpoint, and [`registry`] is Perch's own state.
 
 pub mod adopt;
 pub mod anthropic;
 pub mod commands;
+pub mod credentials;
 pub mod error;
 pub mod host;
 pub mod json;

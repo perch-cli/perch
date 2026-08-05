@@ -181,7 +181,7 @@ fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<St
     if registry.active.as_deref() == Some(account.email()) {
         probe::default_store(host)
     } else {
-        probe::store_for_profile(host, &account.profile.dir)
+        account.store(host)
     }
 }
 
@@ -274,13 +274,8 @@ fn renew_under_the_lock(host: &dyn Host, store: &Store, version: &str) -> Step<S
 }
 
 fn store_it(host: &dyn Host, store: &Store, rotated: &str) -> Step<()> {
-    profile::store_credential(
-        host,
-        &store.keychain_service,
-        &store.keychain_account,
-        rotated,
-    )
-    .map_err(|error| Outcome::Failed(format!("{error}\n\n{ROTATION_LOST}")))
+    profile::store_credential(host, store, rotated)
+        .map_err(|error| Outcome::Failed(format!("{error}\n\n{ROTATION_LOST}")))
 }
 
 const NO_REFRESH_TOKEN: &str = "the Credential Perch holds carries no refresh \
