@@ -13,16 +13,8 @@ _Avoid_: user, login, session
 
 **Credential**:
 The OAuth secret that proves the caller is a given Account. Held in a Credential
-Store, not by Perch.
+Store, never by Perch, and never rendered or logged.
 _Avoid_: token, key, secret
-
-**Credential Store**:
-Where a Credential is kept: the operating system's keychain, or a file of JSON
-readable only by its owner. Which one is not Perch's choice — it is wherever the
-installed Claude Code would put that Account's Credential, so macOS uses the
-keychain and every other platform uses the file. Each Profile has both, one
-primary and one fallback, and a Credential is read from whichever holds it.
-_Avoid_: keychain, vault, backend
 
 **Identity**:
 The non-secret description of an Account — its email address, organization, and
@@ -46,10 +38,17 @@ _Avoid_: selector, subject, handle
 
 **Profile**:
 Perch's local handle on one Account: a directory Claude Code would treat as its
-whole configuration. Because both Credential Stores are derived from the
-directory's path, a Profile is what lets a stored Credential live where Claude
-Code would look for it rather than somewhere Perch invented.
+whole configuration. Because a Credential Store is derived from the directory, a
+Profile is what lets a stored Credential live where Claude Code would put it
+rather than in a file Perch invented.
 _Avoid_: slot, vault entry, workspace
+
+**Credential Store**:
+Where the installed Claude Code keeps one Profile's Credential — the operating
+system's keychain, or a file inside the Profile. Which one is the platform's
+answer rather than Perch's, and a Profile's Credential is held in exactly one at
+a time.
+_Avoid_: keychain, vault, backend
 
 **Default Profile**:
 The Profile Claude Code falls back to when it is told nothing. The Account whose
@@ -155,6 +154,7 @@ in different terminals.
 _Avoid_: use, session, launch
 
 **Live Profile**:
-A Profile with a client currently running against it. Perch treats a Live
+A Profile with a client currently running against it, evidenced by a session
+marker naming a process that is still the one that wrote it. Perch treats a Live
 Profile's Credential as untouchable, because something else is holding it.
 _Avoid_: active, running, in-use

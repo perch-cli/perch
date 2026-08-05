@@ -1,98 +1,90 @@
 # A Credential lives wherever Claude Code puts it
 
-Perch has treated the Credential Store as a keychain: `/usr/bin/security` under
-a service name derived from the Profile's path (ADR 0008), recorded against each
-Account in `registry.json`. That is only true on macOS. The Windows and Linux
-2.1.222 builds keep a Credential as plaintext JSON at
-`<config dir>/.credentials.json`, in the same `claudeAiOauth` shape, written
-with mode 0600 — read out of the shipped binary, not inferred.
+ADR 0001 and ADR 0008 were written against a macOS-only Perch, and both assume
+a Credential is held in the operating system's keychain. That assumption is
+macOS's, not Claude Code's. On Windows — and, on present evidence, on Linux —
+Claude Code writes the Credential as plaintext JSON to
+`<config dir>/.credentials.json`, in the same `claudeAiOauth` shape. The 2.1.222
+Windows build contains the `find-generic-password` call gated behind the Darwin
+branch and does not contain the string `Claude Code-credentials` at all; its
+non-Darwin store is named, in its own source, `plaintext`.
 
-Perch stores a Credential exactly where the installed Claude Code would store
-it, and nowhere else. The Credential Store therefore becomes a concept with two
-implementations rather than a keychain with a name: the keychain, and a file.
+Perch therefore stores a Credential exactly where the installed Claude Code
+would store it, and nowhere else. Off macOS the service-name derivation of
+ADR 0001 — `sha256(CLAUDE_CONFIG_DIR)[0:8]` — is simply irrelevant: the
+Credential lives inside the Profile directory, so a Profile's isolation comes
+from the directory itself rather than from a namespace derived out of it. The
+conclusion of ADR 0001 survives unchanged; only its mechanism is macOS's.
 
-Claude Code is a composite reader — a primary store with a fallback — so Perch
-is too, and the two halves of that are decided by different things:
+The rejected alternative was to protect a parked Credential with the best each
+platform offers — the keychain, DPAPI, the Secret Service. It was rejected
+because its benefit is largely illusory against the threat that matters. DPAPI
+decrypts for any process running as the user, and the Secret Service unlocks
+with the login session, so malware running as the user either has the Credential
+already or can wait one Switch for it. Meanwhile it costs two more backends, a
+hard dependency on a Secret Service that headless Ubuntu and WSL frequently lack,
+and — decisively — the property that makes adoption work at all: that Perch reads
+what Claude Code wrote, and writes what Claude Code will read.
 
-- **The platform chooses where Perch writes.** A Profile that `perch add` has
-  just created holds no evidence about anything; the only question that can be
-  answered about it is which store the Claude Code on this machine would use.
-  On macOS that is the keychain, and everywhere else the file.
-- **Evidence chooses what Perch believes.** An existing store can be looked at.
-  A Credential found in the store that is not the primary is a Credential, and
-  reading it is not a compromise: it is what the Claude Code beside it is doing.
+Claude Code is not a single-store reader, so Perch is not either. Its store is a
+composite with a primary and a fallback, reporting `primary_and_fallback_failed`
+only when both refuse and deleting from both. That means a mac whose keychain is
+locked has a working Claude Code backed by a plaintext file — and a Perch that
+read only the keychain would report exit 11, or no login, about a machine that is
+logged in. So the platform chooses where Perch *writes*, because a Profile that
+`perch add` has just created holds no evidence to read; and evidence chooses what
+Perch *believes*, because an existing store can be looked at. This is ADR 0007's
+rule applied one level down: probed, not assumed.
 
-That second half fixes a live macOS bug. A locked keychain today produces exit
-11, or "no login", about a machine whose Claude Code is working perfectly off
-its plaintext fallback. The composite reader consults the other store when the
-primary yields nothing — whether because the item is absent or because the
-keychain would not answer — and reports the primary's failure only when neither
-store holds anything, which is when that failure is the whole story.
-
-**A write removes the copy in the store it did not write to.** This is the part
-with teeth. A Credential left behind is several Rotations past its retirement
-within minutes, and it would arm the composite reader to hand a dead refresh
-token to Claude Code the next time it consulted that store — ADR 0006's silent
-poisoning, arriving by the back door. The copy is removed by the write that
-superseded it, not swept up later.
-
-The rule is symmetric, and the direction that is easy to overlook is the one
-that matters more. A write that had to fall back leaves the *primary* holding
-the superseded copy — and the primary is what a reader consults first, so that
-copy would beat the Credential just stored. Removing it is safe at that point
-and not before, because by then the new one has been written somewhere and read
-back.
-
-Because the store is derived from the Profile's path rather than recorded,
-`registry.json` stops carrying `keychain_service`, `keychain_account` and `dir`.
-All three were restatements of the Account's email address run through the
-derivations in `probe`. A registry that records them can disagree with those
-derivations, and a registry that cannot say where a Credential is cannot be
-wrong about it. `Profile` collapses into values the registry already keys on,
-and the file becomes version 2; a version 1 registry is read by dropping the
-three fields.
+A successful write to the primary store removes any copy in the fallback. One
+store holds a Profile's Credential at a time, and the reason is ADR 0006's: a
+Credential left in the fallback is several Rotations behind within minutes, so
+leaving it there arms the composite reader to hand a retired refresh token to
+Claude Code the next time the keychain locks — the silent poisoning that Capture
+exists to prevent, arriving by the back door.
 
 ## Consequences
 
-Off macOS this multiplies plaintext secrets on disk from one to N: every Account
-Perch holds has its refresh token in a file, where before only the active one
-did. That is the cost of storing a Credential where Claude Code will find it,
-and it is recorded here rather than mitigated. Mitigating it would mean putting
-a Credential somewhere Claude Code does not read — which is the one thing Perch
-cannot do and still be a switcher.
+On macOS this means Perch deletes `~/.claude/.credentials.json`, a file Claude
+Code owns and Perch did not create. It is defensible — the file is stale by
+definition the moment the primary write succeeds, it is a live secret in
+plaintext, and Perch only touches it inside the three locks a Switch already
+takes — but it is Perch reaching outside its own house, and it was decided
+deliberately rather than discovered.
 
-A file holding a Credential is created 0600 inside a directory created 0700,
-with the mode set at creation. Not by a `chmod` afterwards: between the two
-calls the secret is on disk and readable, and that window is the whole of what
-the mode is for. That has a consequence worth stating, because it is easy to
-write code that reads as though it did not: a directory that already exists
-keeps the mode it has, so the *first* thing to make a Profile's directory has to
-be the thing that makes it private. A file found looser than 0600 is tightened
-and reported once rather than refused — Perch did not necessarily write it,
-refusing would strand a machine whose Claude Code is working, and a tightened
-file is a better outcome than an explained one.
+Off macOS, Perch multiplies the number of plaintext secrets on disk. Claude Code
+alone keeps one Credential in one file; a person holding four Accounts through
+Perch has four, under `~/.perch/profiles/`. Perch does not lower the protection
+of any single Credential, but it does widen what a leaked backup of `$HOME`
+yields, and that is the strongest argument for the rejected alternative. The
+portable case — a Credential leaving the machine — is covered separately and
+differently by ADR 0014's required passphrase.
 
-The keychain remains the fallback off macOS and the primary on it, so there is
-one code path rather than two. On Linux and Windows it simply never holds
-anything, and a keychain that cannot be reached is a store that holds nothing
-rather than a failure: `/usr/bin/security` not existing is not news on Linux.
+Files holding a Credential are created 0600 and their directories 0700, matching
+what Claude Code does at 39 sites in its own binary. The mode is set at creation
+rather than by a `chmod` afterwards: `write_atomically` writes beside the target
+first, and a create-then-chmod would leave a window in which a refresh token is
+world-readable. A credential file found looser than 0600 is tightened and
+mentioned once rather than refused, because Claude Code is using that file
+perfectly happily and refusing would make Perch broken while the thing it wraps
+works. Windows has no mode and relies on the profile ACL; a `$PERCH_HOME` pointed
+at a shared or removable drive therefore gets that drive's permissions and Perch
+will not notice.
 
-The whole non-macOS design rests on one assumption — that the plaintext store
-honours `CLAUDE_CONFIG_DIR`, which is what gives each Profile a Credential of
-its own, exactly as the derived service name does on macOS (ADR 0001). It is one
-assumption rather than several because the same reading of the config directory
-produces both. A contract test asserts it (ADR 0007).
+Because a Credential Store is derived rather than recorded, `registry.json` stops
+carrying `keychain_service` and `keychain_account` — and, by the same argument,
+`dir`, which is `perch_home/profiles/slug(email)`. `Profile` collapses into
+values the registry already keys on. The format goes to version 2, migrating by
+dropping the fields on read. The cost of deriving rather than recording is that
+a future change to Claude Code's derivation would send Perch looking in an empty
+namespace instead of at a remembered one; ADR 0007's answer to drift is to refuse
+loudly rather than to guess, and `short_hash` is pinned by test so the derivation
+cannot move by accident.
 
-Two neighbouring env vars were found beside these paths and neither is acted on.
-`CLAUDE_SECURESTORAGE_CONFIG_DIR` overrides the config directory for the
-credential store alone, in both derivations, so a machine that sets it would put
-every Profile's Credential in one place; nothing sets it, and Perch would rather
-refuse to guess than encode a second config path. `CLAUDE_CODE_HOST_CREDS_FILE`
-names a credentials file supplied by whatever is hosting Claude Code, ignored by
-it when group- or other-readable — a path into Claude Code, not one out of it,
-and not a store Perch writes.
-
-If a build turns out to have a Secret Service primary — a distribution's own, or
-a later Claude Code — that is a third backend to write. The composite reader
-accommodates one without redesign: what changes is which store the platform
-names as primary.
+Linux is inference, not observation. The Windows build was read directly; the
+Linux build is a different one, and if it has a Secret Service primary there is a
+third backend to write. The composite reader accommodates that without redesign,
+but the belief that the plaintext store honours `CLAUDE_CONFIG_DIR` is the single
+assumption the whole non-macOS design rests on, and it earns the loudest contract
+test. `CLAUDE_CODE_HOST_CREDS_FILE` appears in the binary beside these paths and
+its meaning is not yet known.
