@@ -135,6 +135,13 @@ within a Group. What Perch does when you name no target, and what the watcher
 does on your behalf.
 _Avoid_: rotate, next, advance
 
+**Disabled**:
+An Account you have taken out of Cycling and kept in every other way. It stays
+listed, keeps its Alias and its Group and its Credential, and a Switch that
+names it still lands — it is only never chosen for you. Reversible, and never a
+statement about whether the Account works, which is Quarantine.
+_Avoid_: excluded, paused, off, archived
+
 **Strategy**:
 Which Account a Cycle prefers when more than one would serve — the one with the
 most headroom, or the one whose Quota Window resets soonest so perishable quota
