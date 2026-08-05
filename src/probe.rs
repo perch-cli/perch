@@ -204,7 +204,11 @@ pub fn claude_bin(host: &dyn Host) -> Result<PathBuf> {
 
     for dir in path.split(separator).filter(|dir| !dir.is_empty()) {
         for extension in &extensions {
-            let candidate = Path::new(dir).join(format!("claude{extension}"));
+            // Joined with '/' rather than `Path::join`, which would pick the
+            // separator of whatever platform this build runs on. Windows
+            // accepts either, and a candidate that spells differently per
+            // build would make one machine read as two.
+            let candidate = PathBuf::from(format!("{dir}/claude{extension}"));
             if host.is_file(&candidate) {
                 return Ok(candidate);
             }
@@ -809,7 +813,7 @@ mod tests {
 
         assert_eq!(
             claude_bin(&host).unwrap(),
-            std::path::Path::new("C:/npm").join("claude.cmd")
+            PathBuf::from("C:/npm/claude.cmd")
         );
     }
 
@@ -822,7 +826,7 @@ mod tests {
 
         assert_eq!(
             claude_bin(&host).unwrap(),
-            std::path::Path::new("C:/bin").join("claude.exe")
+            PathBuf::from("C:/bin/claude.exe")
         );
     }
 
