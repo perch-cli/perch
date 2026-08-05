@@ -440,22 +440,33 @@ fn rename_replacing(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::rename(from, to)
 }
 
-/// The same on Windows, where a rename fails with a sharing violation while
-/// anything holds a handle on the target — routinely Windows Defender,
-/// transiently. The target here can be `.claude.json`, the file the design
-/// goes out of its way not to lose, so a violation is retried briefly and
-/// then failed exactly as it would have been on the first try.
+/// The same on Windows, where a rename fails while anything holds a handle on
+/// the target — routinely Windows Defender, transiently. The target here can
+/// be `.claude.json`, the file the design goes out of its way not to lose, so
+/// the failure is retried briefly and then reported exactly as it would have
+/// been on the first try.
+///
+/// Both codes, because Windows reports the one phenomenon as either:
+/// `ERROR_SHARING_VIOLATION` from some paths through the kernel, and
+/// `ERROR_ACCESS_DENIED` from `MoveFileEx` replacing an open file — the code
+/// CI actually observed. A genuine permission failure spends the half second
+/// and then fails as it always did.
 #[cfg(windows)]
 fn rename_replacing(from: &Path, to: &Path) -> std::io::Result<()> {
-    use windows_sys::Win32::Foundation::ERROR_SHARING_VIOLATION;
+    use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION};
 
     const ATTEMPTS: u32 = 10;
     const BETWEEN_MILLIS: u64 = 50;
+    const TRANSIENT: [i32; 2] = [ERROR_SHARING_VIOLATION as i32, ERROR_ACCESS_DENIED as i32];
 
     let mut outcome = std::fs::rename(from, to);
     for _ in 1..ATTEMPTS {
         match &outcome {
-            Err(err) if err.raw_os_error() == Some(ERROR_SHARING_VIOLATION as i32) => {
+            Err(err)
+                if err
+                    .raw_os_error()
+                    .is_some_and(|code| TRANSIENT.contains(&code)) =>
+            {
                 std::thread::sleep(std::time::Duration::from_millis(BETWEEN_MILLIS));
                 outcome = std::fs::rename(from, to);
             }
