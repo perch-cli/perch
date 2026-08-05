@@ -27,6 +27,13 @@ Aliases and Group names share one namespace, so neither can shadow the other.
 An Account answers to one Alias at a time.
 _Avoid_: nickname, label, tag
 
+**Remove**:
+Giving an Account up for good: Perch forgets it, deletes the Credential it was
+holding and frees the Alias it answered to, so nothing lists it and nothing
+Cycles to it. The one thing here that no command undoes — only a fresh login
+brings the Account back, and as a new one.
+_Avoid_: delete, drop, purge, unregister
+
 **Target**:
 What a command is told to act on — an Alias, an Account's email address, or a
 Group name, resolved in that order. Every command that acts on one thing takes

@@ -9,8 +9,8 @@ Early. Perch adopts the login you already have, adds further Accounts without
 disturbing it, names them, holds Groups of Accounts you have declared
 interchangeable, lists what you have, reads how full each one is, switches to
 an Account you name, picks one for you when you name none, logs an Account in
-again when its Credential stops working, and takes its configuration from a
-script.
+again when its Credential stops working, gives one up when a subscription is
+retired, and takes its configuration from a script.
 
 ```
 $ perch status
@@ -246,6 +246,51 @@ Relogging in the Account you are **on** also makes its fresh Credential the live
 one, because a repair only its own Profile can see would leave the Account broken
 everywhere it is actually used (ADR 0023). A healthy Account may be relogged in
 too — nothing about the command depends on the Quarantine.
+
+## Giving up an Account
+
+`perch remove <target>` is for the subscription that has been retired. It forgets
+the Account and deletes the Credential Perch holds for it, so it stops being
+listed, stops being a Cycle candidate, and the Alias it answered to comes free.
+
+```
+$ perch remove spare
+`spare` is an Alias for spare@example.com.
+Removed spare@example.com (as `spare`). The Credential Perch held for it is deleted, and nothing lists it or Cycles to it now.
+The Alias `spare` is free to use again.
+```
+
+Removing the Account you are **on** is the case that needs care, because the live
+Credential belongs to it. Perch names the Account it will leave active, lands on
+it first, and asks before any of it happens (ADR 0024).
+
+```
+$ perch remove work
+`work` is an Alias for someone@example.com.
+someone@example.com (as `work`) is the active Account. overflow@example.com (as `overflow`) will be made active first, so nothing is left running as an Account Perch has forgotten — `perch switch <target>` first if you would rather land somewhere else. The login being given up goes with it: holding it again would mean `perch add`.
+Remove someone@example.com (as `work`)? [y/N]: y
+overflow@example.com (as `overflow`) is the active Account now — its Credential is the live one.
+Removed someone@example.com (as `work`). The Credential Perch held for it is deleted, and nothing lists it or Cycles to it now.
+The Alias `work` is free to use again.
+```
+
+The Account it lands on is one in the same Group where there is one, because a
+Group is your own statement that those Accounts are interchangeable — never a
+Quarantined Account, whose Credential does not work, and never a disabled one,
+which is an Account you have said should not be chosen for you. It is not ranked
+on how full it is: it is named before you agree to it, and `perch switch` is how
+you choose differently.
+
+Removing the last Account, or the active one when nothing is left that Perch
+would land on, is allowed and confirmed the same way. It says that Perch will
+hold no active Account afterwards, and it does not log you out: the live
+Credential is not Perch's to take away, but the copy Perch holds is deleted, so
+whatever replaces the live one ends that login for good.
+
+`--yes` agrees in advance. Without a terminal and without the flag, a removal
+that would have asked is refused rather than assumed, and end of input is a no.
+The Group the Account was in stays declared — a Group is something you said, not
+a summary of where the Accounts happen to be.
 
 ## What you have
 

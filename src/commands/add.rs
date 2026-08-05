@@ -13,7 +13,7 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::{say, write_failed};
+use crate::commands::{ask, say};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::login::{self, Produced};
@@ -242,12 +242,4 @@ fn report(
         ),
         None => Ok(()),
     }
-}
-
-/// Puts a question to the person at the terminal and waits for their answer.
-fn ask(host: &dyn Host, out: &mut dyn Write, question: &str) -> Result<Option<String>> {
-    write!(out, "{question}").map_err(write_failed)?;
-    out.flush().map_err(write_failed)?;
-    host.read_line()
-        .map_err(|err| PerchError::Other(format!("could not read your answer: {err}")))
 }

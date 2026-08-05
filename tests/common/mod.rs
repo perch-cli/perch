@@ -14,6 +14,7 @@ use perch::commands::enable::EnableCommand;
 use perch::commands::group::GroupCommand;
 use perch::commands::list::ListArgs;
 use perch::commands::relogin::ReloginArgs;
+use perch::commands::remove::RemoveArgs;
 use perch::commands::status::StatusArgs;
 use perch::commands::switch::SwitchArgs;
 use perch::credentials;
@@ -489,6 +490,25 @@ pub fn run_relogin(host: &FakeHost, target: &str) -> (perch::Result<()>, String)
         },
         &mut written,
     );
+    (result, String::from_utf8(written).expect("output is UTF-8"))
+}
+
+/// Runs `perch remove <target>`, returning what it printed alongside how it
+/// ended.
+pub fn run_remove(host: &FakeHost, target: &str) -> (perch::Result<()>, String) {
+    run_remove_with(
+        host,
+        RemoveArgs {
+            target: target.to_string(),
+            yes: false,
+        },
+    )
+}
+
+/// The same, for the tests that are about the flag a script removes with.
+pub fn run_remove_with(host: &FakeHost, args: RemoveArgs) -> (perch::Result<()>, String) {
+    let mut written = Vec::new();
+    let result = perch::commands::remove::run(host, args, &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
