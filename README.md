@@ -167,6 +167,32 @@ that Accounts are interchangeable, not a weaker form of one. So bare `perch
 switch` Cycles among ungrouped Accounts only when a global setting says it may,
 and that setting is off until you turn it on.
 
+## Reserving an Account
+
+`perch disable` keeps an Account out of Cycling without giving it up — for the
+subscription you are holding for one particular thing and would rather Perch did
+not spend on something else.
+
+```
+$ perch disable spare
+`spare` is an Alias for spare@example.com.
+Disabled spare@example.com (as `spare`). Cycling will not choose it — it stays listed and named, and `perch switch` still switches to it when you name it.
+
+$ perch enable spare
+`spare` is an Alias for spare@example.com.
+Enabled spare@example.com (as `spare`). It is a Cycle candidate again.
+```
+
+A disabled Account is excluded from Cycling and from nothing else. It keeps its
+Alias, its Group and its stored Credential, `perch list` shows it as disabled,
+and naming it on `perch switch` still switches to it — so putting it back needs
+no login, only `perch enable`. Removing the Account is the blunt instrument this
+exists to avoid.
+
+Disabling every Account in a Group is allowed. A bare `perch switch` there then
+reports having no candidate (exit 17) rather than quietly landing you on
+something you had reserved.
+
 ## What you have
 
 `perch list` is the one place that answers it: every Account with its Alias, its

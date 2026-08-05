@@ -6,15 +6,18 @@
 
 use std::path::Path;
 
+use chrono::Duration;
 use perch::commands::add::AddArgs;
 use perch::commands::alias::AliasCommand;
+use perch::commands::enable::EnableCommand;
 use perch::commands::group::GroupCommand;
 use perch::commands::list::ListArgs;
 use perch::commands::status::StatusArgs;
 use perch::commands::switch::SwitchArgs;
 use perch::credentials;
-use perch::host::{Execution, FakeHost, Platform};
+use perch::host::{Execution, FakeHost, Host, Platform};
 use perch::probe;
+use perch::registry::{CachedUtilization, WindowUtilization};
 
 pub const CLAUDE_VERSION: &str = "2.1.221";
 pub const LOGIN_NAME: &str = "someone";
@@ -330,4 +333,64 @@ pub fn add_to_group(group: &str) -> AddArgs {
         group: Some(group.to_string()),
         ..AddArgs::default()
     }
+}
+
+/// Runs `perch enable` or `perch disable`, returning what it printed alongside
+/// how it ended.
+pub fn run_enable(host: &FakeHost, command: EnableCommand) -> (perch::Result<()>, String) {
+    let mut written = Vec::new();
+    let result = perch::commands::enable::run(host, command, &mut written);
+    (result, String::from_utf8(written).expect("output is UTF-8"))
+}
+
+/// `perch disable <target>`.
+pub fn disable_account(host: &FakeHost, target: &str) -> (perch::Result<()>, String) {
+    run_enable(
+        host,
+        EnableCommand::Disable {
+            target: target.to_string(),
+        },
+    )
+}
+
+/// `perch enable <target>`.
+pub fn enable_account(host: &FakeHost, target: &str) -> (perch::Result<()>, String) {
+    run_enable(
+        host,
+        EnableCommand::Enable {
+            target: target.to_string(),
+        },
+    )
+}
+
+/// One Quota Window, as full as the test says and with no reset time recorded.
+pub fn window(name: &str, used_percent: f64) -> WindowUtilization {
+    WindowUtilization {
+        window: name.to_string(),
+        used_percent,
+        resets_at: None,
+    }
+}
+
+/// Puts figures in the cache for an Account, where a `--refresh` four minutes
+/// ago would have left them.
+pub fn observed(host: &FakeHost, email: &str, windows: Vec<WindowUtilization>) {
+    let observed_at = host.now() - Duration::minutes(4);
+    let mut registry = registry_of(host);
+    registry
+        .account_mut(email)
+        .expect("an Account Perch holds")
+        .utilization = Some(CachedUtilization {
+        observed_at,
+        windows,
+    });
+    perch::registry::save(host, &registry).expect("the registry is written");
+}
+
+/// Marks an Account as one whose Credential can no longer be used and cannot be
+/// recovered. Quarantine is #13; this is the state it leaves behind.
+pub fn quarantine(host: &FakeHost, email: &str) {
+    let mut registry = registry_of(host);
+    registry.account_mut(email).expect("an Account").quarantined = true;
+    perch::registry::save(host, &registry).expect("the registry is written");
 }

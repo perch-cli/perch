@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 
 use perch::commands::add::{self, AddArgs};
 use perch::commands::alias::{self, AliasCommand};
+use perch::commands::enable::{self, EnableCommand};
 use perch::commands::group::{self, GroupCommand};
 use perch::commands::list::{self, ListArgs};
 use perch::commands::status::{self, StatusArgs};
@@ -59,6 +60,27 @@ enum Command {
         /// Free the name instead of giving it.
         #[arg(long)]
         unset: bool,
+    },
+
+    /// Keep an Account out of Cycling, without giving it up.
+    ///
+    /// For reserving an Account for one purpose: it stays listed, keeps its
+    /// Alias, its Group and its Credential, and `perch switch <target>` still
+    /// switches to it. Only Cycling stops choosing it, and `perch enable` puts
+    /// it back.
+    Disable {
+        /// The Account: its Alias, or its email address.
+        target: String,
+    },
+
+    /// Return an Account to the Cycling pool.
+    ///
+    /// The other half of `perch disable`, and all it takes to undo one: the
+    /// Account never lost its Profile or its Credential, so nothing has to be
+    /// logged into again.
+    Enable {
+        /// The Account: its Alias, or its email address.
+        target: String,
     },
 
     /// Declare which Accounts are interchangeable.
@@ -195,6 +217,12 @@ fn main() {
             },
             &mut out,
         ),
+        Command::Disable { target } => {
+            enable::run(&host, EnableCommand::Disable { target }, &mut out)
+        }
+        Command::Enable { target } => {
+            enable::run(&host, EnableCommand::Enable { target }, &mut out)
+        }
         Command::Group { action } => group::run(&host, action.into(), &mut out),
         Command::List { json } => list::run(&host, ListArgs { json }, &mut out),
         Command::Status {

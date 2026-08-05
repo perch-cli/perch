@@ -4,6 +4,7 @@
 
 pub mod add;
 pub mod alias;
+pub mod enable;
 pub mod group;
 pub mod list;
 pub mod status;

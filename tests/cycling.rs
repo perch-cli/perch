@@ -17,7 +17,7 @@ use perch::error::{
 };
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
-use perch::registry::{CachedUtilization, WindowUtilization};
+use perch::registry::WindowUtilization;
 
 /// A machine holding three Accounts, all in one Group, the first one active.
 /// The ordinary shape of the problem: several subscriptions declared
@@ -48,17 +48,8 @@ fn machine_with_three_accounts() -> FakeHost {
     host
 }
 
-/// One Quota Window, as full as the test says and with no reset time recorded.
-fn window(name: &str, used_percent: f64) -> WindowUtilization {
-    WindowUtilization {
-        window: name.to_string(),
-        used_percent,
-        resets_at: None,
-    }
-}
-
-/// The same, carrying when it next resets — what the all-exhausted answer is
-/// built out of.
+/// A Quota Window carrying when it next resets — what the all-exhausted answer
+/// is built out of.
 fn resetting(name: &str, used_percent: f64, at: DateTime<Utc>) -> WindowUtilization {
     WindowUtilization {
         window: name.to_string(),
@@ -67,42 +58,12 @@ fn resetting(name: &str, used_percent: f64, at: DateTime<Utc>) -> WindowUtilizat
     }
 }
 
-/// Puts figures in the cache for an Account, where a `--refresh` four minutes
-/// ago would have left them.
-fn observed(host: &FakeHost, email: &str, windows: Vec<WindowUtilization>) {
-    let observed_at = host.now() - Duration::minutes(4);
-    let mut registry = registry_of(host);
-    registry
-        .account_mut(email)
-        .expect("an Account Perch holds")
-        .utilization = Some(CachedUtilization {
-        observed_at,
-        windows,
-    });
-    perch::registry::save(host, &registry).expect("the registry is written");
-}
-
 /// Turns on the global setting that says the ungrouped Accounts are
 /// interchangeable. `perch config` is the form that sets it (#12); this is the
 /// state that form leaves behind.
 fn ungrouped_declared_interchangeable(host: &FakeHost) {
     let mut registry = registry_of(host);
     registry.global.cycle_ungrouped = true;
-    perch::registry::save(host, &registry).expect("the registry is written");
-}
-
-/// Takes an Account out of the Cycling pool. `perch disable` is the form that
-/// does it (#11); this is the state that form leaves behind.
-fn disable(host: &FakeHost, email: &str) {
-    let mut registry = registry_of(host);
-    registry.account_mut(email).expect("an Account").enabled = false;
-    perch::registry::save(host, &registry).expect("the registry is written");
-}
-
-/// The same for an Account whose Credential can no longer be used (#13).
-fn quarantine(host: &FakeHost, email: &str) {
-    let mut registry = registry_of(host);
-    registry.account_mut(email).expect("an Account").quarantined = true;
     perch::registry::save(host, &registry).expect("the registry is written");
 }
 
@@ -249,7 +210,9 @@ fn a_disabled_account_is_never_chosen() {
     observed(&host, EMAIL, vec![window("5-hour", 90.0)]);
     observed(&host, SECOND_EMAIL, vec![window("5-hour", 1.0)]);
     observed(&host, THIRD_EMAIL, vec![window("5-hour", 80.0)]);
-    disable(&host, SECOND_EMAIL);
+    disable_account(&host, SECOND_EMAIL)
+        .0
+        .expect("the Account leaves the pool");
 
     let (result, printed) = run_cycle(&host);
 
@@ -498,8 +461,11 @@ fn the_setting_that_lets_ungrouped_accounts_cycle_is_off_until_it_is_turned_on()
 fn a_group_with_nobody_left_to_cycle_to_says_so_rather_than_switching() {
     let host = three_accounts_in_one_group();
     observed(&host, EMAIL, vec![window("5-hour", 100.0)]);
-    disable(&host, SECOND_EMAIL);
-    disable(&host, THIRD_EMAIL);
+    for reserved in [SECOND_EMAIL, THIRD_EMAIL] {
+        disable_account(&host, reserved)
+            .0
+            .expect("the Account leaves the pool");
+    }
 
     let (result, _) = run_cycle(&host);
 
