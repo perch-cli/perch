@@ -10,9 +10,11 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
+use chrono::{TimeZone, Utc};
 use common::*;
 use perch::error::{
-    EXIT_INVALID, EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NOT_FOUND, EXIT_NOTHING_TO_DO, EXIT_PROFILE_LIVE,
+    EXIT_INVALID, EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NOT_FOUND, EXIT_NOTHING_TO_DO,
+    EXIT_PROBE_REFUSED, EXIT_PROFILE_LIVE,
 };
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
@@ -90,13 +92,21 @@ fn trace(host: &FakeHost) -> Vec<String> {
 }
 
 /// A Claude Code running against a Profile: the marker file it writes for the
-/// session, and a process that is still there to own it.
+/// session — naming its process and when the session began — and a process that
+/// has been there since before it.
 fn client_running_against(host: FakeHost, profile_dir: &str, pid: u32) -> FakeHost {
-    host.with_file(
-        format!("{profile_dir}/sessions/{pid}.json"),
-        &format!(r#"{{"pid":{pid},"cwd":"/Users/someone/work"}}"#),
+    let marker = session_marker(pid, host.now());
+    host.with_file(format!("{profile_dir}/sessions/{pid}.json"), &marker)
+        .with_live_process(pid)
+}
+
+/// The marker Claude Code writes for a session that began at `began`, in the
+/// shape the probe believes in.
+fn session_marker(pid: u32, began: chrono::DateTime<chrono::Utc>) -> String {
+    format!(
+        r#"{{"pid":{pid},"cwd":"/Users/someone/work","startedAt":{}}}"#,
+        began.timestamp_millis()
     )
-    .with_live_process(pid)
 }
 
 #[test]
@@ -378,12 +388,89 @@ fn switching_away_from_a_profile_a_client_is_running_against_is_refused_too() {
 fn a_marker_left_behind_by_a_client_that_died_is_not_a_live_profile() {
     let host = machine_with_two_accounts().with_file(
         format!("{SECOND_PROFILE}/sessions/9999.json"),
-        r#"{"pid":9999,"cwd":"/Users/someone/work"}"#,
+        &session_marker(9999, Utc.with_ymd_and_hms(2026, 8, 4, 9, 0, 0).unwrap()),
     );
 
     run_switch(&host, SECOND_EMAIL)
         .0
         .expect("nothing is holding that Profile");
+}
+
+#[test]
+fn a_marker_whose_pid_now_belongs_to_a_younger_process_is_not_a_live_profile() {
+    // A dead session's marker plus a recycled PID: the process wearing the pid
+    // today began after the session the marker records, so it cannot be the
+    // client that wrote it (ADR 0022).
+    let session_began = Utc.with_ymd_and_hms(2026, 8, 4, 9, 0, 0).unwrap();
+    let host = machine_with_two_accounts()
+        .with_file(
+            format!("{SECOND_PROFILE}/sessions/4242.json"),
+            &session_marker(4242, session_began),
+        )
+        .with_live_process_started_at(4242, Utc.with_ymd_and_hms(2026, 8, 4, 11, 0, 0).unwrap());
+
+    run_switch(&host, SECOND_EMAIL)
+        .0
+        .expect("that client died; the pid was recycled");
+}
+
+#[test]
+fn a_marker_that_does_not_say_when_its_session_began_is_no_evidence_of_a_client() {
+    // The marker parses but is not the shape Perch believes in. A Profile is
+    // Live when something says so, not when nothing does.
+    let host = machine_with_two_accounts()
+        .with_file(
+            format!("{SECOND_PROFILE}/sessions/4242.json"),
+            r#"{"pid":4242,"cwd":"/Users/someone/work"}"#,
+        )
+        .with_live_process(4242);
+
+    run_switch(&host, SECOND_EMAIL)
+        .0
+        .expect("an uncorroborated marker does not hold a Profile");
+}
+
+#[test]
+fn a_marker_that_is_not_json_is_no_evidence_of_a_client() {
+    let host = machine_with_two_accounts()
+        .with_file(
+            format!("{SECOND_PROFILE}/sessions/4242.json"),
+            "not a marker at all",
+        )
+        .with_live_process(4242);
+
+    run_switch(&host, SECOND_EMAIL)
+        .0
+        .expect("a marker Perch cannot read is not evidence");
+}
+
+#[test]
+fn a_live_process_whose_start_cannot_be_read_is_a_refusal_naming_the_assumption() {
+    // The marker is well-shaped and its process is alive, but the operating
+    // system will not say when that process began — so the marker can be
+    // neither corroborated nor dismissed, and guessing either way is wrong.
+    let host = machine_with_two_accounts()
+        .with_file(
+            format!("{SECOND_PROFILE}/sessions/4242.json"),
+            &session_marker(4242, Utc.with_ymd_and_hms(2026, 8, 4, 9, 0, 0).unwrap()),
+        )
+        .with_live_process_of_unknown_start(4242);
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("the marker cannot be corroborated");
+    assert_eq!(error.exit_code(), EXIT_PROBE_REFUSED);
+    assert!(
+        error
+            .to_string()
+            .contains(probe::assumption::SESSION_MARKER),
+        "{error}"
+    );
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(CREDENTIAL),
+        "nothing was written"
+    );
 }
 
 #[test]

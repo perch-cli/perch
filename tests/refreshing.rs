@@ -14,8 +14,8 @@ use std::path::{Path, PathBuf};
 use chrono::{TimeZone, Utc};
 use common::*;
 use perch::anthropic::{self, BETA, PROFILE_URL, TOKEN_URL, USAGE_URL};
-use perch::host::FakeHost;
 use perch::host::fake::Effect;
+use perch::host::{FakeHost, Host};
 use perch::probe;
 
 const SECOND_PROFILE: &str = "/Users/someone/.perch/profiles/overflow-example-com";
@@ -67,13 +67,15 @@ fn ready() -> FakeHost {
 }
 
 /// A Claude Code running against a config directory: the marker file it writes
-/// for the session, and a process still there to own it.
+/// for the session — naming its process and when the session began — and a
+/// process that has been there since before it.
 fn client_running_against(host: FakeHost, config_dir: &str, pid: u32) -> FakeHost {
-    host.with_file(
-        format!("{config_dir}/sessions/{pid}.json"),
-        &format!(r#"{{"pid":{pid},"cwd":"/Users/someone/work"}}"#),
-    )
-    .with_live_process(pid)
+    let marker = format!(
+        r#"{{"pid":{pid},"cwd":"/Users/someone/work","startedAt":{}}}"#,
+        host.now().timestamp_millis()
+    );
+    host.with_file(format!("{config_dir}/sessions/{pid}.json"), &marker)
+        .with_live_process(pid)
 }
 
 fn cached_windows(host: &FakeHost, email: &str) -> Vec<perch::registry::WindowUtilization> {

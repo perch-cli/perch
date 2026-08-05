@@ -368,6 +368,10 @@ impl Host for RealHost {
         unsafe { libc_kill(pid as i32, 0) == 0 }
     }
 
+    fn process_started_at(&self, pid: u32) -> Option<DateTime<Utc>> {
+        process_started_at(pid)
+    }
+
     fn sleep(&self, millis: u64) {
         std::thread::sleep(std::time::Duration::from_millis(millis));
     }
@@ -517,6 +521,107 @@ mod tests {
         assert!(config.contains(expected), "{config}");
         assert_eq!(config.lines().count(), 2, "one option per line: {config}");
     }
+}
+
+/// When a process began, in the terms `/proc` speaks: field 22 of
+/// `/proc/<pid>/stat` is the start in clock ticks since boot, and boot itself
+/// is `btime` in `/proc/stat`, in seconds since the epoch.
+///
+/// Both figures round down, so the answer can only run early — the safe
+/// direction, since an answer that ran late could make a genuine client look
+/// like a recycled PID.
+#[cfg(target_os = "linux")]
+fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The command name sits in parentheses and may hold anything, spaces and
+    // parentheses included; the numbered fields resume after the last ')'.
+    let after_command = stat.rsplit_once(')')?.1;
+    let ticks_after_boot: i64 = after_command.split_whitespace().nth(19)?.parse().ok()?;
+
+    let boot: i64 = std::fs::read_to_string("/proc/stat")
+        .ok()?
+        .lines()
+        .find_map(|line| line.strip_prefix("btime "))?
+        .trim()
+        .parse()
+        .ok()?;
+
+    let ticks_per_second = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    if ticks_per_second <= 0 {
+        return None;
+    }
+    DateTime::from_timestamp_millis(boot * 1_000 + ticks_after_boot * 1_000 / ticks_per_second)
+}
+
+/// When a process began, as libproc reports it: the `proc_bsdinfo` for one
+/// pid, whose `pbi_start_tvsec`/`pbi_start_tvusec` are the start as a
+/// microsecond-resolution timestamp.
+///
+/// `proc_pidinfo` rather than `sysctl KERN_PROC_PID`, because the libc crate
+/// carries a vetted declaration of the former for Apple and none of the
+/// latter's `kinfo_proc` — and hand-writing that struct is precisely the
+/// `unsafe` ADR 0021 exists to avoid.
+#[cfg(target_os = "macos")]
+fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            (&raw mut info).cast(),
+            size,
+        )
+    };
+    // The return is how many bytes were written; anything short of the whole
+    // struct is a process that is gone, or one that will not be described.
+    if written < size {
+        return None;
+    }
+
+    let seconds = i64::try_from(info.pbi_start_tvsec).ok()?;
+    DateTime::from_timestamp(seconds, u32::try_from(info.pbi_start_tvusec).ok()? * 1_000)
+}
+
+/// When a process began, as `GetProcessTimes` reports it: a creation `FILETIME`
+/// counting 100-nanosecond ticks from 1601.
+#[cfg(windows)]
+fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
+    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
+    use windows_sys::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    /// The epoch, in milliseconds after the point `FILETIME` counts from.
+    const EPOCH_MILLIS_AFTER_1601: i64 = 11_644_473_600_000;
+
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return None;
+        }
+        let mut creation: FILETIME = std::mem::zeroed();
+        let mut exit: FILETIME = std::mem::zeroed();
+        let mut kernel: FILETIME = std::mem::zeroed();
+        let mut user: FILETIME = std::mem::zeroed();
+        let told = GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user);
+        CloseHandle(process);
+        if told == 0 {
+            return None;
+        }
+
+        let ticks = ((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64;
+        DateTime::from_timestamp_millis((ticks / 10_000) as i64 - EPOCH_MILLIS_AFTER_1601)
+    }
+}
+
+/// A platform with no way to ask says so, rather than guessing: an
+/// uncorroborable marker becomes a refusal there, never a belief.
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn process_started_at(_pid: u32) -> Option<DateTime<Utc>> {
+    None
 }
 
 unsafe extern "C" {
