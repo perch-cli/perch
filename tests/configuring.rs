@@ -14,20 +14,33 @@
 
 mod common;
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::Duration;
 use common::*;
 use perch::error::{EXIT_INVALID, EXIT_NOT_FOUND, EXIT_NOT_INTERCHANGEABLE};
 use perch::host::{FakeHost, Host};
-use perch::registry::{Strategy, WindowUtilization};
+use perch::registry::Strategy;
 
-/// A Quota Window carrying when it next resets — what the soonest-reset
-/// Strategy is ranked on.
-fn resetting(name: &str, used_percent: f64, at: DateTime<Utc>) -> WindowUtilization {
-    WindowUtilization {
-        window: name.to_string(),
-        used_percent,
-        resets_at: Some(at),
-    }
+/// Three Accounts in one Group where the two Strategies disagree: the Account
+/// with the most room is not the one whose quota is about to be thrown away,
+/// so which one a bare `perch switch` lands on says which Strategy was read.
+fn where_the_strategies_disagree() -> FakeHost {
+    let host = three_accounts_in_one_group();
+    observed(&host, EMAIL, vec![window("5-hour", 96.0)]);
+    observed(
+        &host,
+        SECOND_EMAIL,
+        vec![resetting(
+            "5-hour",
+            70.0,
+            host.now() + Duration::minutes(20),
+        )],
+    );
+    observed(
+        &host,
+        THIRD_EMAIL,
+        vec![resetting("5-hour", 10.0, host.now() + Duration::hours(4))],
+    );
+    host
 }
 
 fn active(host: &FakeHost) -> Option<String> {
@@ -110,24 +123,7 @@ fn every_setting_reads_back_in_the_form_that_would_set_it_again() {
 
 #[test]
 fn the_strategy_a_group_carries_changes_which_account_a_bare_switch_chooses() {
-    let host = three_accounts_in_one_group();
-    // The Account with the most room is not the one whose quota is about to be
-    // thrown away, so the two Strategies disagree about where to go.
-    observed(&host, EMAIL, vec![window("5-hour", 96.0)]);
-    observed(
-        &host,
-        SECOND_EMAIL,
-        vec![resetting(
-            "5-hour",
-            70.0,
-            host.now() + Duration::minutes(20),
-        )],
-    );
-    observed(
-        &host,
-        THIRD_EMAIL,
-        vec![resetting("5-hour", 10.0, host.now() + Duration::hours(4))],
-    );
+    let host = where_the_strategies_disagree();
 
     let (result, printed) = run_cycle(&host);
 
@@ -141,22 +137,7 @@ fn the_strategy_a_group_carries_changes_which_account_a_bare_switch_chooses() {
 
 #[test]
 fn the_soonest_resetting_account_is_chosen_when_the_group_says_to_prefer_it() {
-    let host = three_accounts_in_one_group();
-    observed(&host, EMAIL, vec![window("5-hour", 96.0)]);
-    observed(
-        &host,
-        SECOND_EMAIL,
-        vec![resetting(
-            "5-hour",
-            70.0,
-            host.now() + Duration::minutes(20),
-        )],
-    );
-    observed(
-        &host,
-        THIRD_EMAIL,
-        vec![resetting("5-hour", 10.0, host.now() + Duration::hours(4))],
-    );
+    let host = where_the_strategies_disagree();
     config_set(&host, &["work", "strategy", "soonest-reset"])
         .0
         .expect("the Group carries its own Strategy");
@@ -173,6 +154,33 @@ fn the_soonest_resetting_account_is_chosen_when_the_group_says_to_prefer_it() {
     assert!(
         printed.contains("resets soonest"),
         "the choice is explained in the terms it was judged on: {printed}"
+    );
+}
+
+#[test]
+fn the_soonest_resetting_strategy_falls_back_to_room_when_no_figure_says_when_anything_resets() {
+    let host = three_accounts_in_one_group();
+    observed(&host, EMAIL, vec![window("5-hour", 90.0)]);
+    observed(&host, SECOND_EMAIL, vec![window("5-hour", 50.0)]);
+    observed(&host, THIRD_EMAIL, vec![window("5-hour", 5.0)]);
+    config_set(&host, &["work", "strategy", "soonest-reset"])
+        .0
+        .expect("the Group carries its own Strategy");
+
+    let (result, printed) = run_cycle(&host);
+
+    result.expect("there is somewhere to go");
+    assert_eq!(
+        active(&host).as_deref(),
+        Some(THIRD_EMAIL),
+        "a Strategy says which figure to prefer, not which figures to invent: \
+         with nothing cached saying when anything comes back, the room Perch \
+         can see is what is left to choose on: {printed}"
+    );
+    assert!(
+        printed.contains("no reset time to prefer one on"),
+        "and the fallback is said rather than passed off as the ranking that \
+         was asked for: {printed}"
     );
 }
 

@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use chrono::Duration;
+use chrono::{DateTime, Duration, Utc};
 use perch::commands::add::AddArgs;
 use perch::commands::alias::AliasCommand;
 use perch::commands::config::ConfigCommand;
@@ -433,6 +433,15 @@ pub fn window(name: &str, used_percent: f64) -> WindowUtilization {
         window: name.to_string(),
         used_percent,
         resets_at: None,
+    }
+}
+
+/// The same, carrying when it next resets — what the all-exhausted answer is
+/// built out of, and what the soonest-reset Strategy ranks on.
+pub fn resetting(name: &str, used_percent: f64, at: DateTime<Utc>) -> WindowUtilization {
+    WindowUtilization {
+        resets_at: Some(at),
+        ..window(name, used_percent)
     }
 }
 

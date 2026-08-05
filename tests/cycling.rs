@@ -9,24 +9,13 @@
 
 mod common;
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::Duration;
 use common::*;
 use perch::error::{
     EXIT_NO_CANDIDATE, EXIT_NOT_INTERCHANGEABLE, EXIT_NOTHING_TO_DO, EXIT_PROFILE_LIVE,
 };
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
-use perch::registry::WindowUtilization;
-
-/// A Quota Window carrying when it next resets — what the all-exhausted answer
-/// is built out of.
-fn resetting(name: &str, used_percent: f64, at: DateTime<Utc>) -> WindowUtilization {
-    WindowUtilization {
-        window: name.to_string(),
-        used_percent,
-        resets_at: Some(at),
-    }
-}
 
 /// Turns on the global setting that says the ungrouped Accounts are
 /// interchangeable (ADR 0017), the way a user turns it on.

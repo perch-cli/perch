@@ -320,6 +320,12 @@ about to be thrown away is spent rather than wasted. How headroom is *measured*
 is not configurable — it is always the worst window (ADR 0012) — so a strategy
 reorders the Accounts that have room and can never promote an exhausted one.
 
+A strategy says which figure to prefer, not which figures to invent. Cached
+figures do not always carry a reset time, and `soonest-reset` ranks an Account
+whose figure does not above nothing at all: an Account that says when it comes
+back is preferred to one that does not, and where none of them says, the Cycle
+falls back to the room it can see and says that is what it did.
+
 The **watcher's** two fields are stored and validated and read by nothing: the
 watcher is deferred entirely (ADR 0013), and every message about them says so.
 `watcher-may-act` is off by default, because a Group only ever changes

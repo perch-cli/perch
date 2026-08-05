@@ -80,7 +80,8 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
                 .get(&declared)
                 .expect("the Group was just found")
                 .clone();
-            let (config, was) = written(config, key, value, &declared)?;
+            let was = key.read(&config);
+            let config = validated(config, key, value, &declared)?;
             let now = key.read(&config);
             let meaning = key.what_that_means(&config, &declared);
             registry.groups.insert(declared.clone(), config);
@@ -117,28 +118,27 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
                 key.what_that_means(&registry.global),
             ])
         }
-        _ => Err(how_it_is_addressed("set", words)),
+        _ => Err(how_set_is_addressed(words)),
     }
 }
 
-/// Applies a value to a copy of the Group's configuration, so a value that
-/// turns out not to mean anything leaves the Group as it was.
+/// The Group's configuration with the value applied, or a refusal.
 ///
-/// Returns the configuration and what the key read before the write, which is
-/// how "now" is told from "already".
-fn written(
+/// The value is applied to a copy, so configuration that would not mean
+/// anything never reaches the Group it was meant for: a refused `set` leaves
+/// every setting exactly as it found it.
+fn validated(
     mut config: GroupConfig,
     key: GroupKey,
     value: &str,
     group: &str,
-) -> Result<(GroupConfig, String)> {
-    let was = key.read(&config);
+) -> Result<GroupConfig> {
     key.write(&mut config, value)?;
     // The range a percentage has to be in is stated once, where the registry
     // enforces it on the way in, rather than restated here where it could come
     // to disagree with it.
     config.validate(group)?;
-    Ok((config, was))
+    Ok(config)
 }
 
 /// Reads settings back, in the form that would set them again.
@@ -163,7 +163,7 @@ fn get(registry: &Registry, words: &[String]) -> Result<Vec<String>> {
             let key = GroupKey::parse(key)?;
             Ok(vec![key.read(&registry.groups[&declared])])
         }
-        _ => Err(how_it_is_addressed("get", words)),
+        _ => Err(how_get_is_addressed(words)),
     }
 }
 
@@ -226,21 +226,34 @@ fn neither_a_key_nor_a_group(registry: &Registry, word: &str) -> PerchError {
     ))
 }
 
-/// The two forms of the command, said whenever the words said were neither.
-fn how_it_is_addressed(verb: &str, words: &[String]) -> PerchError {
-    let trailing = if verb == "get" {
-        " (or nothing at all)"
-    } else {
-        ""
-    };
+/// The forms `set` takes, said whenever the words said were none of them.
+fn how_set_is_addressed(words: &[String]) -> PerchError {
     PerchError::Invalid(format!(
-        "`perch config {verb}` was given {} word{}. It takes a Group, a key and \
-         a value — `perch config {verb} <group> <key> <value>` — or a key and a \
-         value alone for a setting that belongs to no Group: `perch config \
-         {verb} <key> <value>`{trailing}.",
-        words.len(),
-        if words.len() == 1 { "" } else { "s" },
+        "`perch config set` was given {}. It takes a Group, a key and a value — \
+         `perch config set <group> <key> <value>` — or a key and a value alone \
+         for a setting that belongs to no Group: `perch config set <key> <value>`.",
+        counted(words),
     ))
+}
+
+/// The forms `get` takes, which are not the forms `set` takes: naming fewer
+/// words asks about more rather than being short of a value. One sentence
+/// serving both would name a form that does not exist.
+fn how_get_is_addressed(words: &[String]) -> PerchError {
+    PerchError::Invalid(format!(
+        "`perch config get` was given {}. It takes a Group and a key — `perch \
+         config get <group> <key>` — or a key alone for a setting that belongs \
+         to no Group. `perch config get <group>` reads everything one Group \
+         carries, and `perch config get` on its own reads every setting there is.",
+        counted(words),
+    ))
+}
+
+fn counted(words: &[String]) -> String {
+    match words.len() {
+        1 => "1 word".to_string(),
+        count => format!("{count} words"),
+    }
 }
 
 /// The settings a Group carries (ADR 0002).
@@ -416,12 +429,27 @@ fn strategy(value: &str) -> Result<Strategy> {
         .find(|candidate| value.eq_ignore_ascii_case(candidate.as_str()))
         .ok_or_else(|| {
             PerchError::Invalid(format!(
-                "`{value}` is not a Strategy Perch implements. It is either \
-                 `most-headroom`, which prefers the Account with the most room \
-                 left, or `soonest-reset`, which prefers the one whose quota is \
-                 about to be thrown away."
+                "`{value}` is not a Strategy Perch implements. The ones it \
+                 implements are:\n  {}",
+                Strategy::ALL
+                    .map(|strategy| format!("{} — {}", strategy.as_str(), gloss(strategy)))
+                    .join("\n  "),
             ))
         })
+}
+
+/// What each Strategy prefers, in a clause. Built by matching every Strategy
+/// rather than written out once as prose, so a Strategy added to the enum
+/// cannot ship with a refusal that fails to mention it — the match stops
+/// compiling instead.
+fn gloss(strategy: Strategy) -> &'static str {
+    match strategy {
+        Strategy::MostHeadroom => "prefers the Account with the most room left",
+        Strategy::SoonestReset => {
+            "prefers the Account whose quota is about to be thrown away, so it \
+             is spent rather than wasted"
+        }
+    }
 }
 
 fn yes_or_no(key: &str, value: &str) -> Result<bool> {
