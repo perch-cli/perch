@@ -8,7 +8,8 @@ login flow again.
 Early. Perch adopts the login you already have, adds further Accounts without
 disturbing it, names them, holds Groups of Accounts you have declared
 interchangeable, lists what you have, reads how full each one is, switches to
-an Account you name, and picks one for you when you name none.
+an Account you name, picks one for you when you name none, and takes its
+configuration from a script.
 
 ```
 $ perch status
@@ -136,6 +137,13 @@ working: the headroom Perch reports is true of every one of that Account's
 windows. Exhausted, disabled and Quarantined Accounts are never chosen, and an
 Account nobody has ever read a figure for is ranked below every Account that
 has one — no figure and plenty of room are opposite pieces of advice.
+
+How headroom is measured is fixed; which Account to prefer is the Group's to
+say. `perch config set <group> strategy soonest-reset` makes a Cycle take the
+Account whose fullest window comes back soonest instead of the one with the
+most room, so perishable quota is spent rather than wasted — see
+[Configuration](#configuration). It reorders the Accounts that have room and
+nothing else: an exhausted Account is never chosen however soon it resets.
 
 Ranking reads the cache and never the network, so the figures can be minutes
 old. Landing on an Account that turns out fuller than they implied is the cache
@@ -273,9 +281,57 @@ In no Group
 
 `perch group move <target> none` takes an Account out of every Group, and a
 Group that still holds Accounts is not removed until they have somewhere to go.
-The configuration a Group carries — its strategy and the watcher's fields — is
-stored and validated now and consumed by nothing yet; `perch config` will set
-it, and the watcher is deferred entirely (ADR 0013).
+
+## Configuration
+
+`perch config` changes how a Group behaves, and asks nothing: every capability
+Perch has is reachable from a script, because it has to be complete over SSH
+and in CI (ADR 0011).
+
+```
+$ perch config set work strategy soonest-reset
+`strategy` on Group `work` is now soonest-reset.
+A Cycle within `work` prefers the Account whose fullest Quota Window resets soonest, so perishable quota is spent rather than wasted. Headroom is still measured by the worst window (ADR 0012), so an exhausted Account is still never chosen however soon it comes back.
+
+$ perch config get
+cycle-ungrouped true
+work strategy soonest-reset
+work watcher-may-act false
+work watcher-threshold-percent 80
+```
+
+Three words name a Group; two do not. Most configuration belongs to a Group,
+because a Group is what carries the rules governing Cycling within it (ADR
+0002) — but whether bare `perch switch` may Cycle among the Accounts in **no**
+Group is about Accounts with no Group to carry it, so it is global and is
+addressed by naming none (ADR 0017).
+
+| Key | Belongs to | Values | Default |
+| --- | ---------- | ------ | ------- |
+| `strategy` | a Group | `most-headroom`, `soonest-reset` | `most-headroom` |
+| `watcher-may-act` | a Group | `true`, `false` | `false` |
+| `watcher-threshold-percent` | a Group | 0–100 | `80` |
+| `cycle-ungrouped` | no Group | `true`, `false` | `false` |
+
+The **strategy** is which Account a Cycle prefers when more than one would
+serve. `most-headroom` takes the one with the most room left; `soonest-reset`
+takes the one whose fullest Quota Window comes back soonest, so quota that was
+about to be thrown away is spent rather than wasted. How headroom is *measured*
+is not configurable — it is always the worst window (ADR 0012) — so a strategy
+reorders the Accounts that have room and can never promote an exhausted one.
+
+The **watcher's** two fields are stored and validated and read by nothing: the
+watcher is deferred entirely (ADR 0013), and every message about them says so.
+`watcher-may-act` is off by default, because a Group only ever changes
+underneath you because you said it could.
+
+Every line `perch config get` prints is the tail of the `perch config set` that
+would restore it, so reading the configuration and writing it back are the same
+vocabulary. Naming one setting prints its value alone, for a script to read
+without parsing prose; naming a Group prints what that Group carries. An unknown
+key or a value that means nothing is refused with exit code 14 and the ones that
+do mean something, so a script that mistyped a setting does not go on believing
+it took.
 
 ## Exit codes
 

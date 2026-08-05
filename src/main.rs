@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 
 use perch::commands::add::{self, AddArgs};
 use perch::commands::alias::{self, AliasCommand};
+use perch::commands::config::{self, ConfigCommand};
 use perch::commands::enable::{self, EnableCommand};
 use perch::commands::group::{self, GroupCommand};
 use perch::commands::list::{self, ListArgs};
@@ -60,6 +61,17 @@ enum Command {
         /// Free the name instead of giving it.
         #[arg(long)]
         unset: bool,
+    },
+
+    /// Read and change how a Group behaves.
+    ///
+    /// Every setting is reachable from a script, because Perch has to be
+    /// complete over SSH and in CI (ADR 0011). Most belong to a Group; the one
+    /// about the Accounts in no Group has no Group to belong to, and is
+    /// addressed by naming none (ADR 0017).
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
     },
 
     /// Keep an Account out of Cycling, without giving it up.
@@ -146,6 +158,44 @@ enum Command {
 }
 
 #[derive(Subcommand)]
+enum ConfigAction {
+    /// Set one setting, and say what it now means.
+    ///
+    /// A Group carries `strategy` — `most-headroom` or `soonest-reset` —
+    /// along with `watcher-may-act` and `watcher-threshold-percent`, which are
+    /// stored and validated and read by nothing yet (ADR 0013). Naming no
+    /// Group addresses `cycle-ungrouped`, which is whether bare `perch switch`
+    /// may Cycle among the Accounts in no Group at all.
+    Set {
+        /// `<group> <key> <value>`, or `<key> <value>` for a setting that
+        /// belongs to no Group.
+        #[arg(value_name = "WORDS", num_args = 1.., required = true, allow_hyphen_values = true)]
+        words: Vec<String>,
+    },
+
+    /// Read settings back, each one in the form that would set it again.
+    ///
+    /// With nothing named it prints every setting there is. A Group prints
+    /// what that Group carries, and a Group and a key — or a key alone, for a
+    /// setting belonging to no Group — prints the one value on its own, for a
+    /// script to read without parsing prose.
+    Get {
+        /// Nothing, `<group>`, `<key>`, or `<group> <key>`.
+        #[arg(value_name = "WORDS", num_args = 0.., allow_hyphen_values = true)]
+        words: Vec<String>,
+    },
+}
+
+impl From<ConfigAction> for ConfigCommand {
+    fn from(action: ConfigAction) -> Self {
+        match action {
+            ConfigAction::Set { words } => ConfigCommand::Set { words },
+            ConfigAction::Get { words } => ConfigCommand::Get { words },
+        }
+    }
+}
+
+#[derive(Subcommand)]
 enum GroupAction {
     /// Declare a Group. It starts empty, with the configuration a Group carries
     /// by default: the most-headroom strategy, and the watcher switched off.
@@ -217,6 +267,7 @@ fn main() {
             },
             &mut out,
         ),
+        Command::Config { action } => config::run(&host, action.into(), &mut out),
         Command::Disable { target } => {
             enable::run(&host, EnableCommand::Disable { target }, &mut out)
         }

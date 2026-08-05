@@ -9,6 +9,7 @@ use std::path::Path;
 use chrono::Duration;
 use perch::commands::add::AddArgs;
 use perch::commands::alias::AliasCommand;
+use perch::commands::config::ConfigCommand;
 use perch::commands::enable::EnableCommand;
 use perch::commands::group::GroupCommand;
 use perch::commands::list::ListArgs;
@@ -217,6 +218,37 @@ pub fn machine_with_two_accounts() -> FakeHost {
     host
 }
 
+/// A machine holding three Accounts, none of them in a Group: what the cases
+/// that need more than a pair start from.
+pub fn machine_with_three_accounts() -> FakeHost {
+    let host = machine_with_two_accounts()
+        .with_login(login_producing(THIRD_CREDENTIAL, THIRD_IDENTITY_FILE));
+    run_add(
+        &host,
+        AddArgs {
+            no_group: true,
+            ..AddArgs::default()
+        },
+    )
+    .0
+    .expect("the third Account is added");
+    host
+}
+
+/// A machine holding three Accounts, all in one Group, the first one active.
+/// The ordinary shape of the problem Cycling exists for: several subscriptions
+/// declared interchangeable, one of them running dry.
+pub fn three_accounts_in_one_group() -> FakeHost {
+    let host = machine_with_three_accounts();
+    declare_group(&host, "work");
+    for email in [EMAIL, SECOND_EMAIL, THIRD_EMAIL] {
+        move_to_group(&host, email, "work")
+            .0
+            .expect("the Account joins the Group");
+    }
+    host
+}
+
 /// Runs `perch add`, returning what it printed alongside how it ended.
 pub fn run_add(host: &FakeHost, args: AddArgs) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
@@ -361,6 +393,38 @@ pub fn enable_account(host: &FakeHost, target: &str) -> (perch::Result<()>, Stri
             target: target.to_string(),
         },
     )
+}
+
+/// Runs `perch config`, returning what it printed alongside how it ended.
+pub fn run_config(host: &FakeHost, command: ConfigCommand) -> (perch::Result<()>, String) {
+    let mut written = Vec::new();
+    let result = perch::commands::config::run(host, command, &mut written);
+    (result, String::from_utf8(written).expect("output is UTF-8"))
+}
+
+/// `perch config set <words...>` — the words after `set`, exactly as they would
+/// be typed, because which of them names a Group is part of what is under test.
+pub fn config_set(host: &FakeHost, words: &[&str]) -> (perch::Result<()>, String) {
+    run_config(
+        host,
+        ConfigCommand::Set {
+            words: worded(words),
+        },
+    )
+}
+
+/// `perch config get [<words...>]`.
+pub fn config_get(host: &FakeHost, words: &[&str]) -> (perch::Result<()>, String) {
+    run_config(
+        host,
+        ConfigCommand::Get {
+            words: worded(words),
+        },
+    )
+}
+
+fn worded(words: &[&str]) -> Vec<String> {
+    words.iter().map(|word| word.to_string()).collect()
 }
 
 /// One Quota Window, as full as the test says and with no reset time recorded.

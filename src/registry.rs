@@ -70,9 +70,9 @@ fn enabled_by_default() -> bool {
 /// How Cycling orders the Accounts in a Group.
 ///
 /// Both readings measure headroom the same way — the worst Quota Window an
-/// Account has (ADR 0012) — and differ only in what they do with it. Ranking
-/// implements the first; the second, and the command that chooses between them,
-/// land with `perch config`.
+/// Account has (ADR 0012) — and differ only in what they do with it. The
+/// measurement is fixed and the Strategy is a separate axis on top of it, so
+/// neither reading is a way round an exhausted Account.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Strategy {
@@ -85,6 +85,10 @@ pub enum Strategy {
 }
 
 impl Strategy {
+    /// Every Strategy there is, so the vocabulary `perch config` accepts and
+    /// names in a refusal cannot fall behind the ones Cycling implements.
+    pub const ALL: [Strategy; 2] = [Strategy::MostHeadroom, Strategy::SoonestReset];
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Strategy::MostHeadroom => "most-headroom",

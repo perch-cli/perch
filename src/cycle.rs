@@ -8,6 +8,13 @@
 //! work: when Perch says 40% headroom, that is true of every window and nothing
 //! surprising blocks you five minutes later.
 //!
+//! How headroom is *measured* is fixed. Which Account to prefer is the Group's
+//! to say, and is a separate axis on top of it: the most headroom, or the
+//! soonest-resetting window so perishable quota is spent rather than wasted
+//! (ADR 0002). A Strategy reorders the candidates and cannot promote one that
+//! the measurement rules out, so an exhausted Account is never chosen however
+//! soon it comes back.
+//!
 //! A Cycle never leaves the scope it started in (ADR 0002). A work subscription
 //! running dry must not land on a personal Account, so the scope is a Group —
 //! the declaration that a set of Accounts is interchangeable — or the ungrouped
@@ -25,7 +32,7 @@
 use chrono::{DateTime, Utc};
 
 use crate::error::{PerchError, Result};
-use crate::registry::{Account, CachedUtilization, Registry, WindowUtilization};
+use crate::registry::{Account, CachedUtilization, Registry, Strategy, WindowUtilization};
 use crate::utilization;
 
 /// Where a Cycle may look for a landing place.
@@ -43,6 +50,20 @@ impl Scope {
         match self {
             Scope::Group(name) => registry.accounts_in(name),
             Scope::Ungrouped => registry.ungrouped_accounts(),
+        }
+    }
+
+    /// Which Account this scope prefers when more than one would serve.
+    ///
+    /// A Strategy is a Group's to carry (ADR 0002), and the Accounts in no
+    /// Group are not a Group (ADR 0017) — nothing holds a Strategy for them,
+    /// so they Cycle the default way.
+    fn strategy(&self, registry: &Registry) -> Strategy {
+        match self {
+            Scope::Group(name) => registry
+                .group(name)
+                .map_or_else(Strategy::default, |config| config.strategy),
+            Scope::Ungrouped => Strategy::default(),
         }
     }
 
@@ -92,6 +113,12 @@ enum Headroom {
     Room {
         percent: f64,
         fullest_window: String,
+        /// When the fullest window comes back, if the observation carried it.
+        /// The window that decides the headroom is the window whose reset
+        /// decides how perishable that headroom is, so one Quota Window
+        /// answers both questions and the two Strategies cannot end up reading
+        /// different windows.
+        resets_at: Option<DateTime<Utc>>,
         observed_at: DateTime<Utc>,
     },
     /// A Quota Window is full, so the Account is blocked whatever its others
@@ -104,15 +131,46 @@ enum Headroom {
 }
 
 impl Headroom {
-    /// What ranking sorts on, best last-resort first. Known room beats an
+    /// What ranking sorts on, higher being better. Known room beats an
     /// unknown, and an unknown beats a window that is full — treating "never
     /// observed" as good news is exactly the mistake the ordering exists to
     /// prevent.
-    fn preference(&self) -> (u8, f64) {
+    ///
+    /// The Strategy only ever reorders Accounts that have room. It cannot
+    /// promote one across those three tiers, which is what keeps it an axis on
+    /// top of ADR 0012's measurement rather than a way round it.
+    fn preference(&self, strategy: Strategy) -> (u8, f64) {
         match self {
-            Headroom::Room { percent, .. } => (2, *percent),
+            Headroom::Room {
+                percent, resets_at, ..
+            } => match strategy {
+                Strategy::MostHeadroom => (2, *percent),
+                // Sooner is better, so the figure sorted on is the reset time
+                // negated. An Account whose figure does not say when its
+                // fullest window comes back cannot be ranked on one at all, and
+                // sorts below every Account that can — the same reasoning that
+                // puts an unobserved Account below an observed one.
+                Strategy::SoonestReset => (
+                    2,
+                    resets_at.map_or(f64::NEG_INFINITY, |at| -(at.timestamp() as f64)),
+                ),
+            },
             Headroom::Unobserved => (1, 0.0),
             Headroom::Exhausted { .. } => (0, 0.0),
+        }
+    }
+
+    /// Whether Perch can see where this Account belongs in the order.
+    ///
+    /// Staying put is only the right answer when it can: under the
+    /// soonest-reset Strategy an Account whose figure carries no reset time is
+    /// no more evidence that moving would gain nothing than an unobserved
+    /// Account is.
+    fn is_rankable(&self, strategy: Strategy) -> bool {
+        match (self, strategy) {
+            (Headroom::Room { .. }, Strategy::MostHeadroom) => true,
+            (Headroom::Room { resets_at, .. }, Strategy::SoonestReset) => resets_at.is_some(),
+            _ => false,
         }
     }
 
@@ -124,20 +182,36 @@ impl Headroom {
     /// says why an Account won, and the one that says why staying put is
     /// already the best you can do. Both make the same promise about the same
     /// number, so they make it in the same words.
-    fn as_a_clause(&self, now: DateTime<Utc>) -> Option<String> {
+    ///
+    /// The clause is the one the Strategy judged on, because a number quoted
+    /// as the reason has to be the number that decided it.
+    fn as_a_clause(&self, strategy: Strategy, now: DateTime<Utc>) -> Option<String> {
         let Headroom::Room {
             percent,
             fullest_window,
+            resets_at,
             observed_at,
         } = self
         else {
             return None;
         };
-        Some(format!(
-            "{percent:.0}% headroom, which is true of every one of its Quota \
-             Windows — {fullest_window} is its fullest, as of {}",
-            utilization::age_phrase(*observed_at, now),
-        ))
+        let age = utilization::age_phrase(*observed_at, now);
+        Some(match (strategy, resets_at) {
+            (Strategy::MostHeadroom, _) => format!(
+                "{percent:.0}% headroom, which is true of every one of its Quota \
+                 Windows — {fullest_window} is its fullest, as of {age}"
+            ),
+            (Strategy::SoonestReset, Some(at)) => format!(
+                "{percent:.0}% headroom, and the window that leaves it least — \
+                 {fullest_window} — resets at {}, as of {age}",
+                utilization::reset_phrase(*at, now),
+            ),
+            (Strategy::SoonestReset, None) => format!(
+                "{percent:.0}% headroom, and no cached figure says when the \
+                 window that leaves it least — {fullest_window} — comes back, \
+                 as of {age}"
+            ),
+        })
     }
 }
 
@@ -158,6 +232,7 @@ fn headroom_of(account: &Account) -> Headroom {
     Headroom::Room {
         percent: 100.0 - fullest.used_percent,
         fullest_window: fullest.window.clone(),
+        resets_at: fullest.resets_at,
         observed_at: cached.observed_at,
     }
 }
@@ -214,6 +289,7 @@ pub fn choose(
     leaving: Option<&str>,
     now: DateTime<Utc>,
 ) -> Result<Choice> {
+    let strategy = scope.strategy(registry);
     let accounts = scope.accounts(registry);
     if accounts.is_empty() {
         return Err(PerchError::NoCandidate(format!(
@@ -240,8 +316,8 @@ pub fn choose(
     // Stable, so Accounts that rank identically stay in the order they were
     // added and the same command twice makes the same choice.
     ranked.sort_by(|left, right| {
-        let (theirs, them) = right.headroom.preference();
-        let (ours, us) = left.headroom.preference();
+        let (theirs, them) = right.headroom.preference(strategy);
+        let (ours, us) = left.headroom.preference(strategy);
         theirs.cmp(&ours).then(them.total_cmp(&us))
     });
 
@@ -263,13 +339,13 @@ pub fn choose(
     // Account it has never observed is not evidence that moving would gain
     // nothing, and out of the box no Account has been observed at all.
     if let Some(here) = here
-        && let Headroom::Room { .. } = here.headroom
+        && here.headroom.is_rankable(strategy)
         && elsewhere
             .iter()
-            .all(|other| other.headroom.preference() <= here.headroom.preference())
+            .all(|other| other.headroom.preference(strategy) <= here.headroom.preference(strategy))
     {
         return Err(PerchError::NothingToDo(already_the_best(
-            registry, scope, here, now,
+            registry, scope, here, strategy, now,
         )));
     }
 
@@ -288,23 +364,38 @@ pub fn choose(
 
     Ok(Choice {
         account: best.account.clone(),
-        because: chosen_because(registry, best, now),
+        because: chosen_because(registry, best, strategy, now),
         caveat: staleness(registry, best),
     })
 }
 
 /// Why the winner won, in the terms it was judged on.
-fn chosen_because(registry: &Registry, best: &Ranked, now: DateTime<Utc>) -> String {
+///
+/// A choice Perch could not actually rank is said plainly rather than dressed
+/// up as one: the Account was picked because it was there, and the user should
+/// know that before they wonder why it filled up so fast.
+fn chosen_because(
+    registry: &Registry,
+    best: &Ranked,
+    strategy: Strategy,
+    now: DateTime<Utc>,
+) -> String {
     let named = registry.named_for_the_user(best.account.email());
-    match best.headroom.as_a_clause(now) {
-        Some(figure) => format!("{named} has the most room: {figure}."),
-        // Said plainly rather than dressed up as a ranking: the Account was
-        // picked because it was there, and the user should know that before
-        // they wonder why it filled up so fast.
-        None => format!(
+    let Some(figure) = best.headroom.as_a_clause(strategy, now) else {
+        return format!(
             "Perch has never observed how full {named} is, so this was not a \
              ranked choice — {HOW_TO_GET_FIGURES}"
-        ),
+        );
+    };
+    if !best.headroom.is_rankable(strategy) {
+        return format!(
+            "{named} was not ranked on when it resets, because no cached figure \
+             says: {figure}. {HOW_TO_GET_FIGURES}"
+        );
+    }
+    match strategy {
+        Strategy::MostHeadroom => format!("{named} has the most room: {figure}."),
+        Strategy::SoonestReset => format!("{named} resets soonest: {figure}."),
     }
 }
 
@@ -397,15 +488,19 @@ fn already_the_best(
     registry: &Registry,
     scope: &Scope,
     here: &Ranked,
+    strategy: Strategy,
     now: DateTime<Utc>,
 ) -> String {
+    let standing = match strategy {
+        Strategy::MostHeadroom => "is already the best Account in",
+        Strategy::SoonestReset => "already resets soonest of the Accounts in",
+    };
     format!(
-        "{} is already the best Account in {}, with {}. Nothing was changed — \
-         {HOW_TO_GET_FIGURES}",
+        "{} {standing} {}, with {}. Nothing was changed — {HOW_TO_GET_FIGURES}",
         registry.named_for_the_user(here.account.email()),
         scope.described(),
         here.headroom
-            .as_a_clause(now)
+            .as_a_clause(strategy, now)
             .expect("staying put is only said of a figure that says to"),
     )
 }
@@ -461,6 +556,12 @@ mod tests {
         for account in accounts {
             registry.upsert(account);
         }
+        registry
+    }
+
+    /// The same Group, told to prefer the other of the two Strategies.
+    fn preferring(mut registry: Registry, strategy: crate::registry::Strategy) -> Registry {
+        registry.groups.get_mut("work").expect("declared").strategy = strategy;
         registry
     }
 
@@ -610,6 +711,79 @@ mod tests {
             error.to_string().contains("1 of them cache no reset time"),
             "advising a three-hour wait while one Account may be back sooner is \
              worse than saying so: {error}"
+        );
+    }
+
+    #[test]
+    fn the_soonest_resetting_account_wins_where_the_group_prefers_perishable_quota() {
+        let accounts = vec![
+            account("here@example.com", vec![resetting("5-hour", 96.0, 2)]),
+            account("roomiest@example.com", vec![resetting("5-hour", 5.0, 8)]),
+            account("soonest@example.com", vec![resetting("5-hour", 60.0, 1)]),
+        ];
+        let registry = holding(accounts);
+
+        assert_eq!(
+            cycle(&registry).expect("there is room").account.email(),
+            "roomiest@example.com",
+            "the default Strategy prefers the most room"
+        );
+
+        let soonest = preferring(registry, Strategy::SoonestReset);
+        let choice = cycle(&soonest).expect("there is room");
+
+        assert_eq!(
+            choice.account.email(),
+            "soonest@example.com",
+            "quota an hour from being thrown away costs nothing to spend"
+        );
+        assert!(
+            choice.because.contains("resets soonest"),
+            "{}",
+            choice.because
+        );
+    }
+
+    #[test]
+    fn a_figure_with_no_reset_time_is_never_read_as_the_soonest_to_reset() {
+        let registry = preferring(
+            holding(vec![
+                account("here@example.com", vec![window("5-hour", 60.0)]),
+                // Less room, but it is the only Account whose figure says when
+                // its quota comes back — so it is the only one that can be
+                // ranked on when its quota comes back.
+                account("says@example.com", vec![resetting("5-hour", 90.0, 5)]),
+            ]),
+            Strategy::SoonestReset,
+        );
+
+        assert_eq!(
+            cycle(&registry).expect("there is room").account.email(),
+            "says@example.com",
+            "an unknown reset is not evidence of an imminent one"
+        );
+    }
+
+    #[test]
+    fn staying_put_is_not_claimed_on_a_reset_time_perch_has_not_got() {
+        let registry = preferring(
+            holding(vec![
+                account("here@example.com", vec![window("5-hour", 10.0)]),
+                account("there@example.com", vec![window("5-hour", 50.0)]),
+            ]),
+            Strategy::SoonestReset,
+        );
+
+        let choice = cycle(&registry).expect(
+            "nothing cached says when either resets, so there is no reason to \
+             believe staying put is right",
+        );
+
+        assert_eq!(choice.account.email(), "there@example.com");
+        assert!(
+            choice.because.contains("not ranked on when it resets"),
+            "a choice Perch could not rank says so: {}",
+            choice.because
         );
     }
 

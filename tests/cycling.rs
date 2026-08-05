@@ -11,42 +11,12 @@ mod common;
 
 use chrono::{DateTime, Duration, Utc};
 use common::*;
-use perch::commands::add::AddArgs;
 use perch::error::{
     EXIT_NO_CANDIDATE, EXIT_NOT_INTERCHANGEABLE, EXIT_NOTHING_TO_DO, EXIT_PROFILE_LIVE,
 };
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
 use perch::registry::WindowUtilization;
-
-/// A machine holding three Accounts, all in one Group, the first one active.
-/// The ordinary shape of the problem: several subscriptions declared
-/// interchangeable, one of them running dry.
-fn three_accounts_in_one_group() -> FakeHost {
-    let host = machine_with_three_accounts();
-    declare_group(&host, "work");
-    for email in [EMAIL, SECOND_EMAIL, THIRD_EMAIL] {
-        move_to_group(&host, email, "work")
-            .0
-            .expect("the Account joins the Group");
-    }
-    host
-}
-
-fn machine_with_three_accounts() -> FakeHost {
-    let host = machine_with_two_accounts()
-        .with_login(login_producing(THIRD_CREDENTIAL, THIRD_IDENTITY_FILE));
-    run_add(
-        &host,
-        AddArgs {
-            no_group: true,
-            ..AddArgs::default()
-        },
-    )
-    .0
-    .expect("the third Account is added");
-    host
-}
 
 /// A Quota Window carrying when it next resets — what the all-exhausted answer
 /// is built out of.
@@ -59,12 +29,11 @@ fn resetting(name: &str, used_percent: f64, at: DateTime<Utc>) -> WindowUtilizat
 }
 
 /// Turns on the global setting that says the ungrouped Accounts are
-/// interchangeable. `perch config` is the form that sets it (#12); this is the
-/// state that form leaves behind.
+/// interchangeable (ADR 0017), the way a user turns it on.
 fn ungrouped_declared_interchangeable(host: &FakeHost) {
-    let mut registry = registry_of(host);
-    registry.global.cycle_ungrouped = true;
-    perch::registry::save(host, &registry).expect("the registry is written");
+    config_set(host, &["cycle-ungrouped", "true"])
+        .0
+        .expect("the ungrouped Accounts are declared interchangeable");
 }
 
 fn live_credential(host: &FakeHost) -> Option<String> {

@@ -123,7 +123,9 @@ fn move_account(registry: &mut Registry, target: &AccountTarget, group: &str) ->
 /// A Group name is not a Target — only a Group will do here — but a typo is a
 /// typo wherever it is made, so it is answered the same way one in a Target
 /// is: with what the user probably meant, and otherwise with what they hold.
-fn no_such_group(registry: &Registry, name: &str) -> PerchError {
+/// `perch config` addresses Groups too, and answers a typo with this same
+/// sentence rather than one of its own.
+pub(crate) fn no_such_group(registry: &Registry, name: &str) -> PerchError {
     let declared: Vec<String> = registry.groups.keys().cloned().collect();
     let help = match target::suggestion(&declared, name) {
         // A near miss is a typo far more often than it is a Group somebody
