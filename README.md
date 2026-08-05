@@ -221,7 +221,7 @@ work — which would cost you the Account you are on. Enabling one does not repa
 it: whether Cycling may choose an Account and whether its Credential works are
 separate facts with separate fixes, so both are always said.
 
-`perch relogin <target>` is the fix, and it repairs **in place**.
+`perch relogin <target>` repairs it, and repairs it **in place**.
 
 ```
 $ perch relogin overflow
@@ -279,7 +279,10 @@ not move between them until you say it may (ADR 0017).
 
 `perch list --json` and `perch status --group --json` carry the same
 information, with an observation time on every figure and the scope they were
-narrowed to. Neither makes a network call. `--group` changes the question, so
+narrowed to. Neither makes a network call. `quarantined` is `null` for an
+Account that works and an object — `reason` and `detail` — for one that does
+not, so a script asking whether it is set reads the same answer it always did
+and now gets the reason with it. `--group` changes the question, so
 it changes the document: `perch status --json` answers about one Account under
 `active`, while the listings answer about a set under `accounts`, with the
 active one named under `active_account`.
@@ -404,7 +407,7 @@ it took.
 | 16 | refused: a client is running against that Profile, so its Credential is not Perch's to write |
 | 17 | a Cycle found nowhere to land — every Account in the Group is exhausted, or none is a candidate |
 | 18 | a bare Cycle from an Account nobody has declared interchangeable with anything (ADR 0017) |
-| 19 | that Account is Quarantined — its Credential no longer works, and `perch relogin` is the fix (ADR 0023) |
+| 19 | that Account is Quarantined — its Credential no longer works, and `perch relogin` repairs it (ADR 0023) |
 
 ## Where things are
 

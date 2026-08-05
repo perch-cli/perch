@@ -53,16 +53,18 @@ pub struct Interrupted {
     pub quarantine: Option<Quarantine>,
 }
 
-/// A Switch that stopped, with nothing about the incoming Account learned from
-/// it beyond the failure itself.
+/// A Switch that stopped before it wrote anything, carrying whatever the
+/// failure knew about the incoming Account.
+///
+/// A Switch can find an Account unusable for good — a Profile with neither
+/// store holding a Credential — and when it does, the failure itself says which
+/// Quarantine that is. Nothing here decides: it reads what was diagnosed where
+/// it was diagnosed.
 fn stopped(error: PerchError) -> Interrupted {
-    // The one failure a Switch diagnoses rather than merely reports is a
-    // Profile with neither store holding a Credential: nothing Perch has can
-    // make that Account switchable again, which is what a Quarantine is. It is
-    // raised where it is found, in `prepare`, and is the only `Quarantined`
-    // failure this module produces.
-    let quarantine =
-        matches!(error, PerchError::Quarantined(_)).then_some(Quarantine::NoCredential);
+    let quarantine = match &error {
+        PerchError::Quarantined { why, .. } => Some(*why),
+        _ => None,
+    };
     Interrupted {
         error,
         incoming_is_live: false,
@@ -172,14 +174,17 @@ fn prepare(host: &dyn Host, incoming: &Account, outgoing: Option<&Account>) -> R
     // 0020): an Account is switchable to as long as its Credential is
     // somewhere Claude Code would have looked.
     let held = credentials::read(host, &incoming.store(host)?)?.ok_or_else(|| {
-        PerchError::Quarantined(format!(
-            "Perch holds no Credential for {}, so it is Quarantined — it stays \
-             listed and named, and nothing switches to it until it has been \
-             logged into again.\n\
-             Nothing was changed. {}",
-            incoming.email(),
-            registry::how_to_repair(incoming.email()),
-        ))
+        PerchError::Quarantined {
+            why: Quarantine::NoCredential,
+            said: format!(
+                "Perch holds no Credential for {}, so it is Quarantined — it \
+                 stays listed and named, and nothing switches to it until it has \
+                 been logged into again.\n\
+                 Nothing was changed. {}",
+                incoming.email(),
+                registry::how_to_repair(incoming.email()),
+            ),
+        }
     })?;
     let credential = probe::understand_credential(
         held.credential,
@@ -266,17 +271,33 @@ fn identity_block_for(host: &dyn Host, incoming: &Account) -> Result<String> {
 /// after: a Profile Perch may not write to is a Profile no browser round trip
 /// was ever going to repair.
 pub fn refuse_if_live(host: &dyn Host, account: &Account, version: &str) -> Result<()> {
-    let running = probe::live_clients(host, &account.profile_dir(host)?, version)?;
+    refuse_if_live_in(
+        host,
+        &account.profile_dir(host)?,
+        &format!("{}'s Profile", account.email()),
+        version,
+    )
+}
+
+/// The same, of a config directory named rather than derived — the Default
+/// Profile, which belongs to no one Account and is where a repair of the Account
+/// you are on has to land.
+pub fn refuse_if_live_in(
+    host: &dyn Host,
+    config_dir: &Path,
+    whose: &str,
+    version: &str,
+) -> Result<()> {
+    let running = probe::live_clients(host, config_dir, version)?;
     if running.is_empty() {
         return Ok(());
     }
 
     let pids: Vec<String> = running.iter().map(u32::to_string).collect();
     Err(PerchError::ProfileLive(format!(
-        "A client is running against {}'s Profile (pid {}).\n\
+        "A client is running against {whose} (pid {}).\n\
          Nothing was changed. That Credential belongs to it until it exits — \
          quit it, or switch to a different Account.",
-        account.email(),
         pids.join(", ")
     )))
 }

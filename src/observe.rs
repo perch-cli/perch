@@ -95,16 +95,9 @@ impl Attempt {
                 Refused::Throttled
             )),
             Outcome::Failed(why) => Some(format!("{}: {why}", self.email)),
-            Outcome::Quarantined { why, detail } => Some(format!(
-                "{} is Quarantined: {}{}. {}",
-                self.email,
-                why.because(),
-                match detail {
-                    Some(detail) => format!(" ({detail})"),
-                    None => String::new(),
-                },
-                registry::how_to_repair(&self.email),
-            )),
+            Outcome::Quarantined { why, detail } => {
+                Some(why.said_of(&self.email, &self.email, detail.as_deref()))
+            }
         }
     }
 
@@ -205,11 +198,23 @@ fn observe(host: &dyn Host, registry: &Registry, account: &Account) -> Step<Quot
     }
 
     let version = probe::claude_version(host)?;
-    let store = holding(host, registry, account)?;
-    let token = usable_token(host, &store, &version)?;
+    let asked = holding(host, registry, account)?;
+    let token = usable_token(host, &asked, &version)?;
     confirm(host, &token, account)?;
     let read = anthropic::utilization(host, &token);
     read.map_err(reading_refused)
+}
+
+/// The store an Account is asked about with, and whose it is.
+///
+/// The two are inseparable, because an empty store means opposite things in the
+/// two cases: an Account's own Profile holding nothing is an Account nothing
+/// Perch has can recover, and the Default Profile holding nothing is a Claude
+/// Code that is logged out.
+struct Asked {
+    store: Store,
+    /// Whether this is the Account's own Profile rather than the Default one.
+    its_own_profile: bool,
 }
 
 /// Which store holds the Credential to ask with.
@@ -218,18 +223,24 @@ fn observe(host: &dyn Host, registry: &Registry, account: &Account) -> Step<Quot
 /// its Credential, and it is ahead of the copy in its own Profile, which only
 /// catches up when a Switch away Captures it (ADR 0006). Every other Account is
 /// asked about with the Credential in its own Profile.
-fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<Store> {
+fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<Asked> {
     if registry.active.as_deref() == Some(account.email()) {
-        probe::default_store(host)
+        Ok(Asked {
+            store: probe::default_store(host)?,
+            its_own_profile: false,
+        })
     } else {
-        account.store(host)
+        Ok(Asked {
+            store: account.store(host)?,
+            its_own_profile: true,
+        })
     }
 }
 
 /// An access token that can still be asked a question, renewing the Credential
 /// when the one there is has run out.
-fn usable_token(host: &dyn Host, store: &Store, version: &str) -> Step<String> {
-    let credential = credential_in(host, store, version)?;
+fn usable_token(host: &dyn Host, asked: &Asked, version: &str) -> Step<String> {
+    let credential = credential_in(host, asked, version)?;
     if credential.usable_at(host.now()) {
         return Ok(credential.access_token);
     }
@@ -237,8 +248,8 @@ fn usable_token(host: &dyn Host, store: &Store, version: &str) -> Step<String> {
     // Asked before the locks are taken, so an Account that was never going to
     // be renewed says so without queueing behind anything, and asked again
     // under them, where the answer is the one that counts.
-    refuse_if_live(host, store, version)?;
-    renew_under_the_lock(host, store, version)
+    refuse_if_live(host, &asked.store, version)?;
+    renew_under_the_lock(host, asked, version)
 }
 
 /// Refuses to renew a Credential something else is holding (ADR 0005).
@@ -261,13 +272,27 @@ fn refuse_if_live(host: &dyn Host, store: &Store, version: &str) -> Step<()> {
     )))
 }
 
-fn credential_in(host: &dyn Host, store: &Store, version: &str) -> Step<Credential> {
-    probe::read_credential(host, store, version)?.ok_or_else(|| {
-        Outcome::Failed(
-            "Perch holds no Credential for it, so there is nothing to ask \
-             Anthropic with."
-                .to_string(),
-        )
+/// The Credential to ask with, or what its absence means.
+///
+/// An Account's own Profile holding nothing is terminal: that Profile is the
+/// only place its Credential ever lives, so nothing Perch holds can make it
+/// answerable again. The Default Profile holding nothing is not terminal at all
+/// — it is a Claude Code that has been logged out, and the Account's own copy is
+/// still there to switch back to.
+fn credential_in(host: &dyn Host, asked: &Asked, version: &str) -> Step<Credential> {
+    probe::read_credential(host, &asked.store, version)?.ok_or_else(|| {
+        if asked.its_own_profile {
+            Outcome::Quarantined {
+                why: Quarantine::NoCredential,
+                detail: None,
+            }
+        } else {
+            Outcome::Failed(
+                "the Default Profile holds no Credential, so Claude Code is \
+                 logged out and there is nothing to ask Anthropic with."
+                    .to_string(),
+            )
+        }
     })
 }
 
@@ -277,12 +302,13 @@ fn credential_in(host: &dyn Host, store: &Store, version: &str) -> Step<Credenti
 /// Under Claude Code's own locks, in Claude Code's own order (ADR 0006), with
 /// Claude Code's own double-checked re-read: whoever was holding the lock while
 /// Perch waited for it may have renewed the very Credential Perch was about to.
-fn renew_under_the_lock(host: &dyn Host, store: &Store, version: &str) -> Step<String> {
+fn renew_under_the_lock(host: &dyn Host, asked: &Asked, version: &str) -> Step<String> {
+    let store = &asked.store;
     lock::under(host, probe::locks_for(store), |held| {
         // Both of the questions asked before the locks were taken, asked again
         // now that nothing can change the answer underneath Perch.
         refuse_if_live(host, store, version)?;
-        let credential = credential_in(host, store, version)?;
+        let credential = credential_in(host, asked, version)?;
         if credential.usable_at(host.now()) {
             return Ok(credential.access_token);
         }

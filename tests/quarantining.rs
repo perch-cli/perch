@@ -125,6 +125,54 @@ fn a_credential_with_nothing_left_to_renew_with_quarantines() {
 }
 
 #[test]
+fn a_profile_that_holds_no_credential_at_all_quarantines_its_account() {
+    let host = machine_with_two_accounts();
+    declare_group(&host, "work");
+    for email in [EMAIL, SECOND_EMAIL] {
+        move_to_group(&host, email, "work").0.expect("joined");
+    }
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
+    // The second Account's Profile is empty — a Rotation that went missing
+    // between two writes, or a store somebody cleared out.
+    host.forget_keychain_item(&store_of(&host, SECOND_EMAIL).keychain_service, LOGIN_NAME);
+    let host = host
+        .with_reply_to(PROFILE_URL, FRESH_TOKEN, 200, &profile_naming(EMAIL))
+        .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE);
+
+    let (result, printed) = run_status_group_refresh(&host, false);
+
+    result.expect("one Account Perch cannot read is not a failed command");
+    assert_eq!(
+        quarantine_of(&host, SECOND_EMAIL),
+        Some(Quarantine::NoCredential),
+        "its own Profile is the only place its Credential ever lives, so an \
+         empty one is an Account nothing Perch holds can recover: {printed}"
+    );
+    assert_eq!(
+        quarantine_of(&host, EMAIL),
+        None,
+        "and the Account that answered is untouched"
+    );
+}
+
+#[test]
+fn a_default_profile_that_holds_nothing_is_a_logout_rather_than_a_quarantine() {
+    let host = machine_with_two_accounts();
+    host.forget_keychain_item(DEFAULT_SERVICE, LOGIN_NAME);
+
+    let (result, printed) = run_status_refresh(&host, false);
+
+    result.expect("the command still answers");
+    assert_eq!(
+        quarantine_of(&host, EMAIL),
+        None,
+        "somebody running `claude /logout` has not broken the Account — its own \
+         Profile still holds a Credential to switch back to: {printed}"
+    );
+    assert!(printed.contains("logged out"), "{printed}");
+}
+
+#[test]
 fn a_refusal_that_might_pass_is_not_a_quarantine() {
     let host = about_to_renew(SPENT).with_reply(TOKEN_URL, 429, "");
 

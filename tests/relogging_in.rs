@@ -41,6 +41,17 @@ fn broken_second_account() -> FakeHost {
     host.with_login(login_producing(SECOND_REPAIRED, SECOND_IDENTITY_FILE))
 }
 
+/// A Claude Code running against a config directory: the marker file it writes
+/// for the session, and a process that has been there since before it.
+fn client_running_against(host: FakeHost, config_dir: &str, pid: u32) -> FakeHost {
+    let marker = format!(
+        r#"{{"pid":{pid},"cwd":"/Users/someone/work","startedAt":{}}}"#,
+        host.now().timestamp_millis()
+    );
+    host.with_file(format!("{config_dir}/sessions/{pid}.json"), &marker)
+        .with_live_process(pid)
+}
+
 fn is_enabled(host: &FakeHost, email: &str) -> bool {
     registry_of(host)
         .account(email)
@@ -279,6 +290,74 @@ fn a_profile_a_client_is_running_against_is_refused_before_a_login_is_spent() {
         "a Profile Perch may not write to is one no browser round trip was going \
          to repair: {:?}",
         host.effects()
+    );
+}
+
+#[test]
+fn repairing_the_account_you_are_on_is_refused_while_a_client_holds_the_default_profile() {
+    // The Default Profile is the one a repair of the active Account writes, and
+    // it is the Credential a running session is holding.
+    let host = machine_with_two_accounts().with_login(login_producing(REPAIRED, IDENTITY_FILE));
+    quarantine(&host, EMAIL);
+    let host = client_running_against(host, "/Users/someone/.claude", 4242);
+    host.forget_effects();
+
+    let (result, _) = run_relogin(&host, EMAIL);
+
+    let error = result.expect_err("that Credential belongs to the client until it exits");
+    assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
+    assert!(error.to_string().contains("4242"), "{error}");
+    assert!(
+        !host
+            .effects()
+            .iter()
+            .any(|effect| matches!(effect, Effect::ExecInteractive { .. })),
+        "and no login was spent on a repair that could not land"
+    );
+    assert_eq!(
+        host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
+        Some(CREDENTIAL),
+        "the session goes on holding exactly what it was holding"
+    );
+    assert_eq!(
+        quarantine_of(&host, EMAIL),
+        Some(Quarantine::RenewalRejected)
+    );
+}
+
+#[test]
+fn a_repair_that_could_not_be_made_live_still_stands_and_says_what_is_left() {
+    // Off macOS, so the Default Profile's Credential is the file below and the
+    // login's own directory is somewhere else entirely: the write that fails is
+    // the last one, not the login.
+    let host = logged_in_machine_off_macos().with_login(login_producing(REPAIRED, IDENTITY_FILE));
+    run_list(&host, false)
+        .0
+        .expect("the first command adopts the login");
+    quarantine(&host, EMAIL);
+
+    // Neither store of the Default Profile will take it, so the repair lands in
+    // the Account's own Profile and goes no further.
+    let host = host.with_unwritable_file(CREDENTIALS_PATH, "no space left on device");
+    host.lock_keychain("could not run /usr/bin/security: No such file or directory");
+
+    let (result, printed) = run_relogin(&host, EMAIL);
+
+    let error = result.expect_err("the live Credential could not be replaced");
+    assert!(
+        error.to_string().contains("The repair itself stands"),
+        "a partial outcome says which half happened: {error}"
+    );
+    assert_eq!(
+        quarantine_of(&host, EMAIL),
+        None,
+        "the Account has a working Credential in its own Profile, which is the \
+         whole of what the Quarantine said it did not have: {printed}"
+    );
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(REPAIRED),
+        "and that Credential is the repaired one"
     );
 }
 

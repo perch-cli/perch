@@ -109,6 +109,41 @@ impl Quarantine {
             Quarantine::Unrecorded => "unrecorded",
         }
     }
+
+    /// The whole of what is said about a Quarantined Account wherever one is
+    /// shown as broken: which Account, what happened to it, and the one command
+    /// that ends it.
+    ///
+    /// Said in one place because every surface owes the same three things. Two
+    /// surfaces spelling this out separately would eventually offer two
+    /// different repairs for one state.
+    ///
+    /// `detail` is whatever the failure underneath said, where there was one
+    /// worth keeping — a keychain that would not take the Rotated Credential,
+    /// say. The reason is what happened; the detail is how.
+    pub fn said_of(&self, named: &str, target: &str, detail: Option<&str>) -> String {
+        let how = match detail {
+            Some(detail) => format!(" ({detail})"),
+            None => String::new(),
+        };
+        format!(
+            "{named} is Quarantined: {}{how}. {}",
+            self.because(),
+            how_to_repair(target)
+        )
+    }
+
+    /// The same as a script reads it. Absent reads as false and present reads
+    /// as true wherever a script asks whether it is set, so the fact a script
+    /// already branches on branches the same way — and now carries why.
+    pub fn document(quarantine: Option<Quarantine>) -> serde_json::Value {
+        match quarantine {
+            Some(why) => {
+                serde_json::json!({"reason": why.as_str(), "detail": why.because()})
+            }
+            None => serde_json::Value::Null,
+        }
+    }
 }
 
 /// How a Quarantine is asked about and how it is put right, said the same way

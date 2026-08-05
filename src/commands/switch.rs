@@ -140,21 +140,24 @@ fn decide(
 ///
 /// Cycling has never been able to choose a Quarantined Account; naming one is
 /// where the user would otherwise find out by losing the session they were in.
-/// The refusal is a code of its own because the fix is one of its own: no other
+/// The refusal is a code of its own because the answer is one of its own: no other
 /// refusal in Perch is answered by logging in again, and none of them is
 /// answered by trying the same command a second time.
 fn refuse_a_quarantined_account(registry: &Registry, incoming: &Account) -> Result<()> {
     let Some(why) = incoming.quarantine else {
         return Ok(());
     };
-    Err(PerchError::Quarantined(format!(
-        "{} is Quarantined: {}.\n\
-         Nothing was changed — switching to it would make a Credential live \
-         that no longer works, and cost you the Account you are on. {}",
-        registry.named_for_the_user(incoming.email()),
-        why.because(),
-        registry::how_to_repair(incoming.email()),
-    )))
+    Err(PerchError::Quarantined {
+        why,
+        said: format!(
+            "{} is Quarantined: {}.\n\
+             Nothing was changed — switching to it would make a Credential live \
+             that no longer works, and cost you the Account you are on. {}",
+            registry.named_for_the_user(incoming.email()),
+            why.because(),
+            registry::how_to_repair(incoming.email()),
+        ),
+    })
 }
 
 /// The Account a bare `perch switch` would be leaving, which is the one whose

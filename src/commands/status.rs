@@ -22,7 +22,7 @@ use crate::commands::write_failed;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::observe::{self, Report};
-use crate::registry::{self, Account, Registry};
+use crate::registry::{self, Account, Quarantine, Registry};
 use crate::utilization;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -151,10 +151,7 @@ fn render_json(
             "organization": account.identity.organization_name,
             "plan": account.plan,
             "profile_dir": account.profile_dir(host)?,
-            "quarantined": account.quarantine.map(|why| json!({
-                "reason": why.as_str(),
-                "detail": why.because(),
-            })),
+            "quarantined": Quarantine::document(account.quarantine),
         },
         "utilization": utilization::document(account, now),
         "refresh": report.document(),

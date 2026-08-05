@@ -27,7 +27,7 @@ use crate::host::Host;
 use crate::login::{self, Produced};
 use crate::probe::{self, Identity};
 use crate::profile;
-use crate::registry::{self, Account, Quarantine, Registry};
+use crate::registry::{self, Account, Registry};
 use crate::switch;
 use crate::target;
 
@@ -49,9 +49,23 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
 
     // Asked before the login rather than after: a Profile Perch may not write
     // to is one no browser round trip was going to repair (ADR 0005).
-    switch::refuse_if_live(host, &account, &probe::claude_version(host)?)?;
+    let version = probe::claude_version(host)?;
+    switch::refuse_if_live(host, &account, &version)?;
 
     let repairing_the_account_you_are_on = registry.active.as_deref() == Some(account.email());
+    if repairing_the_account_you_are_on {
+        // The Default Profile is written too in that case, and its Credential
+        // is the one a running client is holding. Renewing it out from under a
+        // session logs that session out mid-task, which is the whole of ADR
+        // 0005 — and this would not renew it but replace it.
+        switch::refuse_if_live_in(
+            host,
+            &probe::default_store(host)?.config_dir,
+            "the Default Profile, which is where this Account's repaired \
+             Credential has to land",
+            &version,
+        )?;
+    }
     let produced = login::perform(
         host,
         out,
@@ -64,10 +78,10 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // Recorded before the Credential is made live, because the repair is true
     // by now whatever happens next: the Account has a working Credential in its
     // own Profile, which is the whole of what a Quarantine said it did not have.
-    let was = record(&mut registry, &account, produced);
+    let was_quarantined = record(&mut registry, &account, produced);
     registry::save(host, &registry)?;
 
-    report(out, &registry, &account, was)?;
+    report(out, &registry, &account, was_quarantined)?;
 
     if repairing_the_account_you_are_on {
         make_it_live(host, &account)?;
@@ -130,8 +144,8 @@ fn settle_into_its_own_profile(host: &dyn Host, account: &Account, fresh: &Produ
 /// The Alias, the Group, whether Cycling may choose it and where it sits in the
 /// listing are all untouched — they are the user's decisions, and a login is not
 /// a chance to revisit them.
-fn record(registry: &mut Registry, account: &Account, fresh: Produced) -> Option<Quarantine> {
-    let was = registry.release(account.email());
+fn record(registry: &mut Registry, account: &Account, fresh: Produced) -> bool {
+    let was_quarantined = registry.release(account.email()).is_some();
     let held = registry
         .account_mut(account.email())
         .expect("the Account was just resolved");
@@ -145,7 +159,7 @@ fn record(registry: &mut Registry, account: &Account, fresh: Produced) -> Option
         ..fresh.identity
     };
     held.plan = fresh.credential.subscription_type.clone();
-    was
+    was_quarantined
 }
 
 /// Makes the repaired Credential the live one, for the Account that is already
@@ -184,26 +198,27 @@ fn report(
     out: &mut dyn Write,
     registry: &Registry,
     account: &Account,
-    was: Option<Quarantine>,
+    was_quarantined: bool,
 ) -> Result<()> {
     let named = registry.named_for_the_user(account.email());
     // The reason is not repeated here. Every surface said it while it was true,
     // and it has just stopped being true: an outcome that recites what was wrong
     // with a Credential that no longer exists reads as a state, not an ending.
-    match was {
-        Some(_) => say(
+    if was_quarantined {
+        say(
             out,
             &format!(
                 "\nRepaired {named} — it is no longer Quarantined, and is a Cycle \
                  candidate again if it was one before."
             ),
-        )?,
-        None => say(
+        )?;
+    } else {
+        say(
             out,
             &format!(
                 "\nLogged {named} in again. It was not Quarantined; now it has a fresh Credential."
             ),
-        )?,
+        )?;
     }
 
     let held = registry

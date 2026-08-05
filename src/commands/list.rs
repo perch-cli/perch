@@ -20,7 +20,7 @@ use crate::commands::{CYCLING_AMONG_UNGROUPED, IN_NO_GROUP, say, write_failed};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::observe::Report;
-use crate::registry::{self, Account, Registry};
+use crate::registry::{Account, Quarantine, Registry};
 use crate::utilization;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -185,11 +185,10 @@ fn why_they_are_quarantined(registry: &Registry, accounts: &[&Account]) -> Vec<S
         .iter()
         .filter_map(|account| {
             let why = account.quarantine?;
-            Some(format!(
-                "{} is Quarantined: {}. {}",
-                registry.named_for_the_user(account.email()),
-                why.because(),
-                registry::how_to_repair(account.email()),
+            Some(why.said_of(
+                &registry.named_for_the_user(account.email()),
+                account.email(),
+                None,
             ))
         })
         .collect()
@@ -323,13 +322,7 @@ fn render_json(
                 "alias": registry.alias_of(account.email()),
                 "group": account.group,
                 "enabled": account.enabled,
-                // Absent reads as false and present reads as true wherever a
-                // script asks whether it is set, so the fact a script already
-                // branches on still branches the same way — and now carries why.
-                "quarantined": account.quarantine.map(|why| json!({
-                    "reason": why.as_str(),
-                    "detail": why.because(),
-                })),
+                "quarantined": Quarantine::document(account.quarantine),
                 "active": registry.active.as_deref() == Some(account.email()),
                 "organization": account.identity.organization_name,
                 "plan": account.plan,
