@@ -9,16 +9,14 @@
 
 mod common;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use chrono::{TimeZone, Utc};
 use common::*;
 use perch::anthropic::{self, BETA, PROFILE_URL, TOKEN_URL, USAGE_URL};
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
-use perch::probe;
 
-const SECOND_PROFILE: &str = "/Users/someone/.perch/profiles/overflow-example-com";
 const CONFIG_LOCK: &str = "/Users/someone/.claude.json.lock";
 
 /// A Credential with an hour left on it at the clock every fixture here runs
@@ -50,8 +48,13 @@ fn profile_of(email: &str) -> String {
     format!(r#"{{"account": {{"email_address": "{email}"}}}}"#)
 }
 
-fn second_service() -> String {
-    probe::service_name_for(Path::new(SECOND_PROFILE), false)
+/// The keychain namespace of the second Account's Profile, derived the way
+/// every command derives it. The spelling of the directory decides the hash,
+/// and a Windows build joins paths with the other separator — so a fixture
+/// spelling the path by hand would plant the item in a namespace nothing
+/// reads.
+fn second_service(host: &FakeHost) -> String {
+    store_of(host, SECOND_EMAIL).keychain_service
 }
 
 /// A machine holding two Accounts, the active one carrying a Credential that is
@@ -324,7 +327,7 @@ fn a_refresh_that_fails_for_one_account_still_reads_the_others() {
     move_to_group(&host, EMAIL, "work").0.expect("moved");
     move_to_group(&host, SECOND_EMAIL, "work").0.expect("moved");
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
-    host.set_keychain_item(&second_service(), LOGIN_NAME, SECOND_FRESH);
+    host.set_keychain_item(&second_service(&host), LOGIN_NAME, SECOND_FRESH);
     let host = host
         .with_reply_to(PROFILE_URL, FRESH_TOKEN, 200, &profile_of(EMAIL))
         .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE)
@@ -352,7 +355,7 @@ fn a_refresh_reads_only_the_accounts_it_is_about_to_show() {
     move_to_group(&host, EMAIL, "work").0.expect("moved");
     move_to_group(&host, SECOND_EMAIL, "work").0.expect("moved");
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
-    host.set_keychain_item(&second_service(), LOGIN_NAME, SECOND_FRESH);
+    host.set_keychain_item(&second_service(&host), LOGIN_NAME, SECOND_FRESH);
     let host = host
         .with_reply_to(PROFILE_URL, FRESH_TOKEN, 200, &profile_of(EMAIL))
         .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE)
