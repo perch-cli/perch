@@ -17,6 +17,24 @@ serde_json = "1"
 sha2 = "0.11"
 thiserror = "2"
 
+[features]
+# The contract suite needs a real Claude Code installed and a real keychain to
+# assert against, so it is off unless asked for and `cargo test` runs everything
+# else. CI turns it on for the one step that follows the install.
+contract = []
+
+# Declared only so they can be held back by the feature above. Every other test
+# binary is found automatically, which is the point: the list that has to be
+# maintained by hand is the short one of deliberate exclusions, not the growing
+# one of suites that must be remembered.
+[[test]]
+name = "contract"
+required-features = ["contract"]
+
+[[test]]
+name = "contract_credentials"
+required-features = ["contract"]
+
 [lib]
 name = "perch"
 path = "src/lib.rs"
