@@ -137,3 +137,20 @@ jobs:
       # itself and a suite that asserted look identical otherwise.
       - name: Contract tests
         run: cargo test --locked --features contract --test contract --test contract_credentials --test contract_sessions -- --nocapture
+
+  # The one name branch protection listens to, however the matrix above grows
+  # or renames its legs. `if: always()` with an explicit verdict, because a
+  # plain `needs:` job is skipped when a leg fails — and a skipped required
+  # check satisfies branch protection, which would wave the failure through.
+  success:
+    needs: check
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every check passed
+        run: |
+          if [ "${{ needs.check.result }}" != "success" ]; then
+            echo "check concluded: ${{ needs.check.result }}"
+            exit 1
+          fi
