@@ -87,16 +87,18 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // what makes the Profile a directory at all.
     carry::carry(host, &registry, &found.email, &default_profile, &profile);
 
-    // Last, because it is what every write into this Profile is now refused
-    // against — the Carry above being the first of them (ADR 0027).
-    let live = mark_live(host, &profile)?;
-
     say(out, &launching(&registry, &found.email, &launch.said))?;
     // Flushed before the client is handed the terminal. Everything Perch has to
     // say about a Run is said in front of it, and a buffer that had not been
     // emptied would deliver those lines after the output of the thing they were
     // announcing.
     out.flush().map_err(commands::write_failed)?;
+
+    // After the Carry, which will not write into a Live Profile and would
+    // therefore refuse its own Run; and immediately before the launch, with
+    // nothing fallible in between, so the marker cannot outlive a Run that never
+    // started (ADR 0027).
+    let marker = mark_live(host, &profile)?;
 
     // The environment of this one process, and the whole of what makes the Run
     // a Run.
@@ -109,7 +111,7 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
 
     // However it ended, including not having started. The Profile stops being
     // Live when the Run does.
-    let _ = host.remove_file(&live);
+    let _ = host.remove_file(&marker);
 
     ended.map_err(|err| PerchError::Other(format!("could not launch {}: {err}", launch.said)))
 }
@@ -128,19 +130,23 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
 /// this Profile while somebody is working in it — a mid-task logout, silently,
 /// which is the failure ADR 0005 exists for. A Run that cannot claim its Profile
 /// is a Run nothing is protecting, and a person told so beforehand has lost a
-/// command rather than a session.
+/// command rather than their work.
+///
+/// The failure is a refused Run rather than a bare `file_write`, which is how
+/// [`crate::reconcile`] reports the same class of thing on this same path: the
+/// person needs to know that nothing was launched and why, and a line naming
+/// only the file leaves them to work out both.
 fn mark_live(host: &dyn Host, profile: &Path) -> Result<PathBuf> {
     let pid = host.process_id();
     let marker = probe::session_marker_at(profile, pid);
-    let here = host.current_dir().unwrap_or_else(|_| profile.to_path_buf());
 
     host.create_dir_all(&probe::sessions_dir(profile))
-        .and_then(|()| host.write_file(&marker, &probe::session_marker(pid, host.now(), &here)))
+        .and_then(|()| host.write_file(&marker, &probe::session_marker(pid, host.now())))
         .map_err(|err| {
             PerchError::Other(format!(
                 "{} could not be written ({err}), so Perch cannot record that a \
                  client is running against this Profile — and another Perch \
-                 would be free to Capture or Renew the Credential this session \
+                 would be free to Capture or Renew the Credential that client \
                  is holding. Nothing was launched.",
                 marker.display()
             ))

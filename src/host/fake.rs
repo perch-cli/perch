@@ -172,9 +172,6 @@ pub struct FakeHost {
     /// The running processes, each with when it began — or `None` for one whose
     /// start the operating system will not say.
     live_processes: RefCell<BTreeMap<u32, Option<DateTime<Utc>>>>,
-    /// What this Perch's own pid is, which is what a Run marks a Profile Live
-    /// with (ADR 0027).
-    process_id: RefCell<u32>,
     interactive: RefCell<bool>,
     answers: RefCell<VecDeque<String>>,
     /// How long the person at the terminal takes over each answer.
@@ -240,7 +237,6 @@ impl FakeHost {
                 THIS_PROCESS,
                 Some(DateTime::<Utc>::MIN_UTC),
             )])),
-            process_id: RefCell::new(THIS_PROCESS),
             interactive: RefCell::new(true),
             answers: RefCell::new(VecDeque::new()),
             answering_takes_millis: RefCell::new(0),
@@ -1238,7 +1234,7 @@ impl Host for FakeHost {
     }
 
     fn process_id(&self) -> u32 {
-        *self.process_id.borrow()
+        THIS_PROCESS
     }
 
     fn process_alive(&self, pid: u32) -> bool {

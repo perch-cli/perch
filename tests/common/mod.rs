@@ -19,6 +19,7 @@ use perch::commands::run::RunArgs;
 use perch::commands::status::StatusArgs;
 use perch::commands::switch::SwitchArgs;
 use perch::credentials;
+use perch::host::fake::THIS_PROCESS;
 use perch::host::{Execution, FakeHost, Host, Platform};
 use perch::probe;
 use perch::registry::{CachedUtilization, Quarantine, WindowUtilization};
@@ -146,6 +147,20 @@ pub fn abandoned_login() -> impl Fn(&FakeHost, &Path) -> i32 {
 /// own and only exits with the status the test is about.
 pub fn client_exiting(status: i32) -> impl Fn(&FakeHost, &Path) -> i32 {
     move |_host, _dir| status
+}
+
+/// A `perch run` against an Account, as far as the rest of Perch can see one:
+/// the session marker that Run wrote into the Profile, naming the Perch that is
+/// waiting for the client (ADR 0027).
+///
+/// `began` is when that Run started. Now is a Run still going; an hour ago and a
+/// process that has since been replaced is the marker a killed Run left behind.
+pub fn a_run_against(host: &FakeHost, email: &str, began: DateTime<Utc>) {
+    let profile = perch::registry::profile_dir_for(host, email).expect("home is known");
+    host.set_file(
+        probe::session_marker_at(&profile, THIS_PROCESS),
+        &probe::session_marker(THIS_PROCESS, began),
+    );
 }
 
 /// Runs `perch run <target>`, returning the status the client exited with — or

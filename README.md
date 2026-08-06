@@ -228,10 +228,16 @@ can stand in a script wherever `claude` would.
 
 For as long as a Run is running, the Profile it launched is a **Live Profile**,
 and Perch will not write into one (ADR 0027). Another terminal cannot Capture
-into it, cannot Renew the Credential the session is holding — which would
-retire the refresh token and log that session out mid-task — and cannot copy
-`.claude.json` keys over it. Each of those refusals exits 16 and names the
-process holding the Profile.
+into it, cannot Renew the Credential that client is holding — which would retire
+the refresh token and log it out mid-task — and cannot copy `.claude.json` keys
+over it.
+
+Each of those refuses in the register its own command has. A Switch that cannot
+Capture stops, exits 16, and names the process holding the Profile. A
+`--refresh` shows you the cached figure instead and still succeeds, because a
+refresh reports what it could not read rather than failing (ADR 0018). A
+`.claude.json` key simply does not cross, because nothing on that path may
+refuse a Run (ADR 0003) — the cost is one onboarding question, not a session.
 
 Reading is untouched, which is the difference that matters. `perch switch` onto
 the Account you are running lands normally: it copies that Credential into the

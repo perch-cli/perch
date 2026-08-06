@@ -35,9 +35,26 @@ person told beforehand has lost a command; one told nothing loses their work.
 The consequences need stating rather than discovering, because they do not all
 point the same way.
 
-**Refused**, all with the existing exit code 16: a Capture, a Renewal, and a
-`.claude.json` key write. Each of them writes *into* the Profile, under a client
-that holds those files open and rewrites them on its way out.
+**Refused**: a Capture, a Renewal, and a `.claude.json` key write. Each of them
+writes *into* the Profile, under a client that holds those files open and
+rewrites them on its way out.
+
+They are refused in the three different registers those paths already have, and
+deliberately not levelled to one. A Capture stops the Switch with exit code 16,
+because a Switch that cannot Capture must not proceed. A Renewal degrades to the
+cached figure and the command still exits 0, which is ADR 0018 — a refresh
+reports what it could not read rather than failing. A `.claude.json` key simply
+does not cross, silently, which is ADR 0003's amendment — nothing on the Carry
+path may refuse a Run, because a person who answers one onboarding question has
+lost less than one who was refused a client. Only the first of the three is a
+failed command, and saying otherwise would contradict two ADRs.
+
+A Renewal is refused for every directory the Account's Credential could be in
+use from, not only the one being written. A Rotation retires the refresh token
+for an *Account* rather than for a file, so every copy dies together: `perch run
+<the active account>` puts a client on that Account's own Profile while the copy
+a refresh would renew sits in the Default Profile, and renewing it would log
+that client out just the same.
 
 **Allowed**: `perch switch` onto an Account with a Run against it. A Switch reads
 that Profile's Credential and writes it to the Default Profile; the Live Profile
@@ -45,6 +62,19 @@ is untouched. Refusing it would make Run and Switch lock each other out for no
 reason at all — the Account you are running in one terminal is exactly the one
 you would want active in the others. So the refusal moved off the incoming
 Account and onto the outgoing one, where the Capture actually lands.
+
+One case is both at once and stays refused: `perch switch X` where X is already
+the active Account, which is the repair for an interrupted Switch. X is the
+outgoing Account there as well as the incoming one, so the Capture would write
+into the very Profile the Run is holding. That is the outgoing rule doing its
+job rather than an exception to the incoming one.
+
+The same reasoning puts a second liveness check into `perch relogin`, after the
+login rather than only before it. The one before it is minutes stale by the time
+the browser comes back, and what follows it writes a fresh Credential into the
+Account's own Profile — so a Run started during the login would be written
+under. The login itself runs against a directory of its own, so it can never be
+what that check finds.
 
 **Allowed**: reading Utilization. An Account with a client running has a fresh
 access token by ADR 0005's own reasoning, so its figures are readable without

@@ -91,6 +91,13 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
         )));
     }
 
+    // Asked again, because the first answer is minutes old. A browser round
+    // trip is the longest wait in Perch, and the next line writes a Credential
+    // into that Profile — so a `perch run` started while the person was logging
+    // in would be written under (ADR 0027). The login itself ran against a
+    // directory of its own, so it can never be what this finds.
+    switch::refuse_if_live(host, &account, &version)?;
+
     settle_into_its_own_profile(host, &account, &produced)?;
 
     // Recorded before the Credential is made live, because the repair is true

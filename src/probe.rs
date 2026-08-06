@@ -688,22 +688,22 @@ pub fn session_marker_at(config_dir: &Path, pid: u32) -> PathBuf {
 /// The marker a Run writes to say a Profile is Live, in the shape Claude Code
 /// writes one and this module reads one back (ADR 0022).
 ///
-/// Perch's marker carries the two fields that make it evidence and the one that
-/// makes it legible — the process it names, when the session began, and who
-/// wrote it. Claude Code's own carries a good deal more; none of it is read
-/// here, and inventing a `sessionId` Perch does not have would be a marker
-/// claiming to be something it is not.
+/// Three fields and no more: the two that make it evidence — the process it
+/// names, and when the session began — and one that says who wrote it, so
+/// somebody who finds a stale marker knows what left it. Claude Code's own
+/// carries a good deal more, none of it read here, and inventing a `sessionId`
+/// or a version Perch does not have would be a file claiming to be something it
+/// is not.
 ///
 /// `started_at` is the moment the Run began rather than the moment the process
 /// did. That is what makes the file corroborate itself: the process it names
 /// began strictly earlier, so the marker holds for as long as that process
 /// lives and for no longer — a pid recycled after this was written necessarily
 /// belongs to a process younger than it.
-pub fn session_marker(pid: u32, started_at: DateTime<Utc>, cwd: &Path) -> String {
+pub fn session_marker(pid: u32, started_at: DateTime<Utc>) -> String {
     serde_json::json!({
         "pid": pid,
         "startedAt": started_at.timestamp_millis(),
-        "cwd": cwd.to_string_lossy(),
         "writtenBy": "perch",
     })
     .to_string()
@@ -1174,7 +1174,7 @@ mod tests {
     #[test]
     fn the_marker_a_run_writes_is_one_this_module_reads_back() {
         let began = DateTime::from_timestamp_millis(NOON).expect("a time");
-        let written = session_marker(4242, began, Path::new("/Users/someone/work"));
+        let written = session_marker(4242, began);
 
         let host = FakeHost::new().with_file("/tmp/profile/sessions/4242.json", &written);
         assert_eq!(

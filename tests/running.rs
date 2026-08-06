@@ -12,7 +12,7 @@ use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{TimeZone, Utc};
 use common::*;
 use perch::error::{EXIT_INVALID, EXIT_PROBE_REFUSED, EXIT_PROFILE_LIVE, EXIT_QUARANTINED};
 use perch::host::fake::{Effect, THIS_PROCESS};
@@ -547,16 +547,6 @@ fn live_against(host: &FakeHost, email: &str) -> Vec<u32> {
         .expect("every marker here can be corroborated or dismissed")
 }
 
-/// The marker a Run wrote and never got to take away: what a Run that was
-/// killed rather than exiting leaves on the disk.
-fn marker_left_behind(host: &FakeHost, email: &str, began: DateTime<Utc>) {
-    let profile = profile_of(host, email);
-    host.set_file(
-        perch::probe::session_marker_at(&profile, THIS_PROCESS),
-        &perch::probe::session_marker(THIS_PROCESS, began, &profile),
-    );
-}
-
 /// A Profile with a Run against it is a Live Profile, and stops being one when
 /// the Run ends. Asserted from inside the program the Run launched, because
 /// "while it lasts" is the only moment the claim is about.
@@ -645,7 +635,7 @@ fn switching_onto_the_account_a_run_is_against_succeeds() {
 #[test]
 fn a_run_that_was_killed_does_not_leave_a_profile_live_for_ever() {
     let host = machine();
-    marker_left_behind(&host, EMAIL, host.now());
+    a_run_against(&host, EMAIL, host.now());
     let host = host.with_this_process_dead();
 
     assert!(live_against(&host, EMAIL).is_empty());
@@ -660,7 +650,7 @@ fn a_run_that_was_killed_does_not_leave_a_profile_live_for_ever() {
 #[test]
 fn a_killed_runs_marker_does_not_come_back_to_life_with_a_recycled_pid() {
     let host = machine();
-    marker_left_behind(
+    a_run_against(
         &host,
         EMAIL,
         Utc.with_ymd_and_hms(2026, 8, 4, 9, 0, 0).unwrap(),
