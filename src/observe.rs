@@ -199,10 +199,67 @@ fn observe(host: &dyn Host, registry: &Registry, account: &Account) -> Step<Quot
 
     let version = probe::claude_version(host)?;
     let asked = holding(host, registry, account)?;
-    let token = usable_token(host, &asked, &version)?;
+    let token = usable_token(host, &asked, &version).map_err(|outcome| {
+        only_off_a_credential_that_is_theirs(host, outcome, &asked, account, &version)
+    })?;
     confirm(host, &token, account)?;
     let read = anthropic::utilization(host, &token);
     read.map_err(reading_refused)
+}
+
+/// Keeps a Quarantine from being recorded off a Credential that was never
+/// established to be this Account's.
+///
+/// ADR 0019: a figure is recorded only against the Account it was read for. A
+/// Quarantine is a recording too, and a terminal one — and the store the active
+/// Account is asked about with is the Default Profile, which Perch is not the
+/// only thing that writes. Somebody who runs `claude` and logs in directly
+/// leaves Perch's record of who is active behind; when that login later dies, a
+/// refresh reads *their* dead Credential and would condemn the Account Perch
+/// believes is active — whose own Profile still holds a good copy.
+///
+/// [`confirm`] asks Anthropic whose a token is, but it needs a working token
+/// and this is the path where there is none. So the evidence used here is
+/// local, and is the machine's own: Claude Code writes the Credential and the
+/// Identity beside it together, so a `.claude.json` naming this Account says
+/// the Credential there is theirs — the same evidence
+/// [`crate::switch::already_landed`] reads.
+fn only_off_a_credential_that_is_theirs(
+    host: &dyn Host,
+    outcome: Outcome,
+    asked: &Asked,
+    account: &Account,
+    version: &str,
+) -> Outcome {
+    let Outcome::Quarantined { why, detail } = &outcome else {
+        return outcome;
+    };
+    if asked.its_own_profile || names(host, &asked.store, account, version) {
+        return outcome;
+    }
+
+    let how = match detail {
+        Some(detail) => format!(" ({detail})"),
+        None => String::new(),
+    };
+    Outcome::Failed(format!(
+        "the live Credential could not be used — {}{how} — but {} does not \
+         name {}, so it may belong to a login made outside Perch and nothing \
+         was recorded against this Account. `perch switch {}` puts its own \
+         Credential back in place.",
+        why.because(),
+        asked.store.identity_file.display(),
+        account.email(),
+        account.email(),
+    ))
+}
+
+/// Whether a store's Identity names this Account.
+fn names(host: &dyn Host, store: &Store, account: &Account, version: &str) -> bool {
+    probe::read_identity(host, store, version)
+        .ok()
+        .flatten()
+        .is_some_and(|identity| identity.email.eq_ignore_ascii_case(account.email()))
 }
 
 /// The store an Account is asked about with, and whose it is.
