@@ -50,6 +50,14 @@ fn profile_of(host: &FakeHost, email: &str) -> PathBuf {
     perch::registry::profile_dir_for(host, email).expect("home is known")
 }
 
+/// The same, spelled for the fixtures that take a path as a string.
+fn profile_string(email: &str) -> String {
+    format!(
+        "/Users/someone/.config/perch/profiles/{}",
+        perch::registry::slug(email)
+    )
+}
+
 /// Every client a Run launched, as the program and the config directory it was
 /// pointed at.
 fn launched(host: &FakeHost) -> Vec<(String, PathBuf)> {
@@ -145,6 +153,53 @@ fn shared_state_is_reconciled_before_the_client_is_launched() {
     assert!(
         last_link < launch,
         "every link is in place before the client that reads them"
+    );
+}
+
+/// A client launched by a Run hands `CLAUDE_CONFIG_DIR` on to everything it
+/// starts, so a `perch run` typed inside one arrives with a Profile named in its
+/// environment. Shared State is still read from the Default Profile: a Profile
+/// holds links rather than the person's things, and sharing out of one would
+/// share links to links — or nothing at all, silently, where the Account whose
+/// Profile it is has just been added.
+#[test]
+fn shared_state_is_read_from_the_default_profile_even_inside_another_run() {
+    let host = machine_with_shared_state()
+        .with_env("CLAUDE_CONFIG_DIR", &profile_string(EMAIL))
+        .with_file(
+            format!("{}/CLAUDE.md", profile_string(EMAIL)),
+            "a link into the Default Profile, not the person's memory",
+        );
+
+    run_run(&host, SECOND_EMAIL).0.expect("the client ran");
+
+    let profile = profile_of(&host, SECOND_EMAIL);
+    for entry in ["CLAUDE.md", "settings.json", "plugins"] {
+        assert_eq!(
+            host.link_at(profile.join(entry)).map(|(_, target)| target),
+            Some(PathBuf::from(shared(entry))),
+            "{entry} comes from the Default Profile rather than from a Profile"
+        );
+    }
+}
+
+/// The other half of the same rule: a configuration directory somebody has
+/// deliberately moved is where their Shared State is, and Perch reads it from
+/// there. Only a Profile is disqualified, because only a Profile is somewhere
+/// Perch itself pointed the variable.
+#[test]
+fn a_configuration_directory_that_is_not_a_profile_is_where_shared_state_is_read() {
+    let moved = "/Users/someone/elsewhere";
+    let host = machine()
+        .with_env("CLAUDE_CONFIG_DIR", moved)
+        .with_file(format!("{moved}/CLAUDE.md"), "the memory they actually use");
+
+    run_run(&host, SECOND_EMAIL).0.expect("the client ran");
+
+    assert_eq!(
+        host.link_at(profile_of(&host, SECOND_EMAIL).join("CLAUDE.md"))
+            .map(|(_, target)| target),
+        Some(PathBuf::from(format!("{moved}/CLAUDE.md")))
     );
 }
 

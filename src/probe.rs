@@ -294,8 +294,20 @@ pub fn short_hash(config_dir: &Path) -> String {
 pub fn default_store(host: &dyn Host) -> Result<Store> {
     match host.env_var("CLAUDE_CONFIG_DIR").map(PathBuf::from) {
         Some(config_dir) => store_for_directory(host, config_dir, false),
-        None => store_for_directory(host, home(host)?.join(".claude"), true),
+        None => store_for_directory(host, default_config_dir(host)?, true),
     }
+}
+
+/// The directory Claude Code falls back to when it is told nothing — the
+/// Default Profile as the glossary means it, whatever this process's
+/// environment happens to say.
+///
+/// Distinct from [`default_store`], which answers for the directory Claude Code
+/// would use *right now*. The two differ exactly when `CLAUDE_CONFIG_DIR` is
+/// set, and a Run is where that difference has to be reckoned with, because a
+/// Run is what sets it (see [`crate::commands::run`]).
+pub fn default_config_dir(host: &dyn Host) -> Result<PathBuf> {
+    Ok(home(host)?.join(".claude"))
 }
 
 /// The home directory, as a command failure rather than a Host one.

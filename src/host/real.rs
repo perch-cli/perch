@@ -103,6 +103,31 @@ fn run(program: &Path, args: &[&str], stdin: Option<&str>) -> std::io::Result<Ex
     Ok(Execution::from(child.wait_with_output()?))
 }
 
+/// How a process that has finished ended, as the one number a caller can pass
+/// on as its own exit code.
+///
+/// A code where the process exited with one. Where it did not it was killed by a
+/// signal, and the shell's own convention is the honest answer: 128 plus the
+/// signal, which is what `$?` reports for that same death and therefore what
+/// anything wrapping `perch run` is already written to read (ADR 0010). The `-1`
+/// [`Execution`] uses is for the captured executions Perch only ever asks
+/// `succeeded()` of; a status that *becomes* Perch's exit code has to say more
+/// than "not zero", and -1 leaves the shell reporting 255 for a Ctrl-C.
+#[cfg(unix)]
+fn ended_as(status: std::process::ExitStatus) -> i32 {
+    use std::os::unix::process::ExitStatusExt;
+    status
+        .code()
+        .or_else(|| status.signal().map(|signal| 128 + signal))
+        .unwrap_or(-1)
+}
+
+/// Windows has no signals, so a process that has finished has a code.
+#[cfg(not(unix))]
+fn ended_as(status: std::process::ExitStatus) -> i32 {
+    status.code().unwrap_or(-1)
+}
+
 /// Runs `curl` with the request on its stdin.
 fn curl(config: &str) -> Result<Execution, HostError> {
     Ok(run(&curl_bin()?, &CURL_ARGS, Some(config))?)
@@ -418,7 +443,7 @@ impl Host for RealHost {
             command.env(key, value);
         }
         let status = command.status()?;
-        Ok(status.code().unwrap_or(-1))
+        Ok(ended_as(status))
     }
 
     fn process_alive(&self, pid: u32) -> bool {

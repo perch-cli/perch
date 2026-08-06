@@ -20,6 +20,7 @@
 //! settings and plugins through is worse than one that did not start.
 
 use std::io::Write;
+use std::path::PathBuf;
 
 use crate::adopt;
 use crate::commands::{self, say};
@@ -60,7 +61,7 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // only thing Reconcile is preparation for.
     let claude = probe::claude_bin(host)?;
     let profile = registry::profile_dir_for(host, &found.email)?;
-    reconcile::reconcile(host, &probe::default_store(host)?.config_dir, &profile)?;
+    reconcile::reconcile(host, &shared_state(host)?, &profile)?;
 
     say(out, &launching(&registry, &found.email))?;
     // Flushed before the client is handed the terminal. Everything Perch has to
@@ -78,6 +79,27 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     .map_err(|err| PerchError::Other(format!("could not launch Claude Code: {err}")))
 }
 
+/// Where a Run reads Shared State from.
+///
+/// `CLAUDE_CONFIG_DIR` is honoured, because somebody who moved their
+/// configuration directory moved their Shared State along with it — but never
+/// when it names a Profile, and pointing it at one is exactly what a Run does.
+/// The client a Run launches passes that variable on to everything it starts, so
+/// a `perch run` typed inside one inherits it. Reading Shared State out of the
+/// Profile it is already in would share links to links, and would share nothing
+/// whatever where that Profile is fresh — silently, since a Profile that holds
+/// nothing is not an error to enumerate.
+///
+/// A Profile is where Shared State is made reachable and never where it is read
+/// from. That is the whole of the rule.
+fn shared_state(host: &dyn Host) -> Result<PathBuf> {
+    let told = probe::default_store(host)?.config_dir;
+    if told.starts_with(registry::profiles_dir(host)?) {
+        return probe::default_config_dir(host);
+    }
+    Ok(told)
+}
+
 /// Refuses to launch a client against an Account whose Credential is known not
 /// to work.
 ///
@@ -92,17 +114,12 @@ fn refuse_a_quarantined_account(registry: &Registry, email: &str) -> Result<()> 
     let Some(why) = account.quarantine else {
         return Ok(());
     };
-    Err(PerchError::Quarantined {
-        why,
-        said: format!(
-            "{} is Quarantined: {}.\n\
-             Nothing was launched — the client would open on an Account it \
-             cannot authenticate as and ask you to log in. {}",
-            registry.named_for_the_user(email),
-            why.because(),
-            registry::how_to_repair(email),
-        ),
-    })
+    Err(why.refusal(
+        &registry.named_for_the_user(email),
+        email,
+        "Nothing was launched — the client would open on an Account it cannot \
+         authenticate as and ask you to log in.",
+    ))
 }
 
 /// What is about to happen, and what is not.
@@ -113,9 +130,13 @@ fn refuse_a_quarantined_account(registry: &Registry, email: &str) -> Result<()> 
 fn launching(registry: &Registry, email: &str) -> String {
     let named = registry.named_for_the_user(email);
     match registry.active.as_deref() {
+        // Both Accounts are named the way every other command names one, so the
+        // sentence that contrasts them does not hand one of them its Alias and
+        // take the other's away.
         Some(active) if active != email => format!(
-            "Running Claude Code as {named}, in this terminal alone. \
-             {active} stays the active Account everywhere else."
+            "Running Claude Code as {named}, in this terminal alone. {} stays \
+             the active Account everywhere else.",
+            registry.named_for_the_user(active)
         ),
         // Running the Account that is already active is not a mistake worth
         // refusing: the Run still gets a Profile of its own, and the session it

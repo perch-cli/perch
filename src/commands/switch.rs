@@ -148,17 +148,12 @@ fn refuse_a_quarantined_account(registry: &Registry, incoming: &Account) -> Resu
     let Some(why) = incoming.quarantine else {
         return Ok(());
     };
-    Err(PerchError::Quarantined {
-        why,
-        said: format!(
-            "{} is Quarantined: {}.\n\
-             Nothing was changed — switching to it would make a Credential live \
-             that no longer works, and cost you the Account you are on. {}",
-            registry.named_for_the_user(incoming.email()),
-            why.because(),
-            registry::how_to_repair(incoming.email()),
-        ),
-    })
+    Err(why.refusal(
+        &registry.named_for_the_user(incoming.email()),
+        incoming.email(),
+        "Nothing was changed — switching to it would make a Credential live \
+         that no longer works, and cost you the Account you are on.",
+    ))
 }
 
 /// The Account a bare `perch switch` would be leaving, which is the one whose
