@@ -339,6 +339,11 @@ fn something_that_is_not_a_link_in_the_way_is_refused_rather_than_deleted() {
         host.file(profile("CLAUDE.md")).as_deref(),
         Some("somebody's own file")
     );
+    // The remedy is the one that fits: this is a path to move, not a privilege
+    // to turn on. A Run that cannot happen again until something is done says
+    // what that something is.
+    assert!(said.contains("move it aside or remove it"), "{said}");
+    assert!(!said.contains("filesystem that carries no links"), "{said}");
 }
 
 /// The Profile's own Credential and its own `oauthAccount` are what make it a

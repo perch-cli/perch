@@ -12,15 +12,26 @@ use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::probe::{self, Store};
 
+/// Makes a Profile's directory, if it is not already there.
+///
+/// Private from the moment it exists: off macOS the Credential is a file in
+/// here, and a directory others may enter is a directory whose contents others
+/// may open (ADR 0020). Created that way rather than tightened, because a
+/// Profile is Perch's to make and there is no window to leave.
+///
+/// One copy of it, because both paths that bring a Profile into being — a login
+/// stored here, and a Reconcile that needs somewhere to put a link — owe the
+/// same mode, and two copies is how one of them comes to be created at the
+/// umask.
+pub fn make_dir(host: &dyn Host, dir: &Path) -> Result<()> {
+    host.create_private_dir_all(dir)
+        .map_err(|err| PerchError::Other(format!("could not create {}: {err}", dir.display())))
+}
+
 /// Creates `dir` and stores `credential` where the Claude Code on this machine
 /// would keep it, returning the store that now holds it.
 pub fn create(host: &dyn Host, dir: &Path, credential: &str) -> Result<Store> {
-    // Private from the moment it exists: off macOS the Credential is a file in
-    // here, and a directory others may enter is a directory whose contents
-    // others may open (ADR 0020). Created that way rather than tightened,
-    // because a Profile is Perch's to make and there is no window to leave.
-    host.create_private_dir_all(dir)
-        .map_err(|err| PerchError::Other(format!("could not create {}: {err}", dir.display())))?;
+    make_dir(host, dir)?;
 
     let store = probe::store_for_profile(host, dir)?;
     store_credential(host, &store, credential)?;

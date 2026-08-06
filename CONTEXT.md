@@ -78,9 +78,13 @@ _Avoid_: flock, team, org, pool
 ## What belongs to whom
 
 **Shared State**:
-The configuration that belongs to the person rather than the Account — memory,
-settings, plugins, and past work. A Switch leaves it untouched, so it follows
-you across Accounts without effort; only the Run path has to work to reach it.
+Everything in a configuration directory that belongs to the person rather than
+to the Account: memory, settings, plugins, sessions, plans, and whatever the
+next Claude Code release adds. Said as everything-but rather than as a list,
+because the list grows on Claude Code's schedule and one written down here goes
+quietly out of date — what it is not is the Credential and the file naming the
+Account. A Switch leaves it untouched, so it follows you across Accounts
+without effort; only the Run path has to work to reach it.
 _Avoid_: common config, global config
 
 **Reconcile**:

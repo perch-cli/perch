@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{PerchError, Result};
 use crate::host::{Host, HostError, Link, Platform};
-use crate::probe;
+use crate::{probe, profile};
 
 /// The entries that stay behind: the Credential itself, and the file holding
 /// `oauthAccount`. Both are the Account rather than the person, and both are
@@ -44,12 +44,8 @@ pub fn reconcile(host: &dyn Host, shared: &Path, into: &Path) -> Result<()> {
     }
 
     // A link is made inside a directory, so the directory has to be there.
-    // Closed rather than at the umask, because a Profile holds a Credential
-    // (ADR 0020).
     if !host.path_exists(into) {
-        host.create_private_dir_all(into).map_err(|err| {
-            PerchError::Other(format!("could not create {}: {err}", into.display()))
-        })?;
+        profile::make_dir(host, into)?;
     }
 
     for entry in crossing(host, shared)? {
@@ -113,7 +109,7 @@ fn establish(host: &dyn Host, target: &Path, at: &Path) -> Result<()> {
         }
         Ok(None) => in_the_way(host, target, at),
         Err(HostError::NotFound { .. }) => make(host, target, at),
-        Err(err) => Err(refused(host, target, at, &err.to_string())),
+        Err(err) => Err(refused(at, &err.to_string(), no_link_here(host))),
     }
 }
 
@@ -128,25 +124,26 @@ fn establish(host: &dyn Host, target: &Path, at: &Path) -> Result<()> {
 /// old one, which is the divergence this whole module exists to prevent. Doing
 /// it before every Run is what keeps the window down to one Run.
 ///
-/// Everywhere else a link would have been a symbolic one, so a plain file or a
-/// real directory is something Perch did not put there. It is refused rather
-/// than deleted: Perch does not know what it is, and deleting the thing you
-/// cannot identify is how somebody loses work.
+/// Everywhere else a share is a symbolic link and says so, so a plain file or a
+/// real directory is something Perch did not put there — a file the client of
+/// an earlier Run wrote before the Default Profile had an entry of that name,
+/// most likely. It is refused rather than deleted, because deleting the thing
+/// you cannot identify is how somebody loses work, and the refusal names the
+/// path so the fix is one command.
 fn in_the_way(host: &dyn Host, target: &Path, at: &Path) -> Result<()> {
     if host.platform() == Platform::Windows && host.is_file(at) && host.is_file(target) {
         host.remove_file(at)
-            .map_err(|err| refused(host, target, at, &err.to_string()))?;
+            .map_err(|err| refused(at, &err.to_string(), MOVE_IT_ASIDE))?;
         return make(host, target, at);
     }
 
     Err(refused(
-        host,
-        target,
         at,
         &format!(
             "{} is already there and is not a link Perch made",
             at.display()
         ),
+        MOVE_IT_ASIDE,
     ))
 }
 
@@ -158,6 +155,14 @@ fn in_the_way(host: &dyn Host, target: &Path, at: &Path) -> Result<()> {
 /// privilege is there it is the better share, because it survives the file it
 /// names being replaced — and fall back to a hard link, which is what is left
 /// when it is not.
+///
+/// The fallback is Windows' alone, because the re-establishment that keeps a
+/// hard link honest is Windows' alone (see [`in_the_way`]): a machine that fell
+/// back anywhere else would hold a share Perch could not tell from a stray file
+/// and would refuse on the next pass, which is a worse answer than refusing
+/// now. Nothing is given up by that. A filesystem carrying hard links and no
+/// symbolic links is a Windows one; every unix filesystem that has the first
+/// has the second.
 fn make(host: &dyn Host, target: &Path, at: &Path) -> Result<()> {
     let windows = host.platform() == Platform::Windows;
     let kinds: &[Link] = match (host.is_file(target), windows) {
@@ -174,19 +179,19 @@ fn make(host: &dyn Host, target: &Path, at: &Path) -> Result<()> {
             Err(err) => refusals.push(format!("{} could not be made ({err})", kind.describe())),
         }
     }
-    Err(refused(host, target, at, &refusals.join(", and ")))
+    Err(refused(at, &refusals.join(", and "), no_link_here(host)))
 }
 
-/// Takes a link away, and says so in the same terms as a link that could not be
-/// made: either way the entry is not reachable and the Run is not happening.
+/// Takes a link away, and reports a failure the way an unmakeable link is
+/// reported: either way the entry is not reachable and the Run is not
+/// happening.
 fn unlink(host: &dyn Host, at: &Path) -> Result<()> {
     host.remove_link(at).map_err(|err| {
-        PerchError::Other(format!(
-            "The link at {} could not be replaced: {err}\n\n\
-             Perch shares by linking and never by copying (ADR 0026), so a share \
-             it cannot repair refuses the Run rather than being worked around.",
-            at.display()
-        ))
+        refused(
+            at,
+            &format!("the link that shares it could not be replaced ({err})"),
+            no_link_here(host),
+        )
     })
 }
 
@@ -205,7 +210,12 @@ fn unlink(host: &dyn Host, at: &Path) -> Result<()> {
 fn sweep(host: &dyn Host, shared: &Path, into: &Path) -> Result<()> {
     let held = match host.list_dir(into) {
         Ok(held) => held,
-        Err(_) => return Ok(()),
+        // A Profile that is not there holds no links to sweep. A Profile that
+        // will not say what it holds is a different answer, and swallowing it
+        // would leave the dangling links this exists to clear — so it is
+        // reported rather than passed over, as the enumeration above is.
+        Err(HostError::NotFound { .. }) => return Ok(()),
+        Err(err) => return Err(PerchError::file_read(into.to_path_buf(), err)),
     };
 
     for at in held {
@@ -219,34 +229,48 @@ fn sweep(host: &dyn Host, shared: &Path, into: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Why the Run is not happening, in the two pieces a person needs: which entry,
-/// and what stopped it.
+/// Why the Run is not happening, in the three pieces a person needs: which
+/// entry, what stopped it, and what to do about it.
 ///
-/// The fix is theirs rather than Perch's — a privilege to turn on, or a Profile
-/// to move — so the message names it. Copying instead is not on the list.
-fn refused(host: &dyn Host, target: &Path, at: &Path, why: &str) -> PerchError {
-    let entry = target
+/// The remedy is passed in rather than composed here, because the two failures
+/// have nothing in common: a link this machine will not make is a privilege or
+/// a filesystem, and something sitting where the share belongs is a path to
+/// move. A refusal that named the wrong one would be worse than one that named
+/// none. Copying instead is on neither list.
+fn refused(at: &Path, why: &str, remedy: &str) -> PerchError {
+    let entry = at
         .file_name()
-        .unwrap_or(target.as_os_str())
+        .unwrap_or(at.as_os_str())
         .to_string_lossy()
         .into_owned();
-
-    let fix = if host.platform() == Platform::Windows {
-        "Turning on Developer Mode allows symbolic links; a Profile on a \
-         filesystem that carries no links at all has to be moved to one that does."
-    } else {
-        "A Profile on a filesystem that carries no links has to be moved to one \
-         that does."
-    };
 
     PerchError::Other(format!(
         "`{entry}` could not be made reachable from {}: {why}.\n\n\
          Perch shares by linking and never by copying, because a copy diverges the \
          moment it is edited (ADR 0026) — so the Run is refused rather than served \
-         one. {fix}",
+         one. {remedy}",
         at.parent().unwrap_or(at).display(),
     ))
 }
+
+/// What to do about a link this machine will not make. Both halves of it are
+/// the user's: Perch can no more grant itself a privilege than move a Profile
+/// onto another filesystem.
+fn no_link_here(host: &dyn Host) -> &'static str {
+    if host.platform() == Platform::Windows {
+        "Turning on Developer Mode allows symbolic links; a Profile on a \
+         filesystem that carries no links at all has to be moved to one that does."
+    } else {
+        "A Profile on a filesystem that carries no links has to be moved to one \
+         that does."
+    }
+}
+
+/// What to do about something sitting where a share belongs. Naming the act
+/// matters: without it this reads as a Run that can never happen again, and it
+/// is one `mv` from happening.
+const MOVE_IT_ASIDE: &str = "Whatever is at that path is not Perch's to delete, so move it aside or \
+     remove it yourself and run again.";
 
 /// Whether a link stands for exactly this path.
 ///
