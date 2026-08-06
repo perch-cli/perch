@@ -28,7 +28,7 @@ use crate::anthropic::{self, QuotaWindows, Refused};
 use crate::commands::say;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::lock;
+use crate::lock::{self, Held};
 use crate::probe::{self, Credential, Store};
 use crate::profile;
 use crate::registry::{self, Account, CachedUtilization, Quarantine, Registry};
@@ -150,11 +150,22 @@ impl Report {
 }
 
 /// Reads current Utilization for each of `emails` and keeps what came back.
-pub fn refresh(host: &dyn Host, registry: &mut Registry, emails: &[String]) -> Report {
+pub fn refresh(
+    host: &dyn Host,
+    perch: &mut Held<'_>,
+    registry: &mut Registry,
+    emails: &[String],
+) -> Report {
     let mut report = Report::default();
     let mut anything_to_keep = false;
 
     for email in emails {
+        // A round trip to Anthropic each, over as many Accounts as a Group
+        // holds. Said between them rather than only at the write, so a `--group`
+        // refresh over a slow connection does not run past the staleness window
+        // and hand another `perch` the lock this one is still working under.
+        perch.renew();
+
         let Some(account) = registry.account(email).cloned() else {
             continue;
         };
@@ -179,7 +190,7 @@ pub fn refresh(host: &dyn Host, registry: &mut Registry, emails: &[String]) -> R
         });
     }
 
-    if anything_to_keep && let Err(error) = registry::save(host, registry) {
+    if anything_to_keep && let Err(error) = registry::save(host, perch, registry) {
         report.not_kept = Some(format!(
             "The figures were read but Perch could not write them to its own \
              record, so the next command will show the ones before them: {error}"

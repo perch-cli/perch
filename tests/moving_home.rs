@@ -15,6 +15,16 @@ use std::path::PathBuf;
 use common::*;
 use perch::host::{FakeHost, Host, Platform};
 
+/// Everything the migration says, which is everything it said to stderr.
+///
+/// Not to the command's own writer, and this is the point rather than an
+/// implementation detail: the command that happens to trigger the move may be a
+/// `perch status --json` in somebody's shell prompt, and prose on stdout ahead
+/// of the document is prose in the middle of whatever is parsing it.
+fn said_about_the_move(host: &FakeHost) -> String {
+    host.notes().join("\n")
+}
+
 /// Both homes are asked for rather than spelled out, because a path is not a
 /// string: `PathBuf::join` uses the platform's own separator, and a fixture
 /// written with forward slashes would quietly match nothing on Windows — which
@@ -66,8 +76,13 @@ fn an_installation_in_the_old_place_is_carried_across_credentials_and_all() {
 
     result.expect("the listing runs");
     assert!(
-        printed.contains(&new_home(&host).display().to_string()),
-        "it says what it did:\n{printed}"
+        said_about_the_move(&host).contains(&new_home(&host).display().to_string()),
+        "it says what it did:\n{}",
+        said_about_the_move(&host)
+    );
+    assert!(
+        !printed.contains("Moving"),
+        "and says it beside the listing rather than in it:\n{printed}"
     );
     assert_eq!(
         registry_of(&host),
@@ -99,10 +114,38 @@ fn the_move_happens_once_and_is_not_mentioned_again() {
     run_list(&host, false)
         .0
         .expect("the first listing moves it");
+    let after_the_move = host.notes().len();
     let (result, printed) = run_list(&host, false);
 
     result.expect("the second listing runs");
     assert!(!printed.contains("Moving"), "{printed}");
+    assert_eq!(
+        host.notes().len(),
+        after_the_move,
+        "and nothing further is said about it: {:?}",
+        host.notes()
+    );
+}
+
+/// The reason the migration says nothing on stdout. `perch status --json` is
+/// advertised for scripts, and the first run after an upgrade is exactly when
+/// the move happens — so it is exactly the run whose document would otherwise
+/// arrive with prose in front of it.
+#[test]
+fn the_move_leaves_a_json_document_a_script_can_still_parse() {
+    let host = machine_with_two_accounts();
+    an_installation_in_the_old_place(&host);
+
+    let (result, printed) = run_status(&host, true);
+
+    result.expect("the status runs");
+    serde_json::from_str::<serde_json::Value>(&printed)
+        .unwrap_or_else(|err| panic!("the document is the whole of stdout: {err}\n{printed}"));
+    assert!(
+        said_about_the_move(&host).contains("Moving"),
+        "and the move is still reported, on stderr: {:?}",
+        host.notes()
+    );
 }
 
 /// Off macOS the Credential is a file inside the Profile, so what has to travel
@@ -114,7 +157,9 @@ fn a_credential_kept_in_a_file_travels_as_a_private_file() {
     run_list(&host, false).0.expect("the login is adopted");
     an_installation_in_the_old_place(&host);
 
+    let said_before = host.notes().len();
     run_list(&host, false).0.expect("it moves");
+    assert!(host.notes().len() > said_before, "the move is reported");
 
     let store = store_of(&host, EMAIL);
     assert_eq!(
@@ -139,5 +184,71 @@ fn an_installation_that_was_told_where_to_live_is_left_alone() {
 
     result.expect("the listing runs");
     assert!(!printed.contains("Moving"), "{printed}");
+    assert!(
+        !said_about_the_move(&host).contains("Moving"),
+        "{:?}",
+        host.notes()
+    );
     assert!(host.path_exists(&PathBuf::from("/Users/someone/elsewhere/registry.json")));
+}
+
+/// The migration's last act is to delete the old home, which makes it the one
+/// reader that cannot afford to be lenient. A registry written by a newer Perch
+/// carries fields this build does not know about; parsing it here and writing
+/// back what survived would drop them, and then remove the only copy that still
+/// had them. Refused instead, exactly as it is refused everywhere else.
+#[test]
+fn a_registry_from_a_newer_perch_is_refused_rather_than_migrated_and_deleted() {
+    let host = machine_with_two_accounts();
+    an_installation_in_the_old_place(&host);
+
+    let old = old_home(&host).join("registry.json");
+    let from_the_future = host
+        .file(&old)
+        .expect("the old registry is there")
+        .replace("\"version\": 3", "\"version\": 99");
+    host.set_file(&old, &from_the_future);
+
+    let (result, _) = run_list(&host, false);
+
+    let refused = result.expect_err("this build cannot understand it");
+    assert!(refused.to_string().contains("newer Perch"), "{refused}");
+    assert_eq!(
+        host.file(&old).as_deref(),
+        Some(from_the_future.as_str()),
+        "and the only copy that has those fields is still where it was"
+    );
+}
+
+/// An address with no alphanumeric character in it slugs to nothing, and
+/// joining nothing onto a path gives back the path — so such an Account's
+/// Profile *is* `profiles/`, the directory holding every other Account's. The
+/// migration reads from one of those directories and deletes the home it is in,
+/// so it goes through the same guard every other derivation does rather than
+/// joining a slug itself.
+#[test]
+fn an_account_that_names_no_profile_stops_the_move_rather_than_taking_it() {
+    let host = machine_with_two_accounts();
+    an_installation_in_the_old_place(&host);
+
+    let old = old_home(&host).join("registry.json");
+    let degenerate = host
+        .file(&old)
+        .expect("the old registry is there")
+        .replace(SECOND_EMAIL, "@");
+    host.set_file(&old, &degenerate);
+
+    let (result, _) = run_list(&host, false);
+
+    let refused = result.expect_err("no Profile can be named after that address");
+    assert!(
+        refused
+            .to_string()
+            .contains("no character a Profile directory can be named after"),
+        "{refused}"
+    );
+    assert!(
+        host.path_exists(&old_home(&host)),
+        "and both homes are left standing, so the registry can be put right by hand"
+    );
 }

@@ -747,14 +747,22 @@ pub fn profiles_dir(host: &dyn Host) -> Result<PathBuf> {
 /// at the one place every store and every keychain namespace is derived from,
 /// rather than trusted to whatever wrote the address.
 pub fn profile_dir_for(host: &dyn Host, email: &str) -> Result<PathBuf> {
-    let profiles = profiles_dir(host)?;
+    profile_dir_in(host, &profiles_dir(host)?, email)
+}
+
+/// The same derivation, against a `profiles` directory named rather than
+/// derived — which the migration needs, since half of what it does is against
+/// the home Perch is moving out of. The guard travels with the derivation
+/// rather than with the caller: a second way of joining a slug onto a path is a
+/// second way of arriving at `profiles/` itself.
+pub fn profile_dir_in(host: &dyn Host, profiles: &Path, email: &str) -> Result<PathBuf> {
     let slugged = slug(email);
     let dir = profiles.join(&slugged);
 
     // Two ways of asking the same question, because the answer is the whole
     // machine: an empty slug, and — for whatever a future slug might let
     // through — a path that is not one directory below the one it was joined to.
-    if slugged.is_empty() || dir.parent() != Some(profiles.as_path()) {
+    if slugged.is_empty() || dir.parent() != Some(profiles) {
         return Err(PerchError::Invalid(format!(
             "`{email}` has no character a Profile directory can be named after, \
              so Perch cannot say where its Credential would be kept.\n\
@@ -835,6 +843,9 @@ pub fn lock_spec(host: &dyn Host) -> Result<LockSpec> {
         dir: perch_home(host)?.join(".registry.lock"),
         stale_millis: REGISTRY_STALE_MILLIS,
         update_millis: REGISTRY_UPDATE_MILLIS,
+        lost_means: "Another `perch` has been changing the registry since this \
+                     command read it, so what this one holds in memory is behind \
+                     what is on disk. Nothing of it will be written over theirs.",
     })
 }
 
@@ -852,14 +863,35 @@ pub fn lock_spec(host: &dyn Host) -> Result<LockSpec> {
 /// Never held across a browser login. That is minutes of somebody else's time,
 /// and the commands that spend it take this afterwards, against a registry read
 /// fresh.
+///
+/// Perch's home is created here, and privately, because on a fresh machine this
+/// is the first thing to need it: the lock artifact lives inside it, so a
+/// `create_dir_all` on the way to `mkdir` would otherwise be what brings the
+/// directory into being — at whatever the umask happens to be, for a directory
+/// that is about to hold Credentials.
 pub fn lock(host: &dyn Host) -> Result<lock::Held<'_>> {
+    let home = perch_home(host)?;
+    host.create_private_dir_all(&home)
+        .map_err(|err| PerchError::Other(format!("could not create {}: {err}", home.display())))?;
     lock::take_all(host, vec![lock_spec(host)?])
 }
 
 /// Reads the registry, or `None` when Perch has never run here.
 pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
-    let path = registry_path(host)?;
-    let contents = match host.read_file(&path) {
+    read_from(host, &registry_path(host)?)
+}
+
+/// The registry kept at `path`, or `None` when there is none there.
+///
+/// [`load`] reads from wherever Perch keeps state *now*; the migration reads
+/// from where it kept it before the move. Everything below this line is about
+/// what a registry file means — the version it was written by, the Groups its
+/// Accounts claim, the configuration those Groups carry — and none of it is
+/// about which file it is. A second reader that parsed the bytes itself would
+/// be a second reader that skips all of it, which is how a registry written by
+/// a newer Perch gets quietly rewritten by an older one.
+pub fn read_from(host: &dyn Host, path: &Path) -> Result<Option<Registry>> {
+    let contents = match host.read_file(path) {
         Ok(contents) => contents,
         Err(HostError::NotFound { .. }) => return Ok(None),
         Err(err) => {
@@ -921,7 +953,31 @@ fn adopt_groups_only_the_accounts_record(registry: &mut Registry) {
     }
 }
 
-pub fn save(host: &dyn Host, registry: &Registry) -> Result<()> {
+/// Writes the registry, under the hold the caller took to read it.
+///
+/// The hold is asked for rather than assumed, and it is the reason this
+/// signature is the shape it is: the invariant the whole module turns on is
+/// that a registry is only ever written by the Perch that read it, and a
+/// parameter is the only way to say that once rather than in every caller.
+///
+/// It is also the one place every command reliably passes through after however
+/// long its work took, which makes it where the hold is renewed. A hold that
+/// was lost — Perch stalled past the staleness window and another `perch` took
+/// the lock over and ran a whole command under it — is a hold whose registry is
+/// behind the one on disk, and writing it back would revert that command
+/// wholesale. So it is refused, and the caller says what that cost.
+pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -> Result<()> {
+    perch.renew();
+    if !perch.still_held() {
+        return Err(PerchError::Other(
+            "Another `perch` took the registry lock over while this command was \
+             working, and has changed the registry since this one read it. \
+             Nothing was written, because writing would have undone whatever it \
+             did. Run this command again."
+                .to_string(),
+        ));
+    }
+
     let path = registry_path(host)?;
     let body = serde_json::to_string_pretty(registry)
         .map_err(|err| PerchError::Other(format!("could not serialise the registry: {err}")))?;
@@ -1008,6 +1064,79 @@ mod tests {
         lock(&host).expect("a lock given back can be taken again");
     }
 
+    /// The hold spans the whole command, and a command can stall for as long as
+    /// somebody takes to answer a `[y/N]`. Renewed at every write, so the
+    /// ordinary long command keeps the lock it took rather than letting it
+    /// expire silently underneath itself.
+    #[test]
+    fn a_command_that_takes_its_time_keeps_the_lock_it_took() {
+        let host = crate::host::FakeHost::new();
+        let mut perch = lock(&host).expect("the registry lock is free");
+
+        // Comfortably past the staleness window, several times over: exactly
+        // the shape of a `perch remove` waiting on somebody who walked away.
+        for _ in 0..4 {
+            host.sleep(REGISTRY_STALE_MILLIS as u64 - 10_000);
+            save(&host, &mut perch, &Registry::default()).expect("it is still Perch's to write");
+        }
+
+        assert!(perch.still_held());
+        assert!(
+            lock(&host).is_err(),
+            "and no other Perch could have taken it in the meantime"
+        );
+    }
+
+    /// The other direction, and the reason the hold is checked rather than
+    /// assumed: a Perch that did stall past the window has had its lock taken
+    /// over, and the registry it read before that is however many commands out
+    /// of date. Writing it back would revert every one of them wholesale — so
+    /// the write is refused, and the user is told to run the command again.
+    #[test]
+    fn a_registry_read_before_somebody_elses_command_is_not_written_over_theirs() {
+        let host = crate::host::FakeHost::new();
+        let mut perch = lock(&host).expect("the registry lock is free");
+
+        // The stall, and another Perch finding the lock abandoned and taking it.
+        host.sleep(REGISTRY_STALE_MILLIS as u64 + 1_000);
+        let theirs = lock(&host).expect("an abandoned lock is taken over");
+        save(&host, &mut { theirs }, &Registry::default()).expect("theirs is the live hold");
+        let before = load(&host).expect("it reads").expect("they wrote one");
+
+        let stale = Registry {
+            active: Some("someone@example.com".into()),
+            ..Registry::default()
+        };
+        let refused = save(&host, &mut perch, &stale).expect_err("this one may no longer write");
+
+        assert!(
+            refused.to_string().contains("Run this command again"),
+            "{refused}"
+        );
+        assert_eq!(
+            load(&host).expect("it reads").expect("a registry is there"),
+            before,
+            "what the other Perch wrote is what is on disk"
+        );
+    }
+
+    /// Perch's home holds Profile directories full of Credentials, and on a
+    /// fresh machine the *lock* is what brings it into being — before any
+    /// registry has been written into it. Created privately there rather than
+    /// at whatever the umask happens to be, or the narrow modes below it guard
+    /// files inside a directory anybody may walk into.
+    #[test]
+    fn the_home_the_lock_creates_is_the_owners_alone() {
+        let host = crate::host::FakeHost::new();
+
+        let _perch = lock(&host).expect("the registry lock is free");
+
+        assert_eq!(
+            host.mode_of(perch_home(&host).unwrap()),
+            Some(crate::host::PRIVATE_DIR_MODE)
+        );
+    }
+
     /// The registry is the whole of Perch's state and every command reads it
     /// first, so a write that stops half way must not be visible: a reader
     /// would call the file malformed, and a crash inside that window would
@@ -1024,7 +1153,8 @@ mod tests {
             active: Some("someone@example.com".into()),
             ..Registry::default()
         };
-        save(&host, &registry).expect_err("the write cannot land");
+        let mut perch = lock(&host).expect("the registry lock is free");
+        save(&host, &mut perch, &registry).expect_err("the write cannot land");
 
         assert_eq!(
             host.file(path).as_deref(),
@@ -1046,7 +1176,8 @@ mod tests {
     fn the_registry_is_written_for_its_owner_alone() {
         let host = crate::host::FakeHost::new();
 
-        save(&host, &Registry::default()).expect("it is written");
+        let mut perch = lock(&host).expect("the registry lock is free");
+        save(&host, &mut perch, &Registry::default()).expect("it is written");
 
         let path = registry_path(&host).unwrap();
         assert_eq!(host.mode_of(&path), Some(crate::host::PRIVATE_FILE_MODE));

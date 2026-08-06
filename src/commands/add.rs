@@ -64,7 +64,7 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     // may have taken minutes, and writing it back would revert whatever else
     // ran in the meantime — a `perch switch` in another terminal, most
     // damagingly, whose `active` the next Capture depends on (ADR 0006).
-    let (_perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
     refuse_an_account_perch_already_holds(host, &registry, &pending.identity)?;
     registry.refuse_taken_names(args.alias.as_deref(), group.as_deref())?;
 
@@ -83,7 +83,7 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     if let Some(alias) = &args.alias {
         registry.set_alias(alias, &email);
     }
-    registry::save(host, &registry)?;
+    registry::save(host, &mut perch, &registry)?;
 
     report(
         out,

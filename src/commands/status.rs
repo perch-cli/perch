@@ -37,7 +37,19 @@ pub struct StatusArgs {
 }
 
 pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()> {
-    let (_perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    // Exclusively only when there is something to write, which is `--refresh`
+    // and nothing else. This is the command advertised for shell prompts: two
+    // of them rendering at once is the ordinary case, not a race, and taking
+    // the registry lock to read would have one of them wait out the other and
+    // then fail — a prompt showing an error because a second prompt drew at the
+    // same moment.
+    let (mut perch, mut registry) = match args.refresh {
+        true => {
+            let (perch, registry) = adopt::ensure_adopted_exclusively(host, out)?;
+            (Some(perch), registry)
+        }
+        false => (None, adopt::ensure_adopted(host, out)?),
+    };
     let active = active_email(&registry)?;
 
     // Being in no Group is not a Group (ADR 0017), so from an ungrouped Account
@@ -48,11 +60,12 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
         None => Scope::Ungrouped,
     });
 
-    let report = if args.refresh {
-        let asking_about = to_refresh(&registry, &scope, &active);
-        observe::refresh(host, &mut registry, &asking_about)
-    } else {
-        Report::default()
+    let report = match &mut perch {
+        Some(perch) => {
+            let asking_about = to_refresh(&registry, &scope, &active);
+            observe::refresh(host, perch, &mut registry, &asking_about)
+        }
+        None => Report::default(),
     };
 
     let now = host.now();

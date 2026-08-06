@@ -24,6 +24,7 @@ use crate::adopt;
 use crate::commands::say;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::lock::Held;
 use crate::login::{self, Produced};
 use crate::probe::{self, Identity};
 use crate::profile;
@@ -80,7 +81,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // From here the registry is the one on disk now, with the other Perches shut
     // out: the copy read before the login is however many commands out of date,
     // and writing it back would revert them.
-    let (_perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
     if registry.account(account.email()).is_none() {
         return Err(PerchError::NotFound(format!(
             "{} was removed while that login was happening, so there is nothing \
@@ -96,7 +97,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // by now whatever happens next: the Account has a working Credential in its
     // own Profile, which is the whole of what a Quarantine said it did not have.
     let was_quarantined = record(&mut registry, &account, produced);
-    registry::save(host, &registry)?;
+    registry::save(host, &mut perch, &registry)?;
 
     report(out, &registry, &account, was_quarantined)?;
 
@@ -108,7 +109,13 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
         return Ok(());
     }
     if let Err(error) = make_it_live(host, &account) {
-        return Err(no_longer_on_anybody(host, &mut registry, &account, error));
+        return Err(no_longer_on_anybody(
+            host,
+            &mut perch,
+            &mut registry,
+            &account,
+            error,
+        ));
     }
     say(
         out,
@@ -215,12 +222,13 @@ fn make_it_live(host: &dyn Host, account: &Account) -> Result<()> {
 /// they do.
 fn no_longer_on_anybody(
     host: &dyn Host,
+    perch: &mut Held<'_>,
     registry: &mut Registry,
     account: &Account,
     error: PerchError,
 ) -> PerchError {
     registry.active = None;
-    let recorded = match registry::save(host, registry) {
+    let recorded = match registry::save(host, perch, registry) {
         Ok(()) => format!(
             "Perch holds no active Account now, so nothing will Capture the \
              Credential that stopped working over the fresh one. \

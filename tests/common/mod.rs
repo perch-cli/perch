@@ -281,6 +281,14 @@ pub fn registry_of(host: &FakeHost) -> perch::registry::Registry {
         .expect("a registry is written")
 }
 
+/// Writes the registry the way a command does, which means under the lock a
+/// command holds. Taken and given back here, so a fixture arranging a state is
+/// one line rather than three.
+pub fn save_registry(host: &FakeHost, registry: &perch::registry::Registry) {
+    let mut perch = perch::registry::lock(host).expect("the registry lock is free");
+    perch::registry::save(host, &mut perch, registry).expect("the registry is written");
+}
+
 /// `perch group add <name>`, for the tests that only need the Group to exist.
 pub fn declare_group(host: &FakeHost, name: &str) {
     run_group(
@@ -459,7 +467,7 @@ pub fn observed(host: &FakeHost, email: &str, windows: Vec<WindowUtilization>) {
         observed_at,
         windows,
     });
-    perch::registry::save(host, &registry).expect("the registry is written");
+    save_registry(host, &registry);
 }
 
 /// Marks an Account as one whose Credential can no longer be used and cannot be
@@ -476,7 +484,7 @@ pub fn quarantine_for(host: &FakeHost, email: &str, why: Quarantine) {
         registry.quarantine(email, why),
         "{email} is an Account Perch holds and was not already Quarantined"
     );
-    perch::registry::save(host, &registry).expect("the registry is written");
+    save_registry(host, &registry);
 }
 
 /// Runs `perch relogin <target>`, returning what it printed alongside how it

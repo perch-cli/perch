@@ -48,24 +48,24 @@ pub enum GroupCommand {
 const LABEL_WIDTH: usize = 13;
 
 pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Result<()> {
-    let (_perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
 
     match command {
         GroupCommand::Add { name } => {
             registry.declare_group(&name)?;
-            registry::save(host, &registry)?;
+            registry::save(host, &mut perch, &registry)?;
             say(out, &format!("Declared the Group `{name}`."))?;
             describe_configuration(out, registry.group(&name).expect("just declared"))
         }
         GroupCommand::Remove { name } => {
             let removed = remove(&mut registry, &name)?;
-            registry::save(host, &registry)?;
+            registry::save(host, &mut perch, &registry)?;
             say(out, &format!("Removed the Group `{removed}`."))
         }
         GroupCommand::Move { target, group } => {
             let account = target::resolve_account(&registry, &target)?;
             let moved = move_account(&mut registry, &account, &group)?;
-            registry::save(host, &registry)?;
+            registry::save(host, &mut perch, &registry)?;
             say(out, &account.matched)?;
             say(out, &moved)
         }

@@ -19,6 +19,7 @@ use crate::commands::say;
 use crate::cycle::{self, Scope};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::lock::Held;
 use crate::registry::{self, Account, Quarantine, Registry};
 use crate::switch::{self, Captured, Interrupted};
 use crate::target::{self, Target};
@@ -41,7 +42,7 @@ struct Decision {
 }
 
 pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()> {
-    let (_perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
 
     let Decision { incoming, caveat } = decide(&registry, args.target.as_deref(), host.now(), out)?;
     let outgoing = registry.active_account().cloned();
@@ -52,7 +53,7 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
 
     match switch::perform(host, &incoming, outgoing.as_ref()) {
         Ok(captured) => {
-            record_active(host, &mut registry, &incoming)?;
+            record_active(host, &mut perch, &mut registry, &incoming)?;
             report(out, &registry, &incoming, &captured, host.now())?;
             match caveat {
                 Some(caveat) => say(out, &caveat),
@@ -70,7 +71,7 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
             // from scratch — and so `perch list` names it as something needing
             // attention rather than as an Account that simply failed once.
             if let Some(why) = quarantine {
-                record_quarantine(host, &mut registry, incoming.email(), why);
+                record_quarantine(host, &mut perch, &mut registry, incoming.email(), why);
             }
             // Which Account is active is a fact about which Credential is in
             // the Default Profile. Recording anything else would send the next
@@ -81,7 +82,7 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
             // failure that got us here over: the user is told both, and the
             // exit code stays the one the original failure earned.
             if incoming_is_live
-                && let Err(unrecorded) = record_active(host, &mut registry, &incoming)
+                && let Err(unrecorded) = record_active(host, &mut perch, &mut registry, &incoming)
             {
                 return Err(error.with_note(&unrecorded.to_string()));
             }
@@ -203,15 +204,26 @@ fn already_there(
 /// again. Losing that failure over a registry Perch could not write would be a
 /// poor trade — the worst a missed write costs is making the same discovery
 /// next time.
-fn record_quarantine(host: &dyn Host, registry: &mut Registry, email: &str, why: Quarantine) {
+fn record_quarantine(
+    host: &dyn Host,
+    perch: &mut Held<'_>,
+    registry: &mut Registry,
+    email: &str,
+    why: Quarantine,
+) {
     if registry.quarantine(email, why) {
-        let _ = registry::save(host, registry);
+        let _ = registry::save(host, perch, registry);
     }
 }
 
-fn record_active(host: &dyn Host, registry: &mut Registry, incoming: &Account) -> Result<()> {
+fn record_active(
+    host: &dyn Host,
+    perch: &mut Held<'_>,
+    registry: &mut Registry,
+    incoming: &Account,
+) -> Result<()> {
     registry.active = Some(incoming.email().to_string());
-    registry::save(host, registry).map_err(|error| {
+    registry::save(host, perch, registry).map_err(|error| {
         error.with_note(&format!(
             "The Switch itself worked: {}'s Credential is the live one. \
              Perch could not record that, so its own view of which Account is \

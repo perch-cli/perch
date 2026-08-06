@@ -11,10 +11,8 @@
 //! stops half way leaves both copies rather than neither, and running the
 //! command again finishes the job.
 
-use std::io::Write;
 use std::path::Path;
 
-use crate::commands::say;
 use crate::credentials;
 use crate::error::Result;
 use crate::host::Host;
@@ -26,7 +24,12 @@ use crate::registry::{self, Registry};
 ///
 /// Silent and does nothing at all in the ordinary case, which is every run
 /// after the first and every installation that never used the old path.
-pub fn out_of_the_old_home(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
+///
+/// Everything it says goes to `host.note`, which is stderr, and not to the
+/// command's own writer. The command that triggered this may be a
+/// `perch status --json` in somebody's shell prompt: prose on stdout ahead of
+/// the document is prose in the middle of whatever is parsing it.
+pub fn out_of_the_old_home(host: &dyn Host) -> Result<()> {
     // `$PERCH_HOME` is somebody saying where their state lives. Moving it would
     // be answering a question they have already answered.
     if host.env_var("PERCH_HOME").is_some() {
@@ -57,38 +60,50 @@ pub fn out_of_the_old_home(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     // With every other Perch shut out, so two of them starting at once do not
     // each carry half of it across. The lock lives under the new home, which
     // this creates on the way to taking it.
-    let _perch = registry::lock(host)?;
+    let mut perch = registry::lock(host)?;
     if host.path_exists(&new.join("registry.json")) {
         return Ok(());
     }
 
-    say(
-        out,
-        &format!(
-            "Moving what Perch holds from {} to {}, so it is not sitting in \
-             your home directory.",
-            old.display(),
-            new.display()
-        ),
-    )?;
-    carry_it_across(host, &old, &new)?;
-    say(
-        out,
-        "Moved. Nothing else about your Accounts has changed.\n",
-    )
+    host.note(&format!(
+        "Moving what Perch holds from {} to {}, so it is not sitting in your \
+         home directory.",
+        old.display(),
+        new.display()
+    ));
+    carry_it_across(host, &mut perch, &old, &new)?;
+    host.note("Moved. Nothing else about your Accounts has changed.");
+    Ok(())
 }
 
-fn carry_it_across(host: &dyn Host, old: &Path, new: &Path) -> Result<()> {
-    let held = read_the_old_registry(host, old)?;
+fn carry_it_across(
+    host: &dyn Host,
+    perch: &mut crate::lock::Held<'_>,
+    old: &Path,
+    new: &Path,
+) -> Result<()> {
+    let Some(held) = read_the_old_registry(host, old)? else {
+        return Ok(());
+    };
 
     // Every Credential first, because this is the part that can fail: a
     // keychain that will not open stops the migration with the old home
     // untouched, rather than half way through deleting it.
     let mut moved = Vec::new();
     for account in &held.accounts {
-        let slug = registry::slug(account.email());
-        let from = probe::store_for_profile(host, &old.join("profiles").join(&slug))?;
-        let to = probe::store_for_profile(host, &new.join("profiles").join(&slug))?;
+        // Through the derivation rather than around it: an address that slugs
+        // to nothing resolves to `profiles/` itself, and this loop's last act
+        // is to delete the directory it read from. Refused, which leaves both
+        // homes where they are and says the registry has to be put right by
+        // hand — the migration is the worst possible place to discover it.
+        let from = probe::store_for_profile(
+            host,
+            &registry::profile_dir_in(host, &old.join("profiles"), account.email())?,
+        )?;
+        let to = probe::store_for_profile(
+            host,
+            &registry::profile_dir_in(host, &new.join("profiles"), account.email())?,
+        )?;
 
         let Some(credential) = credentials::read(host, &from)? else {
             // An Account with no Credential is already Quarantined, or about to
@@ -102,7 +117,7 @@ fn carry_it_across(host: &dyn Host, old: &Path, new: &Path) -> Result<()> {
 
     // The registry last of the writes: until it is there, the new home is not
     // an installation and this runs again from the start.
-    registry::save(host, &held)?;
+    registry::save(host, perch, &held)?;
 
     // And only now what the old home was holding. Best-effort — what matters is
     // already somewhere Claude Code and Perch both read.
@@ -116,16 +131,16 @@ fn carry_it_across(host: &dyn Host, old: &Path, new: &Path) -> Result<()> {
 }
 
 /// The old registry, read from where it is rather than through
-/// [`registry::load`], which reads from wherever Perch keeps state *now*.
-fn read_the_old_registry(host: &dyn Host, old: &Path) -> Result<Registry> {
-    let path = old.join("registry.json");
-    let contents = host
-        .read_file(&path)
-        .map_err(|err| crate::error::PerchError::file_read(path.clone(), err))?;
-    serde_json::from_str(&contents).map_err(|err| crate::error::PerchError::Malformed {
-        path: path.display().to_string(),
-        detail: err.to_string(),
-    })
+/// [`registry::load`], which reads from wherever Perch keeps state *now* — but
+/// read the same way, by the same code.
+///
+/// The last thing this migration does is delete the old home, so it is the one
+/// reader that cannot afford to be lenient: a registry written by a newer Perch
+/// has to be refused here exactly as it is refused everywhere else, because
+/// parsing it with this build's understanding drops whatever this build does
+/// not know about and then removes the only copy that still had it.
+fn read_the_old_registry(host: &dyn Host, old: &Path) -> Result<Option<Registry>> {
+    registry::read_from(host, &old.join("registry.json"))
 }
 
 /// The `.claude.json` a Profile holds, which describes the Account in Claude
