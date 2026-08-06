@@ -10,6 +10,7 @@ use perch::commands::group::{self, GroupCommand};
 use perch::commands::list::{self, ListArgs};
 use perch::commands::relogin::{self, ReloginArgs};
 use perch::commands::remove::{self, RemoveArgs};
+use perch::commands::run::{self, RunArgs};
 use perch::commands::status::{self, StatusArgs};
 use perch::commands::switch::{self, SwitchArgs};
 use perch::error::EXIT_OK;
@@ -134,6 +135,18 @@ enum Command {
         yes: bool,
     },
 
+    /// Launch Claude Code as one Account, without changing which one is active.
+    ///
+    /// The Account you are on stays active — in every other terminal, in the
+    /// editor extension and in the desktop app — because a Run points one
+    /// process at one Profile and touches nothing else. Two terminals can run
+    /// two Accounts at once, and the client's exit code is Perch's.
+    Run {
+        /// The Account to run as: its Alias, or its email address. A Group has
+        /// no single meaning here, so naming one is refused.
+        target: String,
+    },
+
     /// Show every Account with its Alias, Group, state and cached Utilization.
     ///
     /// The one place that answers "what do I have". Renders from cache and
@@ -186,6 +199,15 @@ enum Command {
     },
 }
 
+/// The exit code a command that either did what it was asked or failed earns.
+///
+/// Every command but `run` is one of those: it worked, or it reported why not
+/// and the failure decides the code. A Run is the exception because it is a way
+/// of launching a program, and what that program said is what Perch says.
+fn ok(outcome: perch::Result<()>) -> perch::Result<i32> {
+    outcome.map(|()| EXIT_OK)
+}
+
 fn main() {
     report::install_panic_hook();
 
@@ -199,7 +221,7 @@ fn main() {
             group,
             no_group,
             alias,
-        } => add::run(
+        } => ok(add::run(
             &host,
             AddArgs {
                 group,
@@ -207,7 +229,7 @@ fn main() {
                 alias,
             },
             &mut out,
-        ),
+        )),
         // `--unset` needs no reading of its own: clap requires a Target unless
         // it was passed, and refuses both together, so the Target's absence is
         // exactly the flag.
@@ -215,30 +237,39 @@ fn main() {
             name,
             target,
             unset: _,
-        } => alias::run(
+        } => ok(alias::run(
             &host,
             match target {
                 Some(target) => AliasCommand::Set { name, target },
                 None => AliasCommand::Unset { name },
             },
             &mut out,
-        ),
-        Command::Config { action } => config::run(&host, action, &mut out),
-        Command::Disable { target } => {
-            enable::run(&host, EnableCommand::Disable { target }, &mut out)
+        )),
+        Command::Config { action } => ok(config::run(&host, action, &mut out)),
+        Command::Disable { target } => ok(enable::run(
+            &host,
+            EnableCommand::Disable { target },
+            &mut out,
+        )),
+        Command::Enable { target } => ok(enable::run(
+            &host,
+            EnableCommand::Enable { target },
+            &mut out,
+        )),
+        Command::Group { action } => ok(group::run(&host, action, &mut out)),
+        Command::List { json } => ok(list::run(&host, ListArgs { json }, &mut out)),
+        Command::Relogin { target } => ok(relogin::run(&host, ReloginArgs { target }, &mut out)),
+        Command::Remove { target, yes } => {
+            ok(remove::run(&host, RemoveArgs { target, yes }, &mut out))
         }
-        Command::Enable { target } => {
-            enable::run(&host, EnableCommand::Enable { target }, &mut out)
-        }
-        Command::Group { action } => group::run(&host, action, &mut out),
-        Command::List { json } => list::run(&host, ListArgs { json }, &mut out),
-        Command::Relogin { target } => relogin::run(&host, ReloginArgs { target }, &mut out),
-        Command::Remove { target, yes } => remove::run(&host, RemoveArgs { target, yes }, &mut out),
+        // The one command whose exit code is not Perch's own: what the client
+        // said is what a script reads.
+        Command::Run { target } => run::run(&host, RunArgs { target }, &mut out),
         Command::Status {
             group,
             refresh,
             json,
-        } => status::run(
+        } => ok(status::run(
             &host,
             StatusArgs {
                 group,
@@ -246,12 +277,12 @@ fn main() {
                 json,
             },
             &mut out,
-        ),
-        Command::Switch { target } => switch::run(&host, SwitchArgs { target }, &mut out),
+        )),
+        Command::Switch { target } => ok(switch::run(&host, SwitchArgs { target }, &mut out)),
     };
 
     let code = match outcome {
-        Ok(()) => EXIT_OK,
+        Ok(code) => code,
         Err(error) => {
             let _ = out.flush();
             let mut stderr = std::io::stderr();

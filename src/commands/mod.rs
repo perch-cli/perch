@@ -10,6 +10,7 @@ pub mod group;
 pub mod list;
 pub mod relogin;
 pub mod remove;
+pub mod run;
 pub mod status;
 pub mod switch;
 

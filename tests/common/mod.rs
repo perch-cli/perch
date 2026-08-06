@@ -15,6 +15,7 @@ use perch::commands::group::GroupCommand;
 use perch::commands::list::ListArgs;
 use perch::commands::relogin::ReloginArgs;
 use perch::commands::remove::RemoveArgs;
+use perch::commands::run::RunArgs;
 use perch::commands::status::StatusArgs;
 use perch::commands::switch::SwitchArgs;
 use perch::credentials;
@@ -138,6 +139,27 @@ pub fn login_producing(
 /// A login the user walked away from: it writes nothing and exits non-zero.
 pub fn abandoned_login() -> impl Fn(&FakeHost, &Path) -> i32 {
     |_host, _dir| 1
+}
+
+/// The client a Run launches, standing where a login stands for `add`: it is
+/// handed a Profile that is already an Account's, so it writes nothing of its
+/// own and only exits with the status the test is about.
+pub fn client_exiting(status: i32) -> impl Fn(&FakeHost, &Path) -> i32 {
+    move |_host, _dir| status
+}
+
+/// Runs `perch run <target>`, returning the status the client exited with — or
+/// Perch's refusal to launch one — alongside what was printed.
+pub fn run_run(host: &FakeHost, target: &str) -> (perch::Result<i32>, String) {
+    let mut written = Vec::new();
+    let result = perch::commands::run::run(
+        host,
+        RunArgs {
+            target: target.to_string(),
+        },
+        &mut written,
+    );
+    (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
 /// Runs `perch status` against a fake machine, returning what it printed
