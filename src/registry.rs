@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::error::{PerchError, Result};
-use crate::host::{Host, HostError};
+use crate::host::{self, Host, HostError};
 use crate::lock;
 use crate::probe::{Identity, LockSpec};
 
@@ -876,17 +876,25 @@ pub fn save(host: &dyn Host, registry: &Registry) -> Result<()> {
     write(host, &path, &format!("{body}\n"))
 }
 
+/// Replaces the registry in one step, or not at all.
+///
+/// The same care `.claude.json` gets, and for a sharper reason: this file is
+/// the whole of Perch's state, and every command reads it before it does
+/// anything. A truncate-then-write leaves a window in which a reader — `perch
+/// status`, which is advertised for shell prompts and may run several times a
+/// minute — sees half a file and reports it as malformed; and a crash inside
+/// that window leaves it half-written for good, with no command able to run
+/// until somebody edits it by hand.
 fn write(host: &dyn Host, path: &Path, contents: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         host.create_dir_all(parent).map_err(|err| {
             PerchError::Other(format!("could not create {}: {err}", parent.display()))
         })?;
     }
-    host.write_file(path, contents)
-        .map_err(|err| PerchError::FileWrite {
-            path: path.to_path_buf(),
-            source: std::io::Error::other(err.to_string()),
-        })
+    host::write_atomically(host, path, contents).map_err(|err| PerchError::FileWrite {
+        path: path.to_path_buf(),
+        source: std::io::Error::other(err.to_string()),
+    })
 }
 
 #[cfg(test)]
@@ -939,6 +947,36 @@ mod tests {
 
         drop(held);
         lock(&host).expect("a lock given back can be taken again");
+    }
+
+    /// The registry is the whole of Perch's state and every command reads it
+    /// first, so a write that stops half way must not be visible: a reader
+    /// would call the file malformed, and a crash inside that window would
+    /// leave it malformed for good.
+    #[test]
+    fn a_save_that_fails_leaves_the_registry_exactly_as_it_was() {
+        let path = "/Users/someone/.perch/registry.json";
+        let before = format!("{{\"version\":{CURRENT_VERSION},\"accounts\":[]}}");
+        let host = crate::host::FakeHost::new()
+            .with_file(path, &before)
+            .with_unwritable_file(path, "No space left on device (os error 28)");
+
+        let registry = Registry {
+            active: Some("someone@example.com".into()),
+            ..Registry::default()
+        };
+        save(&host, &registry).expect_err("the write cannot land");
+
+        assert_eq!(
+            host.file(path).as_deref(),
+            Some(before.as_str()),
+            "a reader still sees the registry that was there"
+        );
+        assert_eq!(
+            host.file(format!("{path}.perch-tmp")),
+            None,
+            "and the half-written copy is not left beside it"
+        );
     }
 
     #[test]
