@@ -462,9 +462,9 @@ it took.
 - `$PERCH_HOME` overrides `~/.config/.perch`. Home is `$USERPROFILE` on Windows and
   `$HOME` elsewhere; a machine that cannot say where home is gets a refusal,
   never a write into the filesystem root. `~/.config` is created if it is not
-  there, and the same path is used on every platform: a Profile's keychain
-  namespace is derived from its path, so a path that differed between machines
-  would be a Credential that could not move between them.
+  there, and the same path is used on every platform, Windows included, rather
+  than `%APPDATA%` — one rule to document and to support, and `$PERCH_HOME` for
+  anybody who wants a different one.
 - An installation still in `~/.perch`, where Perch kept its state before this,
   moves itself the next time any command runs. Not a rename — each Credential
   is read from where it is and written where it is going, because the namespace

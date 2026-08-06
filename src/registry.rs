@@ -697,13 +697,16 @@ impl Registry {
 /// because a machine that cannot say where home is gets a refusal rather than a
 /// registry written into the filesystem root.
 ///
-/// Under `~/.config` rather than directly in home, on every platform including
-/// Windows. A tool that keeps its state in the home directory adds a line to
-/// what somebody sees every time they list it, and Perch's state is not
-/// something anybody reads by hand. One place on every platform rather than the
-/// platform's own convention, because a Profile's keychain namespace is derived
-/// from its path (ADR 0001): a path that differs between machines is a
-/// Credential that cannot be moved between them.
+/// Under `~/.config` rather than directly in home. A tool that keeps its state
+/// in the home directory adds a line to what somebody sees every time they list
+/// it, and Perch's state is not something anybody reads by hand.
+///
+/// The same path on every platform, Windows included, rather than
+/// `%APPDATA%`: one rule is easier to document, to support and to keep in the
+/// Host port, which exposes a home directory and nothing else. It is a
+/// preference rather than a constraint — nothing in the design breaks under a
+/// platform-specific path — and `$PERCH_HOME` is there for anybody who wants
+/// one.
 ///
 /// `~/.config` is created if it is not there — at 0700, along with everything
 /// below it, since what goes under it here is Credentials.
