@@ -244,21 +244,25 @@ pub fn claude_version(host: &dyn Host) -> Result<String> {
         ));
     }
 
-    // "2.1.221 (Claude Code)" — the leading token is the version.
-    let version = execution
-        .stdout
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_string();
-    if version.is_empty() {
+    // "2.1.221 (Claude Code)" — the leading token is the version. Taken only
+    // when it looks like one: `claude` printing "error: ..." on a clean exit
+    // would otherwise become a version called `error:`, quoted back in every
+    // refusal that names which Claude Code Perch was talking to.
+    let version = execution.stdout.split_whitespace().next().unwrap_or("");
+    if !version.starts_with(|c: char| c.is_ascii_digit()) {
         return Err(refusal(
             assumption::INSTALLED,
-            "`claude --version` printed nothing",
+            &format!(
+                "`claude --version` printed {}",
+                match execution.stdout.trim() {
+                    "" => "nothing".to_string(),
+                    printed => format!("`{printed}`, which is not a version"),
+                }
+            ),
             "unknown",
         ));
     }
-    Ok(version)
+    Ok(version.to_string())
 }
 
 /// The keychain service name for a config directory.
@@ -514,6 +518,22 @@ pub fn read_identity(host: &dyn Host, store: &Store, version: &str) -> Result<Op
         )
     })?;
 
+    // An address is what every Profile path, keychain namespace, Alias target
+    // and Group membership is keyed on, so one with nothing nameable in it is
+    // refused where it enters rather than somewhere downstream that has already
+    // derived a path from it.
+    if !email.chars().any(|c| c.is_ascii_alphanumeric()) {
+        return Err(refusal(
+            assumption::IDENTITY_BLOCK,
+            &format!(
+                "{} names the account `{email}`, which has no character Perch \
+                 can name a Profile after",
+                store.identity_file.display()
+            ),
+            version,
+        ));
+    }
+
     Ok(Some(Identity {
         email,
         account_uuid: account.account_uuid,
@@ -533,6 +553,9 @@ pub fn read_identity(host: &dyn Host, store: &Store, version: &str) -> Result<Op
 pub struct LockSpec {
     /// How the lock is named when Perch has to say it could not take one.
     pub name: &'static str,
+    /// Whose lock it is, for the same message: quitting the right program is
+    /// the whole of the advice a contended lock can give.
+    pub held_by: &'static str,
     pub dir: PathBuf,
     pub stale_millis: i64,
     pub update_millis: i64,
@@ -566,18 +589,21 @@ pub fn locks_for(store: &Store) -> Vec<LockSpec> {
     vec![
         LockSpec {
             name: "the refresh lock",
+            held_by: "Claude Code",
             dir: store.config_dir.join(".oauth_refresh.lock"),
             stale_millis: REFRESH_STALE_MILLIS,
             update_millis: REFRESH_UPDATE_MILLIS,
         },
         LockSpec {
             name: "the legacy config-home lock",
+            held_by: "Claude Code",
             dir: legacy,
             stale_millis: REFRESH_STALE_MILLIS,
             update_millis: REFRESH_UPDATE_MILLIS,
         },
         LockSpec {
             name: "the config file lock",
+            held_by: "Claude Code",
             dir: PathBuf::from(config_file),
             stale_millis: CONFIG_STALE_MILLIS,
             update_millis: CONFIG_UPDATE_MILLIS,
@@ -879,7 +905,8 @@ mod tests {
 
     #[test]
     fn every_other_directory_gets_a_hash_of_its_path() {
-        let service = service_name_for(Path::new("/Users/someone/.perch/profiles/a"), false);
+        let service =
+            service_name_for(Path::new("/Users/someone/.config/.perch/profiles/a"), false);
         let hash = service.strip_prefix("Claude Code-credentials-").unwrap();
         assert_eq!(hash.len(), 8);
         assert!(hash.bytes().all(|b| b.is_ascii_hexdigit()));
@@ -887,8 +914,8 @@ mod tests {
 
     #[test]
     fn two_directories_get_two_namespaces() {
-        let one = service_name_for(Path::new("/Users/someone/.perch/profiles/a"), false);
-        let two = service_name_for(Path::new("/Users/someone/.perch/profiles/b"), false);
+        let one = service_name_for(Path::new("/Users/someone/.config/.perch/profiles/a"), false);
+        let two = service_name_for(Path::new("/Users/someone/.config/.perch/profiles/b"), false);
         assert_ne!(one, two);
     }
 

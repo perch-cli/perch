@@ -31,6 +31,19 @@ impl Execution {
     }
 }
 
+impl From<std::process::Output> for Execution {
+    /// A killed process has no exit code, and `-1` is what Perch reads it as
+    /// everywhere — said here so the three programs Perch runs cannot come to
+    /// disagree about it.
+    fn from(output: std::process::Output) -> Execution {
+        Execution {
+            status: output.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }
+    }
+}
+
 /// One HTTP request, whole.
 ///
 /// A request rather than a URL and some arguments beside it, because every part
@@ -94,6 +107,21 @@ pub const PRIVATE_FILE_MODE: u32 = 0o600;
 /// directory whose contents others may open.
 pub const PRIVATE_DIR_MODE: u32 = 0o700;
 
+/// A value as a double-quoted token, for the two line-oriented protocols Perch
+/// writes: `curl`'s configuration file and `security -i`'s command lines.
+///
+/// Quoted so that spaces and `#` are part of the value rather than punctuation,
+/// with backslashes and quotes escaped so JSON arrives as it was written. One
+/// copy rather than two identical ones, because two copies is how one of them
+/// gets fixed and the other does not.
+///
+/// It makes a value a *token*. It does not make it inert: neither protocol has
+/// an escape for a newline, so a value that could carry one is refused where it
+/// enters rather than quoted here.
+pub fn double_quoted(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
 /// Whether a mode lets anybody but the owner near the file.
 pub fn is_private(mode: u32) -> bool {
     mode & 0o077 == 0
@@ -140,6 +168,20 @@ pub trait Host {
 
     fn read_file(&self, path: &Path) -> Result<String, HostError>;
     fn write_file(&self, path: &Path, contents: &str) -> Result<(), HostError>;
+
+    /// Writes a file created with exactly this mode, rather than with whatever
+    /// the process umask happens to be.
+    ///
+    /// The mode belongs to the *creation* for the same reason it does in
+    /// [`Host::write_private_file`]: a file opened and then `chmod`ed is a file
+    /// that was briefly readable. Where a mode means nothing this is an
+    /// ordinary write.
+    fn create_file_with_mode(
+        &self,
+        path: &Path,
+        contents: &str,
+        mode: u32,
+    ) -> Result<(), HostError>;
 
     /// Writes a file nobody but its owner can read, creating it — and any
     /// directory above it — with that mode rather than tightening it
@@ -260,6 +302,36 @@ pub trait Host {
     fn http(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, HostError>;
 }
 
+/// Where the replacement for a file is written before it is moved over it.
+///
+/// Named after the process that is writing it. A single fixed name is one two
+/// Perches writing the same file would collide on, and one anybody who can
+/// write the directory can pre-plant something at — `CLAUDE_CONFIG_DIR` is
+/// taken verbatim and can name a shared location. The pid is what randomness
+/// buys here; a crate that generates a better one would want a real filesystem,
+/// and this sits behind the Host port where there is not always one (ADR 0025).
+pub fn temp_beside(path: &Path) -> PathBuf {
+    let mut beside = path.as_os_str().to_os_string();
+    beside.push(format!(".perch-tmp.{}", std::process::id()));
+    PathBuf::from(beside)
+}
+
+/// The mode a replacement for this file should be created with: the one the
+/// file already has, and the Credential mode for one that is not there yet.
+///
+/// A rename puts a *new* file at the path, so the mode of the old one is not
+/// inherited — it has to be carried across deliberately. `.claude.json` holds
+/// MCP configuration, and an MCP server entry routinely carries an API key in
+/// its `env` block, so a file the user had narrowed must not come back at the
+/// process umask; and a file Perch is the first to create is created closed
+/// rather than open (ADR 0020).
+fn mode_to_carry_across(host: &dyn Host, path: &Path) -> u32 {
+    host.file_mode(path)
+        .ok()
+        .flatten()
+        .unwrap_or(PRIVATE_FILE_MODE)
+}
+
 /// Replaces a file's contents in one step, or not at all.
 ///
 /// Used for the files Perch does not own. `.claude.json` holds project history,
@@ -268,19 +340,67 @@ pub trait Host {
 /// would cost them all of that. Writing beside it and moving it into place
 /// means the file is either the old one or the new one.
 pub fn write_atomically(host: &dyn Host, path: &Path, contents: &str) -> Result<(), HostError> {
-    let mut beside = path.as_os_str().to_os_string();
-    beside.push(".perch-tmp");
-    let beside = PathBuf::from(beside);
+    // The temp file carries the target's mode from the moment it exists: it
+    // holds the whole of the target's contents, so a temp file at the umask
+    // would leak everything the mode on the target is protecting.
+    replace_via_tmp(host, path, contents, mode_to_carry_across(host, path))
+}
 
-    host.write_file(&beside, contents)?;
+/// The whole of writing beside a file and moving the result over it, including
+/// what is done about a write that did not land.
+///
+/// Shared by the secret and non-secret writes. Two copies of this is how the
+/// failure cleanup comes to differ between the path that handles Credentials
+/// and the path that does not — which is the wrong pair to let drift.
+pub fn replace_via_tmp(
+    host: &dyn Host,
+    path: &Path,
+    contents: &str,
+    mode: u32,
+) -> Result<(), HostError> {
+    let beside = temp_beside(path);
+    host.create_file_with_mode(&beside, contents, mode)?;
     match host.rename(&beside, path) {
         Ok(()) => Ok(()),
         Err(err) => {
             // Nothing has replaced the original, so the half-written copy is
-            // just litter — and litter beside a file Claude Code reads is worth
-            // clearing even on the way out.
+            // just litter — and litter beside a file Claude Code reads, or one
+            // holding a Credential, is worth clearing even on the way out.
             let _ = host.remove_file(&beside);
             Err(err)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PATH: &str = "/Users/someone/.claude.json";
+
+    #[test]
+    fn a_replacement_is_created_with_the_mode_the_file_already_had() {
+        for mode in [0o600, 0o644, 0o640] {
+            let host = FakeHost::new()
+                .with_file(PATH, "{}")
+                .with_file_mode(PATH, mode);
+
+            write_atomically(&host, Path::new(PATH), "{\"a\":1}").expect("it is replaced");
+
+            assert_eq!(host.file(PATH).as_deref(), Some("{\"a\":1}"));
+            assert_eq!(host.mode_of(PATH), Some(mode));
+        }
+    }
+
+    /// Nothing is being carried across here, so the file is created closed:
+    /// the alternative is deciding to publish, at the umask, a file whose
+    /// contents Perch cannot see the end of.
+    #[test]
+    fn a_file_that_was_not_there_is_created_for_its_owner_alone() {
+        let host = FakeHost::new();
+
+        write_atomically(&host, Path::new(PATH), "{}").expect("it is written");
+
+        assert_eq!(host.mode_of(PATH), Some(PRIVATE_FILE_MODE));
     }
 }

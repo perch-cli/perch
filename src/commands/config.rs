@@ -39,16 +39,37 @@ use crate::registry::{self, GlobalConfig, GroupConfig, Registry, Strategy};
 /// Group is not something the command line can know: the forms differ only in
 /// how many there are, and telling the user which they seem to have meant is
 /// part of what this command does.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, clap::Subcommand)]
 pub enum ConfigCommand {
-    /// `perch config set [<group>] <key> <value>`.
-    Set { words: Vec<String> },
-    /// `perch config get [[<group>] <key>]`.
-    Get { words: Vec<String> },
+    /// Set one setting, and say what it now means.
+    ///
+    /// A Group carries `strategy` — `most-headroom` or `soonest-reset` —
+    /// along with `watcher-may-act` and `watcher-threshold-percent`, which are
+    /// stored and validated and read by nothing yet (ADR 0013). Naming no
+    /// Group addresses `cycle-ungrouped`, which is whether bare `perch switch`
+    /// may Cycle among the Accounts in no Group at all.
+    Set {
+        /// `<group> <key> <value>`, or `<key> <value>` for a setting that
+        /// belongs to no Group.
+        #[arg(value_name = "WORDS", num_args = 1.., required = true, allow_hyphen_values = true)]
+        words: Vec<String>,
+    },
+
+    /// Read settings back, each one in the form that would set it again.
+    ///
+    /// With nothing named it prints every setting there is. A Group prints
+    /// what that Group carries, and a Group and a key — or a key alone, for a
+    /// setting belonging to no Group — prints the one value on its own, for a
+    /// script to read without parsing prose.
+    Get {
+        /// Nothing, `<group>`, `<key>`, or `<group> <key>`.
+        #[arg(value_name = "WORDS", num_args = 0.., allow_hyphen_values = true)]
+        words: Vec<String>,
+    },
 }
 
 pub fn run(host: &dyn Host, command: ConfigCommand, out: &mut dyn Write) -> Result<()> {
-    let mut registry = adopt::ensure_adopted(host, out)?;
+    let (_perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
 
     match command {
         ConfigCommand::Set { words } => {

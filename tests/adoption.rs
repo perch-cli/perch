@@ -273,3 +273,23 @@ fn adoption_makes_no_network_call() {
 
     assert!(host.http_calls().is_empty());
 }
+
+/// A Profile is named after the slugged email, and an address with no
+/// alphanumeric character in it slugs to nothing — which would put that
+/// Account's Profile *at* the directory holding every other Account's, one
+/// `perch remove` away from taking all of them. Refused where the address
+/// enters, so no path is ever derived from it.
+#[test]
+fn a_login_whose_address_names_no_directory_is_refused_rather_than_adopted() {
+    let nameless = IDENTITY_FILE.replace(EMAIL, "@");
+    let host = logged_in_machine().with_file(IDENTITY_PATH, &nameless);
+
+    let (result, _) = run_status(&host, false);
+
+    let error = result.expect_err("no Profile can be named after that address");
+    assert_eq!(error.exit_code(), EXIT_PROBE_REFUSED);
+    assert!(
+        host.file(REGISTRY_PATH).is_none(),
+        "and nothing was written on the way to finding out"
+    );
+}

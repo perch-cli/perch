@@ -32,7 +32,10 @@ pub struct AddArgs {
 }
 
 pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
-    let mut registry = adopt::ensure_adopted(host, out)?;
+    // Read rather than held. A login is a browser round trip the user drives,
+    // and holding the registry lock across it would block every other Perch on
+    // the machine for as long as somebody takes to find their password.
+    let registry = adopt::ensure_adopted(host, out)?;
 
     // Everything knowable before the login is checked before the login, so a
     // name Perch was always going to refuse never costs a browser round trip.
@@ -53,7 +56,16 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
 
     let pending = login::perform(host, out, &announcement(&registry))?;
     refuse_an_account_perch_already_holds(host, &registry, &pending.identity)?;
-    let group = resolve_group(host, out, &args, &pending.identity)?;
+    let group = resolve_group(host, out, &registry, &args, &pending.identity)?;
+    drop(registry);
+
+    // Everything from here is decided against the registry as it is *now*, with
+    // the other Perches shut out. The copy above was read before a login that
+    // may have taken minutes, and writing it back would revert whatever else
+    // ran in the meantime — a `perch switch` in another terminal, most
+    // damagingly, whose `active` the next Capture depends on (ADR 0006).
+    let (_perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    refuse_an_account_perch_already_holds(host, &registry, &pending.identity)?;
     registry.refuse_taken_names(args.alias.as_deref(), group.as_deref())?;
 
     // Naming a Group on `add` declares it, so an Account is never in a Group
@@ -111,27 +123,66 @@ fn settle_into_a_profile(
     })
 }
 
-/// Refuses a login for an Account Perch is already holding a Profile for.
+/// Refuses a login whose Credential would land in a Profile Perch already
+/// holds one in.
 ///
 /// Two Profiles for one Account would fight over it — each holding a refresh
 /// token the other's next Renewal retires — so the way back to a working
 /// Account Perch already has is `perch relogin`, which repairs the Profile
 /// rather than building a second one.
+///
+/// The question is which *Profile* the login would land in, not which email it
+/// belongs to. A Profile is `profiles/<slugged email>`, and the slug lowercases
+/// and flattens every non-alphanumeric character, so `user+work@gmail.com`,
+/// `user.work@gmail.com` and `User-Work@gmail.com` all name one directory and
+/// one keychain namespace. Plus-addressing on a single inbox is exactly how
+/// somebody comes to hold several Anthropic Accounts, so this is a collision
+/// ordinary use produces — and storing over it would supersede the Credential
+/// already there and destroy a refresh token nothing can recover.
 fn refuse_an_account_perch_already_holds(
     host: &dyn Host,
     registry: &Registry,
     identity: &Identity,
 ) -> Result<()> {
-    let Some(existing) = registry.account(&identity.email) else {
+    let Some(existing) = registry
+        .accounts
+        .iter()
+        .find(|held| registry::same_profile(held.email(), &identity.email))
+    else {
         return Ok(());
     };
+
+    let same_account = existing.email().eq_ignore_ascii_case(&identity.email);
+    let why = if same_account {
+        "two Profiles for one Account would fight over it".to_string()
+    } else {
+        format!(
+            "{} and {} share the Profile they would be kept in, so holding both \
+             would mean each one's Credential replacing the other's",
+            existing.email(),
+            identity.email,
+        )
+    };
+    let way_out = if same_account {
+        format!(
+            "To repair that Account instead, run `perch relogin {}`.",
+            existing.email()
+        )
+    } else {
+        format!(
+            "Nothing about {} is changed. To hold this login instead, remove \
+             that Account first — or log in under an address that does not \
+             flatten to the same name.",
+            existing.email(),
+        )
+    };
+
     Err(PerchError::Conflict(format!(
         "Perch already holds {}, in {}.\n\
-         Nothing was added — two Profiles for one Account would fight over it.\n\
-         To repair that Account instead, run `perch relogin {}`.",
+         Nothing was added — {why}.\n\
+         {way_out}",
         registry.named_for_the_user(existing.email()),
         existing.profile_dir(host)?.display(),
-        existing.email()
     )))
 }
 
@@ -143,6 +194,7 @@ fn refuse_an_account_perch_already_holds(
 fn resolve_group(
     host: &dyn Host,
     out: &mut dyn Write,
+    registry: &Registry,
     args: &AddArgs,
     identity: &Identity,
 ) -> Result<Option<String>> {
@@ -172,7 +224,11 @@ fn resolve_group(
 
     // A name Perch cannot accept is asked about again rather than failing the
     // command: the login has already happened by now, and losing the Account
-    // over a typo would be a poor trade.
+    // over a typo would be a poor trade. Every reason a name can be refused is
+    // asked here, not only whether it is a usable shape — a name that collides
+    // with an existing Alias is exactly as much a typo as a name with a space
+    // in it, and used to abort the command with the browser round trip already
+    // spent.
     loop {
         let answer = match ask(host, out, &question)? {
             Some(answer) => answer.trim().to_string(),
@@ -191,7 +247,9 @@ fn resolve_group(
 
         match &chosen {
             None => return Ok(None),
-            Some(name) => match registry::validate_name(NameKind::Group, name) {
+            Some(name) => match registry::validate_name(NameKind::Group, name)
+                .and_then(|()| registry.refuse_taken_names(args.alias.as_deref(), Some(name)))
+            {
                 Ok(()) => return Ok(chosen),
                 Err(err) => say(out, &format!("{err}"))?,
             },

@@ -21,26 +21,34 @@ use crate::target::{self, AccountTarget};
 
 /// What was asked of `perch group`. The help each of these is described by
 /// lives with the command line that parses it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, clap::Subcommand)]
 pub enum GroupCommand {
+    /// Declare a Group. It starts empty, with the configuration a Group carries
+    /// by default: the most-headroom strategy, and the watcher switched off.
     Add {
+        /// The name, which shares one namespace with Aliases.
         name: String,
     },
-    Remove {
-        name: String,
-    },
-    /// `group` is the Group to move into, or `none` to leave every Group.
+
+    /// Forget a Group. Refused while it still holds Accounts, which are named.
+    Remove { name: String },
+
+    /// Move an Account into a Group, keeping its Profile, Credential and Alias.
     Move {
+        /// The Account: its Alias, or its email address.
         target: String,
+        /// The Group to move it into, or `none` to leave every Group.
         group: String,
     },
+
+    /// Show every Group with its Accounts and its configuration.
     List,
 }
 
 const LABEL_WIDTH: usize = 13;
 
 pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Result<()> {
-    let mut registry = adopt::ensure_adopted(host, out)?;
+    let (_perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
 
     match command {
         GroupCommand::Add { name } => {

@@ -79,9 +79,20 @@ pub fn read(host: &dyn Host, config: &Store) -> Result<Option<StoredCredential>>
                 kept_in: fallback,
                 credential,
             })),
-            // The fallback is only ever asked whether it has one, and an error
-            // from it is not a "yes". What the primary said is what happened.
-            _ => otherwise.map(|_| None),
+            // Neither holds one. What the primary said is what happened: on a
+            // machine with no keychain that is "nothing here", and on one with
+            // a locked keychain it is the lock.
+            Ok(None) => otherwise.map(|_| None),
+            // The fallback is there and would not say what it holds. That is
+            // not "no Credential": "no Credential" is terminal — it Quarantines
+            // an Account (ADR 0006) — and a file that is temporarily unreadable
+            // must not be promoted to a permanent verdict. If the primary
+            // already failed, its failure is the one to report, since it is the
+            // store this machine is meant to be using.
+            Err(fallback_failed) => match otherwise {
+                Ok(None) => Err(fallback_failed),
+                otherwise => otherwise.map(|_| None),
+            },
         },
     }
 }
@@ -112,10 +123,7 @@ impl CredentialStore {
                     Ok(Some(contents))
                 }
                 Err(HostError::NotFound { .. }) => Ok(None),
-                Err(err) => Err(PerchError::FileRead {
-                    path: path.clone(),
-                    source: as_io(err),
-                }),
+                Err(err) => Err(PerchError::file_read(path.clone(), err)),
             },
         }
     }
@@ -129,33 +137,52 @@ impl CredentialStore {
             }
             CredentialStore::Plaintext { path } => host
                 .write_private_file(path, credential)
-                .map_err(|err| PerchError::FileWrite {
-                    path: path.clone(),
-                    source: as_io(err),
-                }),
+                .map_err(|err| PerchError::file_write(path.clone(), err)),
         }
     }
 
-    /// Takes the Credential out of this store, if it holds one. A store that
-    /// held nothing is not a failure: this is how a copy that has been
-    /// superseded elsewhere is removed, and it is often already gone.
-    pub fn forget(&self, host: &dyn Host) -> Result<()> {
+    /// Takes the Credential out of this store, and says whether there was one.
+    ///
+    /// A store that held nothing is not a failure: this is how a copy that has
+    /// been superseded elsewhere is removed, and it is often already gone. But
+    /// it is not the same as one that gave a Credential up, and the caller is
+    /// sometimes about to tell the user which happened — `perch remove` says
+    /// the Credential Perch held is deleted, and the keychain item's account
+    /// name is `$USER`, which is not the same today as it was under `sudo -u`,
+    /// after a login rename, or in a launchd context. There, the delete is a
+    /// no-op that reads as success while the keychain goes on holding a working
+    /// Credential for an Account the tool just said it destroyed.
+    pub fn forget(&self, host: &dyn Host) -> Result<Forgotten> {
         match self {
             CredentialStore::Keychain { service, account } => {
                 match host.keychain_delete(service, account) {
-                    Ok(()) | Err(KeychainError::NotFound { .. }) => Ok(()),
-                    Err(_) if there_is_no_keychain_here(host) => Ok(()),
+                    Ok(()) => Ok(Forgotten::Credential),
+                    Err(KeychainError::NotFound { .. }) => Ok(Forgotten::Nothing),
+                    Err(_) if there_is_no_keychain_here(host) => Ok(Forgotten::Nothing),
                     Err(other) => Err(PerchError::from(other)),
                 }
             }
             CredentialStore::Plaintext { path } => {
-                host.remove_file(path).map_err(|err| PerchError::FileWrite {
-                    path: path.clone(),
-                    source: as_io(err),
+                let held = host.path_exists(path);
+                host.remove_file(path)
+                    .map_err(|err| PerchError::file_write(path.clone(), err))?;
+                Ok(if held {
+                    Forgotten::Credential
+                } else {
+                    Forgotten::Nothing
                 })
             }
         }
     }
+}
+
+/// What a store gave up when it was asked to forget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Forgotten {
+    Credential,
+    /// The store held nothing to take. Ordinary for the store that was not
+    /// written; news when it is the only store there was.
+    Nothing,
 }
 
 /// Whether this machine has a keychain at all.
@@ -166,11 +193,6 @@ impl CredentialStore {
 /// one (ADR 0020).
 fn there_is_no_keychain_here(host: &dyn Host) -> bool {
     host.platform() != Platform::MacOs
-}
-
-/// A Host failure as the error a `PerchError` about a file carries.
-fn as_io(err: HostError) -> std::io::Error {
-    std::io::Error::other(err.to_string())
 }
 
 /// Narrows a credential file anybody could read, and says so.
@@ -210,7 +232,7 @@ mod tests {
     fn profile_store(host: &FakeHost) -> Store {
         probe::store_for_profile(
             host,
-            std::path::Path::new("/Users/someone/.perch/profiles/a"),
+            std::path::Path::new("/Users/someone/.config/.perch/profiles/a"),
         )
         .expect("USER is set")
     }
@@ -233,7 +255,7 @@ mod tests {
         let host = FakeHost::new();
         assert_eq!(
             profile_store(&host).credentials_file,
-            std::path::Path::new("/Users/someone/.perch/profiles/a/.credentials.json")
+            std::path::Path::new("/Users/someone/.config/.perch/profiles/a/.credentials.json")
         );
     }
 
@@ -311,7 +333,10 @@ mod tests {
     fn a_credential_file_others_could_read_is_tightened_and_said_once() {
         let host = FakeHost::new()
             .with_platform(Platform::Other)
-            .with_file_mode("/Users/someone/.perch/profiles/a/.credentials.json", 0o644);
+            .with_file_mode(
+                "/Users/someone/.config/.perch/profiles/a/.credentials.json",
+                0o644,
+            );
         let store = profile_store(&host);
         host.set_file(&store.credentials_file, CREDENTIAL);
 
@@ -326,6 +351,23 @@ mod tests {
         assert_eq!(host.mode_of(&store.credentials_file), Some(0o600));
         assert_eq!(host.notes().len(), 1, "{:?}", host.notes());
         assert!(host.notes()[0].contains("0644"), "{:?}", host.notes());
+    }
+
+    /// "Neither store holds one" is terminal — it Quarantines an Account — so a
+    /// store that is there and would not say what it holds must not answer as
+    /// one holding nothing. The wrong answer here turns a mode that can be
+    /// fixed in a second into a state only a browser login ends.
+    #[test]
+    fn a_store_that_will_not_say_what_it_holds_is_not_a_store_holding_nothing() {
+        let host = FakeHost::new();
+        let store = profile_store(&host);
+        let host = host.with_unreadable_file(&store.credentials_file, "Permission denied");
+        // On this platform the file is the fallback, so it is the one asked
+        // second — and the keychain, asked first, simply has nothing.
+        host.set_file(&store.credentials_file, CREDENTIAL);
+
+        let error = read(&host, &store).unwrap_err();
+        assert!(error.to_string().contains("Permission denied"), "{error}");
     }
 
     #[test]

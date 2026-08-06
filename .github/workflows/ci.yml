@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The contract suite exists to find Claude Code drift before a user does, and
+  # Claude Code updates continuously while this repository may not change for a
+  # week. A weekly run is what turns "we would have noticed" into "we did".
+  schedule:
+    - cron: "0 6 * * 1"
 
 # Least privilege for GITHUB_TOKEN. CI only ever reads the repo, so nothing
 # here can push, tag, comment, or publish even if a step is compromised.
@@ -67,6 +72,34 @@ jobs:
       # run that tested a dependency set no one has committed.
       - name: Unit and behaviour tests
         run: cargo test --locked
+
+      # A dependency that nothing imports is compile time and audit surface for
+      # no call site, and it is invisible: nothing fails when the last use of a
+      # crate is deleted. This is the check that would have caught ratatui and
+      # crossterm sitting unused (ADR 0016).
+      - name: Unused dependencies
+        if: runner.os == 'Linux'
+        run: |
+          cargo install cargo-machete --locked --version 0.9.2
+          cargo machete
+
+      # Advisories against the exact dependency set that is committed, which is
+      # the same set `--locked` above tested.
+      - name: Advisories
+        if: runner.os == 'Linux'
+        run: |
+          cargo install cargo-audit --locked --version 0.22.2
+          cargo audit --deny warnings
+
+      # `rust-version` in Cargo.toml is a claim, and a claim nothing checks is a
+      # claim that quietly stops being true the first time somebody uses a
+      # newer language feature. Checked rather than tested: building is what the
+      # promise is about.
+      - name: Minimum supported Rust version
+        if: runner.os == 'Linux'
+        run: |
+          rustup toolchain install 1.97 --profile minimal
+          cargo +1.97 check --locked --all-targets
 
       # Gives the contract tests a real bundle to assert against. If the install
       # is unavailable they assert the "no Claude Code here" branch instead, so

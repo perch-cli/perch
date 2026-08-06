@@ -25,8 +25,8 @@ const REFRESH_LOCK: &str = "/Users/someone/.claude/.oauth_refresh.lock";
 const LEGACY_LOCK: &str = "/Users/someone/.claude.lock";
 const CONFIG_LOCK: &str = "/Users/someone/.claude.json.lock";
 
-const FIRST_PROFILE: &str = "/Users/someone/.perch/profiles/someone-example-com";
-const SECOND_PROFILE: &str = "/Users/someone/.perch/profiles/overflow-example-com";
+const FIRST_PROFILE: &str = "/Users/someone/.config/.perch/profiles/someone-example-com";
+const SECOND_PROFILE: &str = "/Users/someone/.config/.perch/profiles/overflow-example-com";
 
 /// The keychain namespace of an Account's Profile, derived the way every
 /// command derives it. The spelling of the directory decides the hash, and a
@@ -159,12 +159,13 @@ fn the_switch_captures_first_patches_the_identity_last_and_holds_claude_codes_lo
     assert_eq!(
         trace(&host),
         vec![
-            // Read before any lock is taken: a Profile nothing is running
-            // against does not change underneath Perch.
-            format!("read {SECOND_EMAIL}'s Profile"),
             format!("took {REFRESH_LOCK}"),
             format!("took {LEGACY_LOCK}"),
             format!("took {CONFIG_LOCK}"),
+            // Inside the locks, not before them: whether a client is running
+            // against either Profile is a statement about a moment, and taking
+            // the locks can take seconds.
+            format!("read {SECOND_EMAIL}'s Profile"),
             "read the live store".to_string(),
             format!("wrote {EMAIL}'s Profile"),
             format!("read {EMAIL}'s Profile"),
@@ -502,11 +503,42 @@ fn a_switch_that_cannot_patch_the_identity_says_what_it_left_where() {
     assert_eq!(stored_credential(&host, EMAIL).as_deref(), Some(CREDENTIAL));
     assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
     assert_eq!(
-        host.file(format!("{IDENTITY_PATH}.perch-tmp")),
+        host.file(perch::host::temp_beside(Path::new(IDENTITY_PATH))),
         None,
         "a write that did not land leaves nothing beside the file Claude Code \
          reads"
     );
+}
+
+/// `.claude.json` holds MCP configuration, and an MCP server entry routinely
+/// carries an API key in its `env` block. The Identity is patched by writing a
+/// replacement and moving it over the file, and a replacement created at the
+/// process umask would hand every one of those secrets to every other user on
+/// the machine — permanently, from the first Switch, with no race to lose.
+#[test]
+fn patching_the_identity_leaves_it_as_narrow_as_it_was_found() {
+    let host = machine_with_two_accounts().with_file_mode(IDENTITY_PATH, 0o600);
+
+    run_switch(&host, SECOND_EMAIL).0.expect("it switches");
+
+    assert!(identity_file(&host).contains(SECOND_EMAIL));
+    assert_eq!(
+        host.mode_of(IDENTITY_PATH),
+        Some(0o600),
+        "the file Perch replaced was narrow, so its replacement is too"
+    );
+}
+
+/// The other half of the same rule: a file that was open stays as it was, since
+/// Perch is patching one key of a file it does not own and its permissions are
+/// not Perch's to decide either way.
+#[test]
+fn patching_the_identity_does_not_narrow_a_file_that_was_open() {
+    let host = machine_with_two_accounts().with_file_mode(IDENTITY_PATH, 0o644);
+
+    run_switch(&host, SECOND_EMAIL).0.expect("it switches");
+
+    assert_eq!(host.mode_of(IDENTITY_PATH), Some(0o644));
 }
 
 #[test]
@@ -536,13 +568,15 @@ fn switching_to_the_account_that_is_already_active_changes_nothing() {
         error.to_string().contains("already the active Account"),
         "{error}"
     );
+    // Perch's own registry lock is taken by every command; what must not be
+    // taken is one of Claude Code's, because taking those is the Switch.
     assert!(
-        !host
-            .effects()
-            .iter()
-            .any(|effect| matches!(effect, Effect::Took(_))),
-        "no lock is taken, and no Credential is rewritten, for a Switch that \
-         would change nothing"
+        !host.effects().iter().any(|effect| matches!(
+            effect,
+            Effect::Took(dir) if !dir.starts_with("/Users/someone/.config/.perch")
+        )),
+        "none of Claude Code's locks is taken, and no Credential is rewritten, \
+         for a Switch that would change nothing"
     );
 }
 
@@ -585,7 +619,7 @@ fn a_lock_somebody_is_holding_stops_the_switch_without_changing_anything() {
 
     let error = result.expect_err("the lock is somebody else's");
     assert!(
-        error.to_string().contains("Claude Code is holding"),
+        error.to_string().contains("is held by Claude Code"),
         "{error}"
     );
     assert!(error.to_string().contains("Nothing was changed"), "{error}");
@@ -648,4 +682,41 @@ fn a_locked_keychain_reads_as_locked_rather_than_as_a_missing_account() {
 
     let error = result.expect_err("the keychain cannot be consulted");
     assert_eq!(error.exit_code(), EXIT_KEYCHAIN_UNAVAILABLE);
+}
+
+/// The window a liveness refusal asked before the locks leaves open.
+///
+/// Taking Claude Code's locks can take seconds — the wait is four of them. A
+/// `claude` started inside that wait is one a check made beforehand never saw,
+/// and the Switch would go on to replace the Credential that session is
+/// holding: the mid-task logout ADR 0005 exists to prevent. So the question is
+/// asked again once the locks are held and nothing can change the answer.
+#[test]
+fn a_client_that_starts_during_the_lock_wait_still_stops_the_switch() {
+    let host = machine_with_two_accounts();
+    let now = host.now();
+    let host = host
+        .with_dir_held_since(REFRESH_LOCK, now)
+        .once_while_waiting(move |host| {
+            // The holder gives the lock back — and in the same moment somebody
+            // starts working against the Profile being switched to.
+            host.remove_dir_all(Path::new(REFRESH_LOCK))
+                .expect("the holder is done");
+            host.set_file(
+                format!("{SECOND_PROFILE}/sessions/7788.json"),
+                &session_marker(7788, now),
+            );
+            host.set_live_process(7788);
+        });
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("that Credential belongs to the session holding it");
+    assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
+    assert!(error.to_string().contains("7788"), "{error}");
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(CREDENTIAL),
+        "and nothing was written"
+    );
 }

@@ -108,6 +108,15 @@ pub struct KeychainLock {
 /// namespace stays in [`crate::probe`] and out of the fake.
 pub type Login = Box<dyn Fn(&FakeHost, &Path) -> i32>;
 
+/// Something that happens while Perch waits.
+///
+/// Contending for a lock is the only thing Perch waits on, and the world does
+/// not stand still meanwhile: a `claude` started during that wait is exactly
+/// what the questions asked *under* the locks are asked again for. Without this
+/// the fake can only present a world that was already settled before the
+/// command began.
+pub type WhileWaiting = Box<dyn Fn(&FakeHost)>;
+
 pub struct FakeHost {
     home: PathBuf,
     now: RefCell<DateTime<Utc>>,
@@ -120,12 +129,25 @@ pub struct FakeHost {
     notes: RefCell<Vec<String>>,
     unreadable: RefCell<BTreeMap<PathBuf, String>>,
     unwritable: RefCell<BTreeMap<PathBuf, String>>,
+    /// Paths that will not give up what they hold. Distinct from an unwritable
+    /// one: a store that refuses a write is routinely one a superseded copy can
+    /// still be cleared out of.
+    undeletable: RefCell<BTreeMap<PathBuf, String>>,
     dirs: RefCell<BTreeSet<PathBuf>>,
     modified: RefCell<BTreeMap<PathBuf, DateTime<Utc>>>,
     keychain: RefCell<BTreeMap<(String, String), String>>,
     keychain_lock: RefCell<Option<KeychainLock>>,
+    /// Whether this machine has a keychain although it is not a Mac.
+    keychain_everywhere: RefCell<bool>,
+    /// How many bytes of a Credential the keychain keeps, when a test is about
+    /// a store that takes a write and quietly stores less than it was given.
+    keychain_keeps: RefCell<Option<usize>>,
+    /// Files that come back different from how they were written.
+    corrupting: RefCell<BTreeSet<PathBuf>>,
     executions: RefCell<BTreeMap<String, Execution>>,
     login: RefCell<Option<Login>>,
+    /// What happens the first time Perch waits, and then does not happen again.
+    while_waiting: RefCell<Option<WhileWaiting>>,
     /// The running processes, each with when it began — or `None` for one whose
     /// start the operating system will not say.
     live_processes: RefCell<BTreeMap<u32, Option<DateTime<Utc>>>>,
@@ -160,12 +182,17 @@ impl FakeHost {
             notes: RefCell::new(Vec::new()),
             unreadable: RefCell::new(BTreeMap::new()),
             unwritable: RefCell::new(BTreeMap::new()),
+            undeletable: RefCell::new(BTreeMap::new()),
             dirs: RefCell::new(BTreeSet::new()),
             modified: RefCell::new(BTreeMap::new()),
             keychain: RefCell::new(BTreeMap::new()),
             keychain_lock: RefCell::new(None),
+            keychain_everywhere: RefCell::new(false),
+            keychain_keeps: RefCell::new(None),
+            corrupting: RefCell::new(BTreeSet::new()),
             executions: RefCell::new(BTreeMap::new()),
             login: RefCell::new(None),
+            while_waiting: RefCell::new(None),
             live_processes: RefCell::new(BTreeMap::new()),
             interactive: RefCell::new(true),
             answers: RefCell::new(VecDeque::new()),
@@ -264,6 +291,16 @@ impl FakeHost {
         self
     }
 
+    /// A file that is there and will not go — a directory whose permissions
+    /// forbid it, a lock some other process holds on Windows. What a Credential
+    /// Store that cannot be emptied looks like.
+    pub fn with_undeletable_file(self, path: impl AsRef<Path>, detail: &str) -> Self {
+        self.undeletable
+            .borrow_mut()
+            .insert(path.as_ref().to_path_buf(), detail.to_string());
+        self
+    }
+
     /// Whatever stopped a path being written to has been put right — the
     /// permission fixed, the disk freed — so a test can carry on from a failure
     /// with the world it left rather than a fresh one.
@@ -291,6 +328,20 @@ impl FakeHost {
             .remove(&(service.to_string(), account.to_string()));
     }
 
+    /// A machine that has a keychain although it is not a Mac.
+    ///
+    /// The default off macOS is a keychain that answers the way a real one
+    /// would there: `/usr/bin/security` is not present on Linux or Windows, so
+    /// every call to it fails. A fake keychain that worked everywhere let a
+    /// test pass on a scenario that cannot happen on the platform it claims to
+    /// be about — so having one off macOS has to be asked for, and asking for
+    /// it is a statement that the test is about the composite reader rather
+    /// than about that platform.
+    pub fn with_keychain_off_macos(self) -> Self {
+        *self.keychain_everywhere.borrow_mut() = true;
+        self
+    }
+
     /// Every keychain operation now fails as locked or denied, rather than as
     /// "not found" — the distinction ADR 0008 insists on.
     pub fn with_locked_keychain(self, detail: &str) -> Self {
@@ -303,6 +354,28 @@ impl FakeHost {
         *self.keychain_lock.borrow_mut() = Some(KeychainLock {
             detail: detail.to_string(),
         });
+    }
+
+    /// A keychain that takes a write, reports success, and keeps only the
+    /// first `bytes` of what it was given.
+    ///
+    /// Exactly what `security -i` does when a command line overruns its 4096
+    /// byte stdin buffer: it truncates mid-argument and says nothing (ADR
+    /// 0008). Perch reads every Credential back before trusting it precisely
+    /// because of this, and without a store that can do it the read-back guard
+    /// could be deleted with every test still passing.
+    pub fn with_keychain_truncating_after(self, bytes: usize) -> Self {
+        *self.keychain_keeps.borrow_mut() = Some(bytes);
+        self
+    }
+
+    /// A file that comes back different from how it was written — the same
+    /// hazard on the plaintext store, which the same guard covers.
+    pub fn with_file_corrupting_writes(self, path: impl AsRef<Path>) -> Self {
+        self.corrupting
+            .borrow_mut()
+            .insert(path.as_ref().to_path_buf());
+        self
     }
 
     pub fn with_exec(self, program: &str, args: &[&str], execution: Execution) -> Self {
@@ -318,6 +391,23 @@ impl FakeHost {
     pub fn with_login(self, login: impl Fn(&FakeHost, &Path) -> i32 + 'static) -> Self {
         *self.login.borrow_mut() = Some(Box::new(login));
         self
+    }
+
+    /// What the rest of the machine does the first time Perch waits for a lock
+    /// — the one point in a command where something else can get in.
+    ///
+    /// Once, because it stands for a thing that happens rather than for a
+    /// condition: a client starting, a lock being given back.
+    pub fn once_while_waiting(self, happens: impl Fn(&FakeHost) + 'static) -> Self {
+        *self.while_waiting.borrow_mut() = Some(Box::new(happens));
+        self
+    }
+
+    /// A process that is running, for a world that is already built.
+    pub fn set_live_process(&self, pid: u32) {
+        self.live_processes
+            .borrow_mut()
+            .insert(pid, Some(DateTime::<Utc>::MIN_UTC));
     }
 
     /// A directory somebody else already holds, last written when they say.
@@ -435,6 +525,17 @@ impl FakeHost {
         self.files.borrow().get(path.as_ref()).cloned()
     }
 
+    /// Every file at or below a path, for a test that has to say what a whole
+    /// directory tree holds.
+    pub fn paths_under(&self, root: impl AsRef<Path>) -> Vec<PathBuf> {
+        self.files
+            .borrow()
+            .keys()
+            .filter(|path| path.starts_with(root.as_ref()))
+            .cloned()
+            .collect()
+    }
+
     /// The permissions a path ended up with, so a test can say that a file
     /// holding a Credential was created for its owner alone.
     pub fn mode_of(&self, path: impl AsRef<Path>) -> Option<u32> {
@@ -500,7 +601,28 @@ impl FakeHost {
             .insert(path.to_path_buf(), *self.now.borrow());
     }
 
+    /// What a path actually ends up holding, which is what was written to it
+    /// unless a test arranged otherwise.
+    fn as_stored(&self, path: &Path, contents: &str) -> String {
+        if self.corrupting.borrow().contains(path) {
+            let mut kept = contents.to_string();
+            kept.truncate(contents.len() / 2);
+            return kept;
+        }
+        contents.to_string()
+    }
+
+    /// Why a keychain call cannot be answered, when it cannot.
+    ///
+    /// Off macOS that is the ordinary case rather than an arrangement:
+    /// `/usr/bin/security` is a Mac binary, and a fake that pretended otherwise
+    /// would let a test pass on Linux for a reason that does not exist there.
     fn lock_error(&self) -> Option<KeychainError> {
+        if self.platform() != Platform::MacOs && !*self.keychain_everywhere.borrow() {
+            return Some(KeychainError::Unavailable {
+                detail: "could not run /usr/bin/security: No such file or directory".to_string(),
+            });
+        }
         self.keychain_lock
             .borrow()
             .as_ref()
@@ -563,6 +685,28 @@ impl Host for FakeHost {
         Ok(())
     }
 
+    /// Records the mode the file was *created* with, which is the whole point
+    /// of the call: a test can then say that a replacement for a narrow file
+    /// came back just as narrow.
+    fn create_file_with_mode(
+        &self,
+        path: &Path,
+        contents: &str,
+        mode: u32,
+    ) -> Result<(), HostError> {
+        self.record(Effect::WroteFile(path.to_path_buf()));
+        if let Some(detail) = self.unwritable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
+        }
+        self.note_directories_of(path);
+        self.files
+            .borrow_mut()
+            .insert(path.to_path_buf(), contents.to_string());
+        self.modes.borrow_mut().insert(path.to_path_buf(), mode);
+        self.mark_written(path);
+        Ok(())
+    }
+
     /// Records the mode as well as the contents, because "created private" and
     /// "made private afterwards" are the distinction ADR 0020 turns on and a
     /// fake that only kept the bytes could not tell them apart.
@@ -576,7 +720,7 @@ impl Host for FakeHost {
         }
         self.files
             .borrow_mut()
-            .insert(path.to_path_buf(), contents.to_string());
+            .insert(path.to_path_buf(), self.as_stored(path, contents));
         self.modes
             .borrow_mut()
             .insert(path.to_path_buf(), PRIVATE_FILE_MODE);
@@ -664,7 +808,13 @@ impl Host for FakeHost {
         Ok(())
     }
 
+    /// A path arranged as unreadable will not say when it was written either —
+    /// which is how "the lock is gone" and "the lock will not say" are told
+    /// apart, and they are different answers.
     fn modified_at(&self, path: &Path) -> Result<DateTime<Utc>, HostError> {
+        if let Some(detail) = self.unreadable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
+        }
         self.modified
             .borrow()
             .get(path)
@@ -701,12 +851,22 @@ impl Host for FakeHost {
                 path: from.to_path_buf(),
             })?;
         self.files.borrow_mut().insert(to.to_path_buf(), moved);
+        // A rename moves the file, mode and all: what ends up at the target is
+        // the file that was created beside it, not the one it replaced.
+        let mode = self.modes.borrow_mut().remove(from);
+        match mode {
+            Some(mode) => self.modes.borrow_mut().insert(to.to_path_buf(), mode),
+            None => self.modes.borrow_mut().remove(to),
+        };
         self.mark_written(to);
         Ok(())
     }
 
     fn remove_file(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::RemovedFile(path.to_path_buf()));
+        if let Some(detail) = self.undeletable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
+        }
         self.files.borrow_mut().remove(path);
         self.modified.borrow_mut().remove(path);
         self.modes.borrow_mut().remove(path);
@@ -762,10 +922,19 @@ impl Host for FakeHost {
         if let Some(error) = self.lock_error() {
             return Err(error);
         }
-        self.keychain.borrow_mut().insert(
-            (service.to_string(), account.to_string()),
-            secret.to_string(),
-        );
+        // Truncated at a byte boundary and never mid-character: what is being
+        // stood in for is a buffer that stops, not a broken encoder.
+        let kept = match *self.keychain_keeps.borrow() {
+            Some(bytes) if bytes < secret.len() => secret
+                .char_indices()
+                .take_while(|(at, _)| *at < bytes)
+                .map(|(_, c)| c)
+                .collect(),
+            _ => secret.to_string(),
+        };
+        self.keychain
+            .borrow_mut()
+            .insert((service.to_string(), account.to_string()), kept);
         Ok(())
     }
 
@@ -835,6 +1004,13 @@ impl Host for FakeHost {
         self.record(Effect::Slept { millis });
         let waited = *self.now.borrow() + chrono::Duration::milliseconds(millis as i64);
         *self.now.borrow_mut() = waited;
+
+        // Taken out before it runs, so it can reach back into the fake without
+        // meeting a borrow this call is still holding.
+        let happens = self.while_waiting.borrow_mut().take();
+        if let Some(happens) = happens {
+            happens(self);
+        }
     }
 
     fn is_interactive(&self) -> bool {

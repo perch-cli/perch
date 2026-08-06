@@ -73,7 +73,7 @@ enum Command {
     /// addressed by naming none (ADR 0017).
     Config {
         #[command(subcommand)]
-        action: ConfigAction,
+        action: ConfigCommand,
     },
 
     /// Keep an Account out of Cycling, without giving it up.
@@ -104,7 +104,7 @@ enum Command {
     /// and your personal Account is not.
     Group {
         #[command(subcommand)]
-        action: GroupAction,
+        action: GroupCommand,
     },
 
     /// Log an Account in again, in place.
@@ -186,79 +186,6 @@ enum Command {
     },
 }
 
-#[derive(Subcommand)]
-enum ConfigAction {
-    /// Set one setting, and say what it now means.
-    ///
-    /// A Group carries `strategy` — `most-headroom` or `soonest-reset` —
-    /// along with `watcher-may-act` and `watcher-threshold-percent`, which are
-    /// stored and validated and read by nothing yet (ADR 0013). Naming no
-    /// Group addresses `cycle-ungrouped`, which is whether bare `perch switch`
-    /// may Cycle among the Accounts in no Group at all.
-    Set {
-        /// `<group> <key> <value>`, or `<key> <value>` for a setting that
-        /// belongs to no Group.
-        #[arg(value_name = "WORDS", num_args = 1.., required = true, allow_hyphen_values = true)]
-        words: Vec<String>,
-    },
-
-    /// Read settings back, each one in the form that would set it again.
-    ///
-    /// With nothing named it prints every setting there is. A Group prints
-    /// what that Group carries, and a Group and a key — or a key alone, for a
-    /// setting belonging to no Group — prints the one value on its own, for a
-    /// script to read without parsing prose.
-    Get {
-        /// Nothing, `<group>`, `<key>`, or `<group> <key>`.
-        #[arg(value_name = "WORDS", num_args = 0.., allow_hyphen_values = true)]
-        words: Vec<String>,
-    },
-}
-
-impl From<ConfigAction> for ConfigCommand {
-    fn from(action: ConfigAction) -> Self {
-        match action {
-            ConfigAction::Set { words } => ConfigCommand::Set { words },
-            ConfigAction::Get { words } => ConfigCommand::Get { words },
-        }
-    }
-}
-
-#[derive(Subcommand)]
-enum GroupAction {
-    /// Declare a Group. It starts empty, with the configuration a Group carries
-    /// by default: the most-headroom strategy, and the watcher switched off.
-    Add {
-        /// The name, which shares one namespace with Aliases.
-        name: String,
-    },
-
-    /// Forget a Group. Refused while it still holds Accounts, which are named.
-    Remove { name: String },
-
-    /// Move an Account into a Group, keeping its Profile, Credential and Alias.
-    Move {
-        /// The Account: its Alias, or its email address.
-        target: String,
-        /// The Group to move it into, or `none` to leave every Group.
-        group: String,
-    },
-
-    /// Show every Group with its Accounts and its configuration.
-    List,
-}
-
-impl From<GroupAction> for GroupCommand {
-    fn from(action: GroupAction) -> Self {
-        match action {
-            GroupAction::Add { name } => GroupCommand::Add { name },
-            GroupAction::Remove { name } => GroupCommand::Remove { name },
-            GroupAction::Move { target, group } => GroupCommand::Move { target, group },
-            GroupAction::List => GroupCommand::List,
-        }
-    }
-}
-
 fn main() {
     report::install_panic_hook();
 
@@ -296,14 +223,14 @@ fn main() {
             },
             &mut out,
         ),
-        Command::Config { action } => config::run(&host, action.into(), &mut out),
+        Command::Config { action } => config::run(&host, action, &mut out),
         Command::Disable { target } => {
             enable::run(&host, EnableCommand::Disable { target }, &mut out)
         }
         Command::Enable { target } => {
             enable::run(&host, EnableCommand::Enable { target }, &mut out)
         }
-        Command::Group { action } => group::run(&host, action.into(), &mut out),
+        Command::Group { action } => group::run(&host, action, &mut out),
         Command::List { json } => list::run(&host, ListArgs { json }, &mut out),
         Command::Relogin { target } => relogin::run(&host, ReloginArgs { target }, &mut out),
         Command::Remove { target, yes } => remove::run(&host, RemoveArgs { target, yes }, &mut out),

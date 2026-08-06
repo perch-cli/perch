@@ -107,10 +107,60 @@ fn what_the_login_left(
 /// into. The Identity travels with the Credential it describes.
 pub fn carry_identity_file(host: &dyn Host, contents: &str, store: &probe::Store) -> Result<()> {
     host.write_file(&store.identity_file, contents)
-        .map_err(|err| PerchError::FileWrite {
-            path: store.identity_file.clone(),
-            source: std::io::Error::other(err.to_string()),
-        })
+        .map_err(|err| PerchError::file_write(store.identity_file.clone(), err))
+}
+
+/// How long a pending login is left alone before it is taken to have been
+/// abandoned.
+///
+/// Generous, because the thing on the other side of it is a person finding
+/// their password: a login somebody is still driving in another terminal must
+/// never be reaped out from under them. A login nobody came back from costs
+/// only the time until the next command, and there is no hurry.
+const ABANDONED_AFTER_MINUTES: i64 = 30;
+
+/// Deletes what abandoned logins left behind.
+///
+/// A login writes a complete, working Credential into the directory it runs in
+/// — the keychain on macOS, a file everywhere else — and [`perform`] clears
+/// that directory on the way out. But Ctrl-C delivers SIGINT to the whole
+/// foreground group, and "quit Claude Code when the login is done" is the
+/// documented flow, so a login being abandoned is expected rather than
+/// exceptional: Perch dies without unwinding and the Credential stays.
+///
+/// Nothing ever looked for those again. Each one is named after the moment it
+/// started, so every abandonment left a new one, and the keychain items are
+/// invisible — a slow accumulation of live refresh tokens for Accounts the user
+/// believes they never added. This runs at the start of every command, which is
+/// the earliest anything can notice.
+///
+/// Silent and best-effort throughout. It is tidying up on the way to what the
+/// user actually asked for, and a directory that will not go is not a reason to
+/// fail that.
+pub fn reap_abandoned(host: &dyn Host) {
+    let Ok(pending) = registry::pending_logins_dir(host) else {
+        return;
+    };
+    // Absent is the ordinary case: no login has ever been run here.
+    let Ok(entries) = host.list_dir(&pending) else {
+        return;
+    };
+
+    let too_old = host.now() - chrono::Duration::minutes(ABANDONED_AFTER_MINUTES);
+    for dir in entries {
+        // A directory whose age cannot be established is left alone. Being
+        // wrong in this direction costs a stale directory; being wrong in the
+        // other costs somebody the login they are in the middle of.
+        let Some(started_at) = registry::pending_login_started_at(&dir) else {
+            continue;
+        };
+        if started_at > too_old {
+            continue;
+        }
+        if let Ok(store) = probe::store_for_profile(host, &dir) {
+            profile::discard(host, &store);
+        }
+    }
 }
 
 /// What every login says about the Account it is leaving alone, when there is

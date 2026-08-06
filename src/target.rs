@@ -88,21 +88,36 @@ pub fn resolve_account(registry: &Registry, target: &str) -> Result<AccountTarge
     }
 }
 
+/// Matched however it was capitalised, because that is the rule the names were
+/// made under.
+///
+/// The registry refuses an Alias or a Group that differs from a held name only
+/// in case — "nobody remembers which way they capitalised a Group months ago",
+/// as it puts it — so there is never more than one candidate to find. An exact
+/// lookup here made every command that *resolves* a Target stricter than every
+/// command that *sets* one: `perch group add Work` then `perch switch work`
+/// said nothing was called `work`, while `perch config set work …` and `perch
+/// group remove work` both accepted it. Emails diverged the same way, against
+/// a `switch::already_landed` that compares them case-insensitively.
 fn matched(registry: &Registry, target: &str) -> Option<Target> {
-    if let Some(email) = registry.aliases.get(target) {
+    if let Some((name, email)) = registry.declared_alias(target) {
         return Some(Target::Alias {
-            name: target.to_string(),
-            email: email.clone(),
+            name: name.to_string(),
+            email: email.to_string(),
         });
     }
-    if let Some(account) = registry.account(target) {
+    if let Some(account) = registry
+        .accounts
+        .iter()
+        .find(|held| held.email().eq_ignore_ascii_case(target))
+    {
         return Some(Target::Account {
             email: account.email().to_string(),
         });
     }
-    if registry.group(target).is_some() {
+    if let Some(name) = registry.declared_group(target) {
         return Some(Target::Group {
-            name: target.to_string(),
+            name: name.to_string(),
         });
     }
     None

@@ -480,7 +480,7 @@ fn a_profile_that_cannot_be_completed_is_not_left_half_built() {
     let host = host
         .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE))
         .with_unwritable_file(
-            "/Users/someone/.perch/profiles/overflow-example-com/.claude.json",
+            "/Users/someone/.config/.perch/profiles/overflow-example-com/.claude.json",
             "Permission denied (os error 13)",
         );
     let (result, _) = run_add(&host, add_to_group("work"));
@@ -506,4 +506,198 @@ fn adding_an_account_makes_no_network_call() {
     run_add(&host, add_to_group("work")).0.unwrap();
 
     assert!(host.http_calls().is_empty());
+}
+
+/// The interleaving Perch's registry lock exists for.
+///
+/// `perch add` reads the registry, then spends minutes in a browser. Another
+/// terminal switches while it waits. If the add then wrote its own copy back
+/// wholesale, `active` would silently revert to the Account that was active
+/// before the Switch — and the next Capture would copy the *live* Credential,
+/// which belongs to the Account switched to, over that Account's own good copy
+/// and destroy it (ADR 0006).
+#[test]
+fn an_add_does_not_revert_a_switch_that_ran_while_its_login_was_open() {
+    let host = machine_with_two_accounts().with_login(|host, dir| {
+        // Another terminal, while the browser is open. It lands, and records
+        // itself as active.
+        run_switch(host, SECOND_EMAIL)
+            .0
+            .expect("the other terminal switches");
+        login_producing(THIRD_CREDENTIAL, THIRD_IDENTITY_FILE)(host, dir)
+    });
+
+    let (result, printed) = run_add(
+        &host,
+        AddArgs {
+            no_group: true,
+            ..AddArgs::default()
+        },
+    );
+
+    result.expect("the Account is added");
+    let registry = registry_of(&host);
+    assert!(registry.account(THIRD_EMAIL).is_some(), "{printed}");
+    assert_eq!(
+        registry.active.as_deref(),
+        Some(SECOND_EMAIL),
+        "the Switch that happened during the login stands: an add records an \
+         Account, it does not put the whole registry back to what it was"
+    );
+}
+
+/// A Profile is `profiles/<slugged email>`, and the slug flattens every
+/// non-alphanumeric character — so plus-addressing on one inbox, which is
+/// exactly how somebody comes to hold several Anthropic Accounts, produces two
+/// emails that name one directory and one keychain namespace. Storing over it
+/// would supersede the Credential already there: a refresh token nothing can
+/// recover, gone without a word.
+#[test]
+fn a_login_whose_profile_is_already_held_is_refused_even_under_another_address() {
+    const DOTTED: &str = "team.lead@example.com";
+    const PLUSSED: &str = "team+lead@example.com";
+    assert_eq!(
+        perch::registry::slug(DOTTED),
+        perch::registry::slug(PLUSSED),
+        "the two addresses this test is about flatten to one Profile"
+    );
+
+    let host = logged_in_machine().with_login(login_producing(
+        leaked(&CREDENTIAL.replace("oat01-test", "oat01-dotted")),
+        leaked(&IDENTITY_FILE.replace(EMAIL, DOTTED)),
+    ));
+    run_add(&host, no_group()).0.expect("a second Account");
+
+    let host = host.with_login(login_producing(
+        leaked(&CREDENTIAL.replace("oat01-test", "oat01-plussed")),
+        leaked(&IDENTITY_FILE.replace(EMAIL, PLUSSED)),
+    ));
+    let (result, _) = run_add(&host, no_group());
+
+    let error = result.expect_err("both Accounts would be kept in one Profile");
+    assert_eq!(error.exit_code(), EXIT_CONFLICT);
+    let message = error.to_string();
+    assert!(
+        message.contains(DOTTED) && message.contains(PLUSSED),
+        "both addresses are named, since neither is obviously the wrong \
+         one:\n{message}"
+    );
+
+    let registry = registry_of(&host);
+    assert_eq!(registry.accounts.len(), 2);
+    assert!(
+        credential_of(&host, DOTTED).is_some_and(|held| held.contains("oat01-dotted")),
+        "and the Credential already in that Profile is untouched"
+    );
+    assert_the_active_account_survived(&host);
+}
+
+/// A `&'static str` from a string built at run time, for the fixtures that take
+/// one. The test process ends soon enough that leaking a few is nothing.
+fn leaked(text: &str) -> &'static str {
+    Box::leak(text.to_string().into_boxed_str())
+}
+
+fn no_group() -> AddArgs {
+    AddArgs {
+        no_group: true,
+        ..AddArgs::default()
+    }
+}
+
+/// The same rule catching the case `switch` and `relogin` already treat as one
+/// Account: a login under a differently capitalised spelling of an address
+/// Perch holds is that Account, not a second one.
+#[test]
+fn a_login_under_a_differently_capitalised_address_is_the_account_perch_holds() {
+    let shouted = EMAIL.to_uppercase();
+    let host = logged_in_machine().with_login(login_producing(
+        CREDENTIAL,
+        leaked(&IDENTITY_FILE.replace(EMAIL, &shouted)),
+    ));
+
+    let (result, _) = run_add(&host, no_group());
+
+    let error = result.expect_err("one Account cannot have two entries");
+    assert_eq!(error.exit_code(), EXIT_CONFLICT);
+    assert!(
+        error.to_string().contains("perch relogin"),
+        "and the way back is the one that repairs it in place: {error}"
+    );
+    assert_eq!(registry_of(&host).accounts.len(), 1);
+}
+
+/// Ctrl-C during a login kills Perch without unwinding, and "quit Claude Code
+/// when the login is done" is the documented flow — so a login being abandoned
+/// is expected rather than exceptional. What it leaves behind is a complete,
+/// working Credential in a directory named after the moment it started, which
+/// nothing ever looked for again: a slow accumulation of live refresh tokens
+/// for Accounts the user believes they never added.
+#[test]
+fn what_an_abandoned_login_left_behind_is_reaped_by_the_next_command() {
+    let host = logged_in_machine();
+    run_list(&host, false)
+        .0
+        .expect("the first Account is adopted");
+
+    // What a login that was interrupted after Claude Code wrote its Credential
+    // and before Perch cleared up leaves on the machine.
+    let abandoned = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    let store = perch::probe::store_for_profile(&host, &abandoned).expect("USER is set");
+    host.set_keychain_item(&store.keychain_service, LOGIN_NAME, SECOND_CREDENTIAL);
+    host.set_file(&store.credentials_file, SECOND_CREDENTIAL);
+    assert!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME)
+            .is_some(),
+        "as we start"
+    );
+
+    // A command run straight afterwards leaves it alone: somebody may still be
+    // in the middle of that login in another terminal.
+    run_list(&host, false).0.expect("a listing");
+    assert!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME)
+            .is_some(),
+        "a login half an hour old is one somebody may still be driving"
+    );
+
+    host.set_now(host.now() + chrono::Duration::hours(2));
+    run_list(&host, false).0.expect("a listing");
+
+    assert_eq!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME),
+        None,
+        "the orphaned Credential is gone from the keychain, where nothing but \
+         this could ever have found it"
+    );
+    assert_eq!(host.file(&store.credentials_file), None);
+    assert!(!host.path_exists(&abandoned), "and so is its directory");
+}
+
+/// The Group prompt re-asks rather than failing, because "losing the Account
+/// over a typo would be a poor trade" — and a name that is already an Alias is
+/// exactly as much a typo as a name with a space in it. It used to pass the
+/// shape check, leave the loop, and abort the command with the browser round
+/// trip already spent and discarded.
+#[test]
+fn a_group_name_that_is_already_an_alias_is_asked_about_again() {
+    let host = ready_to_add().with_answers(&["overflow", "work"]);
+    set_alias(&host, "overflow", EMAIL).0.expect("named");
+
+    let (result, printed) = run_add(&host, AddArgs::default());
+
+    result.expect("the login is not thrown away over a name");
+    assert!(
+        printed.contains("already an Alias") || printed.contains("already names"),
+        "the collision is explained where it can still be corrected:\n{printed}"
+    );
+    assert_eq!(
+        registry_of(&host)
+            .account(SECOND_EMAIL)
+            .expect("the Account was added")
+            .group
+            .as_deref(),
+        Some("work"),
+        "and the second answer is the one that stands"
+    );
 }

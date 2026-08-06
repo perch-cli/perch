@@ -104,10 +104,9 @@ fn write_and_read_back(host: &dyn Host, kept_in: &CredentialStore, credential: &
                 "the Credential written to {} did not read back intact",
                 kept_in.describe()
             )),
-            CredentialStore::Plaintext { path } => PerchError::FileWrite {
-                path: path.clone(),
-                source: std::io::Error::other("the Credential did not read back intact"),
-            },
+            CredentialStore::Plaintext { path } => {
+                PerchError::file_write(path.clone(), "the Credential did not read back intact")
+            }
         });
     }
     Ok(())

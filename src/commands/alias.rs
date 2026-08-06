@@ -27,7 +27,7 @@ pub enum AliasCommand {
 }
 
 pub fn run(host: &dyn Host, command: AliasCommand, out: &mut dyn Write) -> Result<()> {
-    let mut registry = adopt::ensure_adopted(host, out)?;
+    let (_perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
 
     match command {
         AliasCommand::Set { name, target } => {
@@ -57,7 +57,7 @@ fn set(registry: &mut Registry, name: &str, account: &AccountTarget) -> Result<S
     // that includes recapitalising it, which is a rename like any other.
     let renaming_itself = previous
         .as_deref()
-        .is_some_and(|held| held.eq_ignore_ascii_case(name));
+        .is_some_and(|held| registry::same_name(held, name));
     if !renaming_itself {
         registry.refuse_taken_names(Some(name), None)?;
     }

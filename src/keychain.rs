@@ -5,18 +5,24 @@
 //! keychain crate. Four constraints come with that binary, and all four live
 //! here and nowhere else:
 //!
-//! - writes hex-encode with `-X` and go in through `-i` so a Credential never
-//!   reaches `argv`, where any process can read it off the process table;
+//! - writes hex-encode with `-X` and go in through `-i` so a Credential does
+//!   not reach `argv`, where any process can read it off the process table;
 //! - the `-i` stdin buffer is 4096 bytes and overflow truncates mid-argument,
-//!   silently corrupting the item, so writes near the limit fall back to argv;
+//!   silently corrupting the item, so writes near the limit fall back to argv
+//!   — the one exception to the line above, and one the user is told about as
+//!   it happens rather than left to discover: a Credential that reaches `argv`
+//!   is readable by anything running as them for as long as `security` does;
 //! - exit code 44 means "not found"; every other non-zero exit means locked,
 //!   denied, or unavailable, and is reported differently;
 //! - `-w` returns hex for non-printable data, so this is safe for the ASCII
 //!   JSON Claude Code stores and nothing else.
+//!
+//! What is here is the protocol and none of the spawning: building a command
+//! line, deciding which way it must travel, and reading an exit status. The
+//! process itself is started in [`crate::host::real`], where every other
+//! process Perch starts is.
 
-use std::process::{Command, Stdio};
-
-use crate::host::Execution;
+use crate::host::{Execution, double_quoted};
 
 /// The `security` binary. Never a build of Perch, never a crate — see ADR 0008.
 pub const SECURITY_BIN: &str = "/usr/bin/security";
@@ -77,13 +83,40 @@ pub fn classify(execution: &Execution, service: &str, account: &str) -> Keychain
 ///
 /// `-U` updates an existing item rather than failing; `-X` takes the secret as
 /// hex so no byte of it is ever quoted, escaped, or logged.
-pub fn add_command_line(service: &str, account: &str, secret: &str) -> String {
-    format!(
+///
+/// Refuses a service or account carrying a control character. `security -i` is
+/// line-oriented — one sub-command per line — so a newline in either of them
+/// does not need escaping, it needs rejecting: it ends this command and starts
+/// another, and `-i` reports a failed sub-command on stderr while still exiting
+/// 0, so an injected `delete-generic-password` that *works* is silent. The
+/// account name is `$USER` verbatim, which is somebody else's to set.
+pub fn add_command_line(
+    service: &str,
+    account: &str,
+    secret: &str,
+) -> Result<String, KeychainError> {
+    inert("the keychain service name", service)?;
+    inert("the keychain account name", account)?;
+    Ok(format!(
         "add-generic-password -U -s {} -a {} -X {}\n",
-        quote(service),
-        quote(account),
+        double_quoted(service),
+        double_quoted(account),
         hex_encode(secret.as_bytes()),
-    )
+    ))
+}
+
+/// Refuses a value that would be punctuation rather than a value.
+fn inert(what: &str, value: &str) -> Result<(), KeychainError> {
+    match value.chars().find(|c| c.is_control()) {
+        Some(control) => Err(KeychainError::Unavailable {
+            detail: format!(
+                "{what} carries a control character (U+{:04X}), which `security` \
+                 would read as the end of one command and the start of another",
+                control as u32
+            ),
+        }),
+        None => Ok(()),
+    }
 }
 
 /// Which path a write of this size must take.
@@ -97,10 +130,6 @@ pub fn write_path_for(command_line: &str) -> WritePath {
     } else {
         WritePath::Stdin
     }
-}
-
-fn quote(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 pub fn hex_encode(bytes: &[u8]) -> String {
@@ -138,35 +167,6 @@ pub fn decode_password_output(stdout: &str) -> String {
     }
 }
 
-/// Runs `security` for real. The only place in Perch that spawns it.
-pub fn run_security(args: &[&str], stdin: Option<&str>) -> std::io::Result<Execution> {
-    let mut command = Command::new(SECURITY_BIN);
-    command
-        .args(args)
-        .stdin(if stdin.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    let mut child = command.spawn()?;
-    if let Some(input) = stdin {
-        use std::io::Write;
-        let mut pipe = child.stdin.take().expect("stdin was piped");
-        pipe.write_all(input.as_bytes())?;
-        drop(pipe);
-    }
-    let output = child.wait_with_output()?;
-
-    Ok(Execution {
-        status: output.status.code().unwrap_or(-1),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,17 +179,39 @@ mod tests {
         assert_eq!(hex_decode(&hex).unwrap(), secret.as_bytes());
     }
 
+    /// The `-i` line for an ordinary write, which every test below is about.
+    fn line(service: &str, account: &str, secret: &str) -> String {
+        add_command_line(service, account, secret).expect("ordinary names")
+    }
+
     #[test]
     fn a_short_credential_goes_through_stdin() {
-        let line = add_command_line("Claude Code-credentials", "someone", "{\"a\":1}");
-        assert_eq!(write_path_for(&line), WritePath::Stdin);
+        let written = line("Claude Code-credentials", "someone", "{\"a\":1}");
+        assert_eq!(write_path_for(&written), WritePath::Stdin);
+    }
+
+    /// `security -i` reads one sub-command per line, so a newline in a value is
+    /// not something to escape — it is the end of this command and the start of
+    /// another. The account name is `$USER` verbatim, which is somebody else's
+    /// to set, and `-i` reports a failed sub-command on stderr while still
+    /// exiting 0: an injected `delete-generic-password` that worked would be
+    /// silent.
+    #[test]
+    fn a_name_carrying_a_control_character_is_refused_rather_than_quoted() {
+        let injected = "someone\ndelete-generic-password -s \"Claude Code-credentials\"";
+        let refused = add_command_line("Claude Code-credentials", injected, "{}")
+            .expect_err("that is two commands, not a name");
+        assert!(refused.to_string().contains("account name"), "{refused}");
+
+        add_command_line("svc\r", "someone", "{}").expect_err("a carriage return too");
+        add_command_line("svc", "someone", "{}").expect("and an ordinary pair is fine");
     }
 
     #[test]
     fn a_credential_near_the_buffer_limit_falls_back_to_argv() {
         let big = "x".repeat(STDIN_BUFFER_LIMIT / 2);
-        let line = add_command_line("Claude Code-credentials", "someone", &big);
-        assert_eq!(write_path_for(&line), WritePath::Argv);
+        let written = line("Claude Code-credentials", "someone", &big);
+        assert_eq!(write_path_for(&written), WritePath::Argv);
     }
 
     #[test]
@@ -203,8 +225,8 @@ mod tests {
 
     #[test]
     fn the_secret_never_appears_in_plain_text_on_the_command_line() {
-        let line = add_command_line("svc", "acct", "sk-ant-oat01-secret");
-        assert!(!line.contains("sk-ant-oat01-secret"));
+        let written = line("svc", "acct", "sk-ant-oat01-secret");
+        assert!(!written.contains("sk-ant-oat01-secret"));
     }
 
     #[test]

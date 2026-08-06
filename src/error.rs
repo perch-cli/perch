@@ -132,6 +132,28 @@ pub enum PerchError {
 }
 
 impl PerchError {
+    /// A file that could not be read, from whatever said so.
+    ///
+    /// Every caller of this used to spell out the same
+    /// `std::io::Error::other(err.to_string())` laundering, because what fails
+    /// is a [`HostError`](crate::host::HostError) and what the variant carries
+    /// is an `io::Error`. Said once, so the six places that report a file
+    /// failure report it the same way.
+    pub fn file_read(path: impl Into<PathBuf>, why: impl std::fmt::Display) -> PerchError {
+        PerchError::FileRead {
+            path: path.into(),
+            source: std::io::Error::other(why.to_string()),
+        }
+    }
+
+    /// The same, for a file that could not be written.
+    pub fn file_write(path: impl Into<PathBuf>, why: impl std::fmt::Display) -> PerchError {
+        PerchError::FileWrite {
+            path: path.into(),
+            source: std::io::Error::other(why.to_string()),
+        }
+    }
+
     /// The same failure, with a line about what it left behind.
     ///
     /// A step that fails part way through a sequence has to say what happened

@@ -12,7 +12,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::error::{PerchError, Result};
 use crate::host::{Host, HostError};
-use crate::probe::Identity;
+use crate::lock;
+use crate::probe::{Identity, LockSpec};
 
 /// The version this build writes. A registry from the future is refused rather
 /// than silently misread.
@@ -319,7 +320,7 @@ pub const NO_GROUP: &str = "none";
 
 /// Whether a name is the one that means no Group at all.
 pub fn means_no_group(name: &str) -> bool {
-    name.eq_ignore_ascii_case(NO_GROUP)
+    same_name(name, NO_GROUP)
 }
 
 /// Which of the two things sharing the namespace is being named. A refusal
@@ -348,6 +349,18 @@ impl NameKind {
 /// `switch` and `run`, so a name has to be distinguishable from the other
 /// things a Target can be: an email address, and the word that means no Group
 /// at all.
+/// Whether two names the user chose are the same name.
+///
+/// Case-insensitively, because nobody remembers which way they capitalised a
+/// Group months ago — and over the whole of Unicode, because
+/// [`validate_name`] accepts the whole of Unicode. Comparing only ASCII would
+/// make `café` and `CAFÉ` two different Groups while making `work` and `Work`
+/// one, which is the ambiguity the rule exists to prevent, kept for exactly
+/// the users whose language has accents in it.
+pub fn same_name(one: &str, other: &str) -> bool {
+    one.to_lowercase() == other.to_lowercase()
+}
+
 pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
     if name.trim().is_empty() {
         return Err(PerchError::Invalid(format!(
@@ -488,7 +501,7 @@ impl Registry {
     pub fn declared_group(&self, name: &str) -> Option<&str> {
         self.groups
             .keys()
-            .find(|declared| declared.eq_ignore_ascii_case(name))
+            .find(|declared| same_name(declared, name))
             .map(String::as_str)
     }
 
@@ -554,7 +567,7 @@ impl Registry {
     pub fn declared_alias(&self, name: &str) -> Option<(&str, &str)> {
         self.aliases
             .iter()
-            .find(|(alias, _)| alias.eq_ignore_ascii_case(name))
+            .find(|(alias, _)| same_name(alias, name))
             .map(|(alias, email)| (alias.as_str(), email.as_str()))
     }
 
@@ -572,7 +585,7 @@ impl Registry {
     /// even though a lookup could tell them apart.
     pub fn refuse_taken_names(&self, alias: Option<&str>, group: Option<&str>) -> Result<()> {
         if let (Some(alias), Some(group)) = (alias, group)
-            && alias.eq_ignore_ascii_case(group)
+            && same_name(alias, group)
         {
             return Err(PerchError::Conflict(format!(
                 "`{alias}` cannot be both an Alias and a Group name."
@@ -680,17 +693,39 @@ impl Registry {
     }
 }
 
-/// `$PERCH_HOME`, or `~/.perch` — an error when neither is knowable, because
-/// a machine that cannot say where home is gets a refusal rather than a
+/// `$PERCH_HOME`, or `~/.config/.perch` — an error when neither is knowable,
+/// because a machine that cannot say where home is gets a refusal rather than a
 /// registry written into the filesystem root.
+///
+/// Under `~/.config` rather than directly in home. A tool that keeps its state
+/// in the home directory adds a line to what somebody sees every time they list
+/// it, and Perch's state is not something anybody reads by hand.
+///
+/// The same path on every platform, Windows included, rather than
+/// `%APPDATA%`: one rule is easier to document, to support and to keep in the
+/// Host port, which exposes a home directory and nothing else. It is a
+/// preference rather than a constraint — nothing in the design breaks under a
+/// platform-specific path — and `$PERCH_HOME` is there for anybody who wants
+/// one.
+///
+/// `~/.config` is created if it is not there — at 0700, along with everything
+/// below it, since what goes under it here is Credentials.
 pub fn perch_home(host: &dyn Host) -> Result<PathBuf> {
     if let Some(overridden) = host.env_var("PERCH_HOME") {
         return Ok(PathBuf::from(overridden));
     }
-    let home = host
-        .home_dir()
-        .map_err(|err| PerchError::Other(err.to_string()))?;
-    Ok(home.join(".perch"))
+    Ok(home_dir(host)?.join(".config").join(".perch"))
+}
+
+/// Where Perch kept its state before it moved under `~/.config`. Read only by
+/// the migration, which is the last thing that has any business knowing it.
+pub fn perch_home_before_the_move(host: &dyn Host) -> Result<PathBuf> {
+    Ok(home_dir(host)?.join(".perch"))
+}
+
+fn home_dir(host: &dyn Host) -> Result<PathBuf> {
+    host.home_dir()
+        .map_err(|err| PerchError::Other(err.to_string()))
 }
 
 pub fn registry_path(host: &dyn Host) -> Result<PathBuf> {
@@ -703,8 +738,32 @@ pub fn profiles_dir(host: &dyn Host) -> Result<PathBuf> {
 
 /// The Profile directory for an Account. The email is slugged because the path
 /// is hashed into a keychain service name and has to be stable and printable.
+///
+/// An address with no alphanumeric character in it slugs to nothing, and
+/// joining nothing onto a path gives back the path: the Profile of such an
+/// Account would *be* `profiles/`, the directory holding every other Account's.
+/// `perch remove` deletes a Profile directory whole, so that Account is one
+/// removal away from taking every Credential Perch holds with it. Refused here,
+/// at the one place every store and every keychain namespace is derived from,
+/// rather than trusted to whatever wrote the address.
 pub fn profile_dir_for(host: &dyn Host, email: &str) -> Result<PathBuf> {
-    Ok(profiles_dir(host)?.join(slug(email)))
+    let profiles = profiles_dir(host)?;
+    let slugged = slug(email);
+    let dir = profiles.join(&slugged);
+
+    // Two ways of asking the same question, because the answer is the whole
+    // machine: an empty slug, and — for whatever a future slug might let
+    // through — a path that is not one directory below the one it was joined to.
+    if slugged.is_empty() || dir.parent() != Some(profiles.as_path()) {
+        return Err(PerchError::Invalid(format!(
+            "`{email}` has no character a Profile directory can be named after, \
+             so Perch cannot say where its Credential would be kept.\n\
+             An Account recorded under that address has to be removed from \
+             {} by hand.",
+            registry_path(host)?.display(),
+        )));
+    }
+    Ok(dir)
 }
 
 /// Where a login lives while Perch is running it.
@@ -714,9 +773,27 @@ pub fn profile_dir_for(host: &dyn Host, email: &str) -> Result<PathBuf> {
 /// here and its Credential is moved into a Profile afterwards. Nothing outlives
 /// the command: this directory is removed whether the login worked or not.
 pub fn pending_login_dir(host: &dyn Host, started_at: DateTime<Utc>) -> Result<PathBuf> {
-    Ok(perch_home(host)?
-        .join("pending")
-        .join(format!("login-{}", started_at.timestamp_millis())))
+    Ok(pending_logins_dir(host)?.join(format!("login-{}", started_at.timestamp_millis())))
+}
+
+/// Where every pending login lives, so the ones nobody came back from can be
+/// found again.
+pub fn pending_logins_dir(host: &dyn Host) -> Result<PathBuf> {
+    Ok(perch_home(host)?.join("pending"))
+}
+
+/// When the login that made this directory started, as its name records.
+///
+/// The name is `login-<millis>`, written by [`pending_login_dir`], and it is
+/// the only account of the directory's age that nothing later moves.
+pub fn pending_login_started_at(dir: &Path) -> Option<DateTime<Utc>> {
+    let millis: i64 = dir
+        .file_name()?
+        .to_str()?
+        .strip_prefix("login-")?
+        .parse()
+        .ok()?;
+    DateTime::from_timestamp_millis(millis)
 }
 
 /// Whether two Accounts derive the same Profile directory. The derivation is
@@ -733,6 +810,50 @@ pub fn slug(email: &str) -> String {
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
     slugged.trim_matches('-').to_string()
+}
+
+/// How long a Perch that died holding the registry lock keeps it.
+///
+/// Longer than the Claude Code locks a Switch takes, because it is the outer
+/// lock: everything one of those waits for happens inside this one. Short
+/// enough that a machine whose Perch was killed mid-command is usable again
+/// within a minute rather than needing the directory removed by hand.
+const REGISTRY_STALE_MILLIS: i64 = 90_000;
+const REGISTRY_UPDATE_MILLIS: i64 = 5_000;
+
+/// The lock one Perch takes so that no other Perch is changing the registry at
+/// the same time.
+///
+/// A directory, taken with the same `mkdir`-or-fail primitive the Claude Code
+/// locks use, for the same reason: the call both asks and answers, with nothing
+/// in between. It excludes only other Perches — Claude Code has no interest in
+/// this file — which is exactly the set that needs excluding.
+pub fn lock_spec(host: &dyn Host) -> Result<LockSpec> {
+    Ok(LockSpec {
+        name: "the Perch registry lock",
+        held_by: "the other `perch`",
+        dir: perch_home(host)?.join(".registry.lock"),
+        stale_millis: REGISTRY_STALE_MILLIS,
+        update_millis: REGISTRY_UPDATE_MILLIS,
+    })
+}
+
+/// Shuts every other Perch out of the registry until the returned hold is
+/// dropped.
+///
+/// Every command is a load, some changes made in memory, and a save of the
+/// whole thing — so two of them overlapping does not merge, it discards. The
+/// hold is taken for the span of the command rather than for the span of the
+/// write, because it is the *read* that goes stale: a `perch add` that saved
+/// its copy after a `perch switch` had landed would put `active` back to
+/// whatever it was before the Switch, and the next Capture would then write the
+/// live Credential into the wrong Account's Profile (ADR 0006).
+///
+/// Never held across a browser login. That is minutes of somebody else's time,
+/// and the commands that spend it take this afterwards, against a registry read
+/// fresh.
+pub fn lock(host: &dyn Host) -> Result<lock::Held<'_>> {
+    lock::take_all(host, vec![lock_spec(host)?])
 }
 
 /// Reads the registry, or `None` when Perch has never run here.
@@ -807,17 +928,32 @@ pub fn save(host: &dyn Host, registry: &Registry) -> Result<()> {
     write(host, &path, &format!("{body}\n"))
 }
 
+/// Replaces the registry in one step, or not at all, and for its owner alone.
+///
+/// **In one step**, with the same care `.claude.json` gets and for a sharper
+/// reason: this file is the whole of Perch's state, and every command reads it
+/// before it does anything. A truncate-then-write leaves a window in which a
+/// reader — `perch status`, which is advertised for shell prompts and may run
+/// several times a minute — sees half a file and reports it as malformed; and a
+/// crash inside that window leaves it half-written for good, with no command
+/// able to run until somebody edits it by hand.
+///
+/// **For its owner alone**, because the registry holds no Credential but holds
+/// everything else: every Account's email address, organization, plan, Alias,
+/// Group and Quarantine reason, and the Utilization history behind them. That
+/// is a full picture of somebody's Anthropic relationships, and the Profile
+/// directories it sits beside are already 0700 (ADR 0020) — this file was the
+/// gap. A `~/.perch` that already exists keeps the mode it has, as `mkdir -p`
+/// does everywhere else in Perch, but the file is replaced on every save and so
+/// comes back narrow from the first one.
 fn write(host: &dyn Host, path: &Path, contents: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
-        host.create_dir_all(parent).map_err(|err| {
+        host.create_private_dir_all(parent).map_err(|err| {
             PerchError::Other(format!("could not create {}: {err}", parent.display()))
         })?;
     }
-    host.write_file(path, contents)
-        .map_err(|err| PerchError::FileWrite {
-            path: path.to_path_buf(),
-            source: std::io::Error::other(err.to_string()),
-        })
+    host.write_private_file(path, contents)
+        .map_err(|err| PerchError::file_write(path, err))
 }
 
 #[cfg(test)]
@@ -827,6 +963,99 @@ mod tests {
     #[test]
     fn an_email_slugs_to_a_stable_directory_name() {
         assert_eq!(slug("Someone@Example.com"), "someone-example-com");
+    }
+
+    /// `join("")` gives back the path it was joined to, so an address with
+    /// nothing nameable in it would put an Account's Profile *at* the
+    /// directory holding every other Account's — and `perch remove` deletes a
+    /// Profile directory whole.
+    #[test]
+    fn an_address_that_names_no_directory_is_refused_rather_than_naming_them_all() {
+        let host = crate::host::FakeHost::new();
+        let profiles = profiles_dir(&host).unwrap();
+
+        for degenerate in ["@", "-", "...", "@.-@"] {
+            assert_eq!(slug(degenerate), "", "the case this is about: {degenerate}");
+            let refused =
+                profile_dir_for(&host, degenerate).expect_err("no Profile can be named after this");
+            assert!(refused.to_string().contains(degenerate), "{refused}");
+        }
+
+        assert_eq!(
+            profile_dir_for(&host, "someone@example.com").unwrap(),
+            profiles.join("someone-example-com"),
+            "and an ordinary address is unaffected"
+        );
+    }
+
+    /// Every command is a load, some changes made in memory and a save of the
+    /// whole thing, so two of them overlapping does not merge — it discards.
+    #[test]
+    fn one_perch_changes_the_registry_at_a_time() {
+        let host = crate::host::FakeHost::new();
+
+        let held = lock(&host).expect("the first Perch takes it");
+        let refused = match lock(&host) {
+            Err(refused) => refused,
+            Ok(_) => panic!("the second Perch must wait, then give up"),
+        };
+        assert!(
+            refused.to_string().contains("the Perch registry lock"),
+            "{refused}"
+        );
+
+        drop(held);
+        lock(&host).expect("a lock given back can be taken again");
+    }
+
+    /// The registry is the whole of Perch's state and every command reads it
+    /// first, so a write that stops half way must not be visible: a reader
+    /// would call the file malformed, and a crash inside that window would
+    /// leave it malformed for good.
+    #[test]
+    fn a_save_that_fails_leaves_the_registry_exactly_as_it_was() {
+        let path = "/Users/someone/.config/.perch/registry.json";
+        let before = format!("{{\"version\":{CURRENT_VERSION},\"accounts\":[]}}");
+        let host = crate::host::FakeHost::new()
+            .with_file(path, &before)
+            .with_unwritable_file(path, "No space left on device (os error 28)");
+
+        let registry = Registry {
+            active: Some("someone@example.com".into()),
+            ..Registry::default()
+        };
+        save(&host, &registry).expect_err("the write cannot land");
+
+        assert_eq!(
+            host.file(path).as_deref(),
+            Some(before.as_str()),
+            "a reader still sees the registry that was there"
+        );
+        assert_eq!(
+            host.file(crate::host::temp_beside(Path::new(path))),
+            None,
+            "and the half-written copy is not left beside it"
+        );
+    }
+
+    /// No Credential, but every Account's address, organization, plan, Alias,
+    /// Group, Quarantine reason and Utilization history — a full picture of
+    /// somebody's Anthropic relationships, beside Profile directories that are
+    /// already 0700.
+    #[test]
+    fn the_registry_is_written_for_its_owner_alone() {
+        let host = crate::host::FakeHost::new();
+
+        save(&host, &Registry::default()).expect("it is written");
+
+        let path = registry_path(&host).unwrap();
+        assert_eq!(host.mode_of(&path), Some(crate::host::PRIVATE_FILE_MODE));
+        assert_eq!(
+            host.mode_of(perch_home(&host).unwrap()),
+            Some(crate::host::PRIVATE_DIR_MODE),
+            "a directory others may enter is a directory whose contents others \
+             may open"
+        );
     }
 
     #[test]

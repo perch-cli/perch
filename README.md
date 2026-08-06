@@ -456,12 +456,19 @@ it took.
 
 ## Where things are
 
-- `~/.perch/registry.json` — Perch's own state, versioned.
-- `~/.perch/profiles/<account>/` — one directory per Account. Its path is what
+- `~/.config/.perch/registry.json` — Perch's own state, versioned.
+- `~/.config/.perch/profiles/<account>/` — one directory per Account. Its path is what
   gives that Account a private Credential Store (ADR 0001).
-- `$PERCH_HOME` overrides `~/.perch`. Home is `$USERPROFILE` on Windows and
+- `$PERCH_HOME` overrides `~/.config/.perch`. Home is `$USERPROFILE` on Windows and
   `$HOME` elsewhere; a machine that cannot say where home is gets a refusal,
-  never a write into the filesystem root.
+  never a write into the filesystem root. `~/.config` is created if it is not
+  there, and the same path is used on every platform, Windows included, rather
+  than `%APPDATA%` — one rule to document and to support, and `$PERCH_HOME` for
+  anybody who wants a different one.
+- An installation still in `~/.perch`, where Perch kept its state before this,
+  moves itself the next time any command runs. Not a rename — each Credential
+  is read from where it is and written where it is going, because the namespace
+  it is filed under is derived from the path.
 - `$PERCH_CLAUDE_BIN` overrides where `claude` is found. Without it, Perch
   walks `PATH` itself — consulting `PATHEXT` on Windows, so the `claude.cmd`
   an npm install leaves works from every shell.

@@ -2,22 +2,38 @@
 name = "perch"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97.1"
+# The minimum this builds with, as convention writes one: the patch belongs in
+# rust-toolchain.toml, which is where the exact toolchain is already pinned.
+rust-version = "1.97"
 description = "Run Claude Code as whichever Claude account you want, without logging in again"
 license = "MIT"
+
+# Local `cargo clippy` and CI agree, rather than CI being the only place that
+# says no. `unsafe_op_in_unsafe_fn` because there are five `unsafe` blocks in
+# host/real.rs and every one of them should have to be written as such.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+all = "deny"
+
+# A distributed CLI is a binary somebody downloads, so its size is a cost they
+# pay. None of this changes behaviour.
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-color-eyre = "0.6.5"
-crossterm = "0.29.0"
-ratatui = "0.30.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
 thiserror = "2"
 
-# Both already in the build transitively; declaring them adds no crate and buys
+# Both already in the build transitively — libc through sha2's cpufeatures,
+# windows-sys through clap's anstream — so declaring them adds no crate and buys
 # vetted declarations for the primitives std does not carry (ADR 0021).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

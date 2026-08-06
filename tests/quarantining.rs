@@ -325,3 +325,40 @@ fn an_account_quarantined_by_a_refresh_leaves_the_cycling_pool_from_that_moment(
     );
     assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
 }
+
+/// The Default Profile is not Perch's alone to write. Somebody who runs
+/// `claude` and logs in directly leaves Perch's record of who is active behind,
+/// and when *their* login later dies a refresh reads their dead Credential —
+/// and would condemn the Account Perch believes is active, whose own Profile
+/// still holds a perfectly good copy. ADR 0019 says a figure is recorded only
+/// against the Account it was read for, and a Quarantine is a recording too.
+#[test]
+fn a_credential_that_may_be_somebody_elses_quarantines_nobody() {
+    let host = about_to_renew(SPENT).with_reply(TOKEN_URL, 401, "");
+    // The evidence that the live Credential is not the active Account's: Claude
+    // Code writes the Identity beside the Credential it belongs to, and this
+    // one names somebody else.
+    host.set_file(
+        IDENTITY_PATH,
+        &IDENTITY_FILE.replace(EMAIL, "stranger@example.com"),
+    );
+
+    let (result, printed) = run_status_refresh(&host, false);
+
+    result.expect("a refresh degrades the display rather than failing it");
+    assert_eq!(
+        quarantine_of(&host, EMAIL),
+        None,
+        "the Account whose own Profile holds a good Credential is not condemned \
+         for a login made outside Perch: {printed}"
+    );
+    assert!(
+        printed.contains("perch switch"),
+        "and the way out is named: {printed}"
+    );
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(CREDENTIAL),
+        "its own copy is still there to switch back to"
+    );
+}

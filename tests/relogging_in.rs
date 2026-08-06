@@ -371,3 +371,47 @@ fn a_group_named_where_one_account_is_meant_is_refused_as_a_group() {
     assert_eq!(error.exit_code(), EXIT_INVALID);
     assert!(error.to_string().contains("Group"), "{error}");
 }
+
+/// Repairing the Account you are on lands the fresh Credential in the Default
+/// Profile last, and that step can fail on its own. What is left is a fresh
+/// Credential in the Account's own Profile and the broken one it replaced still
+/// live — so `active` must stop naming that Account: the very next `perch
+/// switch`, which is at least as natural a thing to reach for as running the
+/// repair again, would Capture the broken copy over the fresh one and undo the
+/// whole browser round trip (ADR 0006).
+#[test]
+fn a_repair_that_could_not_be_made_live_leaves_nothing_to_capture_into() {
+    let host = machine_with_two_accounts().with_login(login_producing(REPAIRED, IDENTITY_FILE));
+    quarantine(&host, EMAIL);
+    let host = host.with_unwritable_file(IDENTITY_PATH, "read-only file");
+
+    let (result, _) = run_relogin(&host, EMAIL);
+
+    let error = result.expect_err("the repair could not be made live");
+    assert!(
+        error.to_string().contains("no active Account"),
+        "it says what it did about it: {error}"
+    );
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(REPAIRED),
+        "the repair itself stands"
+    );
+    assert_eq!(
+        registry_of(&host).active,
+        None,
+        "and Perch is on nobody, so nothing can Capture over it"
+    );
+
+    // The command a user would reach for next, which used to be the one that
+    // destroyed the repair.
+    host.writable_again(IDENTITY_PATH);
+    run_switch(&host, SECOND_EMAIL)
+        .0
+        .expect("a Switch still works");
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(REPAIRED),
+        "the fresh Credential survives the Switch that follows"
+    );
+}

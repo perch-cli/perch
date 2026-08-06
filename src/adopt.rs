@@ -11,6 +11,8 @@ use std::io::Write;
 
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::login;
+use crate::migrate;
 use crate::probe::{self, Findings, Store, Verdict};
 use crate::profile;
 use crate::registry::{self, Account, Registry};
@@ -19,11 +21,49 @@ use crate::registry::{self, Account, Registry};
 ///
 /// Anything worth telling the user about adoption is written to `out` before
 /// the command that asked for it renders anything.
+///
+/// For the commands that only *read* the registry, and for the two that spend a
+/// browser login before they change anything. A command that is going to write
+/// wants [`ensure_adopted_exclusively`] instead.
 pub fn ensure_adopted(host: &dyn Host, out: &mut dyn Write) -> Result<Registry> {
+    migrate::out_of_the_old_home(host, out)?;
+    login::reap_abandoned(host);
     if let Some(registry) = registry::load(host)? {
         return Ok(registry);
     }
-    adopt(host, out)
+    // The adoption itself writes, so it is done with the other Perches shut out
+    // — two of them adopting at once would each build the first Profile and one
+    // would overwrite the other's registry wholesale.
+    let _perch = registry::lock(host)?;
+    load_or_adopt(host, out)
+}
+
+/// The registry, with every other Perch shut out of it until the returned hold
+/// is dropped.
+///
+/// What a command that is going to change something asks for, and the reason
+/// the hold comes back rather than staying inside: the span that has to be
+/// exclusive is the whole load → change → save, not the save. A command holding
+/// a copy read before somebody else's `perch switch` writes that copy back
+/// afterwards and reverts them (see [`registry::lock`]).
+pub fn ensure_adopted_exclusively<'a>(
+    host: &'a dyn Host,
+    out: &mut dyn Write,
+) -> Result<(crate::lock::Held<'a>, Registry)> {
+    migrate::out_of_the_old_home(host, out)?;
+    login::reap_abandoned(host);
+    let held = registry::lock(host)?;
+    let registry = load_or_adopt(host, out)?;
+    Ok((held, registry))
+}
+
+/// The registry, adopting the existing login if there is none. The lock is the
+/// caller's to have taken — this is the half of adoption that writes.
+fn load_or_adopt(host: &dyn Host, out: &mut dyn Write) -> Result<Registry> {
+    match registry::load(host)? {
+        Some(registry) => Ok(registry),
+        None => adopt(host, out),
+    }
 }
 
 fn adopt(host: &dyn Host, out: &mut dyn Write) -> Result<Registry> {
@@ -88,10 +128,7 @@ fn carry_the_identity_block(host: &dyn Host, findings: &Findings, store: &Store)
 
     let kept = store.identity_file.clone();
     host.write_file(&kept, &probe::fresh_identity_file(block))
-        .map_err(|err| PerchError::FileWrite {
-            path: kept,
-            source: std::io::Error::other(err.to_string()),
-        })
+        .map_err(|err| PerchError::file_write(kept, err))
 }
 
 /// Says what was adopted, so the user can confirm Perch picked up the right

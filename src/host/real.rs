@@ -7,9 +7,9 @@ use std::process::{Command, Stdio};
 
 use chrono::{DateTime, Utc};
 
-use super::{Execution, Host, HostError, HttpRequest, HttpResponse, Platform};
 #[cfg(unix)]
-use super::{PRIVATE_DIR_MODE, PRIVATE_FILE_MODE};
+use super::PRIVATE_DIR_MODE;
+use super::{Execution, Host, HostError, HttpRequest, HttpResponse, PRIVATE_FILE_MODE, Platform};
 use crate::keychain::{
     self, KeychainError, SECURITY_BIN, WritePath, classify, decode_password_output,
 };
@@ -57,6 +57,7 @@ const CURL_ARGS: [&str; 6] = [
 /// is ever an argument: an `Authorization` header holds an access token, and
 /// argv is readable by every process on the machine.
 fn curl_config(request: &HttpRequest<'_>) -> String {
+    let quoted = super::double_quoted;
     let mut config = format!("url = {}\n", quoted(request.url));
     for (name, value) in request.headers {
         config.push_str(&format!(
@@ -72,37 +73,37 @@ fn curl_config(request: &HttpRequest<'_>) -> String {
     config
 }
 
-/// A value as a `curl` configuration file quotes one.
+/// Runs a program, optionally with something on its stdin, and reads the whole
+/// of what it said.
 ///
-/// Quoted so that spaces and `#` are part of the value rather than punctuation,
-/// with backslashes and quotes escaped so a body full of JSON arrives as it was
-/// written. A literal newline cannot appear inside one — Perch sends compact
-/// JSON and single-line headers, so none ever does.
-fn quoted(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
-}
-
-/// Runs `curl` with the request on its stdin.
-fn curl(config: &str) -> Result<Execution, HostError> {
-    let mut child = Command::new(curl_bin()?)
-        .args(CURL_ARGS)
-        .stdin(Stdio::piped())
+/// The one place Perch spawns anything. Stdin is where every secret travels —
+/// `curl`'s configuration and `security`'s command lines both — so the choice
+/// between a pipe and `/dev/null` is the same choice in both cases and is made
+/// once.
+fn run(program: &Path, args: &[&str], stdin: Option<&str>) -> std::io::Result<Execution> {
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
 
-    {
+    if let Some(input) = stdin {
         use std::io::Write;
         let mut pipe = child.stdin.take().expect("stdin was piped");
-        pipe.write_all(config.as_bytes())?;
+        pipe.write_all(input.as_bytes())?;
+        drop(pipe);
     }
+    Ok(Execution::from(child.wait_with_output()?))
+}
 
-    let output = child.wait_with_output()?;
-    Ok(Execution {
-        status: output.status.code().unwrap_or(-1),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-    })
+/// Runs `curl` with the request on its stdin.
+fn curl(config: &str) -> Result<Execution, HostError> {
+    Ok(run(&curl_bin()?, &CURL_ARGS, Some(config))?)
 }
 
 /// Runs `security` and turns anything short of success into the distinction
@@ -117,7 +118,7 @@ fn security(
     account: &str,
 ) -> Result<Execution, KeychainError> {
     let execution =
-        keychain::run_security(args, stdin).map_err(|err| KeychainError::Unavailable {
+        run(Path::new(SECURITY_BIN), args, stdin).map_err(|err| KeychainError::Unavailable {
             detail: format!("could not run {SECURITY_BIN}: {err}"),
         })?;
 
@@ -182,26 +183,32 @@ impl Host for RealHost {
         Ok(())
     }
 
+    fn create_file_with_mode(
+        &self,
+        path: &Path,
+        contents: &str,
+        mode: u32,
+    ) -> Result<(), HostError> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        create_file_with_mode(path, contents, mode)
+    }
+
     /// Written beside and moved into place, so the file that ends up at `path`
     /// is one that was created 0600 rather than one that was tightened
     /// afterwards — even where something looser was already there (ADR 0020).
+    ///
+    /// The choreography itself is [`super::replace_via_tmp`], shared with the
+    /// non-secret writes: two copies of it would let the failure cleanup drift
+    /// apart between the path that handles Credentials and the path that does
+    /// not, which is the wrong pair to let drift. All this adds is the parent
+    /// directory, which has to be private before the file lands in it.
     fn write_private_file(&self, path: &Path, contents: &str) -> Result<(), HostError> {
         if let Some(parent) = path.parent() {
             create_private_dir_all(parent)?;
         }
-
-        let mut beside = path.as_os_str().to_os_string();
-        beside.push(".perch-tmp");
-        let beside = PathBuf::from(beside);
-
-        let written = create_private_file(&beside, contents)
-            .and_then(|()| rename_replacing(&beside, path).map_err(HostError::Io));
-        if written.is_err() {
-            // A half-written Credential is not something to leave lying about,
-            // whatever went wrong.
-            let _ = std::fs::remove_file(&beside);
-        }
-        written
+        super::replace_via_tmp(self, path, contents, PRIVATE_FILE_MODE)
     }
 
     fn create_private_dir_all(&self, path: &Path) -> Result<(), HostError> {
@@ -274,6 +281,9 @@ impl Host for RealHost {
 
     fn rename(&self, from: &Path, to: &Path) -> Result<(), HostError> {
         rename_replacing(from, to)?;
+        // The bytes are already durable by the time anything is renamed over
+        // another file here; this is what makes the new name durable too.
+        sync_directory_of(to);
         Ok(())
     }
 
@@ -320,10 +330,24 @@ impl Host for RealHost {
         account: &str,
         secret: &str,
     ) -> Result<(), KeychainError> {
-        let command_line = keychain::add_command_line(service, account, secret);
+        let command_line = keychain::add_command_line(service, account, secret)?;
         match keychain::write_path_for(&command_line) {
             WritePath::Stdin => security(&["-i"], Some(&command_line), service, account)?,
             WritePath::Argv => {
+                // The one time a Credential reaches `argv`, and therefore the
+                // process table. Hex is an encoding, not a protection: anything
+                // that can read `argv` recovers the bytes with `xxd -r -p`. It
+                // is done anyway because the alternative is `security`
+                // truncating the write mid-argument without saying so, which
+                // stores a corrupt Credential nothing notices until some Switch
+                // later (ADR 0008) — but it is said out loud, because an
+                // invariant with a silent exception is not an invariant.
+                self.note(
+                    "A Credential was too large for `security`'s stdin buffer, so it was \
+                     given to it as a command-line argument instead. While that ran, any \
+                     process on this machine running as you could have read it off the \
+                     process table.",
+                );
                 let hex = keychain::hex_encode(secret.as_bytes());
                 let args = [
                     "add-generic-password",
@@ -352,15 +376,7 @@ impl Host for RealHost {
     }
 
     fn exec(&self, program: &str, args: &[&str]) -> Result<Execution, HostError> {
-        let output = Command::new(program)
-            .args(args)
-            .stdin(Stdio::null())
-            .output()?;
-        Ok(Execution {
-            status: output.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        })
+        Ok(run(Path::new(program), args, None)?)
     }
 
     fn exec_interactive(&self, program: &str, env: &[(&str, &str)]) -> Result<i32, HostError> {
@@ -501,28 +517,56 @@ fn create_private_dir_all(path: &Path) -> Result<(), HostError> {
 /// Creates a file with its mode, refusing to write into one that is already
 /// there: an existing file's mode is whatever it was, and `open` would not
 /// change it.
+///
+/// Synced before it is closed. A rename is atomic against other *processes*,
+/// not against a crash: the rename can reach the disk while the data blocks
+/// have not, leaving a file that is present, named, and empty. What this writes
+/// is a Credential Anthropic has already Rotated to, or a `.claude.json` full
+/// of somebody's project history — neither of which can be written again.
 #[cfg(unix)]
-fn create_private_file(path: &Path, contents: &str) -> Result<(), HostError> {
+fn create_file_with_mode(path: &Path, contents: &str, mode: u32) -> Result<(), HostError> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
 
     // Anything already here is what a write that died left behind, and holding
-    // on to it would mean writing a Credential into a file of unknown mode.
+    // on to it would mean writing into a file of unknown mode.
     let _ = std::fs::remove_file(path);
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .mode(PRIVATE_FILE_MODE)
+        .mode(mode)
         .open(path)?;
     file.write_all(contents.as_bytes())?;
+    file.sync_all()?;
     Ok(())
 }
 
+/// The same where permission bits mean nothing: the mode is not a thing that
+/// can be asked for, so the file is simply created afresh.
 #[cfg(not(unix))]
-fn create_private_file(path: &Path, contents: &str) -> Result<(), HostError> {
+fn create_file_with_mode(path: &Path, contents: &str, _mode: u32) -> Result<(), HostError> {
+    use std::io::Write;
+
     let _ = std::fs::remove_file(path);
-    std::fs::write(path, contents)?;
+    let mut file = std::fs::File::create_new(path)?;
+    file.write_all(contents.as_bytes())?;
+    file.sync_all()?;
     Ok(())
+}
+
+/// Makes the *name* durable, once the bytes behind it are.
+///
+/// `sync_all` on the file promises its contents survive; the directory entry
+/// the rename created is a separate write, and on a crash a file can be there
+/// with its old name or with neither. Best-effort: a directory that will not
+/// open for reading — Windows, most of all — is not a reason to fail a write
+/// that has already landed.
+fn sync_directory_of(path: &Path) {
+    if let Some(parent) = path.parent()
+        && let Ok(dir) = std::fs::File::open(parent)
+    {
+        let _ = dir.sync_all();
+    }
 }
 
 #[cfg(unix)]
@@ -834,6 +878,11 @@ mod tests {
     /// is what says whether the holder is alive or died holding it. The
     /// platform split in `touch_now` (backup semantics on Windows) exists for
     /// exactly this case.
+    ///
+    /// Behind the `contract` feature, because it has to outwait a coarse
+    /// filesystem timestamp and there is no faking that: a second of wall clock
+    /// in every `cargo test` is a second nobody chose to spend.
+    #[cfg(feature = "contract")]
     #[test]
     fn touch_moves_a_directorys_modification_time_forward() {
         let host = RealHost::new();
@@ -849,6 +898,40 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
 
         assert!(touched > created, "touched {touched}, created {created}");
+    }
+
+    /// The temp path a replacement is written at is `<path>.perch-tmp` — fixed,
+    /// unrandomised, and therefore predictable. `CLAUDE_CONFIG_DIR` is taken
+    /// verbatim and can name a directory somebody else may write to, so a
+    /// symlink planted there would have Perch write the Identity through it to
+    /// a file of the attacker's choosing. The file is unlinked and created
+    /// afresh instead, which is the shape the Credential writer always used.
+    #[cfg(unix)]
+    #[test]
+    fn a_replacement_is_never_written_through_something_left_at_the_temp_path() {
+        let host = RealHost::new();
+        let dir = std::env::temp_dir().join(format!("perch-symlink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let target = dir.join("config.json");
+        let elsewhere = dir.join("elsewhere");
+        std::fs::write(&elsewhere, "not Perch's to write").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, crate::host::temp_beside(&target)).unwrap();
+
+        let written = crate::host::write_atomically(&host, &target, "{\"mine\":true}");
+
+        let victim = std::fs::read_to_string(&elsewhere);
+        let landed = std::fs::read_to_string(&target);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        written.expect("the write lands");
+        assert_eq!(landed.unwrap(), "{\"mine\":true}");
+        assert_eq!(
+            victim.unwrap(),
+            "not Perch's to write",
+            "the file the symlink pointed at is untouched"
+        );
     }
 
     #[test]

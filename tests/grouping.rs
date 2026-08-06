@@ -390,7 +390,7 @@ const REGISTRY_FROM_BEFORE_GROUPS_WERE_KEPT: &str = r#"{
         "organization_uuid": null
       },
       "profile": {
-        "dir": "/Users/someone/.perch/profiles/someone-example-com",
+        "dir": "/Users/someone/.config/.perch/profiles/someone-example-com",
         "keychain_service": "Claude Code-credentials-abcd1234",
         "keychain_account": "someone"
       },
