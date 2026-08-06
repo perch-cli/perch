@@ -503,7 +503,7 @@ fn a_switch_that_cannot_patch_the_identity_says_what_it_left_where() {
     assert_eq!(stored_credential(&host, EMAIL).as_deref(), Some(CREDENTIAL));
     assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
     assert_eq!(
-        host.file(format!("{IDENTITY_PATH}.perch-tmp")),
+        host.file(perch::host::temp_beside(Path::new(IDENTITY_PATH))),
         None,
         "a write that did not land leaves nothing beside the file Claude Code \
          reads"

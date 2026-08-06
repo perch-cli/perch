@@ -1001,7 +1001,7 @@ mod tests {
             "a reader still sees the registry that was there"
         );
         assert_eq!(
-            host.file(format!("{path}.perch-tmp")),
+            host.file(crate::host::temp_beside(Path::new(path))),
             None,
             "and the half-written copy is not left beside it"
         );

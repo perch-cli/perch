@@ -275,9 +275,16 @@ pub trait Host {
 }
 
 /// Where the replacement for a file is written before it is moved over it.
+///
+/// Named after the process that is writing it. A single fixed name is one two
+/// Perches writing the same file would collide on, and one anybody who can
+/// write the directory can pre-plant something at — `CLAUDE_CONFIG_DIR` is
+/// taken verbatim and can name a shared location. The pid is what randomness
+/// buys here; a crate that generates a better one would want a real filesystem,
+/// and this sits behind the Host port where there is not always one (ADR 0025).
 pub fn temp_beside(path: &Path) -> PathBuf {
     let mut beside = path.as_os_str().to_os_string();
-    beside.push(".perch-tmp");
+    beside.push(format!(".perch-tmp.{}", std::process::id()));
     PathBuf::from(beside)
 }
 
