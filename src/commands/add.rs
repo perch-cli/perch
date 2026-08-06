@@ -123,27 +123,66 @@ fn settle_into_a_profile(
     })
 }
 
-/// Refuses a login for an Account Perch is already holding a Profile for.
+/// Refuses a login whose Credential would land in a Profile Perch already
+/// holds one in.
 ///
 /// Two Profiles for one Account would fight over it — each holding a refresh
 /// token the other's next Renewal retires — so the way back to a working
 /// Account Perch already has is `perch relogin`, which repairs the Profile
 /// rather than building a second one.
+///
+/// The question is which *Profile* the login would land in, not which email it
+/// belongs to. A Profile is `profiles/<slugged email>`, and the slug lowercases
+/// and flattens every non-alphanumeric character, so `user+work@gmail.com`,
+/// `user.work@gmail.com` and `User-Work@gmail.com` all name one directory and
+/// one keychain namespace. Plus-addressing on a single inbox is exactly how
+/// somebody comes to hold several Anthropic Accounts, so this is a collision
+/// ordinary use produces — and storing over it would supersede the Credential
+/// already there and destroy a refresh token nothing can recover.
 fn refuse_an_account_perch_already_holds(
     host: &dyn Host,
     registry: &Registry,
     identity: &Identity,
 ) -> Result<()> {
-    let Some(existing) = registry.account(&identity.email) else {
+    let Some(existing) = registry
+        .accounts
+        .iter()
+        .find(|held| registry::same_profile(held.email(), &identity.email))
+    else {
         return Ok(());
     };
+
+    let same_account = existing.email().eq_ignore_ascii_case(&identity.email);
+    let why = if same_account {
+        "two Profiles for one Account would fight over it".to_string()
+    } else {
+        format!(
+            "{} and {} share the Profile they would be kept in, so holding both \
+             would mean each one's Credential replacing the other's",
+            existing.email(),
+            identity.email,
+        )
+    };
+    let way_out = if same_account {
+        format!(
+            "To repair that Account instead, run `perch relogin {}`.",
+            existing.email()
+        )
+    } else {
+        format!(
+            "Nothing about {} is changed. To hold this login instead, remove \
+             that Account first — or log in under an address that does not \
+             flatten to the same name.",
+            existing.email(),
+        )
+    };
+
     Err(PerchError::Conflict(format!(
         "Perch already holds {}, in {}.\n\
-         Nothing was added — two Profiles for one Account would fight over it.\n\
-         To repair that Account instead, run `perch relogin {}`.",
+         Nothing was added — {why}.\n\
+         {way_out}",
         registry.named_for_the_user(existing.email()),
         existing.profile_dir(host)?.display(),
-        existing.email()
     )))
 }
 

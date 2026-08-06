@@ -545,3 +545,84 @@ fn an_add_does_not_revert_a_switch_that_ran_while_its_login_was_open() {
          Account, it does not put the whole registry back to what it was"
     );
 }
+
+/// A Profile is `profiles/<slugged email>`, and the slug flattens every
+/// non-alphanumeric character — so plus-addressing on one inbox, which is
+/// exactly how somebody comes to hold several Anthropic Accounts, produces two
+/// emails that name one directory and one keychain namespace. Storing over it
+/// would supersede the Credential already there: a refresh token nothing can
+/// recover, gone without a word.
+#[test]
+fn a_login_whose_profile_is_already_held_is_refused_even_under_another_address() {
+    const DOTTED: &str = "team.lead@example.com";
+    const PLUSSED: &str = "team+lead@example.com";
+    assert_eq!(
+        perch::registry::slug(DOTTED),
+        perch::registry::slug(PLUSSED),
+        "the two addresses this test is about flatten to one Profile"
+    );
+
+    let host = logged_in_machine().with_login(login_producing(
+        leaked(&CREDENTIAL.replace("oat01-test", "oat01-dotted")),
+        leaked(&IDENTITY_FILE.replace(EMAIL, DOTTED)),
+    ));
+    run_add(&host, no_group()).0.expect("a second Account");
+
+    let host = host.with_login(login_producing(
+        leaked(&CREDENTIAL.replace("oat01-test", "oat01-plussed")),
+        leaked(&IDENTITY_FILE.replace(EMAIL, PLUSSED)),
+    ));
+    let (result, _) = run_add(&host, no_group());
+
+    let error = result.expect_err("both Accounts would be kept in one Profile");
+    assert_eq!(error.exit_code(), EXIT_CONFLICT);
+    let message = error.to_string();
+    assert!(
+        message.contains(DOTTED) && message.contains(PLUSSED),
+        "both addresses are named, since neither is obviously the wrong \
+         one:\n{message}"
+    );
+
+    let registry = registry_of(&host);
+    assert_eq!(registry.accounts.len(), 2);
+    assert!(
+        credential_of(&host, DOTTED).is_some_and(|held| held.contains("oat01-dotted")),
+        "and the Credential already in that Profile is untouched"
+    );
+    assert_the_active_account_survived(&host);
+}
+
+/// A `&'static str` from a string built at run time, for the fixtures that take
+/// one. The test process ends soon enough that leaking a few is nothing.
+fn leaked(text: &str) -> &'static str {
+    Box::leak(text.to_string().into_boxed_str())
+}
+
+fn no_group() -> AddArgs {
+    AddArgs {
+        no_group: true,
+        ..AddArgs::default()
+    }
+}
+
+/// The same rule catching the case `switch` and `relogin` already treat as one
+/// Account: a login under a differently capitalised spelling of an address
+/// Perch holds is that Account, not a second one.
+#[test]
+fn a_login_under_a_differently_capitalised_address_is_the_account_perch_holds() {
+    let shouted = EMAIL.to_uppercase();
+    let host = logged_in_machine().with_login(login_producing(
+        CREDENTIAL,
+        leaked(&IDENTITY_FILE.replace(EMAIL, &shouted)),
+    ));
+
+    let (result, _) = run_add(&host, no_group());
+
+    let error = result.expect_err("one Account cannot have two entries");
+    assert_eq!(error.exit_code(), EXIT_CONFLICT);
+    assert!(
+        error.to_string().contains("perch relogin"),
+        "and the way back is the one that repairs it in place: {error}"
+    );
+    assert_eq!(registry_of(&host).accounts.len(), 1);
+}
