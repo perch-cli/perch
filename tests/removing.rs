@@ -476,3 +476,29 @@ fn a_removal_that_found_no_credential_does_not_claim_to_have_deleted_one() {
         "and the reason a Credential might still be out there is named:\n{printed}"
     );
 }
+
+/// Removing the last Account while Perch is on nobody used to be confirmed with
+/// a sentence about Claude Code "going on running as" that Account — which is
+/// not true: it is not the active one, and the live store may hold somebody
+/// else's Credential or none at all. Asking somebody to agree to a description
+/// of a state that is not theirs is asking them to agree to nothing.
+#[test]
+fn the_last_account_is_confirmed_without_claiming_it_is_the_one_running() {
+    let host = machine_with_two_accounts().with_answers(&["y", "y"]);
+    // Nothing to land on, so giving up the active Account leaves Perch holding
+    // one Account and on nobody.
+    disable_account(&host, SECOND_EMAIL).0.expect("reserved");
+    run_remove(&host, EMAIL)
+        .0
+        .expect("the active one is given up");
+    assert_eq!(registry_of(&host).active, None);
+
+    let (result, printed) = run_remove(&host, SECOND_EMAIL);
+
+    result.expect("the last Account can be given up");
+    assert!(
+        !printed.contains("goes on running as"),
+        "it does not describe a live state it cannot know:\n{printed}"
+    );
+    assert!(printed.contains("on no Account"), "{printed}");
+}

@@ -217,12 +217,25 @@ fn what_it_would_leave(
              with it: holding it again would mean `perch add`.",
             registry.named_for_the_user(successor.email()),
         ),
-        None => format!(
+        // Two different states wear the same shape here. Removing the *active*
+        // Account with nowhere to land leaves the machine running as it, which
+        // is worth saying. Removing the last Account when Perch is on nobody
+        // does not: the live Credential may be another Account's, or there may
+        // be none, and asking the user to agree to a description of a state
+        // that is not theirs is asking them to agree to nothing.
+        None if consequence.is_active => format!(
             "Nothing Perch holds can be left active in its place, so it will \
              hold no active Account afterwards. Claude Code goes on running as \
              {} — the live Credential is not Perch's to take away — but the \
              Credential Perch holds is deleted, so anything that replaces the \
              live one ends that login for good.",
+            account.email(),
+        ),
+        None => format!(
+            "Perch is on no Account, so nothing is switched away from. The \
+             Credential Perch holds for {} is deleted, and Perch will hold no \
+             Accounts at all afterwards — whatever Claude Code is logged in as \
+             is not Perch's to take away, and not Perch's to give back either.",
             account.email(),
         ),
     });
