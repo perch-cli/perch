@@ -730,7 +730,13 @@ impl Host for FakeHost {
         Ok(())
     }
 
+    /// A path arranged as unreadable will not say when it was written either —
+    /// which is how "the lock is gone" and "the lock will not say" are told
+    /// apart, and they are different answers.
     fn modified_at(&self, path: &Path) -> Result<DateTime<Utc>, HostError> {
+        if let Some(detail) = self.unreadable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
+        }
         self.modified
             .borrow()
             .get(path)
