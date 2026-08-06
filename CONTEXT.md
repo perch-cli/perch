@@ -28,11 +28,18 @@ An Account answers to one Alias at a time.
 _Avoid_: nickname, label, tag
 
 **Remove**:
-Giving an Account up for good: Perch forgets it, deletes the Credential it was
+Giving one Account up for good: Perch forgets it, deletes the Credential it was
 holding and frees the Alias it answered to, so nothing lists it and nothing
-Cycles to it. The one thing here that no command undoes — only a fresh login
-brings the Account back, and as a new one.
-_Avoid_: delete, drop, purge, unregister
+Cycles to it. Always exactly one Account — giving up everything at once is a
+Purge. Only a fresh login brings the Account back, and as a new one.
+_Avoid_: delete, drop, unregister
+
+**Purge**:
+Giving the machine back the state it had before Perch: every Profile, every
+Credential Perch holds, and Perch's own registry, gone in one act. Takes no
+Target, because it is never about one Account — that is a Remove — and offers
+to write an Export first, which is the only thing that makes it survivable.
+_Avoid_: uninstall, reset, wipe, remove
 
 **Target**:
 What a command is told to act on — an Alias, an Account's email address, or a
@@ -77,10 +84,11 @@ you across Accounts without effort; only the Run path has to work to reach it.
 _Avoid_: common config, global config
 
 **Reconcile**:
-The pass Perch makes before a Run, ensuring every piece of Shared State is
-reachable from the Profile it is launching — establishing the links, repairing
-broken ones, and falling back to copies on platforms that cannot link. A Switch
-needs no such pass.
+The pass Perch makes before a Run, making every piece of Shared State reachable
+from the Profile it is launching by linking it there, and repairing links that
+have broken. Never by copying: a copy diverges the moment it is edited, which
+is the opposite of what Shared State promises. Where no link can be made the
+Run is refused rather than served a copy. A Switch needs no such pass.
 _Avoid_: sync, merge, heal
 
 ## Quota
@@ -96,6 +104,20 @@ How full a Quota Window currently is, and when it next resets. The evidence a
 person weighs when choosing an Account, and what Perch ranks on when choosing
 for them.
 _Avoid_: bucket, usage, quota level
+
+**Headroom**:
+How much of an Account is left to spend, taken from its most constrained Quota
+Window — so an Account is only ever as free as its fullest window, and a
+generous-looking figure never hides an exhausted one. What Accounts are
+compared on, whoever is doing the choosing.
+_Avoid_: capacity, room, slack, remaining
+
+**Reserve**:
+What a Group has left to draw on, said as how many of its Accounts still have
+Headroom and how much the best of them has. Never one pooled figure: Accounts
+sit on different plans and Perch only ever sees percentages, so quota does not
+add up across Accounts and a number that implied it would be a lie.
+_Avoid_: total, pool, aggregate, group quota
 
 **Rotation**:
 Anthropic replacing an Account's refresh token with a new one, retiring the old
