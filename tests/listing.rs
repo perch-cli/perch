@@ -77,7 +77,7 @@ fn machine_holding_three_accounts() -> FakeHost {
 
 fn machine_holding(registry: &Registry) -> FakeHost {
     let host = logged_in_machine().with_now(at(12, 0));
-    perch::registry::save(&host, registry).expect("the registry is written");
+    common::save_registry(&host, registry);
     host
 }
 

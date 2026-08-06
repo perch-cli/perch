@@ -405,7 +405,7 @@ fn machine_holding_the_two_that_share_a_profile() -> FakeHost {
             utilization: None,
         });
     }
-    perch::registry::save(&host, &registry).expect("the registry is written");
+    common::save_registry(&host, &registry);
 
     let store = store_of(&host, "some-one@example.com");
     host.set_keychain_item(&store.keychain_service, &store.keychain_account, CREDENTIAL);
@@ -501,4 +501,77 @@ fn the_last_account_is_confirmed_without_claiming_it_is_the_one_running() {
         "it does not describe a live state it cannot know:\n{printed}"
     );
     assert!(printed.contains("on no Account"), "{printed}");
+}
+
+/// `perch remove` asks before it gives up the active Account, and a question
+/// put to a person is the one wait in Perch with no bound on it. The registry
+/// lock is held across it — the whole command is one load, one decision and one
+/// save — so a question nobody answers for a while is where that lock can go
+/// stale under a command that is otherwise behaving perfectly.
+///
+/// A lock that is still Perch's is one this command may go on using, however
+/// long the answer took.
+#[test]
+fn a_question_somebody_takes_their_time_over_does_not_cost_the_lock() {
+    let host = machine_with_two_accounts()
+        .with_answers(&["y"])
+        .with_a_terminal_that_takes(5 * 60_000);
+
+    let (result, printed) = run_remove(&host, EMAIL);
+
+    result.expect("the removal runs");
+    assert!(printed.contains("Removed"), "{printed}");
+    assert!(registry_of(&host).account(EMAIL).is_none());
+    assert!(
+        perch::registry::lock(&host).is_ok(),
+        "and the lock was given back rather than left behind"
+    );
+}
+
+/// The other direction, and the reason the hold is checked rather than assumed.
+/// If the answer took so long that another `perch` found the lock abandoned and
+/// took it over, this one is working from a registry that is however many
+/// commands out of date — and everything past the question deletes Credentials.
+/// Refused before the first irreversible thing rather than discovered at the
+/// save, by which point the Credential is already gone.
+#[test]
+fn an_answer_that_arrives_after_another_perch_took_the_lock_removes_nothing() {
+    let credential_before = credential_of(&machine_with_two_accounts(), EMAIL);
+    let host = machine_with_two_accounts()
+        .with_answers(&["y"])
+        // Past the staleness window, which is what makes the lock claimable.
+        .with_a_terminal_that_takes(120_000)
+        .once_while_waiting(|host| {
+            let lock = perch::registry::lock_spec(host).expect("home is known");
+            host.remove_dir_all(&lock.dir).expect("it was abandoned");
+            host.create_dir_exclusive(&lock.dir)
+                .expect("the other `perch` takes it");
+        });
+
+    let (result, printed) = run_remove(&host, EMAIL);
+
+    let refused = result.expect_err("this Perch may no longer act on what it read");
+    assert!(
+        refused.to_string().contains("Nothing was removed"),
+        "{refused}"
+    );
+    assert!(!printed.contains("Removed"), "{printed}");
+    assert!(
+        registry_of(&host).account(EMAIL).is_some(),
+        "the Account is still held"
+    );
+    assert_eq!(
+        credential_of(&host, EMAIL),
+        credential_before,
+        "and its Credential was never touched"
+    );
+    // The refusal has to land before the landing, not after it. Making the
+    // successor live is the first irreversible step of a removal: it replaces
+    // the Credential a running client is holding, and the `active` that records
+    // it is in the registry this command may no longer write.
+    assert_eq!(
+        host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
+        Some(CREDENTIAL),
+        "nothing was made live in the Default Profile either"
+    );
 }

@@ -10,7 +10,6 @@ use common::*;
 use perch::commands::add::AddArgs;
 use perch::error::EXIT_KEYCHAIN_UNAVAILABLE;
 use perch::host::{FakeHost, Platform};
-use perch::registry;
 
 /// The Credential of an Account that has since Rotated several times: what a
 /// copy left behind in the store Perch stopped writing to would be.
@@ -242,38 +241,6 @@ fn both_stores_being_unreachable_is_reported_as_the_primary_failing() {
     );
 }
 
-#[test]
-fn a_version_1_registry_is_read_by_dropping_where_it_said_a_credential_was() {
-    let host =
-        logged_in_machine().with_file(REGISTRY_PATH, REGISTRY_FROM_BEFORE_STORES_WERE_DERIVED);
-    // The Credential is in the store the derivation names, which is not where
-    // the old file says it is.
-    let store = store_of(&host, EMAIL);
-    host.set_keychain_item(&store.keychain_service, LOGIN_NAME, CREDENTIAL);
-
-    set_alias(&host, "work", EMAIL).0.expect("a command runs");
-
-    let written = host
-        .file(REGISTRY_PATH)
-        .expect("the registry was rewritten");
-    assert!(
-        written.contains(&format!("\"version\": {}", registry::CURRENT_VERSION)),
-        "{written}"
-    );
-    for derived in ["keychain_service", "keychain_account", "\"profile\""] {
-        assert!(!written.contains(derived), "{derived} survived:\n{written}");
-    }
-    assert_eq!(
-        registry_of(&host)
-            .account(EMAIL)
-            .unwrap()
-            .profile_dir(&host)
-            .unwrap(),
-        registry::profile_dir_for(&host, EMAIL).unwrap(),
-        "the Profile is derived from the Account, not read back from the file"
-    );
-}
-
 /// Two Accounts on a machine that is not a Mac.
 /// The same, on the machine that does not exist: not a Mac, and with a
 /// keychain that answers anyway. Only for the tests that are about the
@@ -308,33 +275,6 @@ fn two_accounts_off_macos() -> FakeHost {
     .expect("the second Account is added");
     host
 }
-
-/// A registry from the Perch that recorded each Account's keychain namespace
-/// and Profile directory, with values that were never right on this machine —
-/// so a build that still read them would find nothing.
-const REGISTRY_FROM_BEFORE_STORES_WERE_DERIVED: &str = r#"{
-  "version": 1,
-  "active": "someone@example.com",
-  "accounts": [
-    {
-      "identity": {
-        "email": "someone@example.com",
-        "account_uuid": "account-uuid-1",
-        "organization_name": "Acme",
-        "organization_uuid": null
-      },
-      "plan": "pro",
-      "profile": {
-        "dir": "/Users/someone/.config/.perch/profiles/somewhere-else",
-        "keychain_service": "Claude Code-credentials-deadbeef",
-        "keychain_account": "someone"
-      },
-      "enabled": true,
-      "quarantined": false
-    }
-  ],
-  "aliases": {}
-}"#;
 
 #[test]
 fn the_platform_decides_which_store_is_written_first() {

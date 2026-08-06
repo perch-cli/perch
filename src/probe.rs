@@ -559,6 +559,12 @@ pub struct LockSpec {
     pub dir: PathBuf,
     pub stale_millis: i64,
     pub update_millis: i64,
+    /// What it costs to have lost this one, said to the user when a renewal
+    /// finds it gone. A takeover means something different for each lock — a
+    /// Switch under Claude Code's locks carries on, where a command that has
+    /// lost Perch's own registry lock stops — and the sentence that explains it
+    /// belongs beside the lock rather than in the code that renews them all.
+    pub lost_means: &'static str,
 }
 
 /// The staleness and update intervals Claude Code uses for the two OAuth
@@ -586,6 +592,12 @@ pub fn locks_for(store: &Store) -> Vec<LockSpec> {
     let mut config_file = store.identity_file.clone().into_os_string();
     config_file.push(".lock");
 
+    // Stopping half way through writing a Credential is worse than finishing,
+    // so a Switch that loses one of these carries on and says so.
+    const CARRIES_ON: &str = "Something else may be writing the same Credential. \
+                              Perch is finishing what it started rather than \
+                              stopping half way; check the Account you land on.";
+
     vec![
         LockSpec {
             name: "the refresh lock",
@@ -593,6 +605,7 @@ pub fn locks_for(store: &Store) -> Vec<LockSpec> {
             dir: store.config_dir.join(".oauth_refresh.lock"),
             stale_millis: REFRESH_STALE_MILLIS,
             update_millis: REFRESH_UPDATE_MILLIS,
+            lost_means: CARRIES_ON,
         },
         LockSpec {
             name: "the legacy config-home lock",
@@ -600,6 +613,7 @@ pub fn locks_for(store: &Store) -> Vec<LockSpec> {
             dir: legacy,
             stale_millis: REFRESH_STALE_MILLIS,
             update_millis: REFRESH_UPDATE_MILLIS,
+            lost_means: CARRIES_ON,
         },
         LockSpec {
             name: "the config file lock",
@@ -607,6 +621,7 @@ pub fn locks_for(store: &Store) -> Vec<LockSpec> {
             dir: PathBuf::from(config_file),
             stale_millis: CONFIG_STALE_MILLIS,
             update_millis: CONFIG_UPDATE_MILLIS,
+            lost_means: CARRIES_ON,
         },
     ]
 }

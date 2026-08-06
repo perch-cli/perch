@@ -110,11 +110,13 @@ pub type Login = Box<dyn Fn(&FakeHost, &Path) -> i32>;
 
 /// Something that happens while Perch waits.
 ///
-/// Contending for a lock is the only thing Perch waits on, and the world does
-/// not stand still meanwhile: a `claude` started during that wait is exactly
-/// what the questions asked *under* the locks are asked again for. Without this
-/// the fake can only present a world that was already settled before the
-/// command began.
+/// Perch waits in two places — contending for a lock, and putting a question to
+/// the person at the terminal — and the world does not stand still through
+/// either: a `claude` started during a lock wait is exactly what the questions
+/// asked *under* the locks are asked again for, and another `perch` claiming an
+/// abandoned lock while somebody stares at a `[y/N]` is what the hold is
+/// re-checked afterwards for. Without this the fake can only present a world
+/// that was already settled before the command began.
 pub type WhileWaiting = Box<dyn Fn(&FakeHost)>;
 
 pub struct FakeHost {
@@ -153,6 +155,8 @@ pub struct FakeHost {
     live_processes: RefCell<BTreeMap<u32, Option<DateTime<Utc>>>>,
     interactive: RefCell<bool>,
     answers: RefCell<VecDeque<String>>,
+    /// How long the person at the terminal takes over each answer.
+    answering_takes_millis: RefCell<u64>,
     /// What each endpoint answers, by URL and by the access token that asked.
     replies: RefCell<BTreeMap<(String, Option<String>), HttpResponse>>,
     sent: RefCell<Vec<Sent>>,
@@ -196,6 +200,7 @@ impl FakeHost {
             live_processes: RefCell::new(BTreeMap::new()),
             interactive: RefCell::new(true),
             answers: RefCell::new(VecDeque::new()),
+            answering_takes_millis: RefCell::new(0),
             replies: RefCell::new(BTreeMap::new()),
             sent: RefCell::new(Vec::new()),
             effects: RefCell::new(Vec::new()),
@@ -393,11 +398,12 @@ impl FakeHost {
         self
     }
 
-    /// What the rest of the machine does the first time Perch waits for a lock
-    /// — the one point in a command where something else can get in.
+    /// What the rest of the machine does the first time Perch waits — for a
+    /// lock, or for an answer.
     ///
     /// Once, because it stands for a thing that happens rather than for a
-    /// condition: a client starting, a lock being given back.
+    /// condition: a client starting, a lock being given back, another `perch`
+    /// arriving.
     pub fn once_while_waiting(self, happens: impl Fn(&FakeHost) + 'static) -> Self {
         *self.while_waiting.borrow_mut() = Some(Box::new(happens));
         self
@@ -456,6 +462,17 @@ impl FakeHost {
     /// is end of input, not a hang.
     pub fn with_answers(self, answers: &[&str]) -> Self {
         *self.answers.borrow_mut() = answers.iter().map(|line| line.to_string()).collect();
+        self
+    }
+
+    /// How long the person at the terminal takes to answer each question.
+    ///
+    /// Instant by default, which no real terminal is. A question put to a human
+    /// is the one wait in Perch with no bound on it — somebody may answer in a
+    /// second or come back after lunch — and it is the only place a command
+    /// behaving perfectly well can outlast a lock it is holding.
+    pub fn with_a_terminal_that_takes(self, millis: u64) -> Self {
+        *self.answering_takes_millis.borrow_mut() = millis;
         self
     }
 
@@ -1026,6 +1043,19 @@ impl Host for FakeHost {
 
     fn read_line(&self) -> Result<Option<String>, HostError> {
         self.record(Effect::Asked);
+        let taken = *self.answering_takes_millis.borrow();
+        if taken > 0 {
+            let thought_about_it =
+                *self.now.borrow() + chrono::Duration::milliseconds(taken as i64);
+            *self.now.borrow_mut() = thought_about_it;
+
+            // Taken out before it runs, so it can reach back into the fake
+            // without meeting a borrow this call is still holding.
+            let happens = self.while_waiting.borrow_mut().take();
+            if let Some(happens) = happens {
+                happens(self);
+            }
+        }
         Ok(self.answers.borrow_mut().pop_front())
     }
 

@@ -69,12 +69,12 @@ pub enum ConfigCommand {
 }
 
 pub fn run(host: &dyn Host, command: ConfigCommand, out: &mut dyn Write) -> Result<()> {
-    let (_perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
 
     match command {
         ConfigCommand::Set { words } => {
             let said = set(&mut registry, &words)?;
-            registry::save(host, &registry)?;
+            registry::save(host, &mut perch, &registry)?;
             for line in said {
                 say(out, &line)?;
             }

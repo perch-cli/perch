@@ -73,29 +73,46 @@ impl<'a> Held<'a> {
                 continue;
             }
 
+            // Asked *before* the touch, and this is the whole of the ordering:
+            // the timestamp Perch last left is the only identity a lock
+            // artifact has, and touching overwrites the very evidence the
+            // question is about. Asked afterwards, every renewal compares a
+            // stamp against the one it has just replaced and reports a takeover
+            // that never happened.
+            //
             // A lock that cannot be touched, or that no longer says what Perch
-            // left it saying, is one somebody else has taken over. The work
-            // carries on regardless — stopping half way through writing a
-            // Credential is worse than finishing — but it is said out loud, and
-            // the lock is never given back afterwards, because giving back
-            // somebody else's lock is how the loss spreads to a third process.
-            let touched = host.touch(&taken.lock.dir).is_ok();
-            let stamp = host.modified_at(&taken.lock.dir).ok();
-            if touched && still_ours(taken, stamp) {
-                taken.stamp = stamp;
+            // left it saying, is one somebody else has taken over. It is said
+            // out loud, and the lock is never given back afterwards, because
+            // giving back somebody else's lock is how the loss spreads to a
+            // third process.
+            if still_ours(taken, host.modified_at(&taken.lock.dir).ok())
+                && host.touch(&taken.lock.dir).is_ok()
+                && let Ok(stamp) = host.modified_at(&taken.lock.dir)
+            {
+                taken.stamp = Some(stamp);
                 continue;
             }
 
             taken.stamp = None;
             host.note(&format!(
-                "{} ({}) was taken over while Perch was working under it, so \
-                 something else may be writing the same Credential. Perch is \
-                 finishing what it started rather than stopping half way; check \
-                 the Account you land on.",
+                "{} ({}) was taken over while Perch was working under it. {}",
                 taken.lock.name,
                 taken.lock.dir.display(),
+                taken.lock.lost_means,
             ));
         }
+    }
+
+    /// Whether every lock taken is still Perch's, as of the last [`renew`].
+    ///
+    /// [`renew`]: Held::renew
+    ///
+    /// A hold that has been lost is not a hold that can be regained: whoever
+    /// took it over is working under it now. What a caller does about that
+    /// depends on what it was going to do next — [`crate::registry::save`]
+    /// refuses to write, where a Switch already half done finishes.
+    pub fn still_held(&self) -> bool {
+        self.taken.iter().all(|taken| taken.stamp.is_some())
     }
 
     /// Gives every lock back, last taken first.
@@ -254,6 +271,7 @@ mod tests {
             dir: PathBuf::from(dir),
             stale_millis: 60_000,
             update_millis: 5_000,
+            lost_means: "Perch is finishing what it started.",
         }
     }
 
@@ -276,6 +294,44 @@ mod tests {
             "a holder that goes quiet for longer than the staleness window has \
              its lock taken out from under it: {:?}",
             host.effects()
+        );
+    }
+
+    /// The renewal has to survive itself. A holder says it is still there by
+    /// touching the artifact, and the artifact's timestamp is also the only
+    /// evidence that the artifact is still Perch's — so a renewal that checks
+    /// the evidence *after* writing it reads its own touch as somebody else's
+    /// and declares the lock lost on the first renewal of every hold.
+    ///
+    /// What that costs is here rather than in the ordering: work carries on
+    /// under a hold Perch has stopped renewing, the lock goes stale under it,
+    /// and it is never given back — so the next command waits out a staleness
+    /// window on an artifact nobody holds.
+    #[test]
+    fn renewing_a_lock_nobody_touched_keeps_it_rather_than_losing_it_to_itself() {
+        let host = FakeHost::new();
+        let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
+
+        let ran: Result<()> = under(&host, vec![lock.clone()], |held| {
+            // Three stalls, each past the update interval: a hold whose first
+            // renewal lost it would go quiet from here on.
+            for _ in 0..3 {
+                host.sleep(6_000);
+                held.renew();
+                assert!(held.still_held(), "nobody has taken it");
+            }
+            Ok(())
+        });
+        ran.expect("the work runs");
+
+        assert!(
+            host.notes().is_empty(),
+            "nothing was taken over, so nothing is said: {:?}",
+            host.notes()
+        );
+        assert!(
+            !host.path_exists(Path::new(&lock.dir)),
+            "and a lock Perch still holds is a lock Perch gives back"
         );
     }
 
@@ -422,6 +478,7 @@ mod exclusivity {
             dir: dir.join(".oauth_refresh.lock"),
             stale_millis: 600_000,
             update_millis: 600_000,
+            lost_means: "Perch is finishing what it started.",
         };
 
         // Incremented on the way in and decremented on the way out, so anything

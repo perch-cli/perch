@@ -27,20 +27,20 @@ pub enum AliasCommand {
 }
 
 pub fn run(host: &dyn Host, command: AliasCommand, out: &mut dyn Write) -> Result<()> {
-    let (_perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
 
     match command {
         AliasCommand::Set { name, target } => {
             registry::validate_name(NameKind::Alias, &name)?;
             let account = target::resolve_account(&registry, &target)?;
             let named = set(&mut registry, &name, &account)?;
-            registry::save(host, &registry)?;
+            registry::save(host, &mut perch, &registry)?;
             say(out, &account.matched)?;
             say(out, &named)
         }
         AliasCommand::Unset { name } => {
             let (held, email) = unset(&mut registry, &name)?;
-            registry::save(host, &registry)?;
+            registry::save(host, &mut perch, &registry)?;
             say(out, &format!("`{held}` no longer names {email}."))
         }
     }

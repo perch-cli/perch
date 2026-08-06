@@ -26,6 +26,7 @@ use crate::commands::{ask, say};
 use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::lock::Held;
 use crate::probe;
 use crate::registry::{self, Account, Registry};
 use crate::switch;
@@ -63,7 +64,7 @@ impl Consequence {
 }
 
 pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()> {
-    let (_perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
 
     let found = target::resolve_account(&registry, &args.target)?;
     say(out, &found.matched)?;
@@ -96,10 +97,28 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
         return say(out, "Nothing was removed.");
     }
 
+    // The question above is the one wait in Perch with no bound on it — somebody
+    // may answer it in a second or walk away and answer it after lunch — so it
+    // is the one place the registry lock can go stale under a command that is
+    // otherwise behaving. Asked here, before the first irreversible thing:
+    // everything from this line on deletes Credentials, and finding out
+    // afterwards that the registry recording them was never ours to write is
+    // finding out too late.
+    perch.renew();
+    if !perch.still_held() {
+        return Err(PerchError::Other(
+            "Another `perch` changed the registry while that question was \
+             waiting for an answer, so this one is working from a copy that is \
+             out of date.\n\
+             Nothing was removed. Run this again."
+                .to_string(),
+        ));
+    }
+
     // Somewhere to land before anything is deleted. A failure here has cost
     // nothing: the Account is still held, and its Credential is still live.
     if let Some(successor) = &consequence.successor {
-        land_on(host, out, &mut registry, successor, &account)?;
+        land_on(host, &mut perch, out, &mut registry, successor, &account)?;
     }
 
     let deleted = delete_the_credential_and_its_profile(host, &registry, &account)?;
@@ -107,7 +126,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     let named = registry.named_for_the_user(account.email());
     let alias = registry.alias_of(account.email()).map(str::to_string);
     registry.forget(account.email());
-    registry::save(host, &registry).map_err(|error| {
+    registry::save(host, &mut perch, &registry).map_err(|error| {
         error.with_note(&format!(
             "The Credential Perch held for {} is already deleted, so the Account \
              it still records is one it can no longer switch to.",
@@ -261,6 +280,7 @@ fn what_it_would_leave(
 /// Default Profile is live even if the Identity beside it was never patched.
 fn land_on(
     host: &dyn Host,
+    perch: &mut Held<'_>,
     out: &mut dyn Write,
     registry: &mut Registry,
     successor: &Account,
@@ -271,7 +291,7 @@ fn land_on(
 
     if is_live {
         registry.active = Some(successor.email().to_string());
-        registry::save(host, registry).map_err(|error| {
+        registry::save(host, perch, registry).map_err(|error| {
             error.with_note(&format!(
                 "Nothing was removed. {}'s Credential is the live one now, so \
                  `perch switch {}` puts the record right before anything else is \

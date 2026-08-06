@@ -21,13 +21,7 @@ fn adopted_machine(utilization: &str) -> FakeHost {
         "organization_name": "Acme"
       }},
       "plan": "pro",
-      "profile": {{
-        "dir": "/Users/someone/.config/.perch/profiles/someone-example-com",
-        "keychain_service": "Claude Code-credentials-abcd1234",
-        "keychain_account": "someone"
-      }},
-      "enabled": true,
-      "quarantined": false{utilization}
+      "enabled": true{utilization}
     }}
   ],
   "aliases": {{}}
@@ -181,5 +175,40 @@ fn status_with_no_active_account_names_the_remedy_that_applies() {
     assert!(
         !message.contains("log in"),
         "Perch holds a Credential for the Account it would land on:\n{message}"
+    );
+}
+
+/// `perch status` is the command advertised for a shell prompt, where it may
+/// run several times a minute — and two prompts drawing at once is the ordinary
+/// case rather than a race. Taking the registry lock to read would have one of
+/// them wait out the other and then fail, so a prompt would show an error
+/// because a second prompt happened to draw at the same moment.
+///
+/// Nothing is written without `--refresh`, so nothing needs shutting out.
+#[test]
+fn status_reads_alongside_another_perch_rather_than_waiting_on_it() {
+    let host = machine_with_two_accounts();
+    let held = perch::registry::lock(&host).expect("the other `perch` has it");
+
+    let (result, printed) = run_status(&host, false);
+
+    result.expect("a read does not wait on a writer");
+    assert!(printed.contains(EMAIL), "{printed}");
+    drop(held);
+}
+
+/// The other half of the same rule: `--refresh` writes what it fetched, so it
+/// does take the lock, and two of them do exclude each other.
+#[test]
+fn status_that_refreshes_waits_for_the_other_perch_because_it_writes() {
+    let host = machine_with_two_accounts();
+    let _held = perch::registry::lock(&host).expect("the other `perch` has it");
+
+    let (result, _) = run_status_refresh(&host, false);
+
+    let refused = result.expect_err("a writer waits on a writer");
+    assert!(
+        refused.to_string().contains("the Perch registry lock"),
+        "{refused}"
     );
 }

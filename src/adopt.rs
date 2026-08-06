@@ -12,7 +12,6 @@ use std::io::Write;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::login;
-use crate::migrate;
 use crate::probe::{self, Findings, Store, Verdict};
 use crate::profile;
 use crate::registry::{self, Account, Registry};
@@ -26,7 +25,6 @@ use crate::registry::{self, Account, Registry};
 /// browser login before they change anything. A command that is going to write
 /// wants [`ensure_adopted_exclusively`] instead.
 pub fn ensure_adopted(host: &dyn Host, out: &mut dyn Write) -> Result<Registry> {
-    migrate::out_of_the_old_home(host, out)?;
     login::reap_abandoned(host);
     if let Some(registry) = registry::load(host)? {
         return Ok(registry);
@@ -34,8 +32,8 @@ pub fn ensure_adopted(host: &dyn Host, out: &mut dyn Write) -> Result<Registry> 
     // The adoption itself writes, so it is done with the other Perches shut out
     // — two of them adopting at once would each build the first Profile and one
     // would overwrite the other's registry wholesale.
-    let _perch = registry::lock(host)?;
-    load_or_adopt(host, out)
+    let mut perch = registry::lock(host)?;
+    load_or_adopt(host, &mut perch, out)
 }
 
 /// The registry, with every other Perch shut out of it until the returned hold
@@ -50,23 +48,30 @@ pub fn ensure_adopted_exclusively<'a>(
     host: &'a dyn Host,
     out: &mut dyn Write,
 ) -> Result<(crate::lock::Held<'a>, Registry)> {
-    migrate::out_of_the_old_home(host, out)?;
     login::reap_abandoned(host);
-    let held = registry::lock(host)?;
-    let registry = load_or_adopt(host, out)?;
+    let mut held = registry::lock(host)?;
+    let registry = load_or_adopt(host, &mut held, out)?;
     Ok((held, registry))
 }
 
 /// The registry, adopting the existing login if there is none. The lock is the
 /// caller's to have taken — this is the half of adoption that writes.
-fn load_or_adopt(host: &dyn Host, out: &mut dyn Write) -> Result<Registry> {
+fn load_or_adopt(
+    host: &dyn Host,
+    perch: &mut crate::lock::Held<'_>,
+    out: &mut dyn Write,
+) -> Result<Registry> {
     match registry::load(host)? {
         Some(registry) => Ok(registry),
-        None => adopt(host, out),
+        None => adopt(host, perch, out),
     }
 }
 
-fn adopt(host: &dyn Host, out: &mut dyn Write) -> Result<Registry> {
+fn adopt(
+    host: &dyn Host,
+    perch: &mut crate::lock::Held<'_>,
+    out: &mut dyn Write,
+) -> Result<Registry> {
     let findings = match probe::probe(host)? {
         Verdict::Recognised(findings) => findings,
         Verdict::NoLogin { version, .. } => {
@@ -79,12 +84,16 @@ fn adopt(host: &dyn Host, out: &mut dyn Write) -> Result<Registry> {
         }
     };
 
-    let registry = store_as_first_profile(host, &findings)?;
+    let registry = store_as_first_profile(host, perch, &findings)?;
     report(out, &findings)?;
     Ok(registry)
 }
 
-fn store_as_first_profile(host: &dyn Host, findings: &Findings) -> Result<Registry> {
+fn store_as_first_profile(
+    host: &dyn Host,
+    perch: &mut crate::lock::Held<'_>,
+    findings: &Findings,
+) -> Result<Registry> {
     let dir = registry::profile_dir_for(host, &findings.identity.email)?;
     let store = profile::create(host, &dir, findings.credential.as_str())?;
     carry_the_identity_block(host, findings, &store)?;
@@ -100,7 +109,7 @@ fn store_as_first_profile(host: &dyn Host, findings: &Findings) -> Result<Regist
     });
     registry.active = Some(findings.identity.email.clone());
 
-    registry::save(host, &registry)?;
+    registry::save(host, perch, &registry)?;
     Ok(registry)
 }
 
