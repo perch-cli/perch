@@ -878,6 +878,11 @@ mod tests {
     /// is what says whether the holder is alive or died holding it. The
     /// platform split in `touch_now` (backup semantics on Windows) exists for
     /// exactly this case.
+    ///
+    /// Behind the `contract` feature, because it has to outwait a coarse
+    /// filesystem timestamp and there is no faking that: a second of wall clock
+    /// in every `cargo test` is a second nobody chose to spend.
+    #[cfg(feature = "contract")]
     #[test]
     fn touch_moves_a_directorys_modification_time_forward() {
         let host = RealHost::new();

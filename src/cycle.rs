@@ -543,13 +543,13 @@ fn already_the_best(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::probe::Identity;
     use crate::registry::Quarantine;
     use chrono::TimeZone;
 
-    fn now() -> DateTime<Utc> {
+    pub(super) fn now() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap()
     }
 
@@ -570,7 +570,7 @@ mod tests {
         assert!(said.contains("1 Quarantined"), "{said}");
     }
 
-    fn account(email: &str, windows: Vec<WindowUtilization>) -> Account {
+    pub(super) fn account(email: &str, windows: Vec<WindowUtilization>) -> Account {
         Account {
             identity: Identity {
                 email: email.to_string(),
@@ -589,7 +589,7 @@ mod tests {
         }
     }
 
-    fn window(name: &str, used_percent: f64) -> WindowUtilization {
+    pub(super) fn window(name: &str, used_percent: f64) -> WindowUtilization {
         WindowUtilization {
             window: name.to_string(),
             used_percent,
@@ -597,14 +597,14 @@ mod tests {
         }
     }
 
-    fn resetting(name: &str, used_percent: f64, hours: i64) -> WindowUtilization {
+    pub(super) fn resetting(name: &str, used_percent: f64, hours: i64) -> WindowUtilization {
         WindowUtilization {
             resets_at: Some(now() + chrono::Duration::hours(hours)),
             ..window(name, used_percent)
         }
     }
 
-    fn holding(accounts: Vec<Account>) -> Registry {
+    pub(super) fn holding(accounts: Vec<Account>) -> Registry {
         let mut registry = Registry::default();
         registry.declare_group("work").unwrap();
         registry.active = accounts.first().map(|first| first.email().to_string());
@@ -615,7 +615,10 @@ mod tests {
     }
 
     /// The same Group, told to prefer the other of the two Strategies.
-    fn preferring(mut registry: Registry, strategy: crate::registry::Strategy) -> Registry {
+    pub(super) fn preferring(
+        mut registry: Registry,
+        strategy: crate::registry::Strategy,
+    ) -> Registry {
         registry.groups.get_mut("work").expect("declared").strategy = strategy;
         registry
     }
@@ -883,5 +886,180 @@ mod tests {
         assert_eq!(error.exit_code(), crate::error::EXIT_NO_CANDIDATE);
         assert!(error.to_string().contains("2 disabled"), "{error}");
         assert!(error.to_string().contains("1 Quarantined"), "{error}");
+    }
+}
+
+/// Properties the ranking has to hold for every arrangement of Accounts, not
+/// only for the ones somebody thought to write a fixture for.
+///
+/// The example-based tests above say what happens in the situations the design
+/// is *about*. These say what must never happen in any situation at all — a
+/// comparator sign flipped inside one Strategy would pass every example that
+/// does not use that Strategy, and these would catch it wherever it was.
+///
+/// The cases come from a small congruential generator rather than a property
+/// crate: a fixed seed, printed in every failure, so a failing case is one that
+/// can be reproduced by running the same test rather than one that has to be
+/// caught again (ADR 0025 — a crate where it does not cost a seam, and a
+/// dev-dependency for twenty lines of arithmetic is not that).
+#[cfg(test)]
+mod properties {
+    use super::tests::*;
+    use super::*;
+    use crate::registry::{Quarantine, Strategy};
+
+    /// One case: some Accounts, in some shape, under one Strategy.
+    struct Arrangement {
+        registry: Registry,
+        strategy: Strategy,
+        described: String,
+    }
+
+    /// A deterministic stream of numbers. Not random — reproducible, which is
+    /// the property that matters when a case fails.
+    struct Cases(u64);
+
+    impl Cases {
+        fn next(&mut self, below: u64) -> u64 {
+            // Numerical Recipes' constants: any full-period generator will do
+            // here, and this one needs no dependency and no explanation.
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
+            (self.0 >> 33) % below
+        }
+
+        fn arrangement(&mut self, index: usize) -> Arrangement {
+            let count = 1 + self.next(5) as usize;
+            let strategy = if self.next(2) == 0 {
+                Strategy::MostHeadroom
+            } else {
+                Strategy::SoonestReset
+            };
+
+            let mut described = format!("case {index}, {strategy:?}");
+            let mut accounts = Vec::new();
+            for at in 0..count {
+                let email = format!("a{at}@example.com");
+                // Every shape the ranking distinguishes: no observation, an
+                // observation with a reset time, one without, and a window
+                // that is full.
+                let used = self.next(101) as f64;
+                let windows = match self.next(4) {
+                    0 => vec![],
+                    1 => vec![window("5-hour", used)],
+                    2 => vec![resetting("5-hour", used, 1 + self.next(48) as i64)],
+                    _ => vec![window("5-hour", 100.0)],
+                };
+                let mut held = account(&email, windows);
+                held.enabled = self.next(6) > 0;
+                held.quarantine = (self.next(8) == 0).then_some(Quarantine::RenewalRejected);
+                described.push_str(&format!(
+                    "\n  {email}: {:?} enabled={} quarantined={}",
+                    headroom_of(&held),
+                    held.enabled,
+                    held.quarantined(),
+                ));
+                accounts.push(held);
+            }
+
+            Arrangement {
+                registry: preferring(holding(accounts), strategy),
+                strategy,
+                described,
+            }
+        }
+    }
+
+    fn cases() -> impl Iterator<Item = Arrangement> {
+        let mut generator = Cases(0x5eed_1234_5678_9abc);
+        (0..400).map(move |index| generator.arrangement(index))
+    }
+
+    fn chosen(arrangement: &Arrangement, leaving: Option<&str>) -> Option<Account> {
+        choose(
+            &arrangement.registry,
+            &Scope::Group("work".to_string()),
+            leaving,
+            now(),
+        )
+        .ok()
+        .map(|choice| choice.account)
+    }
+
+    /// Never being chosen for you is the whole of what disabled means, and a
+    /// Quarantined Account's Credential does not work. Neither can be the
+    /// answer however the figures fall.
+    #[test]
+    fn nothing_disabled_exhausted_or_quarantined_is_ever_chosen() {
+        for arrangement in cases() {
+            let Some(won) = chosen(&arrangement, None) else {
+                continue;
+            };
+            assert!(won.enabled, "{}", arrangement.described);
+            assert!(!won.quarantined(), "{}", arrangement.described);
+            assert!(
+                !headroom_of(&won).is_exhausted(),
+                "{}",
+                arrangement.described
+            );
+        }
+    }
+
+    /// The winner is a winner: no candidate the Cycle was allowed to choose
+    /// ranks above it.
+    #[test]
+    fn the_winner_ranks_at_least_as_high_as_every_candidate() {
+        for arrangement in cases() {
+            let Some(won) = chosen(&arrangement, None) else {
+                continue;
+            };
+            let winning = headroom_of(&won).ranking(arrangement.strategy);
+            for held in &arrangement.registry.accounts {
+                if !held.enabled || held.quarantined() || headroom_of(held).is_exhausted() {
+                    continue;
+                }
+                let theirs = headroom_of(held).ranking(arrangement.strategy);
+                assert!(
+                    winning.0 > theirs.0 || (winning.0 == theirs.0 && winning.1 >= theirs.1),
+                    "{} won at {winning:?}, beaten by {theirs:?}\n{}",
+                    won.email(),
+                    arrangement.described,
+                );
+            }
+        }
+    }
+
+    /// Landing where you already are would rewrite Credentials for nothing.
+    #[test]
+    fn the_account_being_left_is_never_the_one_chosen() {
+        for arrangement in cases() {
+            let leaving = arrangement
+                .registry
+                .accounts
+                .first()
+                .map(|first| first.email().to_string());
+            let Some(won) = chosen(&arrangement, leaving.as_deref()) else {
+                continue;
+            };
+            assert_ne!(
+                Some(won.email()),
+                leaving.as_deref(),
+                "{}",
+                arrangement.described
+            );
+        }
+    }
+
+    /// The same question asked twice gets the same answer, or nothing anybody
+    /// reads is stable enough to act on.
+    #[test]
+    fn the_same_arrangement_always_chooses_the_same_account() {
+        for arrangement in cases() {
+            let once = chosen(&arrangement, None).map(|won| won.email().to_string());
+            let twice = chosen(&arrangement, None).map(|won| won.email().to_string());
+            assert_eq!(once, twice, "{}", arrangement.described);
+        }
     }
 }

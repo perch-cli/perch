@@ -320,7 +320,7 @@ pub const NO_GROUP: &str = "none";
 
 /// Whether a name is the one that means no Group at all.
 pub fn means_no_group(name: &str) -> bool {
-    name.eq_ignore_ascii_case(NO_GROUP)
+    same_name(name, NO_GROUP)
 }
 
 /// Which of the two things sharing the namespace is being named. A refusal
@@ -349,6 +349,18 @@ impl NameKind {
 /// `switch` and `run`, so a name has to be distinguishable from the other
 /// things a Target can be: an email address, and the word that means no Group
 /// at all.
+/// Whether two names the user chose are the same name.
+///
+/// Case-insensitively, because nobody remembers which way they capitalised a
+/// Group months ago — and over the whole of Unicode, because
+/// [`validate_name`] accepts the whole of Unicode. Comparing only ASCII would
+/// make `café` and `CAFÉ` two different Groups while making `work` and `Work`
+/// one, which is the ambiguity the rule exists to prevent, kept for exactly
+/// the users whose language has accents in it.
+pub fn same_name(one: &str, other: &str) -> bool {
+    one.to_lowercase() == other.to_lowercase()
+}
+
 pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
     if name.trim().is_empty() {
         return Err(PerchError::Invalid(format!(
@@ -489,7 +501,7 @@ impl Registry {
     pub fn declared_group(&self, name: &str) -> Option<&str> {
         self.groups
             .keys()
-            .find(|declared| declared.eq_ignore_ascii_case(name))
+            .find(|declared| same_name(declared, name))
             .map(String::as_str)
     }
 
@@ -555,7 +567,7 @@ impl Registry {
     pub fn declared_alias(&self, name: &str) -> Option<(&str, &str)> {
         self.aliases
             .iter()
-            .find(|(alias, _)| alias.eq_ignore_ascii_case(name))
+            .find(|(alias, _)| same_name(alias, name))
             .map(|(alias, email)| (alias.as_str(), email.as_str()))
     }
 
@@ -573,7 +585,7 @@ impl Registry {
     /// even though a lookup could tell them apart.
     pub fn refuse_taken_names(&self, alias: Option<&str>, group: Option<&str>) -> Result<()> {
         if let (Some(alias), Some(group)) = (alias, group)
-            && alias.eq_ignore_ascii_case(group)
+            && same_name(alias, group)
         {
             return Err(PerchError::Conflict(format!(
                 "`{alias}` cannot be both an Alias and a Group name."

@@ -385,3 +385,85 @@ mod tests {
         assert!(!host.path_exists(Path::new(&first.dir)));
     }
 }
+
+/// The exclusivity claim itself, on a real filesystem and with real threads.
+///
+/// `mkdir` either creates a directory or fails, with nothing in between, and
+/// that is the whole of the lock protocol — every other rule here is about who
+/// may take over from whom. Everything above checks it sequentially, which is
+/// to say it checks a claim about concurrency without any.
+///
+/// Behind the `contract` feature with the rest of what asserts against the real
+/// machine: eight threads contending really do wait on each other, which is
+/// seconds of wall clock that should not be spent by every `cargo test`.
+#[cfg(all(test, feature = "contract"))]
+mod exclusivity {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+    use crate::host::RealHost;
+    use crate::probe::LockSpec;
+
+    #[test]
+    fn only_one_of_eight_threads_holds_the_lock_at_a_time() {
+        const THREADS: usize = 8;
+        const EACH: usize = 5;
+
+        let dir = std::env::temp_dir().join(format!("perch-lock-race-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Long enough that nothing here is ever taken as abandoned: a takeover
+        // is a different rule, and this test is about the one underneath it.
+        let lock = LockSpec {
+            name: "the refresh lock",
+            held_by: "Claude Code",
+            dir: dir.join(".oauth_refresh.lock"),
+            stale_millis: 600_000,
+            update_millis: 600_000,
+        };
+
+        // Incremented on the way in and decremented on the way out, so anything
+        // above one means two holders overlapped. `taken` counts how many holds
+        // actually happened, since a thread that loses every attempt proves
+        // nothing either way.
+        static INSIDE: AtomicUsize = AtomicUsize::new(0);
+        static MOST: AtomicUsize = AtomicUsize::new(0);
+        static TAKEN: AtomicUsize = AtomicUsize::new(0);
+        INSIDE.store(0, Ordering::SeqCst);
+        MOST.store(0, Ordering::SeqCst);
+        TAKEN.store(0, Ordering::SeqCst);
+
+        std::thread::scope(|threads| {
+            for _ in 0..THREADS {
+                let lock = lock.clone();
+                threads.spawn(move || {
+                    let host = RealHost::new();
+                    for _ in 0..EACH {
+                        let Ok(held) = take_all(&host, vec![lock.clone()]) else {
+                            continue;
+                        };
+                        TAKEN.fetch_add(1, Ordering::SeqCst);
+                        let now = INSIDE.fetch_add(1, Ordering::SeqCst) + 1;
+                        MOST.fetch_max(now, Ordering::SeqCst);
+                        // Long enough that an overlap would be observed rather
+                        // than raced past.
+                        std::thread::sleep(std::time::Duration::from_micros(100));
+                        INSIDE.fetch_sub(1, Ordering::SeqCst);
+                        drop(held);
+                    }
+                });
+            }
+        });
+
+        let most = MOST.load(Ordering::SeqCst);
+        let taken = TAKEN.load(Ordering::SeqCst);
+        let leftover = PathBuf::from(&lock.dir).exists();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(most, 1, "{most} threads held the lock at once");
+        assert!(taken > THREADS, "only {taken} holds happened at all");
+        assert!(!leftover, "the last holder gave it back");
+    }
+}

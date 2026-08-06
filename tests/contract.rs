@@ -171,6 +171,25 @@ fn the_installed_claude_code_stores_what_perch_expects_to_find() {
     }
 }
 
+/// Takes the item back out of the real login keychain when the test ends,
+/// however it ends.
+///
+/// The straight-line `keychain_delete` these tests used runs only if every
+/// assertion before it passed, so the one run that fails is the one that leaves
+/// something behind — in the user's own keychain, on the day they are already
+/// looking at a failure.
+struct Reaped<'a> {
+    host: &'a RealHost,
+    service: String,
+    account: String,
+}
+
+impl Drop for Reaped<'_> {
+    fn drop(&mut self) {
+        let _ = self.host.keychain_delete(&self.service, &self.account);
+    }
+}
+
 #[test]
 fn the_security_binary_round_trips_a_credential_sized_secret() {
     if skipping_keychain() {
@@ -185,10 +204,15 @@ fn the_security_binary_round_trips_a_credential_sized_secret() {
         "a".repeat(300)
     );
 
+    let reaped = Reaped {
+        host: &host,
+        service: service.clone(),
+        account: account.clone(),
+    };
     host.keychain_set(&service, &account, &secret)
         .expect("writing to the login keychain");
     let read_back = host.keychain_get(&service, &account);
-    let _ = host.keychain_delete(&service, &account);
+    drop(reaped);
 
     assert_eq!(read_back.as_deref(), Ok(secret.as_str()));
     assert_eq!(
@@ -216,10 +240,14 @@ fn a_secret_past_the_stdin_buffer_limit_survives_the_argv_fallback() {
         "b".repeat(4096)
     );
 
+    let _reaped = Reaped {
+        host: &host,
+        service: service.clone(),
+        account: account.clone(),
+    };
     host.keychain_set(&service, &account, &secret)
         .expect("writing a large item to the login keychain");
     let read_back = host.keychain_get(&service, &account);
-    let _ = host.keychain_delete(&service, &account);
 
     assert_eq!(
         read_back.as_deref(),

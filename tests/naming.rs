@@ -384,3 +384,36 @@ fn a_switch_accepts_the_spelling_every_other_command_accepts() {
     assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
     assert!(printed.contains(SECOND_EMAIL), "{printed}");
 }
+
+/// `validate_name` accepts the whole of Unicode, so the rule that two names
+/// differing only in case are one name has to hold over the whole of Unicode
+/// too. Comparing only ASCII would make `work` and `Work` one Group while
+/// making `café` and `CAFÉ` two — the exact ambiguity the rule exists to
+/// prevent, kept for the users whose language has accents in it.
+#[test]
+fn a_name_is_one_name_however_it_is_capitalised_in_any_language() {
+    let host = machine_with_two_accounts();
+    declare_group(&host, "café");
+
+    let (refused, _) = run_group(
+        &host,
+        GroupCommand::Add {
+            name: "CAFÉ".to_string(),
+        },
+    );
+    assert_eq!(
+        refused
+            .expect_err("that is the Group that is already declared")
+            .exit_code(),
+        EXIT_CONFLICT
+    );
+
+    let registry = registry_of(&host);
+    assert_eq!(registry.declared_group("CAFÉ"), Some("café"));
+    assert_eq!(
+        target::resolve(&registry, "Café").expect("the Group is reached"),
+        Target::Group {
+            name: "café".to_string()
+        }
+    );
+}
