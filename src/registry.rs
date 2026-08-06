@@ -646,7 +646,7 @@ impl Registry {
     }
 }
 
-/// `$PERCH_HOME`, or `~/.config/.perch` — an error when neither is knowable,
+/// `$PERCH_HOME`, or `~/.config/perch` — an error when neither is knowable,
 /// because a machine that cannot say where home is gets a refusal rather than a
 /// registry written into the filesystem root.
 ///
@@ -667,7 +667,7 @@ pub fn perch_home(host: &dyn Host) -> Result<PathBuf> {
     if let Some(overridden) = host.env_var("PERCH_HOME") {
         return Ok(PathBuf::from(overridden));
     }
-    Ok(home_dir(host)?.join(".config").join(".perch"))
+    Ok(home_dir(host)?.join(".config").join("perch"))
 }
 
 fn home_dir(host: &dyn Host) -> Result<PathBuf> {
@@ -900,7 +900,7 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) ->
 /// Group and Quarantine reason, and the Utilization history behind them. That
 /// is a full picture of somebody's Anthropic relationships, and the Profile
 /// directories it sits beside are already 0700 (ADR 0020) — this file was the
-/// gap. A `~/.config/.perch` that already exists keeps the mode it has, as `mkdir -p`
+/// gap. A `~/.config/perch` that already exists keeps the mode it has, as `mkdir -p`
 /// does everywhere else in Perch, but the file is replaced on every save and so
 /// comes back narrow from the first one.
 fn write(host: &dyn Host, path: &Path, contents: &str) -> Result<()> {
@@ -1044,7 +1044,7 @@ mod tests {
     /// leave it malformed for good.
     #[test]
     fn a_save_that_fails_leaves_the_registry_exactly_as_it_was() {
-        let path = "/Users/someone/.config/.perch/registry.json";
+        let path = "/Users/someone/.config/perch/registry.json";
         let before = format!("{{\"version\":{CURRENT_VERSION},\"accounts\":[]}}");
         let host = crate::host::FakeHost::new()
             .with_file(path, &before)

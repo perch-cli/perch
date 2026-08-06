@@ -232,7 +232,7 @@ mod tests {
     fn profile_store(host: &FakeHost) -> Store {
         probe::store_for_profile(
             host,
-            std::path::Path::new("/Users/someone/.config/.perch/profiles/a"),
+            std::path::Path::new("/Users/someone/.config/perch/profiles/a"),
         )
         .expect("USER is set")
     }
@@ -255,7 +255,7 @@ mod tests {
         let host = FakeHost::new();
         assert_eq!(
             profile_store(&host).credentials_file,
-            std::path::Path::new("/Users/someone/.config/.perch/profiles/a/.credentials.json")
+            std::path::Path::new("/Users/someone/.config/perch/profiles/a/.credentials.json")
         );
     }
 
@@ -334,7 +334,7 @@ mod tests {
         let host = FakeHost::new()
             .with_platform(Platform::Other)
             .with_file_mode(
-                "/Users/someone/.config/.perch/profiles/a/.credentials.json",
+                "/Users/someone/.config/perch/profiles/a/.credentials.json",
                 0o644,
             );
         let store = profile_store(&host);

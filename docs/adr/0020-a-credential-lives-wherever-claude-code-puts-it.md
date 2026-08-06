@@ -54,7 +54,7 @@ deliberately rather than discovered.
 
 Off macOS, Perch multiplies the number of plaintext secrets on disk. Claude Code
 alone keeps one Credential in one file; a person holding four Accounts through
-Perch has four, under `~/.config/.perch/profiles/`. Perch does not lower the protection
+Perch has four, under `~/.config/perch/profiles/`. Perch does not lower the protection
 of any single Credential, but it does widen what a leaked backup of `$HOME`
 yields, and that is the strongest argument for the rejected alternative. The
 portable case — a Credential leaving the machine — is covered separately and

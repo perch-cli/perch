@@ -920,8 +920,7 @@ mod tests {
 
     #[test]
     fn every_other_directory_gets_a_hash_of_its_path() {
-        let service =
-            service_name_for(Path::new("/Users/someone/.config/.perch/profiles/a"), false);
+        let service = service_name_for(Path::new("/Users/someone/.config/perch/profiles/a"), false);
         let hash = service.strip_prefix("Claude Code-credentials-").unwrap();
         assert_eq!(hash.len(), 8);
         assert!(hash.bytes().all(|b| b.is_ascii_hexdigit()));
@@ -929,8 +928,8 @@ mod tests {
 
     #[test]
     fn two_directories_get_two_namespaces() {
-        let one = service_name_for(Path::new("/Users/someone/.config/.perch/profiles/a"), false);
-        let two = service_name_for(Path::new("/Users/someone/.config/.perch/profiles/b"), false);
+        let one = service_name_for(Path::new("/Users/someone/.config/perch/profiles/a"), false);
+        let two = service_name_for(Path::new("/Users/someone/.config/perch/profiles/b"), false);
         assert_ne!(one, two);
     }
 

@@ -456,10 +456,10 @@ it took.
 
 ## Where things are
 
-- `~/.config/.perch/registry.json` — Perch's own state, versioned.
-- `~/.config/.perch/profiles/<account>/` — one directory per Account. Its path is what
+- `~/.config/perch/registry.json` — Perch's own state, versioned.
+- `~/.config/perch/profiles/<account>/` — one directory per Account. Its path is what
   gives that Account a private Credential Store (ADR 0001).
-- `$PERCH_HOME` overrides `~/.config/.perch`. Home is `$USERPROFILE` on Windows and
+- `$PERCH_HOME` overrides `~/.config/perch`. Home is `$USERPROFILE` on Windows and
   `$HOME` elsewhere; a machine that cannot say where home is gets a refusal,
   never a write into the filesystem root. `~/.config` is created if it is not
   there, and the same path is used on every platform, Windows included, rather
