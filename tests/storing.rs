@@ -194,9 +194,16 @@ fn a_credential_written_to_the_primary_store_leaves_no_copy_in_the_other() {
 /// The same rule the other way round, which matters more: the store that could
 /// not be written is the one a reader consults first, so a copy left in it
 /// would beat the Credential that was just stored.
+///
+/// Off macOS with a keychain, which is a machine that does not exist —
+/// `/usr/bin/security` is a Mac binary. This test is about the composite
+/// reader's rule and not about a platform, so it asks for the one arrangement
+/// that lets both stores be reachable at once and says so; the fake refuses a
+/// keychain off macOS by default, because a test that got one by accident would
+/// pass on a scenario the platform cannot produce.
 #[test]
 fn a_credential_stored_in_the_second_choice_store_empties_the_first() {
-    let host = two_accounts_off_macos();
+    let host = two_accounts_off_macos_with_a_keychain();
     let live = CREDENTIALS_PATH;
     assert_eq!(host.file(live).as_deref(), Some(CREDENTIAL), "as we start");
 
@@ -268,6 +275,25 @@ fn a_version_1_registry_is_read_by_dropping_where_it_said_a_credential_was() {
 }
 
 /// Two Accounts on a machine that is not a Mac.
+/// The same, on the machine that does not exist: not a Mac, and with a
+/// keychain that answers anyway. Only for the tests that are about the
+/// composite reader rather than about a platform.
+fn two_accounts_off_macos_with_a_keychain() -> FakeHost {
+    let host = logged_in_machine_off_macos()
+        .with_keychain_off_macos()
+        .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE));
+    run_add(
+        &host,
+        AddArgs {
+            no_group: true,
+            ..AddArgs::default()
+        },
+    )
+    .0
+    .expect("the second Account is added");
+    host
+}
+
 fn two_accounts_off_macos() -> FakeHost {
     let host = logged_in_machine_off_macos()
         .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE));
@@ -330,4 +356,66 @@ fn the_platform_decides_which_store_is_written_first() {
         );
         assert_eq!(credential_of(&host, EMAIL).as_deref(), Some(CREDENTIAL));
     }
+}
+
+/// The read-back guard, which is the whole reason a Credential is not simply
+/// written and believed.
+///
+/// `security -i` truncates mid-argument when a command line overruns its 4096
+/// byte stdin buffer, and says nothing about it (ADR 0008). A truncated
+/// Credential is indistinguishable from a wrong one at the worst possible
+/// moment — some Switch later, with the good copy already replaced. So what a
+/// store says it kept is read back, and a store that kept something else is
+/// treated exactly like one that refused the write outright.
+#[test]
+fn a_store_that_kept_less_than_it_was_given_is_treated_as_one_that_refused() {
+    let host = machine_with_two_accounts().with_keychain_truncating_after(40);
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect("the other store takes what this one would not keep");
+    assert_eq!(
+        host.file(CREDENTIALS_PATH).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "the Credential is whole, in the store that could hold it whole: \n{printed}"
+    );
+    assert_eq!(
+        host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME),
+        None,
+        "and the truncated copy is gone from the store a reader consults \
+         first, where it would have won"
+    );
+    assert!(
+        host.notes().iter().any(|note| note.contains("instead")),
+        "{:?}",
+        host.notes()
+    );
+}
+
+/// And where neither store keeps what it was given, the Switch stops at the
+/// write rather than recording a landing that did not happen.
+#[test]
+fn a_switch_neither_store_would_keep_intact_stops_at_the_write() {
+    let host = machine_with_two_accounts()
+        .with_keychain_truncating_after(40)
+        .with_file_corrupting_writes(CREDENTIALS_PATH);
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("what was stored is not what was written");
+    assert_eq!(error.exit_code(), EXIT_KEYCHAIN_UNAVAILABLE);
+    assert!(
+        error.to_string().contains("did not read back intact"),
+        "{error}"
+    );
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(EMAIL),
+        "the Account being left is still the active one"
+    );
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(CREDENTIAL),
+        "and the Capture that ran before the write still stands"
+    );
 }

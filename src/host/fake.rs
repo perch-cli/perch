@@ -137,6 +137,13 @@ pub struct FakeHost {
     modified: RefCell<BTreeMap<PathBuf, DateTime<Utc>>>,
     keychain: RefCell<BTreeMap<(String, String), String>>,
     keychain_lock: RefCell<Option<KeychainLock>>,
+    /// Whether this machine has a keychain although it is not a Mac.
+    keychain_everywhere: RefCell<bool>,
+    /// How many bytes of a Credential the keychain keeps, when a test is about
+    /// a store that takes a write and quietly stores less than it was given.
+    keychain_keeps: RefCell<Option<usize>>,
+    /// Files that come back different from how they were written.
+    corrupting: RefCell<BTreeSet<PathBuf>>,
     executions: RefCell<BTreeMap<String, Execution>>,
     login: RefCell<Option<Login>>,
     /// What happens the first time Perch waits, and then does not happen again.
@@ -180,6 +187,9 @@ impl FakeHost {
             modified: RefCell::new(BTreeMap::new()),
             keychain: RefCell::new(BTreeMap::new()),
             keychain_lock: RefCell::new(None),
+            keychain_everywhere: RefCell::new(false),
+            keychain_keeps: RefCell::new(None),
+            corrupting: RefCell::new(BTreeSet::new()),
             executions: RefCell::new(BTreeMap::new()),
             login: RefCell::new(None),
             while_waiting: RefCell::new(None),
@@ -318,6 +328,20 @@ impl FakeHost {
             .remove(&(service.to_string(), account.to_string()));
     }
 
+    /// A machine that has a keychain although it is not a Mac.
+    ///
+    /// The default off macOS is a keychain that answers the way a real one
+    /// would there: `/usr/bin/security` is not present on Linux or Windows, so
+    /// every call to it fails. A fake keychain that worked everywhere let a
+    /// test pass on a scenario that cannot happen on the platform it claims to
+    /// be about — so having one off macOS has to be asked for, and asking for
+    /// it is a statement that the test is about the composite reader rather
+    /// than about that platform.
+    pub fn with_keychain_off_macos(self) -> Self {
+        *self.keychain_everywhere.borrow_mut() = true;
+        self
+    }
+
     /// Every keychain operation now fails as locked or denied, rather than as
     /// "not found" — the distinction ADR 0008 insists on.
     pub fn with_locked_keychain(self, detail: &str) -> Self {
@@ -330,6 +354,28 @@ impl FakeHost {
         *self.keychain_lock.borrow_mut() = Some(KeychainLock {
             detail: detail.to_string(),
         });
+    }
+
+    /// A keychain that takes a write, reports success, and keeps only the
+    /// first `bytes` of what it was given.
+    ///
+    /// Exactly what `security -i` does when a command line overruns its 4096
+    /// byte stdin buffer: it truncates mid-argument and says nothing (ADR
+    /// 0008). Perch reads every Credential back before trusting it precisely
+    /// because of this, and without a store that can do it the read-back guard
+    /// could be deleted with every test still passing.
+    pub fn with_keychain_truncating_after(self, bytes: usize) -> Self {
+        *self.keychain_keeps.borrow_mut() = Some(bytes);
+        self
+    }
+
+    /// A file that comes back different from how it was written — the same
+    /// hazard on the plaintext store, which the same guard covers.
+    pub fn with_file_corrupting_writes(self, path: impl AsRef<Path>) -> Self {
+        self.corrupting
+            .borrow_mut()
+            .insert(path.as_ref().to_path_buf());
+        self
     }
 
     pub fn with_exec(self, program: &str, args: &[&str], execution: Execution) -> Self {
@@ -544,7 +590,28 @@ impl FakeHost {
             .insert(path.to_path_buf(), *self.now.borrow());
     }
 
+    /// What a path actually ends up holding, which is what was written to it
+    /// unless a test arranged otherwise.
+    fn as_stored(&self, path: &Path, contents: &str) -> String {
+        if self.corrupting.borrow().contains(path) {
+            let mut kept = contents.to_string();
+            kept.truncate(contents.len() / 2);
+            return kept;
+        }
+        contents.to_string()
+    }
+
+    /// Why a keychain call cannot be answered, when it cannot.
+    ///
+    /// Off macOS that is the ordinary case rather than an arrangement:
+    /// `/usr/bin/security` is a Mac binary, and a fake that pretended otherwise
+    /// would let a test pass on Linux for a reason that does not exist there.
     fn lock_error(&self) -> Option<KeychainError> {
+        if self.platform() != Platform::MacOs && !*self.keychain_everywhere.borrow() {
+            return Some(KeychainError::Unavailable {
+                detail: "could not run /usr/bin/security: No such file or directory".to_string(),
+            });
+        }
         self.keychain_lock
             .borrow()
             .as_ref()
@@ -642,7 +709,7 @@ impl Host for FakeHost {
         }
         self.files
             .borrow_mut()
-            .insert(path.to_path_buf(), contents.to_string());
+            .insert(path.to_path_buf(), self.as_stored(path, contents));
         self.modes
             .borrow_mut()
             .insert(path.to_path_buf(), PRIVATE_FILE_MODE);
@@ -844,10 +911,19 @@ impl Host for FakeHost {
         if let Some(error) = self.lock_error() {
             return Err(error);
         }
-        self.keychain.borrow_mut().insert(
-            (service.to_string(), account.to_string()),
-            secret.to_string(),
-        );
+        // Truncated at a byte boundary and never mid-character: what is being
+        // stood in for is a buffer that stops, not a broken encoder.
+        let kept = match *self.keychain_keeps.borrow() {
+            Some(bytes) if bytes < secret.len() => secret
+                .char_indices()
+                .take_while(|(at, _)| *at < bytes)
+                .map(|(_, c)| c)
+                .collect(),
+            _ => secret.to_string(),
+        };
+        self.keychain
+            .borrow_mut()
+            .insert((service.to_string(), account.to_string()), kept);
         Ok(())
     }
 
