@@ -456,6 +456,10 @@ impl Host for RealHost {
         Ok(ended_as(status))
     }
 
+    fn process_id(&self) -> u32 {
+        std::process::id()
+    }
+
     fn process_alive(&self, pid: u32) -> bool {
         process_alive(pid)
     }

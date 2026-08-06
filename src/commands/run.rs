@@ -18,8 +18,15 @@
 //! State moves underneath it between Runs. A Run that cannot Reconcile does not
 //! launch: a client served a Profile it cannot see the person's memory,
 //! settings and plugins through is worse than one that did not start.
+//!
+//! It is also the one path that makes a Profile **Live** (ADR 0027). A Run
+//! writes the session marker that says so and takes it away when the Run ends,
+//! which is what stops another Perch Capturing, Renewing or writing
+//! `.claude.json` into a Profile somebody is working in. Reading out of one is
+//! untouched: a Switch onto the Account a Run is against still lands.
 
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use crate::adopt;
 use crate::commands::{self, say};
@@ -80,6 +87,10 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // what makes the Profile a directory at all.
     carry::carry(host, &registry, &found.email, &default_profile, &profile);
 
+    // Last, because it is what every write into this Profile is now refused
+    // against — the Carry above being the first of them (ADR 0027).
+    let live = mark_live(host, &profile)?;
+
     say(out, &launching(&registry, &found.email, &launch.said))?;
     // Flushed before the client is handed the terminal. Everything Perch has to
     // say about a Run is said in front of it, and a buffer that had not been
@@ -90,12 +101,52 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // The environment of this one process, and the whole of what makes the Run
     // a Run.
     let handed: Vec<&str> = launch.args.iter().map(String::as_str).collect();
-    host.exec_interactive(
+    let ended = host.exec_interactive(
         &launch.program,
         &handed,
         &[("CLAUDE_CONFIG_DIR", &profile.to_string_lossy())],
-    )
-    .map_err(|err| PerchError::Other(format!("could not launch {}: {err}", launch.said)))
+    );
+
+    // However it ended, including not having started. The Profile stops being
+    // Live when the Run does.
+    let _ = host.remove_file(&live);
+
+    ended.map_err(|err| PerchError::Other(format!("could not launch {}: {err}", launch.said)))
+}
+
+/// Makes the Profile a Live Profile for the length of the Run, and hands back
+/// the marker that says so.
+///
+/// A Profile with a Run against it is Live, evidenced the way ADR 0022 already
+/// evidences one: a session marker naming a process that is still the one that
+/// wrote it. The process named is Perch's own, because Perch waits for what it
+/// launched — so the marker holds for exactly as long as the Run, and it can be
+/// written *before* the launch, which the child's pid cannot.
+///
+/// Refused rather than remarked on when it cannot be written. What the marker
+/// buys is that no other Perch Captures, Renews or writes `.claude.json` into
+/// this Profile while somebody is working in it — a mid-task logout, silently,
+/// which is the failure ADR 0005 exists for. A Run that cannot claim its Profile
+/// is a Run nothing is protecting, and a person told so beforehand has lost a
+/// command rather than a session.
+fn mark_live(host: &dyn Host, profile: &Path) -> Result<PathBuf> {
+    let pid = host.process_id();
+    let marker = probe::session_marker_at(profile, pid);
+    let here = host.current_dir().unwrap_or_else(|_| profile.to_path_buf());
+
+    host.create_dir_all(&probe::sessions_dir(profile))
+        .and_then(|()| host.write_file(&marker, &probe::session_marker(pid, host.now(), &here)))
+        .map_err(|err| {
+            PerchError::Other(format!(
+                "{} could not be written ({err}), so Perch cannot record that a \
+                 client is running against this Profile — and another Perch \
+                 would be free to Capture or Renew the Credential this session \
+                 is holding. Nothing was launched.",
+                marker.display()
+            ))
+        })?;
+
+    Ok(marker)
 }
 
 /// The program a Run launches and what it is handed.

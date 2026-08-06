@@ -11,6 +11,12 @@ Perch shares **everything in the Default Profile except `.credentials.json` and
 `.claude.json`**, which are the two Account-scoped things: the Credential
 itself, and the file holding `oauthAccount`.
 
+> **Amended by ADR 0027.** `sessions` is held back as well. It is neither the
+> person's nor the Account's but the configuration directory's own record of
+> which clients are running in it, and shared it would make one client's marker
+> the answer for every Profile at once. The example below stands as it was
+> written; the denylist is now three entries rather than two.
+
 The alternative is an allowlist naming what is shared. It is more precise and
 it goes stale on Claude Code's release schedule rather than Perch's. When this
 was written the glossary named four pieces of Shared State — memory, settings,

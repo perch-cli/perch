@@ -196,12 +196,17 @@ fn prepare(
     version: String,
     store: Store,
 ) -> Result<Prepared> {
-    // Before anything is written, and in the order the user would care about:
-    // the Profile being read from, then the one being written back to.
-    refuse_if_live(host, incoming, &version)?;
-    if let Some(outgoing) =
-        outgoing.filter(|account| !registry::same_profile(account.email(), incoming.email()))
-    {
+    // Before anything is written, and only of the Profile that is written to.
+    //
+    // The Capture writes the live Credential into the outgoing Account's
+    // Profile, and a client running there is holding that file — writing under
+    // it is the mid-task logout ADR 0005 exists to prevent. The incoming
+    // Account's Profile is only ever *read* from, and reading a Credential to
+    // copy it into the Default Profile takes nothing away from the session that
+    // is using it (ADR 0027). Refusing that as well would make a Run and a
+    // Switch lock each other out for no reason: an Account you are running in
+    // one terminal is exactly the Account you would want active in the others.
+    if let Some(outgoing) = outgoing {
         refuse_if_live(host, outgoing, &version)?;
     }
 

@@ -665,10 +665,48 @@ pub fn locks_for(store: &Store) -> Vec<LockSpec> {
     ]
 }
 
+/// What the directory of session markers is called inside a config directory.
+///
+/// Named here rather than spelled inline because two modules need it for
+/// opposite reasons: this one derives the markers it reads, and
+/// [`crate::reconcile`] holds it back from crossing. A directory whose contents
+/// answer "is a client running *here*" is meaningless shared between config
+/// directories — every Profile would report every other Profile's clients.
+pub const SESSIONS: &str = "sessions";
+
 /// Where Claude Code records the sessions it is running: one `<pid>.json` per
 /// client, in the config directory it was launched against.
 pub fn sessions_dir(config_dir: &Path) -> PathBuf {
-    config_dir.join("sessions")
+    config_dir.join(SESSIONS)
+}
+
+/// The marker for one process running against a config directory.
+pub fn session_marker_at(config_dir: &Path, pid: u32) -> PathBuf {
+    sessions_dir(config_dir).join(format!("{pid}.json"))
+}
+
+/// The marker a Run writes to say a Profile is Live, in the shape Claude Code
+/// writes one and this module reads one back (ADR 0022).
+///
+/// Perch's marker carries the two fields that make it evidence and the one that
+/// makes it legible — the process it names, when the session began, and who
+/// wrote it. Claude Code's own carries a good deal more; none of it is read
+/// here, and inventing a `sessionId` Perch does not have would be a marker
+/// claiming to be something it is not.
+///
+/// `started_at` is the moment the Run began rather than the moment the process
+/// did. That is what makes the file corroborate itself: the process it names
+/// began strictly earlier, so the marker holds for as long as that process
+/// lives and for no longer — a pid recycled after this was written necessarily
+/// belongs to a process younger than it.
+pub fn session_marker(pid: u32, started_at: DateTime<Utc>, cwd: &Path) -> String {
+    serde_json::json!({
+        "pid": pid,
+        "startedAt": started_at.timestamp_millis(),
+        "cwd": cwd.to_string_lossy(),
+        "writtenBy": "perch",
+    })
+    .to_string()
 }
 
 /// The marker Claude Code writes for a running session, to the extent Perch
@@ -1126,6 +1164,28 @@ mod tests {
                 PathBuf::from("/Users/someone/.claude.lock"),
                 PathBuf::from("/Users/someone/.claude.json.lock"),
             ]
+        );
+    }
+
+    /// The marker a Run writes and the marker Perch corroborates are the same
+    /// file, and this is the one place both shapes are stated — so a change to
+    /// either that forgot the other would leave a Run unable to say its own
+    /// Profile is Live.
+    #[test]
+    fn the_marker_a_run_writes_is_one_this_module_reads_back() {
+        let began = DateTime::from_timestamp_millis(NOON).expect("a time");
+        let written = session_marker(4242, began, Path::new("/Users/someone/work"));
+
+        let host = FakeHost::new().with_file("/tmp/profile/sessions/4242.json", &written);
+        assert_eq!(
+            session_start_in(&host, Path::new("/tmp/profile/sessions/4242.json")),
+            Some(NOON)
+        );
+        assert_eq!(
+            session_marker_at(Path::new("/tmp/profile"), 4242),
+            PathBuf::from("/tmp/profile/sessions/4242.json"),
+            "the marker is named after the process, where the corroboration \
+             reads the pid back out of the name"
         );
     }
 

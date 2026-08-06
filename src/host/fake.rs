@@ -172,6 +172,9 @@ pub struct FakeHost {
     /// The running processes, each with when it began — or `None` for one whose
     /// start the operating system will not say.
     live_processes: RefCell<BTreeMap<u32, Option<DateTime<Utc>>>>,
+    /// What this Perch's own pid is, which is what a Run marks a Profile Live
+    /// with (ADR 0027).
+    process_id: RefCell<u32>,
     interactive: RefCell<bool>,
     answers: RefCell<VecDeque<String>>,
     /// How long the person at the terminal takes over each answer.
@@ -181,6 +184,10 @@ pub struct FakeHost {
     sent: RefCell<Vec<Sent>>,
     effects: RefCell<Vec<Effect>>,
 }
+
+/// The pid this Perch runs under, for the tests that assert on the marker a Run
+/// writes for itself. Nothing else in the fixtures wears it.
+pub const THIS_PROCESS: u32 = 700;
 
 impl Default for FakeHost {
     fn default() -> Self {
@@ -224,7 +231,16 @@ impl FakeHost {
             executions: RefCell::new(BTreeMap::new()),
             login: RefCell::new(None),
             while_waiting: RefCell::new(None),
-            live_processes: RefCell::new(BTreeMap::new()),
+            // This Perch, running since before any session a fixture records,
+            // so a marker a Run writes for itself corroborates the way a real
+            // one does. Nothing like the pids the fixtures arrange for other
+            // people's clients, so a test can tell whose marker it is looking
+            // at.
+            live_processes: RefCell::new(BTreeMap::from([(
+                THIS_PROCESS,
+                Some(DateTime::<Utc>::MIN_UTC),
+            )])),
+            process_id: RefCell::new(THIS_PROCESS),
             interactive: RefCell::new(true),
             answers: RefCell::new(VecDeque::new()),
             answering_takes_millis: RefCell::new(0),
@@ -503,6 +519,22 @@ impl FakeHost {
     /// corroborated nor dismissed in.
     pub fn with_live_process_of_unknown_start(self, pid: u32) -> Self {
         self.live_processes.borrow_mut().insert(pid, None);
+        self
+    }
+
+    /// This Perch, gone: what a Run that was killed rather than exiting leaves
+    /// behind, since the marker it wrote outlives the process it names.
+    pub fn with_this_process_dead(self) -> Self {
+        self.live_processes.borrow_mut().remove(&self.process_id());
+        self
+    }
+
+    /// This Perch's pid recycled by a process that began at `at` — a marker
+    /// written before that instant names somebody else now (ADR 0022).
+    pub fn with_this_process_replaced_at(self, at: DateTime<Utc>) -> Self {
+        self.live_processes
+            .borrow_mut()
+            .insert(self.process_id(), Some(at));
         self
     }
 
@@ -1203,6 +1235,10 @@ impl Host for FakeHost {
             Some(login) => Ok(login(self, &config_dir)),
             None => Ok(0),
         }
+    }
+
+    fn process_id(&self) -> u32 {
+        *self.process_id.borrow()
     }
 
     fn process_alive(&self, pid: u32) -> bool {

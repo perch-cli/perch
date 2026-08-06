@@ -79,20 +79,22 @@ _Avoid_: flock, team, org, pool
 
 **Shared State**:
 Everything in a configuration directory that belongs to the person rather than
-to the Account: memory, settings, plugins, sessions, plans, and whatever the
+to the Account: memory, settings, plugins, past work, plans, and whatever the
 next Claude Code release adds. Said as everything-but rather than as a list,
 because the list grows on Claude Code's schedule and one written down here goes
-quietly out of date — what it is not is the Credential and the file naming the
-Account. A Switch leaves it untouched, so it follows you across Accounts
-without effort; only the Run path has to work to reach it.
+quietly out of date — what it is not is the Credential, the file naming the
+Account, and the directory of session markers, which belongs to the
+configuration directory itself. A Switch leaves it untouched, so it follows you
+across Accounts without effort; only the Run path has to work to reach it.
 _Avoid_: common config, global config
 
 **Reconcile**:
 The pass Perch makes before a Run, making every piece of Shared State reachable
 from the Profile it is launching by linking it there, and repairing links that
 have broken or gone stale. What crosses is everything the Default Profile holds
-except the Credential and the file naming the Account, read at Run time rather
-than from a list, so an entry Perch has never heard of still follows you. Never
+except the Credential, the file naming the Account and the directory of session
+markers, read at Run time rather than from a list, so an entry Perch has never
+heard of still follows you. Never
 by copying: a copy diverges the moment it is edited, which is the opposite of
 what Shared State promises — so where no link can be made the Run is refused
 rather than served one. A Switch needs no such pass.
@@ -213,11 +215,16 @@ Launching a program against a chosen Profile without changing which Account is
 active. Scoped to the one invocation, so several Accounts can be running at once
 in different terminals. Claude Code unless something else is named after `--`,
 which is mandatory before anything is: a flag typed without it could belong to
-either program, and guessing is the one thing a Run will not do.
+either program, and guessing is the one thing a Run will not do. A Run makes the
+Profile it launches a Live Profile for as long as it lasts.
 _Avoid_: use, session, launch
 
 **Live Profile**:
 A Profile with a client currently running against it, evidenced by a session
-marker naming a process that is still the one that wrote it. Perch treats a Live
-Profile's Credential as untouchable, because something else is holding it.
+marker naming a process that is still the one that wrote it. A Run makes one and
+writes that evidence itself. Writing into a Live Profile is refused — a Capture,
+a Renewal, a `.claude.json` key — because something else is holding those files;
+reading out of one is not, so a Switch onto the Account still lands and its
+Utilization is still readable. A marker whose process is gone, or whose pid has
+been taken by something younger, makes nothing Live.
 _Avoid_: active, running, in-use

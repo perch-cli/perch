@@ -359,15 +359,18 @@ fn the_switch_reports_where_it_landed_and_what_the_cache_says_about_it() {
     );
 }
 
+/// The Capture is the write, and it writes into the *outgoing* Account's own
+/// Profile — so that Profile being Live is what stops a Switch (ADR 0006).
 #[test]
-fn switching_onto_a_profile_a_client_is_running_against_is_refused() {
-    let host = client_running_against(machine_with_two_accounts(), SECOND_PROFILE, 4242);
+fn switching_away_from_a_profile_a_client_is_running_against_is_refused() {
+    let host = client_running_against(machine_with_two_accounts(), FIRST_PROFILE, 77);
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
-    let error = result.expect_err("the Profile is Live");
+    let error = result.expect_err("the outgoing Profile is Live");
     assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
-    assert!(error.to_string().contains("4242"), "{error}");
+    assert!(error.to_string().contains("77"), "{error}");
+    assert!(error.to_string().contains(EMAIL), "{error}");
     assert!(error.to_string().contains("Nothing was changed"), "{error}");
     assert_eq!(
         live_credential(&host).as_deref(),
@@ -377,23 +380,33 @@ fn switching_onto_a_profile_a_client_is_running_against_is_refused() {
     assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
 }
 
+/// The other direction is not the same danger and is not refused (ADR 0027).
+///
+/// A Switch only ever *reads* the incoming Account's Profile, to copy its
+/// Credential into the Default Profile, and reading takes nothing away from the
+/// session using it. Refusing this would make a Run and a Switch lock each other
+/// out for no reason: the Account you are running in one terminal is exactly the
+/// one you would want active in the others.
 #[test]
-fn switching_away_from_a_profile_a_client_is_running_against_is_refused_too() {
-    // The Capture writes into the outgoing Account's Profile, so that Profile
-    // being Live is the same danger from the other end.
-    let host = client_running_against(machine_with_two_accounts(), FIRST_PROFILE, 77);
+fn switching_onto_a_profile_a_client_is_running_against_lands() {
+    let host = client_running_against(machine_with_two_accounts(), SECOND_PROFILE, 4242);
 
-    let (result, _) = run_switch(&host, SECOND_EMAIL);
+    run_switch(&host, SECOND_EMAIL)
+        .0
+        .expect("reading a Credential out of a Live Profile is safe");
 
-    let error = result.expect_err("the outgoing Profile is Live");
-    assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
-    assert!(error.to_string().contains(EMAIL), "{error}");
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "the incoming Account's Credential is the live one"
+    );
+    assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
 }
 
 #[test]
 fn a_marker_left_behind_by_a_client_that_died_is_not_a_live_profile() {
     let host = machine_with_two_accounts().with_file(
-        format!("{SECOND_PROFILE}/sessions/9999.json"),
+        format!("{FIRST_PROFILE}/sessions/9999.json"),
         &session_marker(9999, Utc.with_ymd_and_hms(2026, 8, 4, 9, 0, 0).unwrap()),
     );
 
@@ -410,7 +423,7 @@ fn a_marker_whose_pid_now_belongs_to_a_younger_process_is_not_a_live_profile() {
     let session_began = Utc.with_ymd_and_hms(2026, 8, 4, 9, 0, 0).unwrap();
     let host = machine_with_two_accounts()
         .with_file(
-            format!("{SECOND_PROFILE}/sessions/4242.json"),
+            format!("{FIRST_PROFILE}/sessions/4242.json"),
             &session_marker(4242, session_began),
         )
         .with_live_process_started_at(4242, Utc.with_ymd_and_hms(2026, 8, 4, 11, 0, 0).unwrap());
@@ -426,7 +439,7 @@ fn a_marker_that_does_not_say_when_its_session_began_is_no_evidence_of_a_client(
     // Live when something says so, not when nothing does.
     let host = machine_with_two_accounts()
         .with_file(
-            format!("{SECOND_PROFILE}/sessions/4242.json"),
+            format!("{FIRST_PROFILE}/sessions/4242.json"),
             r#"{"pid":4242,"cwd":"/Users/someone/work"}"#,
         )
         .with_live_process(4242);
@@ -440,7 +453,7 @@ fn a_marker_that_does_not_say_when_its_session_began_is_no_evidence_of_a_client(
 fn a_marker_that_is_not_json_is_no_evidence_of_a_client() {
     let host = machine_with_two_accounts()
         .with_file(
-            format!("{SECOND_PROFILE}/sessions/4242.json"),
+            format!("{FIRST_PROFILE}/sessions/4242.json"),
             "not a marker at all",
         )
         .with_live_process(4242);
@@ -457,7 +470,7 @@ fn a_live_process_whose_start_cannot_be_read_is_a_refusal_naming_the_assumption(
     // neither corroborated nor dismissed, and guessing either way is wrong.
     let host = machine_with_two_accounts()
         .with_file(
-            format!("{SECOND_PROFILE}/sessions/4242.json"),
+            format!("{FIRST_PROFILE}/sessions/4242.json"),
             &session_marker(4242, Utc.with_ymd_and_hms(2026, 8, 4, 9, 0, 0).unwrap()),
         )
         .with_live_process_of_unknown_start(4242);
@@ -703,7 +716,7 @@ fn a_client_that_starts_during_the_lock_wait_still_stops_the_switch() {
             host.remove_dir_all(Path::new(REFRESH_LOCK))
                 .expect("the holder is done");
             host.set_file(
-                format!("{SECOND_PROFILE}/sessions/7788.json"),
+                format!("{FIRST_PROFILE}/sessions/7788.json"),
                 &session_marker(7788, now),
             );
             host.set_live_process(7788);

@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use chrono::{TimeZone, Utc};
 use common::*;
 use perch::anthropic::{self, BETA, PROFILE_URL, TOKEN_URL, USAGE_URL};
-use perch::host::fake::Effect;
+use perch::host::fake::{Effect, THIS_PROCESS};
 use perch::host::{FakeHost, Host};
 
 const CONFIG_LOCK: &str = "/Users/someone/.claude.json.lock";
@@ -79,6 +79,30 @@ fn client_running_against(host: FakeHost, config_dir: &str, pid: u32) -> FakeHos
     );
     host.with_file(format!("{config_dir}/sessions/{pid}.json"), &marker)
         .with_live_process(pid)
+}
+
+/// Two Accounts declared interchangeable, so `--group` reads both of them.
+fn two_accounts_in_a_group() -> FakeHost {
+    let host = machine_with_two_accounts();
+    declare_group(&host, "work");
+    for email in [EMAIL, SECOND_EMAIL] {
+        move_to_group(&host, email, "work")
+            .0
+            .expect("the Account joins the Group");
+    }
+    host
+}
+
+/// A `perch run` against an Account, as far as the rest of Perch can see it:
+/// the session marker that Run wrote into the Profile, naming the Perch that is
+/// waiting for the client (ADR 0027).
+fn a_run_against(host: FakeHost, email: &str) -> FakeHost {
+    let profile = perch::registry::profile_dir_for(&host, email).expect("home is known");
+    let marker = perch::probe::session_marker(THIS_PROCESS, host.now(), &profile);
+    host.with_file(
+        perch::probe::session_marker_at(&profile, THIS_PROCESS),
+        &marker,
+    )
 }
 
 fn cached_windows(host: &FakeHost, email: &str) -> Vec<perch::registry::WindowUtilization> {
@@ -280,6 +304,63 @@ fn a_credential_a_client_is_holding_is_never_renewed() {
     );
     assert!(printed.contains("4242"), "{printed}");
     assert!(printed.contains("cached figure"), "{printed}");
+}
+
+/// A Profile with a Run against it is Live by Perch's own marker (ADR 0027),
+/// and the rule that follows is the same one: the Credential in there belongs to
+/// the session holding it until that session exits.
+#[test]
+fn a_credential_a_run_is_holding_is_never_renewed_either() {
+    let host = two_accounts_in_a_group();
+    // The active Account is fresh, so the only Credential anything here could
+    // want to renew is the one the Run is holding.
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
+    host.set_keychain_item(&second_service(&host), LOGIN_NAME, SPENT);
+    let host = a_run_against(host, SECOND_EMAIL)
+        .with_reply_to(PROFILE_URL, FRESH_TOKEN, 200, &profile_of(EMAIL))
+        .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE)
+        .with_reply(TOKEN_URL, 200, RENEWED);
+    host.forget_effects();
+
+    let (result, printed) = run_status_group_refresh(&host, false);
+
+    result.expect("a Credential Perch may not touch is not a failed command");
+    assert!(
+        host.sent_to(TOKEN_URL).is_empty(),
+        "renewing under a Run would log that session out mid-task (ADR 0005)"
+    );
+    assert!(printed.contains(&THIS_PROCESS.to_string()), "{printed}");
+    assert!(printed.contains("cached figure"), "{printed}");
+}
+
+/// And the half of ADR 0005 that is not a refusal: an Account with a client
+/// running has a fresh access token by that ADR's own reasoning, so its
+/// Utilization is readable without renewing anything. A Run is not a blindfold.
+#[test]
+fn utilization_for_a_live_account_is_read_without_a_renewal() {
+    let host = two_accounts_in_a_group();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
+    host.set_keychain_item(&second_service(&host), LOGIN_NAME, SECOND_FRESH);
+    let host = a_run_against(host, SECOND_EMAIL)
+        .with_reply_to(PROFILE_URL, FRESH_TOKEN, 200, &profile_of(EMAIL))
+        .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE)
+        .with_reply_to(PROFILE_URL, SECOND_TOKEN, 200, &profile_of(SECOND_EMAIL))
+        .with_reply_to(USAGE_URL, SECOND_TOKEN, 200, USAGE);
+    host.forget_effects();
+
+    run_status_group_refresh(&host, false)
+        .0
+        .expect("the reads work");
+
+    assert_eq!(
+        cached_windows(&host, SECOND_EMAIL).len(),
+        3,
+        "the Live Account's figures were read like anybody else's"
+    );
+    assert!(
+        host.sent_to(TOKEN_URL).is_empty(),
+        "and nothing was renewed to get them"
+    );
 }
 
 #[test]

@@ -19,9 +19,10 @@ const SHARED: &str = "/Users/someone/.claude";
 const PROFILE: &str = "/Users/someone/.config/perch/profiles/someone-example-com";
 
 /// A machine whose Default Profile holds the spread a real one does: memory,
-/// settings, a plugins directory, the sessions and plans directories Claude
-/// Code grew after Perch was written — and the two entries that belong to the
-/// Account rather than to the person.
+/// settings, a plugins directory, the plans directory Claude Code grew after
+/// Perch was written — and the three entries that stay behind: the two that
+/// belong to the Account rather than to the person, and the one that belongs to
+/// the configuration directory itself.
 fn machine() -> FakeHost {
     FakeHost::new()
         .with_file(shared("CLAUDE.md"), "remember this")
@@ -62,14 +63,14 @@ fn share_of(host: &FakeHost, entry: &str) -> (Link, PathBuf) {
 }
 
 #[test]
-fn every_entry_of_the_default_profile_crosses_except_the_two_account_scoped_ones() {
+fn every_entry_of_the_default_profile_crosses_except_the_three_that_stay_behind() {
     let host = machine();
 
     run_reconcile(&host).expect("everything can be linked");
 
     assert_eq!(
         entries_of(&host),
-        vec!["CLAUDE.md", "plans", "plugins", "sessions", "settings.json"],
+        vec!["CLAUDE.md", "plans", "plugins", "settings.json"],
     );
     assert_eq!(
         host.link_at(profile(".credentials.json")),
@@ -80,6 +81,32 @@ fn every_entry_of_the_default_profile_crosses_except_the_two_account_scoped_ones
         host.link_at(profile(".claude.json")),
         None,
         "the file naming the Account is per-Profile and cannot be shared"
+    );
+}
+
+/// The third entry that stays behind, and the one that is neither the person's
+/// nor the Account's but the directory's own (ADR 0027).
+///
+/// Shared, `sessions` would make one client's marker the answer for every
+/// Profile at once: a Run against one Account would make every other Account's
+/// Profile Live, and its own marker would land in the Default Profile. Liveness
+/// is a fact about one configuration directory, so the directory that records it
+/// is per-Profile.
+#[test]
+fn the_directory_that_records_who_is_running_does_not_cross() {
+    let host = machine();
+
+    run_reconcile(&host).expect("everything can be linked");
+
+    assert_eq!(
+        host.link_at(profile("sessions")),
+        None,
+        "a Profile answers for its own clients and nobody else's"
+    );
+    assert!(
+        !entries_of(&host).contains(&"sessions".to_string()),
+        "{:?}",
+        entries_of(&host)
     );
 }
 
@@ -110,7 +137,7 @@ fn off_windows_every_share_is_a_symbolic_link() {
 
     run_reconcile(&host).expect("everything can be linked");
 
-    for entry in ["CLAUDE.md", "settings.json", "plugins", "sessions", "plans"] {
+    for entry in ["CLAUDE.md", "settings.json", "plugins", "plans"] {
         assert_eq!(
             share_of(&host, entry),
             (Link::Symbolic, PathBuf::from(shared(entry))),
@@ -128,7 +155,7 @@ fn windows_without_developer_mode_uses_junctions_and_hard_links() {
 
     run_reconcile(&host).expect("a Windows without the privilege still shares");
 
-    for directory in ["plugins", "sessions", "plans"] {
+    for directory in ["plugins", "plans"] {
         assert_eq!(
             share_of(&host, directory).0,
             Link::Junction,

@@ -52,6 +52,46 @@ fn a_process_that_has_exited_has_no_start_to_read() {
     );
 }
 
+/// The marker a Run writes, held to the same standard as a client's (ADR 0027).
+///
+/// A Run marks its Profile Live by naming its own process, and the whole of
+/// what makes that evidence is that the process began before the marker says
+/// the session did. Asserted here rather than against a fake, because the two
+/// halves come from different places — Perch's clock and the operating system's
+/// answer for a process — and a machine where they disagree is one where a Run
+/// silently protects nothing.
+#[test]
+fn the_marker_a_run_writes_corroborates_itself_on_this_machine() {
+    let host = RealHost::new();
+    let dir = std::env::temp_dir().join(format!("perch-live-{}", std::process::id()));
+    host.create_dir_all(&probe::sessions_dir(&dir))
+        .expect("a directory of our own");
+
+    let me = host.process_id();
+    assert_eq!(me, std::process::id());
+    let marker = probe::session_marker_at(&dir, me);
+    host.write_file(&marker, &probe::session_marker(me, host.now(), &dir))
+        .expect("the marker is written");
+
+    let live = probe::live_clients(&host, &dir, "contract")
+        .expect("the marker names this very process, which is plainly alive");
+    assert_eq!(
+        live,
+        vec![me],
+        "a Run's own marker has to read as a Live Profile, or nothing is \
+         protecting the session it launched"
+    );
+
+    host.remove_file(&marker).expect("the marker is taken away");
+    assert!(
+        probe::live_clients(&host, &dir, "contract")
+            .expect("an empty directory is no evidence")
+            .is_empty(),
+        "and the Profile stops being Live when the Run ends"
+    );
+    let _ = host.remove_dir_all(&dir);
+}
+
 /// The marker's shape, asserted against a client that is actually running: it
 /// names its process in its filename and in its body, and `startedAt` is when
 /// the session began, in milliseconds since the epoch. If Claude Code stops
