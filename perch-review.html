@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Perch — Deep Code Review</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e222b;
+    --border: #2a2f3a;
+    --text: #e6e8ec;
+    --muted: #9aa3b2;
+    --accent: #6ea8fe;
+    --code-bg: #11141a;
+    --crit: #ff5c6c;
+    --high: #ff8a3d;
+    --med: #ffcc4d;
+    --low: #5fd08a;
+    --info: #6ea8fe;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 40px 24px 120px; }
+  header.title { border-bottom: 1px solid var(--border); padding-bottom: 24px; margin-bottom: 32px; }
+  h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: -0.5px; }
+  .sub { color: var(--muted); font-size: 15px; }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 14px; display: flex; gap: 18px; flex-wrap: wrap; }
+  .meta b { color: var(--text); font-weight: 600; }
+
+  h2 { font-size: 21px; margin: 48px 0 4px; letter-spacing: -0.3px; }
+  h2 .rule { display:block; height:3px; width:52px; border-radius:3px; margin-top:8px; }
+  h3 { font-size: 17px; margin: 34px 0 2px; }
+  p { margin: 10px 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .lead { color: var(--muted); max-width: 78ch; }
+
+  /* severity chips */
+  .chip {
+    display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .04em;
+    text-transform: uppercase; padding: 2px 8px; border-radius: 999px; vertical-align: middle;
+    border: 1px solid transparent; white-space: nowrap;
+  }
+  .s-crit { background: rgba(255,92,108,.14); color: var(--crit); border-color: rgba(255,92,108,.35); }
+  .s-high { background: rgba(255,138,61,.14); color: var(--high); border-color: rgba(255,138,61,.35); }
+  .s-med  { background: rgba(255,204,77,.14); color: var(--med);  border-color: rgba(255,204,77,.35); }
+  .s-low  { background: rgba(95,208,138,.14); color: var(--low);  border-color: rgba(95,208,138,.35); }
+  .s-info { background: rgba(110,168,254,.14); color: var(--info); border-color: rgba(110,168,254,.35); }
+  .cat { display:inline-block; font-size: 11px; color: var(--muted); border:1px solid var(--border);
+         border-radius: 6px; padding: 1px 7px; margin-left: 6px; vertical-align: middle; }
+
+  /* summary cards */
+  .cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin: 24px 0 8px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .card .n { font-size: 28px; font-weight: 700; line-height: 1; }
+  .card .l { font-size: 12px; color: var(--muted); margin-top: 6px; text-transform: uppercase; letter-spacing: .05em; }
+  .card.crit .n { color: var(--crit); } .card.high .n { color: var(--high); }
+  .card.med .n { color: var(--med); } .card.low .n { color: var(--low); } .card.info .n { color: var(--info); }
+  @media (max-width: 720px) { .cards { grid-template-columns: repeat(2,1fr); } .wrap{padding:24px 14px 80px;} }
+
+  /* recap table */
+  table.recap { width: 100%; border-collapse: collapse; margin: 18px 0 8px; font-size: 13.5px; }
+  table.recap th, table.recap td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.recap th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; position: sticky; top: 0; background: var(--bg); }
+  table.recap tr:hover td { background: var(--panel); }
+  table.recap td.id { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
+  table.recap td.loc { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  table.recap a { color: var(--text); }
+  table.recap a:hover { color: var(--accent); }
+
+  /* finding blocks */
+  .finding { background: var(--panel); border: 1px solid var(--border); border-left-width: 4px;
+             border-radius: 12px; padding: 18px 20px; margin: 16px 0; }
+  .finding.b-crit { border-left-color: var(--crit); }
+  .finding.b-high { border-left-color: var(--high); }
+  .finding.b-med  { border-left-color: var(--med); }
+  .finding.b-low  { border-left-color: var(--low); }
+  .finding.b-info { border-left-color: var(--info); }
+  .finding h3 { margin-top: 0; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .finding h3 .fid { font-family: var(--mono); color: var(--muted); font-size: 14px; }
+  .finding .loc { font-family: var(--mono); font-size: 12.5px; color: var(--accent); margin: 2px 0 10px; }
+  .finding .k { font-weight: 700; color: var(--text); }
+  .block { margin: 12px 0; }
+  .label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; color: var(--muted); margin-bottom: 3px; }
+  .block.cause .label { color: #d98a8a; }
+  .block.sol .label   { color: #7fb8ff; }
+  .block.eff .label   { color: var(--low); }
+
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+        padding: 12px 14px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; color: #cdd3dc; }
+  code { font-family: var(--mono); font-size: .9em; background: var(--panel-2); padding: 1px 5px; border-radius: 5px; }
+  pre code { background: none; padding: 0; }
+  .diagram { background: var(--code-bg); border: 1px dashed var(--border); color: #b9c1cf; }
+
+  ul { margin: 8px 0; padding-left: 22px; } li { margin: 4px 0; }
+  .toc { columns: 2; column-gap: 32px; font-size: 14px; }
+  .toc a { display: block; padding: 2px 0; }
+  @media (max-width:720px){ .toc{columns:1;} .cards .card .n{font-size:22px;} }
+  .note { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; color: var(--muted); font-size: 13.5px; }
+  .footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+  .tag-agree { font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="title">
+  <h1>Perch — Deep Code Review</h1>
+  <div class="sub">Security, correctness, simplification, dependency hygiene, and test quality</div>
+  <div class="meta">
+    <span><b>Scope:</b> ~6.7k lines <code>src/</code>, ~5k lines <code>tests/</code> (edition 2024, Rust 1.97.1)</span>
+    <span><b>Method:</b> four parallel review passes, every finding re-verified against source</span>
+    <span><b>Date:</b> 2026-08-06</span>
+  </div>
+</header>
+
+<p class="lead">
+Perch is a small, unusually careful CLI: it swaps Claude Code OAuth credentials between accounts using
+the same keychain / credential-file stores and directory locks Claude Code itself uses. The design is
+documented to a rare standard (24 ADRs, a domain glossary), and the review confirmed that most of the
+hard problems — argv secrecy, capture-before-write ordering, PID-recycling corroboration, format-preserving
+JSON edits — are handled correctly. The findings below are the exceptions. The recurring theme is a
+<strong>double standard</strong>: the machinery Perch built to protect files it does <em>not</em> own
+(atomic writes, 0600 creation, read-back guards) is not consistently applied to its own state, nor to
+every path that writes a live credential.
+</p>
+
+<h2>At a glance<span class="rule" style="background:var(--accent)"></span></h2>
+<div class="cards">
+  <div class="card high"><div class="n">5</div><div class="l">High</div></div>
+  <div class="card med"><div class="n">8</div><div class="l">Medium</div></div>
+  <div class="card low"><div class="n">10</div><div class="l">Low</div></div>
+  <div class="card info"><div class="n">9</div><div class="l">Simplify / Deps</div></div>
+  <div class="card"><div class="n" style="color:var(--muted)">7</div><div class="l">Test gaps</div></div>
+</div>
+<p class="note">
+No <span class="s-crit chip">Critical</span> findings: nothing here is remotely reachable or
+unauthenticated. Every high-severity issue requires either local access, a concurrent Perch invocation, or a
+specific account shape — but several are <em>triggered by ordinary use</em> (every switch, plus-addressed
+emails, two terminals) and destroy credentials or state, which is why they rank High.
+</p>
+
+<h2>Recap — all findings<span class="rule" style="background:var(--high)"></span></h2>
+<table class="recap">
+  <thead>
+    <tr><th>ID</th><th>Severity</th><th>Finding</th><th>Where</th></tr>
+  </thead>
+  <tbody>
+    <tr><td class="id">H1</td><td><span class="chip s-high">High</span><span class="cat">security</span></td><td><a href="#H1">Every switch rewrites <code>~/.claude.json</code> at the process umask, dropping its 0600 mode — MCP secrets become world-readable, permanently</a></td><td class="loc">host/mod.rs:270 · switch.rs:246</td></tr>
+    <tr><td class="id">H2</td><td><span class="chip s-high">High</span><span class="cat">bug</span></td><td><a href="#H2"><code>remove</code> saves the active pointer <em>after</em> the destructive step; a mid-removal failure leaves <code>active</code> naming the wrong account and poisons the next switch</a></td><td class="loc">commands/remove.rs:99-119</td></tr>
+    <tr><td class="id">H3</td><td><span class="chip s-high">High</span><span class="cat">bug · security</span></td><td><a href="#H3">No cross-process lock on <code>registry.json</code>; a stale in-memory copy held across a browser login silently reverts <code>active</code> and loses writes</a></td><td class="loc">registry.rs:739-821 · add.rs:35-74</td></tr>
+    <tr><td class="id">H4</td><td><span class="chip s-high">High</span><span class="cat">bug · security</span></td><td><a href="#H4"><code>add</code> only refuses an exact-email duplicate, so two emails that slug to one profile (plus-addressing) silently overwrite each other's credential</a></td><td class="loc">commands/add.rs:118-136</td></tr>
+    <tr><td class="id">H5</td><td><span class="chip s-high">High</span><span class="cat">security · bug</span></td><td><a href="#H5">An email with no alphanumerics slugs to <code>""</code>; the profile path collapses onto the profiles root and <code>remove</code> deletes every account's credential</a></td><td class="loc">registry.rs:706-736 · remove.rs:318</td></tr>
+
+    <tr><td class="id">M1</td><td><span class="chip s-med">Medium</span><span class="cat">bug · security · simplify</span></td><td><a href="#M1"><code>registry::save</code> is a truncating write with no atomicity; a crash mid-write bricks every command with <code>Malformed</code></a></td><td class="loc">registry.rs:810-821</td></tr>
+    <tr><td class="id">M2</td><td><span class="chip s-med">Medium</span><span class="cat">security</span></td><td><a href="#M2">A Ctrl-C'd login leaves a complete live refresh token orphaned in the keychain / <code>pending/</code> forever, invisible to every command</a></td><td class="loc">login.rs:39-66</td></tr>
+    <tr><td class="id">M3</td><td><span class="chip s-med">Medium</span><span class="cat">security</span></td><td><a href="#M3">Liveness is checked <em>before</em> the locks are taken and never re-checked under them, so a client started during the lock wait is switched out from under</a></td><td class="loc">switch.rs:160-201</td></tr>
+    <tr><td class="id">M4</td><td><span class="chip s-med">Medium</span><span class="cat">bug</span></td><td><a href="#M4"><code>relogin</code> of the active account: if the final make-live fails, the next ordinary switch's Capture destroys the freshly repaired credential</a></td><td class="loc">commands/relogin.rs:86-96</td></tr>
+    <tr><td class="id">M5</td><td><span class="chip s-med">Medium</span><span class="cat">bug</span></td><td><a href="#M5"><code>status --refresh</code> can Quarantine the presumed-active account based on a foreign live credential whose ownership was never confirmed (ADR 0019)</a></td><td class="loc">observe.rs:191-206</td></tr>
+    <tr><td class="id">M6</td><td><span class="chip s-med">Medium</span><span class="cat">bug</span></td><td><a href="#M6"><code>credentials::read</code> collapses a fallback-store <em>error</em> into "logged out", so an unreadable file becomes a wrongful terminal Quarantine</a></td><td class="loc">credentials.rs:77-85</td></tr>
+    <tr><td class="id">M7</td><td><span class="chip s-med">Medium</span><span class="cat">security</span></td><td><a href="#M7"><code>registry.json</code> and <code>~/.perch</code> are created world-readable, leaking every account's email, org, plan, and quarantine reasons</a></td><td class="loc">registry.rs:810-821</td></tr>
+    <tr><td class="id">M8</td><td><span class="chip s-med">Medium</span><span class="cat">bug</span></td><td><a href="#M8">Target resolution is case-sensitive while the registry's naming rules are case-insensitive — some commands accept a spelling others refuse</a></td><td class="loc">target.rs:91-109</td></tr>
+
+    <tr><td class="id">L1</td><td><span class="chip s-low">Low</span><span class="cat">security</span></td><td><a href="#L1">The credential reaches <code>argv</code> (hex-encoded) on the oversize-write fallback — the exact invariant the module header promises it never breaks</a></td><td class="loc">host/real.rs:323-339</td></tr>
+    <tr><td class="id">L2</td><td><span class="chip s-low">Low</span><span class="cat">security</span></td><td><a href="#L2">A newline in <code>$USER</code> injects a second sub-command into <code>security -i</code>, which can silently delete a credential</a></td><td class="loc">keychain.rs:80-104</td></tr>
+    <tr><td class="id">L3</td><td><span class="chip s-low">Low</span><span class="cat">security · bug</span></td><td><a href="#L3"><code>indent_to_match</code> mixes byte and char offsets and panics on non-ASCII indentation — after the incoming credential is already live</a></td><td class="loc">json.rs:141-163</td></tr>
+    <tr><td class="id">L4</td><td><span class="chip s-low">Low</span><span class="cat">security</span></td><td><a href="#L4"><code>write_atomically</code> follows a symlink at its predictable temp path, unlike the private-file writer that unlinks first</a></td><td class="loc">host/mod.rs:275</td></tr>
+    <tr><td class="id">L5</td><td><span class="chip s-low">Low</span><span class="cat">bug</span></td><td><a href="#L5"><code>remove</code> reports the credential deleted when the keychain simply never held it (e.g. <code>$USER</code> changed), leaving a live orphan</a></td><td class="loc">credentials.rs:142-150</td></tr>
+    <tr><td class="id">L6</td><td><span class="chip s-low">Low</span><span class="cat">security</span></td><td><a href="#L6">No <code>fsync</code> anywhere; a power loss can leave <code>.claude.json</code> zero-length or a rotated (unretryable) refresh token unwritten</a></td><td class="loc">host/real.rs:181,512</td></tr>
+    <tr><td class="id">L7</td><td><span class="chip s-low">Low</span><span class="cat">security</span></td><td><a href="#L7">Lock loss on a failed <code>touch</code> is unobserved and <code>release</code> deletes whatever is at the path, cascading the loss to a third process</a></td><td class="loc">lock.rs:48-70,160-165</td></tr>
+    <tr><td class="id">L8</td><td><span class="chip s-low">Low</span><span class="cat">bug</span></td><td><a href="#L8"><code>add</code>'s interactive Group prompt validates shape only; an answer colliding with an existing Alias aborts the command after the login was spent</a></td><td class="loc">commands/add.rs:176-199</td></tr>
+    <tr><td class="id">L9</td><td><span class="chip s-low">Low</span><span class="cat">bug</span></td><td><a href="#L9"><code>remove</code>'s confirmation for the last, non-active account claims Claude Code "goes on running as" it — a state that isn't true</a></td><td class="loc">commands/remove.rs:203-233</td></tr>
+    <tr><td class="id">L10</td><td><span class="chip s-low">Low</span><span class="cat">bug</span></td><td><a href="#L10">Minor prose/state mismatches: <code>cycle</code> double-counts a disabled+quarantined account; <code>status</code> suggests the wrong remedy when <code>active == None</code></a></td><td class="loc">cycle.rs:430-446 · status.rs:74-83</td></tr>
+
+    <tr><td class="id">D1</td><td><span class="chip s-info">Simplify</span><span class="cat">deps</span></td><td><a href="#D1"><code>ratatui</code> + <code>crossterm</code> are declared but used nowhere — the largest unused subtree in the graph</a></td><td class="loc">Cargo.toml:13-14</td></tr>
+    <tr><td class="id">D2</td><td><span class="chip s-info">Simplify</span><span class="cat">deps</span></td><td><a href="#D2"><code>color-eyre</code> is pulled in only for a panic hook; ~15 lines of <code>std</code> or <code>human-panic</code> replace it</a></td><td class="loc">report.rs:12-21</td></tr>
+    <tr><td class="id">D3</td><td><span class="chip s-info">Simplify</span><span class="cat">crates</span></td><td><a href="#D3">Crate-vs-hand-rolled audit: which stdlib/crate swaps help (<code>tempfile</code>) and which correctly conflict with the ADRs (<code>keyring</code>, <code>sysinfo</code>, <code>which</code>, <code>dirs</code>)</a></td><td class="loc">—</td></tr>
+    <tr><td class="id">D4</td><td><span class="chip s-info">Simplify</span><span class="cat">dup</span></td><td><a href="#D4">Duplicated logic: <code>quote()</code> twice, process-spawn + <code>Execution</code> build three times, tmp-file-rename twice, mirror enums, two <code>Scope</code>s</a></td><td class="loc">several</td></tr>
+    <tr><td class="id">D5</td><td><span class="chip s-info">Simplify</span><span class="cat">cargo/ci</span></td><td><a href="#D5">Cargo hygiene: no <code>[lints]</code>, no <code>[profile.release]</code>, MSRV over-pinned, no <code>cargo machete</code> / MSRV / audit / scheduled CI legs</a></td><td class="loc">Cargo.toml · ci.yml</td></tr>
+
+    <tr><td class="id">T1</td><td><span class="chip s-info" style="background:rgba(154,163,178,.14);color:var(--muted);border-color:var(--border)">Tests</span></td><td><a href="#T">Seven test gaps: read-back guard untestable, fake keychain works off-macOS, post-destructive save failures, lock re-read, ranking property tests, and more</a></td><td class="loc">tests/ · host/fake.rs</td></tr>
+  </tbody>
+</table>
+
+<h2>Contents<span class="rule" style="background:var(--muted)"></span></h2>
+<div class="toc">
+  <a href="#high">High severity (H1–H5)</a>
+  <a href="#medium">Medium severity (M1–M8)</a>
+  <a href="#low">Low severity (L1–L10)</a>
+  <a href="#deps">Simplifications &amp; dependencies (D1–D5)</a>
+  <a href="#tests">Test quality (T1)</a>
+  <a href="#clean">Verified clean</a>
+</div>
+
+<!-- ============================ HIGH ============================ -->
+<h2 id="high">High severity<span class="rule" style="background:var(--high)"></span></h2>
+
+<div class="finding b-high" id="H1">
+  <h3><span class="fid">H1</span> <span class="chip s-high">High</span> <span class="cat">security</span> Every switch rewrites <code>~/.claude.json</code> at the process umask, discarding its mode</h3>
+  <div class="loc">src/host/mod.rs:270-286 · src/host/real.rs:177-183 · src/switch.rs:246</div>
+
+  <div class="block cause"><div class="label">Cause</div>
+  <p><code>patch_identity</code> writes the identity file through <code>host::write_atomically</code>, which creates its temp file with plain <code>std::fs::write</code>. That gives the new file <code>0o666 &amp; ~umask</code> (0644 on a normal umask; 0666 under the umask 000/002 some CI and container images use), then renames it <em>over</em> <code>~/.claude.json</code>. Whatever mode the original file had is discarded on the very first switch, permanently. Perch already knows the correct pattern — <code>write_private_file</code> is documented as creating a file 0600 "even where something looser was already there" — that reasoning was just never applied to <code>.claude.json</code>.</p></div>
+
+  <div class="block"><div class="label">Explanation</div>
+  <p><code>.claude.json</code> is not innocuous: this repo's own doc (<code>src/json.rs:5-7</code>) describes it as holding "project history, MCP configuration and settings", and MCP server entries routinely carry API keys in their <code>env</code> block. No race is required — the exposure is a stable file mode.</p>
+<pre class="diagram">  before first switch          after first switch
+  ┌───────────────────┐        ┌────────────────────────────┐
+  │ ~/.claude.json     │  switch │ ~/.claude.json  mode 0644  │  ← world-readable
+  │   mode 0600 (safe) │ ─────► │   (temp made at umask,     │
+  │                    │        │    then renamed over it)   │
+  └───────────────────┘        └────────────────────────────┘
+                                 + every .claude.json.perch-tmp
+                                   was world-readable too
+  attacker (any other uid on the box: build agent, shared /home,
+  container) → `cat ~/.claude.json` → harvests every MCP secret</pre></div>
+
+  <div class="block sol"><div class="label">Solution</div>
+  <p>Add a <code>write_atomically_preserving_mode</code>: <code>stat</code> the target, create the temp with <code>OpenOptions::mode()</code> set to the target's existing mode (default 0600 when the target doesn't exist yet), and rename. On non-unix this is a no-op, as elsewhere.</p></div>
+
+  <div class="block eff"><div class="label">Effect</div>
+  <p>Costs one extra <code>stat</code> per switch. Closes a permanent, no-race, cross-user credential leak that ordinary use opens on the first switch. One decision to make: a fresh <code>.claude.json</code> created 0600 is stricter than Claude Code's own default, so a user diffing modes may notice.</p></div>
+</div>
+
+<div class="finding b-high" id="H2">
+  <h3><span class="fid">H2</span> <span class="chip s-high">High</span> <span class="cat">bug</span> <code>remove</code> updates the active pointer after the destructive step, poisoning the next switch on failure</h3>
+  <div class="loc">src/commands/remove.rs:99-119</div>
+
+  <div class="block cause"><div class="label">Cause</div>
+  <p>The order is: <code>land_on(successor)</code> (which makes the successor's credential <em>live</em> via <code>switch::make_live</code>), then <code>delete_the_credential_and_its_profile(account)</code>, and only <em>then</em> is <code>registry.active</code> set to the successor and saved. If the delete fails (a locked/denied keychain returning non-44, or <code>account.store()</code> failing), the command aborts — but on disk <code>active</code> still names the removed account while the live credential is already the successor's.</p></div>
+
+  <div class="block"><div class="label">Explanation</div>
+  <p>Being active "is a fact about which Credential is in the Default Profile, not a wish" (the design's own words). <code>switch::perform</code> goes to great lengths to record <code>incoming_is_live</code> even on failure; <code>remove</code> breaks that invariant, and the corrupted pointer feeds the capture-before-write logic that ADR 0006 is built to protect.</p>
+<pre class="diagram">  remove A (active), successor B:
+
+   1. make_live(B)      ✔  live credential = B
+   2. delete A's cred   ✘  keychain denies → command aborts
+   3. save active=B        never reached
+
+  on disk now:  active = A     live credential = B   ← disagree
+
+  user then runs `perch switch C` (the error said A "is still held"):
+     outgoing := active_account() = A
+     capture(): copies the LIVE credential (B's!) into A's profile
+     → A's own captured credential is destroyed (unrecoverable, ADR 0006)
+     → A is now quarantine-bound; A's profile now holds B's credential</pre></div>
+
+  <div class="block sol"><div class="label">Solution</div>
+  <p>Set <code>registry.active = Some(successor)</code> and <code>save</code> <em>immediately</em> after <code>land_on</code> succeeds, before deleting anything. (This does not violate ADR 0024's "registry written last" rule — that rule is about not dropping the account row before its credential is gone.) Separately, give <code>make_live</code> an <code>incoming_is_live</code>-style result so partial-failure notes stop asserting things that are no longer true.</p></div>
+
+  <div class="block eff"><div class="label">Effect</div>
+  <p>Any failure mid-removal leaves a coherent machine — <code>active</code> names the account whose credential is actually live — so re-running <code>remove</code> or reaching for <code>switch</code> is safe instead of destructive.</p></div>
+</div>
+
+<div class="finding b-high" id="H3">
+  <h3><span class="fid">H3</span> <span class="chip s-high">High</span> <span class="cat">bug · security</span> No cross-process lock on the registry; a stale copy held across a login clobbers concurrent writes</h3>
+  <div class="loc">src/registry.rs:739-821 · src/commands/add.rs:35-74</div>
+
+  <div class="block cause"><div class="label">Cause</div>
+  <p>Every command is <code>load → mutate in memory → save</code> with no Perch-owned mutual exclusion (the locks in <code>lock.rs</code> are Claude Code's credential locks, taken only during a switch). <code>add</code> and <code>relogin</code> deliberately keep the session usable across a minutes-long interactive browser login, holding their in-memory registry the whole time and writing it back wholesale at the end. Running several accounts in parallel terminals is an explicitly supported workflow (ADR 0010).</p></div>
+
+  <div class="block"><div class="label">Explanation</div>
+<pre class="diagram">  terminal A: perch add           terminal B: perch switch Y
+  ──────────────────────          ──────────────────────────
+  load registry (active=X)
+  open browser ...........        capture X's live cred → X's profile
+  (user takes 2 min)              make Y live; save active=Y
+  login done
+  save STALE copy:
+    + account Z, active=X   ◄──── silently reverts B's active=Y
+
+  next bare `perch switch`: outgoing=X but live cred=Y
+    → capture writes Y's cred over X's good copy → X destroyed</pre>
+  <p>The same gap drops a <code>status --refresh</code> quarantine flag, loses a <code>config</code> edit, and orphans <code>add</code>'s freshly created profile with no registry row naming it.</p></div>
+
+  <div class="block sol"><div class="label">Solution</div>
+  <p>Take an exclusive Perch lock (a lock directory under <code>$PERCH_HOME</code>, reusing the existing <code>create_dir_exclusive</code> <code>mkdir</code> primitive) around each <code>load → mutate → save</code>. For <code>add</code>/<code>relogin</code>, hold it only around the final <em>re-load + save</em> after the login returns, re-validating names and <code>active</code> — never across the browser round trip.</p></div>
+
+  <div class="block eff"><div class="label">Effect</div>
+  <p>Concurrent Perch commands can no longer revert <code>active</code> or lose each other's writes; the capture invariant survives interleavings. Introduces a short contention window (keep it off the login wait, or every command blocks behind an in-progress <code>add</code>).</p></div>
+</div>
+
+<div class="finding b-high" id="H4">
+  <h3><span class="fid">H4</span> <span class="chip s-high">High</span> <span class="cat">bug · security</span> <code>add</code> refuses only an exact-email duplicate, so slug collisions overwrite a held credential</h3>
+  <div class="loc">src/commands/add.rs:118-136 · src/registry.rs:729-736</div>
+
+  <div class="block cause"><div class="label">Cause</div>
+  <p><code>refuse_an_account_perch_already_holds</code> checks <code>registry.account(&amp;identity.email)</code> — an exact, case-sensitive match. But the profile directory <em>and</em> keychain namespace are derived from <code>slug(email)</code>, which lowercases and maps every non-alphanumeric to <code>-</code>. So <code>user+work@gmail.com</code>, <code>user.work@gmail.com</code>, and <code>User-Work@gmail.com</code> all resolve to one profile. <code>remove</code> and <code>switch</code> both guard against shared slugs (<code>registry::same_profile</code>); <code>add</code> is the one that's allowed to <em>create</em> the collision destructively.</p></div>
+
+  <div class="block"><div class="label">Explanation</div>
+  <p>Plus-addressing on one inbox is exactly how this tool's audience holds several Anthropic accounts. Adding <code>user+work@gmail.com</code> when <code>user.work@gmail.com</code> is held passes the exact-match refusal, then <code>store_credential</code>'s supersede logic replaces the existing account's credential and deletes its other-store copy — the first account's refresh token is destroyed with no warning, and one of the two rows is now permanently quarantine-bound. A case-variant login (which <code>switch</code>/<code>relogin</code> treat as possible, comparing with <code>eq_ignore_ascii_case</code>) instead creates a <em>second</em> registry row over the same profile, so cycling ranks one physical account twice.</p></div>
+
+  <div class="block sol"><div class="label">Solution</div>
+  <p>In the refusal, reject when any held account satisfies <code>registry::same_profile(existing.email(), identity.email)</code> (which also covers case variants), naming the sharer and pointing at <code>relogin</code>. A hash suffix on the slug would additionally eliminate the collision class entirely.</p></div>
+
+  <div class="block eff"><div class="label">Effect</div>
+  <p>A colliding login is refused after authentication (nothing written) instead of silently destroying a held credential. The check is one predicate change.</p></div>
+</div>
+
+<div class="finding b-high" id="H5">
+  <h3><span class="fid">H5</span> <span class="chip s-high">High</span> <span class="cat">security · bug</span> An all-non-alphanumeric email slugs to <code>""</code>, collapsing the profile path onto the profiles root — <code>remove</code> then deletes everything</h3>
+  <div class="loc">src/registry.rs:706-736 · src/commands/remove.rs:318 · src/probe.rs:506-515</div>
+
+  <div class="block cause"><div class="label">Cause</div>
+  <p><code>slug()</code> is a good traversal defence (<code>../</code> → <code>---</code>) but it can return the empty string after <code>trim_matches('-')</code>. Nothing validates the email: it comes from <code>oauthAccount.emailAddress</code> (which <code>read_identity</code> only requires to be <em>present</em>) or a hand-edited/migrated <code>registry.json</code> (<code>load</code> does no per-account validation).</p>
+<pre class="diagram">  slug("@")                    == ""
+  profiles_dir.join("")        == ~/.perch/profiles/          ← the ROOT
+  store.config_dir             == ~/.perch/profiles/
+  credentials_file             == ~/.perch/profiles/.credentials.json</pre></div>
+
+  <div class="block"><div class="label">Explanation</div>
+  <p>In <code>remove</code>, after the (single-account) sharer guard passes, <code>host.remove_dir_all(&amp;store.config_dir)</code> is called on <code>~/.perch/profiles</code> — <strong>every profile directory of every account</strong>. On Linux/Windows, where the plaintext store is primary, that is every credential Perch holds. The same collapse also makes <code>add</code>/<code>adopt</code> write into the profiles root and derive the keychain service from it, breaking the per-profile namespace ADR 0001 relies on. Likelihood is low (the email normally comes from Claude Code's own login), which is why it's High rather than Critical — but the blast radius is total data loss.</p></div>
+
+  <div class="block sol"><div class="label">Solution</div>
+  <p>In <code>profile_dir_for</code>, reject an email whose slug is empty (<code>PerchError::Invalid</code>) and assert the derived directory is a strict child of <code>profiles_dir</code>. Validate <code>emailAddress</code> at adoption/read time.</p></div>
+
+  <div class="block eff"><div class="label">Effect</div>
+  <p>A degenerate email becomes a clean refusal instead of a machine-wide delete. An account already recorded with such an email becomes unusable rather than dangerous (needs a migration/manual edit — the right direction).</p></div>
+</div>
+
+<!-- ============================ MEDIUM ============================ -->
+<h2 id="medium">Medium severity<span class="rule" style="background:var(--med)"></span></h2>
+
+<div class="finding b-med" id="M1">
+  <h3><span class="fid">M1</span> <span class="chip s-med">Medium</span> <span class="cat">bug · security · simplify</span> <code>registry::save</code> is a truncating write with no atomicity</h3>
+  <div class="loc">src/registry.rs:810-821 · src/host/real.rs:177-183</div>
+  <p class="tag-agree">Found independently by the bug, security, and simplification passes.</p>
+
+  <div class="block cause"><div class="label">Cause</div>
+  <p><code>registry::write</code> calls <code>host.write_file</code> → bare <code>std::fs::write</code> (truncate, then write). <code>host::write_atomically</code> (write-beside + rename) exists three lines away in the same abstraction and is used for <code>.claude.json</code> precisely because a half-written file "would cost them all of that" — but it was never applied to Perch's <em>own</em> single source of truth.</p></div>
+
+  <div class="block"><div class="label">Explanation</div>
+  <p><code>registry.json</code> holds the account list, <code>active</code> pointer, aliases, groups, quarantine reasons, and the utilization cache. <code>status</code> is advertised for shell prompts ("it may run several times a minute"), so a reader can hit a mid-write truncated file → <code>serde_json::from_str</code> fails → <code>PerchError::Malformed</code> from <code>adopt::ensure_adopted</code>, which <em>every</em> command calls first. A crash/SIGKILL mid-write (laptop lid during <code>status --refresh</code>'s save) leaves the file truncated permanently, and there is no repair path in the codebase — every command fails until the file is hand-edited.</p></div>
+
+  <div class="block sol"><div class="label">Solution</div>
+  <p>Route <code>registry::write</code> through <code>host::write_atomically</code> (and, per M7, its private-mode variant). One-line change.</p></div>
+
+  <div class="block eff"><div class="label">Effect</div>
+  <p>Readers always see the old or new registry; a crash can no longer corrupt Perch's entire state. Removes the last torn-write hazard in the state layer.</p></div>
+</div>
+
+<div class="finding b-med" id="M2">
+  <h3><span class="fid">M2</span> <span class="chip s-med">Medium</span> <span class="cat">security</span> An abandoned login leaves a live refresh token orphaned forever</h3>
+  <div class="loc">src/login.rs:39-66 · src/registry.rs:716-720</div>
+
+  <div class="block cause"><div class="label">Cause</div>
+  <p>Cleanup (<code>profile::discard</code>) only runs if <code>exec_interactive</code> returns normally. There is no signal handling anywhere in the crate and no startup sweep of <code>~/.perch/pending</code>. Ctrl-C delivers SIGINT to the whole foreground group, so Perch dies without unwinding — and the documented flow ("quit Claude Code when the login is done") makes abandoning a login expected.</p></div>
+
+  <div class="block"><div class="label">Explanation</div>
+  <p>What's left behind is a complete, live credential: off-macOS a <code>~/.perch/pending/login-&lt;millis&gt;/.credentials.json</code>; on macOS a keychain item under a service derived from <code>sha256(pending dir)</code>. Because the directory is keyed on <code>timestamp_millis()</code>, every abandoned login creates a <em>new</em> orphan, and nothing in Perch ever re-derives, lists, or deletes them. The keychain orphans are wholly invisible and hold refresh tokens valid until Anthropic rotates them — a slow accumulation of working credentials for accounts the user believes they never added.</p></div>
+
+  <div class="block sol"><div class="label">Solution</div>
+  <p>Sweep <code>~/.perch/pending/*</code> at the start of every command: for each entry older than a few minutes, derive its Store and <code>profile::discard</code> it. (The age bound protects a concurrent in-flight <code>add</code>.) Optionally add a SIGINT/SIGTERM handler too, but the sweep alone closes the hole.</p></div>
+
+  <div class="block eff"><div class="label">Effect</div>
+  <p>Orphaned credentials are reaped within one subsequent command instead of living forever. Cost: a directory listing and up to N keychain deletes per command, bounded by the age filter.</p></div>
+</div>
+
+<div class="finding b-med" id="M3">
+  <h3><span class="fid">M3</span> <span class="chip s-med">Medium</span> <span class="cat">security</span> Liveness is checked before the locks and never re-checked under them (switch path)</h3>
+  <div class="loc">src/switch.rs:160-201, 95-104, 135-143</div>
+
+  <div class="block cause"><div class="label">Cause</div>
+  <p><code>prepare</code> runs <code>refuse_if_live</code> and reads the incoming credential <em>outside</em> any lock; the lock is taken afterwards, and the check is never repeated inside it. The justification — "a Profile that nothing is running against does not change underneath Perch" — is the classic time-of-check argument: the refusal established that a moment ago, not for the duration of the write. Lock acquisition can take seconds (<code>lock::take</code> sleeps up to 4×1000 ms).</p></div>
+
+  <div class="block"><div class="label">Explanation</div>
+  <p><code>observe.rs</code> gets this right and shows the intended pattern — it re-runs <code>refuse_if_live</code> <em>inside</em> <code>lock::under</code> ("both of the questions asked before the locks were taken, asked again now that nothing can change the answer"). <code>switch::perform</code> and <code>switch::make_live</code> don't. A <code>claude</code> started during the lock wait is invisible to the switch, and the switch replaces the credential that session is holding — the mid-task logout ADR 0005 exists to prevent. It's worse inside <code>remove</code>'s <code>land_on</code>, where the credential being replaced belongs to an account about to be deleted.</p>
+<pre class="diagram">  switch: check_live(A) ─── (gap: up to ~4s of lock wait) ─── write cred
+                    ▲                    │
+              says "not live"     `claude` starts here → now live,
+                                   but switch never looks again → clobbered</pre></div>
+
+  <div class="block sol"><div class="label">Solution</div>
+  <p>Move the <code>refuse_if_live</code> calls (and the incoming-credential read) <em>inside</em> the <code>lock::under</code> closure, matching <code>observe.rs</code>.</p></div>
+
+  <div class="block eff"><div class="label">Effect</div>
+  <p>Lock held marginally longer; the TOCTOU window on the credential swap closes. Cheap next to the correctness gain.</p></div>
+</div>
+
+<div class="finding b-med" id="M4">
+  <h3><span class="fid">M4</span> <span class="chip s-med">Medium</span> <span class="cat">bug</span> A failed final make-live in <code>relogin</code> lets the next switch destroy the freshly repaired credential</h3>
+  <div class="loc">src/commands/relogin.rs:86-96, 171-180 · src/switch.rs:204-219</div>
+
+  <div class="block cause"><div class="label">Cause</div>
+  <p>After a successful repair, the fresh credential is in the account's own profile and the registry is saved; then <code>make_it_live</code> runs, best-effort. If it fails (locked keychain, <code>.claude.json</code> write failure), the state is <code>active = account</code> but the live credential is still the <em>old, broken</em> one. The note says "run <code>perch relogin</code> again" — but if the user instead runs <code>perch switch other</code> (equally natural), <code>capture</code> copies the broken live credential over the fresh one in the account's profile.</p></div>
+
+  <div class="block"><div class="label">Explanation</div>
+  <p>ADR 0023 names this exact hazard ("the Capture would write the broken copy over the fresh one") but only defends against it <em>inside</em> relogin, not on the switch that follows a failed <code>make_it_live</code>. The repaired account returns to quarantine and the browser round trip is wasted.</p></div>
+
+  <div class="block sol"><div class="label">Solution</div>
+  <p>Either (a) on <code>make_it_live</code> failure set <code>registry.active = None</code> (with an explaining note) so the next switch has no outgoing to capture into, or (b) make <code>capture</code> skip-with-note when the live identity file names an account other than <code>outgoing</code> — a coherence check the codebase already has the pieces for (<code>already_landed</code>).</p></div>
+
+  <div class="block eff"><div class="label">Effect</div>
+  <p>A half-finished repair can no longer be undone by the very command a user reaches for next.</p></div>
+</div>
+
+<div class="finding b-med" id="M5">
+  <h3><span class="fid">M5</span> <span class="chip s-med">Medium</span> <span class="cat">bug</span> <code>status --refresh</code> can quarantine the active account off an unconfirmed foreign credential (ADR 0019)</h3>
+  <div class="loc">src/observe.rs:191-206, 322, 425-433</div>
+
+  <div class="block cause"><div class="label">Cause</div>
+  <p>For the active account, <code>holding()</code> selects the <em>Default</em> store — the one "Perch is not the only thing that writes". The code then renews and records renewal-terminal outcomes (<code>NoRefreshToken</code>, <code>RenewalRejected</code>, <code>RotationLost</code>) <em>before</em> <code>confirm()</code> checks whose token it actually was:</p>
+<pre><code>let asked = holding(host, registry, account)?;      // active → Default store
+let token = usable_token(host, &amp;asked, &amp;version)?;   // may renew, may Quarantine
+confirm(host, &amp;token, account)?;                     // ownership checked only AFTER</code></pre></div>
+
+  <div class="block"><div class="label">Explanation</div>
+  <p>Concretely: the user ran <code>claude</code> and logged in directly as a different account; that login later dies. <code>status --refresh</code> reads the foreign live credential, fails to renew it, and quarantines <em>the account Perch believes is active</em> — whose own profile still holds a good credential. ADR 0019 says a figure is recorded only against the account it was read for, and that a token belonging to someone else "records nothing… names the account the token really belongs to and stops there." A quarantine is a recording, made here without that check.</p></div>
+
+  <div class="block sol"><div class="label">Solution</div>
+  <p>When <code>asked</code> is <em>not</em> the account's own profile, never write a terminal quarantine off it — downgrade renewal-terminal outcomes to a non-terminal <code>Failed</code>, or confirm ownership before recording. Quarantine only off the account's own profile, where the credential is unambiguously theirs.</p></div>
+
+  <div class="block eff"><div class="label">Effect</div>
+  <p>A terminal, user-visible quarantine is only ever recorded against the account it's actually true of.</p></div>
+</div>
+
+<div class="finding b-med" id="M6">
+  <h3><span class="fid">M6</span> <span class="chip s-med">Medium</span> <span class="cat">bug</span> <code>credentials::read</code> collapses a fallback-store error into "logged out"</h3>
+  <div class="loc">src/credentials.rs:77-85</div>
+
+  <div class="block cause"><div class="label">Cause</div>
+  <p>When the primary store holds nothing and the fallback store <em>errors</em> (e.g. <code>.credentials.json</code> exists but is unreadable — permissions), the final match arm is <code>_ =&gt; otherwise.map(|_| None)</code>, returning <code>Ok(None)</code> — indistinguishable from "no credential anywhere". The primary's error is preserved, but a fallback error is silently swallowed into a no-login answer.</p></div>
+
+  <div class="block"><div class="label">Explanation</div>
+  <p>"Logged out" is not benign here: in <code>observe::credential_in</code> it triggers a <strong>Quarantine (<code>NoCredential</code>)</strong> — a terminal state — for an account whose profile file is merely temporarily unreadable, and it drives adoption refusals elsewhere.</p></div>
+
+  <div class="block sol"><div class="label">Solution</div>
+  <p>Distinguish "fallback holds nothing" (<code>Ok(None)</code>) from "fallback errored" — on a genuine read error with the primary empty, surface a non-terminal failure rather than <code>None</code>. At minimum pin the intended behaviour with a test either way (the branch is currently undecided and untested).</p></div>
+
+  <div class="block eff"><div class="label">Effect</div>
+  <p>A transient unreadable file stops being promoted to a permanent quarantine.</p></div>
+</div>
+
+<div class="finding b-med" id="M7">
+  <h3><span class="fid">M7</span> <span class="chip s-med">Medium</span> <span class="cat">security</span> <code>registry.json</code> and <code>~/.perch</code> are world-readable</h3>
+  <div class="loc">src/registry.rs:810-821</div>
+
+  <div class="block cause"><div class="label">Cause</div>
+  <p><code>registry::write</code> uses <code>host.create_dir_all</code> (mode 0755) and <code>host.write_file</code> (mode 0644), never the <code>create_private_dir_all</code> / <code>write_private_file</code> variants that the credential paths correctly use. The profile directories themselves <em>are</em> 0700 — this gap is specific to Perch's own metadata file.</p></div>
+
+  <div class="block"><div class="label">Explanation</div>
+  <p>The registry holds no credential, but it does hold every account's email, organization name, plan, alias, group membership, quarantine reasons, and utilization history — a full picture of the user's Anthropic relationships, readable by any other local user.</p></div>
+
+  <div class="block sol"><div class="label">Solution</div>
+  <p>Write the registry with <code>write_private_file</code> and create <code>~/.perch</code> with <code>create_private_dir_all</code> (this also delivers M1's atomicity if the private writer is the atomic one).</p></div>
+
+  <div class="block eff"><div class="label">Effect</div>
+  <p>New installs get 0600/0700. An existing <code>~/.perch</code> keeps its 0755 (the private-dir helper is documented as not a chmod in disguise), so upgraders need a one-time tighten.</p></div>
+</div>
+
+<div class="finding b-med" id="M8">
+  <h3><span class="fid">M8</span> <span class="chip s-med">Medium</span> <span class="cat">bug</span> Target resolution is case-sensitive while naming rules are case-insensitive</h3>
+  <div class="loc">src/target.rs:91-109 · src/registry.rs:485-493, 554-559</div>
+
+  <div class="block cause"><div class="label">Cause</div>
+  <p><code>target::matched</code> resolves aliases/emails/groups with exact <code>BTreeMap</code>/<code>==</code> lookups, but the registry's own name rules are explicitly case-insensitive ("<code>work</code> and <code>Work</code> reaching different Accounts is the ambiguity this exists to prevent — even though a lookup could tell them apart").</p></div>
+
+  <div class="block"><div class="label">Explanation</div>
+  <p><code>perch group add Work</code> then <code>perch switch work</code> → "nothing is called <code>work</code>, did you mean <code>Work</code>?" — while <code>config set work …</code>, <code>group move x work</code>, <code>group remove work</code>, and <code>alias work --unset</code> all accept the lowercase spelling. Emails diverge the same way (<code>remove Someone@…</code> misses <code>someone@…</code> save for the suggestion, while <code>already_landed</code> compares case-insensitively). Every command should accept the same spelling.</p></div>
+
+  <div class="block sol"><div class="label">Solution</div>
+  <p>Resolve aliases via <code>declared_alias</code>, groups via <code>declared_group</code>, and accounts via a case-insensitive email scan (uniqueness is already guaranteed by the shared namespace + slug rules once H4 is fixed).</p></div>
+
+  <div class="block eff"><div class="label">Effect</div>
+  <p>No command refuses a name another command accepts.</p></div>
+</div>
+
+<!-- ============================ LOW ============================ -->
+<h2 id="low">Low severity<span class="rule" style="background:var(--low)"></span></h2>
+
+<div class="finding b-low" id="L1">
+  <h3><span class="fid">L1</span> <span class="chip s-low">Low</span> <span class="cat">security</span> The credential reaches <code>argv</code> on the oversize-write fallback</h3>
+  <div class="loc">src/host/real.rs:323-339 · src/keychain.rs:8-11</div>
+  <div class="block cause"><div class="label">Cause</div><p>The module header promises "a Credential never reaches <code>argv</code>", and the normal path honours it via <code>security -i</code> on stdin. But when the <code>-i</code> command line would exceed ~3840 bytes, the fallback puts the hex-encoded secret directly in <code>argv</code>. Hex is an encoding, not a protection — anything that can read the process table recovers it with <code>xxd -r -p</code>.</p></div>
+  <div class="block"><div class="label">Explanation</div><p>Reachable once a credential block grows past ~1.9 KB (extra scopes/org fields). Bounded to same-user and root on macOS (<code>KERN_PROCARGS2</code> is uid-restricted), which is why it's Low, not High — but it silently breaks the exact invariant the file documents.</p></div>
+  <div class="block sol"><div class="label">Solution</div><p>Chunk the <code>-i</code> input to stay on stdin, or at minimum <code>host.note()</code> when the argv path is taken so the exposure isn't silent. Avoid a temp file (re-introduces a secret on disk, against ADR 0020).</p></div>
+  <div class="block eff"><div class="label">Effect</div><p>Restores the argv-secrecy guarantee for large credentials, or makes the one exception visible.</p></div>
+</div>
+
+<div class="finding b-low" id="L2">
+  <h3><span class="fid">L2</span> <span class="chip s-low">Low</span> <span class="cat">security</span> A newline in <code>$USER</code> injects a second sub-command into <code>security -i</code></h3>
+  <div class="loc">src/keychain.rs:80-104 · src/probe.rs:353-364</div>
+  <div class="block cause"><div class="label">Cause</div><p><code>quote()</code> escapes backslashes and quotes but not newlines, and <code>security -i</code> is line-oriented (one sub-command per line). <code>account</code> is <code>$USER</code>/<code>$USERNAME</code> verbatim, with no validation. A value like <code>x\ndelete-generic-password -s "Claude Code-credentials"</code> becomes two commands — and since <code>-i</code> reports a failed sub-command on stderr while still exiting 0, an injected command that <em>succeeds</em> is silent.</p></div>
+  <div class="block"><div class="label">Explanation</div><p>Low because it needs control of Perch's environment, and anyone with that has stronger levers (<code>PATH</code>, <code>PERCH_CLAUDE_BIN</code>). But <code>quote</code> is documented as if it made the value inert — the kind of false assumption that gets reused later on genuinely attacker-supplied input.</p></div>
+  <div class="block sol"><div class="label">Solution</div><p>Reject a service/account containing a control character in <code>add_command_line</code>, naming the variable. One line, no behaviour change for real login names.</p></div>
+  <div class="block eff"><div class="label">Effect</div><p>The stdin protocol becomes injection-proof and the "inert" claim becomes true.</p></div>
+</div>
+
+<div class="finding b-low" id="L3">
+  <h3><span class="fid">L3</span> <span class="chip s-low">Low</span> <span class="cat">security · bug</span> <code>indent_to_match</code> mixes byte and char offsets and panics on non-ASCII indentation</h3>
+  <div class="loc">src/json.rs:141-163</div>
+  <div class="block cause"><div class="label">Cause</div><p><code>own</code> is a <em>byte</em> indent width (<code>line.len() - line.trim_start().len()</code>) taken as the min over lines, then used to <em>byte</em>-slice every other line: <code>&amp;line[own.min(line.len())..]</code>. <code>trim_start</code> trims Unicode whitespace, so a block indented with mixed multi-byte whitespace (e.g. U+00A0 then U+2028) yields an <code>own</code> that slices another line mid-<code>char</code> → panic. The sibling function <code>indentation_of_the_line</code> counts <code>chars()</code> for the same concept — the tell that the two disagree.</p></div>
+  <div class="block"><div class="label">Explanation</div><p>The re-indented block is read verbatim from a profile's <code>.claude.json</code> (a file Perch doesn't own). Impact is a panic, not compromise — but it fires inside <code>patch_identity</code>, <em>after</em> the incoming credential is already live, leaving the machine acting as one account while displaying another and printing a "this is a bug" panic instead of the recovery instructions <code>live_but_unnamed</code> was written to give.</p></div>
+  <div class="block sol"><div class="label">Solution</div><p>Compute and strip the common indent in <code>chars</code> (or via <code>str::strip_prefix</code> on the shared prefix), never a raw byte slice.</p></div>
+  <div class="block eff"><div class="label">Effect</div><p>No panic on non-ASCII indentation; the interrupted-switch recovery path stays reachable.</p></div>
+</div>
+
+<div class="finding b-low" id="L4">
+  <h3><span class="fid">L4</span> <span class="chip s-low">Low</span> <span class="cat">security</span> <code>write_atomically</code> follows a symlink at its predictable temp path</h3>
+  <div class="loc">src/host/mod.rs:275 · src/host/real.rs:504-518</div>
+  <div class="block cause"><div class="label">Cause</div><p>The atomic path writes the temp file with <code>std::fs::write</code>, which <em>follows</em> a symlink at <code>&lt;path&gt;.perch-tmp</code> (a fixed, unrandomised suffix). The private-file writer deliberately <code>remove_file</code>s first and uses <code>create_new(true)</code>; the atomic writer does neither.</p></div>
+  <div class="block"><div class="label">Explanation</div><p>Cross-user only when the identity directory is attacker-writable — possible because <code>CLAUDE_CONFIG_DIR</code> is taken verbatim and can point at a shared location. There, another user pre-plants <code>.claude.json.perch-tmp</code> as a symlink and Perch writes the identity JSON through it to a file of the attacker's choice.</p></div>
+  <div class="block sol"><div class="label">Solution</div><p>Unlink the temp path and create it with <code>create_new(true)</code> (the shape <code>create_private_file</code> already uses).</p></div>
+  <div class="block eff"><div class="label">Effect</div><p>Removes the symlink-follow; a stale temp from a killed process now fails loudly instead of being reused.</p></div>
+</div>
+
+<div class="finding b-low" id="L5">
+  <h3><span class="fid">L5</span> <span class="chip s-low">Low</span> <span class="cat">bug</span> <code>remove</code> reports the credential deleted when the store never held it</h3>
+  <div class="loc">src/credentials.rs:142-150 · src/commands/remove.rs:336-338</div>
+  <div class="block cause"><div class="label">Cause</div><p><code>forget</code> treats keychain exit 44 (<code>NotFound</code>) as success, and <code>remove</code> then states flatly "the Credential Perch held for it is deleted". The keychain account name is <code>$USER</code>; if that differs from when the credential was written (login rename, <code>sudo -u</code>, a CI/launchd context, or <code>USER</code> unset in one shell), the delete is a no-op that reads as success.</p></div>
+  <div class="block"><div class="label">Explanation</div><p>The plaintext copy and profile dir <em>are</em> deleted, so the user can't notice — while the macOS keychain retains a working credential for an account the tool just said it destroyed.</p></div>
+  <div class="block sol"><div class="label">Solution</div><p>Have <code>forget</code> report whether it removed anything, and word <code>remove</code>'s message conditionally — distinguishing "the other store was legitimately empty" from "nothing was found to delete".</p></div>
+  <div class="block eff"><div class="label">Effect</div><p>The success message stops overclaiming; a stranded credential becomes visible.</p></div>
+</div>
+
+<div class="finding b-low" id="L6">
+  <h3><span class="fid">L6</span> <span class="chip s-low">Low</span> <span class="cat">security</span> No <code>fsync</code> — a crash can zero <code>.claude.json</code> or lose a rotated refresh token</h3>
+  <div class="loc">src/host/real.rs:181, 512-518 · src/host/mod.rs:275-276</div>
+  <div class="block cause"><div class="label">Cause</div><p>Every write-and-rename skips <code>File::sync_all</code> and a parent-directory fsync. <code>rename</code> is atomic against other processes, not against a crash: on power loss the rename can be durable while the data blocks are not, leaving a zero-length <code>~/.claude.json</code> or a truncated <code>.credentials.json</code>.</p></div>
+  <div class="block"><div class="label">Explanation</div><p>Sharper here than usual because <code>observe::renew_under_the_lock</code> stores a credential Anthropic has <em>already</em> rotated — a lost write is <code>Quarantine::RotationLost</code>, unrecoverable except by a fresh login.</p></div>
+  <div class="block sol"><div class="label">Solution</div><p><code>sync_all</code> the temp file before the rename in <code>create_private_file</code> and <code>write_atomically</code>, then fsync the parent dir.</p></div>
+  <div class="block eff"><div class="label">Effect</div><p>Two extra syncs per credential write / switch — negligible on SSD — in exchange for crash durability of the one write that can't be retried.</p></div>
+</div>
+
+<div class="finding b-low" id="L7">
+  <h3><span class="fid">L7</span> <span class="chip s-low">Low</span> <span class="cat">security</span> Lock loss is unobserved and <code>release</code> deletes whatever is at the path</h3>
+  <div class="loc">src/lock.rs:48-70, 160-165</div>
+  <div class="block cause"><div class="label">Cause</div><p>A lock artifact carries no holder identity (a bare directory, matching Claude Code). So: (a) a failed <code>touch</code> in <code>renew</code> means the lock is gone and someone else may hold it, but the write proceeds anyway; (b) <code>release</code> then <code>remove_dir_all</code>s the path unconditionally, deleting the <em>new</em> holder's lock; (c) <code>abandoned</code> returns <code>true</code> when the mtime can't be read at all, licensing a takeover of a live lock on a stat error.</p></div>
+  <div class="block"><div class="label">Explanation</div><p>Not attacker-driven — needs a stall longer than the 60 s staleness window, which the code itself notes a permission-prompting keychain can cause.</p></div>
+  <div class="block sol"><div class="label">Solution</div><p>Write a holder token (pid + start time, already exposed by the Host) into the lock dir; verify it before <code>release</code> and before proceeding past a failed <code>renew</code>; treat an unreadable mtime as "held". A token file inside the directory stays compatible with Claude Code's bare-<code>mkdir</code> protocol.</p></div>
+  <div class="block eff"><div class="label">Effect</div><p>Lock loss becomes detectable and stops cascading. Small divergence from Claude Code's scheme to watch as it drifts.</p></div>
+</div>
+
+<div class="finding b-low" id="L8">
+  <h3><span class="fid">L8</span> <span class="chip s-low">Low</span> <span class="cat">bug</span> <code>add</code>'s Group prompt validates shape only, then aborts after the login on an alias collision</h3>
+  <div class="loc">src/commands/add.rs:176-199, 57</div>
+  <div class="block cause"><div class="label">Cause</div><p>The re-ask loop validates the answer with <code>validate_name</code> only; the <code>refuse_taken_names</code> check runs <em>after</em> the loop. If the answer collides with an existing Alias, <code>validate_name</code> passes, the loop exits, and <code>refuse_taken_names</code> then raises <code>Conflict</code> — aborting the command after the browser login was already spent and discarded.</p></div>
+  <div class="block"><div class="label">Explanation</div><p>The loop's own comment says "losing the Account over a typo would be a poor trade" — which is exactly what happens for the collision case it doesn't check.</p></div>
+  <div class="block sol"><div class="label">Solution</div><p>Run <code>registry.refuse_taken_names(alias, Some(name))</code> inside the loop and re-ask on <code>Err</code>.</p></div>
+  <div class="block eff"><div class="label">Effect</div><p>A colliding group name is re-prompted instead of wasting the login.</p></div>
+</div>
+
+<div class="finding b-low" id="L9">
+  <h3><span class="fid">L9</span> <span class="chip s-low">Low</span> <span class="cat">bug</span> <code>remove</code>'s confirmation for the last non-active account describes a state that isn't true</h3>
+  <div class="loc">src/commands/remove.rs:203-233</div>
+  <div class="block cause"><div class="label">Cause</div><p>When <code>is_active == false</code> and <code>remaining == 0</code> but <code>active == None</code>, the <code>successor: None</code> branch prints "Claude Code goes on running as {account} — the live Credential is not Perch's to take away" — false: that account isn't active and the live store may hold nothing or someone else's credential. The user is asked to agree to a description of a state that isn't theirs.</p></div>
+  <div class="block sol"><div class="label">Solution</div><p>Branch the <code>None</code>-successor sentence on <code>consequence.is_active</code>.</p></div>
+  <div class="block eff"><div class="label">Effect</div><p>The confirmation stops asserting an untrue live state.</p></div>
+</div>
+
+<div class="finding b-low" id="L10">
+  <h3><span class="fid">L10</span> <span class="chip s-low">Low</span> <span class="cat">bug</span> Minor prose/state mismatches</h3>
+  <div class="loc">src/cycle.rs:430-446 · src/commands/status.rs:74-83</div>
+  <div class="block"><div class="label">Detail</div>
+  <ul>
+    <li><code>cycle::nobody_is_a_candidate</code> counts an account that is <em>both</em> disabled and quarantined in both tallies, so the reported counts can exceed the number of accounts.</li>
+    <li><code>status</code> with accounts held but <code>active == None</code> says "run <code>claude</code> and log in", where <code>perch switch &lt;target&gt;</code> is the actual remedy (the one <code>remove</code> itself recommends).</li>
+    <li><code>claude_version</code> takes the first stdout token unconditionally, so <code>"error: …"</code> yields version <code>"error:"</code> in refusal messages; a cached <code>used_percent</code> of <code>-5.0</code> renders "105% headroom". Both cosmetic; a clamp + guard is a few lines.</li>
+  </ul></div>
+  <div class="block sol"><div class="label">Solution</div><p>Count each account in one bucket; branch the <code>status</code> remedy on whether any account is held; clamp <code>used_percent</code> to <code>[0,100]</code>.</p></div>
+  <div class="block eff"><div class="label">Effect</div><p>Messages match reality; no functional risk.</p></div>
+</div>
+
+<!-- ============================ DEPS / SIMPLIFY ============================ -->
+<h2 id="deps">Simplifications &amp; dependencies<span class="rule" style="background:var(--info)"></span></h2>
+<p class="lead">The project has explicit ADR positions on dependencies (ADR 0008 keychain, ADR 0021 platform primitives), and most crate-vs-hand-rolled calls are deliberate and correct. These are the ones worth acting on, plus an honest account of the crate swaps that would <em>not</em> help.</p>
+
+<div class="finding b-info" id="D1">
+  <h3><span class="fid">D1</span> <span class="chip s-info">Simplify</span> <code>ratatui</code> + <code>crossterm</code> are declared but used nowhere</h3>
+  <div class="loc">Cargo.toml:13-14</div>
+  <div class="block"><div class="label">Finding</div><p>A recursive grep over <code>src/</code> and <code>tests/</code> finds zero references to either crate — the only hits are the Cargo.toml lines themselves (a TUI is a future plan noted in <code>utilization.rs</code>, not present code). Together they are the largest subtree in the dependency graph, compiled and audited for nothing.</p></div>
+  <div class="block eff"><div class="label">Effect / tradeoff</div><p>Faster clean builds, smaller <code>Cargo.lock</code> surface, fewer CI minutes across the 3-OS matrix. Note: the Cargo.toml comment justifies declaring <code>libc</code>/<code>windows-sys</code> partly by "already pulled in by crossterm and ratatui" — but <code>chrono</code> alone still pulls both transitively, so the "adds no crate" claim survives a one-line comment edit. Adding <code>cargo machete</code> to CI keeps this class of drift out permanently.</p></div>
+</div>
+
+<div class="finding b-info" id="D2">
+  <h3><span class="fid">D2</span> <span class="chip s-info">Simplify</span> <code>color-eyre</code> is pulled in for a panic hook only</h3>
+  <div class="loc">src/report.rs:12-21</div>
+  <div class="block"><div class="label">Finding</div><p>The sole use installs color-eyre's panic hook and explicitly discards its <em>error</em> hook; <code>error.rs</code> is the real error story and never touches eyre. color-eyre drags in <code>eyre</code>, <code>backtrace</code>, <code>owo-colors</code>, <code>indenter</code> for one pretty panic message.</p></div>
+  <div class="block sol"><div class="label">Solution</div><p>A hand-rolled <code>std::panic::set_hook</code> printing payload + location + version + issues URL is ~15 lines with zero deps; <code>human-panic</code> is a much smaller crate that does exactly this.</p></div>
+  <div class="block eff"><div class="label">Effect / tradeoff</div><p>Drops 5-8 transitive crates. You lose color-eyre's span-formatted backtrace, which is genuinely nicer for bug reports — so if report quality is the point (the module says it is), keeping it is defensible. Worth a deliberate re-decision once D1 removes its neighbours.</p></div>
+</div>
+
+<div class="finding b-info" id="D3">
+  <h3><span class="fid">D3</span> <span class="chip s-info">Crates</span> Crate-vs-hand-rolled: what helps, what correctly conflicts with the ADRs</h3>
+  <div class="block"><div class="label">Worth adopting</div>
+  <ul>
+    <li><b><code>tempfile</code></b> (<code>NamedTempFile::persist</code>) — replaces the fixed <code>.perch-tmp</code> suffix in <code>write_atomically</code>, which two concurrent processes collide on and which enables the L4 symlink issue. Randomised temp names fix both.</li>
+  </ul></div>
+  <div class="block"><div class="label">Correctly hand-rolled — do <em>not</em> swap</div>
+  <ul>
+    <li><b><code>keyring</code></b> — rejected by ADR 0008 for a real reason: macOS anchors a keychain item's ACL to the creating binary, so Perch must drive the same <code>security</code> binary Claude Code does. The wrapper honours all four documented CLI constraints.</li>
+    <li><b><code>sysinfo</code></b> — ADR 0021 chose vetted <code>libc</code>/<code>windows-sys</code> declarations over a heavy process-table crate; the <code>/proc</code> parsing is careful (rsplit on <code>)</code> for hostile comm names).</li>
+    <li><b><code>which</code> / <code>dirs</code> / <code>fd-lock</code> / <code>fs4</code></b> — each conflicts with the Host-port abstraction (which lets <code>FakeHost</code> test Windows <code>.cmd</code> and unset-<code>HOME</code> cases on any OS) or with the fact that <code>lock.rs</code> takes <em>Claude Code's</em> directory locks, not locks of its own. A file-lock crate would lock against nobody.</li>
+    <li><b><code>reqwest</code>/<code>ureq</code></b> — the <code>curl</code>-via-stdin design is what keeps the access token out of <code>argv</code>; ADR 0021 covers it. <code>std::io::IsTerminal</code> is already used instead of a terminal-detection crate.</li>
+    <li><b><code>serde_json</code> value surgery</b> — the hand-rolled byte-preserving splicer in <code>json.rs</code> is justified: no format-preserving JSON editor exists in Rust, and round-tripping would reorder a file Perch doesn't own.</li>
+  </ul></div>
+</div>
+
+<div class="finding b-info" id="D4">
+  <h3><span class="fid">D4</span> <span class="chip s-info">Simplify</span> Duplicated logic worth unifying</h3>
+  <div class="block"><div class="label">Findings</div>
+  <ul>
+    <li><b><code>quote()</code> / <code>quoted()</code></b> — byte-for-byte identical escaping in <code>keychain.rs:102</code> and <code>host/real.rs:81</code>. Two copies is how one gets fixed and the other doesn't.</li>
+    <li><b>Process spawn + <code>Execution</code> build</b> — the same spawn-with-optional-stdin dance and <code>Execution { status: code().unwrap_or(-1), stdout: from_utf8_lossy… }</code> appears in <code>curl</code>, <code>run_security</code>, and <code>exec</code>. One <code>impl From&lt;Output&gt; for Execution</code> + one <code>exec_with_stdin</code> removes ~35 lines.</li>
+    <li><b>tmp-file-beside-and-rename</b> — <code>write_atomically</code> and <code>write_private_file</code> share the whole choreography; a <code>replace_via_tmp(path, write_fn)</code> collapses it and stops the failure-cleanup drifting between the secret and non-secret paths.</li>
+    <li><b>Mirror enums</b> — <code>main.rs</code> defines <code>ConfigAction</code>/<code>GroupAction</code> + <code>From</code> impls that mirror <code>ConfigCommand</code>/<code>GroupCommand</code> field-for-field (~70 lines). <code>clap</code> is already an unconditional dep, so deriving <code>Subcommand</code> directly would delete them (tradeoff: the lib picks up a clap derive).</li>
+    <li><b>Two <code>Scope</code> enums</b> — <code>cycle.rs</code> and <code>commands/list.rs</code> both define <code>Scope</code> with near-identical <code>accounts()</code> dispatch. Unifying is ~25 lines; the counter-argument (cycle deliberately has no <code>Everything</code>) is real — decide it explicitly rather than by accident.</li>
+    <li><b><code>std::io::Error::other(err.to_string())</code></b> laundering repeated at 6 sites — <code>PerchError::file_read/file_write</code> constructors remove ~20 lines.</li>
+  </ul></div>
+  <div class="block eff"><div class="label">Effect</div><p>~150 lines removed across behaviour-preserving refactors; each de-duplication closes a "fix one copy, miss the other" hazard.</p></div>
+</div>
+
+<div class="finding b-info" id="D5">
+  <h3><span class="fid">D5</span> <span class="chip s-info">Cargo / CI</span> Hygiene gaps</h3>
+  <div class="block"><div class="label">Findings</div>
+  <ul>
+    <li><b>No <code>[lints]</code> table</b> — CI enforces <code>clippy -D warnings</code> but local <code>cargo clippy</code> doesn't. Add <code>[lints.clippy] all = "deny"</code> and <code>[lints.rust] unsafe_op_in_unsafe_fn = "deny"</code> (there are five <code>unsafe</code> blocks in <code>host/real.rs</code>) so local and CI agree.</li>
+    <li><b>No <code>[profile.release]</code></b> — <code>strip = true</code>, <code>lto = "thin"</code>, <code>codegen-units = 1</code> is a free ~30-50% binary-size cut for a distributed CLI.</li>
+    <li><b>MSRV over-pinned</b> — <code>rust-version = "1.97.1"</code> compares the full triple; <code>"1.97"</code> matches convention (the exact patch belongs in <code>rust-toolchain.toml</code>, where it already is). And it's never <em>checked</em> — add a <code>cargo +1.97 check --locked</code> leg.</li>
+    <li><b>Missing CI legs</b> — <code>cargo machete</code> (would have caught D1), <code>cargo-audit</code>, and a <code>schedule:</code> trigger so the contract suite catches Claude Code drift on a quiet week (it exists specifically to find drift before users do, against a continuously-updating Claude Code).</li>
+  </ul></div>
+  <div class="block eff"><div class="label">Effect</div><p>CI is already strong (SHA-pinned actions, <code>persist-credentials: false</code>, least-privilege token, <code>--locked</code>, 3-OS matrix, <code>if: always()</code> gate). These close the remaining drift and reproducibility gaps.</p></div>
+</div>
+
+<!-- ============================ TESTS ============================ -->
+<h2 id="tests">Test quality<span class="rule" style="background:var(--muted)"></span></h2>
+<p class="lead">
+The suite is a genuine strength — 236 tests, effect-trace assertions that pin the switch's ordered contract,
+all four PID-recycling quadrants, network-discipline checks in nearly every suite, and a fake clock that makes
+timing tests instant. The gaps below are mostly places where the <em>test double</em> can't express the failure
+the production code guards against, so the guard is effectively unverified.
+</p>
+
+<div class="finding b-info" id="T">
+  <h3><span class="fid">T1</span> <span class="chip s-info" style="background:rgba(154,163,178,.14);color:var(--muted);border-color:var(--border)">Tests</span> Seven gaps, most-impactful first</h3>
+  <div class="block"><div class="label">High-impact gaps</div>
+  <ul>
+    <li><b>The read-back guard is untestable.</b> <code>profile::write_and_read_back</code> exists for <code>security</code>'s silent stdin truncation, but the fake keychain/filesystem always store bytes faithfully, so the failure branch can never fire — it could be deleted and no test would fail. <em>Fix:</em> add <code>FakeHost::with_keychain_truncating_after(n)</code> / <code>with_file_corrupting_writes</code> and assert the switch stops at the write step.</li>
+    <li><b>The fake keychain works off-macOS,</b> where real Linux/Windows has no <code>/usr/bin/security</code>. <code>tests/storing.rs</code>'s "second-choice store" test passes only because of this — on real Linux that scenario fails outright. <em>Fix:</em> make <code>FakeHost::keychain_*</code> return <code>Unavailable</code> when <code>platform() != MacOs</code> unless a test opts in, then re-scope the storing test.</li>
+    <li><b>Slug edge cases untested</b> — the empty-slug delete (H5) and the <code>add</code> slug-collision (H4) have no test pinning a refusal. <em>Fix:</em> <code>a_slug_is_never_empty…</code> (unit) and <code>adding_an_account_whose_email_slugs_to_an_existing_profile_is_refused</code> (behaviour).</li>
+  </ul></div>
+  <div class="block"><div class="label">Medium-impact gaps</div>
+  <ul>
+    <li><b>Registry-save failure after the destructive step</b> is never exercised (<code>remove</code> post-delete, <code>switch</code> <code>record_active</code>) though the fake supports <code>with_unwritable_file(REGISTRY_PATH)</code> — these are the exact windows H2 is about.</li>
+    <li><b>The under-lock re-read</b> (<code>observe.rs</code> re-checking liveness/credential inside the lock, the whole ADR 0006 safety argument) can't be tested — the fake can't mutate the world during a <code>sleep</code>/lock-wait. <em>Fix:</em> add <code>FakeHost::on_sleep(callback)</code>.</li>
+    <li><b><code>credentials::read</code> swallowing a fallback error</b> (M6) is undecided and untested — one line of <code>with_unreadable_file</code> arrangement pins it either way.</li>
+    <li><b>No concurrency test for the lock and no property tests for ranking.</b> The mkdir-exclusivity claim is the entire lock protocol but is only checked sequentially; <code>cycle.rs</code>'s tier invariants are example-based, so a comparator sign-flip confined to <code>SoonestReset</code> could survive. <em>Fix:</em> an 8-thread <code>lock::under</code> race test on <code>RealHost</code>, and <code>proptest</code> properties (winner ≥ every candidate; exhausted/disabled/quarantined never chosen; determinism).</li>
+  </ul></div>
+  <div class="block"><div class="label">Also worth noting</div>
+  <ul>
+    <li>Dead error branches the fake can't reach: <code>remove_file</code>/<code>remove_dir_all</code>/<code>create_dir_all</code> never fail in <code>FakeHost</code>, so <code>credentials.rs:151-157</code>, <code>lock.rs:101-108</code>, and the <code>remove</code> forget-failure path are untested.</li>
+    <li>Unicode name matching is ASCII-only (<code>eq_ignore_ascii_case</code>) while <code>validate_name</code> accepts Unicode — <code>café</code>/<code>CAFÉ</code> are different names. Pin the intended rule.</li>
+    <li>A 1100 ms real sleep runs in every <code>cargo test</code> (<code>real.rs:846</code>) — belongs in the contract suite. A contract keychain test leaves a real login-keychain item behind if an assertion panics mid-test — use a drop guard.</li>
+  </ul></div>
+</div>
+
+<!-- ============================ CLEAN ============================ -->
+<h2 id="clean">Verified clean<span class="rule" style="background:var(--low)"></span></h2>
+<p class="lead">Areas actively checked and found correct — recorded so the report's silence elsewhere isn't mistaken for "not looked at".</p>
+<ul>
+  <li><b>argv secrecy on the HTTP path</b> — <code>curl</code> driven via <code>--config -</code> with URL/headers/body all on stdin; both binaries invoked by absolute path; Windows <code>curl</code> from <code>%SystemRoot%</code>, never a <code>PATH</code> walk.</li>
+  <li><b>No shell is ever spawned</b> — every exec is <code>Command::new</code> with an args array; no <code>sh -c</code>, no string concatenation.</li>
+  <li><b>No secret in any error, log, or stdout</b> — <code>Credential</code>'s <code>Display</code> is <code>&lt;credential N bytes&gt;</code>; <code>anthropic::understand</code> discards reply bodies; parse errors carry position only.</li>
+  <li><b>Path traversal via email is blocked</b> — <code>slug</code> maps every non-alphanumeric to <code>-</code> (the <em>empty</em> case is H5, a different bug).</li>
+  <li><b>Capture-before-write ordering and interruption recording</b> — the switch state machine records <code>incoming_is_live</code> on failure, and the retry self-captures correctly.</li>
+  <li><b>Credential files 0600 / dirs 0700 at creation</b> (not chmod'd after), write→read-back→supersede in both directions, loose-file tightening said once.</li>
+  <li><b>Session-marker corroboration (ADR 0022)</b> — recycled-PID reasoning is exact, not heuristic; an unreadable start time is a refusal, not a guess.</li>
+  <li><b>The JSON splicer</b> is depth- and escape-aware and rejects truncated/non-object values (only defect: the L3 indentation panic).</li>
+  <li><b>Registry version-from-the-future is refused</b>; the v2→v3 quarantine migration fails safe.</li>
+  <li><b>Ranking/cycling math</b> — worst-window selection, four-tier ordering, negated-timestamp trick, stable-sort tie handling, and honest non-outcomes are all correct; units (millis vs seconds, <code>/proc</code> field 22, FILETIME epoch) are right throughout and all times are UTC.</li>
+  <li><b>No export/import crypto exists yet</b> (ADR 0014 is unimplemented), so there was none to review.</li>
+</ul>
+
+<div class="footer">
+  <p><b>Top five to act on:</b> H1 (<code>.claude.json</code> mode loss), H2 (<code>remove</code> ordering), H3 (registry locking) + M1/M7 (make the same <code>registry::save</code> atomic and private in one change), H4 (<code>add</code> slug collision), H5 (empty-slug delete guard). The first, fourth, and fifth are small, contained edits; H2/H3 are the ones that change control flow.</p>
+  <p>Every finding was re-verified against the source before inclusion. Line numbers reference the tree at branch <code>t3code/bac45dac</code>; they may drift as the code changes.</p>
+</div>
+
+</div>
+</body>
+</html>

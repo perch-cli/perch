@@ -27,6 +27,16 @@ and exit codes; unexpected ones are panics with a colour-eyre report. Anything
 that starts as a panic and turns out to be an outcome a user can act on should
 move across, not stay.
 
-Ratatui and crossterm are in the dependency tree before anything imports them.
-Until `perch tui` lands they cost compile time and nothing else — an accepted
-price for settling the choice early.
+## Amended: the declaration waits for the code
+
+Ratatui and crossterm were declared from the start, before anything imported
+them, so that the dependency set was settled while the surface was small. That
+was the wrong half of the decision to act on early.
+
+The *choice* is what is worth settling ahead of time, and this document is
+where it is settled — including the reason crossterm is named directly rather
+than left to ratatui, which is the part that would have been rediscovered. The
+*declaration* buys nothing until there is code behind it: together they were
+the largest subtree in the dependency graph, compiled on every build and
+audited on every advisory, for no call site. They come back with `perch tui`,
+at the versions named above.
