@@ -330,7 +330,7 @@ impl Host for RealHost {
         account: &str,
         secret: &str,
     ) -> Result<(), KeychainError> {
-        let command_line = keychain::add_command_line(service, account, secret);
+        let command_line = keychain::add_command_line(service, account, secret)?;
         match keychain::write_path_for(&command_line) {
             WritePath::Stdin => security(&["-i"], Some(&command_line), service, account)?,
             WritePath::Argv => {

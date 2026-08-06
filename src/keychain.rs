@@ -80,13 +80,40 @@ pub fn classify(execution: &Execution, service: &str, account: &str) -> Keychain
 ///
 /// `-U` updates an existing item rather than failing; `-X` takes the secret as
 /// hex so no byte of it is ever quoted, escaped, or logged.
-pub fn add_command_line(service: &str, account: &str, secret: &str) -> String {
-    format!(
+///
+/// Refuses a service or account carrying a control character. `security -i` is
+/// line-oriented — one sub-command per line — so a newline in either of them
+/// does not need escaping, it needs rejecting: it ends this command and starts
+/// another, and `-i` reports a failed sub-command on stderr while still exiting
+/// 0, so an injected `delete-generic-password` that *works* is silent. The
+/// account name is `$USER` verbatim, which is somebody else's to set.
+pub fn add_command_line(
+    service: &str,
+    account: &str,
+    secret: &str,
+) -> Result<String, KeychainError> {
+    inert("the keychain service name", service)?;
+    inert("the keychain account name", account)?;
+    Ok(format!(
         "add-generic-password -U -s {} -a {} -X {}\n",
         quote(service),
         quote(account),
         hex_encode(secret.as_bytes()),
-    )
+    ))
+}
+
+/// Refuses a value that would be punctuation rather than a value.
+fn inert(what: &str, value: &str) -> Result<(), KeychainError> {
+    match value.chars().find(|c| c.is_control()) {
+        Some(control) => Err(KeychainError::Unavailable {
+            detail: format!(
+                "{what} carries a control character (U+{:04X}), which `security` \
+                 would read as the end of one command and the start of another",
+                control as u32
+            ),
+        }),
+        None => Ok(()),
+    }
 }
 
 /// Which path a write of this size must take.
@@ -182,17 +209,39 @@ mod tests {
         assert_eq!(hex_decode(&hex).unwrap(), secret.as_bytes());
     }
 
+    /// The `-i` line for an ordinary write, which every test below is about.
+    fn line(service: &str, account: &str, secret: &str) -> String {
+        add_command_line(service, account, secret).expect("ordinary names")
+    }
+
     #[test]
     fn a_short_credential_goes_through_stdin() {
-        let line = add_command_line("Claude Code-credentials", "someone", "{\"a\":1}");
-        assert_eq!(write_path_for(&line), WritePath::Stdin);
+        let written = line("Claude Code-credentials", "someone", "{\"a\":1}");
+        assert_eq!(write_path_for(&written), WritePath::Stdin);
+    }
+
+    /// `security -i` reads one sub-command per line, so a newline in a value is
+    /// not something to escape — it is the end of this command and the start of
+    /// another. The account name is `$USER` verbatim, which is somebody else's
+    /// to set, and `-i` reports a failed sub-command on stderr while still
+    /// exiting 0: an injected `delete-generic-password` that worked would be
+    /// silent.
+    #[test]
+    fn a_name_carrying_a_control_character_is_refused_rather_than_quoted() {
+        let injected = "someone\ndelete-generic-password -s \"Claude Code-credentials\"";
+        let refused = add_command_line("Claude Code-credentials", injected, "{}")
+            .expect_err("that is two commands, not a name");
+        assert!(refused.to_string().contains("account name"), "{refused}");
+
+        add_command_line("svc\r", "someone", "{}").expect_err("a carriage return too");
+        add_command_line("svc", "someone", "{}").expect("and an ordinary pair is fine");
     }
 
     #[test]
     fn a_credential_near_the_buffer_limit_falls_back_to_argv() {
         let big = "x".repeat(STDIN_BUFFER_LIMIT / 2);
-        let line = add_command_line("Claude Code-credentials", "someone", &big);
-        assert_eq!(write_path_for(&line), WritePath::Argv);
+        let written = line("Claude Code-credentials", "someone", &big);
+        assert_eq!(write_path_for(&written), WritePath::Argv);
     }
 
     #[test]
@@ -206,8 +255,8 @@ mod tests {
 
     #[test]
     fn the_secret_never_appears_in_plain_text_on_the_command_line() {
-        let line = add_command_line("svc", "acct", "sk-ant-oat01-secret");
-        assert!(!line.contains("sk-ant-oat01-secret"));
+        let written = line("svc", "acct", "sk-ant-oat01-secret");
+        assert!(!written.contains("sk-ant-oat01-secret"));
     }
 
     #[test]
