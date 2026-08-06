@@ -877,6 +877,40 @@ mod tests {
         assert!(touched > created, "touched {touched}, created {created}");
     }
 
+    /// The temp path a replacement is written at is `<path>.perch-tmp` — fixed,
+    /// unrandomised, and therefore predictable. `CLAUDE_CONFIG_DIR` is taken
+    /// verbatim and can name a directory somebody else may write to, so a
+    /// symlink planted there would have Perch write the Identity through it to
+    /// a file of the attacker's choosing. The file is unlinked and created
+    /// afresh instead, which is the shape the Credential writer always used.
+    #[cfg(unix)]
+    #[test]
+    fn a_replacement_is_never_written_through_something_left_at_the_temp_path() {
+        let host = RealHost::new();
+        let dir = std::env::temp_dir().join(format!("perch-symlink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let target = dir.join("config.json");
+        let elsewhere = dir.join("elsewhere");
+        std::fs::write(&elsewhere, "not Perch's to write").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, crate::host::temp_beside(&target)).unwrap();
+
+        let written = crate::host::write_atomically(&host, &target, "{\"mine\":true}");
+
+        let victim = std::fs::read_to_string(&elsewhere);
+        let landed = std::fs::read_to_string(&target);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        written.expect("the write lands");
+        assert_eq!(landed.unwrap(), "{\"mine\":true}");
+        assert_eq!(
+            victim.unwrap(),
+            "not Perch's to write",
+            "the file the symlink pointed at is untouched"
+        );
+    }
+
     #[test]
     fn an_unset_home_is_a_refusal_rather_than_the_filesystem_root() {
         assert!(home_from("HOME", None).is_err());
