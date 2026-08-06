@@ -79,9 +79,20 @@ pub fn read(host: &dyn Host, config: &Store) -> Result<Option<StoredCredential>>
                 kept_in: fallback,
                 credential,
             })),
-            // The fallback is only ever asked whether it has one, and an error
-            // from it is not a "yes". What the primary said is what happened.
-            _ => otherwise.map(|_| None),
+            // Neither holds one. What the primary said is what happened: on a
+            // machine with no keychain that is "nothing here", and on one with
+            // a locked keychain it is the lock.
+            Ok(None) => otherwise.map(|_| None),
+            // The fallback is there and would not say what it holds. That is
+            // not "no Credential": "no Credential" is terminal — it Quarantines
+            // an Account (ADR 0006) — and a file that is temporarily unreadable
+            // must not be promoted to a permanent verdict. If the primary
+            // already failed, its failure is the one to report, since it is the
+            // store this machine is meant to be using.
+            Err(fallback_failed) => match otherwise {
+                Ok(None) => Err(fallback_failed),
+                otherwise => otherwise.map(|_| None),
+            },
         },
     }
 }
@@ -326,6 +337,23 @@ mod tests {
         assert_eq!(host.mode_of(&store.credentials_file), Some(0o600));
         assert_eq!(host.notes().len(), 1, "{:?}", host.notes());
         assert!(host.notes()[0].contains("0644"), "{:?}", host.notes());
+    }
+
+    /// "Neither store holds one" is terminal — it Quarantines an Account — so a
+    /// store that is there and would not say what it holds must not answer as
+    /// one holding nothing. The wrong answer here turns a mode that can be
+    /// fixed in a second into a state only a browser login ends.
+    #[test]
+    fn a_store_that_will_not_say_what_it_holds_is_not_a_store_holding_nothing() {
+        let host = FakeHost::new();
+        let store = profile_store(&host);
+        let host = host.with_unreadable_file(&store.credentials_file, "Permission denied");
+        // On this platform the file is the fallback, so it is the one asked
+        // second — and the keychain, asked first, simply has nothing.
+        host.set_file(&store.credentials_file, CREDENTIAL);
+
+        let error = read(&host, &store).unwrap_err();
+        assert!(error.to_string().contains("Permission denied"), "{error}");
     }
 
     #[test]
