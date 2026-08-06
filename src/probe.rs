@@ -514,6 +514,22 @@ pub fn read_identity(host: &dyn Host, store: &Store, version: &str) -> Result<Op
         )
     })?;
 
+    // An address is what every Profile path, keychain namespace, Alias target
+    // and Group membership is keyed on, so one with nothing nameable in it is
+    // refused where it enters rather than somewhere downstream that has already
+    // derived a path from it.
+    if !email.chars().any(|c| c.is_ascii_alphanumeric()) {
+        return Err(refusal(
+            assumption::IDENTITY_BLOCK,
+            &format!(
+                "{} names the account `{email}`, which has no character Perch \
+                 can name a Profile after",
+                store.identity_file.display()
+            ),
+            version,
+        ));
+    }
+
     Ok(Some(Identity {
         email,
         account_uuid: account.account_uuid,

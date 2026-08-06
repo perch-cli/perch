@@ -704,8 +704,32 @@ pub fn profiles_dir(host: &dyn Host) -> Result<PathBuf> {
 
 /// The Profile directory for an Account. The email is slugged because the path
 /// is hashed into a keychain service name and has to be stable and printable.
+///
+/// An address with no alphanumeric character in it slugs to nothing, and
+/// joining nothing onto a path gives back the path: the Profile of such an
+/// Account would *be* `profiles/`, the directory holding every other Account's.
+/// `perch remove` deletes a Profile directory whole, so that Account is one
+/// removal away from taking every Credential Perch holds with it. Refused here,
+/// at the one place every store and every keychain namespace is derived from,
+/// rather than trusted to whatever wrote the address.
 pub fn profile_dir_for(host: &dyn Host, email: &str) -> Result<PathBuf> {
-    Ok(profiles_dir(host)?.join(slug(email)))
+    let profiles = profiles_dir(host)?;
+    let slugged = slug(email);
+    let dir = profiles.join(&slugged);
+
+    // Two ways of asking the same question, because the answer is the whole
+    // machine: an empty slug, and — for whatever a future slug might let
+    // through — a path that is not one directory below the one it was joined to.
+    if slugged.is_empty() || dir.parent() != Some(profiles.as_path()) {
+        return Err(PerchError::Invalid(format!(
+            "`{email}` has no character a Profile directory can be named after, \
+             so Perch cannot say where its Credential would be kept.\n\
+             An Account recorded under that address has to be removed from \
+             {} by hand.",
+            registry_path(host)?.display(),
+        )));
+    }
+    Ok(dir)
 }
 
 /// Where a login lives while Perch is running it.
@@ -872,6 +896,29 @@ mod tests {
     #[test]
     fn an_email_slugs_to_a_stable_directory_name() {
         assert_eq!(slug("Someone@Example.com"), "someone-example-com");
+    }
+
+    /// `join("")` gives back the path it was joined to, so an address with
+    /// nothing nameable in it would put an Account's Profile *at* the
+    /// directory holding every other Account's — and `perch remove` deletes a
+    /// Profile directory whole.
+    #[test]
+    fn an_address_that_names_no_directory_is_refused_rather_than_naming_them_all() {
+        let host = crate::host::FakeHost::new();
+        let profiles = profiles_dir(&host).unwrap();
+
+        for degenerate in ["@", "-", "...", "@.-@"] {
+            assert_eq!(slug(degenerate), "", "the case this is about: {degenerate}");
+            let refused =
+                profile_dir_for(&host, degenerate).expect_err("no Profile can be named after this");
+            assert!(refused.to_string().contains(degenerate), "{refused}");
+        }
+
+        assert_eq!(
+            profile_dir_for(&host, "someone@example.com").unwrap(),
+            profiles.join("someone-example-com"),
+            "and an ordinary address is unaffected"
+        );
     }
 
     /// Every command is a load, some changes made in memory and a save of the
