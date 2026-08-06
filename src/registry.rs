@@ -739,9 +739,27 @@ pub fn profile_dir_for(host: &dyn Host, email: &str) -> Result<PathBuf> {
 /// here and its Credential is moved into a Profile afterwards. Nothing outlives
 /// the command: this directory is removed whether the login worked or not.
 pub fn pending_login_dir(host: &dyn Host, started_at: DateTime<Utc>) -> Result<PathBuf> {
-    Ok(perch_home(host)?
-        .join("pending")
-        .join(format!("login-{}", started_at.timestamp_millis())))
+    Ok(pending_logins_dir(host)?.join(format!("login-{}", started_at.timestamp_millis())))
+}
+
+/// Where every pending login lives, so the ones nobody came back from can be
+/// found again.
+pub fn pending_logins_dir(host: &dyn Host) -> Result<PathBuf> {
+    Ok(perch_home(host)?.join("pending"))
+}
+
+/// When the login that made this directory started, as its name records.
+///
+/// The name is `login-<millis>`, written by [`pending_login_dir`], and it is
+/// the only account of the directory's age that nothing later moves.
+pub fn pending_login_started_at(dir: &Path) -> Option<DateTime<Utc>> {
+    let millis: i64 = dir
+        .file_name()?
+        .to_str()?
+        .strip_prefix("login-")?
+        .parse()
+        .ok()?;
+    DateTime::from_timestamp_millis(millis)
 }
 
 /// Whether two Accounts derive the same Profile directory. The derivation is

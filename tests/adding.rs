@@ -626,3 +626,50 @@ fn a_login_under_a_differently_capitalised_address_is_the_account_perch_holds() 
     );
     assert_eq!(registry_of(&host).accounts.len(), 1);
 }
+
+/// Ctrl-C during a login kills Perch without unwinding, and "quit Claude Code
+/// when the login is done" is the documented flow — so a login being abandoned
+/// is expected rather than exceptional. What it leaves behind is a complete,
+/// working Credential in a directory named after the moment it started, which
+/// nothing ever looked for again: a slow accumulation of live refresh tokens
+/// for Accounts the user believes they never added.
+#[test]
+fn what_an_abandoned_login_left_behind_is_reaped_by_the_next_command() {
+    let host = logged_in_machine();
+    run_list(&host, false)
+        .0
+        .expect("the first Account is adopted");
+
+    // What a login that was interrupted after Claude Code wrote its Credential
+    // and before Perch cleared up leaves on the machine.
+    let abandoned = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    let store = perch::probe::store_for_profile(&host, &abandoned).expect("USER is set");
+    host.set_keychain_item(&store.keychain_service, LOGIN_NAME, SECOND_CREDENTIAL);
+    host.set_file(&store.credentials_file, SECOND_CREDENTIAL);
+    assert!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME)
+            .is_some(),
+        "as we start"
+    );
+
+    // A command run straight afterwards leaves it alone: somebody may still be
+    // in the middle of that login in another terminal.
+    run_list(&host, false).0.expect("a listing");
+    assert!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME)
+            .is_some(),
+        "a login half an hour old is one somebody may still be driving"
+    );
+
+    host.set_now(host.now() + chrono::Duration::hours(2));
+    run_list(&host, false).0.expect("a listing");
+
+    assert_eq!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME),
+        None,
+        "the orphaned Credential is gone from the keychain, where nothing but \
+         this could ever have found it"
+    );
+    assert_eq!(host.file(&store.credentials_file), None);
+    assert!(!host.path_exists(&abandoned), "and so is its directory");
+}
