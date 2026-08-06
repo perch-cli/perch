@@ -5,10 +5,13 @@
 //! keychain crate. Four constraints come with that binary, and all four live
 //! here and nowhere else:
 //!
-//! - writes hex-encode with `-X` and go in through `-i` so a Credential never
-//!   reaches `argv`, where any process can read it off the process table;
+//! - writes hex-encode with `-X` and go in through `-i` so a Credential does
+//!   not reach `argv`, where any process can read it off the process table;
 //! - the `-i` stdin buffer is 4096 bytes and overflow truncates mid-argument,
-//!   silently corrupting the item, so writes near the limit fall back to argv;
+//!   silently corrupting the item, so writes near the limit fall back to argv
+//!   — the one exception to the line above, and one the user is told about as
+//!   it happens rather than left to discover: a Credential that reaches `argv`
+//!   is readable by anything running as them for as long as `security` does;
 //! - exit code 44 means "not found"; every other non-zero exit means locked,
 //!   denied, or unavailable, and is reported differently;
 //! - `-w` returns hex for non-printable data, so this is safe for the ASCII

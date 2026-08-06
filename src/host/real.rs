@@ -334,6 +334,20 @@ impl Host for RealHost {
         match keychain::write_path_for(&command_line) {
             WritePath::Stdin => security(&["-i"], Some(&command_line), service, account)?,
             WritePath::Argv => {
+                // The one time a Credential reaches `argv`, and therefore the
+                // process table. Hex is an encoding, not a protection: anything
+                // that can read `argv` recovers the bytes with `xxd -r -p`. It
+                // is done anyway because the alternative is `security`
+                // truncating the write mid-argument without saying so, which
+                // stores a corrupt Credential nothing notices until some Switch
+                // later (ADR 0008) — but it is said out loud, because an
+                // invariant with a silent exception is not an invariant.
+                self.note(
+                    "A Credential was too large for `security`'s stdin buffer, so it was \
+                     given to it as a command-line argument instead. While that ran, any \
+                     process on this machine running as you could have read it off the \
+                     process table.",
+                );
                 let hex = keychain::hex_encode(secret.as_bytes());
                 let args = [
                     "add-generic-password",
