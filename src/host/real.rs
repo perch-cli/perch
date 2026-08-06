@@ -206,6 +206,9 @@ impl Host for RealHost {
 
         let written = create_file_with_mode(&beside, contents, PRIVATE_FILE_MODE)
             .and_then(|()| rename_replacing(&beside, path).map_err(HostError::Io));
+        if written.is_ok() {
+            sync_directory_of(path);
+        }
         if written.is_err() {
             // A half-written Credential is not something to leave lying about,
             // whatever went wrong.
@@ -284,6 +287,9 @@ impl Host for RealHost {
 
     fn rename(&self, from: &Path, to: &Path) -> Result<(), HostError> {
         rename_replacing(from, to)?;
+        // The bytes are already durable by the time anything is renamed over
+        // another file here; this is what makes the new name durable too.
+        sync_directory_of(to);
         Ok(())
     }
 
@@ -525,6 +531,12 @@ fn create_private_dir_all(path: &Path) -> Result<(), HostError> {
 /// Creates a file with its mode, refusing to write into one that is already
 /// there: an existing file's mode is whatever it was, and `open` would not
 /// change it.
+///
+/// Synced before it is closed. A rename is atomic against other *processes*,
+/// not against a crash: the rename can reach the disk while the data blocks
+/// have not, leaving a file that is present, named, and empty. What this writes
+/// is a Credential Anthropic has already Rotated to, or a `.claude.json` full
+/// of somebody's project history — neither of which can be written again.
 #[cfg(unix)]
 fn create_file_with_mode(path: &Path, contents: &str, mode: u32) -> Result<(), HostError> {
     use std::io::Write;
@@ -539,6 +551,7 @@ fn create_file_with_mode(path: &Path, contents: &str, mode: u32) -> Result<(), H
         .mode(mode)
         .open(path)?;
     file.write_all(contents.as_bytes())?;
+    file.sync_all()?;
     Ok(())
 }
 
@@ -546,9 +559,28 @@ fn create_file_with_mode(path: &Path, contents: &str, mode: u32) -> Result<(), H
 /// can be asked for, so the file is simply created afresh.
 #[cfg(not(unix))]
 fn create_file_with_mode(path: &Path, contents: &str, _mode: u32) -> Result<(), HostError> {
+    use std::io::Write;
+
     let _ = std::fs::remove_file(path);
-    std::fs::write(path, contents)?;
+    let mut file = std::fs::File::create_new(path)?;
+    file.write_all(contents.as_bytes())?;
+    file.sync_all()?;
     Ok(())
+}
+
+/// Makes the *name* durable, once the bytes behind it are.
+///
+/// `sync_all` on the file promises its contents survive; the directory entry
+/// the rename created is a separate write, and on a crash a file can be there
+/// with its old name or with neither. Best-effort: a directory that will not
+/// open for reading — Windows, most of all — is not a reason to fail a write
+/// that has already landed.
+fn sync_directory_of(path: &Path) {
+    if let Some(parent) = path.parent()
+        && let Ok(dir) = std::fs::File::open(parent)
+    {
+        let _ = dir.sync_all();
+    }
 }
 
 #[cfg(unix)]
