@@ -335,3 +335,52 @@ fn an_alias_command_on_a_registry_from_before_aliases_finds_nothing() {
         EXIT_NOT_FOUND
     );
 }
+
+/// The registry refuses an Alias or a Group that differs from a held name only
+/// in case, precisely so that nobody has to remember how they capitalised one
+/// months ago. Resolving a Target has to honour the same rule, or `perch group
+/// add Work` produces a Group that `perch group remove work` will drop and
+/// `perch switch work` says does not exist.
+#[test]
+fn a_name_is_reached_however_it_is_capitalised() {
+    let host = machine_with_two_accounts();
+    declare_group(&host, "Work");
+    set_alias(&host, "Overflow", SECOND_EMAIL).0.expect("named");
+    let registry = registry_of(&host);
+
+    assert_eq!(
+        target::resolve(&registry, "work").expect("the Group is reached"),
+        Target::Group {
+            name: "Work".to_string()
+        },
+        "and it comes back spelled the way it was declared"
+    );
+    assert_eq!(
+        target::resolve(&registry, "OVERFLOW").expect("the Alias is reached"),
+        Target::Alias {
+            name: "Overflow".to_string(),
+            email: SECOND_EMAIL.to_string(),
+        }
+    );
+    assert_eq!(
+        target::resolve(&registry, &EMAIL.to_uppercase()).expect("the Account is reached"),
+        Target::Account {
+            email: EMAIL.to_string()
+        },
+        "an address is one address however it is typed, which is the rule \
+         `already_landed` has always compared by"
+    );
+}
+
+/// The same rule reaching the command that acts on it, rather than only the
+/// resolution underneath.
+#[test]
+fn a_switch_accepts_the_spelling_every_other_command_accepts() {
+    let host = machine_with_two_accounts();
+
+    let (result, printed) = run_switch(&host, &SECOND_EMAIL.to_uppercase());
+
+    result.expect("that is the Account, typed loudly");
+    assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+    assert!(printed.contains(SECOND_EMAIL), "{printed}");
+}
