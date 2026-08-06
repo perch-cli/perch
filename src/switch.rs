@@ -270,18 +270,11 @@ fn patch_identity(host: &dyn Host, prepared: &Prepared) -> Result<()> {
         Err(host::HostError::NotFound { .. }) => {
             probe::fresh_identity_file(&prepared.identity_block)
         }
-        Err(err) => {
-            return Err(PerchError::FileRead {
-                path: file.clone(),
-                source: std::io::Error::other(err.to_string()),
-            });
-        }
+        Err(err) => return Err(PerchError::file_read(file.clone(), err)),
     };
 
-    host::write_atomically(host, file, &patched).map_err(|err| PerchError::FileWrite {
-        path: file.clone(),
-        source: std::io::Error::other(err.to_string()),
-    })
+    host::write_atomically(host, file, &patched)
+        .map_err(|err| PerchError::file_write(file.clone(), err))
 }
 
 /// The `oauthAccount` block for an Account.

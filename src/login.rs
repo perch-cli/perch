@@ -107,10 +107,7 @@ fn what_the_login_left(
 /// into. The Identity travels with the Credential it describes.
 pub fn carry_identity_file(host: &dyn Host, contents: &str, store: &probe::Store) -> Result<()> {
     host.write_file(&store.identity_file, contents)
-        .map_err(|err| PerchError::FileWrite {
-            path: store.identity_file.clone(),
-            source: std::io::Error::other(err.to_string()),
-        })
+        .map_err(|err| PerchError::file_write(store.identity_file.clone(), err))
 }
 
 /// How long a pending login is left alone before it is taken to have been

@@ -16,10 +16,13 @@
 //!   denied, or unavailable, and is reported differently;
 //! - `-w` returns hex for non-printable data, so this is safe for the ASCII
 //!   JSON Claude Code stores and nothing else.
+//!
+//! What is here is the protocol and none of the spawning: building a command
+//! line, deciding which way it must travel, and reading an exit status. The
+//! process itself is started in [`crate::host::real`], where every other
+//! process Perch starts is.
 
-use std::process::{Command, Stdio};
-
-use crate::host::Execution;
+use crate::host::{Execution, double_quoted};
 
 /// The `security` binary. Never a build of Perch, never a crate — see ADR 0008.
 pub const SECURITY_BIN: &str = "/usr/bin/security";
@@ -96,8 +99,8 @@ pub fn add_command_line(
     inert("the keychain account name", account)?;
     Ok(format!(
         "add-generic-password -U -s {} -a {} -X {}\n",
-        quote(service),
-        quote(account),
+        double_quoted(service),
+        double_quoted(account),
         hex_encode(secret.as_bytes()),
     ))
 }
@@ -127,10 +130,6 @@ pub fn write_path_for(command_line: &str) -> WritePath {
     } else {
         WritePath::Stdin
     }
-}
-
-fn quote(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 pub fn hex_encode(bytes: &[u8]) -> String {
@@ -166,35 +165,6 @@ pub fn decode_password_output(stdout: &str) -> String {
         },
         None => trimmed.to_string(),
     }
-}
-
-/// Runs `security` for real. The only place in Perch that spawns it.
-pub fn run_security(args: &[&str], stdin: Option<&str>) -> std::io::Result<Execution> {
-    let mut command = Command::new(SECURITY_BIN);
-    command
-        .args(args)
-        .stdin(if stdin.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    let mut child = command.spawn()?;
-    if let Some(input) = stdin {
-        use std::io::Write;
-        let mut pipe = child.stdin.take().expect("stdin was piped");
-        pipe.write_all(input.as_bytes())?;
-        drop(pipe);
-    }
-    let output = child.wait_with_output()?;
-
-    Ok(Execution {
-        status: output.status.code().unwrap_or(-1),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-    })
 }
 
 #[cfg(test)]

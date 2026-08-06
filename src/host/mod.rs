@@ -31,6 +31,19 @@ impl Execution {
     }
 }
 
+impl From<std::process::Output> for Execution {
+    /// A killed process has no exit code, and `-1` is what Perch reads it as
+    /// everywhere — said here so the three programs Perch runs cannot come to
+    /// disagree about it.
+    fn from(output: std::process::Output) -> Execution {
+        Execution {
+            status: output.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }
+    }
+}
+
 /// One HTTP request, whole.
 ///
 /// A request rather than a URL and some arguments beside it, because every part
@@ -93,6 +106,21 @@ pub const PRIVATE_FILE_MODE: u32 = 0o600;
 /// The same for the directory it sits in. A directory others may enter is a
 /// directory whose contents others may open.
 pub const PRIVATE_DIR_MODE: u32 = 0o700;
+
+/// A value as a double-quoted token, for the two line-oriented protocols Perch
+/// writes: `curl`'s configuration file and `security -i`'s command lines.
+///
+/// Quoted so that spaces and `#` are part of the value rather than punctuation,
+/// with backslashes and quotes escaped so JSON arrives as it was written. One
+/// copy rather than two identical ones, because two copies is how one of them
+/// gets fixed and the other does not.
+///
+/// It makes a value a *token*. It does not make it inert: neither protocol has
+/// an escape for a newline, so a value that could carry one is refused where it
+/// enters rather than quoted here.
+pub fn double_quoted(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
 
 /// Whether a mode lets anybody but the owner near the file.
 pub fn is_private(mode: u32) -> bool {
@@ -312,19 +340,32 @@ fn mode_to_carry_across(host: &dyn Host, path: &Path) -> u32 {
 /// would cost them all of that. Writing beside it and moving it into place
 /// means the file is either the old one or the new one.
 pub fn write_atomically(host: &dyn Host, path: &Path, contents: &str) -> Result<(), HostError> {
-    let mode = mode_to_carry_across(host, path);
-    let beside = temp_beside(path);
-
     // The temp file carries the target's mode from the moment it exists: it
     // holds the whole of the target's contents, so a temp file at the umask
     // would leak everything the mode on the target is protecting.
+    replace_via_tmp(host, path, contents, mode_to_carry_across(host, path))
+}
+
+/// The whole of writing beside a file and moving the result over it, including
+/// what is done about a write that did not land.
+///
+/// Shared by the secret and non-secret writes. Two copies of this is how the
+/// failure cleanup comes to differ between the path that handles Credentials
+/// and the path that does not — which is the wrong pair to let drift.
+pub fn replace_via_tmp(
+    host: &dyn Host,
+    path: &Path,
+    contents: &str,
+    mode: u32,
+) -> Result<(), HostError> {
+    let beside = temp_beside(path);
     host.create_file_with_mode(&beside, contents, mode)?;
     match host.rename(&beside, path) {
         Ok(()) => Ok(()),
         Err(err) => {
             // Nothing has replaced the original, so the half-written copy is
-            // just litter — and litter beside a file Claude Code reads is worth
-            // clearing even on the way out.
+            // just litter — and litter beside a file Claude Code reads, or one
+            // holding a Credential, is worth clearing even on the way out.
             let _ = host.remove_file(&beside);
             Err(err)
         }

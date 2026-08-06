@@ -33,6 +33,11 @@ pub struct ListArgs {
 /// Being in no Group is not a Group (ADR 0017), so it is a scope of its own
 /// rather than a Group with a reserved name: the two are shown differently
 /// because Cycling treats them differently.
+///
+/// Deliberately not [`crate::cycle::Scope`], which is the same idea for a
+/// Cycle and has no `Everything`. Showing every Account is ordinary; Cycling
+/// across every Account is the thing ADR 0002 exists to prevent, and the
+/// difference is worth keeping in the types rather than in a check.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Scope {
     /// Every Account Perch holds.

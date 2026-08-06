@@ -919,10 +919,7 @@ fn write(host: &dyn Host, path: &Path, contents: &str) -> Result<()> {
         })?;
     }
     host.write_private_file(path, contents)
-        .map_err(|err| PerchError::FileWrite {
-            path: path.to_path_buf(),
-            source: std::io::Error::other(err.to_string()),
-        })
+        .map_err(|err| PerchError::file_write(path, err))
 }
 
 #[cfg(test)]

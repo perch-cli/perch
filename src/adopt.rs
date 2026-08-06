@@ -125,10 +125,7 @@ fn carry_the_identity_block(host: &dyn Host, findings: &Findings, store: &Store)
 
     let kept = store.identity_file.clone();
     host.write_file(&kept, &probe::fresh_identity_file(block))
-        .map_err(|err| PerchError::FileWrite {
-            path: kept,
-            source: std::io::Error::other(err.to_string()),
-        })
+        .map_err(|err| PerchError::file_write(kept, err))
 }
 
 /// Says what was adopted, so the user can confirm Perch picked up the right

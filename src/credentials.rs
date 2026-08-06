@@ -123,10 +123,7 @@ impl CredentialStore {
                     Ok(Some(contents))
                 }
                 Err(HostError::NotFound { .. }) => Ok(None),
-                Err(err) => Err(PerchError::FileRead {
-                    path: path.clone(),
-                    source: as_io(err),
-                }),
+                Err(err) => Err(PerchError::file_read(path.clone(), err)),
             },
         }
     }
@@ -140,10 +137,7 @@ impl CredentialStore {
             }
             CredentialStore::Plaintext { path } => host
                 .write_private_file(path, credential)
-                .map_err(|err| PerchError::FileWrite {
-                    path: path.clone(),
-                    source: as_io(err),
-                }),
+                .map_err(|err| PerchError::file_write(path.clone(), err)),
         }
     }
 
@@ -171,10 +165,7 @@ impl CredentialStore {
             CredentialStore::Plaintext { path } => {
                 let held = host.path_exists(path);
                 host.remove_file(path)
-                    .map_err(|err| PerchError::FileWrite {
-                        path: path.clone(),
-                        source: as_io(err),
-                    })?;
+                    .map_err(|err| PerchError::file_write(path.clone(), err))?;
                 Ok(if held {
                     Forgotten::Credential
                 } else {
@@ -202,11 +193,6 @@ pub enum Forgotten {
 /// one (ADR 0020).
 fn there_is_no_keychain_here(host: &dyn Host) -> bool {
     host.platform() != Platform::MacOs
-}
-
-/// A Host failure as the error a `PerchError` about a file carries.
-fn as_io(err: HostError) -> std::io::Error {
-    std::io::Error::other(err.to_string())
 }
 
 /// Narrows a credential file anybody could read, and says so.

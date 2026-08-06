@@ -36,6 +36,14 @@ use crate::registry::{Account, CachedUtilization, Registry, Strategy, WindowUtil
 use crate::utilization;
 
 /// Where a Cycle may look for a landing place.
+///
+/// Deliberately not [`crate::commands::list::Scope`], which is the same idea
+/// for a listing and carries an `Everything` besides. A Cycle never leaves the
+/// scope it started in (ADR 0002): a work subscription running dry must not
+/// land on a personal Account. Sharing the type would make "every Account" a
+/// thing a Cycle could be handed, and the rule that stops it would move from
+/// the type into a runtime check somebody has to remember to write. Two small
+/// enums that cannot express each other's mistakes are the cheaper pair.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Scope {
     /// The Accounts in one Group, named as the Group was declared.

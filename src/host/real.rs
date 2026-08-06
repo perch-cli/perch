@@ -57,6 +57,7 @@ const CURL_ARGS: [&str; 6] = [
 /// is ever an argument: an `Authorization` header holds an access token, and
 /// argv is readable by every process on the machine.
 fn curl_config(request: &HttpRequest<'_>) -> String {
+    let quoted = super::double_quoted;
     let mut config = format!("url = {}\n", quoted(request.url));
     for (name, value) in request.headers {
         config.push_str(&format!(
@@ -72,37 +73,37 @@ fn curl_config(request: &HttpRequest<'_>) -> String {
     config
 }
 
-/// A value as a `curl` configuration file quotes one.
+/// Runs a program, optionally with something on its stdin, and reads the whole
+/// of what it said.
 ///
-/// Quoted so that spaces and `#` are part of the value rather than punctuation,
-/// with backslashes and quotes escaped so a body full of JSON arrives as it was
-/// written. A literal newline cannot appear inside one — Perch sends compact
-/// JSON and single-line headers, so none ever does.
-fn quoted(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
-}
-
-/// Runs `curl` with the request on its stdin.
-fn curl(config: &str) -> Result<Execution, HostError> {
-    let mut child = Command::new(curl_bin()?)
-        .args(CURL_ARGS)
-        .stdin(Stdio::piped())
+/// The one place Perch spawns anything. Stdin is where every secret travels —
+/// `curl`'s configuration and `security`'s command lines both — so the choice
+/// between a pipe and `/dev/null` is the same choice in both cases and is made
+/// once.
+fn run(program: &Path, args: &[&str], stdin: Option<&str>) -> std::io::Result<Execution> {
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
 
-    {
+    if let Some(input) = stdin {
         use std::io::Write;
         let mut pipe = child.stdin.take().expect("stdin was piped");
-        pipe.write_all(config.as_bytes())?;
+        pipe.write_all(input.as_bytes())?;
+        drop(pipe);
     }
+    Ok(Execution::from(child.wait_with_output()?))
+}
 
-    let output = child.wait_with_output()?;
-    Ok(Execution {
-        status: output.status.code().unwrap_or(-1),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-    })
+/// Runs `curl` with the request on its stdin.
+fn curl(config: &str) -> Result<Execution, HostError> {
+    Ok(run(&curl_bin()?, &CURL_ARGS, Some(config))?)
 }
 
 /// Runs `security` and turns anything short of success into the distinction
@@ -117,7 +118,7 @@ fn security(
     account: &str,
 ) -> Result<Execution, KeychainError> {
     let execution =
-        keychain::run_security(args, stdin).map_err(|err| KeychainError::Unavailable {
+        run(Path::new(SECURITY_BIN), args, stdin).map_err(|err| KeychainError::Unavailable {
             detail: format!("could not run {SECURITY_BIN}: {err}"),
         })?;
 
@@ -197,24 +198,17 @@ impl Host for RealHost {
     /// Written beside and moved into place, so the file that ends up at `path`
     /// is one that was created 0600 rather than one that was tightened
     /// afterwards — even where something looser was already there (ADR 0020).
+    ///
+    /// The choreography itself is [`super::replace_via_tmp`], shared with the
+    /// non-secret writes: two copies of it would let the failure cleanup drift
+    /// apart between the path that handles Credentials and the path that does
+    /// not, which is the wrong pair to let drift. All this adds is the parent
+    /// directory, which has to be private before the file lands in it.
     fn write_private_file(&self, path: &Path, contents: &str) -> Result<(), HostError> {
         if let Some(parent) = path.parent() {
             create_private_dir_all(parent)?;
         }
-
-        let beside = super::temp_beside(path);
-
-        let written = create_file_with_mode(&beside, contents, PRIVATE_FILE_MODE)
-            .and_then(|()| rename_replacing(&beside, path).map_err(HostError::Io));
-        if written.is_ok() {
-            sync_directory_of(path);
-        }
-        if written.is_err() {
-            // A half-written Credential is not something to leave lying about,
-            // whatever went wrong.
-            let _ = std::fs::remove_file(&beside);
-        }
-        written
+        super::replace_via_tmp(self, path, contents, PRIVATE_FILE_MODE)
     }
 
     fn create_private_dir_all(&self, path: &Path) -> Result<(), HostError> {
@@ -382,15 +376,7 @@ impl Host for RealHost {
     }
 
     fn exec(&self, program: &str, args: &[&str]) -> Result<Execution, HostError> {
-        let output = Command::new(program)
-            .args(args)
-            .stdin(Stdio::null())
-            .output()?;
-        Ok(Execution {
-            status: output.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        })
+        Ok(run(Path::new(program), args, None)?)
     }
 
     fn exec_interactive(&self, program: &str, env: &[(&str, &str)]) -> Result<i32, HostError> {
