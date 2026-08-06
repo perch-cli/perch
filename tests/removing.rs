@@ -17,6 +17,7 @@ use perch::host::{FakeHost, Host};
 use perch::probe::Identity;
 use perch::registry::Account;
 
+const FIRST_PROFILE: &str = "/Users/someone/.perch/profiles/someone-example-com";
 const SECOND_PROFILE: &str = "/Users/someone/.perch/profiles/overflow-example-com";
 
 /// The config directory every client reads — where a Switch, and the landing a
@@ -167,6 +168,35 @@ fn removing_the_active_account_names_what_will_be_active_and_asks_first() {
          Account it no longer holds"
     );
     assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+}
+
+/// The window between the two halves of removing the active Account: the
+/// successor's Credential is live, and the Account being given up has not been
+/// destroyed yet. A failure in there must leave the record agreeing with the
+/// machine — because `active` is what the next Switch Captures *into*, and one
+/// naming the Account whose Credential is no longer live would copy the
+/// successor's over that Account's own good copy and destroy it (ADR 0006).
+#[test]
+fn a_removal_that_fails_after_landing_still_records_who_is_live() {
+    let host = machine_with_two_accounts()
+        .with_answers(&["y"])
+        .with_undeletable_file(format!("{FIRST_PROFILE}/.credentials.json"), "read-only");
+
+    let (result, printed) = run_remove(&host, EMAIL);
+
+    result.expect_err("the Credential could not be given up");
+    assert!(holds(&host, EMAIL), "nothing was forgotten: {printed}");
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "the landing happened, so the successor's Credential is the live one"
+    );
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(SECOND_EMAIL),
+        "and the record says so, rather than going on naming the Account whose \
+         Credential a Switch would now overwrite"
+    );
 }
 
 #[test]

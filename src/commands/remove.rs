@@ -99,7 +99,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     // Somewhere to land before anything is deleted. A failure here has cost
     // nothing: the Account is still held, and its Credential is still live.
     if let Some(successor) = &consequence.successor {
-        land_on(host, out, &registry, successor, &account)?;
+        land_on(host, out, &mut registry, successor, &account)?;
     }
 
     let deleted = delete_the_credential_and_its_profile(host, &registry, &account)?;
@@ -107,9 +107,6 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     let named = registry.named_for_the_user(account.email());
     let alias = registry.alias_of(account.email()).map(str::to_string);
     registry.forget(account.email());
-    if let Some(successor) = &consequence.successor {
-        registry.active = Some(successor.email().to_string());
-    }
     registry::save(host, &registry).map_err(|error| {
         error.with_note(&format!(
             "The Credential Perch held for {} is already deleted, so the Account \
@@ -233,26 +230,60 @@ fn what_it_would_leave(
 }
 
 /// Makes the successor's Credential the live one before the Account being given
-/// up is destroyed.
+/// up is destroyed, and records it as the active one the moment it becomes so.
 ///
 /// Not a Switch, which Captures the outgoing Credential first (ADR 0006). What
 /// is live here is the Credential of the Account being removed, and Capturing it
 /// would copy it into a Profile that is about to be deleted — work that can only
 /// fail, on the way to a directory that will not exist.
+///
+/// The active pointer is written here rather than with the rest of the registry
+/// at the end, because everything between the two is destructive and any of it
+/// can fail. Being active is a fact about which Credential is in the Default
+/// Profile, not a wish: a `remove` that stopped after the landing would
+/// otherwise leave `active` naming an Account whose Credential is no longer
+/// live, and the next Switch would Capture the successor's live Credential over
+/// that Account's own copy and destroy it (ADR 0006). Written whether the
+/// landing finished or not, for the same reason — a Credential that reached the
+/// Default Profile is live even if the Identity beside it was never patched.
 fn land_on(
     host: &dyn Host,
     out: &mut dyn Write,
-    registry: &Registry,
+    registry: &mut Registry,
     successor: &Account,
     leaving: &Account,
 ) -> Result<()> {
-    switch::make_live(host, successor).map_err(|error| {
-        error.with_note(&format!(
-            "Nothing was removed — {} is still held, and its Credential is still \
-             the live one.",
-            leaving.email()
-        ))
+    let landed = switch::make_live(host, successor);
+    let is_live = landed.as_ref().err().is_none_or(|stopped| stopped.is_live);
+
+    if is_live {
+        registry.active = Some(successor.email().to_string());
+        registry::save(host, registry).map_err(|error| {
+            error.with_note(&format!(
+                "Nothing was removed. {}'s Credential is the live one now, so \
+                 `perch switch {}` puts the record right before anything else is \
+                 tried.",
+                successor.email(),
+                successor.email(),
+            ))
+        })?;
+    }
+
+    landed.map_err(|stopped| {
+        let held = format!("Nothing was removed — {} is still held", leaving.email());
+        stopped.error.with_note(&if stopped.is_live {
+            format!(
+                "{held}. Its Credential is no longer the live one: {}'s is, and \
+                 Perch records it as active. Run `perch switch {}` to finish \
+                 landing there, then `perch remove` again.",
+                successor.email(),
+                successor.email(),
+            )
+        } else {
+            format!("{held}, and its Credential is still the live one.")
+        })
     })?;
+
     say(
         out,
         &format!(

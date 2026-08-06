@@ -168,8 +168,8 @@ fn record(registry: &mut Registry, account: &Account, fresh: Produced) -> bool {
 /// Never a Capture: what is live is the very Credential the login replaced, and
 /// Capturing it would write the broken copy over the fresh one (ADR 0006).
 fn make_it_live(host: &dyn Host, account: &Account) -> Result<()> {
-    switch::make_live(host, account).map_err(|error| {
-        error.with_note(&format!(
+    switch::make_live(host, account).map_err(|stopped| {
+        stopped.error.with_note(&format!(
             "The repair itself stands: {} has a working Credential in its own \
              Profile and is no longer Quarantined. It is the live Credential \
              that was not replaced, so Claude Code goes on using the one that \

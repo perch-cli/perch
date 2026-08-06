@@ -120,6 +120,10 @@ pub struct FakeHost {
     notes: RefCell<Vec<String>>,
     unreadable: RefCell<BTreeMap<PathBuf, String>>,
     unwritable: RefCell<BTreeMap<PathBuf, String>>,
+    /// Paths that will not give up what they hold. Distinct from an unwritable
+    /// one: a store that refuses a write is routinely one a superseded copy can
+    /// still be cleared out of.
+    undeletable: RefCell<BTreeMap<PathBuf, String>>,
     dirs: RefCell<BTreeSet<PathBuf>>,
     modified: RefCell<BTreeMap<PathBuf, DateTime<Utc>>>,
     keychain: RefCell<BTreeMap<(String, String), String>>,
@@ -160,6 +164,7 @@ impl FakeHost {
             notes: RefCell::new(Vec::new()),
             unreadable: RefCell::new(BTreeMap::new()),
             unwritable: RefCell::new(BTreeMap::new()),
+            undeletable: RefCell::new(BTreeMap::new()),
             dirs: RefCell::new(BTreeSet::new()),
             modified: RefCell::new(BTreeMap::new()),
             keychain: RefCell::new(BTreeMap::new()),
@@ -259,6 +264,16 @@ impl FakeHost {
     /// multi-step write and see what is left behind.
     pub fn with_unwritable_file(self, path: impl AsRef<Path>, detail: &str) -> Self {
         self.unwritable
+            .borrow_mut()
+            .insert(path.as_ref().to_path_buf(), detail.to_string());
+        self
+    }
+
+    /// A file that is there and will not go — a directory whose permissions
+    /// forbid it, a lock some other process holds on Windows. What a Credential
+    /// Store that cannot be emptied looks like.
+    pub fn with_undeletable_file(self, path: impl AsRef<Path>, detail: &str) -> Self {
+        self.undeletable
             .borrow_mut()
             .insert(path.as_ref().to_path_buf(), detail.to_string());
         self
@@ -736,6 +751,9 @@ impl Host for FakeHost {
 
     fn remove_file(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::RemovedFile(path.to_path_buf()));
+        if let Some(detail) = self.undeletable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
+        }
         self.files.borrow_mut().remove(path);
         self.modified.borrow_mut().remove(path);
         self.modes.borrow_mut().remove(path);

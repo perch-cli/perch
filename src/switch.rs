@@ -132,14 +132,34 @@ pub fn perform(
 /// The Credential written is the one in the Account's own Profile, read back
 /// out of it rather than passed in, so the same store that a `perch switch`
 /// tomorrow will read is the store this proves works today.
-pub fn make_live(host: &dyn Host, account: &Account) -> Result<()> {
-    let prepared = prepare(host, account, None)?;
+pub fn make_live(host: &dyn Host, account: &Account) -> std::result::Result<(), NotLanded> {
+    let prepared = prepare(host, account, None).map_err(|error| NotLanded {
+        error,
+        is_live: false,
+    })?;
 
-    lock::under(host, probe::locks_for(&prepared.store), |held| {
+    let mut is_live = false;
+    let landed = lock::under(host, probe::locks_for(&prepared.store), |held| {
         profile::store_credential(host, &prepared.store, prepared.credential.as_str())?;
+        is_live = true;
         held.renew();
         patch_identity(host, &prepared)
-    })
+    });
+
+    landed.map_err(|error| NotLanded { error, is_live })
+}
+
+/// A `make_live` that stopped part way, and what the machine is holding now.
+///
+/// The same distinction [`Interrupted`] draws, for the same reason: a failure
+/// after the Credential was written but before the Identity was patched has
+/// still changed which Account the machine is acting as, and a caller that
+/// records who is active has to record what is true rather than what it asked
+/// for.
+pub struct NotLanded {
+    pub error: PerchError,
+    /// Whether the Account's Credential is the live one despite the failure.
+    pub is_live: bool,
 }
 
 /// Whether the machine already says what a Switch to this Account would make it
