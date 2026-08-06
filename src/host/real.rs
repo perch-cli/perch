@@ -7,9 +7,9 @@ use std::process::{Command, Stdio};
 
 use chrono::{DateTime, Utc};
 
-use super::{Execution, Host, HostError, HttpRequest, HttpResponse, Platform};
 #[cfg(unix)]
-use super::{PRIVATE_DIR_MODE, PRIVATE_FILE_MODE};
+use super::PRIVATE_DIR_MODE;
+use super::{Execution, Host, HostError, HttpRequest, HttpResponse, PRIVATE_FILE_MODE, Platform};
 use crate::keychain::{
     self, KeychainError, SECURITY_BIN, WritePath, classify, decode_password_output,
 };
@@ -182,6 +182,18 @@ impl Host for RealHost {
         Ok(())
     }
 
+    fn create_file_with_mode(
+        &self,
+        path: &Path,
+        contents: &str,
+        mode: u32,
+    ) -> Result<(), HostError> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        create_file_with_mode(path, contents, mode)
+    }
+
     /// Written beside and moved into place, so the file that ends up at `path`
     /// is one that was created 0600 rather than one that was tightened
     /// afterwards — even where something looser was already there (ADR 0020).
@@ -190,11 +202,9 @@ impl Host for RealHost {
             create_private_dir_all(parent)?;
         }
 
-        let mut beside = path.as_os_str().to_os_string();
-        beside.push(".perch-tmp");
-        let beside = PathBuf::from(beside);
+        let beside = super::temp_beside(path);
 
-        let written = create_private_file(&beside, contents)
+        let written = create_file_with_mode(&beside, contents, PRIVATE_FILE_MODE)
             .and_then(|()| rename_replacing(&beside, path).map_err(HostError::Io));
         if written.is_err() {
             // A half-written Credential is not something to leave lying about,
@@ -502,24 +512,26 @@ fn create_private_dir_all(path: &Path) -> Result<(), HostError> {
 /// there: an existing file's mode is whatever it was, and `open` would not
 /// change it.
 #[cfg(unix)]
-fn create_private_file(path: &Path, contents: &str) -> Result<(), HostError> {
+fn create_file_with_mode(path: &Path, contents: &str, mode: u32) -> Result<(), HostError> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
 
     // Anything already here is what a write that died left behind, and holding
-    // on to it would mean writing a Credential into a file of unknown mode.
+    // on to it would mean writing into a file of unknown mode.
     let _ = std::fs::remove_file(path);
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .mode(PRIVATE_FILE_MODE)
+        .mode(mode)
         .open(path)?;
     file.write_all(contents.as_bytes())?;
     Ok(())
 }
 
+/// The same where permission bits mean nothing: the mode is not a thing that
+/// can be asked for, so the file is simply created afresh.
 #[cfg(not(unix))]
-fn create_private_file(path: &Path, contents: &str) -> Result<(), HostError> {
+fn create_file_with_mode(path: &Path, contents: &str, _mode: u32) -> Result<(), HostError> {
     let _ = std::fs::remove_file(path);
     std::fs::write(path, contents)?;
     Ok(())

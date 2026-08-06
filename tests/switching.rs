@@ -509,6 +509,37 @@ fn a_switch_that_cannot_patch_the_identity_says_what_it_left_where() {
     );
 }
 
+/// `.claude.json` holds MCP configuration, and an MCP server entry routinely
+/// carries an API key in its `env` block. The Identity is patched by writing a
+/// replacement and moving it over the file, and a replacement created at the
+/// process umask would hand every one of those secrets to every other user on
+/// the machine — permanently, from the first Switch, with no race to lose.
+#[test]
+fn patching_the_identity_leaves_it_as_narrow_as_it_was_found() {
+    let host = machine_with_two_accounts().with_file_mode(IDENTITY_PATH, 0o600);
+
+    run_switch(&host, SECOND_EMAIL).0.expect("it switches");
+
+    assert!(identity_file(&host).contains(SECOND_EMAIL));
+    assert_eq!(
+        host.mode_of(IDENTITY_PATH),
+        Some(0o600),
+        "the file Perch replaced was narrow, so its replacement is too"
+    );
+}
+
+/// The other half of the same rule: a file that was open stays as it was, since
+/// Perch is patching one key of a file it does not own and its permissions are
+/// not Perch's to decide either way.
+#[test]
+fn patching_the_identity_does_not_narrow_a_file_that_was_open() {
+    let host = machine_with_two_accounts().with_file_mode(IDENTITY_PATH, 0o644);
+
+    run_switch(&host, SECOND_EMAIL).0.expect("it switches");
+
+    assert_eq!(host.mode_of(IDENTITY_PATH), Some(0o644));
+}
+
 #[test]
 fn running_the_switch_again_finishes_a_job_that_stopped_half_way() {
     let host = machine_with_two_accounts().with_unwritable_file(IDENTITY_PATH, "read-only file");

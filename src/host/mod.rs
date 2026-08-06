@@ -141,6 +141,20 @@ pub trait Host {
     fn read_file(&self, path: &Path) -> Result<String, HostError>;
     fn write_file(&self, path: &Path, contents: &str) -> Result<(), HostError>;
 
+    /// Writes a file created with exactly this mode, rather than with whatever
+    /// the process umask happens to be.
+    ///
+    /// The mode belongs to the *creation* for the same reason it does in
+    /// [`Host::write_private_file`]: a file opened and then `chmod`ed is a file
+    /// that was briefly readable. Where a mode means nothing this is an
+    /// ordinary write.
+    fn create_file_with_mode(
+        &self,
+        path: &Path,
+        contents: &str,
+        mode: u32,
+    ) -> Result<(), HostError>;
+
     /// Writes a file nobody but its owner can read, creating it — and any
     /// directory above it — with that mode rather than tightening it
     /// afterwards.
@@ -260,6 +274,29 @@ pub trait Host {
     fn http(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, HostError>;
 }
 
+/// Where the replacement for a file is written before it is moved over it.
+pub fn temp_beside(path: &Path) -> PathBuf {
+    let mut beside = path.as_os_str().to_os_string();
+    beside.push(".perch-tmp");
+    PathBuf::from(beside)
+}
+
+/// The mode a replacement for this file should be created with: the one the
+/// file already has, and the Credential mode for one that is not there yet.
+///
+/// A rename puts a *new* file at the path, so the mode of the old one is not
+/// inherited — it has to be carried across deliberately. `.claude.json` holds
+/// MCP configuration, and an MCP server entry routinely carries an API key in
+/// its `env` block, so a file the user had narrowed must not come back at the
+/// process umask; and a file Perch is the first to create is created closed
+/// rather than open (ADR 0020).
+fn mode_to_carry_across(host: &dyn Host, path: &Path) -> u32 {
+    host.file_mode(path)
+        .ok()
+        .flatten()
+        .unwrap_or(PRIVATE_FILE_MODE)
+}
+
 /// Replaces a file's contents in one step, or not at all.
 ///
 /// Used for the files Perch does not own. `.claude.json` holds project history,
@@ -268,11 +305,13 @@ pub trait Host {
 /// would cost them all of that. Writing beside it and moving it into place
 /// means the file is either the old one or the new one.
 pub fn write_atomically(host: &dyn Host, path: &Path, contents: &str) -> Result<(), HostError> {
-    let mut beside = path.as_os_str().to_os_string();
-    beside.push(".perch-tmp");
-    let beside = PathBuf::from(beside);
+    let mode = mode_to_carry_across(host, path);
+    let beside = temp_beside(path);
 
-    host.write_file(&beside, contents)?;
+    // The temp file carries the target's mode from the moment it exists: it
+    // holds the whole of the target's contents, so a temp file at the umask
+    // would leak everything the mode on the target is protecting.
+    host.create_file_with_mode(&beside, contents, mode)?;
     match host.rename(&beside, path) {
         Ok(()) => Ok(()),
         Err(err) => {
@@ -282,5 +321,38 @@ pub fn write_atomically(host: &dyn Host, path: &Path, contents: &str) -> Result<
             let _ = host.remove_file(&beside);
             Err(err)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PATH: &str = "/Users/someone/.claude.json";
+
+    #[test]
+    fn a_replacement_is_created_with_the_mode_the_file_already_had() {
+        for mode in [0o600, 0o644, 0o640] {
+            let host = FakeHost::new()
+                .with_file(PATH, "{}")
+                .with_file_mode(PATH, mode);
+
+            write_atomically(&host, Path::new(PATH), "{\"a\":1}").expect("it is replaced");
+
+            assert_eq!(host.file(PATH).as_deref(), Some("{\"a\":1}"));
+            assert_eq!(host.mode_of(PATH), Some(mode));
+        }
+    }
+
+    /// Nothing is being carried across here, so the file is created closed:
+    /// the alternative is deciding to publish, at the umask, a file whose
+    /// contents Perch cannot see the end of.
+    #[test]
+    fn a_file_that_was_not_there_is_created_for_its_owner_alone() {
+        let host = FakeHost::new();
+
+        write_atomically(&host, Path::new(PATH), "{}").expect("it is written");
+
+        assert_eq!(host.mode_of(PATH), Some(PRIVATE_FILE_MODE));
     }
 }

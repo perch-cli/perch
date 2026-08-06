@@ -563,6 +563,28 @@ impl Host for FakeHost {
         Ok(())
     }
 
+    /// Records the mode the file was *created* with, which is the whole point
+    /// of the call: a test can then say that a replacement for a narrow file
+    /// came back just as narrow.
+    fn create_file_with_mode(
+        &self,
+        path: &Path,
+        contents: &str,
+        mode: u32,
+    ) -> Result<(), HostError> {
+        self.record(Effect::WroteFile(path.to_path_buf()));
+        if let Some(detail) = self.unwritable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
+        }
+        self.note_directories_of(path);
+        self.files
+            .borrow_mut()
+            .insert(path.to_path_buf(), contents.to_string());
+        self.modes.borrow_mut().insert(path.to_path_buf(), mode);
+        self.mark_written(path);
+        Ok(())
+    }
+
     /// Records the mode as well as the contents, because "created private" and
     /// "made private afterwards" are the distinction ADR 0020 turns on and a
     /// fake that only kept the bytes could not tell them apart.
@@ -701,6 +723,13 @@ impl Host for FakeHost {
                 path: from.to_path_buf(),
             })?;
         self.files.borrow_mut().insert(to.to_path_buf(), moved);
+        // A rename moves the file, mode and all: what ends up at the target is
+        // the file that was created beside it, not the one it replaced.
+        let mode = self.modes.borrow_mut().remove(from);
+        match mode {
+            Some(mode) => self.modes.borrow_mut().insert(to.to_path_buf(), mode),
+            None => self.modes.borrow_mut().remove(to),
+        };
         self.mark_written(to);
         Ok(())
     }
