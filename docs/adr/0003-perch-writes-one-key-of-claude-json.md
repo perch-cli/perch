@@ -59,3 +59,32 @@ direction, which is the opposite of the direction the directory takes.
 The list is consequently a thing to maintain. It is short, it is only ever
 about first-run friction, and a key that goes missing costs a dialog rather
 than correctness.
+
+Two things follow from "the most recently used profile in the same group" that
+are worth writing down, because both are about *where* an account's state is
+rather than about which account it may come from.
+
+An account's state is not always in its profile. The active account works in
+the default profile — that is what being active means (ADR 0001) — and its own
+profile holds only what Perch stored there. So the candidates are the
+directories the accounts are actually used in, and for the active account that
+is `~/.claude`. Reading its profile instead would copy a file nobody has
+touched since the account was added.
+
+An account's own state crosses to its own profile whatever group it is in,
+because there is no crossing in it. `perch run` on the account you are already
+on is a real command — it is how a session is kept out of the way of a later
+switch — and it lands in a profile rather than in the directory that account
+has been working in all day. Nothing is being carried between accounts there,
+so the group has nothing to say about it. The profile being launched is never
+itself a candidate: it is written by every Run, so it would outrank the
+person's own directory from the first Run onwards and freeze what crosses at
+whatever the first one copied.
+
+Nothing here can refuse a Run. A client already running against the profile,
+nothing to copy from, a file that is not the shape it should be, a write the
+filesystem will not take: all of them leave the launch alone, because a Run
+that happened is worth more than a key that crossed. The write that fails is
+the one worth remarking on — meeting the onboarding questions on every Run with
+nothing to explain it is worse than meeting them once — so that one is said,
+and the client is launched regardless.

@@ -10,6 +10,7 @@
 
 pub mod adopt;
 pub mod anthropic;
+pub mod carry;
 pub mod commands;
 pub mod credentials;
 pub mod cycle;

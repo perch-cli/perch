@@ -178,6 +178,10 @@ impl Host for RealHost {
         home_from(HOME_VARIABLE, std::env::var_os(HOME_VARIABLE))
     }
 
+    fn current_dir(&self) -> Result<PathBuf, HostError> {
+        std::env::current_dir().map_err(|err| HostError::Other(err.to_string()))
+    }
+
     fn env_var(&self, key: &str) -> Option<String> {
         std::env::var(key).ok().filter(|value| !value.is_empty())
     }
