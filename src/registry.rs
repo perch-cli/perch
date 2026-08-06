@@ -1,31 +1,25 @@
 //! Perch's own state: the Accounts it holds, the Profile each one lives in,
 //! and which Account is active.
 //!
-//! Versioned from the first commit, because later specs add Groups, Aliases and
-//! Quarantine to the same file and will have to migrate what is already there.
+//! Versioned, so that a registry written by a build that understands more than
+//! this one is refused rather than silently misread. The version is a guard
+//! against the future and not a migration story: nobody is running Perch yet,
+//! so there is no past format to read.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::error::{PerchError, Result};
 use crate::host::{Host, HostError};
 use crate::lock;
 use crate::probe::{Identity, LockSpec};
 
-/// The version this build writes. A registry from the future is refused rather
-/// than silently misread.
-///
-/// Version 2 stopped recording where an Account's Credential is kept: a store
-/// is derived from the Profile's path rather than written down, so a registry
-/// can no longer disagree with the derivation (ADR 0020).
-///
-/// Version 3 records *why* an Account is Quarantined rather than only that it
-/// is. A reason is not decoration: it is the difference between an Account the
-/// user can act on and one that is broken for reasons nobody wrote down.
-pub const CURRENT_VERSION: u32 = 3;
+/// The version this build writes, and the only one there has ever been. A
+/// registry from the future is refused rather than silently misread.
+pub const CURRENT_VERSION: u32 = 1;
 
 /// One Quota Window's Utilization, as observed at a point in time (ADR 0015).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -71,11 +65,6 @@ pub enum Quarantine {
     NoRefreshToken,
     /// Neither of the Profile's Credential Stores holds anything at all.
     NoCredential,
-    /// A Quarantine a Perch that did not record reasons left behind. Only ever
-    /// read, never written: a registry from before reasons still says the
-    /// Account is broken rather than quietly reading as healthy.
-    #[serde(rename = "unrecorded")]
-    Unrecorded,
 }
 
 impl Quarantine {
@@ -92,10 +81,6 @@ impl Quarantine {
                 "the Credential Perch holds carries no refresh token, so it cannot be renewed"
             }
             Quarantine::NoCredential => "Perch holds no Credential for it",
-            Quarantine::Unrecorded => {
-                "its Credential could no longer be used, and Perch did not record reasons \
-                 when it found out"
-            }
         }
     }
 
@@ -107,7 +92,6 @@ impl Quarantine {
             Quarantine::RotationLost => "rotation-lost",
             Quarantine::NoRefreshToken => "no-refresh-token",
             Quarantine::NoCredential => "no-credential",
-            Quarantine::Unrecorded => "unrecorded",
         }
     }
 
@@ -170,15 +154,10 @@ pub struct Account {
     pub enabled: bool,
     /// Why this Account's Credential can no longer be used, when it cannot.
     ///
-    /// Absent is the ordinary case, so it is left out of the file entirely: a
-    /// registry an older Perch reads back still says every healthy Account is
-    /// healthy.
-    #[serde(
-        default,
-        alias = "quarantined",
-        deserialize_with = "quarantine_as_recorded",
-        skip_serializing_if = "Option::is_none"
-    )]
+    /// Absent is the ordinary case, and is left out of the file entirely rather
+    /// than written as a null: the registry is something a person may open, and
+    /// a healthy Account reads more clearly for saying nothing about its health.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quarantine: Option<Quarantine>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
@@ -188,32 +167,6 @@ pub struct Account {
 
 fn enabled_by_default() -> bool {
     true
-}
-
-/// Reads a Quarantine however the registry that holds it spelled one.
-///
-/// Before version 3 this was a flag, so a registry Perch wrote earlier says
-/// `false` where it now says nothing and `true` where it now names a reason.
-/// Both still have to load: a registry that will not parse is worse than one
-/// whose oldest entry cannot say why.
-fn quarantine_as_recorded<'de, D>(
-    deserializer: D,
-) -> std::result::Result<Option<Quarantine>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Recorded {
-        Flag(bool),
-        Reason(Quarantine),
-    }
-
-    Ok(match Option::<Recorded>::deserialize(deserializer)? {
-        None | Some(Recorded::Flag(false)) => None,
-        Some(Recorded::Flag(true)) => Some(Quarantine::Unrecorded),
-        Some(Recorded::Reason(reason)) => Some(reason),
-    })
 }
 
 /// How Cycling orders the Accounts in a Group.
@@ -253,9 +206,9 @@ pub const DEFAULT_WATCHER_THRESHOLD_PERCENT: u8 = 80;
 /// What a Group carries besides its Accounts: the rules that would govern
 /// Cycling within it (ADR 0002).
 ///
-/// v1 stores and validates these and reads none of them. They are here from the
-/// first Group rather than added later, so a Group written today is a Group the
-/// watcher can be pointed at without migrating anything.
+/// Perch stores and validates these and reads none of them yet. They are here
+/// from the first Group rather than added later, so a Group written today is a
+/// Group the watcher can be pointed at when it ships.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GroupConfig {
@@ -717,12 +670,6 @@ pub fn perch_home(host: &dyn Host) -> Result<PathBuf> {
     Ok(home_dir(host)?.join(".config").join(".perch"))
 }
 
-/// Where Perch kept its state before it moved under `~/.config`. Read only by
-/// the migration, which is the last thing that has any business knowing it.
-pub fn perch_home_before_the_move(host: &dyn Host) -> Result<PathBuf> {
-    Ok(home_dir(host)?.join(".perch"))
-}
-
 fn home_dir(host: &dyn Host) -> Result<PathBuf> {
     host.home_dir()
         .map_err(|err| PerchError::Other(err.to_string()))
@@ -747,22 +694,14 @@ pub fn profiles_dir(host: &dyn Host) -> Result<PathBuf> {
 /// at the one place every store and every keychain namespace is derived from,
 /// rather than trusted to whatever wrote the address.
 pub fn profile_dir_for(host: &dyn Host, email: &str) -> Result<PathBuf> {
-    profile_dir_in(host, &profiles_dir(host)?, email)
-}
-
-/// The same derivation, against a `profiles` directory named rather than
-/// derived — which the migration needs, since half of what it does is against
-/// the home Perch is moving out of. The guard travels with the derivation
-/// rather than with the caller: a second way of joining a slug onto a path is a
-/// second way of arriving at `profiles/` itself.
-pub fn profile_dir_in(host: &dyn Host, profiles: &Path, email: &str) -> Result<PathBuf> {
+    let profiles = profiles_dir(host)?;
     let slugged = slug(email);
     let dir = profiles.join(&slugged);
 
     // Two ways of asking the same question, because the answer is the whole
     // machine: an empty slug, and — for whatever a future slug might let
     // through — a path that is not one directory below the one it was joined to.
-    if slugged.is_empty() || dir.parent() != Some(profiles) {
+    if slugged.is_empty() || dir.parent() != Some(profiles.as_path()) {
         return Err(PerchError::Invalid(format!(
             "`{email}` has no character a Profile directory can be named after, \
              so Perch cannot say where its Credential would be kept.\n\
@@ -878,19 +817,7 @@ pub fn lock(host: &dyn Host) -> Result<lock::Held<'_>> {
 
 /// Reads the registry, or `None` when Perch has never run here.
 pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
-    read_from(host, &registry_path(host)?)
-}
-
-/// The registry kept at `path`, or `None` when there is none there.
-///
-/// [`load`] reads from wherever Perch keeps state *now*; the migration reads
-/// from where it kept it before the move. Everything below this line is about
-/// what a registry file means — the version it was written by, the Groups its
-/// Accounts claim, the configuration those Groups carry — and none of it is
-/// about which file it is. A second reader that parsed the bytes itself would
-/// be a second reader that skips all of it, which is how a registry written by
-/// a newer Perch gets quietly rewritten by an older one.
-pub fn read_from(host: &dyn Host, path: &Path) -> Result<Option<Registry>> {
+    let path = &registry_path(host)?;
     let contents = match host.read_file(path) {
         Ok(contents) => contents,
         Err(HostError::NotFound { .. }) => return Ok(None),
@@ -902,7 +829,7 @@ pub fn read_from(host: &dyn Host, path: &Path) -> Result<Option<Registry>> {
         }
     };
 
-    let mut registry: Registry =
+    let registry: Registry =
         serde_json::from_str(&contents).map_err(|err| PerchError::Malformed {
             path: path.display().to_string(),
             detail: err.to_string(),
@@ -916,16 +843,8 @@ pub fn read_from(host: &dyn Host, path: &Path) -> Result<Option<Registry>> {
         )));
     }
 
-    // A version 1 registry recorded each Account's Profile directory and
-    // keychain namespace. All three are derived now, and serde has already
-    // dropped them on the way in; the version follows so the next save says
-    // what the file actually holds (ADR 0020).
-    registry.version = CURRENT_VERSION;
-
-    adopt_groups_only_the_accounts_record(&mut registry);
-
     // Group configuration is checked on the way in rather than where it is
-    // read, because in v1 nothing reads it: a value that means nothing would
+    // read, because nothing reads it yet: a value that means nothing would
     // otherwise sit in the file until the watcher shipped and then surprise
     // someone by acting on it.
     for (name, config) in &registry.groups {
@@ -933,24 +852,6 @@ pub fn read_from(host: &dyn Host, path: &Path) -> Result<Option<Registry>> {
     }
 
     Ok(Some(registry))
-}
-
-/// Declares every Group an Account is in but that nothing declared.
-///
-/// A Perch that predates `perch group` recorded a Group only on the Accounts
-/// that joined it. Left alone, such a Group would be one the user has plainly
-/// got — their Accounts are in it — that `perch group list` cannot show and
-/// `perch group remove` says does not exist. It picks up the default
-/// configuration, which is what it would have been created with.
-fn adopt_groups_only_the_accounts_record(registry: &mut Registry) {
-    let claimed: Vec<String> = registry
-        .accounts
-        .iter()
-        .filter_map(|account| account.group.clone())
-        .collect();
-    for name in claimed {
-        registry.groups.entry(name).or_default();
-    }
 }
 
 /// Writes the registry, under the hold the caller took to read it.
@@ -999,7 +900,7 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) ->
 /// Group and Quarantine reason, and the Utilization history behind them. That
 /// is a full picture of somebody's Anthropic relationships, and the Profile
 /// directories it sits beside are already 0700 (ADR 0020) — this file was the
-/// gap. A `~/.perch` that already exists keeps the mode it has, as `mkdir -p`
+/// gap. A `~/.config/.perch` that already exists keeps the mode it has, as `mkdir -p`
 /// does everywhere else in Perch, but the file is replaced on every save and so
 /// comes back narrow from the first one.
 fn write(host: &dyn Host, path: &Path, contents: &str) -> Result<()> {
@@ -1213,32 +1114,13 @@ mod tests {
         assert_eq!(back.active_account().unwrap().plan.as_deref(), Some("pro"));
     }
 
+    /// Not so that anything can be migrated — nothing is running this yet, so
+    /// there is nothing to migrate from. It is there so a build that
+    /// understands less than the file it is handed says so.
     #[test]
-    fn the_version_is_recorded_so_later_specs_can_migrate() {
+    fn the_version_is_recorded_so_an_older_build_can_refuse_the_file() {
         let json = serde_json::to_string(&Registry::default()).unwrap();
         assert!(json.contains(&format!("\"version\":{CURRENT_VERSION}")));
-    }
-
-    #[test]
-    fn a_quarantine_a_registry_recorded_as_a_flag_still_reads_as_broken() {
-        let earlier = r#"{
-          "version": 2,
-          "accounts": [
-            {"identity": {"email": "broken@example.com"}, "quarantined": true},
-            {"identity": {"email": "fine@example.com"}, "quarantined": false}
-          ]
-        }"#;
-
-        let registry: Registry =
-            serde_json::from_str(earlier).expect("a registry Perch wrote before reasons existed");
-
-        assert_eq!(
-            registry.account("broken@example.com").unwrap().quarantine,
-            Some(Quarantine::Unrecorded),
-            "an Account a flag said was broken is still broken, and says as much \
-             about why as the flag did"
-        );
-        assert!(!registry.account("fine@example.com").unwrap().quarantined());
     }
 
     #[test]
@@ -1319,12 +1201,12 @@ mod tests {
     #[test]
     fn cycling_among_ungrouped_accounts_is_off_until_it_is_asked_for() {
         assert!(!Registry::default().global.cycle_ungrouped);
-        let before_the_setting_existed: Registry =
-            serde_json::from_str(r#"{"version":2}"#).expect("a registry Perch wrote earlier");
+        let says_nothing_about_it: Registry =
+            serde_json::from_str(r#"{"version":1}"#).expect("a registry with no settings in it");
         assert!(
-            !before_the_setting_existed.global.cycle_ungrouped,
-            "a registry written before the setting existed reads as off, not as \
-             a declaration nobody made (ADR 0017)"
+            !says_nothing_about_it.global.cycle_ungrouped,
+            "a registry that says nothing about it reads as off, not as a \
+             declaration nobody made (ADR 0017)"
         );
     }
 

@@ -12,7 +12,6 @@ use std::io::Write;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::login;
-use crate::migrate;
 use crate::probe::{self, Findings, Store, Verdict};
 use crate::profile;
 use crate::registry::{self, Account, Registry};
@@ -26,7 +25,6 @@ use crate::registry::{self, Account, Registry};
 /// browser login before they change anything. A command that is going to write
 /// wants [`ensure_adopted_exclusively`] instead.
 pub fn ensure_adopted(host: &dyn Host, out: &mut dyn Write) -> Result<Registry> {
-    migrate::out_of_the_old_home(host)?;
     login::reap_abandoned(host);
     if let Some(registry) = registry::load(host)? {
         return Ok(registry);
@@ -50,7 +48,6 @@ pub fn ensure_adopted_exclusively<'a>(
     host: &'a dyn Host,
     out: &mut dyn Write,
 ) -> Result<(crate::lock::Held<'a>, Registry)> {
-    migrate::out_of_the_old_home(host)?;
     login::reap_abandoned(host);
     let mut held = registry::lock(host)?;
     let registry = load_or_adopt(host, &mut held, out)?;

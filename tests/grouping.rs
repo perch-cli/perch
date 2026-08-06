@@ -376,64 +376,6 @@ fn group_list_says_so_when_nothing_has_been_declared() {
     );
 }
 
-/// A registry from a Perch that recorded a Group only on the Accounts in it,
-/// which is every registry written before `perch group` existed.
-const REGISTRY_FROM_BEFORE_GROUPS_WERE_KEPT: &str = r#"{
-  "version": 1,
-  "active": "someone@example.com",
-  "accounts": [
-    {
-      "identity": {
-        "email": "someone@example.com",
-        "account_uuid": null,
-        "organization_name": "Acme",
-        "organization_uuid": null
-      },
-      "profile": {
-        "dir": "/Users/someone/.config/.perch/profiles/someone-example-com",
-        "keychain_service": "Claude Code-credentials-abcd1234",
-        "keychain_account": "someone"
-      },
-      "enabled": true,
-      "quarantined": false,
-      "group": "work"
-    }
-  ]
-}"#;
-
-#[test]
-fn a_group_an_older_perch_only_recorded_on_its_accounts_is_still_a_group() {
-    let host = logged_in_machine().with_file(REGISTRY_PATH, REGISTRY_FROM_BEFORE_GROUPS_WERE_KEPT);
-
-    let (result, printed) = run_group(&host, GroupCommand::List);
-
-    assert!(result.is_ok(), "{:?}", result.err());
-    assert!(
-        printed.contains("work") && printed.contains(EMAIL),
-        "a Group the user plainly has must be shown, with what is in it:\n{printed}"
-    );
-    assert!(
-        printed.contains("most-headroom"),
-        "and it carries what it would have been declared with:\n{printed}"
-    );
-}
-
-#[test]
-fn a_group_from_an_older_perch_can_be_emptied_and_removed() {
-    let host = logged_in_machine().with_file(REGISTRY_PATH, REGISTRY_FROM_BEFORE_GROUPS_WERE_KEPT);
-
-    let (moved, _) = move_to_group(&host, EMAIL, "none");
-    assert!(moved.is_ok(), "{:?}", moved.err());
-    let (removed, _) = remove_group(&host, "work");
-
-    assert!(
-        removed.is_ok(),
-        "a Group that exists cannot also be one that cannot be removed: {:?}",
-        removed.err()
-    );
-    assert!(registry_of(&host).group("work").is_none());
-}
-
 #[test]
 fn a_stored_configuration_outside_its_range_is_refused_rather_than_read_as_something_else() {
     let host = logged_in_machine().with_file(

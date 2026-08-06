@@ -465,10 +465,6 @@ it took.
   there, and the same path is used on every platform, Windows included, rather
   than `%APPDATA%` — one rule to document and to support, and `$PERCH_HOME` for
   anybody who wants a different one.
-- An installation still in `~/.perch`, where Perch kept its state before this,
-  moves itself the next time any command runs. Not a rename — each Credential
-  is read from where it is and written where it is going, because the namespace
-  it is filed under is derived from the path.
 - `$PERCH_CLAUDE_BIN` overrides where `claude` is found. Without it, Perch
   walks `PATH` itself — consulting `PATHEXT` on Windows, so the `claude.cmd`
   an npm install leaves works from every shell.

@@ -21,13 +21,7 @@ fn adopted_machine(utilization: &str) -> FakeHost {
         "organization_name": "Acme"
       }},
       "plan": "pro",
-      "profile": {{
-        "dir": "/Users/someone/.config/.perch/profiles/someone-example-com",
-        "keychain_service": "Claude Code-credentials-abcd1234",
-        "keychain_account": "someone"
-      }},
-      "enabled": true,
-      "quarantined": false{utilization}
+      "enabled": true{utilization}
     }}
   ],
   "aliases": {{}}
