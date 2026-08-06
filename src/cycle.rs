@@ -427,9 +427,17 @@ fn staleness(registry: &Registry, best: &Ranked) -> Option<String> {
 }
 
 /// The scope holds Accounts, but none of them is a candidate.
+///
+/// Each Account is counted once. One that is both disabled and Quarantined is
+/// still one Account, and a tally that put it in both buckets could add up to
+/// more Accounts than the scope holds — a reason that does not survive being
+/// checked teaches the reader to stop checking.
 fn nobody_is_a_candidate(scope: &Scope, accounts: &[&Account]) -> String {
-    let disabled = accounts.iter().filter(|a| !a.enabled).count();
     let quarantined = accounts.iter().filter(|a| a.quarantined()).count();
+    let disabled = accounts
+        .iter()
+        .filter(|a| !a.enabled && !a.quarantined())
+        .count();
     let mut why = Vec::new();
     if disabled > 0 {
         why.push(format!("{disabled} disabled"));
@@ -535,6 +543,23 @@ mod tests {
 
     fn now() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap()
+    }
+
+    /// A reason that does not survive being checked teaches the reader to stop
+    /// checking, and "2 disabled, 2 Quarantined" out of two Accounts is exactly
+    /// that.
+    #[test]
+    fn an_account_that_is_both_disabled_and_quarantined_is_counted_once() {
+        let mut broken = account("broken@example.com", vec![]);
+        broken.enabled = false;
+        broken.quarantine = Some(Quarantine::RenewalRejected);
+        let mut reserved = account("reserved@example.com", vec![]);
+        reserved.enabled = false;
+
+        let said = nobody_is_a_candidate(&Scope::Ungrouped, &[&broken, &reserved]);
+
+        assert!(said.contains("1 disabled"), "{said}");
+        assert!(said.contains("1 Quarantined"), "{said}");
     }
 
     fn account(email: &str, windows: Vec<WindowUtilization>) -> Account {

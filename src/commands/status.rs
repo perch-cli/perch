@@ -71,15 +71,29 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
     }
 }
 
+/// The Account being reported on, or why there is not one.
+///
+/// The remedy depends on what Perch holds. With nothing held there is nobody to
+/// switch to and a login is the way in; with Accounts held, a login is not the
+/// answer at all — Perch has Credentials and has simply been left on nobody,
+/// which is what `perch switch` is for and what `perch remove` itself
+/// recommends when it leaves the machine in this state.
 fn active_email(registry: &Registry) -> Result<String> {
-    registry
-        .active_account()
-        .map(|account| account.email().to_string())
-        .ok_or_else(|| {
-            PerchError::NotFound(
-                "No active Account. Run `claude` and log in, then run Perch again.".to_string(),
-            )
-        })
+    if let Some(account) = registry.active_account() {
+        return Ok(account.email().to_string());
+    }
+    Err(PerchError::NotFound(if registry.accounts.is_empty() {
+        "Perch holds no Accounts. Run `claude` and log in, then run Perch again.".to_string()
+    } else {
+        format!(
+            "Perch holds no active Account. `perch switch <target>` makes {} active.",
+            if registry.accounts.len() == 1 {
+                "the one it holds".to_string()
+            } else {
+                format!("one of the {} it holds", registry.accounts.len())
+            }
+        )
+    }))
 }
 
 fn group_of(registry: &Registry, email: &str) -> Option<String> {

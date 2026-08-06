@@ -244,21 +244,25 @@ pub fn claude_version(host: &dyn Host) -> Result<String> {
         ));
     }
 
-    // "2.1.221 (Claude Code)" — the leading token is the version.
-    let version = execution
-        .stdout
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_string();
-    if version.is_empty() {
+    // "2.1.221 (Claude Code)" — the leading token is the version. Taken only
+    // when it looks like one: `claude` printing "error: ..." on a clean exit
+    // would otherwise become a version called `error:`, quoted back in every
+    // refusal that names which Claude Code Perch was talking to.
+    let version = execution.stdout.split_whitespace().next().unwrap_or("");
+    if !version.starts_with(|c: char| c.is_ascii_digit()) {
         return Err(refusal(
             assumption::INSTALLED,
-            "`claude --version` printed nothing",
+            &format!(
+                "`claude --version` printed {}",
+                match execution.stdout.trim() {
+                    "" => "nothing".to_string(),
+                    printed => format!("`{printed}`, which is not a version"),
+                }
+            ),
             "unknown",
         ));
     }
-    Ok(version)
+    Ok(version.to_string())
 }
 
 /// The keychain service name for a config directory.

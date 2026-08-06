@@ -220,7 +220,11 @@ fn window_from(name: &str, value: &Value) -> Option<WindowUtilization> {
     let used_percent = value.get("utilization").and_then(Value::as_f64)?;
     Some(WindowUtilization {
         window: window_name(name),
-        used_percent,
+        // How full a window is, and a window cannot be less than empty or more
+        // than full. Anything outside that is a reply Perch does not understand
+        // rather than a figure, and clamping it here is what stops it becoming
+        // "105% headroom" in a sentence somebody is asked to act on.
+        used_percent: used_percent.clamp(0.0, 100.0),
         resets_at: value
             .get("resets_at")
             .and_then(Value::as_str)
@@ -264,6 +268,22 @@ fn email_in(document: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    /// A window cannot be less than empty or more than full. A reply saying
+    /// otherwise is one Perch does not understand, and left alone it becomes
+    /// "105% headroom" in a sentence somebody is asked to act on.
+    #[test]
+    fn a_utilization_outside_nought_to_a_hundred_is_brought_back_into_it() {
+        let document: Value = serde_json::from_str(
+            r#"{"five_hour": {"utilization": -5}, "seven_day": {"utilization": 130}}"#,
+        )
+        .unwrap();
+
+        let windows = super::windows_in(&document);
+
+        assert_eq!(windows[0].used_percent, 0.0);
+        assert_eq!(windows[1].used_percent, 100.0);
+    }
+
     use super::*;
 
     const USAGE: &str = r#"{

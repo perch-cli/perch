@@ -159,3 +159,27 @@ fn a_registry_from_a_newer_perch_is_refused_rather_than_misread() {
     let error = result.expect_err("a registry from the future cannot be trusted");
     assert!(error.to_string().contains("newer Perch"), "{error}");
 }
+
+/// With Accounts held but Perch on nobody, a login is not the answer: Perch
+/// has Credentials and has simply been left on nobody, which is what `perch
+/// switch` is for — and what `perch remove` itself recommends when it leaves
+/// the machine in this state.
+#[test]
+fn status_with_no_active_account_names_the_remedy_that_applies() {
+    let host = machine_with_two_accounts().with_answers(&["y"]);
+    disable_account(&host, SECOND_EMAIL).0.expect("reserved");
+    run_remove(&host, EMAIL)
+        .0
+        .expect("the active one is given up");
+    assert_eq!(registry_of(&host).active, None);
+
+    let (result, _) = run_status(&host, false);
+
+    let error = result.expect_err("there is no Account to report on");
+    let message = error.to_string();
+    assert!(message.contains("perch switch"), "{message}");
+    assert!(
+        !message.contains("log in"),
+        "Perch holds a Credential for the Account it would land on:\n{message}"
+    );
+}
