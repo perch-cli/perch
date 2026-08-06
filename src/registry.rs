@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::error::{PerchError, Result};
-use crate::host::{self, Host, HostError};
+use crate::host::{Host, HostError};
 use crate::lock;
 use crate::probe::{Identity, LockSpec};
 
@@ -894,25 +894,35 @@ pub fn save(host: &dyn Host, registry: &Registry) -> Result<()> {
     write(host, &path, &format!("{body}\n"))
 }
 
-/// Replaces the registry in one step, or not at all.
+/// Replaces the registry in one step, or not at all, and for its owner alone.
 ///
-/// The same care `.claude.json` gets, and for a sharper reason: this file is
-/// the whole of Perch's state, and every command reads it before it does
-/// anything. A truncate-then-write leaves a window in which a reader — `perch
-/// status`, which is advertised for shell prompts and may run several times a
-/// minute — sees half a file and reports it as malformed; and a crash inside
-/// that window leaves it half-written for good, with no command able to run
-/// until somebody edits it by hand.
+/// **In one step**, with the same care `.claude.json` gets and for a sharper
+/// reason: this file is the whole of Perch's state, and every command reads it
+/// before it does anything. A truncate-then-write leaves a window in which a
+/// reader — `perch status`, which is advertised for shell prompts and may run
+/// several times a minute — sees half a file and reports it as malformed; and a
+/// crash inside that window leaves it half-written for good, with no command
+/// able to run until somebody edits it by hand.
+///
+/// **For its owner alone**, because the registry holds no Credential but holds
+/// everything else: every Account's email address, organization, plan, Alias,
+/// Group and Quarantine reason, and the Utilization history behind them. That
+/// is a full picture of somebody's Anthropic relationships, and the Profile
+/// directories it sits beside are already 0700 (ADR 0020) — this file was the
+/// gap. A `~/.perch` that already exists keeps the mode it has, as `mkdir -p`
+/// does everywhere else in Perch, but the file is replaced on every save and so
+/// comes back narrow from the first one.
 fn write(host: &dyn Host, path: &Path, contents: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
-        host.create_dir_all(parent).map_err(|err| {
+        host.create_private_dir_all(parent).map_err(|err| {
             PerchError::Other(format!("could not create {}: {err}", parent.display()))
         })?;
     }
-    host::write_atomically(host, path, contents).map_err(|err| PerchError::FileWrite {
-        path: path.to_path_buf(),
-        source: std::io::Error::other(err.to_string()),
-    })
+    host.write_private_file(path, contents)
+        .map_err(|err| PerchError::FileWrite {
+            path: path.to_path_buf(),
+            source: std::io::Error::other(err.to_string()),
+        })
 }
 
 #[cfg(test)]
@@ -994,6 +1004,26 @@ mod tests {
             host.file(format!("{path}.perch-tmp")),
             None,
             "and the half-written copy is not left beside it"
+        );
+    }
+
+    /// No Credential, but every Account's address, organization, plan, Alias,
+    /// Group, Quarantine reason and Utilization history — a full picture of
+    /// somebody's Anthropic relationships, beside Profile directories that are
+    /// already 0700.
+    #[test]
+    fn the_registry_is_written_for_its_owner_alone() {
+        let host = crate::host::FakeHost::new();
+
+        save(&host, &Registry::default()).expect("it is written");
+
+        let path = registry_path(&host).unwrap();
+        assert_eq!(host.mode_of(&path), Some(crate::host::PRIVATE_FILE_MODE));
+        assert_eq!(
+            host.mode_of(perch_home(&host).unwrap()),
+            Some(crate::host::PRIVATE_DIR_MODE),
+            "a directory others may enter is a directory whose contents others \
+             may open"
         );
     }
 
