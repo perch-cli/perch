@@ -33,6 +33,16 @@ use crate::{probe, reconcile, target};
 pub struct RunArgs {
     /// The Account to run as: its Alias, or its email address.
     pub target: String,
+
+    /// What was typed after `--`, one word per element and none of them read:
+    /// the program to run and its arguments, or Claude Code's own arguments
+    /// where the first word is a flag. Empty is `perch run <target>` on its own.
+    ///
+    /// Text, like every other word Perch takes. A word that is not text is
+    /// refused by the parser rather than mangled here, which is the honest
+    /// answer until somebody has one to forward — and forwarding it would mean
+    /// an `OsString` in every hand it passes through.
+    pub command: Vec<String>,
 }
 
 /// Launches a client against the named Account's Profile and reports the status
@@ -56,14 +66,15 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     say(out, &found.matched)?;
     refuse_a_quarantined_account(&registry, &found.email)?;
 
-    // Found before anything is linked. A machine with no Claude Code on it is a
-    // refusal that should cost the filesystem nothing, and the launch is the
-    // only thing Reconcile is preparation for.
-    let claude = probe::claude_bin(host)?;
+    // Settled before anything is linked. Where this is the Claude Code the probe
+    // has to find, a machine without one is a refusal that should cost the
+    // filesystem nothing — and the launch is the only thing Reconcile is
+    // preparation for either way.
+    let launch = what_to_launch(host, &args.command)?;
     let profile = registry::profile_dir_for(host, &found.email)?;
     reconcile::reconcile(host, &shared_state(host)?, &profile)?;
 
-    say(out, &launching(&registry, &found.email))?;
+    say(out, &launching(&registry, &found.email, &launch.said))?;
     // Flushed before the client is handed the terminal. Everything Perch has to
     // say about a Run is said in front of it, and a buffer that had not been
     // emptied would deliver those lines after the output of the thing they were
@@ -72,11 +83,149 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
 
     // The environment of this one process, and the whole of what makes the Run
     // a Run.
+    let handed: Vec<&str> = launch.args.iter().map(String::as_str).collect();
     host.exec_interactive(
-        &claude.to_string_lossy(),
+        &launch.program,
+        &handed,
         &[("CLAUDE_CONFIG_DIR", &profile.to_string_lossy())],
     )
-    .map_err(|err| PerchError::Other(format!("could not launch Claude Code: {err}")))
+    .map_err(|err| PerchError::Other(format!("could not launch {}: {err}", launch.said)))
+}
+
+/// The program a Run launches and what it is handed.
+struct Launch {
+    /// As the operating system will look for it: a path for the Claude Code the
+    /// probe found, and otherwise the word as typed, so `npm` is found the way
+    /// the shell would have found it.
+    program: String,
+    /// What it is handed, in the order it was typed. Claude Code's own arguments
+    /// where nothing else was named, and the program's own where something was.
+    args: Vec<String>,
+    /// How the line printed before the launch says what is starting.
+    said: String,
+}
+
+/// Reads the words after `--` as a command line (ADR 0010).
+///
+/// The first word decides, and decides totally: a word beginning with `-` is an
+/// argument, because nothing that begins with `-` can name a program the
+/// operating system would find — `PATH` is searched for names and a path is
+/// written with a `/`, and somebody with a file called `-resume` reaches it as
+/// `./-resume`. So `perch run dev -- --resume` is Claude Code resuming and
+/// `perch run dev -- npm test` is `npm`, with nothing guessed in either case.
+///
+/// Nothing after `--`, and nothing after the Target at all, is Claude Code with
+/// no arguments: the command's first and commonest form.
+fn what_to_launch(host: &dyn Host, command: &[String]) -> Result<Launch> {
+    match command.split_first() {
+        Some((program, args)) if !program.starts_with('-') => Ok(Launch {
+            program: program.clone(),
+            args: args.to_vec(),
+            said: format!("`{program}`"),
+        }),
+        // The probe is what finds Claude Code, and it is reached only where
+        // Claude Code is what is being launched: a Run of `npm` on a machine
+        // Perch could not find a client on is still a Run of `npm`.
+        _ => Ok(Launch {
+            program: probe::claude_bin(host)?.to_string_lossy().into_owned(),
+            args: command.to_vec(),
+            said: "Claude Code".to_string(),
+        }),
+    }
+}
+
+/// Refuses `perch run <target> <anything>`, where what was meant for the program
+/// was typed without the separator that says so (ADR 0010).
+///
+/// Read off the command line before the parser sees it, because the parser is
+/// what the rule exists to protect against: clap will claim `--resume` for Perch
+/// and report an unknown argument, which is true and is not the thing the person
+/// needs to be told. Both readings of that line are real — Perch has a `--json`
+/// and so does Claude Code — so the answer is neither reading, and the message
+/// is the line that would have worked.
+///
+/// A word that is not a flag is caught by the same rule and told the same thing,
+/// because `perch run dev npm test` is the same mistake made without a dash:
+/// nothing but `--` follows a Target, so there is no reading of it to argue
+/// about, only a separator to put in.
+///
+/// It ends at the Target, and only where the Target is the first word after
+/// `run`. Anything before it is the parser's: a flag there is Perch's beyond
+/// doubt — `perch run --help` is a request for help with `run`, and no program
+/// has been named yet for it to have belonged to — and a line the parser will
+/// reject anyway should be rejected in its words rather than answered here with
+/// a suggestion that quietly drops half of what was typed.
+pub fn refuse_a_flag_without_the_separator(typed: &[String]) -> Result<()> {
+    let typed = words(typed);
+    let ["run", target, rest @ ..] = typed.as_slice() else {
+        return Ok(());
+    };
+    if target.starts_with('-') {
+        return Ok(());
+    }
+
+    // One word decides the whole line: what follows a Target is either the
+    // separator or something that needed one. Nothing past `--` is read at all,
+    // including a second `--`, which belongs to the program's own parser.
+    let Some((word, _)) = rest.split_first() else {
+        return Ok(());
+    };
+    if *word == "--" {
+        return Ok(());
+    }
+
+    Err(PerchError::NotUnderstood(format!(
+        "{} Everything meant for the program you are running goes after \
+         `--`:\n\n    {}\n",
+        whose(word),
+        as_typed(target, rest)
+    )))
+}
+
+/// Why the word was not Perch's to read, said in its own terms.
+///
+/// A flag is genuinely two things at once and the sentence says so. A bare word
+/// never was — it names a program — so telling somebody Perch could not tell
+/// whose it was would be inventing an ambiguity to explain.
+fn whose(word: &str) -> String {
+    if word.starts_with('-') {
+        format!("`{word}` could be Perch's flag or the program's, and Perch will not guess which.")
+    } else {
+        format!("`{word}` is a program to run rather than something Perch reads.")
+    }
+}
+
+/// The command line as words to match against, which is all this rule reads it
+/// as: everything about whose a flag is can be seen in the words themselves.
+fn words(typed: &[String]) -> Vec<&str> {
+    typed.iter().map(String::as_str).collect()
+}
+
+/// The line that would have worked, ready to be pasted back.
+///
+/// The words are shown as a shell would need them rather than as they arrived:
+/// they reached this process with one layer of quoting already taken off, and a
+/// suggestion that cannot be run is worse than no suggestion.
+fn as_typed(target: &str, rest: &[&str]) -> String {
+    let mut line = format!("perch run {target} --");
+    for word in rest {
+        line.push(' ');
+        line.push_str(&quoted_for_a_shell(word));
+    }
+    line
+}
+
+/// One word as a shell would have to be given it, quoted only where it needs to
+/// be so the common line reads as the person typed it.
+fn quoted_for_a_shell(word: &str) -> String {
+    let plain = !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_alphanumeric() || "-_=+.,:/@%^".contains(c));
+    if plain {
+        return word.to_string();
+    }
+    format!("'{}'", word.replace('\'', r"'\''"))
 }
 
 /// Where a Run reads Shared State from.
@@ -127,20 +276,140 @@ fn refuse_a_quarantined_account(registry: &Registry, email: &str) -> Result<()> 
 /// The second half is the whole point of the command, and the difference from
 /// the command next to it: somebody who typed `run` where they meant `switch`
 /// should be able to see that nothing moved before the client takes the screen.
-fn launching(registry: &Registry, email: &str) -> String {
+fn launching(registry: &Registry, email: &str, said: &str) -> String {
     let named = registry.named_for_the_user(email);
     match registry.active.as_deref() {
         // Both Accounts are named the way every other command names one, so the
         // sentence that contrasts them does not hand one of them its Alias and
         // take the other's away.
         Some(active) if active != email => format!(
-            "Running Claude Code as {named}, in this terminal alone. {} stays \
-             the active Account everywhere else.",
+            "Running {said} as {named}, in this terminal alone. {} stays the \
+             active Account everywhere else.",
             registry.named_for_the_user(active)
         ),
         // Running the Account that is already active is not a mistake worth
         // refusing: the Run still gets a Profile of its own, and the session it
         // launches is not the one a later Switch moves out from under.
-        _ => format!("Running Claude Code as {named}, in this terminal alone."),
+        _ => format!("Running {said} as {named}, in this terminal alone."),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::EXIT_NOT_UNDERSTOOD;
+
+    fn typed(line: &str) -> Vec<String> {
+        line.split(' ').map(str::to_string).collect()
+    }
+
+    fn refusal_for(line: &str) -> String {
+        refuse_a_flag_without_the_separator(&typed(line))
+            .expect_err("the line names a flag Perch will not claim")
+            .to_string()
+    }
+
+    #[test]
+    fn a_flag_after_the_target_is_refused_with_the_line_that_would_have_worked() {
+        let said = refusal_for("run dev --resume");
+
+        assert!(said.contains("`--resume`"), "{said}");
+        assert!(said.contains("after `--`"), "{said}");
+        assert!(said.contains("perch run dev -- --resume"), "{said}");
+    }
+
+    /// The exit code the argument parser itself would have used, so a script
+    /// reads "that line was not a command" from one place.
+    #[test]
+    fn the_refusal_is_a_command_line_that_was_not_understood() {
+        let refusal = refuse_a_flag_without_the_separator(&typed("run dev -p hello"))
+            .expect_err("`-p` is a flag like any other");
+
+        assert_eq!(refusal.exit_code(), EXIT_NOT_UNDERSTOOD);
+    }
+
+    /// Everything the person typed comes back in the suggestion, in the order
+    /// they typed it: a corrected line missing half the command is a second
+    /// thing for them to get right.
+    #[test]
+    fn the_suggested_line_carries_every_word_that_followed() {
+        let said = refusal_for("run dev --resume --model opus -p hello");
+
+        assert!(
+            said.contains("perch run dev -- --resume --model opus -p hello"),
+            "{said}"
+        );
+    }
+
+    /// The suggestion is meant to be pasted, and a word with a space in it that
+    /// came off the command line as one word has to go back as one word.
+    #[test]
+    fn a_word_that_needs_quoting_is_quoted_in_the_suggestion() {
+        let said = refuse_a_flag_without_the_separator(&[
+            "run".to_string(),
+            "dev".to_string(),
+            "-p".to_string(),
+            "two words".to_string(),
+        ])
+        .expect_err("`-p` is a flag")
+        .to_string();
+
+        assert!(said.contains("perch run dev -- -p 'two words'"), "{said}");
+    }
+
+    /// The same mistake without a dash on it. Nothing but `--` may follow a
+    /// Target, so a program typed straight after one is told where it goes
+    /// rather than left to the parser to call an unexpected argument.
+    #[test]
+    fn a_program_typed_without_the_separator_is_told_where_it_goes() {
+        let said = refusal_for("run dev npm test");
+
+        assert!(said.contains("`npm`"), "{said}");
+        assert!(!said.contains("Perch's flag"), "{said}");
+        assert!(said.contains("perch run dev -- npm test"), "{said}");
+    }
+
+    #[test]
+    fn a_line_with_the_separator_is_left_alone() {
+        for line in [
+            "run dev -- --resume",
+            "run dev -- npm test -- --watch",
+            "run dev --",
+            "run dev",
+            "run",
+        ] {
+            assert!(
+                refuse_a_flag_without_the_separator(&typed(line)).is_ok(),
+                "{line}"
+            );
+        }
+    }
+
+    /// A flag before the Target belongs to Perch beyond doubt — there is no
+    /// program named yet for it to have been meant for — so the parser answers
+    /// for it, and answers with help rather than with a refusal. The parser also
+    /// keeps the lines it would reject anyway: a suggestion built from a line
+    /// with an unknown flag in front of the Target would drop that flag on the
+    /// floor and read as though it had been accepted.
+    #[test]
+    fn a_flag_before_the_target_is_the_parsers_business() {
+        for line in ["run --help", "run -h", "run --json dev --resume"] {
+            assert!(
+                refuse_a_flag_without_the_separator(&typed(line)).is_ok(),
+                "{line}"
+            );
+        }
+    }
+
+    /// Every other command has flags of its own and none of them launches
+    /// anything, so the rule is `run`'s alone.
+    #[test]
+    fn no_other_command_is_touched() {
+        for line in ["list --json", "status --group --refresh", "add --no-group"] {
+            assert!(
+                refuse_a_flag_without_the_separator(&typed(line)).is_ok(),
+                "{line}"
+            );
+        }
     }
 }

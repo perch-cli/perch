@@ -12,6 +12,11 @@ use crate::keychain::KeychainError;
 pub const EXIT_OK: i32 = 0;
 /// Exit code for a failure with no more specific meaning.
 pub const EXIT_GENERAL: i32 = 1;
+/// Exit code for a command line Perch could not read as one. The argument
+/// parser's own code, because a line Perch rejects itself and a line the parser
+/// rejects are the same failure to the script wrapping it, and two codes for it
+/// would be a distinction nobody could act on.
+pub const EXIT_NOT_UNDERSTOOD: i32 = 2;
 /// Exit code for a refused operation: an assumption about Claude Code failed.
 pub const EXIT_PROBE_REFUSED: i32 = 10;
 /// Exit code for a keychain that is locked, denied, or otherwise unavailable.
@@ -60,6 +65,14 @@ pub enum PerchError {
     /// "not found", which reads as an Account having vanished (ADR 0008).
     #[error("Keychain unavailable: {0}")]
     KeychainUnavailable(String),
+
+    /// The command line could not be read as one — a flag Perch cannot tell
+    /// apart from the launched program's. Distinct from [`PerchError::Invalid`],
+    /// which is a request Perch read and declined: nothing here was understood
+    /// well enough to decline, so the message has to end in the line that would
+    /// have worked.
+    #[error("{0}")]
+    NotUnderstood(String),
 
     /// Something Perch was asked about does not exist.
     #[error("{0}")]
@@ -175,6 +188,9 @@ impl PerchError {
             PerchError::KeychainUnavailable(message) => {
                 PerchError::KeychainUnavailable(format!("{message}\n\n{note}"))
             }
+            PerchError::NotUnderstood(message) => {
+                PerchError::NotUnderstood(format!("{message}\n\n{note}"))
+            }
             PerchError::NotFound(message) => PerchError::NotFound(format!("{message}\n\n{note}")),
             PerchError::Conflict(message) => PerchError::Conflict(format!("{message}\n\n{note}")),
             PerchError::Invalid(message) => PerchError::Invalid(format!("{message}\n\n{note}")),
@@ -205,6 +221,7 @@ impl PerchError {
         match self {
             PerchError::ProbeRefused { .. } => EXIT_PROBE_REFUSED,
             PerchError::KeychainUnavailable(_) => EXIT_KEYCHAIN_UNAVAILABLE,
+            PerchError::NotUnderstood(_) => EXIT_NOT_UNDERSTOOD,
             PerchError::NotFound(_) => EXIT_NOT_FOUND,
             PerchError::Conflict(_) => EXIT_CONFLICT,
             PerchError::Invalid(_) => EXIT_INVALID,

@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use common::*;
-use perch::error::{EXIT_INVALID, EXIT_QUARANTINED};
+use perch::error::{EXIT_INVALID, EXIT_PROBE_REFUSED, EXIT_QUARANTINED};
 use perch::host::FakeHost;
 use perch::host::fake::Effect;
 
@@ -67,7 +67,22 @@ fn launched(host: &FakeHost) -> Vec<(String, PathBuf)> {
             Effect::ExecInteractive {
                 program,
                 config_dir,
+                ..
             } => Some((program, config_dir)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The same, as the whole command line each Run launched: the program and every
+/// word it was handed.
+fn command_lines(host: &FakeHost) -> Vec<Vec<String>> {
+    host.effects()
+        .into_iter()
+        .filter_map(|effect| match effect {
+            Effect::ExecInteractive { program, args, .. } => {
+                Some(std::iter::once(program).chain(args).collect())
+            }
             _ => None,
         })
         .collect()
@@ -377,6 +392,150 @@ fn the_clients_exit_code_is_perchs_exit_code() {
 
         assert_eq!(outcome, status);
     }
+}
+
+/// Everything after `--` belongs to the launched program. Perch has flags of
+/// its own spelled the same way, and the whole of the separator's job is that it
+/// stops reading at it: a `--json` after `--` is Claude Code's `--json`, not the
+/// one `perch list` takes.
+#[test]
+fn arguments_after_the_separator_reach_the_client_verbatim() {
+    let host = machine();
+
+    let outcome = run_run_with(
+        &host,
+        SECOND_EMAIL,
+        &["--resume", "--json", "-p", "two words", "--group"],
+    )
+    .0
+    .expect("the client ran");
+
+    assert_eq!(outcome, 0);
+    assert_eq!(
+        command_lines(&host),
+        vec![vec![
+            CLAUDE_BIN.to_string(),
+            "--resume".to_string(),
+            "--json".to_string(),
+            "-p".to_string(),
+            "two words".to_string(),
+            "--group".to_string(),
+        ]],
+        "Claude Code, handed every word as it was typed"
+    );
+}
+
+/// A word that is not a flag names the program, which is what makes a Run a way
+/// of running anything under an Account rather than a way of running Claude Code
+/// (ADR 0010). The Profile is still what the program is pointed at: that is the
+/// point of running it here rather than in the shell.
+#[test]
+fn a_program_named_after_the_separator_is_what_runs() {
+    let host = machine();
+
+    let outcome = run_run_with(&host, SECOND_EMAIL, &["npm", "test", "--", "--watch"])
+        .0
+        .expect("the program ran");
+
+    assert_eq!(outcome, 0);
+    assert_eq!(
+        command_lines(&host),
+        vec![vec![
+            "npm".to_string(),
+            "test".to_string(),
+            "--".to_string(),
+            "--watch".to_string(),
+        ]],
+        "the program named, and everything after it — including a second separator"
+    );
+    assert_eq!(
+        launched(&host),
+        vec![("npm".to_string(), profile_of(&host, SECOND_EMAIL))],
+        "pointed at the Account's Profile, like every other Run"
+    );
+}
+
+/// Said before the program takes the terminal, because "you are about to run
+/// this, as this Account" is the whole of what a Run announces — and naming
+/// Claude Code where something else is launching would be a lie about which
+/// program is about to write in that Profile.
+#[test]
+fn the_program_being_launched_is_named_when_it_is_not_claude_code() {
+    let host = machine();
+
+    let (_, printed) = run_run_with(&host, SECOND_EMAIL, &["npm", "test"]);
+    assert!(
+        printed.contains(&format!(
+            "Running `npm` as {SECOND_EMAIL}, in this terminal alone."
+        )),
+        "{printed}"
+    );
+
+    let (_, printed) = run_run_with(&host, SECOND_EMAIL, &["--resume"]);
+    assert!(
+        printed.contains(&format!("Running Claude Code as {SECOND_EMAIL}")),
+        "{printed}"
+    );
+}
+
+/// Shared State is what a Run is for, and a program other than Claude Code reads
+/// the same directory: `npm test` inside a Profile that cannot see the person's
+/// settings is the same failure as a client that cannot.
+#[test]
+fn another_program_is_reconciled_for_like_any_other_run() {
+    let host = machine_with_shared_state();
+
+    run_run_with(&host, SECOND_EMAIL, &["npm", "test"])
+        .0
+        .expect("the program ran");
+
+    let profile = profile_of(&host, SECOND_EMAIL);
+    for entry in ["CLAUDE.md", "settings.json", "plugins"] {
+        assert_eq!(
+            host.link_at(profile.join(entry)).map(|(_, target)| target),
+            Some(PathBuf::from(shared(entry))),
+            "{entry} is reachable from the Profile the program runs in"
+        );
+    }
+}
+
+/// The probe finds Claude Code, and it is reached only where Claude Code is what
+/// is being launched: a Run of `npm` on a machine Perch could not find a client
+/// on is still a Run of `npm`, and only the Run that needed a client is refused
+/// for the want of one.
+#[test]
+fn another_program_runs_on_a_machine_with_no_claude_code_to_find() {
+    let host = machine().without_env("PATH");
+
+    let outcome = run_run_with(&host, SECOND_EMAIL, &["npm", "test"])
+        .0
+        .expect("`npm` is not Claude Code and does not need one");
+
+    assert_eq!(outcome, 0);
+    assert_eq!(
+        launched(&host),
+        vec![("npm".to_string(), profile_of(&host, SECOND_EMAIL))]
+    );
+
+    let refusal = run_run(&host, SECOND_EMAIL)
+        .0
+        .expect_err("Claude Code is what this one asked for");
+    assert_eq!(refusal.exit_code(), EXIT_PROBE_REFUSED);
+}
+
+/// The refusals a Run makes are about the Account rather than about the program,
+/// so naming one changes nothing about them.
+#[test]
+fn a_quarantined_account_is_refused_whatever_is_being_launched() {
+    let host = machine();
+    quarantine(&host, SECOND_EMAIL);
+
+    let refusal = run_run_with(&host, SECOND_EMAIL, &["npm", "test"])
+        .0
+        .expect_err("a Run that could not authenticate is refused");
+
+    assert_eq!(refusal.exit_code(), EXIT_QUARANTINED);
+    assert!(launched(&host).is_empty(), "{:?}", launched(&host));
 }
 
 /// Nothing is launched for an Account Perch does not hold, and the refusal is

@@ -19,6 +19,19 @@ mutates the calling shell, needs per-shell installation, and cannot undo itself.
 `--` is mandatory before passthrough arguments. `perch run dev --resume` is
 genuinely ambiguous — the flag could belong to either program, and the argument
 parser will claim it — so the bare form must fail with a message naming the fix.
+The refusal is read off the command line before the parser sees it: clap would
+report an unknown argument, which is true and is not what the person needs to be
+told, and it exits with the parser's own code (2) either way.
+
+After `--`, the first word decides what runs, and decides totally: a word
+beginning with `-` is an argument for Claude Code, and anything else is the
+program to launch with the rest as its arguments. Nothing is guessed, because
+nothing beginning with `-` can name a program the operating system would find —
+`PATH` is searched for names, a path is written with a `/`, and a file called
+`-resume` is reached as `./-resume`. So `perch run dev -- --resume` resumes
+Claude Code and `perch run dev -- npm test` runs `npm`, and only Claude Code is
+looked for by the probe: a Run of `npm` on a machine with no client installed is
+still a Run of `npm`.
 
 This is the only path where profiles are used as live config directories rather
 than as storage. It is therefore the only path that has to Reconcile — linking

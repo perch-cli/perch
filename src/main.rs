@@ -145,6 +145,12 @@ enum Command {
         /// The Account to run as: its Alias, or its email address. A Group has
         /// no single meaning here, so naming one is refused.
         target: String,
+
+        /// What to run, after a mandatory `--`: a program and its arguments, or
+        /// Claude Code's own arguments where the first word is a flag. Nothing
+        /// here is read by Perch, so a `--json` after `--` is the program's.
+        #[arg(last = true, allow_hyphen_values = true, num_args = .., value_name = "COMMAND")]
+        command: Vec<String>,
     },
 
     /// Show every Account with its Alias, Group, state and cached Utilization.
@@ -208,13 +214,40 @@ fn ok(outcome: perch::Result<()>) -> perch::Result<i32> {
     outcome.map(|()| EXIT_OK)
 }
 
+/// What Perch exits with, and where a failure is said: to stderr, after
+/// everything the command had already printed has been let out.
+fn ended_as(outcome: perch::Result<i32>, out: &mut dyn Write) -> i32 {
+    match outcome {
+        Ok(code) => code,
+        Err(error) => {
+            let _ = out.flush();
+            let mut stderr = std::io::stderr();
+            let _ = writeln!(stderr, "{error}");
+            error.exit_code()
+        }
+    }
+}
+
 fn main() {
     report::install_panic_hook();
 
-    let cli = Cli::parse();
-    let host = RealHost::new();
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
+
+    // Before the parser rather than after it, for the reason
+    // `refuse_a_flag_without_the_separator` is written down at. Lossily, because
+    // it only reads the shape of the words: one that is not text is clap's to
+    // complain about, in clap's words.
+    let typed: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|word| word.to_string_lossy().into_owned())
+        .collect();
+    if let Err(refusal) = run::refuse_a_flag_without_the_separator(&typed) {
+        std::process::exit(ended_as(Err(refusal), &mut out));
+    }
+
+    let cli = Cli::parse();
+    let host = RealHost::new();
 
     let outcome = match cli.command {
         Command::Add {
@@ -264,7 +297,7 @@ fn main() {
         }
         // The one command whose exit code is not Perch's own: what the client
         // said is what a script reads.
-        Command::Run { target } => run::run(&host, RunArgs { target }, &mut out),
+        Command::Run { target, command } => run::run(&host, RunArgs { target, command }, &mut out),
         Command::Status {
             group,
             refresh,
@@ -281,16 +314,50 @@ fn main() {
         Command::Switch { target } => ok(switch::run(&host, SwitchArgs { target }, &mut out)),
     };
 
-    let code = match outcome {
-        Ok(code) => code,
-        Err(error) => {
-            let _ = out.flush();
-            let mut stderr = std::io::stderr();
-            let _ = writeln!(stderr, "{error}");
-            error.exit_code()
-        }
-    };
+    let code = ended_as(outcome, &mut out);
 
     let _ = out.flush();
     std::process::exit(code);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn command_of(line: &[&str]) -> Vec<String> {
+        match Cli::try_parse_from(line).expect("the line parses").command {
+            Command::Run { command, .. } => command,
+            _ => panic!("`{}` is not a Run", line.join(" ")),
+        }
+    }
+
+    #[test]
+    fn nothing_after_the_target_is_a_run_with_no_command() {
+        assert!(command_of(&["perch", "run", "dev"]).is_empty());
+        assert!(command_of(&["perch", "run", "dev", "--"]).is_empty());
+    }
+
+    /// The parser stops reading at `--` and hands the rest over whole: flags it
+    /// has of its own, a word with a space in it, and a second `--` that belongs
+    /// to the program's own argument parser rather than to Perch.
+    #[test]
+    fn everything_after_the_separator_arrives_as_it_was_typed() {
+        assert_eq!(
+            command_of(&["perch", "run", "dev", "--", "--json", "-p", "two words"]),
+            vec!["--json", "-p", "two words"]
+        );
+        assert_eq!(
+            command_of(&["perch", "run", "dev", "--", "npm", "test", "--", "--watch"]),
+            vec!["npm", "test", "--", "--watch"]
+        );
+    }
+
+    /// The separator is mandatory, and the parser holds that line too: the
+    /// refusal Perch writes itself is a better message for the same rule rather
+    /// than the only thing enforcing it.
+    #[test]
+    fn a_command_without_the_separator_is_not_a_command_line() {
+        assert!(Cli::try_parse_from(["perch", "run", "dev", "--resume"]).is_err());
+        assert!(Cli::try_parse_from(["perch", "run", "dev", "npm", "test"]).is_err());
+    }
 }

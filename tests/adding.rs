@@ -61,6 +61,7 @@ fn a_login_is_launched_inside_a_new_profile_of_its_own() {
             Effect::ExecInteractive {
                 program,
                 config_dir,
+                ..
             } => Some((program, config_dir)),
             _ => None,
         })

@@ -197,9 +197,11 @@ that Group's threshold.
 _Avoid_: daemon, monitor, background job
 
 **Run**:
-Launching a client against a chosen Profile without changing which Account is
+Launching a program against a chosen Profile without changing which Account is
 active. Scoped to the one invocation, so several Accounts can be running at once
-in different terminals.
+in different terminals. Claude Code unless something else is named after `--`,
+which is mandatory before anything is: a flag typed without it could belong to
+either program, and guessing is the one thing a Run will not do.
 _Avoid_: use, session, launch
 
 **Live Profile**:
