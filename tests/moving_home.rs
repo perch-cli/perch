@@ -10,22 +10,32 @@
 
 mod common;
 
+use std::path::PathBuf;
+
 use common::*;
 use perch::host::{FakeHost, Host, Platform};
 
-const OLD_HOME: &str = "/Users/someone/.perch";
-const NEW_HOME: &str = "/Users/someone/.config/.perch";
+/// Both homes are asked for rather than spelled out, because a path is not a
+/// string: `PathBuf::join` uses the platform's own separator, and a fixture
+/// written with forward slashes would quietly match nothing on Windows — which
+/// is a test that passes by never arranging the thing it is about.
+fn old_home(host: &FakeHost) -> PathBuf {
+    perch::registry::perch_home_before_the_move(host).expect("home is known")
+}
+
+fn new_home(host: &FakeHost) -> PathBuf {
+    perch::registry::perch_home(host).expect("home is known")
+}
 
 /// A machine holding two Accounts, with everything Perch holds put back where
 /// the version before this one kept it.
 fn an_installation_in_the_old_place(host: &FakeHost) {
-    for path in host.paths_under(NEW_HOME) {
-        let moved = path
-            .to_string_lossy()
-            .replace(NEW_HOME, OLD_HOME)
-            .to_string();
+    let (old, new) = (old_home(host), new_home(host));
+
+    for path in host.paths_under(&new) {
+        let under = path.strip_prefix(&new).expect("under the new home");
         let contents = host.file(&path).expect("a file");
-        host.set_file(&moved, &contents);
+        host.set_file(old.join(under), &contents);
     }
     // The keychain items go with them: a Profile's namespace is derived from
     // its path, so an item filed under the new path is not one the old
@@ -34,10 +44,7 @@ fn an_installation_in_the_old_place(host: &FakeHost) {
         let now = store_of(host, email);
         let then = perch::probe::store_for_profile(
             host,
-            std::path::Path::new(&format!(
-                "{OLD_HOME}/profiles/{}",
-                perch::registry::slug(email)
-            )),
+            &old.join("profiles").join(perch::registry::slug(email)),
         )
         .expect("USER is set");
         if let Some(held) = host.keychain_item(&now.keychain_service, LOGIN_NAME) {
@@ -45,7 +52,7 @@ fn an_installation_in_the_old_place(host: &FakeHost) {
         }
         host.forget_keychain_item(&now.keychain_service, LOGIN_NAME);
     }
-    host.remove_dir_all(std::path::Path::new(NEW_HOME))
+    host.remove_dir_all(&new)
         .expect("nothing is in the new place yet");
 }
 
@@ -59,7 +66,7 @@ fn an_installation_in_the_old_place_is_carried_across_credentials_and_all() {
 
     result.expect("the listing runs");
     assert!(
-        printed.contains(NEW_HOME),
+        printed.contains(&new_home(&host).display().to_string()),
         "it says what it did:\n{printed}"
     );
     assert_eq!(
@@ -78,7 +85,7 @@ fn an_installation_in_the_old_place_is_carried_across_credentials_and_all() {
         Some(SECOND_CREDENTIAL)
     );
     assert!(
-        !host.path_exists(std::path::Path::new(OLD_HOME)),
+        !host.path_exists(&old_home(&host)),
         "and nothing is left in the home directory"
     );
 }
@@ -132,7 +139,5 @@ fn an_installation_that_was_told_where_to_live_is_left_alone() {
 
     result.expect("the listing runs");
     assert!(!printed.contains("Moving"), "{printed}");
-    assert!(host.path_exists(std::path::Path::new(
-        "/Users/someone/elsewhere/registry.json"
-    )));
+    assert!(host.path_exists(&PathBuf::from("/Users/someone/elsewhere/registry.json")));
 }
