@@ -450,3 +450,29 @@ fn a_target_that_names_nothing_is_refused_with_what_it_nearly_matched() {
     assert!(error.to_string().contains(SECOND_EMAIL), "{error}");
     assert_eq!(registry_of(&host).accounts.len(), 2);
 }
+
+/// A keychain item is filed under `$USER`. If that is not the name it was
+/// written under — a login rename, `sudo -u`, a launchd context, or a shell
+/// with `USER` unset — the delete finds nothing and reports success, while the
+/// keychain goes on holding a working Credential. The plaintext copy and the
+/// Profile directory do go, so there is nothing left for the user to notice by.
+#[test]
+fn a_removal_that_found_no_credential_does_not_claim_to_have_deleted_one() {
+    let host = machine_with_two_accounts();
+    let store = store_of(&host, SECOND_EMAIL);
+    // What the machine looks like when the item was filed under another name.
+    host.forget_keychain_item(&store.keychain_service, LOGIN_NAME);
+
+    let (result, printed) = run_remove(&host, SECOND_EMAIL);
+
+    result.expect("the Account is still forgotten");
+    assert!(!holds(&host, SECOND_EMAIL), "{printed}");
+    assert!(
+        !printed.contains("is deleted"),
+        "nothing was deleted, so nothing says it was:\n{printed}"
+    );
+    assert!(
+        printed.contains("$USER"),
+        "and the reason a Credential might still be out there is named:\n{printed}"
+    );
+}

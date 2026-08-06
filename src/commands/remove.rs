@@ -299,6 +299,11 @@ enum Deleted {
     /// Gone from both of the Profile's Credential Stores, and the Profile with
     /// it.
     Credential,
+    /// Both stores were asked and neither held anything to take. The Profile is
+    /// gone, but nothing was destroyed — and saying otherwise would tell
+    /// somebody a Credential is beyond recovery when it may be sitting in a
+    /// keychain under a different `$USER` than this shell has.
+    NothingWasThere,
     /// Left where it is, because another Account Perch holds keeps its own
     /// Credential in the same Profile.
     NothingSharedWith(String),
@@ -335,8 +340,9 @@ fn delete_the_credential_and_its_profile(
     }
 
     let store = account.store(host)?;
+    let mut anything_was_there = false;
     for kept_in in credentials::stores_for(host, &store) {
-        kept_in.forget(host).map_err(|error| {
+        let forgotten = kept_in.forget(host).map_err(|error| {
             error.with_note(&format!(
                 "Nothing was removed — {} is still held, so `perch remove` can be \
                  run again once {} can be written to.",
@@ -344,6 +350,7 @@ fn delete_the_credential_and_its_profile(
                 kept_in.describe(),
             ))
         })?;
+        anything_was_there |= forgotten == credentials::Forgotten::Credential;
     }
 
     if host.remove_dir_all(&store.config_dir).is_err() {
@@ -353,7 +360,11 @@ fn delete_the_credential_and_its_profile(
             store.config_dir.display()
         ));
     }
-    Ok(Deleted::Credential)
+    Ok(if anything_was_there {
+        Deleted::Credential
+    } else {
+        Deleted::NothingWasThere
+    })
 }
 
 /// What was given up, and what the user is standing on now.
@@ -367,6 +378,10 @@ fn report(
     let credential = match deleted {
         Deleted::Credential => "The Credential Perch held for it is deleted, and nothing lists it \
              or Cycles to it now."
+            .to_string(),
+        Deleted::NothingWasThere => "Nothing lists it or Cycles to it now. Neither of its \
+             Credential Stores held anything to delete — on macOS a keychain item is filed under \
+             `$USER`, so one written under a different login name is still there."
             .to_string(),
         Deleted::NothingSharedWith(sharer) => format!(
             "Nothing lists it or Cycles to it now. The Credential Perch held for \

@@ -147,26 +147,51 @@ impl CredentialStore {
         }
     }
 
-    /// Takes the Credential out of this store, if it holds one. A store that
-    /// held nothing is not a failure: this is how a copy that has been
-    /// superseded elsewhere is removed, and it is often already gone.
-    pub fn forget(&self, host: &dyn Host) -> Result<()> {
+    /// Takes the Credential out of this store, and says whether there was one.
+    ///
+    /// A store that held nothing is not a failure: this is how a copy that has
+    /// been superseded elsewhere is removed, and it is often already gone. But
+    /// it is not the same as one that gave a Credential up, and the caller is
+    /// sometimes about to tell the user which happened — `perch remove` says
+    /// the Credential Perch held is deleted, and the keychain item's account
+    /// name is `$USER`, which is not the same today as it was under `sudo -u`,
+    /// after a login rename, or in a launchd context. There, the delete is a
+    /// no-op that reads as success while the keychain goes on holding a working
+    /// Credential for an Account the tool just said it destroyed.
+    pub fn forget(&self, host: &dyn Host) -> Result<Forgotten> {
         match self {
             CredentialStore::Keychain { service, account } => {
                 match host.keychain_delete(service, account) {
-                    Ok(()) | Err(KeychainError::NotFound { .. }) => Ok(()),
-                    Err(_) if there_is_no_keychain_here(host) => Ok(()),
+                    Ok(()) => Ok(Forgotten::Credential),
+                    Err(KeychainError::NotFound { .. }) => Ok(Forgotten::Nothing),
+                    Err(_) if there_is_no_keychain_here(host) => Ok(Forgotten::Nothing),
                     Err(other) => Err(PerchError::from(other)),
                 }
             }
             CredentialStore::Plaintext { path } => {
-                host.remove_file(path).map_err(|err| PerchError::FileWrite {
-                    path: path.clone(),
-                    source: as_io(err),
+                let held = host.path_exists(path);
+                host.remove_file(path)
+                    .map_err(|err| PerchError::FileWrite {
+                        path: path.clone(),
+                        source: as_io(err),
+                    })?;
+                Ok(if held {
+                    Forgotten::Credential
+                } else {
+                    Forgotten::Nothing
                 })
             }
         }
     }
+}
+
+/// What a store gave up when it was asked to forget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Forgotten {
+    Credential,
+    /// The store held nothing to take. Ordinary for the store that was not
+    /// written; news when it is the only store there was.
+    Nothing,
 }
 
 /// Whether this machine has a keychain at all.
