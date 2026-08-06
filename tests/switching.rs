@@ -159,12 +159,13 @@ fn the_switch_captures_first_patches_the_identity_last_and_holds_claude_codes_lo
     assert_eq!(
         trace(&host),
         vec![
-            // Read before any lock is taken: a Profile nothing is running
-            // against does not change underneath Perch.
-            format!("read {SECOND_EMAIL}'s Profile"),
             format!("took {REFRESH_LOCK}"),
             format!("took {LEGACY_LOCK}"),
             format!("took {CONFIG_LOCK}"),
+            // Inside the locks, not before them: whether a client is running
+            // against either Profile is a statement about a moment, and taking
+            // the locks can take seconds.
+            format!("read {SECOND_EMAIL}'s Profile"),
             "read the live store".to_string(),
             format!("wrote {EMAIL}'s Profile"),
             format!("read {EMAIL}'s Profile"),
@@ -681,4 +682,41 @@ fn a_locked_keychain_reads_as_locked_rather_than_as_a_missing_account() {
 
     let error = result.expect_err("the keychain cannot be consulted");
     assert_eq!(error.exit_code(), EXIT_KEYCHAIN_UNAVAILABLE);
+}
+
+/// The window a liveness refusal asked before the locks leaves open.
+///
+/// Taking Claude Code's locks can take seconds — the wait is four of them. A
+/// `claude` started inside that wait is one a check made beforehand never saw,
+/// and the Switch would go on to replace the Credential that session is
+/// holding: the mid-task logout ADR 0005 exists to prevent. So the question is
+/// asked again once the locks are held and nothing can change the answer.
+#[test]
+fn a_client_that_starts_during_the_lock_wait_still_stops_the_switch() {
+    let host = machine_with_two_accounts();
+    let now = host.now();
+    let host = host
+        .with_dir_held_since(REFRESH_LOCK, now)
+        .once_while_waiting(move |host| {
+            // The holder gives the lock back — and in the same moment somebody
+            // starts working against the Profile being switched to.
+            host.remove_dir_all(Path::new(REFRESH_LOCK))
+                .expect("the holder is done");
+            host.set_file(
+                format!("{SECOND_PROFILE}/sessions/7788.json"),
+                &session_marker(7788, now),
+            );
+            host.set_live_process(7788);
+        });
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("that Credential belongs to the session holding it");
+    assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
+    assert!(error.to_string().contains("7788"), "{error}");
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(CREDENTIAL),
+        "and nothing was written"
+    );
 }

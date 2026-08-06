@@ -72,12 +72,14 @@ fn stopped(error: PerchError) -> Interrupted {
     }
 }
 
-/// Everything the three steps need, established before any lock is taken.
+/// Everything the three steps need, established under the locks.
 ///
-/// Reading the incoming Credential up front keeps the lock held for as short a
-/// time as possible, and is safe because a Profile that nothing is running
-/// against does not change underneath Perch — which is what the liveness
-/// refusal has just established.
+/// Under them, not before them: the liveness refusal is a statement about a
+/// moment, and taking a lock can take seconds. A `claude` started during that
+/// wait is one the refusal never saw, and the Switch would then replace the
+/// Credential that session is holding — the mid-task logout ADR 0005 exists to
+/// prevent. Once the locks are held, nothing can change the answer, which is
+/// the only condition under which asking is worth anything.
 struct Prepared {
     version: String,
     store: Store,
@@ -92,10 +94,12 @@ pub fn perform(
     incoming: &Account,
     outgoing: Option<&Account>,
 ) -> std::result::Result<Captured, Interrupted> {
-    let prepared = prepare(host, incoming, outgoing).map_err(stopped)?;
+    let (version, store) = ground(host).map_err(stopped)?;
 
     let mut incoming_is_live = false;
-    let switched: Result<Captured> = lock::under(host, probe::locks_for(&prepared.store), |held| {
+    let switched: Result<Captured> = lock::under(host, probe::locks_for(&store), |held| {
+        let prepared = prepare(host, incoming, outgoing, version, store)?;
+
         let captured = capture(host, &prepared, outgoing)
             .map_err(|error| error.with_note(&nothing_happened(outgoing)))?;
 
@@ -112,9 +116,8 @@ pub fn perform(
     });
 
     switched.map_err(|error| Interrupted {
-        error,
         incoming_is_live,
-        quarantine: None,
+        ..stopped(error)
     })
 }
 
@@ -133,13 +136,15 @@ pub fn perform(
 /// out of it rather than passed in, so the same store that a `perch switch`
 /// tomorrow will read is the store this proves works today.
 pub fn make_live(host: &dyn Host, account: &Account) -> std::result::Result<(), NotLanded> {
-    let prepared = prepare(host, account, None).map_err(|error| NotLanded {
+    let (version, store) = ground(host).map_err(|error| NotLanded {
         error,
         is_live: false,
     })?;
 
     let mut is_live = false;
-    let landed = lock::under(host, probe::locks_for(&prepared.store), |held| {
+    let landed = lock::under(host, probe::locks_for(&store), |held| {
+        let prepared = prepare(host, account, None, version, store)?;
+
         profile::store_credential(host, &prepared.store, prepared.credential.as_str())?;
         is_live = true;
         held.renew();
@@ -177,10 +182,20 @@ pub fn already_landed(host: &dyn Host, account: &Account) -> Result<bool> {
         .is_some_and(|identity| identity.email.eq_ignore_ascii_case(account.email())))
 }
 
-fn prepare(host: &dyn Host, incoming: &Account, outgoing: Option<&Account>) -> Result<Prepared> {
-    let version = probe::claude_version(host)?;
-    let store = probe::default_store(host)?;
+/// The two things that are true whatever else is: which Claude Code is
+/// installed, and where the Default Profile is. Established before the locks,
+/// because the locks are derived from the second of them.
+fn ground(host: &dyn Host) -> Result<(String, Store)> {
+    Ok((probe::claude_version(host)?, probe::default_store(host)?))
+}
 
+fn prepare(
+    host: &dyn Host,
+    incoming: &Account,
+    outgoing: Option<&Account>,
+    version: String,
+    store: Store,
+) -> Result<Prepared> {
     // Before anything is written, and in the order the user would care about:
     // the Profile being read from, then the one being written back to.
     refuse_if_live(host, incoming, &version)?;

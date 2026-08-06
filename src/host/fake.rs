@@ -108,6 +108,15 @@ pub struct KeychainLock {
 /// namespace stays in [`crate::probe`] and out of the fake.
 pub type Login = Box<dyn Fn(&FakeHost, &Path) -> i32>;
 
+/// Something that happens while Perch waits.
+///
+/// Contending for a lock is the only thing Perch waits on, and the world does
+/// not stand still meanwhile: a `claude` started during that wait is exactly
+/// what the questions asked *under* the locks are asked again for. Without this
+/// the fake can only present a world that was already settled before the
+/// command began.
+pub type WhileWaiting = Box<dyn Fn(&FakeHost)>;
+
 pub struct FakeHost {
     home: PathBuf,
     now: RefCell<DateTime<Utc>>,
@@ -130,6 +139,8 @@ pub struct FakeHost {
     keychain_lock: RefCell<Option<KeychainLock>>,
     executions: RefCell<BTreeMap<String, Execution>>,
     login: RefCell<Option<Login>>,
+    /// What happens the first time Perch waits, and then does not happen again.
+    while_waiting: RefCell<Option<WhileWaiting>>,
     /// The running processes, each with when it began — or `None` for one whose
     /// start the operating system will not say.
     live_processes: RefCell<BTreeMap<u32, Option<DateTime<Utc>>>>,
@@ -171,6 +182,7 @@ impl FakeHost {
             keychain_lock: RefCell::new(None),
             executions: RefCell::new(BTreeMap::new()),
             login: RefCell::new(None),
+            while_waiting: RefCell::new(None),
             live_processes: RefCell::new(BTreeMap::new()),
             interactive: RefCell::new(true),
             answers: RefCell::new(VecDeque::new()),
@@ -333,6 +345,23 @@ impl FakeHost {
     pub fn with_login(self, login: impl Fn(&FakeHost, &Path) -> i32 + 'static) -> Self {
         *self.login.borrow_mut() = Some(Box::new(login));
         self
+    }
+
+    /// What the rest of the machine does the first time Perch waits for a lock
+    /// — the one point in a command where something else can get in.
+    ///
+    /// Once, because it stands for a thing that happens rather than for a
+    /// condition: a client starting, a lock being given back.
+    pub fn once_while_waiting(self, happens: impl Fn(&FakeHost) + 'static) -> Self {
+        *self.while_waiting.borrow_mut() = Some(Box::new(happens));
+        self
+    }
+
+    /// A process that is running, for a world that is already built.
+    pub fn set_live_process(&self, pid: u32) {
+        self.live_processes
+            .borrow_mut()
+            .insert(pid, Some(DateTime::<Utc>::MIN_UTC));
     }
 
     /// A directory somebody else already holds, last written when they say.
@@ -882,6 +911,13 @@ impl Host for FakeHost {
         self.record(Effect::Slept { millis });
         let waited = *self.now.borrow() + chrono::Duration::milliseconds(millis as i64);
         *self.now.borrow_mut() = waited;
+
+        // Taken out before it runs, so it can reach back into the fake without
+        // meeting a borrow this call is still holding.
+        let happens = self.while_waiting.borrow_mut().take();
+        if let Some(happens) = happens {
+            happens(self);
+        }
     }
 
     fn is_interactive(&self) -> bool {
