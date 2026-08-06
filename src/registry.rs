@@ -693,17 +693,36 @@ impl Registry {
     }
 }
 
-/// `$PERCH_HOME`, or `~/.perch` — an error when neither is knowable, because
-/// a machine that cannot say where home is gets a refusal rather than a
+/// `$PERCH_HOME`, or `~/.config/.perch` — an error when neither is knowable,
+/// because a machine that cannot say where home is gets a refusal rather than a
 /// registry written into the filesystem root.
+///
+/// Under `~/.config` rather than directly in home, on every platform including
+/// Windows. A tool that keeps its state in the home directory adds a line to
+/// what somebody sees every time they list it, and Perch's state is not
+/// something anybody reads by hand. One place on every platform rather than the
+/// platform's own convention, because a Profile's keychain namespace is derived
+/// from its path (ADR 0001): a path that differs between machines is a
+/// Credential that cannot be moved between them.
+///
+/// `~/.config` is created if it is not there — at 0700, along with everything
+/// below it, since what goes under it here is Credentials.
 pub fn perch_home(host: &dyn Host) -> Result<PathBuf> {
     if let Some(overridden) = host.env_var("PERCH_HOME") {
         return Ok(PathBuf::from(overridden));
     }
-    let home = host
-        .home_dir()
-        .map_err(|err| PerchError::Other(err.to_string()))?;
-    Ok(home.join(".perch"))
+    Ok(home_dir(host)?.join(".config").join(".perch"))
+}
+
+/// Where Perch kept its state before it moved under `~/.config`. Read only by
+/// the migration, which is the last thing that has any business knowing it.
+pub fn perch_home_before_the_move(host: &dyn Host) -> Result<PathBuf> {
+    Ok(home_dir(host)?.join(".perch"))
+}
+
+fn home_dir(host: &dyn Host) -> Result<PathBuf> {
+    host.home_dir()
+        .map_err(|err| PerchError::Other(err.to_string()))
 }
 
 pub fn registry_path(host: &dyn Host) -> Result<PathBuf> {
@@ -992,7 +1011,7 @@ mod tests {
     /// leave it malformed for good.
     #[test]
     fn a_save_that_fails_leaves_the_registry_exactly_as_it_was() {
-        let path = "/Users/someone/.perch/registry.json";
+        let path = "/Users/someone/.config/.perch/registry.json";
         let before = format!("{{\"version\":{CURRENT_VERSION},\"accounts\":[]}}");
         let host = crate::host::FakeHost::new()
             .with_file(path, &before)

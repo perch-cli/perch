@@ -525,6 +525,17 @@ impl FakeHost {
         self.files.borrow().get(path.as_ref()).cloned()
     }
 
+    /// Every file at or below a path, for a test that has to say what a whole
+    /// directory tree holds.
+    pub fn paths_under(&self, root: impl AsRef<Path>) -> Vec<PathBuf> {
+        self.files
+            .borrow()
+            .keys()
+            .filter(|path| path.starts_with(root.as_ref()))
+            .cloned()
+            .collect()
+    }
+
     /// The permissions a path ended up with, so a test can say that a file
     /// holding a Credential was created for its owner alone.
     pub fn mode_of(&self, path: impl AsRef<Path>) -> Option<u32> {

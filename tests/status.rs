@@ -22,7 +22,7 @@ fn adopted_machine(utilization: &str) -> FakeHost {
       }},
       "plan": "pro",
       "profile": {{
-        "dir": "/Users/someone/.perch/profiles/someone-example-com",
+        "dir": "/Users/someone/.config/.perch/profiles/someone-example-com",
         "keychain_service": "Claude Code-credentials-abcd1234",
         "keychain_account": "someone"
       }},

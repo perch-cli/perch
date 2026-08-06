@@ -480,7 +480,7 @@ fn a_profile_that_cannot_be_completed_is_not_left_half_built() {
     let host = host
         .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE))
         .with_unwritable_file(
-            "/Users/someone/.perch/profiles/overflow-example-com/.claude.json",
+            "/Users/someone/.config/.perch/profiles/overflow-example-com/.claude.json",
             "Permission denied (os error 13)",
         );
     let (result, _) = run_add(&host, add_to_group("work"));

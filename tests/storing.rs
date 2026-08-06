@@ -325,7 +325,7 @@ const REGISTRY_FROM_BEFORE_STORES_WERE_DERIVED: &str = r#"{
       },
       "plan": "pro",
       "profile": {
-        "dir": "/Users/someone/.perch/profiles/somewhere-else",
+        "dir": "/Users/someone/.config/.perch/profiles/somewhere-else",
         "keychain_service": "Claude Code-credentials-deadbeef",
         "keychain_account": "someone"
       },

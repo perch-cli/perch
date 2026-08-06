@@ -25,8 +25,8 @@ const REFRESH_LOCK: &str = "/Users/someone/.claude/.oauth_refresh.lock";
 const LEGACY_LOCK: &str = "/Users/someone/.claude.lock";
 const CONFIG_LOCK: &str = "/Users/someone/.claude.json.lock";
 
-const FIRST_PROFILE: &str = "/Users/someone/.perch/profiles/someone-example-com";
-const SECOND_PROFILE: &str = "/Users/someone/.perch/profiles/overflow-example-com";
+const FIRST_PROFILE: &str = "/Users/someone/.config/.perch/profiles/someone-example-com";
+const SECOND_PROFILE: &str = "/Users/someone/.config/.perch/profiles/overflow-example-com";
 
 /// The keychain namespace of an Account's Profile, derived the way every
 /// command derives it. The spelling of the directory decides the hash, and a
@@ -573,7 +573,7 @@ fn switching_to_the_account_that_is_already_active_changes_nothing() {
     assert!(
         !host.effects().iter().any(|effect| matches!(
             effect,
-            Effect::Took(dir) if !dir.starts_with("/Users/someone/.perch")
+            Effect::Took(dir) if !dir.starts_with("/Users/someone/.config/.perch")
         )),
         "none of Claude Code's locks is taken, and no Credential is rewritten, \
          for a Switch that would change nothing"

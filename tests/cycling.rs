@@ -283,7 +283,7 @@ fn being_already_on_the_best_account_rewrites_no_credentials() {
     assert!(
         !host.effects().iter().any(|effect| matches!(
             effect,
-            Effect::Took(dir) if !dir.starts_with("/Users/someone/.perch")
+            Effect::Took(dir) if !dir.starts_with("/Users/someone/.config/.perch")
         )),
         "none of Claude Code's locks is taken, and no Credential is rewritten, \
          for a Switch that would change nothing"
@@ -452,7 +452,7 @@ fn a_cycle_onto_a_live_profile_is_refused_like_any_other_switch() {
     let host = three_accounts_in_one_group();
     observed(&host, EMAIL, vec![window("5-hour", 96.0)]);
     observed(&host, SECOND_EMAIL, vec![window("5-hour", 18.0)]);
-    let profile = "/Users/someone/.perch/profiles/overflow-example-com";
+    let profile = "/Users/someone/.config/.perch/profiles/overflow-example-com";
     let marker = format!(
         r#"{{"pid":4242,"cwd":"/Users/someone/work","startedAt":{}}}"#,
         host.now().timestamp_millis()
