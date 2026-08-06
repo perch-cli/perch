@@ -27,7 +27,7 @@ pub enum AliasCommand {
 }
 
 pub fn run(host: &dyn Host, command: AliasCommand, out: &mut dyn Write) -> Result<()> {
-    let mut registry = adopt::ensure_adopted(host, out)?;
+    let (_perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
 
     match command {
         AliasCommand::Set { name, target } => {

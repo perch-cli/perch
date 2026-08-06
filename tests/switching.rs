@@ -567,13 +567,15 @@ fn switching_to_the_account_that_is_already_active_changes_nothing() {
         error.to_string().contains("already the active Account"),
         "{error}"
     );
+    // Perch's own registry lock is taken by every command; what must not be
+    // taken is one of Claude Code's, because taking those is the Switch.
     assert!(
-        !host
-            .effects()
-            .iter()
-            .any(|effect| matches!(effect, Effect::Took(_))),
-        "no lock is taken, and no Credential is rewritten, for a Switch that \
-         would change nothing"
+        !host.effects().iter().any(|effect| matches!(
+            effect,
+            Effect::Took(dir) if !dir.starts_with("/Users/someone/.perch")
+        )),
+        "none of Claude Code's locks is taken, and no Credential is rewritten, \
+         for a Switch that would change nothing"
     );
 }
 
@@ -616,7 +618,7 @@ fn a_lock_somebody_is_holding_stops_the_switch_without_changing_anything() {
 
     let error = result.expect_err("the lock is somebody else's");
     assert!(
-        error.to_string().contains("Claude Code is holding"),
+        error.to_string().contains("is held by Claude Code"),
         "{error}"
     );
     assert!(error.to_string().contains("Nothing was changed"), "{error}");

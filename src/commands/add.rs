@@ -32,7 +32,10 @@ pub struct AddArgs {
 }
 
 pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
-    let mut registry = adopt::ensure_adopted(host, out)?;
+    // Read rather than held. A login is a browser round trip the user drives,
+    // and holding the registry lock across it would block every other Perch on
+    // the machine for as long as somebody takes to find their password.
+    let registry = adopt::ensure_adopted(host, out)?;
 
     // Everything knowable before the login is checked before the login, so a
     // name Perch was always going to refuse never costs a browser round trip.
@@ -54,6 +57,15 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     let pending = login::perform(host, out, &announcement(&registry))?;
     refuse_an_account_perch_already_holds(host, &registry, &pending.identity)?;
     let group = resolve_group(host, out, &args, &pending.identity)?;
+    drop(registry);
+
+    // Everything from here is decided against the registry as it is *now*, with
+    // the other Perches shut out. The copy above was read before a login that
+    // may have taken minutes, and writing it back would revert whatever else
+    // ran in the meantime — a `perch switch` in another terminal, most
+    // damagingly, whose `active` the next Capture depends on (ADR 0006).
+    let (_perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    refuse_an_account_perch_already_holds(host, &registry, &pending.identity)?;
     registry.refuse_taken_names(args.alias.as_deref(), group.as_deref())?;
 
     // Naming a Group on `add` declares it, so an Account is never in a Group

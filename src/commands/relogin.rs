@@ -38,7 +38,10 @@ pub struct ReloginArgs {
 }
 
 pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()> {
-    let mut registry = adopt::ensure_adopted(host, out)?;
+    // Read rather than held: the registry lock is not carried across a browser
+    // login. It is taken below, against a registry read fresh once the login
+    // has come back.
+    let registry = adopt::ensure_adopted(host, out)?;
 
     let found = target::resolve_account(&registry, &args.target)?;
     say(out, &found.matched)?;
@@ -72,6 +75,20 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
         &announcement(&registry, &account, repairing_the_account_you_are_on),
     )?;
     refuse_a_different_account(&registry, &account, &produced.identity)?;
+    drop(registry);
+
+    // From here the registry is the one on disk now, with the other Perches shut
+    // out: the copy read before the login is however many commands out of date,
+    // and writing it back would revert them.
+    let (_perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    if registry.account(account.email()).is_none() {
+        return Err(PerchError::NotFound(format!(
+            "{} was removed while that login was happening, so there is nothing \
+             left to repair.\n\
+             The login itself worked — `perch add` holds it as a new Account.",
+            account.email()
+        )));
+    }
 
     settle_into_its_own_profile(host, &account, &produced)?;
 

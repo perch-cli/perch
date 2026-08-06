@@ -88,6 +88,17 @@ pub fn under<T, E: From<PerchError>>(
     locks: Vec<LockSpec>,
     work: impl FnOnce(&mut Held<'_>) -> std::result::Result<T, E>,
 ) -> std::result::Result<T, E> {
+    let mut held = take_all(host, locks).map_err(E::from)?;
+    work(&mut held)
+}
+
+/// Takes every lock in `locks`, in the order given, and hands back the hold —
+/// which gives them all back when it is dropped.
+///
+/// [`under`] is the shape to reach for. This one is for a hold that has to last
+/// as long as a whole command rather than as long as a closure: Perch's own
+/// registry lock spans a load, whatever the command does, and the save.
+pub fn take_all(host: &dyn Host, locks: Vec<LockSpec>) -> Result<Held<'_>> {
     let mut held = Held {
         host,
         taken: Vec::new(),
@@ -100,18 +111,15 @@ pub fn under<T, E: From<PerchError>>(
         // contention, which is a different problem with a different answer.
         if let Some(parent) = lock.dir.parent() {
             host.create_dir_all(parent).map_err(|err| {
-                E::from(PerchError::Other(format!(
-                    "could not create {}: {err}",
-                    parent.display()
-                )))
+                PerchError::Other(format!("could not create {}: {err}", parent.display()))
             })?;
         }
 
-        take(host, &lock).map_err(E::from)?;
+        take(host, &lock)?;
         held.taken.push((lock, host.now()));
     }
 
-    work(&mut held)
+    Ok(held)
 }
 
 /// Takes one lock, waiting out a holder that is alive and taking over from one
@@ -143,11 +151,12 @@ fn take(host: &dyn Host, lock: &LockSpec) -> Result<()> {
     }
 
     Err(PerchError::Other(format!(
-        "Claude Code is holding {} ({}) and did not give it back.\n\
-         Nothing was changed. Try again in a moment; if it persists, quit \
-         Claude Code and run this again.",
+        "{} ({}) is held by {} and was not given back.\n\
+         Nothing was changed. Try again in a moment; if it persists, quit it \
+         and run this again.",
         lock.name,
-        lock.dir.display()
+        lock.dir.display(),
+        lock.held_by,
     )))
 }
 
@@ -175,6 +184,7 @@ mod tests {
     fn a_lock(dir: &str) -> LockSpec {
         LockSpec {
             name: "the refresh lock",
+            held_by: "Claude Code",
             dir: PathBuf::from(dir),
             stale_millis: 60_000,
             update_millis: 5_000,

@@ -533,6 +533,9 @@ pub fn read_identity(host: &dyn Host, store: &Store, version: &str) -> Result<Op
 pub struct LockSpec {
     /// How the lock is named when Perch has to say it could not take one.
     pub name: &'static str,
+    /// Whose lock it is, for the same message: quitting the right program is
+    /// the whole of the advice a contended lock can give.
+    pub held_by: &'static str,
     pub dir: PathBuf,
     pub stale_millis: i64,
     pub update_millis: i64,
@@ -566,18 +569,21 @@ pub fn locks_for(store: &Store) -> Vec<LockSpec> {
     vec![
         LockSpec {
             name: "the refresh lock",
+            held_by: "Claude Code",
             dir: store.config_dir.join(".oauth_refresh.lock"),
             stale_millis: REFRESH_STALE_MILLIS,
             update_millis: REFRESH_UPDATE_MILLIS,
         },
         LockSpec {
             name: "the legacy config-home lock",
+            held_by: "Claude Code",
             dir: legacy,
             stale_millis: REFRESH_STALE_MILLIS,
             update_millis: REFRESH_UPDATE_MILLIS,
         },
         LockSpec {
             name: "the config file lock",
+            held_by: "Claude Code",
             dir: PathBuf::from(config_file),
             stale_millis: CONFIG_STALE_MILLIS,
             update_millis: CONFIG_UPDATE_MILLIS,

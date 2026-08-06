@@ -37,7 +37,7 @@ pub struct StatusArgs {
 }
 
 pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()> {
-    let mut registry = adopt::ensure_adopted(host, out)?;
+    let (_perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
     let active = active_email(&registry)?;
 
     // Being in no Group is not a Group (ADR 0017), so from an ungrouped Account

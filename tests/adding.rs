@@ -507,3 +507,41 @@ fn adding_an_account_makes_no_network_call() {
 
     assert!(host.http_calls().is_empty());
 }
+
+/// The interleaving Perch's registry lock exists for.
+///
+/// `perch add` reads the registry, then spends minutes in a browser. Another
+/// terminal switches while it waits. If the add then wrote its own copy back
+/// wholesale, `active` would silently revert to the Account that was active
+/// before the Switch — and the next Capture would copy the *live* Credential,
+/// which belongs to the Account switched to, over that Account's own good copy
+/// and destroy it (ADR 0006).
+#[test]
+fn an_add_does_not_revert_a_switch_that_ran_while_its_login_was_open() {
+    let host = machine_with_two_accounts().with_login(|host, dir| {
+        // Another terminal, while the browser is open. It lands, and records
+        // itself as active.
+        run_switch(host, SECOND_EMAIL)
+            .0
+            .expect("the other terminal switches");
+        login_producing(THIRD_CREDENTIAL, THIRD_IDENTITY_FILE)(host, dir)
+    });
+
+    let (result, printed) = run_add(
+        &host,
+        AddArgs {
+            no_group: true,
+            ..AddArgs::default()
+        },
+    );
+
+    result.expect("the Account is added");
+    let registry = registry_of(&host);
+    assert!(registry.account(THIRD_EMAIL).is_some(), "{printed}");
+    assert_eq!(
+        registry.active.as_deref(),
+        Some(SECOND_EMAIL),
+        "the Switch that happened during the login stands: an add records an \
+         Account, it does not put the whole registry back to what it was"
+    );
+}
