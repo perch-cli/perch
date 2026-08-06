@@ -138,12 +138,22 @@ fn indentation_of_the_line(contents: &str, at: usize) -> usize {
 }
 
 /// Rewrites a block at a given indentation, whatever it was written at before.
+///
+/// Counted in characters, as [`indentation_of_the_line`] counts the
+/// indentation it is being matched to. The block is read verbatim out of a
+/// `.claude.json` Perch does not own, so its whitespace can be anything Unicode
+/// calls whitespace — and a width measured in bytes and then used to cut a
+/// string would slice one of those characters in half and panic. Not somewhere
+/// a panic can be afforded: this runs inside `patch_identity`, after the
+/// incoming Credential is already live, where what the user needs is the
+/// recovery instructions rather than a backtrace.
 fn indent_to_match(block: &str, indentation: usize) -> String {
+    let width_of = |line: &str| line.chars().take_while(|c| c.is_whitespace()).count();
     let own = block
         .lines()
         .skip(1)
         .filter(|line| !line.trim().is_empty())
-        .map(|line| line.len() - line.trim_start().len())
+        .map(width_of)
         .min()
         .unwrap_or(0);
 
@@ -155,7 +165,8 @@ fn indent_to_match(block: &str, indentation: usize) -> String {
             if index == 0 {
                 line.to_string()
             } else {
-                format!("{padding}{}", &line[own.min(line.len())..])
+                let undented: String = line.chars().skip(own).collect();
+                format!("{padding}{undented}")
             }
         })
         .collect::<Vec<_>>()
@@ -165,6 +176,37 @@ fn indent_to_match(block: &str, indentation: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The block is read verbatim out of a `.claude.json` Perch does not own,
+    /// so its whitespace is whatever is in that file. A width measured in bytes
+    /// and then used to cut a string slices a multi-byte character in half —
+    /// and this runs after the incoming Credential is already live, where a
+    /// panic replaces the recovery instructions the user actually needs.
+    #[test]
+    fn a_block_indented_with_multi_byte_whitespace_is_re_indented_rather_than_split() {
+        // U+00A0 NO-BREAK SPACE: two bytes, one character, and whitespace as
+        // far as `trim_start` is concerned.
+        let block = "{\n\u{a0}\u{a0}\"a\": 1,\n\u{a0}\u{a0}\"b\": 2\n\u{a0}\u{a0}}";
+
+        assert_eq!(
+            indent_to_match(block, 2),
+            "{\n  \"a\": 1,\n  \"b\": 2\n  }",
+            "two characters of indentation are two characters, not four bytes"
+        );
+    }
+
+    /// The case that used to panic outright: the narrowest line's indentation,
+    /// measured in bytes, falls inside a character of a wider one.
+    #[test]
+    fn a_block_whose_lines_use_different_multi_byte_whitespace_does_not_panic() {
+        // Two of U+00A0 is four bytes; two of U+2028 is six, and byte four is
+        // the middle of the second one.
+        let block = "{\n\u{a0}\u{a0}\"a\": 1,\n\u{2028}\u{2028}\"b\": 2\n\u{a0}\u{a0}}";
+
+        let indented = indent_to_match(block, 0);
+
+        assert_eq!(indented, "{\n\"a\": 1,\n\"b\": 2\n}");
+    }
 
     const DOCUMENT: &str = r#"{
   "numStartups": 41,
