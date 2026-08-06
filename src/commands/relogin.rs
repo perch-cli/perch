@@ -100,18 +100,24 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
 
     report(out, &registry, &account, was_quarantined)?;
 
-    if repairing_the_account_you_are_on {
-        make_it_live(host, &account)?;
-        say(
-            out,
-            &format!(
-                "Its fresh Credential is the live one, so {} is working again \
-                 everywhere without a Switch.",
-                account.email()
-            ),
-        )?;
+    // Asked of the registry as it is rather than as it was before the login: if
+    // another terminal switched away in the meantime, the live Credential is
+    // somebody else's now, and putting this one over it without a Capture would
+    // destroy theirs (ADR 0006).
+    if registry.active.as_deref() != Some(account.email()) {
+        return Ok(());
     }
-    Ok(())
+    if let Err(error) = make_it_live(host, &account) {
+        return Err(no_longer_on_anybody(host, &mut registry, &account, error));
+    }
+    say(
+        out,
+        &format!(
+            "Its fresh Credential is the live one, so {} is working again \
+             everywhere without a Switch.",
+            account.email()
+        ),
+    )
 }
 
 /// Refuses a login that authenticated somebody else.
@@ -195,6 +201,42 @@ fn make_it_live(host: &dyn Host, account: &Account) -> Result<()> {
             account.email(),
         ))
     })
+}
+
+/// Stops Perch claiming to be on anybody, after a repair that could not be made
+/// live.
+///
+/// What is left is a fresh Credential in the Account's own Profile and the
+/// broken one it replaced still live. If `active` went on naming this Account,
+/// the very next `perch switch` would Capture that broken copy over the fresh
+/// one — ADR 0023 names this hazard and defends against it inside `relogin`,
+/// but not on the ordinary command a user reaches for next. With nothing
+/// active there is nothing to Capture into, so the repair survives whatever
+/// they do.
+fn no_longer_on_anybody(
+    host: &dyn Host,
+    registry: &mut Registry,
+    account: &Account,
+    error: PerchError,
+) -> PerchError {
+    registry.active = None;
+    let recorded = match registry::save(host, registry) {
+        Ok(()) => format!(
+            "Perch holds no active Account now, so nothing will Capture the \
+             Credential that stopped working over the fresh one. \
+             `perch switch {}` puts you back on it.",
+            account.email(),
+        ),
+        Err(unsaved) => format!(
+            "Perch could not stop recording {} as active ({unsaved}), so do not \
+             run `perch switch` until `perch relogin {}` has worked: a Switch \
+             would Capture the Credential that stopped working over the fresh \
+             one.",
+            account.email(),
+            account.email(),
+        ),
+    };
+    error.with_note(&recorded)
 }
 
 fn announcement(registry: &Registry, account: &Account, is_the_active_one: bool) -> String {
