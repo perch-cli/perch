@@ -673,3 +673,31 @@ fn what_an_abandoned_login_left_behind_is_reaped_by_the_next_command() {
     assert_eq!(host.file(&store.credentials_file), None);
     assert!(!host.path_exists(&abandoned), "and so is its directory");
 }
+
+/// The Group prompt re-asks rather than failing, because "losing the Account
+/// over a typo would be a poor trade" — and a name that is already an Alias is
+/// exactly as much a typo as a name with a space in it. It used to pass the
+/// shape check, leave the loop, and abort the command with the browser round
+/// trip already spent and discarded.
+#[test]
+fn a_group_name_that_is_already_an_alias_is_asked_about_again() {
+    let host = ready_to_add().with_answers(&["overflow", "work"]);
+    set_alias(&host, "overflow", EMAIL).0.expect("named");
+
+    let (result, printed) = run_add(&host, AddArgs::default());
+
+    result.expect("the login is not thrown away over a name");
+    assert!(
+        printed.contains("already an Alias") || printed.contains("already names"),
+        "the collision is explained where it can still be corrected:\n{printed}"
+    );
+    assert_eq!(
+        registry_of(&host)
+            .account(SECOND_EMAIL)
+            .expect("the Account was added")
+            .group
+            .as_deref(),
+        Some("work"),
+        "and the second answer is the one that stands"
+    );
+}

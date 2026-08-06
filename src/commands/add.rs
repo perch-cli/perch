@@ -56,7 +56,7 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
 
     let pending = login::perform(host, out, &announcement(&registry))?;
     refuse_an_account_perch_already_holds(host, &registry, &pending.identity)?;
-    let group = resolve_group(host, out, &args, &pending.identity)?;
+    let group = resolve_group(host, out, &registry, &args, &pending.identity)?;
     drop(registry);
 
     // Everything from here is decided against the registry as it is *now*, with
@@ -194,6 +194,7 @@ fn refuse_an_account_perch_already_holds(
 fn resolve_group(
     host: &dyn Host,
     out: &mut dyn Write,
+    registry: &Registry,
     args: &AddArgs,
     identity: &Identity,
 ) -> Result<Option<String>> {
@@ -223,7 +224,11 @@ fn resolve_group(
 
     // A name Perch cannot accept is asked about again rather than failing the
     // command: the login has already happened by now, and losing the Account
-    // over a typo would be a poor trade.
+    // over a typo would be a poor trade. Every reason a name can be refused is
+    // asked here, not only whether it is a usable shape — a name that collides
+    // with an existing Alias is exactly as much a typo as a name with a space
+    // in it, and used to abort the command with the browser round trip already
+    // spent.
     loop {
         let answer = match ask(host, out, &question)? {
             Some(answer) => answer.trim().to_string(),
@@ -242,7 +247,9 @@ fn resolve_group(
 
         match &chosen {
             None => return Ok(None),
-            Some(name) => match registry::validate_name(NameKind::Group, name) {
+            Some(name) => match registry::validate_name(NameKind::Group, name)
+                .and_then(|()| registry.refuse_taken_names(args.alias.as_deref(), Some(name)))
+            {
                 Ok(()) => return Ok(chosen),
                 Err(err) => say(out, &format!("{err}"))?,
             },
