@@ -17,8 +17,8 @@ use perch::host::{FakeHost, Host};
 use perch::probe::Identity;
 use perch::registry::Account;
 
-const FIRST_PROFILE: &str = "/Users/someone/.config/.perch/profiles/someone-example-com";
-const SECOND_PROFILE: &str = "/Users/someone/.config/.perch/profiles/overflow-example-com";
+const FIRST_PROFILE: &str = "/Users/someone/.config/perch/profiles/someone-example-com";
+const SECOND_PROFILE: &str = "/Users/someone/.config/perch/profiles/overflow-example-com";
 
 /// The config directory every client reads — where a Switch, and the landing a
 /// removal makes, has to write.

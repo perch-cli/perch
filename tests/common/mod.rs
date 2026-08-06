@@ -26,7 +26,7 @@ pub const CLAUDE_VERSION: &str = "2.1.221";
 pub const LOGIN_NAME: &str = "someone";
 pub const EMAIL: &str = "someone@example.com";
 pub const DEFAULT_SERVICE: &str = "Claude Code-credentials";
-pub const REGISTRY_PATH: &str = "/Users/someone/.config/.perch/registry.json";
+pub const REGISTRY_PATH: &str = "/Users/someone/.config/perch/registry.json";
 pub const IDENTITY_PATH: &str = "/Users/someone/.claude.json";
 
 pub const CREDENTIAL: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-test","refreshToken":"sk-ant-ort01-test","expiresAt":1785000000000,"scopes":["user:inference","user:profile"],"subscriptionType":"pro"}}"#;
