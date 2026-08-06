@@ -99,6 +99,39 @@ pub enum Platform {
     Other,
 }
 
+/// How one path is made to stand for another, which is the whole of how Shared
+/// State reaches the Profile a Run launches (ADR 0026).
+///
+/// Three kinds rather than one, because the platforms do not agree on which of
+/// them a person may make: only symbolic links need Developer Mode or elevation
+/// on Windows, and junctions and hard links need neither. Which kind is used
+/// where is [`crate::reconcile`]'s decision; making one is the Host's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Link {
+    /// A path that names another path. What everything but Windows uses, and
+    /// the kind that survives its target being replaced rather than merely
+    /// edited — a new file at the same name is still the file it points at.
+    Symbolic,
+    /// Windows' link for a directory. Works without Developer Mode and without
+    /// elevation, and exists nowhere else.
+    Junction,
+    /// A second name for the same file, which is why it is a share rather than
+    /// a copy — and why it stops being one the moment the file it names is
+    /// replaced rather than written through.
+    Hard,
+}
+
+impl Link {
+    /// How to say what could not be made, in a refusal a person has to act on.
+    pub fn describe(self) -> &'static str {
+        match self {
+            Link::Symbolic => "a symbolic link",
+            Link::Junction => "a directory junction",
+            Link::Hard => "a hard link",
+        }
+    }
+}
+
 /// The permissions a file holding a Credential is created with, and the mode
 /// anything looser is tightened to: the owner, and nobody else (ADR 0020).
 pub const PRIVATE_FILE_MODE: u32 = 0o600;
@@ -241,6 +274,36 @@ pub trait Host {
 
     /// Removes a file. A file that was not there is not a failure.
     fn remove_file(&self, path: &Path) -> Result<(), HostError>;
+
+    // ---- links ----------------------------------------------------------
+
+    /// Makes `at` a link of `kind` standing for `target`.
+    ///
+    /// The one way Shared State reaches a Run's Profile, because it is the only
+    /// one that cannot diverge (ADR 0026). A kind the platform will not make is
+    /// an error rather than a quieter kind substituted for it: which link was
+    /// made decides what happens when the target is replaced, so the caller
+    /// chooses and hears about it.
+    fn link(&self, kind: Link, target: &Path, at: &Path) -> Result<(), HostError>;
+
+    /// What a path links to, or `None` when what is there is not a link.
+    ///
+    /// Answers for the link itself rather than for what it points at, so a link
+    /// whose target has gone is still a link — which is the whole of how a
+    /// broken one is found and repaired. [`HostError::NotFound`] means nothing
+    /// is there at all, which is a third answer and a different repair.
+    ///
+    /// A hard link is not a link here, and cannot be: it is a name for a file,
+    /// indistinguishable from the file's first name.
+    fn link_target(&self, path: &Path) -> Result<Option<PathBuf>, HostError>;
+
+    /// Removes a link without touching what it points at.
+    ///
+    /// Its own operation because the platforms disagree about which call takes
+    /// one: a Windows junction is removed as a directory and a file symlink as
+    /// a file, and `remove_dir_all` on either would be a walk into somebody
+    /// else's directory.
+    fn remove_link(&self, path: &Path) -> Result<(), HostError>;
 
     // ---- keychain -------------------------------------------------------
 

@@ -39,6 +39,14 @@ thiserror = "2"
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
+# A directory junction is how Shared State reaches a Run's Profile on a Windows
+# without Developer Mode (ADR 0026), and it is a reparse point the standard
+# library will not write. The alternative was a hand-built REPARSE_DATA_BUFFER
+# through DeviceIoControl — precisely the class of `unsafe` ADR 0021 declined to
+# write — and this sits behind the Host port either way, which is where a crate
+# costs no seam (ADR 0025). Windows-only, and it carries no dependencies.
+junction = { version = "2", default-features = false }
+
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",
@@ -67,6 +75,10 @@ required-features = ["contract"]
 
 [[test]]
 name = "contract_sessions"
+required-features = ["contract"]
+
+[[test]]
+name = "contract_links"
 required-features = ["contract"]
 
 [lib]

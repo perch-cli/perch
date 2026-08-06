@@ -1,0 +1,428 @@
+//! Behaviour tests for Reconcile: making Shared State reachable from the
+//! Profile a Run launches (ADR 0026).
+//!
+//! Driven through the Host port, so the Windows half — junctions, and the
+//! symbolic link privilege a machine without Developer Mode does not have —
+//! is asserted from whatever machine the tests run on.
+
+use std::path::{Path, PathBuf};
+
+use perch::host::fake::Effect;
+use perch::host::{FakeHost, Host, Link, PRIVATE_DIR_MODE, Platform};
+use perch::reconcile::reconcile;
+
+/// The Default Profile: the configuration directory Claude Code falls back to,
+/// holding everything that belongs to the person.
+const SHARED: &str = "/Users/someone/.claude";
+
+/// The Profile a Run would be launched against.
+const PROFILE: &str = "/Users/someone/.config/perch/profiles/someone-example-com";
+
+/// A machine whose Default Profile holds the spread a real one does: memory,
+/// settings, a plugins directory, the sessions and plans directories Claude
+/// Code grew after Perch was written — and the two entries that belong to the
+/// Account rather than to the person.
+fn machine() -> FakeHost {
+    FakeHost::new()
+        .with_file(shared("CLAUDE.md"), "remember this")
+        .with_file(shared("settings.json"), r#"{"theme":"dark"}"#)
+        .with_file(shared("plugins/config.json"), "{}")
+        .with_file(shared("sessions/4321.json"), "{}")
+        .with_file(shared("plans/one.md"), "a plan")
+        .with_file(shared(".credentials.json"), r#"{"claudeAiOauth":{}}"#)
+        .with_file(shared(".claude.json"), r#"{"oauthAccount":{}}"#)
+}
+
+fn shared(entry: &str) -> String {
+    format!("{SHARED}/{entry}")
+}
+
+fn profile(entry: &str) -> String {
+    format!("{PROFILE}/{entry}")
+}
+
+/// Runs the pass a Run would run.
+fn run_reconcile(host: &FakeHost) -> perch::Result<()> {
+    reconcile(host, Path::new(SHARED), Path::new(PROFILE))
+}
+
+/// What a Profile now holds, by entry name, whether it is a link or not.
+fn entries_of(host: &FakeHost) -> Vec<String> {
+    host.list_dir(Path::new(PROFILE))
+        .expect("the Profile is there")
+        .iter()
+        .filter_map(|path| path.file_name()?.to_str().map(str::to_string))
+        .collect()
+}
+
+/// What one entry of the Profile stands for, and how.
+fn share_of(host: &FakeHost, entry: &str) -> (Link, PathBuf) {
+    host.link_at(profile(entry))
+        .unwrap_or_else(|| panic!("`{entry}` is shared into the Profile"))
+}
+
+#[test]
+fn every_entry_of_the_default_profile_crosses_except_the_two_account_scoped_ones() {
+    let host = machine();
+
+    run_reconcile(&host).expect("everything can be linked");
+
+    assert_eq!(
+        entries_of(&host),
+        vec!["CLAUDE.md", "plans", "plugins", "sessions", "settings.json"],
+    );
+    assert_eq!(
+        host.link_at(profile(".credentials.json")),
+        None,
+        "the Credential is the Account's, and stays in the Profile it belongs to"
+    );
+    assert_eq!(
+        host.link_at(profile(".claude.json")),
+        None,
+        "the file naming the Account is per-Profile and cannot be shared"
+    );
+}
+
+/// The reason the set is a denylist rather than a list in Perch's source: a
+/// Claude Code release that adds a directory has to follow the user without
+/// waiting for a Perch release.
+#[test]
+fn an_entry_perch_has_never_heard_of_crosses_without_a_code_change() {
+    let host = machine()
+        .with_file(shared("telemetry-v3/spool.bin"), "")
+        .with_file(shared("whatever-comes-next.json"), "{}");
+
+    run_reconcile(&host).expect("everything can be linked");
+
+    assert_eq!(
+        share_of(&host, "telemetry-v3").1,
+        PathBuf::from(shared("telemetry-v3"))
+    );
+    assert_eq!(
+        share_of(&host, "whatever-comes-next.json").1,
+        PathBuf::from(shared("whatever-comes-next.json"))
+    );
+}
+
+#[test]
+fn off_windows_every_share_is_a_symbolic_link() {
+    let host = machine().with_platform(Platform::Other);
+
+    run_reconcile(&host).expect("everything can be linked");
+
+    for entry in ["CLAUDE.md", "settings.json", "plugins", "sessions", "plans"] {
+        assert_eq!(
+            share_of(&host, entry),
+            (Link::Symbolic, PathBuf::from(shared(entry))),
+            "{entry}"
+        );
+    }
+}
+
+/// The platform the copy fallback used to exist for, and does not need one:
+/// junctions and hard links both work without Developer Mode and without
+/// elevation, and only symbolic links need either.
+#[test]
+fn windows_without_developer_mode_uses_junctions_and_hard_links() {
+    let host = machine().with_platform(Platform::Windows);
+
+    run_reconcile(&host).expect("a Windows without the privilege still shares");
+
+    for directory in ["plugins", "sessions", "plans"] {
+        assert_eq!(
+            share_of(&host, directory).0,
+            Link::Junction,
+            "{directory} is a directory"
+        );
+    }
+    for file in ["CLAUDE.md", "settings.json"] {
+        assert_eq!(share_of(&host, file).0, Link::Hard, "{file} is a file");
+    }
+}
+
+/// A symbolic link is the better share where it can be had — it survives the
+/// file it names being replaced rather than written through — so it is what a
+/// Windows with the privilege gets.
+#[test]
+fn windows_with_developer_mode_prefers_a_symbolic_link_for_a_file() {
+    let host = machine()
+        .with_platform(Platform::Windows)
+        .with_developer_mode();
+
+    run_reconcile(&host).expect("everything can be linked");
+
+    assert_eq!(share_of(&host, "CLAUDE.md").0, Link::Symbolic);
+    assert_eq!(
+        share_of(&host, "plugins").0,
+        Link::Junction,
+        "a junction is what a directory gets on Windows either way"
+    );
+}
+
+/// The one thing Reconcile may never do, on any platform: hand a Run a copy,
+/// which would silently stop being the file the person is editing.
+#[test]
+fn nothing_is_ever_copied_into_the_profile() {
+    for platform in [Platform::MacOs, Platform::Windows, Platform::Other] {
+        let host = machine().with_platform(platform);
+        host.forget_effects();
+
+        run_reconcile(&host).expect("everything can be linked");
+
+        let copied: Vec<Effect> = host
+            .effects()
+            .into_iter()
+            .filter(|effect| {
+                matches!(effect, Effect::WroteFile(path) | Effect::WrotePrivateFile(path)
+                    if path.starts_with(PROFILE))
+            })
+            .collect();
+        assert!(copied.is_empty(), "{platform:?} copied: {copied:?}");
+    }
+}
+
+/// A refusal is recoverable and a diverged copy is not, so the failure is
+/// reported rather than worked around — and it names the entry, because the fix
+/// is the user's to apply.
+#[test]
+fn a_link_that_cannot_be_made_refuses_and_names_the_entry_and_the_reason() {
+    let host = machine().with_unwritable_file(profile("plugins"), "Read-only file system");
+
+    let refusal = run_reconcile(&host).expect_err("the Run does not launch");
+
+    let said = refusal.to_string();
+    assert!(said.contains("`plugins`"), "{said}");
+    assert!(said.contains("Read-only file system"), "{said}");
+    assert!(said.contains("never by copying"), "{said}");
+    assert_eq!(
+        host.file(profile("plugins")),
+        None,
+        "a refusal leaves nothing behind, least of all a copy"
+    );
+}
+
+/// Both attempts are reported on Windows: which one a person can do something
+/// about depends on which privilege they are missing.
+#[test]
+fn a_windows_refusal_says_what_it_tried_and_what_would_let_it_through() {
+    let host = machine()
+        .with_platform(Platform::Windows)
+        .with_unwritable_file(profile("CLAUDE.md"), "The device is not ready");
+
+    let said = run_reconcile(&host)
+        .expect_err("the Run does not launch")
+        .to_string();
+
+    assert!(said.contains("a symbolic link could not be made"), "{said}");
+    assert!(said.contains("a hard link could not be made"), "{said}");
+    assert!(said.contains("Developer Mode"), "{said}");
+}
+
+#[test]
+fn a_link_pointing_somewhere_stale_is_repaired_rather_than_left() {
+    let host = machine().with_link(
+        Link::Symbolic,
+        "/Users/someone/.config/perch/profiles/somebody-else/plugins",
+        profile("plugins"),
+    );
+
+    run_reconcile(&host).expect("the stale link is replaced");
+
+    assert_eq!(
+        share_of(&host, "plugins"),
+        (Link::Symbolic, PathBuf::from(shared("plugins")))
+    );
+}
+
+/// A link to an entry the Default Profile no longer holds is not inert: Claude
+/// Code takes its locks with `mkdir`, and `mkdir` at a dangling link fails as
+/// though the lock were held.
+#[test]
+fn a_link_to_an_entry_that_has_gone_is_taken_away() {
+    let host = machine().with_link(
+        Link::Symbolic,
+        shared(".oauth_refresh.lock"),
+        profile(".oauth_refresh.lock"),
+    );
+
+    run_reconcile(&host).expect("the broken link is swept up");
+
+    assert_eq!(host.link_at(profile(".oauth_refresh.lock")), None);
+    assert!(!entries_of(&host).contains(&".oauth_refresh.lock".to_string()));
+}
+
+/// Only Perch's own shares are swept: a link somebody put in their Profile
+/// pointing anywhere else is theirs, broken or not.
+#[test]
+fn a_broken_link_that_is_not_a_share_of_the_default_profile_is_left_alone() {
+    let host = machine().with_link(Link::Symbolic, "/Volumes/backup/notes", profile("notes"));
+
+    run_reconcile(&host).expect("everything else can be linked");
+
+    assert_eq!(
+        host.link_at(profile("notes")),
+        Some((Link::Symbolic, PathBuf::from("/Volumes/backup/notes"))),
+        "a Profile is not Perch's to tidy"
+    );
+}
+
+/// Where a share is a symbolic link, a link that is already right is left
+/// exactly as it is: re-making one is a window in which the entry is not there.
+#[test]
+fn a_second_pass_over_an_unchanged_machine_touches_nothing() {
+    let host = machine();
+    run_reconcile(&host).expect("the first pass links everything");
+    host.forget_effects();
+
+    run_reconcile(&host).expect("the second pass has nothing to do");
+
+    let touched: Vec<Effect> = host
+        .effects()
+        .into_iter()
+        .filter(|effect| {
+            matches!(
+                effect,
+                Effect::Linked { .. } | Effect::RemovedLink(_) | Effect::RemovedFile(_)
+            )
+        })
+        .collect();
+    assert!(touched.is_empty(), "{touched:?}");
+}
+
+/// A hard link is a second name for a file, and an editor that writes beside a
+/// file and renames it into place leaves the Default Profile holding a new file
+/// and the Profile still naming the old one. Re-establishing it before every
+/// Run is what keeps that from being a divergence somebody discovers later.
+#[test]
+fn a_hard_linked_file_is_re_established_every_pass() {
+    let host = machine().with_platform(Platform::Windows);
+    run_reconcile(&host).expect("the first pass links everything");
+    assert_eq!(share_of(&host, "CLAUDE.md").0, Link::Hard);
+
+    // What a replacement looks like from outside: the same name, a different
+    // file behind it.
+    host.set_file(shared("CLAUDE.md"), "remember this instead");
+    host.forget_effects();
+    run_reconcile(&host).expect("the second pass re-establishes it");
+
+    assert_eq!(
+        host.file(profile("CLAUDE.md")).as_deref(),
+        Some("remember this instead"),
+        "a Run reads what the Default Profile actually holds"
+    );
+    assert!(
+        host.effects().iter().any(|effect| matches!(
+            effect,
+            Effect::Linked {
+                kind: Link::Hard,
+                ..
+            }
+        )),
+        "the hard link is made again rather than believed"
+    );
+}
+
+/// Off Windows a share is a symbolic link, so anything else at that name is
+/// something Perch did not put there — and deleting what you cannot identify is
+/// how somebody loses work.
+#[test]
+fn something_that_is_not_a_link_in_the_way_is_refused_rather_than_deleted() {
+    let host = machine().with_file(profile("CLAUDE.md"), "somebody's own file");
+
+    let said = run_reconcile(&host)
+        .expect_err("the Run does not launch")
+        .to_string();
+
+    assert!(said.contains("`CLAUDE.md`"), "{said}");
+    assert!(said.contains("is not a link Perch made"), "{said}");
+    assert_eq!(
+        host.file(profile("CLAUDE.md")).as_deref(),
+        Some("somebody's own file")
+    );
+}
+
+/// The Profile's own Credential and its own `oauthAccount` are what make it a
+/// Profile rather than a copy of the Default one. Nothing here goes near them.
+#[test]
+fn the_profiles_own_credential_and_identity_are_untouched() {
+    let host = machine()
+        .with_file(
+            profile(".credentials.json"),
+            r#"{"claudeAiOauth":{"mine":1}}"#,
+        )
+        .with_file(profile(".claude.json"), r#"{"oauthAccount":{"mine":1}}"#);
+
+    run_reconcile(&host).expect("everything can be linked");
+
+    assert_eq!(
+        host.file(profile(".credentials.json")).as_deref(),
+        Some(r#"{"claudeAiOauth":{"mine":1}}"#)
+    );
+    assert_eq!(
+        host.file(profile(".claude.json")).as_deref(),
+        Some(r#"{"oauthAccount":{"mine":1}}"#)
+    );
+    assert_eq!(host.link_at(profile(".credentials.json")), None);
+}
+
+#[test]
+fn a_profile_that_is_not_there_yet_is_created_for_its_owner_alone() {
+    let host = machine();
+    assert!(!host.path_exists(Path::new(PROFILE)));
+
+    run_reconcile(&host).expect("everything can be linked");
+
+    assert_eq!(host.mode_of(PROFILE), Some(PRIVATE_DIR_MODE));
+}
+
+/// A machine Claude Code has never run on has nothing to share, which is not a
+/// failure.
+#[test]
+fn a_default_profile_that_is_not_there_shares_nothing() {
+    let host = FakeHost::new();
+
+    run_reconcile(&host).expect("there is simply nothing to do");
+
+    assert_eq!(
+        host.list_dir(Path::new(PROFILE))
+            .expect("the Profile itself is made")
+            .len(),
+        0
+    );
+}
+
+/// The same shape reached the other way, by a `CLAUDE_CONFIG_DIR` that puts a
+/// Profile inside the Default Profile: everything else crosses, and the Profile
+/// is not linked into itself.
+#[test]
+fn a_profile_inside_the_default_profile_is_not_linked_into_itself() {
+    let nested = shared("nested");
+    let host = machine().with_file(format!("{nested}/.credentials.json"), "{}");
+
+    reconcile(&host, Path::new(SHARED), Path::new(&nested)).expect("everything else crosses");
+
+    assert_eq!(host.link_at(format!("{nested}/nested")), None);
+    assert_eq!(
+        host.link_at(format!("{nested}/CLAUDE.md")),
+        Some((Link::Symbolic, PathBuf::from(shared("CLAUDE.md"))))
+    );
+}
+
+/// The Default Profile already holds all of it, and a directory linked into
+/// itself is a shape nothing recovers from.
+#[test]
+fn the_default_profile_is_never_reconciled_into_itself() {
+    let host = machine();
+    host.forget_effects();
+
+    reconcile(&host, Path::new(SHARED), Path::new(SHARED)).expect("nothing to do");
+
+    assert!(
+        !host
+            .effects()
+            .iter()
+            .any(|effect| matches!(effect, Effect::Linked { .. })),
+        "{:?}",
+        host.effects()
+    );
+}

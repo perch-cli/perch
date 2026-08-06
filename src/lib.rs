@@ -22,6 +22,7 @@ pub mod login;
 pub mod observe;
 pub mod probe;
 pub mod profile;
+pub mod reconcile;
 pub mod registry;
 pub mod report;
 pub mod switch;

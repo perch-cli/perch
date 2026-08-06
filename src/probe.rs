@@ -341,12 +341,21 @@ pub fn credentials_file_for(config_dir: &Path) -> PathBuf {
     config_dir.join(CREDENTIALS_FILE)
 }
 
+/// What the identity file is called, wherever it sits: beside the default
+/// config directory as `~/.claude.json`, and inside every other one.
+///
+/// Named here because it is one of the two entries a Reconcile refuses to share
+/// (ADR 0026), and the name of a file Claude Code writes belongs in the module
+/// that knows about Claude Code rather than in the one that enumerates a
+/// directory.
+pub const IDENTITY_FILE: &str = ".claude.json";
+
 /// `~/.claude.json` for the default directory, `<dir>/.claude.json` otherwise.
 fn identity_file_for(config_dir: &Path, is_default: bool, host: &dyn Host) -> Result<PathBuf> {
     if is_default {
-        Ok(home(host)?.join(".claude.json"))
+        Ok(home(host)?.join(IDENTITY_FILE))
     } else {
-        Ok(config_dir.join(".claude.json"))
+        Ok(config_dir.join(IDENTITY_FILE))
     }
 }
 
