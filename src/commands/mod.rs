@@ -10,6 +10,7 @@ pub mod export;
 pub mod group;
 pub mod import;
 pub mod list;
+pub mod purge;
 pub mod relogin;
 pub mod remove;
 pub mod run;
@@ -46,6 +47,18 @@ pub fn ask(host: &dyn Host, out: &mut dyn Write, question: &str) -> Result<Optio
     out.flush().map_err(write_failed)?;
     host.read_line()
         .map_err(|err| PerchError::Other(format!("could not read your answer: {err}")))
+}
+
+/// The same, with the answer as it will be compared: trimmed of what the Return
+/// key leaves behind, and folded to lower case.
+///
+/// Every question Perch puts is answered by matching a word — `y`, `n`, `purge`
+/// — and a caller doing its own trimming and folding is how one of them comes to
+/// accept `Y ` and another not to. What each word *means* stays with the caller,
+/// including what to make of `None`: end of input is agreement to nothing and
+/// refusal of nothing, and only the question knows which of those it wanted.
+pub fn ask_a_word(host: &dyn Host, out: &mut dyn Write, question: &str) -> Result<Option<String>> {
+    Ok(ask(host, out, question)?.map(|typed| typed.trim().to_lowercase()))
 }
 
 /// The same, for a question whose answer the terminal must never show — the

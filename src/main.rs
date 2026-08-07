@@ -10,6 +10,7 @@ use perch::commands::export::{self, ExportArgs};
 use perch::commands::group::{self, GroupCommand};
 use perch::commands::import::{self, ImportArgs};
 use perch::commands::list::{self, ListArgs};
+use perch::commands::purge::{self, PurgeArgs};
 use perch::commands::relogin::{self, ReloginArgs};
 use perch::commands::remove::{self, RemoveArgs};
 use perch::commands::run::{self, RunArgs};
@@ -143,6 +144,25 @@ enum Command {
         /// The file to restore from. The passphrase is prompted, and a wrong
         /// one fails before anything is written.
         path: std::path::PathBuf,
+    },
+
+    /// Give the machine back the state it had before Perch.
+    ///
+    /// Every Profile, every Credential Perch holds and its own registry, gone in
+    /// one act — the exact inverse of an import, and what makes room for one
+    /// (ADR 0014). It takes no target: giving up one Account is `perch remove`.
+    ///
+    /// It offers to write an export first, lists the Accounts that will go by
+    /// email address, and wants the word `purge` typed rather than a letter.
+    /// Whatever Claude Code is logged in as is left exactly where it is.
+    Purge {
+        /// Purge without being asked, and write no export.
+        ///
+        /// An export is a path you name and a passphrase you type, neither of
+        /// which a script can be asked for — so this answers both questions at
+        /// once. Without a terminal and without this flag, a purge is refused.
+        #[arg(long)]
+        yes: bool,
     },
 
     /// Log an Account in again, in place.
@@ -366,6 +386,7 @@ fn main() {
         Command::Group { action } => ok(group::run(&host, action, &mut out)),
         Command::Import { path } => ok(import::run(&host, ImportArgs { path }, &mut out)),
         Command::List { json } => ok(list::run(&host, ListArgs { json }, &mut out)),
+        Command::Purge { yes } => ok(purge::run(&host, PurgeArgs { yes }, &mut out)),
         Command::Relogin { target } => ok(relogin::run(&host, ReloginArgs { target }, &mut out)),
         Command::Remove { target, yes } => {
             ok(remove::run(&host, RemoveArgs { target, yes }, &mut out))
@@ -464,6 +485,30 @@ mod tests {
             ],
             &["perch", "import", "/tmp/perch.age", "--force"],
             &["perch", "import", "/tmp/perch.age", "--merge"],
+        ] {
+            assert!(
+                Cli::try_parse_from(narrowed).is_err(),
+                "`{}` should not parse",
+                narrowed.join(" ")
+            );
+        }
+    }
+
+    /// A Purge is never about one Account — that is `perch remove`, which is
+    /// deliberately narrow, and two verbs for one act is exactly the ambiguity
+    /// the shared Alias and Group namespace exists to prevent. So it takes no
+    /// Target, in any of the shapes one could arrive in. `--yes` is the whole of
+    /// the surface, because it is the only question a script can answer.
+    #[test]
+    fn a_purge_takes_no_target() {
+        assert!(Cli::try_parse_from(["perch", "purge"]).is_ok());
+        assert!(Cli::try_parse_from(["perch", "purge", "--yes"]).is_ok());
+
+        for narrowed in [
+            &["perch", "purge", "someone@example.com"][..],
+            &["perch", "purge", "work"],
+            &["perch", "purge", "--account", "work"],
+            &["perch", "purge", "--group", "work"],
         ] {
             assert!(
                 Cli::try_parse_from(narrowed).is_err(),
