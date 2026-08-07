@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, TimeZone, Utc};
 
 use super::{
-    Execution, Host, HostError, HttpRequest, HttpResponse, PRIVATE_DIR_MODE, PRIVATE_FILE_MODE,
-    Platform,
+    Execution, Host, HostError, HttpRequest, HttpResponse, Link, PRIVATE_DIR_MODE,
+    PRIVATE_FILE_MODE, Platform,
 };
 use crate::keychain::KeychainError;
 
@@ -36,6 +36,13 @@ pub enum Effect {
         from: PathBuf,
         to: PathBuf,
     },
+    /// One path made to stand for another, and how.
+    Linked {
+        kind: Link,
+        target: PathBuf,
+        at: PathBuf,
+    },
+    RemovedLink(PathBuf),
     Touched(PathBuf),
     Slept {
         millis: u64,
@@ -136,6 +143,14 @@ pub struct FakeHost {
     /// still be cleared out of.
     undeletable: RefCell<BTreeMap<PathBuf, String>>,
     dirs: RefCell<BTreeSet<PathBuf>>,
+    /// Every link that has been made, by the path that holds it. A hard link is
+    /// in here *and* in `files`, because that is what a hard link is: another
+    /// name for the file, telling nothing about itself.
+    links: RefCell<BTreeMap<PathBuf, (Link, PathBuf)>>,
+    /// Whether this Windows can make a symbolic link. Off is the ordinary
+    /// machine: the privilege needs Developer Mode or elevation, which is the
+    /// whole reason a Run reaches for junctions and hard links (ADR 0026).
+    developer_mode: RefCell<bool>,
     modified: RefCell<BTreeMap<PathBuf, DateTime<Utc>>>,
     keychain: RefCell<BTreeMap<(String, String), String>>,
     keychain_lock: RefCell<Option<KeychainLock>>,
@@ -188,6 +203,8 @@ impl FakeHost {
             unwritable: RefCell::new(BTreeMap::new()),
             undeletable: RefCell::new(BTreeMap::new()),
             dirs: RefCell::new(BTreeSet::new()),
+            links: RefCell::new(BTreeMap::new()),
+            developer_mode: RefCell::new(false),
             modified: RefCell::new(BTreeMap::new()),
             keychain: RefCell::new(BTreeMap::new()),
             keychain_lock: RefCell::new(None),
@@ -311,6 +328,26 @@ impl FakeHost {
     /// with the world it left rather than a fresh one.
     pub fn writable_again(&self, path: impl AsRef<Path>) {
         self.unwritable.borrow_mut().remove(path.as_ref());
+    }
+
+    /// A Windows with Developer Mode on, where a symbolic link is something an
+    /// ordinary user may make. Means nothing anywhere else, where they always
+    /// could.
+    pub fn with_developer_mode(self) -> Self {
+        *self.developer_mode.borrow_mut() = true;
+        self
+    }
+
+    /// A link that is already there — including one pointing at nothing, which
+    /// is what a Profile holds after the entry it shared was deleted and is the
+    /// state a Reconcile has to repair.
+    pub fn with_link(self, kind: Link, target: impl AsRef<Path>, at: impl AsRef<Path>) -> Self {
+        self.note_directories_of(at.as_ref());
+        self.links.borrow_mut().insert(
+            at.as_ref().to_path_buf(),
+            (kind, target.as_ref().to_path_buf()),
+        );
+        self
     }
 
     pub fn with_keychain_item(self, service: &str, account: &str, secret: &str) -> Self {
@@ -553,6 +590,13 @@ impl FakeHost {
             .collect()
     }
 
+    /// The link a path holds, of whatever kind, and what it stands for — hard
+    /// links included, which [`Host::link_target`] cannot report because the
+    /// filesystem cannot either.
+    pub fn link_at(&self, path: impl AsRef<Path>) -> Option<(Link, PathBuf)> {
+        self.links.borrow().get(path.as_ref()).cloned()
+    }
+
     /// The permissions a path ended up with, so a test can say that a file
     /// holding a Credential was created for its owner alone.
     pub fn mode_of(&self, path: impl AsRef<Path>) -> Option<u32> {
@@ -606,6 +650,32 @@ impl FakeHost {
             modes.entry(dir.clone()).or_insert(mode);
             dirs.insert(dir);
         }
+    }
+
+    /// What a path names once its links are followed, or `None` when it names
+    /// nothing — a link whose target has gone, most of all.
+    ///
+    /// Only the path itself is followed, not the directories above it: a file
+    /// *inside* a linked directory is not something Perch ever asks this fake
+    /// about, and a fake that half-implemented it would be worse than one that
+    /// does not. Bounded, so two links pointing at each other are an answer
+    /// rather than a hang.
+    fn resolved(&self, path: &Path) -> Option<PathBuf> {
+        const FOLLOWED: usize = 8;
+
+        let mut at = path.to_path_buf();
+        for _ in 0..FOLLOWED {
+            if self.files.borrow().contains_key(&at) || self.dirs.borrow().contains(&at) {
+                return Some(at);
+            }
+            let target = self
+                .links
+                .borrow()
+                .get(&at)
+                .map(|(_, target)| target.clone());
+            at = target?;
+        }
+        None
     }
 
     fn record(&self, effect: Effect) {
@@ -790,17 +860,24 @@ impl Host for FakeHost {
         Ok(())
     }
 
+    /// A link counts as what it points at, as it does on a real filesystem —
+    /// so a link into a directory that has gone is a path that does not exist,
+    /// which is the state a Reconcile has to notice.
     fn path_exists(&self, path: &Path) -> bool {
-        self.files.borrow().contains_key(path) || self.dirs.borrow().contains(path)
+        self.resolved(path).is_some()
     }
 
     fn is_file(&self, path: &Path) -> bool {
-        self.files.borrow().contains_key(path)
+        self.resolved(path)
+            .is_some_and(|at| self.files.borrow().contains_key(&at))
     }
 
     fn remove_dir_all(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::RemovedDir(path.to_path_buf()));
         self.dirs.borrow_mut().retain(|dir| !dir.starts_with(path));
+        self.links
+            .borrow_mut()
+            .retain(|at, _| !at.starts_with(path));
         self.files
             .borrow_mut()
             .retain(|file, _| !file.starts_with(path));
@@ -885,8 +962,99 @@ impl Host for FakeHost {
             return Err(HostError::Other(detail.clone()));
         }
         self.files.borrow_mut().remove(path);
+        self.links.borrow_mut().remove(path);
         self.modified.borrow_mut().remove(path);
         self.modes.borrow_mut().remove(path);
+        Ok(())
+    }
+
+    /// Makes a link, refusing the kinds this machine could not make.
+    ///
+    /// The refusals are the point of having this behind the port at all: a
+    /// symbolic link on a Windows without Developer Mode, and a junction
+    /// anywhere else, fail here exactly as they would there — so the fallbacks
+    /// ADR 0026 turns on are exercised from whatever machine the tests run on.
+    fn link(&self, kind: Link, target: &Path, at: &Path) -> Result<(), HostError> {
+        self.record(Effect::Linked {
+            kind,
+            target: target.to_path_buf(),
+            at: at.to_path_buf(),
+        });
+        if let Some(detail) = self.unwritable.borrow().get(at) {
+            return Err(HostError::Other(detail.clone()));
+        }
+        if self.links.borrow().contains_key(at) || self.path_exists(at) {
+            return Err(HostError::AlreadyExists {
+                path: at.to_path_buf(),
+            });
+        }
+
+        let windows = self.platform() == Platform::Windows;
+        match kind {
+            Link::Symbolic if windows && !*self.developer_mode.borrow() => {
+                return Err(HostError::Other(
+                    "A required privilege is not held by the client. (os error 1314)".to_string(),
+                ));
+            }
+            Link::Junction if !windows => {
+                return Err(HostError::Other(
+                    "a directory junction is a Windows link, and this is not Windows".to_string(),
+                ));
+            }
+            // A hard link is a second name for a *file*: there is no such thing
+            // as one for a directory, and nothing to name where nothing is.
+            Link::Hard if !self.is_file(target) => {
+                return Err(HostError::Other(format!(
+                    "{} is not a file, so it has no second name to give",
+                    target.display()
+                )));
+            }
+            _ => {}
+        }
+
+        self.links
+            .borrow_mut()
+            .insert(at.to_path_buf(), (kind, target.to_path_buf()));
+        if kind == Link::Hard {
+            // The file is now reachable under both names, and nothing about the
+            // second one says it is a second one.
+            let contents = self.file(target).unwrap_or_default();
+            self.set_file(at, &contents);
+        }
+        self.note_directories_of(at);
+        self.mark_written(at);
+        Ok(())
+    }
+
+    fn link_target(&self, path: &Path) -> Result<Option<PathBuf>, HostError> {
+        match self.links.borrow().get(path) {
+            // A hard link tells nothing about itself, so it answers as the
+            // ordinary file it is indistinguishable from.
+            Some((Link::Hard, _)) | None => {
+                if self.files.borrow().contains_key(path) || self.dirs.borrow().contains(path) {
+                    Ok(None)
+                } else {
+                    Err(HostError::NotFound {
+                        path: path.to_path_buf(),
+                    })
+                }
+            }
+            Some((_, target)) => Ok(Some(target.clone())),
+        }
+    }
+
+    fn remove_link(&self, path: &Path) -> Result<(), HostError> {
+        self.record(Effect::RemovedLink(path.to_path_buf()));
+        if let Some(detail) = self.undeletable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
+        }
+        // A hard link is a name for the file, so removing it removes that name
+        // — and only that name.
+        if self.links.borrow_mut().remove(path).is_some() {
+            self.files.borrow_mut().remove(path);
+            self.modes.borrow_mut().remove(path);
+        }
+        self.modified.borrow_mut().remove(path);
         Ok(())
     }
 
@@ -905,6 +1073,9 @@ impl Host for FakeHost {
             .cloned()
             .collect();
         found.extend(self.dirs.borrow().iter().filter(|dir| held(dir)).cloned());
+        // Links included, pointing at something or not: a directory holds the
+        // ones it holds, and a broken one is precisely what has to be found.
+        found.extend(self.links.borrow().keys().filter(|at| held(at)).cloned());
         Ok(found.into_iter().collect())
     }
 

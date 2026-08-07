@@ -25,6 +25,17 @@ two Perch processes writing the same file. The name now carries the process id.
 and the fake Host has none — the primitive belongs behind the port, and behind
 the port a pid is the whole of what randomness buys here.
 
+**Directory junctions**, from `junction`, on Windows only. A Reconcile shares a
+directory into a Run's Profile as a junction, because that is the one directory
+link a Windows without Developer Mode can make (ADR 0026) — and a junction is a
+reparse point the standard library will not write. The alternative was a
+hand-built `REPARSE_DATA_BUFFER` through `DeviceIoControl`, which is precisely
+the class of `unsafe` ADR 0021 declined to write when it took `windows-sys`
+rather than hand-rolling `GetProcessTimes`. The call sits inside `RealHost`, so
+it costs no seam: the fake makes and refuses the same three kinds of link on
+whatever machine the tests run on. Symbolic and hard links stay with the
+standard library, which carries both on every platform Perch runs on.
+
 ## Not taken, and why
 
 **`keyring`** — ADR 0008. macOS anchors a keychain item's ACL to the binary

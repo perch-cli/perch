@@ -78,17 +78,24 @@ _Avoid_: flock, team, org, pool
 ## What belongs to whom
 
 **Shared State**:
-The configuration that belongs to the person rather than the Account — memory,
-settings, plugins, and past work. A Switch leaves it untouched, so it follows
-you across Accounts without effort; only the Run path has to work to reach it.
+Everything in a configuration directory that belongs to the person rather than
+to the Account: memory, settings, plugins, sessions, plans, and whatever the
+next Claude Code release adds. Said as everything-but rather than as a list,
+because the list grows on Claude Code's schedule and one written down here goes
+quietly out of date — what it is not is the Credential and the file naming the
+Account. A Switch leaves it untouched, so it follows you across Accounts
+without effort; only the Run path has to work to reach it.
 _Avoid_: common config, global config
 
 **Reconcile**:
 The pass Perch makes before a Run, making every piece of Shared State reachable
 from the Profile it is launching by linking it there, and repairing links that
-have broken. Never by copying: a copy diverges the moment it is edited, which
-is the opposite of what Shared State promises. Where no link can be made the
-Run is refused rather than served a copy. A Switch needs no such pass.
+have broken or gone stale. What crosses is everything the Default Profile holds
+except the Credential and the file naming the Account, read at Run time rather
+than from a list, so an entry Perch has never heard of still follows you. Never
+by copying: a copy diverges the moment it is edited, which is the opposite of
+what Shared State promises — so where no link can be made the Run is refused
+rather than served one. A Switch needs no such pass.
 _Avoid_: sync, merge, heal
 
 ## Quota

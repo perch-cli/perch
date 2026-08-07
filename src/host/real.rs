@@ -9,7 +9,9 @@ use chrono::{DateTime, Utc};
 
 #[cfg(unix)]
 use super::PRIVATE_DIR_MODE;
-use super::{Execution, Host, HostError, HttpRequest, HttpResponse, PRIVATE_FILE_MODE, Platform};
+use super::{
+    Execution, Host, HostError, HttpRequest, HttpResponse, Link, PRIVATE_FILE_MODE, Platform,
+};
 use crate::keychain::{
     self, KeychainError, SECURITY_BIN, WritePath, classify, decode_password_output,
 };
@@ -295,6 +297,33 @@ impl Host for RealHost {
         }
     }
 
+    fn link(&self, kind: Link, target: &Path, at: &Path) -> Result<(), HostError> {
+        make_link(kind, target, at)
+    }
+
+    /// `symlink_metadata` rather than `read_link` alone, so the three answers
+    /// stay three: a link, something that is not a link, and nothing there.
+    /// `read_link` collapses the last two into one error.
+    fn link_target(&self, path: &Path) -> Result<Option<PathBuf>, HostError> {
+        let metadata = match std::fs::symlink_metadata(path) {
+            Ok(metadata) => metadata,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Err(HostError::NotFound {
+                    path: path.to_path_buf(),
+                });
+            }
+            Err(err) => return Err(HostError::Io(err)),
+        };
+        if !metadata.file_type().is_symlink() {
+            return Ok(None);
+        }
+        Ok(Some(std::fs::read_link(path)?))
+    }
+
+    fn remove_link(&self, path: &Path) -> Result<(), HostError> {
+        remove_link(path)
+    }
+
     fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>, HostError> {
         let entries = match std::fs::read_dir(path) {
             Ok(entries) => entries,
@@ -552,6 +581,81 @@ fn create_file_with_mode(path: &Path, contents: &str, _mode: u32) -> Result<(), 
     file.write_all(contents.as_bytes())?;
     file.sync_all()?;
     Ok(())
+}
+
+/// Makes a link, where a symbolic link is a symbolic link and a junction is
+/// something this platform has never heard of.
+#[cfg(not(windows))]
+fn make_link(kind: Link, target: &Path, at: &Path) -> Result<(), HostError> {
+    match kind {
+        Link::Symbolic => Ok(std::os::unix::fs::symlink(target, at)?),
+        Link::Hard => Ok(std::fs::hard_link(target, at)?),
+        Link::Junction => Err(HostError::Other(
+            "a directory junction is a Windows link, and this is not Windows".to_string(),
+        )),
+    }
+}
+
+/// The same on Windows, where the kinds actually differ.
+///
+/// A symbolic link needs Developer Mode or elevation and fails without either,
+/// which is the failure the other two kinds exist to be tried after. Junctions
+/// are a reparse point the standard library does not write, so that one is the
+/// `junction` crate's: hand-writing a `REPARSE_DATA_BUFFER` is exactly the
+/// class of `unsafe` ADR 0021 declined to write, and it sits behind this port
+/// either way (ADR 0025).
+#[cfg(windows)]
+fn make_link(kind: Link, target: &Path, at: &Path) -> Result<(), HostError> {
+    match kind {
+        // Which of the two symlink calls is the target's business: Windows
+        // records in the link whether it names a directory, and a file symlink
+        // pointing at a directory does not resolve.
+        Link::Symbolic if target.is_dir() => Ok(std::os::windows::fs::symlink_dir(target, at)?),
+        Link::Symbolic => Ok(std::os::windows::fs::symlink_file(target, at)?),
+        Link::Junction => Ok(junction::create(target, at)?),
+        Link::Hard => Ok(std::fs::hard_link(target, at)?),
+    }
+}
+
+/// Removes a link and nothing else. A link that has already gone is not a
+/// failure, as with every other removal here.
+#[cfg(not(windows))]
+fn remove_link(path: &Path) -> Result<(), HostError> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(HostError::Io(err)),
+    }
+}
+
+/// The same on Windows, where which call removes a link depends on whether it
+/// names a directory.
+///
+/// Read off the attributes rather than off `FileType`, which reports a junction
+/// as a symlink and not as a directory — true, and not what the call to make
+/// turns on.
+#[cfg(windows)]
+fn remove_link(path: &Path) -> Result<(), HostError> {
+    use std::os::windows::fs::MetadataExt;
+
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY;
+
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(HostError::Io(err)),
+    };
+
+    let removed = if metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0 {
+        std::fs::remove_dir(path)
+    } else {
+        std::fs::remove_file(path)
+    };
+    match removed {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(HostError::Io(err)),
+    }
 }
 
 /// Makes the *name* durable, once the bytes behind it are.

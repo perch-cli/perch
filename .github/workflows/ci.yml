@@ -169,7 +169,7 @@ jobs:
       # --nocapture so the "skipping:" lines are visible: a suite that skipped
       # itself and a suite that asserted look identical otherwise.
       - name: Contract tests
-        run: cargo test --locked --features contract --test contract --test contract_credentials --test contract_sessions -- --nocapture
+        run: cargo test --locked --features contract --test contract --test contract_credentials --test contract_sessions --test contract_links -- --nocapture
 
   # The one name branch protection listens to, however the matrix above grows
   # or renames its legs. `if: always()` with an explicit verdict, because a
