@@ -206,6 +206,18 @@ Never by copying, because a copy diverges the moment it is edited: where no link
 can be made, the Run is refused rather than served one, naming the entry and
 what to do about it.
 
+One file cannot be linked. `.claude.json` holds the Account itself, so every
+Profile keeps its own — and it also holds a good deal that is yours: whether you
+have been through onboarding, which tips you have seen, and the trust and tool
+approvals of the repository you are standing in. So that one file is **Carried**
+key by key instead, from the most recently used Profile in the same Group, and
+only into a Profile nothing is running against (ADR 0003). What crosses is a
+named list rather than everything-but, because this file also holds figures
+Anthropic gave for one Account — carrying those would show you one Account's
+Utilization under another Account's name. Without it, the first Run of a new
+Account lands you in a Claude Code that believes it has never been used, asking
+for trust in the middle of your task.
+
 A Group is not a Target here — it names a set of Accounts rather than one, and
 there is no single Profile to point a process at — and an Account that is
 Quarantined is refused with exit code 19 rather than launching a client that

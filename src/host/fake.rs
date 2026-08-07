@@ -129,6 +129,9 @@ pub type WhileWaiting = Box<dyn Fn(&FakeHost)>;
 
 pub struct FakeHost {
     home: PathBuf,
+    /// The directory the command was typed in — the project a Run is about,
+    /// and the one entry of `projects` that crosses to a Profile (ADR 0003).
+    current_dir: RefCell<PathBuf>,
     now: RefCell<DateTime<Utc>>,
     platform: RefCell<Platform>,
     env: RefCell<BTreeMap<String, String>>,
@@ -191,6 +194,12 @@ impl FakeHost {
         let mut env = BTreeMap::new();
         env.insert("USER".to_string(), "someone".to_string());
         FakeHost {
+            // Spelled out rather than joined onto `home`, because a test that
+            // writes this directory into a file writes it the way it is written
+            // here. `join` would answer with the separator of whatever platform
+            // the tests are running on, and the two spellings would stop
+            // matching on Windows.
+            current_dir: RefCell::new(PathBuf::from("/Users/someone/work")),
             home,
             now: RefCell::new(Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap()),
             // The platform Perch was written for first, so a test says which
@@ -247,6 +256,13 @@ impl FakeHost {
 
     pub fn with_file(self, path: impl AsRef<Path>, contents: &str) -> Self {
         self.set_file(path, contents);
+        self
+    }
+
+    /// The directory the command is being typed in — a second repository, for
+    /// a test about the project entry that crosses being the current one.
+    pub fn in_directory(self, path: impl AsRef<Path>) -> Self {
+        *self.current_dir.borrow_mut() = path.as_ref().to_path_buf();
         self
     }
 
@@ -736,6 +752,10 @@ impl Host for FakeHost {
 
     fn home_dir(&self) -> Result<PathBuf, HostError> {
         Ok(self.home.clone())
+    }
+
+    fn current_dir(&self) -> Result<PathBuf, HostError> {
+        Ok(self.current_dir.borrow().clone())
     }
 
     fn env_var(&self, key: &str) -> Option<String> {

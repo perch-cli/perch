@@ -20,14 +20,14 @@
 //! settings and plugins through is worse than one that did not start.
 
 use std::io::Write;
-use std::path::PathBuf;
 
 use crate::adopt;
 use crate::commands::{self, say};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::probe::Store;
 use crate::registry::{self, Registry};
-use crate::{probe, reconcile, target};
+use crate::{carry, probe, reconcile, target};
 
 #[derive(Debug, Clone)]
 pub struct RunArgs {
@@ -72,7 +72,13 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // preparation for either way.
     let launch = what_to_launch(host, &args.command)?;
     let profile = registry::profile_dir_for(host, &found.email)?;
-    reconcile::reconcile(host, &shared_state(host)?, &profile)?;
+    let default_profile = the_default_profile(host)?;
+    reconcile::reconcile(host, &default_profile.config_dir, &profile)?;
+
+    // The one file Reconcile cannot link, because it holds the Account as well
+    // as the person (ADR 0003). Handled key by key, and afterwards: Reconcile is
+    // what makes the Profile a directory at all.
+    carry::carry(host, &registry, &found.email, &default_profile, &profile);
 
     say(out, &launching(&registry, &found.email, &launch.said))?;
     // Flushed before the client is handed the terminal. Everything Perch has to
@@ -228,7 +234,8 @@ fn quoted_for_a_shell(word: &str) -> String {
     format!("'{}'", word.replace('\'', r"'\''"))
 }
 
-/// Where a Run reads Shared State from.
+/// The Default Profile a Run reads the person's things out of: the Shared State
+/// it links, and the `.claude.json` keys it copies.
 ///
 /// `CLAUDE_CONFIG_DIR` is honoured, because somebody who moved their
 /// configuration directory moved their Shared State along with it — but never
@@ -241,10 +248,10 @@ fn quoted_for_a_shell(word: &str) -> String {
 ///
 /// A Profile is where Shared State is made reachable and never where it is read
 /// from. That is the whole of the rule.
-fn shared_state(host: &dyn Host) -> Result<PathBuf> {
-    let told = probe::default_store(host)?.config_dir;
-    if told.starts_with(registry::profiles_dir(host)?) {
-        return probe::default_config_dir(host);
+fn the_default_profile(host: &dyn Host) -> Result<Store> {
+    let told = probe::default_store(host)?;
+    if told.config_dir.starts_with(registry::profiles_dir(host)?) {
+        return probe::default_profile_store(host);
     }
     Ok(told)
 }

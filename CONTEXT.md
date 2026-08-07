@@ -98,6 +98,18 @@ what Shared State promises — so where no link can be made the Run is refused
 rather than served one. A Switch needs no such pass.
 _Avoid_: sync, merge, heal
 
+**Carry**:
+The pass Perch makes before a Run over the one file Reconcile cannot link —
+`.claude.json`, which holds the Account as well as the person — copying the
+named keys that belong to the person into the Profile it is launching: onboarding,
+tips, notifications, and the current directory's entry of `projects`. Named
+rather than everything-but, which is the opposite direction from Reconcile and
+deliberate: the same file holds figures read for one Account, and those must
+never appear under another's name. Bounded to those keys, from the most recently
+used Profile in the same Group, and only where nothing is running against the
+Profile. Nothing here is load-bearing — a key that does not cross costs a dialog.
+_Avoid_: copy, merge, seed, sync
+
 ## Quota
 
 **Quota Window**:

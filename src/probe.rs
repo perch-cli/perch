@@ -298,6 +298,18 @@ pub fn default_store(host: &dyn Host) -> Result<Store> {
     }
 }
 
+/// The store of the Default Profile as it stands when nothing has pointed this
+/// process anywhere else — `~/.claude`, with its identity file beside it.
+///
+/// Distinct from [`default_store`] in exactly the case a Run creates: a client
+/// launched against a Profile passes `CLAUDE_CONFIG_DIR` on to everything it
+/// starts, so a Perch run inside one is told a Profile is the default. It is
+/// not, and the two commands that read the person's own state — Reconcile and
+/// the Carry — have to reach past that.
+pub fn default_profile_store(host: &dyn Host) -> Result<Store> {
+    store_for_directory(host, default_config_dir(host)?, true)
+}
+
 /// The directory Claude Code falls back to when it is told nothing — the
 /// Default Profile as the glossary means it, whatever this process's
 /// environment happens to say.
@@ -367,8 +379,14 @@ fn identity_file_for(config_dir: &Path, is_default: bool, host: &dyn Host) -> Re
     if is_default {
         Ok(home(host)?.join(IDENTITY_FILE))
     } else {
-        Ok(config_dir.join(IDENTITY_FILE))
+        Ok(identity_file_in(config_dir))
     }
+}
+
+/// The identity file of a config directory that is not the default one — every
+/// Profile, which is every directory Perch itself made.
+pub fn identity_file_in(config_dir: &Path) -> PathBuf {
+    config_dir.join(IDENTITY_FILE)
 }
 
 /// The login name a keychain item is stored under. `USERNAME` is Windows'
@@ -678,6 +696,40 @@ struct SessionMarker {
 /// corroborated nor dismissed, and guessing either way is silently wrong on
 /// one side or the other, so the answer is a refusal naming the assumption.
 pub fn live_clients(host: &dyn Host, config_dir: &Path, version: &str) -> Result<Vec<u32>> {
+    clients_in(host, config_dir).map_err(|marker| {
+        refusal(
+            assumption::SESSION_MARKER,
+            &format!(
+                "{} names a running process, but when that process began could \
+                 not be read, so the marker can be neither corroborated nor \
+                 dismissed. If that session is dead, delete the file",
+                marker.display()
+            ),
+            version,
+        )
+    })
+}
+
+/// Whether anything may be running against a config directory, where a marker
+/// that can be neither corroborated nor dismissed counts as one.
+///
+/// The question [`live_clients`] answers, for the caller that has no Claude
+/// Code version to name an assumption against and does not need one: the Carry
+/// writes into a Profile only when it is quiet (ADR 0003), and doubt is the
+/// same answer as a client for that purpose. Not writing costs a dialog;
+/// writing under a client that rewrites the file wholesale on its way out costs
+/// the file.
+pub fn anything_running(host: &dyn Host, config_dir: &Path) -> bool {
+    match clients_in(host, config_dir) {
+        Ok(running) => !running.is_empty(),
+        Err(_) => true,
+    }
+}
+
+/// The processes running against a config directory, or the marker that could
+/// be neither corroborated nor dismissed. Both callers phrase that doubt in
+/// their own terms, and neither decides it.
+fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32>, PathBuf> {
     let markers = match host.list_dir(&sessions_dir(config_dir)) {
         Ok(markers) => markers,
         Err(_) => return Ok(Vec::new()),
@@ -707,19 +759,7 @@ pub fn live_clients(host: &dyn Host, config_dir: &Path, version: &str) -> Result
             // No start to compare. The process being gone is the ordinary way
             // that happens — a marker left behind by a client that died.
             None if !host.process_alive(pid) => {}
-            None => {
-                return Err(refusal(
-                    assumption::SESSION_MARKER,
-                    &format!(
-                        "{} names a running process, but when that process \
-                         began could not be read, so the marker can be neither \
-                         corroborated nor dismissed. If that session is dead, \
-                         delete the file",
-                        marker.display()
-                    ),
-                    version,
-                ));
-            }
+            None => return Err(marker),
         }
     }
     Ok(running)

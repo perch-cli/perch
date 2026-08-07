@@ -191,6 +191,12 @@ pub trait Host {
     /// that cannot say where home is must be refused rather than quietly
     /// worked under the filesystem root.
     fn home_dir(&self) -> Result<PathBuf, HostError>;
+
+    /// The directory this command was typed in, which is the project a Run is
+    /// about: Claude Code keys the trust it was given and the tools it was
+    /// allowed by exactly this path (ADR 0003).
+    fn current_dir(&self) -> Result<PathBuf, HostError>;
+
     fn env_var(&self, key: &str) -> Option<String>;
 
     /// Which platform this is, which is what decides where a Credential is
