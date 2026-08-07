@@ -334,6 +334,34 @@ fn nothing_is_written_while_a_client_is_running_against_that_profile() {
     assert_eq!(identity_of(&host, SECOND_EMAIL), before);
 }
 
+/// The same precondition, read from the other end. A Run makes the Profile it
+/// launches Live (ADR 0027), so a Run that marked itself before Carrying would
+/// meet its own marker and refuse its own write — silently, on every Run,
+/// leaving every first Run of an Account to the onboarding questions.
+#[test]
+fn a_run_carries_before_it_marks_the_profile_live() {
+    let host = machine();
+
+    run_run(&host, SECOND_EMAIL).0.expect("the client ran");
+
+    assert_eq!(
+        read(&host, SECOND_EMAIL)["hasCompletedOnboarding"],
+        serde_json::json!(true),
+        "the Run is not blocked from writing by its own marker"
+    );
+
+    let effects = host.effects();
+    let carried = effects
+        .iter()
+        .rposition(|effect| matches!(effect, Effect::Renamed { to, .. } if to == &profile_of(&host, SECOND_EMAIL).join(".claude.json")))
+        .expect("the Carry wrote the identity file");
+    let marked = effects
+        .iter()
+        .position(|effect| matches!(effect, Effect::WroteFile(path) if path.starts_with(profile_of(&host, SECOND_EMAIL).join("sessions"))))
+        .expect("the Run marked the Profile Live");
+    assert!(carried < marked, "and it wrote before it marked");
+}
+
 /// A Profile that will not take the write is a remark rather than a refusal:
 /// the Run is what the person asked for, and what they lose without it is an
 /// onboarding question. Said, though, because meeting that question on every

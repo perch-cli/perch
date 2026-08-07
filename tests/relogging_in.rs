@@ -17,7 +17,7 @@ mod common;
 
 use common::*;
 use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROFILE_LIVE};
-use perch::host::fake::Effect;
+use perch::host::fake::{Effect, THIS_PROCESS};
 use perch::host::{FakeHost, Host};
 use perch::registry::Quarantine;
 
@@ -290,6 +290,47 @@ fn a_profile_a_client_is_running_against_is_refused_before_a_login_is_spent() {
         "a Profile Perch may not write to is one no browser round trip was going \
          to repair: {:?}",
         host.effects()
+    );
+}
+
+/// The same question, asked again on the other side of the login.
+///
+/// A browser round trip is the longest wait in Perch — the first answer is
+/// minutes old by the time it comes back — and what follows it writes a fresh
+/// Credential into the Account's own Profile. A `perch run` started while the
+/// person was logging in would be written under, so the repair stops instead
+/// (ADR 0027). The login itself runs against a directory of its own, which is
+/// what lets this be asked at all without the repair tripping over itself.
+#[test]
+fn a_run_started_during_the_login_stops_the_repair_before_it_writes() {
+    let host = broken_second_account();
+    let held = store_of(&host, SECOND_EMAIL).config_dir;
+    let before = credential_of(&host, SECOND_EMAIL);
+    let host = host.with_login(move |host: &FakeHost, dir: &std::path::Path| {
+        // Somebody starts working in that Account while the browser is open.
+        a_run_against(host, SECOND_EMAIL, host.now());
+        login_producing(SECOND_REPAIRED, SECOND_IDENTITY_FILE)(host, dir)
+    });
+    host.forget_effects();
+
+    let (result, _) = run_relogin(&host, "overflow");
+
+    let error = result.expect_err("the repair would write under that Run");
+    assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
+    assert!(
+        error.to_string().contains(&THIS_PROCESS.to_string()),
+        "{error}"
+    );
+    assert_eq!(
+        credential_of(&host, SECOND_EMAIL),
+        before,
+        "and {} was left exactly as the Run found it",
+        held.display()
+    );
+    assert_eq!(
+        quarantine_of(&host, SECOND_EMAIL),
+        Some(Quarantine::RenewalRejected),
+        "the Account is still broken, because nothing was repaired"
     );
 }
 

@@ -9,9 +9,10 @@
 //! Two rules, and everything here is one of them:
 //!
 //! - **What crosses is decided by denylist.** Everything the Default Profile
-//!   holds except the Credential and the file naming the Account, enumerated at
-//!   Run time rather than listed in Perch's source — so a directory a Claude
-//!   Code release invents follows the user without waiting for a Perch release.
+//!   holds except the Credential, the file naming the Account and the directory
+//!   of session markers, enumerated at Run time rather than listed in Perch's
+//!   source — so a directory a Claude Code release invents follows the user
+//!   without waiting for a Perch release.
 //! - **It crosses by link, never by copy.** A copy diverges the moment it is
 //!   edited, which inverts the one thing Shared State promises. Where no link
 //!   can be made the Run is refused, naming the entry and the reason, because a
@@ -24,10 +25,25 @@ use crate::error::{PerchError, Result};
 use crate::host::{Host, HostError, Link, Platform};
 use crate::{probe, profile};
 
-/// The entries that stay behind: the Credential itself, and the file holding
-/// `oauthAccount`. Both are the Account rather than the person, and both are
-/// what a Profile exists to keep apart.
-pub const ACCOUNT_SCOPED: [&str; 2] = [probe::CREDENTIALS_FILE, probe::IDENTITY_FILE];
+/// The entries that stay behind, for the two different reasons there are to
+/// hold one back.
+///
+/// `.credentials.json` and `.claude.json` are the Account rather than the
+/// person, and keeping them apart is what a Profile is for.
+///
+/// `sessions` is neither: it is the config directory's own answer to "is a
+/// client running here". Shared, every Profile would report every other
+/// Profile's clients and its own Run's marker would land in the Default
+/// Profile — so one client would make every Profile Live at once, and the
+/// refusals that protect a Live Profile would fire for every Account on the
+/// machine (ADR 0027). It is the one entry that is not the person's and not the
+/// Account's but the directory's, which is why the denylist ADR 0026 wrote as
+/// two entries is three.
+pub const HELD_BACK: [&str; 3] = [
+    probe::CREDENTIALS_FILE,
+    probe::IDENTITY_FILE,
+    probe::SESSIONS,
+];
 
 /// Makes every piece of Shared State in `shared` reachable from `into`,
 /// repairing whatever share is there already, or says why it cannot.
@@ -70,28 +86,28 @@ fn crossing(host: &dyn Host, shared: &Path) -> Result<Vec<PathBuf>> {
     match host.list_dir(shared) {
         Ok(entries) => Ok(entries
             .into_iter()
-            .filter(|entry| !account_scoped(entry))
+            .filter(|entry| !held_back(entry))
             .collect()),
         Err(HostError::NotFound { .. }) => Ok(Vec::new()),
         Err(err) => Err(PerchError::file_read(shared.to_path_buf(), err)),
     }
 }
 
-/// Whether an entry is one of the two that stay behind.
+/// Whether an entry is one of the three that stay behind.
 ///
 /// Without regard to case, because Windows answers to `.Credentials.json` for
 /// the same file — and the cost of the two answers is not the same: an entry
 /// wrongly held back is one piece of Shared State a person has to notice
 /// missing, and an entry wrongly crossed is a Credential in somebody else's
 /// Profile.
-fn account_scoped(entry: &Path) -> bool {
+fn held_back(entry: &Path) -> bool {
     entry
         .file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| {
-            ACCOUNT_SCOPED
+            HELD_BACK
                 .iter()
-                .any(|held_back| name.eq_ignore_ascii_case(held_back))
+                .any(|stays| name.eq_ignore_ascii_case(stays))
         })
 }
 
@@ -300,29 +316,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_two_account_scoped_entries_are_the_only_ones_held_back() {
-        assert!(account_scoped(Path::new(
-            "/Users/someone/.claude/.credentials.json"
-        )));
-        assert!(account_scoped(Path::new(
-            "/Users/someone/.claude/.claude.json"
-        )));
-        assert!(!account_scoped(Path::new("/Users/someone/.claude/plugins")));
-        assert!(!account_scoped(Path::new(
-            "/Users/someone/.claude/CLAUDE.md"
-        )));
+    fn the_three_entries_that_stay_behind_are_the_only_ones() {
+        for stays in [".credentials.json", ".claude.json", "sessions"] {
+            assert!(
+                held_back(&Path::new("/Users/someone/.claude").join(stays)),
+                "{stays} stays behind"
+            );
+        }
+        for crosses in ["plugins", "CLAUDE.md", "plans", "session-env"] {
+            assert!(
+                !held_back(&Path::new("/Users/someone/.claude").join(crosses)),
+                "{crosses} follows the person into a Run"
+            );
+        }
     }
 
     /// A Windows filesystem answers to any spelling of a name, so a Credential
     /// must not be able to cross by being written in a different case.
     #[test]
-    fn the_credential_stays_behind_however_it_is_spelled() {
-        assert!(account_scoped(Path::new(
-            "C:/Users/someone/.claude/.Credentials.JSON"
-        )));
-        assert!(account_scoped(Path::new(
-            "C:/Users/someone/.claude/.Claude.json"
-        )));
+    fn what_stays_behind_stays_behind_however_it_is_spelled() {
+        for spelling in [".Credentials.JSON", ".Claude.json", "Sessions"] {
+            assert!(
+                held_back(&Path::new("C:/Users/someone/.claude").join(spelling)),
+                "{spelling} is the same entry"
+            );
+        }
     }
 
     #[test]

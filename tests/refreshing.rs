@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use chrono::{TimeZone, Utc};
 use common::*;
 use perch::anthropic::{self, BETA, PROFILE_URL, TOKEN_URL, USAGE_URL};
-use perch::host::fake::Effect;
+use perch::host::fake::{Effect, THIS_PROCESS};
 use perch::host::{FakeHost, Host};
 
 const CONFIG_LOCK: &str = "/Users/someone/.claude.json.lock";
@@ -79,6 +79,18 @@ fn client_running_against(host: FakeHost, config_dir: &str, pid: u32) -> FakeHos
     );
     host.with_file(format!("{config_dir}/sessions/{pid}.json"), &marker)
         .with_live_process(pid)
+}
+
+/// Two Accounts declared interchangeable, so `--group` reads both of them.
+fn two_accounts_in_a_group() -> FakeHost {
+    let host = machine_with_two_accounts();
+    declare_group(&host, "work");
+    for email in [EMAIL, SECOND_EMAIL] {
+        move_to_group(&host, email, "work")
+            .0
+            .expect("the Account joins the Group");
+    }
+    host
 }
 
 fn cached_windows(host: &FakeHost, email: &str) -> Vec<perch::registry::WindowUtilization> {
@@ -280,6 +292,112 @@ fn a_credential_a_client_is_holding_is_never_renewed() {
     );
     assert!(printed.contains("4242"), "{printed}");
     assert!(printed.contains("cached figure"), "{printed}");
+}
+
+/// A Profile with a Run against it is Live by Perch's own marker (ADR 0027),
+/// and the rule that follows is the same one: the Credential in there belongs to
+/// the client holding it until that client exits.
+#[test]
+fn a_credential_a_run_is_holding_is_never_renewed_either() {
+    let host = two_accounts_in_a_group();
+    // The active Account is fresh, so the only Credential anything here could
+    // want to renew is the one the Run is holding.
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
+    host.set_keychain_item(&second_service(&host), LOGIN_NAME, SPENT);
+    a_run_against(&host, SECOND_EMAIL, host.now());
+    let host = host
+        .with_reply_to(PROFILE_URL, FRESH_TOKEN, 200, &profile_of(EMAIL))
+        .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE)
+        .with_reply(TOKEN_URL, 200, RENEWED);
+    host.forget_effects();
+
+    let (result, printed) = run_status_group_refresh(&host, false);
+
+    result.expect("a Credential Perch may not touch is not a failed command");
+    assert!(
+        host.sent_to(TOKEN_URL).is_empty(),
+        "renewing under a Run would log that client out mid-task (ADR 0005)"
+    );
+    assert!(printed.contains(&THIS_PROCESS.to_string()), "{printed}");
+    assert!(printed.contains("cached figure"), "{printed}");
+}
+
+/// The same, for the Account that is *active*, where the copy a refresh would
+/// renew and the copy the Run is holding are two different files.
+///
+/// `perch run <the active account>` points a client at that Account's own
+/// Profile, while the live copy sits in the Default Profile. A Rotation retires
+/// the refresh token for the Account rather than for a file, so renewing the
+/// live copy kills the one the Run is using just the same — and checking only
+/// the directory being written would miss it entirely (ADR 0027).
+#[test]
+fn a_run_against_the_active_account_stops_its_live_credential_being_renewed() {
+    let host = two_accounts_in_a_group();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
+    a_run_against(&host, EMAIL, host.now());
+    let host = host.with_reply(TOKEN_URL, 200, RENEWED);
+    host.forget_effects();
+
+    let (result, printed) = run_status_refresh(&host, false);
+
+    result.expect("a Credential Perch may not touch is not a failed command");
+    assert!(
+        host.sent_to(TOKEN_URL).is_empty(),
+        "the Run holds a copy of this very Credential: {:?}",
+        host.sent_to(TOKEN_URL)
+    );
+    assert!(printed.contains(&THIS_PROCESS.to_string()), "{printed}");
+    assert!(printed.contains("cached figure"), "{printed}");
+}
+
+/// And the half of ADR 0005 that is not a refusal: an Account with a client
+/// running has a fresh access token by that ADR's own reasoning, so its
+/// Utilization is readable without renewing anything. A Run is not a blindfold.
+#[test]
+fn utilization_for_a_live_account_is_read_without_a_renewal() {
+    let host = two_accounts_in_a_group();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
+    host.set_keychain_item(&second_service(&host), LOGIN_NAME, SECOND_FRESH);
+    a_run_against(&host, SECOND_EMAIL, host.now());
+    let host = host
+        .with_reply_to(PROFILE_URL, FRESH_TOKEN, 200, &profile_of(EMAIL))
+        .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE)
+        .with_reply_to(PROFILE_URL, SECOND_TOKEN, 200, &profile_of(SECOND_EMAIL))
+        .with_reply_to(USAGE_URL, SECOND_TOKEN, 200, USAGE);
+    host.forget_effects();
+
+    // Stated rather than assumed. Everything below is about an Account that is
+    // Live, and a fixture that quietly stopped being Live would let all of it
+    // pass while proving nothing.
+    assert_eq!(
+        perch::probe::live_clients(
+            &host,
+            &perch::registry::profile_dir_for(&host, SECOND_EMAIL).expect("home is known"),
+            CLAUDE_VERSION
+        )
+        .expect("the marker corroborates"),
+        vec![THIS_PROCESS],
+        "the Account this is about has a Run against it"
+    );
+
+    run_status_group_refresh(&host, false)
+        .0
+        .expect("the reads work");
+
+    assert_eq!(
+        cached_windows(&host, SECOND_EMAIL).len(),
+        3,
+        "the Live Account's figures were read like anybody else's"
+    );
+    assert_eq!(
+        host.sent_to(USAGE_URL).len(),
+        2,
+        "both Accounts were read, the Live one included"
+    );
+    assert!(
+        host.sent_to(TOKEN_URL).is_empty(),
+        "and nothing was renewed to get them"
+    );
 }
 
 #[test]

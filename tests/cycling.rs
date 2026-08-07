@@ -447,8 +447,12 @@ fn naming_a_group_that_holds_no_accounts_switches_nowhere() {
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
 }
 
+/// A Cycle is a Switch that chooses for you, so it inherits the rule about
+/// Live Profiles whole: the Account it lands on is only ever read from, and an
+/// Account you are already running in one terminal is exactly the one you would
+/// want active in the others (ADR 0027).
 #[test]
-fn a_cycle_onto_a_live_profile_is_refused_like_any_other_switch() {
+fn a_cycle_lands_on_a_live_account_like_any_other() {
     let host = three_accounts_in_one_group();
     observed(&host, EMAIL, vec![window("5-hour", 96.0)]);
     observed(&host, SECOND_EMAIL, vec![window("5-hour", 18.0)]);
@@ -461,8 +465,32 @@ fn a_cycle_onto_a_live_profile_is_refused_like_any_other_switch() {
         .with_file(format!("{profile}/sessions/4242.json"), &marker)
         .with_live_process(4242);
 
+    run_cycle(&host).0.expect("a Run does not close an Account");
+
+    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(live_credential(&host).as_deref(), Some(SECOND_CREDENTIAL));
+}
+
+/// The other direction is still refused: the Capture writes the live Credential
+/// into the outgoing Account's own Profile, and a client running there is
+/// holding that file.
+#[test]
+fn a_cycle_away_from_a_live_profile_is_refused() {
+    let host = three_accounts_in_one_group();
+    observed(&host, EMAIL, vec![window("5-hour", 96.0)]);
+    observed(&host, SECOND_EMAIL, vec![window("5-hour", 18.0)]);
+    let profile = "/Users/someone/.config/perch/profiles/someone-example-com";
+    let marker = format!(
+        r#"{{"pid":4242,"cwd":"/Users/someone/work","startedAt":{}}}"#,
+        host.now().timestamp_millis()
+    );
+    let host = host
+        .with_file(format!("{profile}/sessions/4242.json"), &marker)
+        .with_live_process(4242);
+
     let (result, _) = run_cycle(&host);
 
-    let error = result.expect_err("something else is holding that Credential");
+    let error = result.expect_err("the Capture would write under that client");
     assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
+    assert_eq!(active(&host).as_deref(), Some(EMAIL));
 }

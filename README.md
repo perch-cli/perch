@@ -197,14 +197,14 @@ command is for, not an edge case.
 
 Because a Run uses a Profile as a live configuration directory rather than as
 storage, it is the one path that has to **Reconcile** first, every time: your
-memory, settings, plugins, sessions and plans are linked into the Profile it is
+memory, settings, plugins, past work and plans are linked into the Profile it is
 about to launch, and links that have broken or gone stale are repaired (ADR
 0026). What crosses is everything the Default Profile holds except the
-Credential and the file naming the Account, read at Run time — so a directory a
-new Claude Code release invents follows you without waiting for a Perch release.
-Never by copying, because a copy diverges the moment it is edited: where no link
-can be made, the Run is refused rather than served one, naming the entry and
-what to do about it.
+Credential, the file naming the Account and the directory of session markers,
+read at Run time — so a directory a new Claude Code release invents follows you
+without waiting for a Perch release. Never by copying, because a copy diverges
+the moment it is edited: where no link can be made, the Run is refused rather
+than served one, naming the entry and what to do about it.
 
 One file cannot be linked. `.claude.json` holds the Account itself, so every
 Profile keeps its own — and it also holds a good deal that is yours: whether you
@@ -223,6 +223,32 @@ there is no single Profile to point a process at — and an Account that is
 Quarantined is refused with exit code 19 rather than launching a client that
 would ask you to log in. The client's own exit code is Perch's, so `perch run`
 can stand in a script wherever `claude` would.
+
+### What a Run protects while it lasts
+
+For as long as a Run is running, the Profile it launched is a **Live Profile**,
+and Perch will not write into one (ADR 0027). Another terminal cannot Capture
+into it, cannot Renew the Credential that client is holding — which would retire
+the refresh token and log it out mid-task — and cannot copy `.claude.json` keys
+over it.
+
+Each of those refuses in the register its own command has. A Switch that cannot
+Capture stops, exits 16, and names the process holding the Profile. A
+`--refresh` shows you the cached figure instead and still succeeds, because a
+refresh reports what it could not read rather than failing (ADR 0018). A
+`.claude.json` key simply does not cross, because nothing on that path may
+refuse a Run (ADR 0003) — the cost is one onboarding question, not a session.
+
+Reading is untouched, which is the difference that matters. `perch switch` onto
+the Account you are running lands normally: it copies that Credential into the
+Default Profile and leaves the Profile itself alone. Its Utilization is read
+without renewing anything, because an Account with a client running has a fresh
+access token already. A Run and a Switch do not lock each other out.
+
+It works by the marker Claude Code already uses to record a running client, so
+a Run that was killed rather than closed leaves nothing behind that matters: a
+marker naming a process that is gone, or a pid since taken by something younger,
+makes no Profile Live (ADR 0022).
 
 ### Running with arguments, and running something else
 

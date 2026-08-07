@@ -20,6 +20,7 @@
 //! Account rather than failing an Account that might work next time.
 
 use std::io::Write;
+use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
 use serde_json::json;
@@ -283,6 +284,13 @@ struct Asked {
     store: Store,
     /// Whether this is the Account's own Profile rather than the Default one.
     its_own_profile: bool,
+    /// Every configuration directory a client could be holding this Account's
+    /// Credential from, which is what a Renewal has to be refused against.
+    ///
+    /// More than the store being renewed, because a Rotation retires the
+    /// refresh token for an *Account* rather than for a file: every copy of
+    /// that Credential dies together, wherever it is being held from.
+    in_use_from: Vec<PathBuf>,
 }
 
 /// Which store holds the Credential to ask with.
@@ -292,13 +300,22 @@ struct Asked {
 /// catches up when a Switch away Captures it (ADR 0006). Every other Account is
 /// asked about with the Credential in its own Profile.
 fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<Asked> {
+    let its_own_profile = account.profile_dir(host)?;
     if registry.active.as_deref() == Some(account.email()) {
+        let store = probe::default_store(host)?;
+        // Two directories rather than one, and this is the only case where they
+        // differ. The copy being renewed is the live one in the Default
+        // Profile, but `perch run <this account>` points a client at the
+        // Account's own Profile — and the Rotation that renewal may cause would
+        // retire that client's refresh token along with this one (ADR 0027).
         Ok(Asked {
-            store: probe::default_store(host)?,
+            in_use_from: vec![store.config_dir.clone(), its_own_profile],
+            store,
             its_own_profile: false,
         })
     } else {
         Ok(Asked {
+            in_use_from: vec![its_own_profile],
             store: account.store(host)?,
             its_own_profile: true,
         })
@@ -316,7 +333,7 @@ fn usable_token(host: &dyn Host, asked: &Asked, version: &str) -> Step<String> {
     // Asked before the locks are taken, so an Account that was never going to
     // be renewed says so without queueing behind anything, and asked again
     // under them, where the answer is the one that counts.
-    refuse_if_live(host, &asked.store, version)?;
+    refuse_if_live(host, asked, version)?;
     renew_under_the_lock(host, asked, version)
 }
 
@@ -324,9 +341,14 @@ fn usable_token(host: &dyn Host, asked: &Asked, version: &str) -> Step<String> {
 ///
 /// Anthropic retires the old refresh token when it Rotates one, so renewing a
 /// Credential a running Claude Code has in memory logs that session out
-/// silently, mid-task.
-fn refuse_if_live(host: &dyn Host, store: &Store, version: &str) -> Step<()> {
-    let running = probe::live_clients(host, &store.config_dir, version)?;
+/// silently, mid-task. Asked of every directory that Credential could be in use
+/// from rather than only the one being written, because a Rotation kills every
+/// copy of it at once.
+fn refuse_if_live(host: &dyn Host, asked: &Asked, version: &str) -> Step<()> {
+    let mut running = Vec::new();
+    for config_dir in &asked.in_use_from {
+        running.extend(probe::live_clients(host, config_dir, version)?);
+    }
     if running.is_empty() {
         return Ok(());
     }
@@ -334,7 +356,7 @@ fn refuse_if_live(host: &dyn Host, store: &Store, version: &str) -> Step<()> {
     let pids: Vec<String> = running.iter().map(u32::to_string).collect();
     Err(Outcome::Failed(format!(
         "its access token has expired and a client is running against that \
-         Profile (pid {}), so renewing it would log that session out. The \
+         Account (pid {}), so renewing it would log that session out. The \
          cached figure is what you see.",
         pids.join(", ")
     )))
@@ -375,7 +397,7 @@ fn renew_under_the_lock(host: &dyn Host, asked: &Asked, version: &str) -> Step<S
     lock::under(host, probe::locks_for(store), |held| {
         // Both of the questions asked before the locks were taken, asked again
         // now that nothing can change the answer underneath Perch.
-        refuse_if_live(host, store, version)?;
+        refuse_if_live(host, asked, version)?;
         let credential = credential_in(host, asked, version)?;
         if credential.usable_at(host.now()) {
             return Ok(credential.access_token);

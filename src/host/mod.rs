@@ -341,6 +341,14 @@ pub trait Host {
         env: &[(&str, &str)],
     ) -> Result<i32, HostError>;
 
+    /// This process, as the operating system names it.
+    ///
+    /// What a Run marks its Profile Live with (ADR 0027): Perch waits for the
+    /// program it launched, so its own pid is alive for exactly as long as the
+    /// Run and no longer — and it is knowable *before* the launch, where the
+    /// child's is not.
+    fn process_id(&self) -> u32;
+
     /// Whether a process is still running. A Live Profile's Credential is
     /// untouchable because something else is holding it.
     fn process_alive(&self, pid: u32) -> bool;

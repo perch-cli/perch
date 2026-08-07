@@ -12,10 +12,11 @@ use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use chrono::{TimeZone, Utc};
 use common::*;
-use perch::error::{EXIT_INVALID, EXIT_PROBE_REFUSED, EXIT_QUARANTINED};
-use perch::host::FakeHost;
-use perch::host::fake::Effect;
+use perch::error::{EXIT_INVALID, EXIT_PROBE_REFUSED, EXIT_PROFILE_LIVE, EXIT_QUARANTINED};
+use perch::host::fake::{Effect, THIS_PROCESS};
+use perch::host::{FakeHost, Host};
 
 /// The Default Profile: where Shared State lives, and what a Run has to
 /// Reconcile out of.
@@ -535,6 +536,194 @@ fn a_quarantined_account_is_refused_whatever_is_being_launched() {
         .expect_err("a Run that could not authenticate is refused");
 
     assert_eq!(refusal.exit_code(), EXIT_QUARANTINED);
+    assert!(launched(&host).is_empty(), "{:?}", launched(&host));
+}
+
+// ---- a Run makes the Profile Live (ADR 0027) ---------------------------
+
+/// The processes Perch would say are running against a Profile right now.
+fn live_against(host: &FakeHost, email: &str) -> Vec<u32> {
+    perch::probe::live_clients(host, &profile_of(host, email), CLAUDE_VERSION)
+        .expect("every marker here can be corroborated or dismissed")
+}
+
+/// A Profile with a Run against it is a Live Profile, and stops being one when
+/// the Run ends. Asserted from inside the program the Run launched, because
+/// "while it lasts" is the only moment the claim is about.
+#[test]
+fn a_run_marks_its_profile_live_for_as_long_as_it_lasts() {
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let recorded = Rc::clone(&seen);
+    let host = machine_with_two_accounts().with_login(move |host: &FakeHost, _dir: &_| {
+        *recorded.borrow_mut() = live_against(host, SECOND_EMAIL);
+        0
+    });
+    host.forget_effects();
+
+    run_run(&host, SECOND_EMAIL).0.expect("the client ran");
+
+    assert_eq!(
+        *seen.borrow(),
+        vec![THIS_PROCESS],
+        "the Run names its own process, which is alive for exactly as long as it is"
+    );
+    assert!(
+        live_against(&host, SECOND_EMAIL).is_empty(),
+        "and the marker is taken away when the Run ends"
+    );
+}
+
+/// The consequence that matters: while somebody is working in a Profile, the
+/// Capture that a Switch away from that Account would perform is refused. That
+/// write would land under a client holding the same file, which is the mid-task
+/// logout ADR 0005 exists to prevent.
+#[test]
+fn a_capture_into_the_profile_a_run_is_against_is_refused() {
+    let refused = Rc::new(RefCell::new(None));
+    let recorded = Rc::clone(&refused);
+    let host = machine_with_two_accounts().with_login(move |host: &FakeHost, _dir: &_| {
+        *recorded.borrow_mut() = Some(run_switch(host, SECOND_EMAIL).0);
+        0
+    });
+    host.forget_effects();
+
+    // A Run against the Account that is active, so the Switch attempted inside
+    // it would Capture into the very Profile the Run is holding.
+    run_run(&host, EMAIL).0.expect("the client ran");
+
+    let error = refused
+        .borrow_mut()
+        .take()
+        .expect("a Switch was attempted while the Run was live")
+        .expect_err("the Capture would write under the Run");
+    assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
+    assert!(error.to_string().contains(EMAIL), "{error}");
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(EMAIL),
+        "nothing moved"
+    );
+}
+
+/// And the direction that is allowed. Reading a Credential out of a Profile to
+/// copy it into the Default Profile takes nothing away from the session using
+/// it, and an Account you are running in one terminal is exactly the one you
+/// would want active in the others.
+#[test]
+fn switching_onto_the_account_a_run_is_against_succeeds() {
+    let landed = Rc::new(RefCell::new(None));
+    let recorded = Rc::clone(&landed);
+    let host = machine_with_two_accounts().with_login(move |host: &FakeHost, _dir: &_| {
+        *recorded.borrow_mut() = Some(run_switch(host, SECOND_EMAIL).0);
+        0
+    });
+    host.forget_effects();
+
+    run_run(&host, SECOND_EMAIL).0.expect("the client ran");
+
+    landed
+        .borrow_mut()
+        .take()
+        .expect("a Switch was attempted while the Run was live")
+        .expect("a Run does not close an Account to a Switch");
+    assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+}
+
+/// A Run is killed often — closing the terminal is how a session usually ends —
+/// so the marker outliving the process it names is the ordinary case rather
+/// than the exception. It says nothing once that process is gone (ADR 0022).
+#[test]
+fn a_run_that_was_killed_does_not_leave_a_profile_live_for_ever() {
+    let host = machine();
+    a_run_against(&host, EMAIL, host.now());
+    let host = host.with_this_process_dead();
+
+    assert!(live_against(&host, EMAIL).is_empty());
+    run_switch(&host, SECOND_EMAIL)
+        .0
+        .expect("nothing is holding that Profile");
+}
+
+/// The same marker, with its pid worn by something that started later. A
+/// recycled pid necessarily belongs to a process younger than the marker, which
+/// is what makes the check exact rather than a guess.
+#[test]
+fn a_killed_runs_marker_does_not_come_back_to_life_with_a_recycled_pid() {
+    let host = machine();
+    a_run_against(
+        &host,
+        EMAIL,
+        Utc.with_ymd_and_hms(2026, 8, 4, 9, 0, 0).unwrap(),
+    );
+    let host =
+        host.with_this_process_replaced_at(Utc.with_ymd_and_hms(2026, 8, 4, 11, 0, 0).unwrap());
+
+    assert!(live_against(&host, EMAIL).is_empty());
+    run_switch(&host, SECOND_EMAIL)
+        .0
+        .expect("that Run died; the pid was recycled");
+}
+
+/// Liveness is a fact about one configuration directory, so the directory that
+/// records it is the one entry a Reconcile holds back that is neither the
+/// person's nor the Account's (ADR 0027). Shared, a Run against one Account
+/// would make every Profile on the machine Live at once, and its own marker
+/// would land in the Default Profile.
+#[test]
+fn a_run_answers_for_its_own_profile_and_for_nobody_elses() {
+    let elsewhere = Rc::new(RefCell::new(Vec::new()));
+    let recorded = Rc::clone(&elsewhere);
+    let host = machine_with_shared_state()
+        // An ordinary `claude` in another terminal, against the Default Profile.
+        .with_file(shared("sessions/33.json"), &{
+            let now = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
+            format!(
+                r#"{{"pid":33,"cwd":"/Users/someone/work","startedAt":{}}}"#,
+                now.timestamp_millis()
+            )
+        })
+        .with_live_process(33)
+        .with_login(move |host: &FakeHost, _dir: &_| {
+            *recorded.borrow_mut() = live_against(host, EMAIL);
+            0
+        });
+    host.forget_effects();
+
+    run_run(&host, SECOND_EMAIL).0.expect("the client ran");
+
+    assert!(
+        elsewhere.borrow().is_empty(),
+        "a client against the Default Profile is not a client against a Profile: {:?}",
+        elsewhere.borrow()
+    );
+    assert_eq!(
+        host.link_at(profile_of(&host, SECOND_EMAIL).join("sessions")),
+        None,
+        "`sessions` does not cross, or every Profile would answer for every other"
+    );
+    assert!(
+        host.file(shared("sessions/700.json")).is_none(),
+        "and the Run's own marker does not land in the Default Profile"
+    );
+}
+
+/// What the marker buys is that no other Perch Captures or Renews the Credential
+/// this session is holding. A Run that cannot claim its Profile is a Run nothing
+/// is protecting, so it is refused rather than launched unguarded — and a person
+/// told beforehand has lost a command rather than a session.
+#[test]
+fn a_run_that_cannot_mark_its_profile_live_does_not_launch() {
+    let host = machine();
+    let marker = perch::probe::session_marker_at(&profile_of(&host, SECOND_EMAIL), THIS_PROCESS);
+    let host = host.with_unwritable_file(&marker, "permission denied");
+
+    let refusal = run_run(&host, SECOND_EMAIL)
+        .0
+        .expect_err("nothing would be protecting that session");
+
+    let said = refusal.to_string();
+    assert!(said.contains("permission denied"), "{said}");
+    assert!(said.contains("Nothing was launched"), "{said}");
     assert!(launched(&host).is_empty(), "{:?}", launched(&host));
 }
 
