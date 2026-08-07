@@ -228,6 +228,14 @@ just left stays off the candidate list. It belongs to the running loop and is
 forgotten when the loop stops.
 _Avoid_: backoff, debounce, rate limit, throttle
 
+**Back-off**:
+How much longer the Watcher leaves it before asking again after a Refresh it
+could not read — doubling with each failure, bounded, and dropped entirely by
+the first Refresh that works. Not a Cooldown: a Cooldown paces Switches the
+Watcher may make and is the Group's to set, and a Back-off paces questions
+nobody is answering and is arithmetic about Anthropic's allowance.
+_Avoid_: cooldown, retry delay, throttle
+
 **Run**:
 Launching a program against a chosen Profile without changing which Account is
 active. Scoped to the one invocation, so several Accounts can be running at once

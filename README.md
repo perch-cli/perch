@@ -215,15 +215,31 @@ nobody a session (ADR 0005).
 **It never acts on a figure it did not just read.** A read that fails holds the
 decision rather than falling back on the cached figure, because a Switch made
 on a cached figure is one you could have made yourself without leaving a
-process running.
+process running. A reply that arrives but says nothing Perch can read a Quota
+Window out of is a failed read too — not an Account with nothing used, which is
+the one reading that could never be over any threshold.
 
 ```
-2026-08-04T12:00:00Z  held      you@example.com unread; threshold 80% — nothing current to decide on, so nothing was decided: Anthropic is rate-limiting reads of this Account's usage, so nothing current could be read.
-2026-08-04T12:05:00Z  nowhere   you@example.com 100% used, fullest 5-hour; threshold 80% — over it, and nowhere to go: Every Account in Group `work` is exhausted, so there is nowhere useful to Switch. Nothing was changed. overflow@example.com frees up soonest, at 2026-08-04 14:30 UTC (in 3h).
+2026-08-04T12:00:00Z  held      you@example.com unread; threshold 80% — nothing current to decide on, so nothing was decided: Anthropic is rate-limiting reads of this Account's usage, so nothing current could be read. Asking again in 2m30s.
+2026-08-04T12:02:30Z  held      you@example.com unread; threshold 80% — nothing current to decide on, so nothing was decided: Anthropic is rate-limiting reads of this Account's usage, so nothing current could be read. Asking again in 5m00s.
+2026-08-04T12:07:30Z  nowhere   you@example.com 100% used, fullest 5-hour; threshold 80% — over it, and nowhere to go: Every Account in Group `work` is exhausted, so there is nowhere useful to Switch. Nothing was changed. overflow@example.com frees up soonest, at 2026-08-04 14:30 UTC (in 3h).
 ```
 
 Neither of those ends the watch. Nowhere to go is resolved by waiting, which is
 what the loop is already doing.
+
+**A failing read is asked about less and less often, and never more often than
+a working one.** That growing wait is the **Back-off**: it doubles with each
+failure — 2m30s, 5m, 10m — and stops at twenty minutes, so a transient failure
+is recovered from at the ordinary cadence and a persistent one asks three times
+an hour instead of twenty-four. It is bounded because the endpoint coming back
+does not announce itself: the only way to find out is to ask. The first read
+that works drops the whole of it. Every held line says which failure held it
+and when it will ask again, so a hold never reads as a watcher that has given
+up. It is not the cooldown — that paces Switches you have said the watcher may
+make, and this paces questions nobody is answering — and unlike the cooldown it
+is not configurable: like the interval, it is arithmetic about Anthropic's
+allowance rather than anybody's preference.
 
 **It does not ping-pong.** Two Accounts hovering either side of the threshold
 would otherwise trade places every couple of minutes, each Switch costing a

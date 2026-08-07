@@ -35,14 +35,93 @@ use crate::registry::{Account, GroupConfig};
 /// because this is the number it is the reason for (ADR 0013).
 pub const REFRESH_INTERVAL_MILLIS: u64 = 150_000;
 
+/// The longest the loop will leave between two Refreshes, however long a
+/// failure lasts.
+///
+/// Eight ordinary intervals — twenty minutes, which is three reads an hour
+/// rather than twenty-four. Bounded rather than doubling for as long as the
+/// failure does, because the endpoint coming back does not announce itself and
+/// the only way the watcher finds out is by asking: a loop that had backed off
+/// to an hour would come back long after the crossing it was left running for.
+/// Twenty minutes is the order of thing a five-hour window forgives — fifteen
+/// is what the cooldown was set at on the same reasoning (ADR 0013).
+pub const LONGEST_WAIT_MILLIS: u64 = REFRESH_INTERVAL_MILLIS * 8;
+
 /// How often that is, for the line that says what the loop is about to do.
 ///
 /// Derived rather than written out, so the sentence and the constant cannot
 /// come to disagree — and in one form rather than a special case per shape,
 /// because a branch this constant never reaches is a branch nothing tests.
 pub fn how_often() -> String {
-    let seconds = REFRESH_INTERVAL_MILLIS / 1_000;
+    how_long(REFRESH_INTERVAL_MILLIS)
+}
+
+/// A wait, as the line that quotes one says it.
+fn how_long(millis: u64) -> String {
+    let seconds = millis / 1_000;
     format!("{}m{:02}s", seconds / 60, seconds % 60)
+}
+
+/// How long the loop waits before it asks again: the ordinary interval, until a
+/// Refresh fails and then a growing multiple of it.
+///
+/// A held decision costs nothing, which is the whole reason the watcher holds
+/// one rather than acting on a cached figure. Held at the ordinary cadence for
+/// as long as the loop is left running, though, it costs an endpoint with a
+/// 28-30 an hour budget twenty-four questions an hour that it is already
+/// refusing to answer. So the wait doubles with each failure and goes back to
+/// the interval on the first Refresh that works: a transient failure is
+/// recovered from at the ordinary cadence, and a persistent one settles at
+/// [`LONGEST_WAIT_MILLIS`].
+///
+/// It grows from the interval rather than under it, so no back-off ever asks
+/// faster than the loop asks when everything works. The arithmetic putting that
+/// cadence inside Anthropic's allowance is [`REFRESH_INTERVAL_MILLIS`]'s, and a
+/// retry is not the place to spend the room it left over.
+///
+/// This is not a [`Cooldown`](Policy::cooldown): a cooldown paces Switches the
+/// watcher *may* make and is the Group's to set, and a back-off paces questions
+/// nobody is answering and is arithmetic about the endpoint. They are counted
+/// separately because a failure that cleared would otherwise leave the watcher
+/// waiting out a rest it never earned.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Backoff {
+    /// Refreshes that have failed in a row, and nothing else: a count reset by
+    /// the first one that works is a count that cannot outlive the failure.
+    failures: u32,
+}
+
+impl Backoff {
+    /// A loop that has read nothing yet and is owed no wait beyond its own.
+    pub fn none() -> Backoff {
+        Backoff::default()
+    }
+
+    /// A Refresh that could not be read.
+    pub fn failed(&mut self) {
+        self.failures = self.failures.saturating_add(1);
+    }
+
+    /// A Refresh that was read. The first one clears the whole of the back-off
+    /// rather than winding it down a step: the failure is over, and a watcher
+    /// still asking every twenty minutes about an endpoint that is answering
+    /// would be pacing itself on something that has stopped happening.
+    pub fn read(&mut self) {
+        self.failures = 0;
+    }
+
+    /// How long to leave it before asking again, as things stand.
+    pub fn waiting_for(&self) -> u64 {
+        let doublings = self.failures.saturating_sub(1);
+        // Saturating throughout, so a loop left running against a dead endpoint
+        // for a week arrives at the longest wait rather than back at the
+        // interval: an overflow here would be a watcher that quietly started
+        // hammering again after however many hours it took to wrap.
+        let factor = 2u64.checked_pow(doublings).unwrap_or(u64::MAX);
+        REFRESH_INTERVAL_MILLIS
+            .saturating_mul(factor)
+            .min(LONGEST_WAIT_MILLIS)
+    }
 }
 
 /// The rules a Group gives the watcher for Switching within it (ADR 0013).
@@ -358,7 +437,12 @@ pub enum Outcome {
     /// The figures could not be read, so nothing was decided on the ones Perch
     /// already had. A Switch made on a cached figure is a Switch the user could
     /// have made themselves without leaving a process running (ADR 0013).
-    Held { why: String },
+    ///
+    /// The only outcome that carries how long the loop then waits, because it
+    /// is the only one where that is not the ordinary interval — and a hold
+    /// whose line did not say when it would try again would read as a watcher
+    /// that had given up.
+    Held { why: String, retrying_in: u64 },
     /// A Switch was wanted, was attempted, and was turned away without
     /// changing anything — a client running against the Profile the Capture
     /// would write into, most often (ADR 0027). Distinct from a dead end,
@@ -399,6 +483,28 @@ pub struct Round {
 }
 
 impl Round {
+    /// How long the loop leaves it before the next round.
+    ///
+    /// Read off the round rather than kept beside it, so the wait the line
+    /// promised and the wait the loop takes are the same number. A round that
+    /// read a figure is followed by the ordinary interval whatever it decided
+    /// about it: nothing is wrong with the endpoint, and a watcher that paced
+    /// itself on finding nowhere to go would be slowest to notice the moment
+    /// somewhere opened up.
+    pub fn waiting_for(&self) -> u64 {
+        match &self.outcome {
+            Outcome::Held { retrying_in, .. } => *retrying_in,
+            // Named one by one rather than caught by a wildcard, so an outcome
+            // added later has to say what the loop does after it instead of
+            // inheriting an answer nobody chose for it.
+            Outcome::Waiting
+            | Outcome::Cooling { .. }
+            | Outcome::Switched { .. }
+            | Outcome::Nowhere { .. }
+            | Outcome::Refused { .. } => REFRESH_INTERVAL_MILLIS,
+        }
+    }
+
     /// The decision line, as it is printed: one line, whatever happened.
     pub fn line(&self, now: DateTime<Utc>) -> String {
         format!(
@@ -430,9 +536,11 @@ impl Round {
             Outcome::Cooling { why } => format!("over it, and too soon to move again: {why}"),
             Outcome::Switched { because } => format!("over it. Switched — {because}"),
             Outcome::Nowhere { why } => format!("over it, and nowhere to go: {why}"),
-            Outcome::Held { why } => {
-                format!("nothing current to decide on, so nothing was decided: {why}")
-            }
+            Outcome::Held { why, retrying_in } => format!(
+                "nothing current to decide on, so nothing was decided: {why} \
+                 Asking again in {}.",
+                how_long(*retrying_in),
+            ),
             Outcome::Refused { why } => {
                 format!("over it, and the Switch was turned away: {why}")
             }
@@ -505,6 +613,7 @@ mod tests {
                 None,
                 Outcome::Held {
                     why: "Anthropic could not be reached.".to_string(),
+                    retrying_in: REFRESH_INTERVAL_MILLIS,
                 },
             ),
             round(
@@ -540,6 +649,7 @@ mod tests {
             None,
             Outcome::Held {
                 why: "Anthropic is rate-limiting reads of this Account.".to_string(),
+                retrying_in: REFRESH_INTERVAL_MILLIS,
             },
         )
         .line(now());
@@ -550,6 +660,133 @@ mod tests {
             "{line}"
         );
         assert!(line.contains("rate-limiting"), "{line}");
+    }
+
+    /// A hold is the one outcome that changes when the loop comes back, so it
+    /// is the one that has to say. Without it the log reads as a watcher that
+    /// noticed something was wrong and stopped having opinions about it.
+    #[test]
+    fn a_held_round_says_when_it_will_ask_again() {
+        let line = round(
+            None,
+            Outcome::Held {
+                why: "Anthropic could not be reached.".to_string(),
+                retrying_in: 600_000,
+            },
+        )
+        .line(now());
+
+        assert!(line.contains("held"), "{line}");
+        assert!(line.contains("could not be reached"), "{line}");
+        assert!(line.contains("10m00s"), "and when it comes back: {line}");
+    }
+
+    /// The wait the line promises is the wait the loop takes, because they are
+    /// the same number read out of the same place.
+    #[test]
+    fn a_round_that_read_a_figure_is_followed_by_the_ordinary_interval() {
+        for outcome in [
+            Outcome::Waiting,
+            Outcome::Cooling { why: String::new() },
+            Outcome::Switched {
+                because: String::new(),
+            },
+            Outcome::Nowhere { why: String::new() },
+            Outcome::Refused { why: String::new() },
+        ] {
+            let round = round(at(86.0), outcome);
+            assert_eq!(
+                round.waiting_for(),
+                REFRESH_INTERVAL_MILLIS,
+                "{:?} is a decision about a figure that was read, not about an \
+                 endpoint that would not answer",
+                round.outcome,
+            );
+        }
+
+        assert_eq!(
+            round(
+                None,
+                Outcome::Held {
+                    why: String::new(),
+                    retrying_in: 600_000,
+                },
+            )
+            .waiting_for(),
+            600_000,
+        );
+    }
+
+    /// The wait after `failures` Refreshes have failed in a row.
+    fn after_failing(failures: u32) -> u64 {
+        let mut backoff = Backoff::none();
+        for _ in 0..failures {
+            backoff.failed();
+        }
+        backoff.waiting_for()
+    }
+
+    /// A transient failure is recovered from at the ordinary cadence: the first
+    /// retry is a round like any other, and only being wrong twice in a row
+    /// buys any patience.
+    #[test]
+    fn the_first_failure_is_retried_at_the_ordinary_interval() {
+        assert_eq!(after_failing(0), REFRESH_INTERVAL_MILLIS);
+        assert_eq!(after_failing(1), REFRESH_INTERVAL_MILLIS);
+    }
+
+    /// It doubles, and then it stops. Doubling forever would have the watcher
+    /// come back hours after the crossing it was left running for.
+    #[test]
+    fn the_wait_doubles_with_every_failure_and_stops_at_the_longest() {
+        let waits: Vec<u64> = (1..=6).map(after_failing).collect();
+
+        assert_eq!(
+            waits,
+            vec![150_000, 300_000, 600_000, 1_200_000, 1_200_000, 1_200_000],
+        );
+        assert_eq!(LONGEST_WAIT_MILLIS, 1_200_000, "twenty minutes");
+    }
+
+    /// Arithmetic that saturates rather than wrapping: a loop left running
+    /// against a dead endpoint for a week arrives at the longest wait and stays
+    /// there, rather than quietly starting to hammer again. Two hundred
+    /// failures is long past where doubling overflows a `u64`, which is the
+    /// step that would otherwise come back round to a short wait.
+    #[test]
+    fn a_failure_that_never_clears_never_comes_back_round_to_the_interval() {
+        assert_eq!(after_failing(200), LONGEST_WAIT_MILLIS);
+    }
+
+    /// No back-off ever asks faster than the loop does when everything works,
+    /// so the arithmetic that puts the ordinary cadence inside Anthropic's
+    /// allowance covers a failing endpoint too.
+    #[test]
+    fn no_wait_is_ever_shorter_than_an_ordinary_round() {
+        for failures in 0..10 {
+            let reads_an_hour = 3_600_000 / after_failing(failures);
+            assert!(
+                reads_an_hour <= 3_600_000 / REFRESH_INTERVAL_MILLIS,
+                "a retry that asked faster than the loop would spend the room \
+                 the interval left for the user's own `perch status --refresh`"
+            );
+        }
+    }
+
+    /// The first Refresh that works clears the whole of it. Winding it down a
+    /// step at a time would pace the watcher on a failure that has stopped
+    /// happening.
+    #[test]
+    fn the_first_reading_that_works_puts_the_wait_back_to_the_interval() {
+        let mut backoff = Backoff::none();
+        for _ in 0..4 {
+            backoff.failed();
+        }
+
+        backoff.read();
+
+        assert_eq!(backoff, Backoff::none());
+        assert_eq!(backoff.waiting_for(), REFRESH_INTERVAL_MILLIS);
     }
 
     /// The Cycle's refusals are written for a terminal and run to several

@@ -134,6 +134,27 @@ fn decisions(printed: &str) -> Vec<String> {
         .collect()
 }
 
+/// A machine where the Account being watched cannot be read: the usage
+/// endpoint answers `refusals` in turn, the last of them for every round after
+/// the trace runs out, and the Account it would move to is empty and waiting.
+fn unreadable(refusals: &[(u16, &str)], rounds: u32) -> FakeHost {
+    let host = watched()
+        .with_reply_to(PROFILE_URL, ACTIVE_TOKEN, 200, &profile_of(EMAIL))
+        .with_replies_to(USAGE_URL, ACTIVE_TOKEN, refusals);
+    answering(host, SPARE_TOKEN, SECOND_EMAIL, &[5.0]).with_interrupt_after(rounds)
+}
+
+/// How long the loop waited after each round, in the order it waited.
+fn waits(host: &FakeHost) -> Vec<u64> {
+    host.effects()
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Waited { millis } => Some(*millis),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Every access token that asked the usage endpoint how full an Account is, in
 /// the order they asked.
 fn asked_by(host: &FakeHost) -> Vec<String> {
@@ -219,14 +240,8 @@ fn the_refresh_interval_keeps_one_account_inside_its_hourly_allowance() {
         "{reads_an_hour} reads an hour is either past the 28-30 the endpoint          allows or too rare to catch a crossing while it matters"
     );
     assert_eq!(
-        host.effects()
-            .iter()
-            .filter(|effect| **effect
-                == Effect::Waited {
-                    millis: REFRESH_INTERVAL_MILLIS
-                })
-            .count(),
-        2,
+        waits(&host),
+        vec![REFRESH_INTERVAL_MILLIS; 2],
         "and it is what the loop actually waits"
     );
 }
@@ -333,6 +348,179 @@ fn a_reading_that_failed_holds_the_decision_rather_than_falling_back_to_the_cach
         1,
         "and no candidate was read for a decision that was never taken"
     );
+}
+
+/// The trace this whole rule is for: the Account fills past the threshold while
+/// the endpoint is refusing to say so. Everything but the freshness of the
+/// cached figure says to move — it is well over the threshold, and the Account
+/// beside it is empty and waiting — and moving on it would be a Switch made on
+/// evidence the user already had, which is `perch switch` and needs no loop.
+#[test]
+fn a_refresh_that_fails_across_a_threshold_crossing_never_switches() {
+    let host = unreadable(&[(429, "{}")], 4);
+    observed(&host, EMAIL, vec![window("5-hour", 95.0)]);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a held decision is not a failure");
+    let decisions = decisions(&printed);
+    assert_eq!(decisions.len(), 4, "it kept watching: {printed}");
+    for decision in &decisions {
+        assert!(decision.contains("held"), "{decision}");
+        assert!(
+            decision.contains("unread"),
+            "and never quotes the cached 95% as the figure it decided on: \
+             {decision}"
+        );
+    }
+    assert_eq!(
+        printed.matches("switched").count(),
+        0,
+        "the crossing is only in a figure nobody could confirm: {printed}"
+    );
+    assert_eq!(active(&host).as_deref(), Some(EMAIL));
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(ACTIVE),
+        "and nothing was Captured or written for a Switch that never happened"
+    );
+    assert_eq!(
+        asked_by(&host),
+        vec![ACTIVE_TOKEN; 4],
+        "no candidate was read for a decision that was never taken"
+    );
+}
+
+/// A held decision costs nothing, but held every two and a half minutes for as
+/// long as the loop is left running it costs an endpoint that is already
+/// refusing twenty-four questions an hour. So the wait grows — and stops
+/// growing, because the failure clears without announcing itself and the only
+/// way the watcher finds out is by asking.
+#[test]
+fn a_refresh_that_keeps_failing_is_retried_less_and_less_often_and_then_no_less() {
+    let host = unreadable(&[(429, "{}")], 5);
+    observed(&host, EMAIL, vec![window("5-hour", 95.0)]);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a held decision is not a failure");
+    assert_eq!(
+        waits(&host),
+        vec![150_000, 300_000, 600_000, 1_200_000, 1_200_000],
+        "doubling from the ordinary interval, and bounded: {printed}"
+    );
+    for (decision, coming_back) in decisions(&printed)
+        .iter()
+        .zip(["2m30s", "5m00s", "10m00s", "20m00s", "20m00s"])
+    {
+        assert!(decision.contains("held"), "{decision}");
+        assert!(
+            decision.contains("rate-limiting"),
+            "the line names the failure: {decision}"
+        );
+        assert!(
+            decision.contains(coming_back),
+            "and when it will ask again, which is the only thing about a hold \
+             that changes: {decision}"
+        );
+    }
+}
+
+/// The back-off never spends more of the allowance than a loop that is working.
+/// The endpoint with a 28-30 an hour budget is the one refusing, and a retry is
+/// not the place to spend the room the interval left for the `perch status
+/// --refresh` somebody types while the watcher runs.
+#[test]
+fn a_failure_that_never_clears_never_asks_faster_than_an_ordinary_round() {
+    let host = unreadable(&[(429, "{}")], 6);
+    observed(&host, EMAIL, vec![window("5-hour", 95.0)]);
+
+    run_watch(&host)
+        .0
+        .expect("a held decision is not a failure");
+
+    for wait in waits(&host) {
+        let reads_an_hour = 3_600_000 / wait;
+        assert!(
+            wait >= REFRESH_INTERVAL_MILLIS && reads_an_hour <= 28,
+            "{reads_an_hour} reads an hour is past what the endpoint allows, \
+             and it is failing"
+        );
+    }
+    assert_eq!(
+        asked_by(&host),
+        vec![ACTIVE_TOKEN; 6],
+        "and it is still only ever the Account it is on"
+    );
+}
+
+/// A transient failure is recovered from at the ordinary cadence. The first
+/// Refresh that works clears the whole of the back-off rather than winding it
+/// down a step at a time, which would pace the watcher on something that has
+/// stopped happening.
+#[test]
+fn the_first_reading_that_works_puts_the_loop_back_to_its_ordinary_cadence() {
+    let readable = usage(40.0);
+    let host = unreadable(&[(429, "{}"), (429, "{}"), (200, &readable)], 4);
+    observed(&host, EMAIL, vec![window("5-hour", 95.0)]);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("it was stopped");
+    assert_eq!(
+        waits(&host),
+        vec![150_000, 300_000, 150_000, 150_000],
+        "two failures, then the endpoint comes back: {printed}"
+    );
+    let decisions = decisions(&printed);
+    assert!(decisions[1].contains("held"), "{printed}");
+    assert!(
+        decisions[2].contains("waiting") && decisions[2].contains("40% used"),
+        "and the figure it decided on is the one it just read: {printed}"
+    );
+}
+
+/// A reply that arrived is not the same as a figure that was read. Anthropic
+/// answering with something Perch cannot make a Quota Window of is a Refresh
+/// that failed — read as an Account with nothing used, it would be the one
+/// reading that can never be over any threshold, so the watcher would go on
+/// waiting through a crossing it was left running for.
+#[test]
+fn a_reply_perch_cannot_read_is_a_failed_refresh_rather_than_a_reading_of_zero() {
+    let host = unreadable(
+        &[(200, r#"{"five_hour": {}}"#), (200, "<html>nope</html>")],
+        2,
+    );
+    observed(&host, EMAIL, vec![window("5-hour", 95.0)]);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a held decision is not a failure");
+    let decisions = decisions(&printed);
+    assert_eq!(decisions.len(), 2, "{printed}");
+    for decision in &decisions {
+        assert!(decision.contains("held"), "{decision}");
+        assert!(
+            !decision.contains("waiting") && !decision.contains("0% used"),
+            "a partial reply is not an Account with nothing used: {decision}"
+        );
+    }
+    assert!(
+        decisions[0].contains("named no Quota Window"),
+        "and the line says what could not be read: {}",
+        decisions[0]
+    );
+    assert!(
+        decisions[1].contains("not JSON"),
+        "whichever way it was unreadable: {}",
+        decisions[1]
+    );
+    assert_eq!(
+        waits(&host),
+        vec![150_000, 300_000],
+        "and it backs off the same way, because it is the same failure"
+    );
+    assert_eq!(active(&host).as_deref(), Some(EMAIL));
 }
 
 /// Running while Claude Code is working is the normal case for this command,

@@ -57,6 +57,32 @@ switch made on evidence the user already had; a held decision costs nothing,
 and a wrong switch costs a capture, a credential write, and possibly an account
 more exhausted than the one it left.
 
+This is the one place the watcher diverges from every other surface. ADR 0018
+has a refresh degrade the display rather than fail the command, and ADR 0015
+has everything served from cache, because those surfaces show a person a number
+they will judge for themselves. The watcher shows nobody anything; it acts. A
+reply that arrived but carries no quota window perch can read is a failed
+refresh too, and not a reading of zero — an account with nothing used is the
+one reading that can never be over any threshold.
+
+**Back-off doubles from the interval and stops at twenty minutes.** It starts
+at the ordinary two and a half rather than under it, so no retry ever asks
+faster than a working loop does and the arithmetic above covers a failing
+endpoint unchanged. At twenty minutes a persistent failure asks three times an
+hour instead of twenty-four. It is bounded there because the endpoint coming
+back does not announce itself and the only way the watcher finds out is by
+asking — a loop that had doubled its way to an hour would come back long after
+the crossing it was left running for. Twenty minutes is the order of thing a
+five-hour window forgives, which is the same reasoning the cooldown's fifteen
+was set on. The first refresh that works drops the whole of it rather than
+winding it down a step, because pacing the loop on a failure that has stopped
+happening is pacing it on nothing. It lives in the running loop beside the
+cooldown and is nobody's to configure — a group that could set it could set it
+to nothing, and nothing is what the endpoint is already refusing.
+
+Every held round says which failure held it and when the watcher will ask
+again. A hold whose line said neither reads as a watcher that has given up.
+
 **Cooldown 15 minutes, margin 10 points, no return for one cooldown.** A
 five-hour window moves slowly enough that fifteen minutes never misses a real
 crossing. The margin is what kills the ping-pong: at an 80% threshold nothing
