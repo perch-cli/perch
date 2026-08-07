@@ -8,9 +8,10 @@ login flow again.
 Early. Perch adopts the login you already have, adds further Accounts without
 disturbing it, names them, holds Groups of Accounts you have declared
 interchangeable, lists what you have, reads how full each one is, switches to
-an Account you name, picks one for you when you name none, logs an Account in
-again when its Credential stops working, gives one up when a subscription is
-retired, and takes its configuration from a script.
+an Account you name, picks one for you when you name none, runs a client as one
+Account without switching to it, logs an Account in again when its Credential
+stops working, gives one up when a subscription is retired, and takes its
+configuration from a script.
 
 ```
 $ perch status
@@ -175,6 +176,41 @@ the first one ungrouped — but being ungrouped is the *absence* of a declaratio
 that Accounts are interchangeable, not a weaker form of one. So bare `perch
 switch` Cycles among ungrouped Accounts only when a global setting says it may,
 and that setting is off until you turn it on.
+
+## Running one Account in one terminal
+
+`perch run <target>` launches Claude Code as an Account without changing which
+one is active. It is the other half of `switch`: a Switch is about the whole
+machine, and a Run is about one process.
+
+```
+$ perch run overflow
+`overflow` is an Alias for overflow@example.com.
+Running Claude Code as overflow@example.com (as `overflow`), in this terminal alone. you@example.com stays the active Account everywhere else.
+```
+
+It works by setting `CLAUDE_CONFIG_DIR` for that one process (ADR 0010). Nothing
+is Captured, nothing is written to the Default Profile, and no Identity is
+patched — so every other terminal, the editor extension and the desktop app go
+on as the Account they were on. Two terminals running two Accounts is what the
+command is for, not an edge case.
+
+Because a Run uses a Profile as a live configuration directory rather than as
+storage, it is the one path that has to **Reconcile** first, every time: your
+memory, settings, plugins, sessions and plans are linked into the Profile it is
+about to launch, and links that have broken or gone stale are repaired (ADR
+0026). What crosses is everything the Default Profile holds except the
+Credential and the file naming the Account, read at Run time — so a directory a
+new Claude Code release invents follows you without waiting for a Perch release.
+Never by copying, because a copy diverges the moment it is edited: where no link
+can be made, the Run is refused rather than served one, naming the entry and
+what to do about it.
+
+A Group is not a Target here — it names a set of Accounts rather than one, and
+there is no single Profile to point a process at — and an Account that is
+Quarantined is refused with exit code 19 rather than launching a client that
+would ask you to log in. The client's own exit code is Perch's, so `perch run`
+can stand in a script wherever `claude` would.
 
 ## Reserving an Account
 
@@ -453,6 +489,12 @@ it took.
 | 17 | a Cycle found nowhere to land — every Account in the Group is exhausted, or none is a candidate |
 | 18 | a bare Cycle from an Account nobody has declared interchangeable with anything (ADR 0017) |
 | 19 | that Account is Quarantined — its Credential no longer works, and `perch relogin` repairs it (ADR 0023) |
+
+`perch run` is the one command these do not describe once it has launched
+something: what the client exited with is what Perch exits with, so a script
+wrapping it reads the program's own code rather than Perch's. Everything that
+stops a Run before the launch — an unknown Target, a Group, a Quarantine, a
+Reconcile that could not be made — is in the table above.
 
 ## Where things are
 

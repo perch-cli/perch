@@ -118,6 +118,25 @@ impl Quarantine {
         )
     }
 
+    /// The refusal a command raises rather than acting on a Quarantined
+    /// Account, as opposed to [`said_of`](Quarantine::said_of), which is how one
+    /// is *shown*.
+    ///
+    /// `consequence` is the caller's, and it is the only part that differs:
+    /// what a Switch would have cost is not what a Run would have. Everything
+    /// around it is shared, so the third command to refuse a Quarantine cannot
+    /// come to offer a different repair from the first two.
+    pub fn refusal(self, named: &str, target: &str, consequence: &str) -> PerchError {
+        PerchError::Quarantined {
+            why: self,
+            said: format!(
+                "{named} is Quarantined: {}.\n{consequence} {}",
+                self.because(),
+                how_to_repair(target),
+            ),
+        }
+    }
+
     /// The same as a script reads it. Absent reads as false and present reads
     /// as true wherever a script asks whether it is set, so the fact a script
     /// already branches on branches the same way — and now carries why.
