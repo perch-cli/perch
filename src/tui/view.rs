@@ -17,13 +17,21 @@ use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Tabs};
 
 use crate::commands::list::{self, COLUMNS};
+use crate::cycle;
+use crate::registry::Account;
 use crate::tui::model::{Model, Refreshing, Tab};
 use crate::utilization;
 
-/// The most lines given over to saying what a Refresh did. Beyond that the
-/// figures themselves are the more useful thing to be looking at, and every
-/// note is about an Account whose figure says how old it is anyway.
-const MOST_NOTES: usize = 3;
+/// The share of the frame that what was said may take before it is counted
+/// rather than shown.
+///
+/// A Switch says several sentences and a failed Refresh names an Account per
+/// line, and both are worth reading — but the listing is what the command is
+/// for, and a report that pushed it off the screen would be the picker
+/// answering a question nobody asked. A third, and never less than one line.
+fn most_notes(height: usize) -> usize {
+    (height / 3).max(1)
+}
 
 /// What the keys do, along the bottom of every frame.
 ///
@@ -31,11 +39,15 @@ const MOST_NOTES: usize = 3;
 /// discovered is one people leave by killing the terminal. ASCII, because this
 /// is the line that has to be legible on the terminal at the far end of an SSH
 /// session.
-const KEYS: &str = "q  quit    Tab  view    Up/Down  move    r  refresh";
+const KEYS: &str = "q  quit   Tab  view   Up/Down  move   Enter  switch   x  run   r  refresh";
 
 /// Draws the whole frame.
 pub fn render(frame: &mut Frame, model: &Model) {
-    let notes = as_many_as_fit(notes(model), frame.area().width as usize);
+    let notes = as_many_as_fit(
+        notes(model),
+        frame.area().width as usize,
+        most_notes(frame.area().height as usize),
+    );
     let [bar, body, said, keys] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(1),
@@ -64,7 +76,7 @@ pub fn render(frame: &mut Frame, model: &Model) {
 /// the Utilization tab would otherwise be a table of figures with no "you are
 /// here" in it.
 fn render_bar(frame: &mut Frame, model: &Model, area: Rect) {
-    let active = match &model.registry.active {
+    let active = match &model.registry().active {
         Some(email) => format!("active: {email} "),
         None => "no active Account ".to_string(),
     };
@@ -111,29 +123,53 @@ fn room_for_both(width: usize, label: usize) -> bool {
     width >= tabs + label
 }
 
+/// The columns of the Accounts view: `perch list`'s own, and the figure the
+/// order was made on beside them.
+///
+/// Headroom is added here rather than shared with that listing, because the two
+/// surfaces differ in exactly the way this column exists for. `perch list`
+/// prints every Quota Window an Account has, which is the evidence. A picker
+/// ranks the Accounts, so it owes the one number the ranking was made on —
+/// otherwise the order is a claim with nothing on screen to check it against.
+const ACCOUNT_COLUMNS: usize = COLUMNS + 1;
+const HEADROOM: &str = "Headroom";
+
 /// The Accounts, as things to choose between: what each one is called, what it
-/// is interchangeable with, and whether it is any use.
+/// is interchangeable with, how much of it is left, and whether it is any use.
+///
+/// In the order a Cycle ranks them ([`crate::cycle::ranked`]), Group by Group,
+/// so the ranking `perch switch` makes is visible rather than hidden.
 fn render_accounts(frame: &mut Frame, model: &Model, area: Rect) {
-    if model.accounts().is_empty() {
+    let accounts = model.accounts();
+    if accounts.is_empty() {
         return render_nothing_held(frame, area);
     }
 
-    let cells: Vec<[String; COLUMNS]> = model
-        .accounts()
+    let cells: Vec<[String; ACCOUNT_COLUMNS]> = accounts
         .iter()
-        .map(|account| list::columns(&model.registry, account))
+        .map(|account| {
+            with_headroom(
+                list::columns(model.registry(), account),
+                cycle::headroom_phrase(account),
+            )
+        })
         .collect();
-    let widths = list::widths(&cells);
+    let headers: [&str; ACCOUNT_COLUMNS] = with_headroom(list::HEADERS, HEADROOM);
+    let widths = list::widths(&headers, &cells);
 
     let mut lines = vec![
         Line::from(format!(
             "{MARKERS}{}",
-            row(&list::HEADERS.map(str::to_string), &widths)
+            row(&headers.map(str::to_string), &widths)
         ))
         .style(Style::new().add_modifier(Modifier::BOLD)),
     ];
     lines.extend(cells.iter().enumerate().map(|(index, cells)| {
-        let line = Line::from(format!("{}{}", markers(model, index), row(cells, &widths)));
+        let line = Line::from(format!(
+            "{}{}",
+            markers(model, accounts[index], index),
+            row(cells, &widths)
+        ));
         match index == model.cursor {
             true => line.style(Style::new().add_modifier(Modifier::REVERSED)),
             false => line,
@@ -153,17 +189,22 @@ fn render_accounts(frame: &mut Frame, model: &Model, area: Rect) {
 /// Account would have to pick one of them, and the one it picked would be the
 /// one hiding the other.
 fn render_utilization(frame: &mut Frame, model: &Model, area: Rect) {
-    if model.accounts().is_empty() {
+    let accounts = model.accounts();
+    if accounts.is_empty() {
         return render_nothing_held(frame, area);
     }
 
     let mut lines = Vec::new();
     let mut cursor_line = 0;
-    for (index, account) in model.accounts().iter().enumerate() {
+    for (index, account) in accounts.iter().enumerate() {
         if index == model.cursor {
             cursor_line = lines.len();
         }
-        let heading = Line::from(format!("{}{}", markers(model, index), account.email()));
+        let heading = Line::from(format!(
+            "{}{}",
+            markers(model, account, index),
+            account.email()
+        ));
         lines.push(match index == model.cursor {
             true => heading.style(Style::new().add_modifier(Modifier::REVERSED)),
             false => heading.style(Style::new().add_modifier(Modifier::BOLD)),
@@ -219,12 +260,11 @@ const MARKERS: &str = "   ";
 /// session may not have. `>` is the row the keys act on and `*` is the Account
 /// every client is currently using; they are separate facts and are shown as
 /// two.
-fn markers(model: &Model, index: usize) -> String {
-    let account = &model.accounts()[index];
+fn markers(model: &Model, account: &Account, index: usize) -> String {
     format!(
         "{}{} ",
         if index == model.cursor { '>' } else { ' ' },
-        if model.registry.active.as_deref() == Some(account.email()) {
+        if model.registry().active.as_deref() == Some(account.email()) {
             '*'
         } else {
             ' '
@@ -232,11 +272,18 @@ fn markers(model: &Model, index: usize) -> String {
     )
 }
 
+/// The shared columns with the Headroom one after them, for a row of cells and
+/// for the headers alike.
+fn with_headroom<T>(shared: [T; COLUMNS], headroom: T) -> [T; ACCOUNT_COLUMNS] {
+    let mut taking = shared.into_iter().chain(std::iter::once(headroom));
+    std::array::from_fn(|_| taking.next().expect("one more than the shared columns"))
+}
+
 /// One row of the listing, padded to the columns it shares with `perch list`.
 /// What goes *in* those columns is that listing's to say ([`list::columns`]);
 /// this only lays them out, which is the half a frame does differently from a
 /// line.
-fn row(cells: &[String; COLUMNS], widths: &[usize; COLUMNS]) -> String {
+fn row<const N: usize>(cells: &[String; N], widths: &[usize; N]) -> String {
     cells
         .iter()
         .zip(widths)
@@ -256,9 +303,9 @@ fn row(cells: &[String; COLUMNS], widths: &[usize; COLUMNS]) -> String {
 /// whose figure is silently old. So what is dropped is a whole note and a
 /// count, never the end of a sentence — a note cut at the width loses its last
 /// clause, which is the half naming the command that puts it right.
-fn as_many_as_fit(notes: Vec<String>, width: usize) -> Vec<String> {
+fn as_many_as_fit(notes: Vec<String>, width: usize, most: usize) -> Vec<String> {
     let wrapped: Vec<Vec<String>> = notes.iter().map(|note| broken(note, width)).collect();
-    if wrapped.iter().map(Vec::len).sum::<usize>() <= MOST_NOTES {
+    if wrapped.iter().map(Vec::len).sum::<usize>() <= most {
         return wrapped.concat();
     }
 
@@ -267,7 +314,7 @@ fn as_many_as_fit(notes: Vec<String>, width: usize) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     let mut said = 0;
     for note in &wrapped {
-        if lines.len() + note.len() + 1 > MOST_NOTES {
+        if lines.len() + note.len() + 1 > most {
             break;
         }
         lines.extend(note.iter().cloned());
@@ -303,17 +350,29 @@ fn broken(note: &str, width: usize) -> Vec<String> {
     lines
 }
 
-/// What is said above the keys: what a Refresh is doing, or what it could not
-/// do. Nothing at all in the ordinary case, where the figures speak for
-/// themselves by carrying their age.
+/// What is said above the keys: what a Refresh is doing or could not do, and
+/// what the last act said. Nothing at all in the ordinary case, where the
+/// figures speak for themselves by carrying their age.
+///
+/// The two share one region because they are the same kind of thing — news
+/// about the machine that the listing cannot show — and a second region kept
+/// empty most of the time is rows taken away from the Accounts.
+///
+/// What was just done comes first, and what a Refresh said follows it. Only one
+/// of them is answering a key that was pressed a moment ago, and what is left
+/// out when there is not room for both is the older news — a Refresh that named
+/// five unreadable Accounts stands until something is done, and would otherwise
+/// take the whole region for as long as the view is open.
 fn notes(model: &Model) -> Vec<String> {
-    match &model.refreshing {
+    let mut notes = model.said.clone();
+    notes.extend(match &model.refreshing {
         Refreshing::Unasked => Vec::new(),
         Refreshing::Waiting => {
             vec!["Refreshing. What is on screen is what was known before it.".to_string()]
         }
         Refreshing::Back(notes) => notes.clone(),
-    }
+    });
+    notes
 }
 
 #[cfg(test)]
@@ -343,6 +402,8 @@ mod tests {
     }
 
     const WIDE: usize = 80;
+    /// The allowance on an ordinary terminal.
+    const MOST: usize = 3;
 
     fn note(which: usize) -> String {
         format!("account-{which}@example.com: no answer from Anthropic")
@@ -350,9 +411,9 @@ mod tests {
 
     #[test]
     fn every_note_there_is_room_for_is_said_whole() {
-        let said = as_many_as_fit((0..MOST_NOTES).map(note).collect(), WIDE);
+        let said = as_many_as_fit((0..MOST).map(note).collect(), WIDE, MOST);
 
-        assert_eq!(said, (0..MOST_NOTES).map(note).collect::<Vec<String>>());
+        assert_eq!(said, (0..MOST).map(note).collect::<Vec<String>>());
     }
 
     /// ADR 0018 has a failed Refresh name every Account it could not read.
@@ -361,11 +422,25 @@ mod tests {
     /// an Account whose figure is silently old.
     #[test]
     fn the_notes_there_is_no_room_for_are_counted_rather_than_dropped() {
-        let said = as_many_as_fit((0..5).map(note).collect(), WIDE);
+        let said = as_many_as_fit((0..5).map(note).collect(), WIDE, MOST);
 
-        assert_eq!(said.len(), MOST_NOTES);
+        assert_eq!(said.len(), MOST);
         assert_eq!(said[0], note(0));
-        assert_eq!(said[MOST_NOTES - 1], "...and 3 more.");
+        assert_eq!(said[MOST - 1], "...and 3 more.");
+    }
+
+    /// A Switch says several sentences and they are all worth reading, so the
+    /// allowance grows with the terminal — but never past the share of it the
+    /// listing needs to stay the thing on screen.
+    #[test]
+    fn what_is_said_may_take_a_third_of_the_frame_and_no_more() {
+        assert_eq!(most_notes(24), 8);
+        assert_eq!(most_notes(9), 3);
+        assert_eq!(
+            most_notes(2),
+            1,
+            "a terminal with no room for a third still says one thing"
+        );
     }
 
     /// The last clause of one of these names the command that repairs the
@@ -375,7 +450,7 @@ mod tests {
         let repair = "spare@example.com: Anthropic would not renew its Credential. \
                       `perch relogin spare@example.com` repairs it.";
 
-        let said = as_many_as_fit(vec![repair.to_string()], 40);
+        let said = as_many_as_fit(vec![repair.to_string()], 40, MOST);
 
         assert!(said.len() > 1, "{said:?}");
         assert!(

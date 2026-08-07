@@ -802,11 +802,12 @@ two tabs.
 ```
 $ perch tui
  Accounts | Utilization                             active: someone@example.com
-   Account               Alias     Group  State
->* someone@example.com   -         work   enabled
-   overflow@example.com  overflow  work   enabled
+   Account               Alias     Group  State     Headroom
+>  overflow@example.com  overflow  work   enabled   93%
+ * someone@example.com   -         work   enabled   58%
+   spare@example.com     -         none   disabled  never observed
 
-q  quit    Tab  view    Up/Down  move    r  refresh
+q  quit   Tab  view   Up/Down  move   Enter  switch   x  run   r  refresh
 ```
 
 `Tab` and the left and right arrows move between the views, the up and down
@@ -814,19 +815,81 @@ arrows move the cursor, `q` and Ctrl-C leave, and `r` reads current Utilization.
 `>` is the row the keys act on and `*` is the active Account — characters rather
 than colours, so the view reads the same over SSH on a terminal that has none.
 
-The Utilization view is the same Accounts with their figures, one row per Quota
-Window and each carrying its own age:
+The Accounts are listed in the order `perch switch` would rank them, with the
+Headroom they were ranked on beside them, so the ranking is visible rather than
+hidden. Cycling never leaves the Group it started in (ADR 0002), so the listing
+is one ranking per Group, with the Group the active Account is in first. A
+Disabled or Quarantined Account is listed like any other and sorts below every
+Account a Cycle would choose — they are shown, and shown as out of the running.
+The Account at the top of a Group is the one a Cycle within it prefers, which is
+where a bare `perch switch` lands unless you are already on it — landing where
+you already are is the one thing a Cycle will not do.
+
+The Accounts in no Group come last, and are listed in the order they were added
+rather than ranked. Being ungrouped is the absence of a declaration that
+Accounts are interchangeable rather than a weaker form of one, so `perch switch`
+refuses to Cycle among them until `perch config set cycle-ungrouped true` says
+it may (ADR 0017) — and a ranking of Accounts Perch would not choose between is
+exactly the hidden claim this listing exists not to make. Their Headroom is
+still shown; it is a figure rather than a running order. Set `cycle-ungrouped`
+and they rank like any Group.
+
+The Utilization view is the same Accounts in the same order, with their figures,
+one row per Quota Window and each carrying its own age. The order is shared
+because the cursor is: two orders would make `Tab` move what `Enter` acts on.
 
 ```
  Accounts | Utilization                             active: someone@example.com
->* someone@example.com
+>  overflow@example.com
+    5-hour     7%  (as of 4m ago)
+
+ * someone@example.com
     5-hour    42%  (as of 4m ago)
     7-day     18%  (as of 4m ago)
 
-   overflow@example.com
+   spare@example.com
     never observed
 
-q  quit    Tab  view    Up/Down  move    r  refresh
+q  quit   Tab  view   Up/Down  move   Enter  switch   x  run   r  refresh
+```
+
+### It acts, and acts on exactly two things
+
+`Enter` Switches to the Account under the cursor and `x` Runs it. That is the
+whole of what the view does, and it is deliberate: ADR 0011's justification for
+an interactive view at all is making a choice, and both of those have plain
+command forms, so nothing becomes TUI-only.
+
+`add`, `remove`, `purge` and `config` stay out. A keystroke away from an
+irreversible act is the wrong ergonomics for the one surface being navigated by
+arrow key, so nothing destructive is reachable here at all.
+
+A Switch from the view is the same Switch as everywhere — the outgoing
+Credential Captured first, Claude Code's locks taken, the Identity patched — and
+what `perch switch` would have printed is what appears above the keys. Switching
+to the Account that is already active says there is nothing to do rather than
+rewriting Credentials for nothing.
+
+A Run hands the terminal over: the view ends, the terminal goes back, and Claude
+Code starts against that Account's Profile with the active Account untouched. It
+returns when the client exits, with the status the client exited with — the same
+as `perch run`, because it is `perch run`.
+
+Selecting a Quarantined Account names `perch relogin` rather than failing
+obscurely, whichever of the two keys was pressed, and nothing is changed.
+
+```
+ Accounts | Utilization                             active: someone@example.com
+   Account               Alias     Group  State                 Headroom
+ * someone@example.com   -         work   enabled               58%
+>  overflow@example.com  overflow  work   enabled, quarantined  93%
+
+overflow@example.com is Quarantined: Anthropic would not renew its Credential.
+Nothing was changed — switching to it would make a Credential live that no
+longer works, and cost you the Account you are on. `perch relogin
+overflow@example.com` logs it in again in place, keeping its Alias, its Group
+and whether Cycling may choose it.
+q  quit   Tab  view   Up/Down  move   Enter  switch   x  run   r  refresh
 ```
 
 The first frame is drawn from cache and never waits on the network (ADR 0015),
@@ -842,9 +905,10 @@ no others, like every other Refresh. One that fails leaves every figure standing
 with the age it had and says what could not be read (ADR 0018).
 
 Nothing here is only here. The interactive view is one command among several
-rather than the primary surface (ADR 0011), so everything it shows has a plain
-command form — `perch list`, `perch status`, `perch config` — and where there is
-no terminal to draw in, `perch tui` refuses and names them rather than trying.
+rather than the primary surface (ADR 0011), so everything it shows and
+everything it does has a plain command form — `perch list`, `perch status`,
+`perch config`, `perch switch`, `perch run` — and where there is no terminal to
+draw in, `perch tui` refuses and names them rather than trying.
 
 The terminal is given back however the view ends: on `q`, on an error, and on a
 panic. A TUI that dies in raw mode is one you have to `reset` your way out of.

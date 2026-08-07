@@ -149,14 +149,21 @@ pub fn columns(registry: &Registry, account: &Account) -> [String; COLUMNS] {
 /// characters rather than bytes, because that is what the padding counts — a
 /// name a terminal draws in eight columns pads to eight, not to the eleven
 /// bytes it happens to occupy.
-pub fn widths<'a>(
-    rows: impl IntoIterator<Item = &'a [String; COLUMNS]> + Clone,
-) -> [usize; COLUMNS] {
+///
+/// Written over however many columns there are rather than over these four,
+/// because the TUI's Accounts view shows the same listing with the figure its
+/// order was made on beside it. Measuring a column is the same arithmetic
+/// whatever the columns are, and two copies of it is how two surfaces come to
+/// pad differently.
+pub fn widths<'a, const N: usize>(
+    headers: &[&str; N],
+    rows: impl IntoIterator<Item = &'a [String; N]> + Clone,
+) -> [usize; N] {
     std::array::from_fn(|column| {
         rows.clone()
             .into_iter()
             .map(|row| row[column].chars().count())
-            .chain(std::iter::once(HEADERS[column].chars().count()))
+            .chain(std::iter::once(headers[column].chars().count()))
             .max()
             .unwrap_or_default()
     })
@@ -253,7 +260,7 @@ fn render_human(
     // one, every row would carry the same answer to a question the heading has
     // already answered.
     let show_group = matches!(scope, Scope::Everything);
-    let widths = widths(rows.iter().map(|row| &row.cells));
+    let widths = widths(&HEADERS, rows.iter().map(|row| &row.cells));
 
     write_row(out, ' ', HEADERS, "Utilization", &widths, show_group)?;
     for row in &rows {
@@ -386,7 +393,10 @@ mod tests {
 
     #[test]
     fn a_column_is_as_wide_as_its_widest_value_or_its_header() {
-        let widths = widths(&[row("a@b.com", "overflow"), row("someone@b.com", "-")]);
+        let widths = widths(
+            &HEADERS,
+            &[row("a@b.com", "overflow"), row("someone@b.com", "-")],
+        );
         assert_eq!(widths[0], "someone@b.com".len());
         assert_eq!(widths[1], "overflow".len());
         assert_eq!(widths[2], "Group".len(), "the header is the floor");
@@ -396,7 +406,7 @@ mod tests {
     fn a_column_is_measured_in_characters_rather_than_bytes() {
         // A name a terminal draws in eight columns pads to eight, not to the
         // eleven bytes it happens to occupy.
-        let widths = widths(&[row("a@b.com", "øverfløw")]);
+        let widths = widths(&HEADERS, &[row("a@b.com", "øverfløw")]);
         assert_eq!(widths[1], 8);
     }
 }

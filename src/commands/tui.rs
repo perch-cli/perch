@@ -10,13 +10,21 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::write_failed;
+use crate::commands::run::RunArgs;
+use crate::commands::{run as run_command, write_failed};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::tui::Left;
 use crate::tui::refresh::InAThread;
 use crate::tui::terminal::TerminalScreen;
 
-pub fn run(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
+/// Opens the view, and hands over to whatever the person chose in it.
+///
+/// The status comes back rather than being folded into success or failure,
+/// because one of the two things the picker acts on is a Run — and a Run is a
+/// way of launching a program (ADR 0010). What the client said is what a script
+/// reads, whether it was launched from a command line or from a cursor.
+pub fn run(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     if !host.is_interactive() {
         return Err(PerchError::Other(
             "`perch tui` draws in a terminal, and this is not one. Everything it \
@@ -46,5 +54,29 @@ pub fn run(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     // what the user was doing, and the other is a line that could not be
     // written about the way out of it.
     let finished = crate::tui::finish(&mut refresher, out);
-    browsed.and(finished)
+    hand_over(host, browsed.and_then(|left| finished.map(|()| left))?, out)
+}
+
+/// What the view was left for.
+///
+/// Reached with the terminal already given back and any outstanding Refresh
+/// already waited for, which is the only state a Run may start from: a Run
+/// lasts as long as somebody's session, and nothing may be held for that long.
+///
+/// Its own function because that ordering is the whole of what it depends on,
+/// and because a Run launched from a cursor has to be the same Run as one
+/// launched from a command line — arguments and all, which here is none of
+/// them: Claude Code, against the chosen Profile, with nothing passed on.
+pub fn hand_over(host: &dyn Host, left: Left, out: &mut dyn Write) -> Result<i32> {
+    match left {
+        Left::Alone => Ok(0),
+        Left::ToRun(email) => run_command::run(
+            host,
+            RunArgs {
+                target: email,
+                command: Vec::new(),
+            },
+            out,
+        ),
+    }
 }

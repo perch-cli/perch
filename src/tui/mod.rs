@@ -5,6 +5,12 @@
 //! is the choice made by eye: the Accounts, their Groups, and how full they are,
 //! side by side.
 //!
+//! It **acts, and acts on exactly two things**: a Switch and a Run ([`act`]).
+//! Both have plain command forms, which is what keeps ADR 0011's constraint
+//! honest — nothing here is only here. `add`, `remove`, `purge` and `config`
+//! stay out, because a keystroke away from an irreversible act is the wrong
+//! ergonomics for the one surface being navigated by arrow key.
+//!
 //! Three rules shape the loop.
 //!
 //! The **first frame is drawn from cache** and never blocks on the network (ADR
@@ -28,6 +34,7 @@
 //! into a buffer a test can read, so the frame loop is driven with no terminal
 //! at all.
 
+pub mod act;
 pub mod fake;
 pub mod model;
 pub mod refresh;
@@ -43,7 +50,7 @@ use crate::error::Result;
 use crate::host::Host;
 use crate::registry::Registry;
 
-pub use model::{Asked, Model, Refreshing, Tab};
+pub use model::{Asked, Left, Model, Refreshing, Tab};
 pub use refresh::{Refreshed, Refresher};
 
 /// How long the loop waits for a keystroke before drawing again.
@@ -73,6 +80,10 @@ pub enum Signal {
     /// Read Utilization from Anthropic — the only thing here that touches the
     /// network, and only ever because somebody asked (ADR 0015).
     Refresh,
+    /// Make the Account under the cursor the active one.
+    Switch,
+    /// Launch a client as the Account under the cursor, in this terminal alone.
+    Run,
     /// The terminal is a different size now. Carried with the size so a test
     /// can resize the surface it is drawing into; the real terminal is asked
     /// its own size at the next draw and ignores these.
@@ -111,6 +122,12 @@ impl Signal {
             KeyCode::Down | KeyCode::Char('j') => Some(Signal::Down),
             KeyCode::Up | KeyCode::Char('k') => Some(Signal::Up),
             KeyCode::Char('r') => Some(Signal::Refresh),
+            KeyCode::Enter => Some(Signal::Switch),
+            // `x` rather than `R`, which would sit one shift away from the key
+            // that Refreshes. A mistyped Refresh costs a round trip; a mistyped
+            // Run hands the terminal to a client, and the two should not be
+            // neighbours.
+            KeyCode::Char('x') => Some(Signal::Run),
             _ => None,
         }
     }
@@ -137,21 +154,28 @@ pub trait Screen {
 /// drawn from what is already on disk (ADR 0015) — the loading happens before
 /// the terminal is ever entered, and a Refresh replaces it wholesale from
 /// somewhere that is not this loop.
+///
+/// It ends with what the picker was for: leaving, or the Account to launch a
+/// client as. A Run is not something the loop can do and come back from — it
+/// lasts as long as somebody's session — so it is what the loop ends *with*
+/// rather than something it takes ([`Left`]).
 pub fn browse(
     host: &dyn Host,
     registry: Registry,
     screen: &mut dyn Screen,
     refresher: &mut dyn Refresher,
-) -> Result<()> {
+) -> Result<Left> {
     let mut model = Model::new(registry, host.now());
 
     loop {
         screen.draw(&model)?;
 
-        if let Some(signal) = screen.next(FRAME_MILLIS)?
-            && model.act_on(signal) == Asked::ForARefresh
-        {
-            refresher.ask(model.accounts_on_show());
+        if let Some(signal) = screen.next(FRAME_MILLIS)? {
+            match model.act_on(signal) {
+                Asked::Nothing => {}
+                Asked::ForARefresh => refresher.ask(model.accounts_on_show()),
+                Asked::ForASwitch => act::switch(host, &mut model),
+            }
         }
 
         // Whatever came back while the loop was drawing. Asked for after the
@@ -166,10 +190,23 @@ pub fn browse(
         // whatever it said when it was first drawn.
         model.now = host.now();
 
-        if model.leaving {
-            return Ok(());
+        if let Some(left) = &model.leaving {
+            return Ok(left.clone());
         }
     }
+}
+
+/// What a command wrote, as the lines a frame can show it in.
+///
+/// A refusal is a sentence about the Account and then a sentence about the
+/// repair, broken where the command broke it: the terminal wraps what is too
+/// long for it ([`view`]), and a report reflowed twice reads as neither.
+pub(crate) fn lines_of(said: &str) -> Vec<String> {
+    said.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// What leaving does about a Refresh that has not come back.
@@ -250,6 +287,61 @@ mod tests {
 
         assert_eq!(Signal::of(&key(KeyCode::Char('j'))), Some(Signal::Down));
         assert_eq!(Signal::of(&Event::Key(released)), None);
+    }
+
+    #[test]
+    fn the_two_acting_keys_are_enter_and_x() {
+        assert_eq!(Signal::of(&key(KeyCode::Enter)), Some(Signal::Switch));
+        assert_eq!(Signal::of(&key(KeyCode::Char('x'))), Some(Signal::Run));
+    }
+
+    /// The picker acts on exactly two things (ADR 0011), and nothing
+    /// destructive is a keystroke away: `add`, `remove`, `purge` and `config`
+    /// have no key here and are reached by typing their names.
+    ///
+    /// Written as the whole vocabulary rather than as a list of keys that do
+    /// nothing, because the vocabulary is the thing being constrained: a
+    /// keystroke that removed an Account would have to add a Signal, and that
+    /// is what this fails on rather than on somebody having thought to try `d`.
+    #[test]
+    fn no_key_reaches_anything_but_looking_switching_and_running() {
+        let allowed = [
+            Signal::Leave,
+            Signal::NextTab,
+            Signal::PreviousTab,
+            Signal::Down,
+            Signal::Up,
+            Signal::Refresh,
+            Signal::Switch,
+            Signal::Run,
+        ];
+
+        let typed = ('a'..='z')
+            .chain('A'..='Z')
+            .chain('0'..='9')
+            .map(KeyCode::Char)
+            .chain([
+                KeyCode::Enter,
+                KeyCode::Esc,
+                KeyCode::Backspace,
+                KeyCode::Delete,
+                KeyCode::Home,
+                KeyCode::End,
+                KeyCode::PageUp,
+                KeyCode::PageDown,
+                KeyCode::Tab,
+                KeyCode::BackTab,
+                KeyCode::Up,
+                KeyCode::Down,
+                KeyCode::Left,
+                KeyCode::Right,
+            ]);
+
+        for code in typed {
+            if let Some(signal) = Signal::of(&key(code)) {
+                assert!(allowed.contains(&signal), "{code:?} means {signal:?}");
+            }
+        }
     }
 
     #[test]

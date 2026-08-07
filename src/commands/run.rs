@@ -320,7 +320,12 @@ fn the_default_profile(host: &dyn Host) -> Result<Store> {
 /// so it carries the same exit code: no amount of re-running repairs it, and
 /// `perch relogin` does. Without this the user finds out by being asked to log
 /// in by a Claude Code that has already taken the terminal.
-fn refuse_a_quarantined_account(registry: &Registry, email: &str) -> Result<()> {
+///
+/// Reached by the TUI as well, which refuses the keystroke while it still has
+/// the terminal: a Run from the picker gives the screen back before it launches
+/// anything, and a refusal arriving after that is one the user reads with the
+/// view they were choosing in already gone.
+pub(crate) fn refuse_a_quarantined_account(registry: &Registry, email: &str) -> Result<()> {
     let account = registry
         .account(email)
         .expect("resolution named an Account Perch holds");

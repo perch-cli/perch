@@ -153,7 +153,13 @@ fn decide(
 /// The refusal is a code of its own because the answer is one of its own: no other
 /// refusal in Perch is answered by logging in again, and none of them is
 /// answered by trying the same command a second time.
-fn refuse_a_quarantined_account(registry: &Registry, incoming: &Account) -> Result<()> {
+///
+/// Reached by the TUI as well, which refuses the keystroke in the frame rather
+/// than letting the Switch below discover it: the picker names the Account by
+/// cursor, so the refusal has to be the one the command would have given —
+/// character for character, from here, rather than a second sentence about the
+/// same state.
+pub(crate) fn refuse_a_quarantined_account(registry: &Registry, incoming: &Account) -> Result<()> {
     let Some(why) = incoming.quarantine else {
         return Ok(());
     };

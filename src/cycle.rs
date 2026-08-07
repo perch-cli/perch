@@ -449,6 +449,59 @@ pub fn choose(
     })
 }
 
+/// Every Account in a scope, in the order a Cycle ranks them: the ones it could
+/// land on first, best first, and the ones it would never choose after them.
+///
+/// [`choose`] needs only the winner and refuses where there is none. A picker
+/// needs the whole order, and needs it over Accounts a Cycle would not touch —
+/// a Disabled Account is still shown, and where it sits is what says it is out
+/// of the running. So the two share the measurement and the Strategy rather
+/// than each sorting on its own idea of which Account is better, because two
+/// orders would be a listing that put one Account at the top and a `perch
+/// switch` that landed on another.
+///
+/// A Cycle never leaves the scope it started in (ADR 0002), so there is no
+/// ranking over every Account Perch holds: this is per scope, and a listing
+/// spanning several is those rankings one after another.
+pub fn ranked<'a>(registry: &'a Registry, scope: &Scope) -> Vec<&'a Account> {
+    let strategy = scope.strategy(registry);
+    let mut accounts = scope.accounts(registry);
+    // Stable, so Accounts that rank identically stay in the order they were
+    // added — the same tie-break the choice itself has.
+    accounts.sort_by(|left, right| {
+        let (theirs, them) = place(right, strategy);
+        let (ours, us) = place(left, strategy);
+        theirs.cmp(&ours).then(them.total_cmp(&us))
+    });
+    accounts
+}
+
+/// Where one Account sorts, higher being better: whether a Cycle could land on
+/// it at all, and then how it ranks among the ones it could.
+///
+/// Candidacy comes first and outranks every figure. An exhausted Account is
+/// still one a Cycle would consider tomorrow; a Disabled or Quarantined one is
+/// not one it would consider at all, and sorting it by its headroom would put a
+/// full-looking Account nobody can use above one they can.
+fn place(account: &Account, strategy: Strategy) -> ((u8, u8), f64) {
+    let candidate = u8::from(account.enabled && !account.quarantined());
+    let (tier, figure) = headroom_of(account).ranking(strategy);
+    ((candidate, tier), figure)
+}
+
+/// How much of an Account is left to spend, in a column's worth of words.
+///
+/// The figure the ranking is made on, said so the order can be checked against
+/// it rather than taken on trust. Never observed is said as itself and never as
+/// a number: "no figure" and "plenty of room" are opposite pieces of advice.
+pub fn headroom_phrase(account: &Account) -> String {
+    match headroom_of(account) {
+        Headroom::Room { percent, .. } => format!("{percent:.0}%"),
+        Headroom::Exhausted { .. } => "exhausted".to_string(),
+        Headroom::Unobserved => "never observed".to_string(),
+    }
+}
+
 /// Why the winner won, in the terms it was actually judged on — which is not
 /// always the terms the Strategy asked for.
 ///
@@ -688,6 +741,112 @@ pub(crate) mod tests {
 
     fn cycle(registry: &Registry) -> Result<Choice> {
         setting_aside(registry, &SetAside::nothing())
+    }
+
+    fn work() -> Scope {
+        Scope::Group("work".to_string())
+    }
+
+    fn ranked_emails(registry: &Registry) -> Vec<&str> {
+        ranked(registry, &work())
+            .into_iter()
+            .map(Account::email)
+            .collect()
+    }
+
+    /// The order a picker shows is the order the choice makes, so the Account
+    /// at the top is the one a bare `perch switch` would land on.
+    #[test]
+    fn the_order_is_the_one_the_choice_would_make() {
+        let registry = holding(vec![
+            account("tired@example.com", vec![window("5-hour", 90.0)]),
+            account("fresh@example.com", vec![window("5-hour", 10.0)]),
+            account("middling@example.com", vec![window("5-hour", 50.0)]),
+        ]);
+
+        assert_eq!(
+            ranked_emails(&registry),
+            [
+                "fresh@example.com",
+                "middling@example.com",
+                "tired@example.com"
+            ]
+        );
+        assert_eq!(
+            cycle(&registry).expect("somewhere to go").account.email(),
+            "fresh@example.com",
+            "the top of the listing is where the Cycle goes",
+        );
+    }
+
+    /// The Strategy is the Group's, and the listing obeys it: two surfaces
+    /// disagreeing about which Account is better would be a listing that put
+    /// one at the top and a Switch that landed on another.
+    #[test]
+    fn the_order_follows_the_groups_strategy() {
+        let registry = holding(vec![
+            account("roomy@example.com", vec![resetting("5-hour", 20.0, 4)]),
+            account("soon@example.com", vec![resetting("5-hour", 60.0, 1)]),
+        ]);
+
+        assert_eq!(
+            ranked_emails(&registry)[0],
+            "roomy@example.com",
+            "most headroom is the default"
+        );
+        assert_eq!(
+            ranked_emails(&preferring(registry, Strategy::SoonestReset))[0],
+            "soon@example.com",
+        );
+    }
+
+    /// An Account a Cycle would never choose sorts below every one it would,
+    /// however full its window says it is: sorting it on its headroom would put
+    /// an Account nobody can use above one they can.
+    #[test]
+    fn an_account_no_cycle_would_choose_sorts_below_every_one_it_would() {
+        let mut spared = account("spared@example.com", vec![window("5-hour", 0.0)]);
+        spared.enabled = false;
+        let mut broken = account("broken@example.com", vec![window("5-hour", 0.0)]);
+        broken.quarantine = Some(Quarantine::RenewalRejected);
+        let registry = holding(vec![
+            spared,
+            broken,
+            account("exhausted@example.com", vec![window("5-hour", 100.0)]),
+            account("usable@example.com", vec![window("5-hour", 80.0)]),
+        ]);
+
+        assert_eq!(
+            ranked_emails(&registry),
+            [
+                "usable@example.com",
+                "exhausted@example.com",
+                "spared@example.com",
+                "broken@example.com",
+            ]
+        );
+    }
+
+    /// The figure the order was made on, said so the order can be checked
+    /// against it rather than taken on trust.
+    #[test]
+    fn the_headroom_shown_is_the_room_in_the_fullest_window() {
+        assert_eq!(
+            headroom_phrase(&account(
+                "a@example.com",
+                vec![window("5-hour", 4.0), window("7-day", 95.0)]
+            )),
+            "5%"
+        );
+        assert_eq!(
+            headroom_phrase(&account("a@example.com", vec![window("5-hour", 100.0)])),
+            "exhausted"
+        );
+        assert_eq!(
+            headroom_phrase(&account("a@example.com", vec![])),
+            "never observed",
+            "'no figure' and 'plenty of room' are opposite pieces of advice",
+        );
     }
 
     fn setting_aside(registry: &Registry, set_aside: &SetAside) -> Result<Choice> {
