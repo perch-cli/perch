@@ -832,6 +832,71 @@ fn a_group_that_has_not_said_the_watcher_may_act_is_not_watched() {
     assert!(host.sent_to(USAGE_URL).is_empty(), "and nothing was read");
 }
 
+/// Permission is asked for every round rather than only at the first, because
+/// it can stop being given while the loop is sleeping: a `perch switch` typed
+/// in another terminal can leave an ungrouped Account active, and a watcher
+/// still watching it would be watching an Account nothing carries permission to
+/// act on. It stops on the message it would have refused to start on.
+#[test]
+fn a_switch_onto_an_ungrouped_account_stops_the_loop_that_was_already_running() {
+    let host = watching(&[40.0, 45.0], 5.0).once_while_waiting(|host| {
+        move_to_group(host, SECOND_EMAIL, "none")
+            .0
+            .expect("the other Account leaves the Group");
+        run_switch(host, SECOND_EMAIL)
+            .0
+            .expect("somebody Switches onto it between two rounds");
+    });
+
+    let (result, printed) = run_watch(&host);
+
+    let refusal = result.expect_err("the Group that said it may act is gone");
+    assert_eq!(refusal.exit_code(), EXIT_NOT_INTERCHANGEABLE);
+    assert!(
+        refusal.to_string().contains("perch group move"),
+        "{refusal}"
+    );
+    assert!(refusal.to_string().contains("watcher-may-act"), "{refusal}");
+    assert_eq!(
+        decisions(&printed).len(),
+        1,
+        "the round before it, and no round after: {printed}"
+    );
+    assert_eq!(
+        asked_by(&host),
+        vec![ACTIVE_TOKEN.to_string()],
+        "and it stopped before spending a read on a decision it may not take"
+    );
+}
+
+/// The other grant, withdrawn the same way: a Group can be told the watcher may
+/// no longer act on it while a watcher is acting on it, and permission taken
+/// back is a loop to be stopped rather than one to be left running.
+#[test]
+fn a_group_that_takes_the_permission_back_stops_the_watcher_it_had_given_it() {
+    let host = watching(&[40.0, 45.0], 5.0).once_while_waiting(|host| {
+        config_set(host, &["work", "watcher-may-act", "false"])
+            .0
+            .expect("the Group takes the permission back between two rounds");
+    });
+
+    let (result, printed) = run_watch(&host);
+
+    let refusal = result.expect_err("nothing may be acted on any more");
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    assert!(refusal.to_string().contains("watcher-may-act"), "{refusal}");
+    assert_eq!(
+        decisions(&printed).len(),
+        1,
+        "the round before it, and no round after: {printed}"
+    );
+    assert_eq!(
+        asked_by(&host),
+        vec![ACTIVE_TOKEN.to_string()],
+        "and it stopped before spending a read on a decision it may not take"
+    );
+}
+
 /// The marker a Run writes names this process, and the watcher is this process
 /// — so a fixture that leaves one behind would make the watcher look like a
 /// client of itself. Asserted so the fixture above cannot quietly stop meaning
