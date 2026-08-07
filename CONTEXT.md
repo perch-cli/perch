@@ -207,8 +207,17 @@ _Avoid_: policy, mode, algorithm, preference
 **Watcher**:
 The foreground process that Cycles on your behalf when the Account you are on
 runs low. It acts only within a Group that has been told it may, and only above
-that Group's threshold.
+that Group's threshold. Either a loop you can see and kill, or a sequence of
+Checks something else runs for you — never a service running in the background.
 _Avoid_: daemon, monitor, background job
+
+**Check**:
+One round of the Watcher taken on its own — `perch watch --once` — for a
+scheduler to run. The loop's policy exactly, run once, saying what it decided in
+its exit code rather than in a line somebody is watching. What paces it is
+recorded, because each Check is a fresh process and the sequence of them is the
+Watcher.
+_Avoid_: poll, tick, cron job
 
 **Threshold**:
 How full the Account you are on has to be before the Watcher wants to move off
@@ -224,8 +233,10 @@ _Avoid_: buffer, hysteresis, gap, slack
 **Cooldown**:
 The least wall-clock the Watcher leaves between one Switch and the next,
 whatever the figures do in between. It also names how long the Account a Switch
-just left stays off the candidate list. It belongs to the running loop and is
-forgotten when the loop stops.
+just left stays off the candidate list. It belongs to the Watcher rather than to
+the machine: the loop carries it in memory and forgets it when it stops, and a
+Check records it against its Group, because there is no loop for it to live in
+and the Check after it would otherwise be paced by nothing.
 _Avoid_: backoff, debounce, rate limit, throttle
 
 **Back-off**:

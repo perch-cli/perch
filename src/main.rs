@@ -13,7 +13,7 @@ use perch::commands::remove::{self, RemoveArgs};
 use perch::commands::run::{self, RunArgs};
 use perch::commands::status::{self, StatusArgs};
 use perch::commands::switch::{self, SwitchArgs};
-use perch::commands::watch;
+use perch::commands::watch::{self, WatchArgs};
 use perch::error::EXIT_OK;
 use perch::host::RealHost;
 use perch::report;
@@ -214,8 +214,20 @@ enum Command {
     ///
     /// Every decision is printed as it is made, including the ones where
     /// nothing happens, which are most of them. They go to standard output, so
-    /// redirecting them to a file is yours to do.
-    Watch,
+    /// redirecting them to a file is yours to do — or `--once` takes a single
+    /// check for cron or a systemd timer to run, and says what it decided in
+    /// its exit code.
+    Watch {
+        /// Take one check and exit, saying what it decided in the exit code.
+        ///
+        /// For cron or a systemd timer, which is where an unattended watcher
+        /// belongs: scheduling is the operating system's job. The policy is the
+        /// loop's, run once — and the cooldown and no-return that pace it
+        /// survive between invocations, so a check every minute still switches
+        /// no more often than the Group allows.
+        #[arg(long)]
+        once: bool,
+    },
 }
 
 /// The exit code a command that either did what it was asked or failed earns.
@@ -325,7 +337,10 @@ fn main() {
             &mut out,
         )),
         Command::Switch { target } => ok(switch::run(&host, SwitchArgs { target }, &mut out)),
-        Command::Watch => ok(watch::run(&host, &mut out)),
+        // The other command whose exit code is not simply "it worked": a check
+        // reports what it decided, so a scheduler can tell a Switch from a
+        // figure that could not be read without parsing the line (ADR 0013).
+        Command::Watch { once } => watch::run(&host, WatchArgs { once }, &mut out),
     };
 
     let code = ended_as(outcome, &mut out);

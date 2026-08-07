@@ -450,8 +450,12 @@ impl GroupKey {
 /// Said of both of the watcher's fields, in one place, because two sentences
 /// about it would sooner or later say two different things: nothing here is a
 /// service that has been switched on (ADR 0013).
-const ONLY_WHILE_IT_RUNS: &str = "Only while it is running, and only in the \
-     terminal you run it in: it is a loop you can see and kill, not a daemon.";
+///
+/// Both ways of running one are named, because a setting that only governed the
+/// loop would be a setting somebody scheduling `--once` had no reason to read.
+const ONLY_WHILE_IT_RUNS: &str = "Only while a watcher is running — the loop in \
+     the terminal you started it in, or a `perch watch --once` your scheduler \
+     runs. It is not a daemon, and nothing here switches one on.";
 
 /// The settings that belong to no Group, because there is no Group for them to
 /// belong to (ADR 0017).

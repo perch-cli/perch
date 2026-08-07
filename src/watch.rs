@@ -19,7 +19,8 @@
 
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 
-use crate::registry::{Account, GroupConfig};
+use crate::error::{EXIT_HELD, EXIT_NO_CANDIDATE, EXIT_NOTHING_TO_DO, EXIT_OK};
+use crate::registry::{Account, Checked, GroupConfig};
 
 /// How long the watcher waits between Refreshing the Account it is on.
 ///
@@ -229,15 +230,21 @@ impl Fullest {
     }
 }
 
-/// The one thing the loop carries from one round to the next: when it last
+/// The one thing carried from one round to the next: when the watcher last
 /// Switched, and what it Switched off.
 ///
-/// In memory and nowhere else, which is the whole of why `perch watch` still
-/// "writes no file of its own". A cooldown is about the loop somebody is
-/// running, not about the machine: two watchers would be two people watching,
-/// and a cooldown recorded in the registry would have one of them pacing the
-/// other's decisions. Stopping the loop and starting it again is a person
-/// saying "go on then", and it starts with nothing to wait for.
+/// Where it is carried is the loop's and the check's one difference (ADR 0013).
+/// The loop keeps it in memory and nowhere else, which is the whole of why
+/// `perch watch` still "writes no file of its own": a cooldown is about the loop
+/// somebody is running, not about the machine, and two watchers would be two
+/// people watching with one pacing the other's decisions. Stopping the loop and
+/// starting it again is a person saying "go on then", and it starts with
+/// nothing to wait for.
+///
+/// A `perch watch --once` is a fresh process every time and the sequence of
+/// them is the watcher, so there is no memory for it to be carried in and it
+/// comes back off the registry — [`Recently::recorded`], from what the check
+/// before it wrote down.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Recently {
     switched: Option<Switched>,
@@ -253,6 +260,17 @@ impl Recently {
     /// A loop that has just started, which owes nobody a wait.
     pub fn nothing() -> Recently {
         Recently::default()
+    }
+
+    /// What a scheduled check inherits from the one before it: the Switch its
+    /// Group has on record, or nothing where none has happened.
+    pub fn recorded(checked: Option<&Checked>) -> Recently {
+        Recently {
+            switched: checked.map(|checked| Switched {
+                at: checked.switched_at,
+                off: checked.switched_off.clone(),
+            }),
+        }
     }
 
     pub fn switched(&mut self, off: &str, at: DateTime<Utc>) {
@@ -271,9 +289,12 @@ impl Recently {
     pub fn resting(&self, policy: &Policy, now: DateTime<Utc>) -> Option<String> {
         let left = self.left_of_the_cooldown(policy, now)?;
         let switched = self.switched.as_ref()?;
+        // The rule is named rather than only described, because a check's line
+        // is read out of a cron mailbox by somebody who has to know which
+        // setting to reach for.
         Some(format!(
-            "the last Switch was {} ago and this Group leaves at least {} \
-             between two, so nothing moves for another {}.",
+            "the last Switch was {} ago and this Group's cooldown leaves at \
+             least {} between two, so nothing moves for another {}.",
             minutes(now - switched.at),
             minutes(policy.cooldown()),
             minutes(left),
@@ -442,7 +463,15 @@ pub enum Outcome {
     /// is the only one where that is not the ordinary interval — and a hold
     /// whose line did not say when it would try again would read as a watcher
     /// that had given up.
-    Held { why: String, retrying_in: u64 },
+    ///
+    /// Absent where nothing here decides when the next reading is: a
+    /// `perch watch --once` is exiting, and when it comes back is whatever
+    /// scheduled it to say. Promising an interval it has no part in would be
+    /// the one thing on the line that was not true.
+    Held {
+        why: String,
+        retrying_in: Option<u64>,
+    },
     /// A Switch was wanted, was attempted, and was turned away without
     /// changing anything — a client running against the Profile the Capture
     /// would write into, most often (ADR 0027). Distinct from a dead end,
@@ -452,6 +481,31 @@ pub enum Outcome {
 }
 
 impl Outcome {
+    /// What a single check reports to whatever scheduled it (ADR 0013).
+    ///
+    /// The existing table rather than a code per outcome: a scheduler branches
+    /// on what it can do about the answer, and three of the six outcomes leave
+    /// it with the same thing to do — nothing now, and come back at the next
+    /// Check. Which of the three it was is on the decision line, where a person
+    /// reading a cron mailbox needs it and a script does not.
+    ///
+    /// Only 20 is new, and only because a scheduler retrying in five minutes
+    /// has to tell a figure that could not be read from a Group with nowhere to
+    /// go: the first resolves itself and the second does not.
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            Outcome::Switched { .. } => EXIT_OK,
+            // Nothing to do *now*, three ways: the Account is not full enough,
+            // the cooldown is not up, or a client was holding the Profile and
+            // will not be holding it for long.
+            Outcome::Waiting | Outcome::Cooling { .. } | Outcome::Refused { .. } => {
+                EXIT_NOTHING_TO_DO
+            }
+            Outcome::Nowhere { .. } => EXIT_NO_CANDIDATE,
+            Outcome::Held { .. } => EXIT_HELD,
+        }
+    }
+
     /// The word the line is read by, in a column so a day of them can be
     /// skimmed for the ones that did something.
     fn word(&self) -> &'static str {
@@ -493,11 +547,18 @@ impl Round {
     /// somewhere opened up.
     pub fn waiting_for(&self) -> u64 {
         match &self.outcome {
-            Outcome::Held { retrying_in, .. } => *retrying_in,
+            Outcome::Held {
+                retrying_in: Some(millis),
+                ..
+            } => *millis,
             // Named one by one rather than caught by a wildcard, so an outcome
             // added later has to say what the loop does after it instead of
-            // inheriting an answer nobody chose for it.
-            Outcome::Waiting
+            // inheriting an answer nobody chose for it. A hold carrying no wait
+            // is a check's, and a check exits rather than asking this.
+            Outcome::Held {
+                retrying_in: None, ..
+            }
+            | Outcome::Waiting
             | Outcome::Cooling { .. }
             | Outcome::Switched { .. }
             | Outcome::Nowhere { .. }
@@ -536,11 +597,18 @@ impl Round {
             Outcome::Cooling { why } => format!("over it, and too soon to move again: {why}"),
             Outcome::Switched { because } => format!("over it. Switched — {because}"),
             Outcome::Nowhere { why } => format!("over it, and nowhere to go: {why}"),
-            Outcome::Held { why, retrying_in } => format!(
+            Outcome::Held {
+                why,
+                retrying_in: Some(millis),
+            } => format!(
                 "nothing current to decide on, so nothing was decided: {why} \
                  Asking again in {}.",
-                how_long(*retrying_in),
+                how_long(*millis),
             ),
+            Outcome::Held {
+                why,
+                retrying_in: None,
+            } => format!("nothing current to decide on, so nothing was decided: {why}"),
             Outcome::Refused { why } => {
                 format!("over it, and the Switch was turned away: {why}")
             }
@@ -613,7 +681,7 @@ mod tests {
                 None,
                 Outcome::Held {
                     why: "Anthropic could not be reached.".to_string(),
-                    retrying_in: REFRESH_INTERVAL_MILLIS,
+                    retrying_in: Some(REFRESH_INTERVAL_MILLIS),
                 },
             ),
             round(
@@ -649,7 +717,7 @@ mod tests {
             None,
             Outcome::Held {
                 why: "Anthropic is rate-limiting reads of this Account.".to_string(),
-                retrying_in: REFRESH_INTERVAL_MILLIS,
+                retrying_in: Some(REFRESH_INTERVAL_MILLIS),
             },
         )
         .line(now());
@@ -671,7 +739,7 @@ mod tests {
             None,
             Outcome::Held {
                 why: "Anthropic could not be reached.".to_string(),
-                retrying_in: 600_000,
+                retrying_in: Some(600_000),
             },
         )
         .line(now());
@@ -679,6 +747,119 @@ mod tests {
         assert!(line.contains("held"), "{line}");
         assert!(line.contains("could not be reached"), "{line}");
         assert!(line.contains("10m00s"), "and when it comes back: {line}");
+    }
+
+    /// A check's hold says the same thing without the promise: when it comes
+    /// back is whatever scheduled it to say, and a line quoting an interval this
+    /// process has no part in would be the one untrue thing on it.
+    #[test]
+    fn a_held_check_says_what_held_it_and_promises_nothing_about_coming_back() {
+        let line = round(
+            None,
+            Outcome::Held {
+                why: "Anthropic could not be reached.".to_string(),
+                retrying_in: None,
+            },
+        )
+        .line(now());
+
+        assert!(line.contains("held"), "{line}");
+        assert!(line.contains("could not be reached"), "{line}");
+        assert!(!line.contains("Asking again"), "{line}");
+        assert!(!line.contains("m00s"), "no interval at all: {line}");
+    }
+
+    /// What a check reports to whatever scheduled it, over every outcome there
+    /// is: five codes, four of them the table's already (ADR 0013).
+    ///
+    /// Written as a match rather than a list, so an outcome added later cannot
+    /// reach a scheduler without somebody deciding what it means to one — and
+    /// asserted against the whole set, because a code outside it is one no
+    /// script that read the table would know what to do with.
+    #[test]
+    fn every_outcome_a_check_can_have_reports_a_code_from_the_table() {
+        let outcomes = [
+            Outcome::Waiting,
+            Outcome::Cooling { why: String::new() },
+            Outcome::Switched {
+                because: String::new(),
+            },
+            Outcome::Nowhere { why: String::new() },
+            Outcome::Held {
+                why: String::new(),
+                retrying_in: None,
+            },
+            Outcome::Refused { why: String::new() },
+        ];
+
+        for outcome in &outcomes {
+            let code = outcome.exit_code();
+            assert!(
+                [EXIT_OK, EXIT_NOTHING_TO_DO, EXIT_NO_CANDIDATE, EXIT_HELD].contains(&code),
+                "{outcome:?} exits {code}, which is not in the table `--once` \
+                 documents"
+            );
+        }
+
+        // The distinctions a scheduler acts on: a Switch happened, a Switch
+        // could not be decided on, and a Switch was decided against for want of
+        // anywhere to go.
+        assert_eq!(outcomes[2].exit_code(), EXIT_OK);
+        assert_eq!(outcomes[4].exit_code(), EXIT_HELD);
+        assert_eq!(outcomes[3].exit_code(), EXIT_NO_CANDIDATE);
+        for nothing_now in [&outcomes[0], &outcomes[1], &outcomes[5]] {
+            assert_eq!(
+                nothing_now.exit_code(),
+                EXIT_NOTHING_TO_DO,
+                "{nothing_now:?} leaves a scheduler the same thing to do — \
+                 nothing now, and come back at the next Check"
+            );
+        }
+    }
+
+    /// A cooldown is a rule with a name, and the line a scheduler captures is
+    /// read by somebody who has to know which setting to reach for.
+    #[test]
+    fn a_cooling_round_names_the_rule_that_held_it() {
+        let mut recently = Recently::nothing();
+        recently.switched("left@example.com", now());
+
+        let why = recently
+            .resting(&policy(), now() + Duration::minutes(4))
+            .expect("four minutes into a fifteen minute cooldown");
+
+        assert!(why.contains("cooldown"), "{why}");
+    }
+
+    /// What a check inherits from the one before it, which is the whole of what
+    /// makes a sequence of them a watcher rather than a Switch on a timer.
+    #[test]
+    fn a_check_is_paced_by_what_the_one_before_it_recorded() {
+        let recorded = Recently::recorded(Some(&Checked {
+            switched_at: now(),
+            switched_off: "left@example.com".to_string(),
+        }));
+
+        assert!(
+            recorded
+                .resting(&policy(), now() + Duration::minutes(4))
+                .is_some()
+        );
+        assert_eq!(
+            recorded.barred(&policy(), now() + Duration::minutes(4)),
+            Some("left@example.com"),
+        );
+        assert_eq!(
+            recorded.resting(&policy(), now() + Duration::minutes(15)),
+            None,
+            "one cooldown, counted from the Switch that was recorded rather \
+             than from the process that read it"
+        );
+        assert_eq!(
+            Recently::recorded(None),
+            Recently::nothing(),
+            "a Group nothing has Switched within owes nobody a wait"
+        );
     }
 
     /// The wait the line promises is the wait the loop takes, because they are
@@ -709,7 +890,7 @@ mod tests {
                 None,
                 Outcome::Held {
                     why: String::new(),
-                    retrying_in: 600_000,
+                    retrying_in: Some(600_000),
                 },
             )
             .waiting_for(),

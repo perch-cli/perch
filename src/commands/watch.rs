@@ -1,10 +1,16 @@
-//! `perch watch` — the loop that Cycles on your behalf when the Account you are
-//! on runs low.
+//! `perch watch` — the watcher that Cycles on your behalf when the Account you
+//! are on runs low.
 //!
 //! A loop in a terminal you can see and kill, and deliberately not a daemon
 //! (ADR 0013): no service to install, no lifecycle to manage on three
 //! platforms, and nothing left behind when it stops. What it decides and why is
 //! [`crate::watch`]; the round it takes to decide it is here.
+//!
+//! `perch watch --once` is one of those rounds, for cron or a systemd timer to
+//! run: the same policy and the same decision line, with what was decided in
+//! the exit code because nobody is reading a terminal. Scheduling is the
+//! operating system's job, and the whole of the difference between the two is
+//! [`Watcher`].
 //!
 //! One round is: Refresh the active Account, from Anthropic rather than from
 //! cache; say what that came to against the Group's threshold; and where it is
@@ -18,9 +24,10 @@
 //! side of it from trading places every few minutes: a cooldown under how often
 //! a Switch may happen at all, checked here before anything is read, and a
 //! margin under where one may land, applied by setting candidates aside for the
-//! ranking in [`act`]. The one thing the loop carries between rounds is a
+//! ranking in [`act`]. The one thing carried between rounds is a
 //! [`Recently`](crate::watch::Recently), which is what those two are measured
-//! from.
+//! from — in memory for the loop, and on the registry for a check, which has no
+//! memory of the one before it.
 //!
 //! What it does when it acts is a Switch, whole: the outgoing Credential is
 //! Captured first (ADR 0006), Claude Code's locks are taken, and a Live
@@ -42,17 +49,61 @@
 
 use std::io::Write;
 
+use chrono::{DateTime, Utc};
+
 use crate::adopt;
 use crate::commands::{say, switch as switch_command};
 use crate::cycle::{self, Scope};
-use crate::error::{PerchError, Result};
+use crate::error::{EXIT_OK, PerchError, Result};
 use crate::host::{Host, Waited};
 use crate::observe::{self, Attempt};
 use crate::registry::{Account, Registry};
 use crate::switch::{self, Interrupted};
 use crate::watch::{self, Backoff, Considered, Fullest, Outcome, Policy, Recently, Round};
 
-pub fn run(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
+/// How the watcher was asked for: as the loop, or as one check.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct WatchArgs {
+    /// Take one round and exit, reporting what it decided in the exit code.
+    pub once: bool,
+}
+
+pub fn run(host: &dyn Host, args: WatchArgs, out: &mut dyn Write) -> Result<i32> {
+    match args.once {
+        true => check(host, out),
+        false => keep_watching(host, out).map(|()| EXIT_OK),
+    }
+}
+
+/// One round, for whatever scheduled it (ADR 0013).
+///
+/// The same policy as the loop and the same decision line — the difference is
+/// only in how the answer is delivered, because nobody is watching a terminal:
+/// the line goes to standard output for cron to capture, and what was decided
+/// goes into the exit code for a script to branch on.
+///
+/// The interrupt handler is taken over here for the same reason the loop takes
+/// it: what a check does when it acts is a Switch, and a signal arriving in the
+/// middle of one would leave the machine part way through it. There is no wait
+/// to answer the interrupt at afterwards, because a check is already leaving.
+fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
+    host.listen_for_interrupts();
+
+    // Nothing carried in from anywhere: the cooldown and the no-return come off
+    // the registry inside the round, and a back-off would be pacing a loop this
+    // process does not have. How soon to come back is the scheduler's.
+    let round = one_round(
+        host,
+        out,
+        Watcher::Check,
+        &mut Recently::nothing(),
+        &mut Backoff::none(),
+    )?;
+    say(out, &round.line(host.now()))?;
+    Ok(round.outcome.exit_code())
+}
+
+fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     // Before the first round, so that a Ctrl-C during it is a request to stop
     // rather than a process killed in the middle of a Switch.
     host.listen_for_interrupts();
@@ -67,7 +118,7 @@ pub fn run(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     let mut backoff = Backoff::none();
 
     loop {
-        let round = one_round(host, out, &mut recently, &mut backoff)?;
+        let round = one_round(host, out, Watcher::Loop, &mut recently, &mut backoff)?;
         say(out, &round.line(host.now()))?;
 
         // The one place the loop holds nothing, and therefore the only place it
@@ -110,6 +161,66 @@ fn opening(host: &dyn Host, out: &mut dyn Write) -> Result<String> {
         watching.policy.ceiling(),
         watching.policy.cooldown_minutes,
     ))
+}
+
+/// Which watcher a round belongs to.
+///
+/// One difference, and every part of it is here rather than as a test of this
+/// enum scattered through the round: where the cooldown and the no-return are
+/// kept between rounds, and who decides when the next reading is (ADR 0013).
+/// Both follow from the same thing — a loop is one process a person is
+/// watching, and a check is one of a sequence of processes nobody is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Watcher {
+    /// `perch watch`: rounds separated by a wait this process takes, so what
+    /// paces it lives in memory and dies with it.
+    Loop,
+    /// `perch watch --once`: one round and out, so what paces it is written to
+    /// the registry for the next invocation to read, and how long until that
+    /// one is whatever scheduled them.
+    Check,
+}
+
+impl Watcher {
+    /// How long before the watcher reads again, where that is the watcher's to
+    /// say. A loop backs off and prints the wait it lands on; a check is
+    /// leaving, and promising an interval it has no part in would put the one
+    /// untrue thing on the line.
+    fn asking_again(self, backoff: &Backoff) -> Option<u64> {
+        match self {
+            Watcher::Loop => Some(backoff.waiting_for()),
+            Watcher::Check => None,
+        }
+    }
+
+    /// What paces this round, put where the round will read it.
+    ///
+    /// A check remembers nothing of the one before it, so it takes the Group's
+    /// record — read under the lock, so the cooldown a round is held by is the
+    /// one that was on record when it decided. The loop's is already in the
+    /// caller's hands, where it has been since the loop started.
+    fn pacing(self, carried: &mut Recently, registry: &Registry, group: &str) {
+        match self {
+            Watcher::Loop => {}
+            Watcher::Check => *carried = Recently::recorded(registry.checked(group)),
+        }
+    }
+
+    /// A Switch that happened, remembered where this watcher will find it next
+    /// time.
+    ///
+    /// For a check that is the registry, and the write happens before the
+    /// Switch is recorded so that the one save carries both: a cooldown that
+    /// did not survive the process would be a check that moved and let the next
+    /// one move straight back. The loop's memory is the
+    /// [`Recently`](crate::watch::Recently) it is holding, which the round has
+    /// already told.
+    fn remember(self, registry: &mut Registry, group: &str, off: &str, at: DateTime<Utc>) {
+        match self {
+            Watcher::Loop => {}
+            Watcher::Check => registry.record_check(group, off, at),
+        }
+    }
 }
 
 /// The Account being watched, the Group that said it may be, and the rules it
@@ -179,12 +290,15 @@ fn permitted(registry: &Registry) -> Result<Watching> {
 fn one_round(
     host: &dyn Host,
     out: &mut dyn Write,
+    watcher: Watcher,
     recently: &mut Recently,
     backoff: &mut Backoff,
 ) -> Result<Round> {
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
     let watching = permitted(&registry)?;
     let email = watching.account.email().to_string();
+
+    watcher.pacing(recently, &registry, &watching.group);
 
     // The one Account Refreshed, and nearly all of the network this loop
     // spends (ADR 0013).
@@ -215,7 +329,7 @@ fn one_round(
             threshold: watching.policy.threshold,
             outcome: Outcome::Held {
                 why,
-                retrying_in: backoff.waiting_for(),
+                retrying_in: watcher.asking_again(backoff),
             },
         })
     };
@@ -252,7 +366,14 @@ fn one_round(
         // nothing finding out where it would have gone.
         Outcome::Cooling { why }
     } else {
-        act(host, &mut perch, &mut registry, &watching, recently)?
+        act(
+            host,
+            &mut perch,
+            &mut registry,
+            &watching,
+            watcher,
+            recently,
+        )?
     };
     Ok(Round {
         email,
@@ -314,6 +435,7 @@ fn act(
     perch: &mut crate::lock::Held<'_>,
     registry: &mut Registry,
     watching: &Watching,
+    watcher: Watcher,
     recently: &mut Recently,
 ) -> Result<Outcome> {
     let scope = Scope::Group(watching.group.clone());
@@ -368,11 +490,12 @@ fn act(
     let landed = switch::perform(host, &choice.account, Some(&outgoing));
     match landed {
         Ok(_captured) => {
-            switch_command::record_active(host, perch, registry, &choice.account)?;
             // Only a Switch that happened starts a cooldown. A round that was
             // refused or found nowhere to go has changed nothing, and making it
             // wait would be pacing the watcher on its failures.
             recently.switched(outgoing.email(), host.now());
+            watcher.remember(registry, &watching.group, outgoing.email(), host.now());
+            switch_command::record_active(host, perch, registry, &choice.account)?;
             Ok(Outcome::Switched {
                 because: also(choice.because, &unread),
             })

@@ -106,6 +106,23 @@ give `perch watch` a file to write when the whole of the record above is that
 it leaves nothing behind. Stopping the loop and starting it again is a person
 saying "go on then".
 
+**A `--once` check records it, because there is no loop for it to live in.**
+The reasoning above turns on a watcher being one process: memory that outlives
+every round it paces, and dies when the person watching stops watching.
+Scheduled, the watcher is a sequence of processes and no one of them is it — so
+a cooldown kept in memory would be a cooldown that never held anything, and a
+`--once` every minute would switch every minute whatever the group said. What
+one check switched, and when, is written against the group in the registry for
+the next check to read. It is per group rather than per machine, because a
+cooldown is a group's setting and a switch within one group has nothing to say
+about how soon another may move. Only a switch that happened writes one: a
+check that changed nothing has nothing to pace.
+
+This does not make the cooldown the machine's after all. Two people running two
+loops still pace themselves separately, and a loop still starts with nothing to
+wait for — the record is the scheduled watcher's memory, kept where that
+watcher can reach it, and the loop neither reads nor writes it.
+
 The cooldown and no-return hold the same window by construction: nothing is
 switched during the cooldown, so nothing can be switched back either. The
 cooldown always gets there first, and `watcher-no-return` changes no trace the
@@ -150,3 +167,26 @@ the user's call, and `--once` under cron has its output captured already.
 and every candidate was exhausted, `18` ungrouped. One code is new — `20`, held
 because the figures were stale — because a scheduler retrying shortly needs to
 tell that apart from `17`, and only one of the two resolves itself.
+
+Three outcomes share `15`, and deliberately: under the threshold, inside the
+cooldown, and a switch the machine turned away all leave a scheduler the same
+thing to do — nothing now, and come back at the next check. Which of them it was
+is on the decision line, where a person reading a cron mailbox needs it and a
+script can do nothing with it. A code per outcome would be a distinction
+nobody could act on, and the refusal already has a code of its own (`16`) for
+the command a person typed.
+
+Anything that stops a check from deciding keeps its own code, before the round
+or during it: a group that has not said the watcher may act exits `14` as it
+does from the loop, and a switch that made the incoming credential live and
+then failed exits with whatever failed, as the loop stops on it. Those are
+failures rather than decisions, and folding them into the table would report
+`0` or `15` about a machine that is part way through a switch. The table is
+what a check *decided*.
+
+A quarantined active account is a figure that cannot be read, so a check holds
+and exits `20`, as it would for a throttle. `19` says more — it is the one
+failure `perch relogin` repairs — and it is not in the table `--once` promises,
+so that distinction is carried on the decision line, which names the quarantine
+and the repair. Neither is anything the scheduler itself can act on: both mean
+this check decided nothing.

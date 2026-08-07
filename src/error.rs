@@ -49,6 +49,11 @@ pub const EXIT_NOT_INTERCHANGEABLE: i32 = 18;
 /// Distinct from every other refusal because the repair is distinct: no amount
 /// of retrying, enabling or re-targeting repairs it, and `perch relogin` does.
 pub const EXIT_QUARANTINED: i32 = 19;
+/// Exit code for a check that decided nothing because it had no current figure
+/// to decide on: `perch watch --once` held, and the Refresh it held for failed
+/// (ADR 0013). Distinct from having nowhere to go, because a scheduler retrying
+/// shortly needs to tell the two apart — only one of them resolves itself.
+pub const EXIT_HELD: i32 = 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PerchError {

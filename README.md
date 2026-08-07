@@ -9,7 +9,8 @@ Early. Perch adopts the login you already have, adds further Accounts without
 disturbing it, names them, holds Groups of Accounts you have declared
 interchangeable, lists what you have, reads how full each one is, switches to
 an Account you name, picks one for you when you name none, watches the Account
-you are on and Cycles when it runs low, runs a client as one Account without
+you are on and Cycles when it runs low — in a loop or one check at a time for
+your scheduler — runs a client as one Account without
 switching to it, logs an Account in again when its Credential stops working,
 gives one up when a subscription is retired, and takes its configuration from a
 script.
@@ -197,7 +198,8 @@ Stopped. Nothing was left behind: the watcher holds no lock, writes no file of i
 It is **not a daemon** (ADR 0013). There is nothing to install, nothing to
 manage, and nothing left behind when it stops: it holds no lock and takes no
 marker across a wait, so Ctrl-C is safe wherever it lands. A Ctrl-C during a
-Switch lets that Switch finish first.
+Switch lets that Switch finish first. Wanting it truly unattended is what
+[`--once` and your own scheduler](#watching-on-a-schedule) are for.
 
 **Every decision is printed, including the ones where nothing happens** — which
 are most of them. A line names what was read, the threshold it was read
@@ -270,9 +272,10 @@ watcher knows nothing about, and no figure is not evidence of room.
 
 None of it survives the loop. The cooldown lives in the running process and
 nowhere else — stopping `perch watch` and starting it again is you saying "go
-on then", and it starts with nothing to wait for. `watcher-no-return` is
-measured in cooldowns, so a Group with `watcher-cooldown-minutes 0` has no
-no-return either, whatever it is set to.
+on then", and it starts with nothing to wait for. A scheduled check is the one
+exception, and [it says why below](#watching-on-a-schedule).
+`watcher-no-return` is measured in cooldowns, so a Group with
+`watcher-cooldown-minutes 0` has no no-return either, whatever it is set to.
 
 What it does when it acts is a Switch and nothing else: the outgoing Credential
 is Captured into its own Profile first (ADR 0006), Claude Code's locks are
@@ -295,6 +298,67 @@ Group `work` has not been told the watcher may act on it, so nothing is being wa
 `cycle-ungrouped` grants the watcher nothing. Permission to Switch **when you
 ask** and permission to Switch **while nobody is looking** are different grants,
 and the second has no owner when there is no Group to carry it.
+
+### Watching on a schedule
+
+`perch watch --once` takes one check and exits, saying what it decided in its
+exit code. That is the whole of what an unattended watcher needs, because
+scheduling is the operating system's job (ADR 0013): cron and systemd timers
+already run things at an interval, keep them from overlapping, and capture what
+they printed.
+
+```cron
+*/5 * * * * perch watch --once >> ~/.local/state/perch-watch.log 2>&1
+```
+
+```
+$ perch watch --once
+2026-08-04T12:00:00Z  switched  you@example.com 86% used, fullest 5-hour; threshold 80% — over it. Switched — overflow@example.com has the most room: 95% headroom.   # exit 0
+
+$ perch watch --once
+2026-08-04T12:05:00Z  cooling   overflow@example.com 90% used, fullest 5-hour; threshold 80% — over it, and too soon to move again: the last Switch was 5 minutes ago and this Group's cooldown leaves at least 15 minutes between two, so nothing moves for another 10 minutes.   # exit 15
+```
+
+It is the same policy as the loop, run once — the same threshold, cooldown,
+margin and no return, and the same refusal to act on a figure it did not just
+read. **The cooldown and the no return survive between invocations**, because
+each `--once` is a fresh process and the sequence of them is the watcher: what
+one check Switched, and when, is recorded against the Group in the registry for
+the next one to be paced by. That is the one thing about the watcher that is
+written down, and it is why a check every minute still Switches no more often
+than the Group allows. The loop keeps the same two facts in memory instead —
+two loops would be two people watching, and one pacing the other's decisions is
+not what either of them asked for.
+
+The exit codes are the [table below](#exit-codes), and a check reaches five of
+them:
+
+| Code | What a check decided |
+| ---- | -------------------- |
+| 0 | it Switched |
+| 15 | nothing to do now — under the threshold, inside the cooldown, or a client was holding the Profile |
+| 17 | a Switch was wanted and every candidate was exhausted |
+| 18 | the Account it is on is in no Group, so nothing carries permission |
+| 20 | held: the figures were stale and the Refresh that would have replaced them failed |
+
+`20` is the one code the watcher added, and it exists because a scheduler
+retrying in five minutes has to tell a figure it could not read from a Group
+with nowhere to go: the first resolves itself and the second does not. A Switch
+held back by the cooldown or the no return is `15` — there was nothing to do
+*now* — and which of the rules held it is on the line rather than in the code,
+because a script can do nothing different about it and a person reading a cron
+mailbox wants to know.
+
+An Account whose Credential has stopped working is `20` as well — a figure that
+cannot be read is a figure that cannot be read — and the line names the
+Quarantine and the `perch relogin` that repairs it.
+
+Anything that stops a check from deciding exits as it would from any other
+command: `14` for a Group that has not said the watcher may act, `12` for no
+active Account at all, `11` for a keychain nobody can reach, and whatever
+failed for a Switch that made the incoming Credential live and then could not
+finish. A check reports what it decided, and a machine part way through a
+Switch is not a decision.
 
 ## Running one Account in one terminal
 
@@ -696,11 +760,12 @@ it took.
 | 12 | there is no such thing — no login, no such Account, no such Group |
 | 13 | it collides with something Perch already holds |
 | 14 | Perch understood it and will not accept it — an ambiguous name, a value out of range, a Group that has not said the watcher may act on it |
-| 15 | there was nothing to do — you are already on that Account |
+| 15 | there was nothing to do — you are already on that Account, or a check found nothing to do now |
 | 16 | refused: a client is running against that Profile, so its Credential is not Perch's to write |
 | 17 | a Cycle found nowhere to land — every Account in the Group is exhausted, or none is a candidate |
 | 18 | a bare Cycle, or a watcher, on an Account nobody has declared interchangeable with anything (ADR 0017) |
 | 19 | that Account is Quarantined — its Credential no longer works, and `perch relogin` repairs it (ADR 0023) |
+| 20 | `perch watch --once` held: there was no current figure to decide on, and the Refresh that would have got one failed (ADR 0013) |
 
 `perch run` is the one command these do not describe once it has launched
 something: what the client exited with is what Perch exits with, so a script
