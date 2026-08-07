@@ -414,6 +414,17 @@ pub trait Host {
     /// One line of input, or `None` at end of input.
     fn read_line(&self) -> Result<Option<String>, HostError>;
 
+    /// One line of input that is never shown as it is typed, or `None` at end of
+    /// input.
+    ///
+    /// Its own effect rather than a flag on [`Host::read_line`], because the
+    /// caller who forgets the flag is the caller who writes somebody's export
+    /// passphrase into their scrollback — and because turning the terminal's
+    /// echo off and back on again is a platform primitive, which is what this
+    /// port is for. A platform with no way to hide what is typed refuses rather
+    /// than showing it (ADR 0014).
+    fn read_secret(&self) -> Result<Option<String>, HostError>;
+
     /// Says something the user should know that is not the answer to what they
     /// asked: a Credential written to the store Perch would rather not have
     /// used, a file found looser than it should be (ADR 0020).

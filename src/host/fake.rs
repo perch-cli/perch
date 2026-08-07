@@ -82,6 +82,10 @@ pub enum Effect {
     /// A question put to the person at the terminal. Recorded so a command that
     /// must never ask one — bare `perch switch` (ADR 0011) — can be held to it.
     Asked,
+    /// A question whose answer the terminal never showed. Distinct from `Asked`
+    /// so a test can say that a passphrase went in by the path that hides it
+    /// rather than by the one that echoes.
+    AskedInSecret,
 }
 
 /// One request the fake was asked to send, kept whole so a test can say what
@@ -185,6 +189,11 @@ pub struct FakeHost {
     live_processes: RefCell<BTreeMap<u32, Option<DateTime<Utc>>>>,
     interactive: RefCell<bool>,
     answers: RefCell<VecDeque<String>>,
+    /// What the person types where the terminal shows nothing back. Its own
+    /// queue rather than a share of `answers`, so a test states which prompt
+    /// each line was typed at — and a command that read a passphrase through the
+    /// echoing path runs out of answers rather than quietly working.
+    secrets: RefCell<VecDeque<String>>,
     /// How long the person at the terminal takes over each answer.
     answering_takes_millis: RefCell<u64>,
     /// What each endpoint answers, by URL and by the access token that asked.
@@ -261,6 +270,7 @@ impl FakeHost {
             )])),
             interactive: RefCell::new(true),
             answers: RefCell::new(VecDeque::new()),
+            secrets: RefCell::new(VecDeque::new()),
             answering_takes_millis: RefCell::new(0),
             replies: RefCell::new(BTreeMap::new()),
             traces: RefCell::new(BTreeMap::new()),
@@ -590,6 +600,13 @@ impl FakeHost {
         self
     }
 
+    /// The same, for the questions the terminal shows nothing back to — a
+    /// passphrase, prompted and confirmed (ADR 0014).
+    pub fn with_secrets(self, secrets: &[&str]) -> Self {
+        *self.secrets.borrow_mut() = secrets.iter().map(|line| line.to_string()).collect();
+        self
+    }
+
     /// How long the person at the terminal takes to answer each question.
     ///
     /// Instant by default, which no real terminal is. A question put to a human
@@ -789,6 +806,31 @@ impl FakeHost {
 
     fn record(&self, effect: Effect) {
         self.effects.borrow_mut().push(effect);
+    }
+
+    /// Passes the time the person at the terminal takes over an answer, and lets
+    /// whatever the test said happens while Perch waits happen.
+    ///
+    /// Shared by both prompts, because a question is a wait whether or not the
+    /// terminal shows what is typed — and the passphrase prompts are the longest
+    /// wait in Perch, since there are two of them and both are somebody typing
+    /// carefully. A fake that passed time at one prompt and not the other would
+    /// present a world that stood still for exactly the command most able to
+    /// outlast the state it checked.
+    fn while_they_answer(&self) {
+        let taken = *self.answering_takes_millis.borrow();
+        if taken == 0 {
+            return;
+        }
+        let thought_about_it = *self.now.borrow() + chrono::Duration::milliseconds(taken as i64);
+        *self.now.borrow_mut() = thought_about_it;
+
+        // Taken out before it runs, so it can reach back into the fake without
+        // meeting a borrow this call is still holding.
+        let happens = self.while_waiting.borrow_mut().take();
+        if let Some(happens) = happens {
+            happens(self);
+        }
     }
 
     fn mark_written(&self, path: &Path) {
@@ -1367,20 +1409,14 @@ impl Host for FakeHost {
 
     fn read_line(&self) -> Result<Option<String>, HostError> {
         self.record(Effect::Asked);
-        let taken = *self.answering_takes_millis.borrow();
-        if taken > 0 {
-            let thought_about_it =
-                *self.now.borrow() + chrono::Duration::milliseconds(taken as i64);
-            *self.now.borrow_mut() = thought_about_it;
-
-            // Taken out before it runs, so it can reach back into the fake
-            // without meeting a borrow this call is still holding.
-            let happens = self.while_waiting.borrow_mut().take();
-            if let Some(happens) = happens {
-                happens(self);
-            }
-        }
+        self.while_they_answer();
         Ok(self.answers.borrow_mut().pop_front())
+    }
+
+    fn read_secret(&self) -> Result<Option<String>, HostError> {
+        self.record(Effect::AskedInSecret);
+        self.while_they_answer();
+        Ok(self.secrets.borrow_mut().pop_front())
     }
 
     /// Answers with whatever the test arranged for this endpoint, and with

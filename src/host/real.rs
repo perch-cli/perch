@@ -522,12 +522,11 @@ impl Host for RealHost {
     }
 
     fn read_line(&self) -> Result<Option<String>, HostError> {
-        let mut line = String::new();
-        let read = std::io::stdin().read_line(&mut line)?;
-        if read == 0 {
-            return Ok(None);
-        }
-        Ok(Some(line.trim_end_matches(['\r', '\n']).to_string()))
+        read_a_line()
+    }
+
+    fn read_secret(&self) -> Result<Option<String>, HostError> {
+        read_without_echo()
     }
 
     fn http(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, HostError> {
@@ -549,6 +548,98 @@ impl Host for RealHost {
             body: body.to_string(),
         })
     }
+}
+
+/// One line from standard input, or `None` at end of it.
+fn read_a_line() -> Result<Option<String>, HostError> {
+    use std::io::BufRead;
+
+    let mut line = String::new();
+    let read = std::io::stdin().lock().read_line(&mut line)?;
+    if read == 0 {
+        return Ok(None);
+    }
+    Ok(Some(line.trim_end_matches(['\r', '\n']).to_string()))
+}
+
+/// The same, with the terminal not showing what is typed.
+///
+/// The whole of it is `ECHO` off, one line, `ECHO` back on — a platform
+/// primitive linked rather than taken as a crate, which is what ADR 0021
+/// decided for the last two of these. The mode is restored whatever the read
+/// did, because a terminal left with its echo off outlives the process that
+/// turned it off and every shell after it types blind.
+#[cfg(unix)]
+fn read_without_echo() -> Result<Option<String>, HostError> {
+    use std::os::fd::AsRawFd;
+
+    let terminal = std::io::stdin().as_raw_fd();
+    let mut showing: libc::termios = unsafe { std::mem::zeroed() };
+    // SAFETY: `showing` is a `termios` this call fills in, and the descriptor is
+    // this process's own standard input.
+    if unsafe { libc::tcgetattr(terminal, &mut showing) } != 0 {
+        return Err(HostError::Io(std::io::Error::last_os_error()));
+    }
+
+    let mut hiding = showing;
+    hiding.c_lflag &= !libc::ECHO;
+    // `TCSAFLUSH` rather than `TCSANOW`: anything typed ahead of the question was
+    // typed while the terminal was still echoing, and would be read as part of
+    // the passphrase after having been shown on the way in.
+    // SAFETY: both arguments are as above, and `hiding` is the mode just read
+    // back with one flag cleared.
+    if unsafe { libc::tcsetattr(terminal, libc::TCSAFLUSH, &hiding) } != 0 {
+        return Err(HostError::Io(std::io::Error::last_os_error()));
+    }
+
+    let typed = read_a_line();
+    // SAFETY: as above, restoring exactly the mode `tcgetattr` reported.
+    unsafe { libc::tcsetattr(terminal, libc::TCSAFLUSH, &showing) };
+    typed
+}
+
+/// The same on Windows, where the console has one mode word and `ENABLE_ECHO_INPUT`
+/// is the bit in it.
+#[cfg(windows)]
+fn read_without_echo() -> Result<Option<String>, HostError> {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::System::Console::{
+        ENABLE_ECHO_INPUT, GetConsoleMode, GetStdHandle, STD_INPUT_HANDLE, SetConsoleMode,
+    };
+
+    // SAFETY: every call here takes a handle this process owns and a mode word
+    // owned by this frame.
+    unsafe {
+        let console = GetStdHandle(STD_INPUT_HANDLE);
+        if console == INVALID_HANDLE_VALUE || console.is_null() {
+            return Err(HostError::Io(std::io::Error::last_os_error()));
+        }
+
+        let mut showing = 0u32;
+        if GetConsoleMode(console, &mut showing) == 0 {
+            return Err(HostError::Io(std::io::Error::last_os_error()));
+        }
+        if SetConsoleMode(console, showing & !ENABLE_ECHO_INPUT) == 0 {
+            return Err(HostError::Io(std::io::Error::last_os_error()));
+        }
+
+        let typed = read_a_line();
+        SetConsoleMode(console, showing);
+        typed
+    }
+}
+
+/// A platform with no way to stop the terminal showing what is typed refuses
+/// rather than showing it. Perch runs on three platforms and two of them are
+/// above; this is the branch that keeps the third from silently printing an
+/// export passphrase into somebody's scrollback.
+#[cfg(not(any(unix, windows)))]
+fn read_without_echo() -> Result<Option<String>, HostError> {
+    Err(HostError::Other(
+        "this platform has no way to stop the terminal showing what is typed, \
+         and a passphrase must never be shown"
+            .to_string(),
+    ))
 }
 
 /// Moves a path over another, replacing it — `std::fs::rename`, everywhere it

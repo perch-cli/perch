@@ -23,8 +23,9 @@ pub const EXIT_PROBE_REFUSED: i32 = 10;
 pub const EXIT_KEYCHAIN_UNAVAILABLE: i32 = 11;
 /// Exit code for a target that does not exist — no login, no such Account.
 pub const EXIT_NOT_FOUND: i32 = 12;
-/// Exit code for a request that collides with what Perch already holds: an
-/// Account added twice, a name already spoken for.
+/// Exit code for a request that collides with something that is already there:
+/// an Account added twice, a name already spoken for, a path an Export would
+/// have written over.
 pub const EXIT_CONFLICT: i32 = 13;
 /// Exit code for a request Perch understood and refused on its own terms: a
 /// name it will not accept, a configured value outside the range it means
@@ -83,8 +84,8 @@ pub enum PerchError {
     #[error("{0}")]
     NotFound(String),
 
-    /// The request collides with something Perch already holds, and naming the
-    /// existing entry is the whole of the answer.
+    /// The request collides with something that is already there, and naming
+    /// what is in the way is the whole of the answer.
     #[error("{0}")]
     Conflict(String),
 
@@ -147,6 +148,25 @@ pub enum PerchError {
 
     #[error("{0}")]
     Other(String),
+}
+
+/// The refusal a build raises rather than half-reading something a newer Perch
+/// wrote.
+///
+/// Both of Perch's own formats are versioned, and the version is a guard against
+/// the future rather than a migration story: nobody is running Perch yet, so
+/// there is no past format to read. What there is, and what this exists for, is
+/// the machine holding two builds — a registry written by the newer one, an
+/// Export restored by the older — where the wrong answer is a file half-read
+/// rather than refused.
+///
+/// Said once because the two formats owe the reader the same three things: what
+/// it was, how far ahead it is, and that upgrading is the way through.
+pub fn written_by_a_newer_perch(what: &str, of: &str, version: u32, understood: u32) -> PerchError {
+    PerchError::Other(format!(
+        "{what} was written by a newer Perch ({of} version {version}, this build \
+         understands {understood}). Upgrade Perch."
+    ))
 }
 
 impl PerchError {

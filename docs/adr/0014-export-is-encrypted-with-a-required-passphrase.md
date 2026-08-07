@@ -61,3 +61,49 @@ pair that makes moving to a new machine true.
 the file is wherever the user put it, possibly on another machine — so
 requiring one is a check that checks nothing. Offering to write one is not: it
 is a keystroke, and it is the only artifact that makes purge survivable.
+
+## Amended: the file is armored, and the passphrase is typed at a terminal
+
+The amendment above settled the format and the contents and left two things to
+whoever wrote the command. Both turned out to be decisions rather than details.
+
+**The file is armored** — `age`'s own text encoding of the same `age` file,
+which `age -d` reads back without being told. Two things follow and both are
+wanted. The result is a `str`, so an export goes out through the Host port's
+ordinary private write rather than needing a second, bytes-shaped way to write a
+file: every other secret Perch writes is text, and one binary path would be one
+path where the mode, the atomic replace and the failure cleanup are written
+again. And an export is something a person may reasonably paste into a password
+manager, which is a thing you can do with text and not with a blob. The cost is
+about a third more bytes, on a file written perhaps twice a year.
+
+**The passphrase is typed at a terminal, and there is no flag.** Every other
+capability in Perch is reachable from a script, because it has to be complete
+over SSH and in CI (ADR 0011). This one is the exception, and it is the same
+rule an access token travels under (ADR 0021): a value passed as an argument
+sits in `argv` where any process on the machine can read it off the process
+table, and a value in a shell history outlives the command that used it. So
+`perch export` without a terminal is refused, and the refusal names the terminal
+rather than a way round it — an escape hatch here would be the whole of what the
+required passphrase was for.
+
+It is prompted twice and confirmed for the same reason it is required at all: a
+passphrase mistyped once is a file nobody discovers is unreadable until the
+machine it would have restored is gone.
+
+**Nothing is written over.** The one argument is a path somebody typed, and what
+the command does with it is replace the file there. A mistyped path would
+otherwise make the backup command destroy whatever it was pointed at, and an
+export landing on an older export is the older backup gone — which is the
+opposite of what a file that accumulates is for. A path that is taken is refused,
+and naming a free one is a keystroke.
+
+## Verified
+
+`age` 1.3.1 — Filippo Valsorda's Go implementation, the reference one — decrypts
+what `perch export` writes, given the passphrase, on a machine that has never
+heard of Perch. Checked by hand rather than in CI: the property is what the crate
+promises, and installing the Go tool on three runners to re-check it every push
+buys less than it costs. What CI does hold is that the file carries `age`'s armor
+header and that its recipient is scrypt, which is the pair that makes `age -d`
+recognise the file and ask for a passphrase.

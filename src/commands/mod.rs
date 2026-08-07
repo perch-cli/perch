@@ -6,6 +6,7 @@ pub mod add;
 pub mod alias;
 pub mod config;
 pub mod enable;
+pub mod export;
 pub mod group;
 pub mod list;
 pub mod relogin;
@@ -43,6 +44,23 @@ pub fn ask(host: &dyn Host, out: &mut dyn Write, question: &str) -> Result<Optio
     out.flush().map_err(write_failed)?;
     host.read_line()
         .map_err(|err| PerchError::Other(format!("could not read your answer: {err}")))
+}
+
+/// The same, for a question whose answer the terminal must never show — the
+/// passphrase an Export is encrypted with (ADR 0014).
+///
+/// The newline afterwards is Perch's to write, because the one the terminal
+/// would have written is the one that was suppressed: with echo off, the Return
+/// that ended the answer never reached the screen, so whatever is said next
+/// would otherwise be written where the question ended.
+pub fn ask_secret(host: &dyn Host, out: &mut dyn Write, question: &str) -> Result<Option<String>> {
+    write!(out, "{question}").map_err(write_failed)?;
+    out.flush().map_err(write_failed)?;
+    let answered = host
+        .read_secret()
+        .map_err(|err| PerchError::Other(format!("could not read your answer: {err}")))?;
+    writeln!(out).map_err(write_failed)?;
+    Ok(answered)
 }
 
 /// What the Accounts in no Group are shown under. Being in no Group is not a

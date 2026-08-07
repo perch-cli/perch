@@ -12,8 +12,8 @@ an Account you name, picks one for you when you name none, watches the Account
 you are on and Cycles when it runs low — in a loop or one check at a time for
 your scheduler — runs a client as one Account without
 switching to it, logs an Account in again when its Credential stops working,
-gives one up when a subscription is retired, and takes its configuration from a
-script.
+gives one up when a subscription is retired, writes everything it holds to one
+encrypted file, and takes its configuration from a script.
 
 ```
 $ perch status
@@ -589,6 +589,61 @@ that would have asked is refused rather than assumed, and end of input is a no.
 The Group the Account was in stays declared — a Group is something you said, not
 a summary of where the Accounts happen to be.
 
+## Backing up everything
+
+`perch export <path>` writes everything Perch holds to one encrypted file: the
+whole registry — every Account, its Alias, its Group, whether Cycling may choose
+it, why it is Quarantined where it is, and what each Group carries — alongside
+every Credential. A dead machine, a mistaken `perch remove` or a new laptop then
+costs you a file rather than a login for every subscription (ADR 0014).
+
+```
+$ perch export ~/perch-backup.age
+This file holds a working Credential for every Account Perch has. It is encrypted with a passphrase you choose, and there is no way into it without one.
+Passphrase:
+Again:
+Exported 3 Accounts to /Users/someone/perch-backup.age, with everything the registry says about them: their Aliases, their Groups, whether Cycling may choose them, and what each Group carries.
+Keep the passphrase somewhere that is not beside the file. Without it there is nothing in there, and nothing Perch holds can get it back.
+```
+
+**It takes everything and has no target.** There is no per-Account and no
+per-Group form, because a selective export is a partial restore — which is the
+failure the file exists to prevent, wearing a feature's clothes.
+
+**The passphrase is required rather than offered**, prompted, confirmed, and
+never shown as you type it. It cannot be passed as an argument and there is no
+flag that answers ahead of time: an argument sits in the process table for
+anything on the machine to read, and in a shell history afterwards. So this is
+the one command in Perch that a script cannot drive — without a terminal it is
+refused, and the refusal names the terminal rather than a way round it.
+
+**The file is an `age` file**, in `age`'s text encoding, so the standard `age`
+tool reads it on a machine that has never heard of Perch:
+
+```
+$ age --decrypt ~/perch-backup.age
+Enter passphrase: 
+{"version":1,"registry":{ ... },"credentials":{ ... }}
+```
+
+A forgotten passphrase means the export is gone and logging in again is the only
+way back. That is the correct trade for a file holding every Credential at once.
+
+Nothing is Renewed and nothing Rotated on the way — an export reads what is
+stored — and an Account something is currently running against is read like any
+other, because only *writing* into a Live Profile is refused. A store that is
+there and will not say what it holds stops the whole export rather than shrinking
+it: an export that quietly left one Account out would only be found wanting on
+the day it was needed. An Account whose stores hold nothing is still exported,
+Quarantine reason and all, and the command says which.
+
+The path is read as somebody's typing rather than as an instruction. Nothing is
+written over — a path that is already taken is refused, and checked again after
+the passphrase, so a file that arrived while you were typing is safe too — and a
+directory that is not there is refused rather than created, because one Perch
+made for a path you typed would be a directory you did not ask for, at
+permissions you did not choose.
+
 ## What you have
 
 `perch list` is the one place that answers it: every Account with its Alias, its
@@ -765,7 +820,7 @@ it took.
 | 10 | refused: an assumption about the installed Claude Code failed (ADR 0007) |
 | 11 | the keychain is locked, denied, or unavailable |
 | 12 | there is no such thing — no login, no such Account, no such Group |
-| 13 | it collides with something Perch already holds |
+| 13 | it collides with something that is already there — an Account added twice, a name already spoken for, a path an Export would have written over |
 | 14 | Perch understood it and will not accept it — an ambiguous name, a value out of range, a Group that has not said the watcher may act on it |
 | 15 | there was nothing to do — you are already on that Account, or a check found nothing to do now |
 | 16 | refused: a client is running against that Profile, so its Credential is not Perch's to write |
