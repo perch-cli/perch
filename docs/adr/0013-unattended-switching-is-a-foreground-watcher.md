@@ -149,6 +149,14 @@ is looking are different grants, and the second has no owner when there is no
 group to carry it. `perch watch` started on an ungrouped account says so and
 exits rather than idling forever having decided nothing.
 
+**Both grants are read every round, not only at the first.** Either can be
+taken back while the loop is sleeping: a `perch switch` in another terminal can
+leave an ungrouped account active, and a group can be told the watcher may no
+longer act on it. A loop still running on permission that has been withdrawn is
+the exact thing "nothing changes underneath you unless you said it could" is
+about, so it stops on the message it would have refused to start on — `18` for
+the ungrouped account and `14` for the group, as at the first round.
+
 **A Switch that changed nothing is a decision; one that changed something and
 then failed stops the loop.** A Capture refused because a client is running
 against the outgoing Profile (ADR 0027) leaves the machine exactly as it was

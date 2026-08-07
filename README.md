@@ -282,8 +282,8 @@ is Captured into its own Profile first (ADR 0006), Claude Code's locks are
 taken, and a Live Profile's token is never Renewed (ADR 0005). Running while
 Claude Code is working is the normal case, not the exception.
 
-Two things stop it before it starts, because there would be nothing for it to
-do:
+Two things stop it, at the first round or at any round after, because there
+would be nothing for it to do:
 
 ```
 $ perch watch
@@ -298,6 +298,13 @@ Group `work` has not been told the watcher may act on it, so nothing is being wa
 `cycle-ungrouped` grants the watcher nothing. Permission to Switch **when you
 ask** and permission to Switch **while nobody is looking** are different grants,
 and the second has no owner when there is no Group to carry it.
+
+Both permissions are read every round rather than only at the first, because
+either can be taken back while the watcher is sleeping. A `perch switch` in
+another terminal that leaves an ungrouped Account active, or a
+`perch config set work watcher-may-act false`, stops a watcher that is already
+running — on the message and exit code above, the ones it would have refused to
+start on, rather than leaving it idling having decided it may do nothing.
 
 ### Watching on a schedule
 
