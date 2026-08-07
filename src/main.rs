@@ -8,6 +8,7 @@ use perch::commands::config::{self, ConfigCommand};
 use perch::commands::enable::{self, EnableCommand};
 use perch::commands::export::{self, ExportArgs};
 use perch::commands::group::{self, GroupCommand};
+use perch::commands::import::{self, ImportArgs};
 use perch::commands::list::{self, ListArgs};
 use perch::commands::relogin::{self, ReloginArgs};
 use perch::commands::remove::{self, RemoveArgs};
@@ -125,6 +126,22 @@ enum Command {
     Group {
         #[command(subcommand)]
         action: GroupCommand,
+    },
+
+    /// Put a whole machine back from a file `perch export` wrote.
+    ///
+    /// The exact inverse of an export: the registry and every Credential, so a
+    /// new machine arrives with the setup the old one had rather than a pile of
+    /// nameless logins (ADR 0014). Credentials land wherever this machine's
+    /// Claude Code keeps one, whatever store the file was written from.
+    ///
+    /// It refuses a Perch that already holds an Account and names `perch purge`
+    /// as the way to make room — merging two machines is a different feature.
+    /// Nothing is made active by an import; `perch switch` is what lands.
+    Import {
+        /// The file to restore from. The passphrase is prompted, and a wrong
+        /// one fails before anything is written.
+        path: std::path::PathBuf,
     },
 
     /// Log an Account in again, in place.
@@ -334,6 +351,7 @@ fn main() {
         )),
         Command::Export { path } => ok(export::run(&host, ExportArgs { path }, &mut out)),
         Command::Group { action } => ok(group::run(&host, action, &mut out)),
+        Command::Import { path } => ok(import::run(&host, ImportArgs { path }, &mut out)),
         Command::List { json } => ok(list::run(&host, ListArgs { json }, &mut out)),
         Command::Relogin { target } => ok(relogin::run(&host, ReloginArgs { target }, &mut out)),
         Command::Remove { target, yes } => {
@@ -407,6 +425,38 @@ mod tests {
     fn a_command_without_the_separator_is_not_a_command_line() {
         assert!(Cli::try_parse_from(["perch", "run", "dev", "--resume"]).is_err());
         assert!(Cli::try_parse_from(["perch", "run", "dev", "npm", "test"]).is_err());
+    }
+
+    /// An Import is the exact inverse, so its surface is the same one: a path,
+    /// and nothing that would narrow the restore or answer the passphrase ahead
+    /// of time. There is no `--force` either — a machine that already holds an
+    /// Account is refused rather than merged, and a flag would be the merge
+    /// wearing a shortcut's clothes (ADR 0014).
+    #[test]
+    fn an_import_takes_a_path_and_nothing_else() {
+        assert!(Cli::try_parse_from(["perch", "import", "/tmp/perch.age"]).is_ok());
+        assert!(Cli::try_parse_from(["perch", "import"]).is_err());
+
+        for narrowed in [
+            &["perch", "import", "/tmp/perch.age", "someone@example.com"][..],
+            &["perch", "import", "/tmp/perch.age", "--account", "work"],
+            &["perch", "import", "/tmp/perch.age", "--group", "work"],
+            &[
+                "perch",
+                "import",
+                "/tmp/perch.age",
+                "--passphrase",
+                "hunter2",
+            ],
+            &["perch", "import", "/tmp/perch.age", "--force"],
+            &["perch", "import", "/tmp/perch.age", "--merge"],
+        ] {
+            assert!(
+                Cli::try_parse_from(narrowed).is_err(),
+                "`{}` should not parse",
+                narrowed.join(" ")
+            );
+        }
     }
 
     /// An Export takes everything and has no target: a selective one is a

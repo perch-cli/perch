@@ -24,7 +24,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::adopt;
-use crate::commands::{ask_secret, say};
+use crate::commands::{ask_passphrase, ask_secret, refuse_without_a_terminal, say};
 use crate::error::{PerchError, Result};
 use crate::export::{self, Export};
 use crate::host::Host;
@@ -39,7 +39,7 @@ pub fn run(host: &dyn Host, args: ExportArgs, out: &mut dyn Write) -> Result<()>
     // Before the passphrase, because all three are refusals somebody should meet
     // before typing one twice — and before the registry is even read, because
     // none of them depends on what it says.
-    refuse_without_a_terminal(host)?;
+    refuse_without_a_terminal(host, "perch export")?;
     refuse_a_directory_that_is_not_there(host, &args.path)?;
     refuse_an_occupied_path(host, &args.path)?;
 
@@ -66,27 +66,6 @@ pub fn run(host: &dyn Host, args: ExportArgs, out: &mut dyn Write) -> Result<()>
         .map_err(|err| PerchError::file_write(args.path.clone(), err))?;
 
     report(out, &args.path, &export)
-}
-
-/// A terminal is what a passphrase is typed at, and there is deliberately no
-/// flag that answers ahead of time: a passphrase on a command line is one every
-/// process on the machine can read off the process table, and one in a shell
-/// history is one that outlives the command.
-///
-/// So this refusal names what is needed rather than a way round it, which is the
-/// one place in Perch where that is the whole answer.
-fn refuse_without_a_terminal(host: &dyn Host) -> Result<()> {
-    if host.is_interactive() {
-        return Ok(());
-    }
-    Err(PerchError::Other(
-        "An Export is encrypted with a passphrase, and there is no terminal to \
-         prompt for one on.\n\
-         There is no flag that answers ahead of time: a passphrase passed as an \
-         argument sits in the process table for anything on this machine to \
-         read. Run `perch export` where you can type."
-            .to_string(),
-    ))
 }
 
 /// Refuses to write over whatever is already at the path.
@@ -146,16 +125,13 @@ fn agreed_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<String> {
          without one.",
     )?;
 
-    // End of input is not a passphrase: a pipe that closed reads as nobody
-    // having typed one, which is the empty case below.
-    let typed = ask_secret(host, out, "Passphrase: ")?.unwrap_or_default();
-    if typed.trim().is_empty() {
+    let Some(typed) = ask_passphrase(host, out, "Passphrase: ")? else {
         return Err(PerchError::Invalid(
             "No passphrase was typed, and an Export cannot be written without \
              one. Nothing was written."
                 .to_string(),
         ));
-    }
+    };
 
     if ask_secret(host, out, "Again: ")?.unwrap_or_default() != typed {
         return Err(PerchError::Invalid(
