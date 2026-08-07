@@ -341,6 +341,27 @@ fn out_of_range(
     ))
 }
 
+/// The Switch a scheduled Check made within a Group, kept so the next one can
+/// be paced by it (ADR 0013).
+///
+/// The one thing about the watcher that is written down, and only because
+/// `perch watch --once` is a fresh process every time: the cooldown and the
+/// no-return are measured from the last Switch, and a check that could not
+/// remember one would be a check with no policy but the threshold. The loop
+/// carries the same two facts in memory and records nothing, because a loop is
+/// one process and a person watching it — two of them would otherwise pace each
+/// other's decisions.
+///
+/// Per Group rather than per machine: a cooldown is a Group's setting, and a
+/// Switch within `work` has nothing to say about how soon `personal` may move.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Checked {
+    /// When the Switch happened, which is what the cooldown counts from.
+    pub switched_at: DateTime<Utc>,
+    /// The Account it Switched off, which no-return bars for one cooldown.
+    pub switched_off: String,
+}
+
 /// The configuration that belongs to no Group, because there is no Group for
 /// it to belong to (ADR 0017).
 ///
@@ -454,6 +475,11 @@ pub struct Registry {
     /// The configuration that hangs off no Group.
     #[serde(default)]
     pub global: GlobalConfig,
+    /// What the last scheduled Check did in each Group. Written by
+    /// `perch watch --once` and by nothing else, and absent from the file until
+    /// one of them Switches.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub checks: BTreeMap<String, Checked>,
 }
 
 impl Default for Registry {
@@ -465,6 +491,7 @@ impl Default for Registry {
             aliases: BTreeMap::new(),
             groups: BTreeMap::new(),
             global: GlobalConfig::default(),
+            checks: BTreeMap::new(),
         }
     }
 }
@@ -583,8 +610,30 @@ impl Registry {
 
     /// Forgets a Group. The caller establishes that nothing is left in it:
     /// dropping the Group is not a way to empty it.
+    ///
+    /// What a scheduled Check left behind goes with it. A Group that is gone
+    /// paces nothing, and a record kept past it would be a cooldown a Group
+    /// declared under the same name later inherited from a Group it never was.
     pub fn forget_group(&mut self, name: &str) {
         self.groups.remove(name);
+        self.checks.remove(name);
+    }
+
+    /// What the last scheduled Check did within a Group, if one has Switched
+    /// there.
+    pub fn checked(&self, group: &str) -> Option<&Checked> {
+        self.checks.get(group)
+    }
+
+    /// Records a Switch a Check made, for the next one to be paced by.
+    pub fn record_check(&mut self, group: &str, switched_off: &str, at: DateTime<Utc>) {
+        self.checks.insert(
+            group.to_string(),
+            Checked {
+                switched_at: at,
+                switched_off: switched_off.to_string(),
+            },
+        );
     }
 
     pub fn account_mut(&mut self, email: &str) -> Option<&mut Account> {
@@ -1011,6 +1060,7 @@ fn write(host: &dyn Host, path: &Path, contents: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
 
     #[test]
     fn an_email_slugs_to_a_stable_directory_name() {
@@ -1207,6 +1257,50 @@ mod tests {
         let back: Registry = serde_json::from_str(&json).unwrap();
         assert_eq!(back, registry);
         assert_eq!(back.active_account().unwrap().plan.as_deref(), Some("pro"));
+    }
+
+    /// What a scheduled Check leaves for the next one, and nothing where none
+    /// has Switched: a key in every registry on every machine would be a
+    /// promise the watcher had run, which for nearly all of them it has not.
+    #[test]
+    fn what_a_check_recorded_survives_the_file_and_is_absent_until_one_switches() {
+        let mut registry = Registry::default();
+        assert!(
+            !serde_json::to_string(&registry).unwrap().contains("checks"),
+            "a machine nothing has been scheduled on records no checks"
+        );
+
+        let at = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
+        registry.record_check("work", "someone@example.com", at);
+        let back: Registry =
+            serde_json::from_str(&serde_json::to_string(&registry).unwrap()).unwrap();
+
+        let recorded = back.checked("work").expect("the Group it Switched within");
+        assert_eq!(recorded.switched_at, at);
+        assert_eq!(recorded.switched_off, "someone@example.com");
+        assert_eq!(
+            back.checked("personal"),
+            None,
+            "a cooldown is a Group's, and a Switch within one says nothing \
+             about how soon another may move"
+        );
+    }
+
+    /// A Group that is gone paces nothing, and a record kept past it would be a
+    /// cooldown inherited by a Group declared under the same name later.
+    #[test]
+    fn forgetting_a_group_forgets_what_a_check_recorded_against_it() {
+        let mut registry = Registry::default();
+        registry.declare_group("work").expect("a usable name");
+        registry.record_check(
+            "work",
+            "someone@example.com",
+            Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap(),
+        );
+
+        registry.forget_group("work");
+
+        assert_eq!(registry.checked("work"), None);
     }
 
     /// Not so that anything can be migrated — nothing is running this yet, so

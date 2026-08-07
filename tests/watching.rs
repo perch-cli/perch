@@ -17,21 +17,10 @@ mod common;
 use chrono::{DateTime, Duration, Utc};
 use common::*;
 use perch::anthropic::{PROFILE_URL, TOKEN_URL, USAGE_URL};
-use perch::commands::add::AddArgs;
 use perch::error::{EXIT_INVALID, EXIT_NOT_INTERCHANGEABLE};
 use perch::host::fake::{Effect, THIS_PROCESS};
 use perch::host::{FakeHost, Host};
 use perch::watch::REFRESH_INTERVAL_MILLIS;
-
-/// The Credential the active Account is watched with: months of life left at
-/// the clock these tests run at, so a round is a Refresh of Utilization rather than
-/// a Renewal of a token.
-const ACTIVE: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-active","refreshToken":"sk-ant-ort01-active","expiresAt":1790000000000,"subscriptionType":"pro"}}"#;
-const ACTIVE_TOKEN: &str = "sk-ant-oat01-active";
-
-/// The same for the Account it would Cycle to.
-const SPARE: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-spare","refreshToken":"sk-ant-ort01-spare","expiresAt":1790000000000,"subscriptionType":"max"}}"#;
-const SPARE_TOKEN: &str = "sk-ant-oat01-spare";
 
 /// The Credential of an Account whose access token ran out twenty minutes ago,
 /// so reading it at all means Renewing it first.
@@ -44,59 +33,6 @@ const DEFAULT_CONFIG_DIR: &str = "/Users/someone/.claude";
 /// Perch's own lock over its registry — the one artifact a loop could leave
 /// behind if it held anything across a wait.
 const REGISTRY_LOCK: &str = "/Users/someone/.config/perch/.registry.lock";
-
-/// Two Accounts declared interchangeable, the first one active, and the Group
-/// told the watcher may act on it.
-fn watched() -> FakeHost {
-    let host = logged_in_machine().with_login(login_producing(SPARE, SECOND_IDENTITY_FILE));
-    // Before the first command, so adoption keeps this Credential rather than
-    // the fixture's short-lived one.
-    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ACTIVE);
-
-    run_add(
-        &host,
-        AddArgs {
-            no_group: true,
-            ..AddArgs::default()
-        },
-    )
-    .0
-    .expect("the second Account is added");
-
-    declare_group(&host, "work");
-    for email in [EMAIL, SECOND_EMAIL] {
-        move_to_group(&host, email, "work")
-            .0
-            .expect("the Account joins the Group");
-    }
-    config_set(&host, &["work", "watcher-may-act", "true"])
-        .0
-        .expect("the Group says the watcher may act");
-    host.forget_effects();
-    host
-}
-
-/// What the usage endpoint answers: one Quota Window, as full as the trace
-/// says at that point.
-fn usage(used_percent: f64) -> String {
-    format!(
-        r#"{{"five_hour": {{"utilization": {used_percent}, "resets_at": "2026-08-04T14:30:00Z"}}}}"#
-    )
-}
-
-fn profile_of(email: &str) -> String {
-    format!(r#"{{"account": {{"email_address": "{email}"}}}}"#)
-}
-
-/// An Account that answers about itself, with its Utilization following a
-/// trace: the first figure for the first Refresh, and the last one for every one
-/// after the trace runs out.
-fn answering(host: FakeHost, token: &str, email: &str, trace: &[f64]) -> FakeHost {
-    let bodies: Vec<String> = trace.iter().copied().map(usage).collect();
-    let replies: Vec<(u16, &str)> = bodies.iter().map(|body| (200, body.as_str())).collect();
-    host.with_reply_to(PROFILE_URL, token, 200, &profile_of(email))
-        .with_replies_to(USAGE_URL, token, &replies)
-}
 
 /// A machine where the active Account's figure follows `trace` and the Account
 /// it would Cycle to sits at `spare`, watched for as many rounds as the trace
@@ -122,16 +58,6 @@ fn when(decision: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(stamp)
         .unwrap_or_else(|_| panic!("every decision line opens with its time: {decision}"))
         .with_timezone(&Utc)
-}
-
-/// The decision lines, which is everything printed but the line that says what
-/// is being watched and the line that says it stopped.
-fn decisions(printed: &str) -> Vec<String> {
-    printed
-        .lines()
-        .filter(|line| line.contains("threshold"))
-        .map(str::to_string)
-        .collect()
 }
 
 /// A machine where the Account being watched cannot be read: the usage
@@ -718,6 +644,30 @@ fn the_account_just_left_is_no_candidate_until_the_cooldown_has_passed() {
         active(&host).as_deref(),
         Some(EMAIL),
         "and it is returned to once the cooldown has run out: {printed}"
+    );
+}
+
+/// The loop's cooldown is the loop's own: it lives in the running process and
+/// is written down nowhere, so stopping `perch watch` and starting it again is
+/// a person saying "go on then". A scheduled `--once` is the other case — the
+/// sequence of invocations is the watcher there, and what paces it has to
+/// outlive any one of them (ADR 0013).
+#[test]
+fn the_loop_carries_its_cooldown_in_memory_and_records_nothing() {
+    let host = filling_up_one_after_the_other();
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("it was stopped");
+    assert_eq!(
+        printed.matches("switched").count(),
+        2,
+        "the trace this is read off is one that Switched: {printed}"
+    );
+    assert!(
+        registry_of(&host).checks.is_empty(),
+        "two people watching in two terminals would otherwise pace each \
+         other's decisions"
     );
 }
 

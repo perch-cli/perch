@@ -7,6 +7,7 @@
 use std::path::Path;
 
 use chrono::{DateTime, Duration, Utc};
+use perch::anthropic::{PROFILE_URL, USAGE_URL};
 use perch::commands::add::AddArgs;
 use perch::commands::alias::AliasCommand;
 use perch::commands::config::ConfigCommand;
@@ -18,6 +19,7 @@ use perch::commands::remove::RemoveArgs;
 use perch::commands::run::RunArgs;
 use perch::commands::status::StatusArgs;
 use perch::commands::switch::SwitchArgs;
+use perch::commands::watch::WatchArgs;
 use perch::credentials;
 use perch::host::fake::THIS_PROCESS;
 use perch::host::{Execution, FakeHost, Host, Platform};
@@ -394,9 +396,94 @@ fn run_switch_with(host: &FakeHost, args: SwitchArgs) -> (perch::Result<()>, Str
 /// interrupts would leave this spinning: `with_interrupt_after` is what says
 /// how many rounds the test is about.
 pub fn run_watch(host: &FakeHost) -> (perch::Result<()>, String) {
+    let (result, printed) = run_watch_with(host, WatchArgs { once: false });
+    (result.map(|_| ()), printed)
+}
+
+/// Runs `perch watch --once`: one check, and the exit code it reports to
+/// whatever scheduled it.
+pub fn run_watch_once(host: &FakeHost) -> (perch::Result<i32>, String) {
+    run_watch_with(host, WatchArgs { once: true })
+}
+
+fn run_watch_with(host: &FakeHost, args: WatchArgs) -> (perch::Result<i32>, String) {
     let mut written = Vec::new();
-    let result = perch::commands::watch::run(host, &mut written);
+    let result = perch::commands::watch::run(host, args, &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
+}
+
+/// The Credential the active Account is watched with: months of life left at
+/// the clock these tests run at, so a round is a Refresh of Utilization rather
+/// than a Renewal of a token.
+pub const ACTIVE: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-active","refreshToken":"sk-ant-ort01-active","expiresAt":1790000000000,"subscriptionType":"pro"}}"#;
+pub const ACTIVE_TOKEN: &str = "sk-ant-oat01-active";
+
+/// The same for the Account it would Cycle to.
+pub const SPARE: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-spare","refreshToken":"sk-ant-ort01-spare","expiresAt":1790000000000,"subscriptionType":"max"}}"#;
+pub const SPARE_TOKEN: &str = "sk-ant-oat01-spare";
+
+/// Two Accounts declared interchangeable, the first one active, and the Group
+/// told the watcher may act on it — the machine both `perch watch` and
+/// `perch watch --once` have something to do on.
+pub fn watched() -> FakeHost {
+    let host = logged_in_machine().with_login(login_producing(SPARE, SECOND_IDENTITY_FILE));
+    // Before the first command, so adoption keeps this Credential rather than
+    // the fixture's short-lived one.
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ACTIVE);
+
+    run_add(
+        &host,
+        AddArgs {
+            no_group: true,
+            ..AddArgs::default()
+        },
+    )
+    .0
+    .expect("the second Account is added");
+
+    declare_group(&host, "work");
+    for email in [EMAIL, SECOND_EMAIL] {
+        move_to_group(&host, email, "work")
+            .0
+            .expect("the Account joins the Group");
+    }
+    config_set(&host, &["work", "watcher-may-act", "true"])
+        .0
+        .expect("the Group says the watcher may act");
+    host.forget_effects();
+    host
+}
+
+/// What the usage endpoint answers: one Quota Window, as full as the trace
+/// says at that point.
+pub fn usage(used_percent: f64) -> String {
+    format!(
+        r#"{{"five_hour": {{"utilization": {used_percent}, "resets_at": "2026-08-04T14:30:00Z"}}}}"#
+    )
+}
+
+pub fn profile_of(email: &str) -> String {
+    format!(r#"{{"account": {{"email_address": "{email}"}}}}"#)
+}
+
+/// An Account that answers about itself, with its Utilization following a
+/// trace: the first figure for the first Refresh, and the last one for every
+/// one after the trace runs out.
+pub fn answering(host: FakeHost, token: &str, email: &str, trace: &[f64]) -> FakeHost {
+    let bodies: Vec<String> = trace.iter().copied().map(usage).collect();
+    let replies: Vec<(u16, &str)> = bodies.iter().map(|body| (200, body.as_str())).collect();
+    host.with_reply_to(PROFILE_URL, token, 200, &profile_of(email))
+        .with_replies_to(USAGE_URL, token, &replies)
+}
+
+/// The decision lines, which is everything printed but the line that says what
+/// is being watched and the line that says it stopped.
+pub fn decisions(printed: &str) -> Vec<String> {
+    printed
+        .lines()
+        .filter(|line| line.contains("threshold"))
+        .map(str::to_string)
+        .collect()
 }
 
 /// Runs `perch alias`, returning what it printed alongside how it ended.
