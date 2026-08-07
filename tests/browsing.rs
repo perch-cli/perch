@@ -216,6 +216,56 @@ fn a_resize_is_redrawn_at_the_new_size() {
     );
 }
 
+/// A terminal too narrow for the tab bar and the active Account both keeps the
+/// bar: which view this is, is the thing the keys act on.
+#[test]
+fn a_narrow_terminal_keeps_the_views_legible_and_drops_the_label() {
+    let host = machine_with_figures();
+    let mut screen = FakeScreen::sized(46, 10, vec![Some(Signal::Leave)]);
+
+    browse_with(&host, &mut screen, &mut FakeRefresher::out_for_ever());
+
+    let bar = screen
+        .last_frame()
+        .lines()
+        .next()
+        .expect("a frame")
+        .to_string();
+    assert!(bar.contains("Accounts"), "{bar}");
+    assert!(bar.contains("Utilization"), "{bar}");
+    assert!(!bar.contains("active:"), "there is no room for it: {bar}");
+}
+
+/// ADR 0018 wants what could not be read said by name, and the clause naming
+/// the command that repairs it is the end of the sentence — so a note is broken
+/// between words rather than cut at the width.
+#[test]
+fn a_note_too_long_for_the_terminal_is_broken_rather_than_cut() {
+    let host = machine_with_figures();
+    let repair = "spare@example.com: Anthropic would not renew its Credential. \
+                  `perch relogin spare@example.com` repairs it.";
+    let mut refresher =
+        FakeRefresher::answering(Refreshed::nothing_read(vec![repair.to_string()]), 0);
+    let mut screen = FakeScreen::scripted(vec![Some(Signal::Refresh), None, Some(Signal::Leave)]);
+
+    browse_with(&host, &mut screen, &mut refresher);
+
+    // The note reaches the screen whole, across however many lines it takes:
+    // its last clause is the one naming the command that repairs the Account.
+    let frame = screen.last_frame();
+    let said: Vec<&str> = frame
+        .lines()
+        .filter(|line| line.contains("spare@example.com") || line.contains("repairs"))
+        .flat_map(str::split_whitespace)
+        .collect();
+
+    assert_eq!(
+        said,
+        repair.split_whitespace().collect::<Vec<&str>>(),
+        "{frame}"
+    );
+}
+
 #[test]
 fn nothing_is_asked_of_anthropic_until_somebody_asks_for_a_refresh() {
     let host = machine_with_figures();
