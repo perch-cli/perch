@@ -236,6 +236,18 @@ impl Headroom {
 /// absence of one is the reason for the answer.
 const HOW_TO_GET_FIGURES: &str = "`perch status --group --refresh` reads current figures.";
 
+/// The Quota Window that decides how full an Account is: its fullest (ADR
+/// 0012), or `None` for one nothing has ever been observed of.
+///
+/// Public because the watcher compares the Account it is on against a
+/// threshold, and that comparison has to be against the same figure the ranking
+/// below is made on. Two measures of fullness would be a watcher that acts on
+/// one number and chooses on another, and the day they disagreed would be the
+/// day it switched off an Account that was fine onto one that was not.
+pub fn fullest_window_of(account: &Account) -> Option<&WindowUtilization> {
+    account.observed_utilization().and_then(fullest_window)
+}
+
 fn headroom_of(account: &Account) -> Headroom {
     let Some(cached) = account.observed_utilization() else {
         return Headroom::Unobserved;

@@ -43,6 +43,14 @@ so ADR 0005 permits renewing them. Polling every account in the group instead
 would spend every account's budget to keep figures fresh that are read only at
 a threshold crossing, and would make the size of a group a scaling limit.
 
+**It polls every two and a half minutes.** Twenty-four reads an hour, which
+sits inside the ~28-30 the endpoint allows with room left for the `perch status
+--refresh` somebody types while the watcher is running — a loop that spent the
+whole allowance would answer the user's own question with a throttle. It is a
+constant rather than a setting: it is derived from Anthropic's allowance rather
+than from anyone's preference, and a group configured to poll every ten seconds
+would be a group configured to be refused.
+
 **It never acts on a figure it did not just refresh.** A failed refresh holds
 the decision, backs off and retries. Acting on a cached figure would be a
 switch made on evidence the user already had; a held decision costs nothing,
@@ -61,6 +69,14 @@ nothing. Permission to switch when asked and permission to switch while nobody
 is looking are different grants, and the second has no owner when there is no
 group to carry it. `perch watch` started on an ungrouped account says so and
 exits rather than idling forever having decided nothing.
+
+**A Switch that changed nothing is a decision; one that changed something and
+then failed stops the loop.** A Capture refused because a client is running
+against the outgoing Profile (ADR 0027) leaves the machine exactly as it was
+and clears itself when that client exits, so it is printed and the loop goes on
+watching. A Switch that made the incoming Credential live and then failed has
+left the machine part way through, and a watcher that carried on polling would
+be deciding what to do next about a machine nobody has looked at.
 
 **Its decision log goes to standard output.** This is a loop in a terminal the
 user can see; a rotated logfile is what a daemon needs because nobody is

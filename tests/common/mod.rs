@@ -388,6 +388,17 @@ fn run_switch_with(host: &FakeHost, args: SwitchArgs) -> (perch::Result<()>, Str
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
+/// Runs `perch watch`, returning everything it printed alongside how it ended.
+///
+/// It only ends because somebody stopped it, so a fake Host that nobody
+/// interrupts would leave this spinning: `with_interrupt_after` is what says
+/// how many rounds the test is about.
+pub fn run_watch(host: &FakeHost) -> (perch::Result<()>, String) {
+    let mut written = Vec::new();
+    let result = perch::commands::watch::run(host, &mut written);
+    (result, String::from_utf8(written).expect("output is UTF-8"))
+}
+
 /// Runs `perch alias`, returning what it printed alongside how it ended.
 pub fn run_alias(host: &FakeHost, command: AliasCommand) -> (perch::Result<()>, String) {
     let mut written = Vec::new();

@@ -194,12 +194,17 @@ fn already_there(
 /// Writes down that an Account is Quarantined, on the way out of a Switch that
 /// discovered it.
 ///
+/// Shared with the watcher, which performs the same Switch and meets the same
+/// discovery: a Quarantine recorded by one and not the other would be an
+/// Account that `perch switch` knows is broken and `perch watch` keeps
+/// choosing.
+///
 /// Best effort, and deliberately so: the failure the user is about to read is
 /// the one that matters, and it already says the Account has to be logged into
 /// again. Losing that failure over a registry Perch could not write would be a
 /// poor trade — the worst a missed write costs is making the same discovery
 /// next time.
-fn record_quarantine(
+pub(crate) fn record_quarantine(
     host: &dyn Host,
     perch: &mut Held<'_>,
     registry: &mut Registry,
@@ -211,7 +216,10 @@ fn record_quarantine(
     }
 }
 
-fn record_active(
+/// Records which Account is active, and says what it costs when that write
+/// fails: the Switch itself worked, so Perch's own record is behind until this
+/// is fixed. Shared with the watcher, which lands the same Switch.
+pub(crate) fn record_active(
     host: &dyn Host,
     perch: &mut Held<'_>,
     registry: &mut Registry,

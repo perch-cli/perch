@@ -8,10 +8,11 @@ login flow again.
 Early. Perch adopts the login you already have, adds further Accounts without
 disturbing it, names them, holds Groups of Accounts you have declared
 interchangeable, lists what you have, reads how full each one is, switches to
-an Account you name, picks one for you when you name none, runs a client as one
-Account without switching to it, logs an Account in again when its Credential
-stops working, gives one up when a subscription is retired, and takes its
-configuration from a script.
+an Account you name, picks one for you when you name none, watches the Account
+you are on and Cycles when it runs low, runs a client as one Account without
+switching to it, logs an Account in again when its Credential stops working,
+gives one up when a subscription is retired, and takes its configuration from a
+script.
 
 ```
 $ perch status
@@ -176,6 +177,75 @@ the first one ungrouped — but being ungrouped is the *absence* of a declaratio
 that Accounts are interchangeable, not a weaker form of one. So bare `perch
 switch` Cycles among ungrouped Accounts only when a global setting says it may,
 and that setting is off until you turn it on.
+
+## Watching
+
+`perch watch` does the Cycling for you. It is a loop in this terminal that
+reads how full the Account you are on is, says what it made of that, and
+Switches within the Group when the Account runs low — so you stop being the one
+who notices.
+
+```
+$ perch watch
+Watching you@example.com in Group `work`. Reading how full it is every 2m30s, and Switching within the Group when its fullest Quota Window reaches 80%. Ctrl-C stops.
+2026-08-04T12:00:00Z  waiting   you@example.com 40% used, fullest 5-hour; threshold 80% — under it, so nothing was wanted.
+2026-08-04T12:02:30Z  switched  you@example.com 86% used, fullest 5-hour; threshold 80% — over it. Switched — overflow@example.com has the most room: 95% headroom, which is true of every one of its Quota Windows — 5-hour is its fullest, as of just now.
+^C
+Stopped. Nothing was left behind: the watcher holds no lock, writes no file of its own, and the Account you are on is the one it last Switched to.
+```
+
+It is **not a daemon** (ADR 0013). There is nothing to install, nothing to
+manage, and nothing left behind when it stops: it holds no lock and takes no
+marker across a wait, so Ctrl-C is safe wherever it lands. A Ctrl-C during a
+Switch lets that Switch finish first.
+
+**Every decision is printed, including the ones where nothing happens** — which
+are most of them. A line names what was read, the threshold it was read
+against, what was decided and why, so "why did it switch just then" is
+answerable without reading the source. It goes to standard output and no file
+is written or rotated: redirecting it is yours to do.
+
+**Only the Account you are on is read.** Anthropic allows roughly 28-30 reads
+an hour per Account, and one Account read every two and a half minutes fits
+inside that with room left for the `perch status --refresh` you type while it
+runs. The Accounts it could move to are read at the moment a decision needs
+them and not before — they are idle then by definition, so renewing them costs
+nobody a session (ADR 0005).
+
+**It never acts on a figure it did not just read.** A read that fails holds the
+decision rather than falling back on the cached figure, because a Switch made
+on a cached figure is one you could have made yourself without leaving a
+process running.
+
+```
+2026-08-04T12:00:00Z  held      you@example.com unread; threshold 80% — nothing current to decide on, so nothing was decided: Anthropic is rate-limiting reads of this Account's usage, so nothing current could be read.
+2026-08-04T12:05:00Z  nowhere   you@example.com 100% used, fullest 5-hour; threshold 80% — over it, and nowhere to go: Every Account in Group `work` is exhausted, so there is nowhere useful to Switch. Nothing was changed. overflow@example.com frees up soonest, at 2026-08-04 14:30 UTC (in 3h).
+```
+
+Neither of those ends the watch. Nowhere to go is resolved by waiting, which is
+what the loop is already doing.
+
+What it does when it acts is a Switch and nothing else: the outgoing Credential
+is Captured into its own Profile first (ADR 0006), Claude Code's locks are
+taken, and a Live Profile's token is never Renewed (ADR 0005). Running while
+Claude Code is working is the normal case, not the exception.
+
+Two things stop it before it starts, because there would be nothing for it to
+do:
+
+```
+$ perch watch
+you@example.com is in no Group, so nothing carries permission for the watcher to act on it. Nothing is being watched.
+Put it in a Group with `perch group move you@example.com <group>`, then let the watcher act on that Group with `perch config set <group> watcher-may-act true`.   # exit 18
+
+$ perch watch
+Group `work` has not been told the watcher may act on it, so nothing is being watched. A Group only ever changes underneath you because you said it could.
+`perch config set work watcher-may-act true` says it may.   # exit 14
+```
+
+`cycle-ungrouped` grants the watcher nothing. Permission to Switch **when you
+ask** and permission to Switch **while nobody is looking** are different grants,
+and the second has no owner when there is no Group to carry it.
 
 ## Running one Account in one terminal
 
@@ -530,10 +600,13 @@ whose figure does not above nothing at all: an Account that says when it comes
 back is preferred to one that does not, and where none of them says, the Cycle
 falls back to the room it can see and says that is what it did.
 
-The **watcher's** two fields are stored and validated and read by nothing: the
-watcher is deferred entirely (ADR 0013), and every message about them says so.
-`watcher-may-act` is off by default, because a Group only ever changes
-underneath you because you said it could.
+The **watcher's** two fields govern [`perch watch`](#watching) and nothing else.
+`watcher-may-act` says whether it may Switch within the Group at all, and is off
+by default because a Group only ever changes underneath you because you said it
+could; `watcher-threshold-percent` is how much of the fullest Quota Window of
+the Account you are on has to be used before it moves you. Neither switches
+anything on: they take effect while the loop is running in a terminal, and not
+otherwise.
 
 Every line `perch config get` prints is the tail of the `perch config set` that
 would restore it, so reading the configuration and writing it back are the same
@@ -554,11 +627,11 @@ it took.
 | 11 | the keychain is locked, denied, or unavailable |
 | 12 | there is no such thing — no login, no such Account, no such Group |
 | 13 | it collides with something Perch already holds |
-| 14 | Perch understood it and will not accept it — an ambiguous name, a value out of range |
+| 14 | Perch understood it and will not accept it — an ambiguous name, a value out of range, a Group that has not said the watcher may act on it |
 | 15 | there was nothing to do — you are already on that Account |
 | 16 | refused: a client is running against that Profile, so its Credential is not Perch's to write |
 | 17 | a Cycle found nowhere to land — every Account in the Group is exhausted, or none is a candidate |
-| 18 | a bare Cycle from an Account nobody has declared interchangeable with anything (ADR 0017) |
+| 18 | a bare Cycle, or a watcher, on an Account nobody has declared interchangeable with anything (ADR 0017) |
 | 19 | that Account is Quarantined — its Credential no longer works, and `perch relogin` repairs it (ADR 0023) |
 
 `perch run` is the one command these do not describe once it has launched
