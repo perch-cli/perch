@@ -644,6 +644,52 @@ directory that is not there is refused rather than created, because one Perch
 made for a path you typed would be a directory you did not ask for, at
 permissions you did not choose.
 
+## Moving to another machine
+
+`perch import <path>` is the exact inverse: it puts the whole registry and every
+Credential back, so a new laptop arrives with the setup the old one had rather
+than a pile of nameless logins.
+
+```
+$ perch import ~/perch-backup.age
+This file is encrypted with the passphrase it was written with. Nothing is restored until it opens.
+Passphrase:
+Imported 3 Accounts from /Users/someone/perch-backup.age, with everything the registry said about them: their Aliases, their Groups, whether Cycling may choose them, and what each Group carries.
+Nothing is active: an Import restores what Perch holds and does not touch what Claude Code is logged in as. `perch switch <target>` makes one of them active.
+```
+
+**It refuses a Perch that already holds an Account**, and names `perch purge` as
+the way to make room. Merging is where every hard case lives — the same Account
+on both sides one Rotation apart, with no way to tell which Credential is live;
+an Alias meaning different Accounts on two machines; a Group that exists in both
+with different members. That is a real feature and it is not this one. Refusing
+keeps an import the exact inverse of a purge, and that pair is what makes moving
+machines true. There is no `--force`, because a flag would be the merge wearing a
+shortcut's clothes.
+
+**Credentials land where this machine keeps one.** The file records a Credential
+against an email address and nothing about the store it came out of, so an export
+taken on a Mac restores into files on Linux and the other way round, without
+either side knowing about the other's store (ADR 0020).
+
+**Nothing is made active.** The Account that was active where the export was
+taken is a fact about that machine, and an import writes nothing into this one's
+Default Profile — whatever Claude Code is logged in as goes on running until you
+`perch switch`. The login that is already on the machine is not adopted either:
+it is left exactly where it is, to switch onto or to ignore.
+
+The passphrase is required and prompted once — a wrong one fails before anything
+at all is written, and is told apart from a file that is not an export. Without a
+terminal it is refused for the same reason `perch export` is, and there is no
+flag.
+
+An import that fails part way leaves nothing behind: every Profile it made comes
+back out, so there is no half-populated registry and no orphaned Profile, and the
+file can simply be imported again. A registry inside the file written by a newer
+Perch is refused rather than half-read. An Account the export carried no
+Credential for is still restored, Quarantine reason and all, and the command says
+which — `perch relogin` is what ends that.
+
 ## What you have
 
 `perch list` is the one place that answers it: every Account with its Alias, its
@@ -820,7 +866,7 @@ it took.
 | 10 | refused: an assumption about the installed Claude Code failed (ADR 0007) |
 | 11 | the keychain is locked, denied, or unavailable |
 | 12 | there is no such thing — no login, no such Account, no such Group |
-| 13 | it collides with something that is already there — an Account added twice, a name already spoken for, a path an Export would have written over |
+| 13 | it collides with something that is already there — an Account added twice, a name already spoken for, a path an Export would have written over, an Import onto a Perch that already holds an Account |
 | 14 | Perch understood it and will not accept it — an ambiguous name, a value out of range, a Group that has not said the watcher may act on it |
 | 15 | there was nothing to do — you are already on that Account, or a check found nothing to do now |
 | 16 | refused: a client is running against that Profile, so its Credential is not Perch's to write |

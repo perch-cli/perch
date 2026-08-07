@@ -14,6 +14,7 @@ use perch::commands::config::ConfigCommand;
 use perch::commands::enable::EnableCommand;
 use perch::commands::export::ExportArgs;
 use perch::commands::group::GroupCommand;
+use perch::commands::import::ImportArgs;
 use perch::commands::list::ListArgs;
 use perch::commands::relogin::ReloginArgs;
 use perch::commands::remove::RemoveArgs;
@@ -639,6 +640,19 @@ pub fn run_export(host: &FakeHost, path: &str) -> (perch::Result<()>, String) {
     let result = perch::commands::export::run(
         host,
         ExportArgs {
+            path: std::path::PathBuf::from(path),
+        },
+        &mut written,
+    );
+    (result, String::from_utf8(written).expect("output is UTF-8"))
+}
+
+/// Runs `perch import <path>`, returning what it printed alongside how it ended.
+pub fn run_import(host: &FakeHost, path: &str) -> (perch::Result<()>, String) {
+    let mut written = Vec::new();
+    let result = perch::commands::import::run(
+        host,
+        ImportArgs {
             path: std::path::PathBuf::from(path),
         },
         &mut written,

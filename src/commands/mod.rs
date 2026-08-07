@@ -8,6 +8,7 @@ pub mod config;
 pub mod enable;
 pub mod export;
 pub mod group;
+pub mod import;
 pub mod list;
 pub mod relogin;
 pub mod remove;
@@ -61,6 +62,45 @@ pub fn ask_secret(host: &dyn Host, out: &mut dyn Write, question: &str) -> Resul
         .map_err(|err| PerchError::Other(format!("could not read your answer: {err}")))?;
     writeln!(out).map_err(write_failed)?;
     Ok(answered)
+}
+
+/// The passphrase somebody typed, or `None` when they typed none.
+///
+/// Empty and end of input are one answer here, because they are one event: a
+/// pipe that closed reads as nobody having typed anything, and typing nothing is
+/// the same skip an optional passphrase would have been. What it *cost* is the
+/// caller's to say — an Export that was not written and one that was not opened
+/// are different pieces of news — so this only reports that there was no answer.
+pub fn ask_passphrase(
+    host: &dyn Host,
+    out: &mut dyn Write,
+    question: &str,
+) -> Result<Option<String>> {
+    let typed = ask_secret(host, out, question)?.unwrap_or_default();
+    Ok(Some(typed).filter(|typed| !typed.trim().is_empty()))
+}
+
+/// Refuses the two commands that need a passphrase when there is no terminal to
+/// type one at (ADR 0014).
+///
+/// There is deliberately no flag that answers ahead of time, which is what makes
+/// this a refusal rather than a fallback: a passphrase passed as an argument
+/// sits in the process table for anything on the machine to read, and one in a
+/// shell history outlives the command that used it. So the message names the
+/// terminal rather than a way round it — and says so once, because an escape
+/// hatch appearing in only one of the two would be the whole of what the
+/// required passphrase was for.
+pub fn refuse_without_a_terminal(host: &dyn Host, command: &str) -> Result<()> {
+    if host.is_interactive() {
+        return Ok(());
+    }
+    Err(PerchError::Other(format!(
+        "An Export is encrypted with a passphrase, and there is no terminal to \
+         prompt for one on.\n\
+         There is no flag that answers ahead of time: a passphrase passed as an \
+         argument sits in the process table for anything on this machine to \
+         read. Run `{command}` where you can type."
+    )))
 }
 
 /// What the Accounts in no Group are shown under. Being in no Group is not a

@@ -52,6 +52,16 @@ machine does not depend on Perch still existing. A backup is what one is *for*,
 and the word is fine for that; the thing itself is an Export.
 _Avoid_: dump, snapshot, archive
 
+**Import**:
+Putting an Export back: the whole registry and every Credential, onto a machine
+that holds no Account. The exact inverse of a Purge, and refuses rather than
+merging — the same Account on two machines one Rotation apart has no answer to
+which Credential is live. Credentials land wherever this machine's Claude Code
+keeps one, whatever store the file was written from. Nothing arrives active. A
+restore is what one is *for*, and the word is fine for that; the act itself is an
+Import.
+_Avoid_: merge, load, adopt
+
 **Target**:
 What a command is told to act on — an Alias, an Account's email address, or a
 Group name, resolved in that order. Every command that acts on one thing takes

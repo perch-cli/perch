@@ -98,6 +98,38 @@ export landing on an older export is the older backup gone — which is the
 opposite of what a file that accumulates is for. A path that is taken is refused,
 and naming a free one is a keystroke.
 
+## Amended: an import adopts nothing, lands nothing, and leaves nothing behind
+
+The amendments above settled that import refuses a non-empty registry and left
+three things to whoever wrote the command. All three turned out to be decisions.
+
+**An import adopts nothing.** Every other command reads the registry through
+adoption, which takes the existing Claude Code login over the first time Perch
+runs (ADR 0009). Doing that here would make the machine hold one account on the
+way to refusing itself for holding one — the command would be unable to run on
+the machine it is written for. So import reads the registry directly, and the
+login that is on the machine is left exactly where it is. Whoever imported can
+switch onto it or ignore it; it is not Perch's to take.
+
+**Nothing is made active.** The account that was active where the export was
+taken is a fact about *that* machine's default profile, and an import writes
+nothing there. Making one active would mean replacing the live credential of
+whatever is logged in, which is precisely the thing `perch remove` goes to
+lengths not to do. So the restore lands and the user switches.
+
+**Anything that fails part way takes back what it placed.** A machine holding
+some of an export is the partial restore this record exists to prevent, arriving
+by accident rather than as a feature. Every profile the command touches is
+recorded before it is written, so a credential that will not go into a store
+takes the directory made for it back out along with every profile before it.
+Safe to be that blunt about deleting, and only here: an import runs only on a
+machine holding no accounts, so every profile it removes is one it made moments
+ago.
+
+The passphrase is prompted once rather than twice. Confirming is what you do to a
+passphrase being *chosen*, because a file nobody can open is not discovered until
+it is needed; one being *checked* is answered by the file itself a moment later.
+
 ## Verified
 
 `age` 1.3.1 — Filippo Valsorda's Go implementation, the reference one — decrypts
@@ -107,3 +139,9 @@ promises, and installing the Go tool on three runners to re-check it every push
 buys less than it costs. What CI does hold is that the file carries `age`'s armor
 header and that its recipient is scrypt, which is the pair that makes `age -d`
 recognise the file and ask for a passphrase.
+
+The other direction holds too: `perch import` restores an armored file that `age
+-p` wrote — registry, aliases, group configuration, quarantine reason and a
+credential into the real keychain — on a machine where nothing Perch wrote was
+involved. Both halves of the format are therefore somebody else's, which is the
+whole of what taking the crate bought.
