@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Perch app icon</title>
+  <desc id="desc">A coral perching bird above two mint switch arrows on a deep indigo rounded square.</desc>
+  <defs>
+    <linearGradient id="background" x1="128" y1="96" x2="896" y2="928" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#25234F"/>
+      <stop offset="1" stop-color="#12172E"/>
+    </linearGradient>
+    <linearGradient id="bird" x1="312" y1="264" x2="704" y2="704" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFB07C"/>
+      <stop offset="1" stop-color="#F36F64"/>
+    </linearGradient>
+    <linearGradient id="wing" x1="408" y1="444" x2="620" y2="660" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E95B61"/>
+      <stop offset="1" stop-color="#C94862"/>
+    </linearGradient>
+    <linearGradient id="switch" x1="232" y1="740" x2="792" y2="852" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#67E8C8"/>
+      <stop offset="1" stop-color="#34BFC4"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="48" y="48" width="928" height="928" rx="224" fill="url(#background)"/>
+
+  <!-- Tail feathers: a quiet echo of two selectable account paths. -->
+  <path d="M398 620 292 726c-15 15-5 41 16 41h91l76-133Z" fill="#D95462"/>
+  <path d="M462 642 402 774c-9 20 11 40 30 29l103-57 15-111Z" fill="#F2846D"/>
+
+  <!-- Bird silhouette. -->
+  <path d="M307 471c17-89 95-157 189-157 26 0 51 5 74 14 27-55 83-93 148-93 37 0 71 12 99 32l-61 40c37 23 62 65 62 112 0 71-56 129-126 132-22 104-114 183-225 183-127 0-230-103-230-230 0-11 1-22 2-33h68Z" fill="url(#bird)"/>
+
+  <!-- Wing suggests a sheltered profile holding its credential. -->
+  <path d="M390 452c96 12 174 76 208 161-30 44-80 73-137 73-87 0-158-67-165-152 26-42 56-69 94-82Z" fill="url(#wing)"/>
+  <path d="M365 486c64 12 119 46 158 96-48-22-99-30-154-23-17-21-25-43-22-64 6-4 12-7 18-9Z" fill="#FFB183" opacity=".52"/>
+
+  <!-- Face. -->
+  <circle cx="703" cy="365" r="22" fill="#16172F"/>
+  <circle cx="710" cy="357" r="7" fill="#FFF7E8"/>
+  <path d="m786 364 89 39-89 39c9-25 9-53 0-78Z" fill="#FFD166"/>
+
+  <!-- Feet. -->
+  <path d="M445 694v58m-29 0h58M618 685v67m-29 0h58" fill="none" stroke="#FFD166" stroke-width="24" stroke-linecap="round"/>
+
+  <!-- Two opposing paths form the perch and communicate account switching. -->
+  <path d="M242 772h504l-49-45" fill="none" stroke="url(#switch)" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M782 838H278l49 45" fill="none" stroke="url(#switch)" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

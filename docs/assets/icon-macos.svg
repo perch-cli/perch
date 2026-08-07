@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Perch macOS menu-bar icon</title>
+  <desc id="desc">The original Perch bird in white and black, perched above two opposing switch arrows.</desc>
+
+  <!-- Original tail geometry. -->
+  <path d="M398 620 292 726c-15 15-5 41 16 41h91l76-133Z" fill="#fff" stroke="#111318" stroke-width="27" stroke-linejoin="round"/>
+  <path d="m462 642-60 132c-9 20 11 40 30 29l103-57 15-111Z" fill="#fff" stroke="#111318" stroke-width="27" stroke-linejoin="round"/>
+
+  <!-- Original body and crest silhouette. -->
+  <path d="M307 471c17-89 95-157 189-157 26 0 51 5 74 14 27-55 83-93 148-93 37 0 71 12 99 32l-61 40c37 23 62 65 62 112 0 71-56 129-126 132-22 104-114 183-225 183-127 0-230-103-230-230 0-11 1-22 2-33Z" fill="#fff" stroke="#111318" stroke-width="32" stroke-linejoin="round"/>
+
+  <!-- Wing and its highlight retain the original shapes. -->
+  <path d="M390 452c96 12 174 76 208 161-30 44-80 73-137 73-87 0-158-67-165-152 26-42 56-69 94-82Z" fill="#111318" stroke="#111318" stroke-width="18" stroke-linejoin="round"/>
+  <path d="M365 486c64 12 119 46 158 96-48-22-99-30-154-23-17-21-25-43-22-64 6-4 12-7 18-9Z" fill="#fff"/>
+
+  <!-- Face and lowered beak. -->
+  <circle cx="703" cy="365" r="24" fill="#111318"/>
+  <circle cx="711" cy="357" r="7" fill="#fff"/>
+  <path d="m786 364 89 39-89 39c9-25 9-53 0-78Z" fill="#fff" stroke="#111318" stroke-width="25" stroke-linejoin="round"/>
+
+</svg>
