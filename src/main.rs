@@ -15,6 +15,7 @@ use perch::commands::remove::{self, RemoveArgs};
 use perch::commands::run::{self, RunArgs};
 use perch::commands::status::{self, StatusArgs};
 use perch::commands::switch::{self, SwitchArgs};
+use perch::commands::tui;
 use perch::commands::watch::{self, WatchArgs};
 use perch::error::EXIT_OK;
 use perch::host::RealHost;
@@ -240,6 +241,18 @@ enum Command {
         json: bool,
     },
 
+    /// Open the interactive view: the Accounts and their Utilization, side by
+    /// side.
+    ///
+    /// For when the choice wants making by eye rather than by rule. Nothing
+    /// here is only here — every capability has a plain command form, because
+    /// Perch has to be complete over SSH and in scripts (ADR 0011).
+    ///
+    /// The first frame is drawn from cache and never waits on the network, with
+    /// the age of every figure on it; `r` Refreshes, and the display keeps
+    /// answering while it does. `q` or Ctrl-C leaves.
+    Tui,
+
     /// Watch the Account you are on, and Cycle when it runs low.
     ///
     /// A loop in this terminal rather than a daemon (ADR 0013): it runs until
@@ -374,6 +387,7 @@ fn main() {
             &mut out,
         )),
         Command::Switch { target } => ok(switch::run(&host, SwitchArgs { target }, &mut out)),
+        Command::Tui => ok(tui::run(&host, &mut out)),
         // The other command whose exit code is not simply "it worked": a check
         // reports what it decided, so a scheduler can tell a Switch from a
         // figure that could not be read without parsing the line (ADR 0013).
@@ -450,6 +464,28 @@ mod tests {
             ],
             &["perch", "import", "/tmp/perch.age", "--force"],
             &["perch", "import", "/tmp/perch.age", "--merge"],
+        ] {
+            assert!(
+                Cli::try_parse_from(narrowed).is_err(),
+                "`{}` should not parse",
+                narrowed.join(" ")
+            );
+        }
+    }
+
+    /// The interactive view has no arguments at all. What it shows is every
+    /// Account, and how it shows them is a keystroke away rather than a flag —
+    /// and a `--json` here would be `perch list --json`, which is the command
+    /// ADR 0011 requires to exist anyway.
+    #[test]
+    fn the_interactive_view_takes_no_arguments() {
+        assert!(Cli::try_parse_from(["perch", "tui"]).is_ok());
+
+        for narrowed in [
+            &["perch", "tui", "work"][..],
+            &["perch", "tui", "--json"],
+            &["perch", "tui", "--refresh"],
+            &["perch", "tui", "--group", "work"],
         ] {
             assert!(
                 Cli::try_parse_from(narrowed).is_err(),

@@ -1,0 +1,179 @@
+//! A terminal and a Refresh that a test drives, for the same reason
+//! [`crate::host::FakeHost`] exists: the frame loop under test is the real one.
+//!
+//! The screen draws into a buffer instead of a terminal and keeps every frame
+//! as text, so a test says what somebody pressed and then reads what they would
+//! have seen. The Refresh answers when the test says it does, which is what
+//! lets one assert that the loop kept drawing while a Refresh was out — the
+//! whole point of taking it off the loop.
+
+use std::collections::VecDeque;
+
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
+use ratatui::buffer::Buffer;
+
+use crate::error::{PerchError, Result};
+use crate::tui::model::Model;
+use crate::tui::refresh::{Refreshed, Refresher};
+use crate::tui::{Screen, Signal, view};
+
+/// A terminal of a fixed size that remembers what was drawn in it.
+pub struct FakeScreen {
+    terminal: Terminal<TestBackend>,
+    /// What the person does, in order. `None` is a wait that ended with
+    /// nobody having pressed anything, which is most of them on a real
+    /// terminal.
+    doing: VecDeque<Option<Signal>>,
+    drawn: Vec<String>,
+}
+
+impl FakeScreen {
+    /// A screen the size of an ordinary terminal, with a script of what
+    /// somebody does at it.
+    pub fn scripted(doing: Vec<Option<Signal>>) -> FakeScreen {
+        FakeScreen::sized(80, 24, doing)
+    }
+
+    pub fn sized(width: u16, height: u16, doing: Vec<Option<Signal>>) -> FakeScreen {
+        FakeScreen {
+            terminal: Terminal::new(TestBackend::new(width, height))
+                .expect("a buffer is always available to draw in"),
+            doing: doing.into(),
+            drawn: Vec::new(),
+        }
+    }
+
+    /// Every frame, in the order they were drawn.
+    pub fn frames(&self) -> &[String] {
+        &self.drawn
+    }
+
+    /// The frame that was on screen when the loop ended.
+    pub fn last_frame(&self) -> &str {
+        self.drawn.last().map(String::as_str).unwrap_or_default()
+    }
+
+    /// Whether anything drawn so far said this.
+    pub fn ever_said(&self, said: &str) -> bool {
+        self.drawn.iter().any(|frame| frame.contains(said))
+    }
+}
+
+impl Screen for FakeScreen {
+    fn draw(&mut self, model: &Model) -> Result<()> {
+        self.terminal
+            .draw(|frame| view::render(frame, model))
+            .expect("a buffer is always available to draw in");
+        self.drawn.push(as_text(self.terminal.backend().buffer()));
+        Ok(())
+    }
+
+    fn next(&mut self, _millis: u64) -> Result<Option<Signal>> {
+        match self.doing.pop_front() {
+            Some(signal) => {
+                // A resize is the one signal the screen itself acts on: the
+                // real terminal is asked its size at the next draw, and this
+                // one has to be told.
+                if let Some(Signal::Resized(width, height)) = signal {
+                    self.terminal.backend_mut().resize(width, height);
+                }
+                Ok(signal)
+            }
+            // Never a Leave that the test did not write: a loop that ran past
+            // its script is one whose ending the test is no longer describing,
+            // and a fake that quietly ended it would hide exactly that.
+            None => Err(PerchError::Other(
+                "the frame loop asked for a keystroke the test did not script".to_string(),
+            )),
+        }
+    }
+}
+
+/// The rendered buffer as a person would read it, one line per row with the
+/// trailing blanks cut off.
+fn as_text(buffer: &Buffer) -> String {
+    (0..buffer.area.height)
+        .map(|row| {
+            (0..buffer.area.width)
+                .map(|column| buffer[(column, row)].symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect::<Vec<String>>()
+        .join("\n")
+}
+
+/// A Refresh that comes back when the test says so.
+#[derive(Default)]
+pub struct FakeRefresher {
+    /// What each Refresh was asked to read, in order.
+    asked: Vec<Vec<String>>,
+    /// How many more times [`Refresher::collect`] answers with nothing before
+    /// the outstanding Refresh lands.
+    still_out: usize,
+    coming: Option<Refreshed>,
+    /// Whether one has been asked for and not yet collected — the same
+    /// question the real one answers by whether its channel is still there.
+    out: bool,
+    waited: bool,
+}
+
+impl FakeRefresher {
+    /// One that never answers: what a Refresh looks like from the loop's side
+    /// while Anthropic is thinking.
+    pub fn out_for_ever() -> FakeRefresher {
+        FakeRefresher::default()
+    }
+
+    /// One that answers with this, after `rounds` frames have gone by.
+    pub fn answering(refreshed: Refreshed, rounds: usize) -> FakeRefresher {
+        FakeRefresher {
+            still_out: rounds,
+            coming: Some(refreshed),
+            ..FakeRefresher::default()
+        }
+    }
+
+    /// What each Refresh was asked to read.
+    pub fn asked(&self) -> &[Vec<String>] {
+        &self.asked
+    }
+
+    /// Whether the way out waited for an outstanding Refresh.
+    pub fn was_waited_for(&self) -> bool {
+        self.waited
+    }
+}
+
+impl Refresher for FakeRefresher {
+    fn ask(&mut self, emails: Vec<String>) {
+        self.asked.push(emails);
+        self.out = true;
+    }
+
+    fn collect(&mut self) -> Option<Refreshed> {
+        if self.asked.is_empty() {
+            return None;
+        }
+        if self.still_out > 0 {
+            self.still_out -= 1;
+            return None;
+        }
+        let refreshed = self.coming.take()?;
+        self.out = false;
+        Some(refreshed)
+    }
+
+    fn outstanding(&self) -> bool {
+        self.out
+    }
+
+    /// Nothing to wait for that a test would have to spend the time on: the
+    /// waiting is what the real one does about a thread, and there is no
+    /// thread here.
+    fn wait_for_it(&mut self, _millis: u64) {
+        self.waited = true;
+    }
+}

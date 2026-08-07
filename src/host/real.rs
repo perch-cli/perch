@@ -157,16 +157,49 @@ fn security(
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct RealHost {
     /// What has already been said, so a remark about the machine is made once
     /// however many Accounts provoke it.
     noted: RefCell<BTreeSet<String>>,
+    /// Whether a remark is printed as it is made, or only kept.
+    aloud: bool,
+}
+
+impl Default for RealHost {
+    fn default() -> Self {
+        RealHost::new()
+    }
 }
 
 impl RealHost {
     pub fn new() -> Self {
-        RealHost::default()
+        RealHost {
+            noted: RefCell::new(BTreeSet::new()),
+            aloud: true,
+        }
+    }
+
+    /// A Host that keeps its remarks instead of printing them, for the one
+    /// caller that owns the screen.
+    ///
+    /// A remark goes to stderr, which is exactly where `perch tui` is drawing:
+    /// a line about a Credential written to a store Perch would rather not have
+    /// used would land in the middle of a frame and stay there until something
+    /// redrew over it. So the Refresh the TUI runs collects them from
+    /// [`RealHost::remarks`] and shows them where it shows everything else it
+    /// could not do.
+    pub fn keeping_its_remarks() -> Self {
+        RealHost {
+            aloud: false,
+            ..RealHost::new()
+        }
+    }
+
+    /// Everything [`Host::note`] was given, in the order a `BTreeSet` keeps and
+    /// each of them once.
+    pub fn remarks(&self) -> Vec<String> {
+        self.noted.borrow().iter().cloned().collect()
     }
 }
 
@@ -514,9 +547,10 @@ impl Host for RealHost {
     }
 
     /// To stderr, so a note never lands in the middle of the JSON a script is
-    /// reading off stdout.
+    /// reading off stdout — unless this is a Host built to keep them, whose
+    /// caller has the screen and will say them itself.
     fn note(&self, line: &str) {
-        if self.noted.borrow_mut().insert(line.to_string()) {
+        if self.noted.borrow_mut().insert(line.to_string()) && self.aloud {
             eprintln!("perch: {line}");
         }
     }

@@ -13,7 +13,8 @@ you are on and Cycles when it runs low — in a loop or one check at a time for
 your scheduler — runs a client as one Account without
 switching to it, logs an Account in again when its Credential stops working,
 gives one up when a subscription is retired, writes everything it holds to one
-encrypted file, and takes its configuration from a script.
+encrypted file, draws all of it in an interactive view for when the choice wants
+making by eye, and takes its configuration from a script.
 
 ```
 $ perch status
@@ -729,6 +730,61 @@ and now gets the reason with it. `--group` changes the question, so
 it changes the document: `perch status --json` answers about one Account under
 `active`, while the listings answer about a set under `accounts`, with the
 active one named under `active_account`.
+
+## Choosing by eye
+
+`perch tui` opens the interactive view: the Accounts and their Utilization, in
+two tabs.
+
+```
+$ perch tui
+ Accounts | Utilization                             active: someone@example.com
+   Account               Alias     Group  State
+>* someone@example.com   -         work   enabled
+   overflow@example.com  overflow  work   enabled
+
+q  quit    Tab  view    Up/Down  move    r  refresh
+```
+
+`Tab` and the left and right arrows move between the views, the up and down
+arrows move the cursor, `q` and Ctrl-C leave, and `r` reads current Utilization.
+`>` is the row the keys act on and `*` is the active Account — characters rather
+than colours, so the view reads the same over SSH on a terminal that has none.
+
+The Utilization view is the same Accounts with their figures, one row per Quota
+Window and each carrying its own age:
+
+```
+ Accounts | Utilization                             active: someone@example.com
+>* someone@example.com
+    5-hour    42%  (as of 4m ago)
+    7-day     18%  (as of 4m ago)
+
+   overflow@example.com
+    never observed
+
+q  quit    Tab  view    Up/Down  move    r  refresh
+```
+
+The first frame is drawn from cache and never waits on the network (ADR 0015),
+which is why it appears at once and why every figure on it says how old it is. A
+picker that hangs before showing anything is worse than one showing numbers a
+few minutes old and saying so.
+
+`r` is the only thing here that reads from Anthropic, and it is taken off the
+frame loop: the
+display goes on redrawing, goes on answering the keys and goes on leaving on
+Ctrl-C while Anthropic is being waited on. It reads the Accounts on screen and
+no others, like every other Refresh. One that fails leaves every figure standing
+with the age it had and says what could not be read (ADR 0018).
+
+Nothing here is only here. The interactive view is one command among several
+rather than the primary surface (ADR 0011), so everything it shows has a plain
+command form — `perch list`, `perch status`, `perch config` — and where there is
+no terminal to draw in, `perch tui` refuses and names them rather than trying.
+
+The terminal is given back however the view ends: on `q`, on an error, and on a
+panic. A TUI that dies in raw mode is one you have to `reset` your way out of.
 
 ## Names
 

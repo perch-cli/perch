@@ -56,3 +56,28 @@ report never did.
 What is given up is the span-formatted backtrace, which is genuinely nicer to
 read. It is not nicer than not shipping four crates for it, and the choice is
 recorded here so it is a decision rather than a drift.
+
+## Amended: the declaration is back, and the terminal is a seam of its own
+
+`perch tui` exists, so the code the declaration was waiting for is here.
+Ratatui 0.30 and crossterm 0.29 are in `Cargo.toml` — crossterm at the version
+`ratatui-crossterm` resolves to, which is the whole point of naming it, and
+ratatui with its default features off: the calendar and the rest are widgets
+Perch does not draw, and a binary somebody downloads pays for them.
+
+The part that was not settled ahead of time is where the terminal sits. It is
+an effect outside the process, which is the Host port's whole subject, and it
+is deliberately not a Host method. A `Host` that knew about frames would be one
+every non-TUI test carried and every fake had to answer for, and what is on the
+far side of the call is not a primitive like `mkdir` — it is ratatui's `Frame`.
+So `perch tui` owns its terminal through a seam of its own, `tui::Screen`, with
+two methods: draw this model, and wait this long for a keystroke. The fake
+draws into a buffer and hands back a scripted keystroke, so the real frame loop
+is driven with no terminal at all — the same bargain the Host port makes, made
+locally.
+
+A Refresh is the other thing the frame loop must not do itself, and it goes to
+a thread with a `RealHost` of its own. That Host keeps its remarks rather than
+printing them: `Host::note` goes to stderr, which is exactly where the frames
+are, so a note about the machine would land in the middle of one. The loop
+shows them where it shows everything else a Refresh could not do.

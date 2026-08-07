@@ -99,3 +99,27 @@ fidelity with Claude Code. A future change that removes one of those reasons —
 a `perch tui` that owns its own terminal, say, or a Claude Code that publishes
 a contract — reopens the question, and should say so here rather than in a
 commit message.
+
+## Reopened by `perch tui`, and settled the same way
+
+Crossterm is now in the tree (ADR 0016), which puts a second implementation of
+two things this document declined a crate for within reach. Both stay where
+they are.
+
+**Reading the export passphrase** stays `Host::read_secret` over
+`tcgetattr`/`SetConsoleMode`, rather than crossterm's raw mode. Not because
+crossterm could not turn echo off — it plainly can — but because the reason was
+never the primitive: it is a Host method so a test can say the passphrase went
+in by the path that hides it, from a machine with no terminal at all. Routing
+it through crossterm would move the call, not the seam, and would put the
+process-global raw-mode flag under a command that is not drawing anything.
+
+**Terminal detection** stays `std::io::IsTerminal` behind
+`Host::is_interactive`, for the same reason and one more: every command asks it
+and only one of them draws, so the answer must not depend on a crate the other
+twelve are otherwise unaware of.
+
+What crossterm did take over is the thing it is for and there was never
+hand-rolled code for: raw mode, the alternate screen, and reading key events —
+all of it inside `tui/terminal.rs`, behind `tui::Screen`, which is a seam of the
+same shape as the Host port rather than a hole in it.
