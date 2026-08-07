@@ -268,6 +268,11 @@ enum Command {
     /// here is only here — every capability has a plain command form, because
     /// Perch has to be complete over SSH and in scripts (ADR 0011).
     ///
+    /// The Accounts are listed in the order `perch switch` would rank them, so
+    /// the ranking is visible rather than hidden. Enter Switches to the one
+    /// under the cursor and `x` Runs it, and those are the only two things it
+    /// acts on: nothing here reaches `add`, `remove`, `purge` or `config`.
+    ///
     /// The first frame is drawn from cache and never waits on the network, with
     /// the age of every figure on it; `r` Refreshes, and the display keeps
     /// answering while it does. `q` or Ctrl-C leaves.
@@ -408,7 +413,10 @@ fn main() {
             &mut out,
         )),
         Command::Switch { target } => ok(switch::run(&host, SwitchArgs { target }, &mut out)),
-        Command::Tui => ok(tui::run(&host, &mut out)),
+        // A third whose exit code is not simply Perch's own: the picker can
+        // hand the terminal to a client, and what that client said is what a
+        // script reads.
+        Command::Tui => tui::run(&host, &mut out),
         // The other command whose exit code is not simply "it worked": a check
         // reports what it decided, so a scheduler can tell a Switch from a
         // figure that could not be read without parsing the line (ADR 0013).

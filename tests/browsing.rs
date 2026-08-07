@@ -11,9 +11,9 @@ use common::*;
 
 use perch::host::{FakeHost, Host};
 use perch::registry::Registry;
-use perch::tui::Signal;
 use perch::tui::fake::{FakeRefresher, FakeScreen};
 use perch::tui::refresh::Refreshed;
+use perch::tui::{Left, Signal};
 
 /// Opens the TUI on this machine and does these things at it, with a Refresh
 /// that never comes back — which is what one looks like for as long as it is
@@ -25,10 +25,19 @@ fn browse(host: &FakeHost, doing: Vec<Option<Signal>>) -> FakeScreen {
 }
 
 /// The same, for the tests that are about what the Refresh does.
-fn browse_with(host: &FakeHost, screen: &mut FakeScreen, refresher: &mut FakeRefresher) {
+fn browse_with(host: &FakeHost, screen: &mut FakeScreen, refresher: &mut FakeRefresher) -> Left {
     let registry = perch::adopt::ensure_adopted(host, &mut std::io::sink())
         .expect("the machine has a login to adopt");
-    perch::tui::browse(host, registry, screen, refresher).expect("the TUI leaves cleanly");
+    perch::tui::browse(host, registry, screen, refresher).expect("the TUI leaves cleanly")
+}
+
+/// The same again, for the tests about what the view was left for.
+fn left_after(host: &FakeHost, doing: Vec<Option<Signal>>) -> Left {
+    browse_with(
+        host,
+        &mut FakeScreen::scripted(doing),
+        &mut FakeRefresher::out_for_ever(),
+    )
 }
 
 /// The same again, holding exactly what the test says rather than what the
@@ -45,11 +54,27 @@ fn browse_holding(host: &FakeHost, registry: Registry, doing: Vec<Option<Signal>
     screen
 }
 
-/// A machine with two Accounts, both with figures four minutes old.
+/// A machine with two Accounts, both with figures four minutes old. Neither is
+/// in a Group, which is the ordinary starting state (ADR 0017) — so the listing
+/// is the order they were added rather than a ranking.
 fn machine_with_figures() -> FakeHost {
     let host = machine_with_two_accounts();
     observed(&host, EMAIL, vec![window("5-hour", 42.0)]);
     observed(&host, SECOND_EMAIL, vec![window("5-hour", 7.0)]);
+    host.forget_effects();
+    host
+}
+
+/// The same, with both Accounts declared interchangeable — which is what makes
+/// the listing a ranking, and the state every test about the order or about
+/// acting on the top of it starts from. The active Account is the fuller of the
+/// two, so the ranking puts the other first.
+fn machine_with_a_group() -> FakeHost {
+    let host = machine_with_figures();
+    declare_group(&host, "work");
+    for email in [EMAIL, SECOND_EMAIL] {
+        move_to_group(&host, email, "work").0.expect("it moves");
+    }
     host.forget_effects();
     host
 }
@@ -291,6 +316,8 @@ fn a_refresh_reads_the_accounts_that_are_on_screen() {
 
     browse_with(&host, &mut screen, &mut refresher);
 
+    // In the order they are shown, which for two ungrouped Accounts is the
+    // order they were added.
     assert_eq!(
         refresher.asked(),
         [vec![EMAIL.to_string(), SECOND_EMAIL.to_string()]]
@@ -434,6 +461,240 @@ fn leaving_with_nothing_out_waits_for_nothing_and_says_nothing() {
 
     assert!(said.is_empty(), "{said:?}");
     assert!(!refresher.was_waited_for());
+}
+
+/// The ranking `perch switch` makes is what the listing shows, with the figure
+/// it was made on beside it — so the order can be checked rather than taken on
+/// trust.
+#[test]
+fn the_accounts_are_listed_in_the_order_a_switch_would_rank_them() {
+    let host = machine_with_a_group();
+
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
+
+    let frame = screen.last_frame();
+    assert!(frame.contains("Headroom"), "{frame}");
+    // Every row of the listing, and not the tab bar's "active:" label.
+    let listed: Vec<&str> = frame
+        .lines()
+        .filter(|line| line.contains('@') && !line.contains("active:"))
+        .map(|line| line.trim())
+        .collect();
+    assert_eq!(listed.len(), 2, "{frame}");
+    assert!(
+        listed[0].contains(SECOND_EMAIL) && listed[0].ends_with("93%"),
+        "the emptier Account is at the top with its Headroom: {listed:?}"
+    );
+    assert!(
+        listed[1].contains(EMAIL) && listed[1].ends_with("58%"),
+        "{listed:?}"
+    );
+}
+
+/// Disabled is never a statement about whether the Account works and
+/// Quarantined always is, so the two read differently — and neither is ever
+/// mistaken for an Account that simply has no room.
+#[test]
+fn disabled_and_quarantined_are_distinguishable_at_a_glance() {
+    let host = machine_with_three_accounts();
+    observed(&host, THIRD_EMAIL, vec![window("5-hour", 1.0)]);
+    disable_account(&host, SECOND_EMAIL)
+        .0
+        .expect("it is spared");
+    quarantine(&host, THIRD_EMAIL);
+
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
+
+    let frame = screen.last_frame();
+    let row = |email: &str| -> String {
+        frame
+            .lines()
+            .find(|line| line.contains(email))
+            .unwrap_or_else(|| panic!("{email} is listed in\n{frame}"))
+            .to_string()
+    };
+    assert!(row(SECOND_EMAIL).contains("disabled"), "{frame}");
+    assert!(!row(SECOND_EMAIL).contains("quarantined"), "{frame}");
+    assert!(row(THIRD_EMAIL).contains("quarantined"), "{frame}");
+    assert!(
+        frame
+            .lines()
+            .last()
+            .is_some_and(|keys| keys.contains("run")),
+        "{frame}"
+    );
+}
+
+/// A Switch from the picker is the same Switch as everywhere: the outgoing
+/// Credential Captured into its own Profile first, then the incoming one made
+/// live, under Claude Code's locks (ADR 0006).
+#[test]
+fn enter_switches_to_the_account_under_the_cursor() {
+    let host = machine_with_a_group();
+    let was_live = credential_of(&host, EMAIL);
+
+    // The cursor starts on the emptiest Account, which is the second one.
+    let screen = browse(&host, vec![Some(Signal::Switch), None, Some(Signal::Leave)]);
+
+    assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(
+        credential_of(&host, EMAIL),
+        was_live,
+        "the outgoing Credential was Captured into its own Profile",
+    );
+    assert!(
+        host.effects()
+            .iter()
+            .any(|effect| format!("{effect:?}").contains("oauth_refresh.lock")),
+        "the Switch took Claude Code's locks: {:?}",
+        host.effects()
+    );
+    let frame = screen.last_frame();
+    assert!(frame.contains("Captured"), "{frame}");
+    assert!(
+        frame.contains(&format!("Switched to {SECOND_EMAIL}")),
+        "{frame}"
+    );
+    assert!(
+        frame
+            .lines()
+            .any(|line| line.starts_with(">* ") && line.contains(SECOND_EMAIL)),
+        "the marker moved with it\n{frame}"
+    );
+}
+
+/// A failed Refresh's notes stand until something else is done, and on a short
+/// terminal there is only room for so many lines — so what a key just did is
+/// said first and the older news is what gets counted rather than shown.
+#[test]
+fn what_a_switch_said_is_not_pushed_off_the_screen_by_an_older_refresh() {
+    let host = machine_with_a_group();
+    let unread: Vec<String> = (0..4)
+        .map(|which| format!("account-{which}@example.com: no answer from Anthropic"))
+        .collect();
+    let mut refresher = FakeRefresher::answering(Refreshed::nothing_read(unread), 0);
+    let mut screen = FakeScreen::sized(
+        80,
+        12,
+        vec![
+            Some(Signal::Refresh),
+            Some(Signal::Switch),
+            Some(Signal::Leave),
+        ],
+    );
+
+    browse_with(&host, &mut screen, &mut refresher);
+
+    let frame = screen.last_frame();
+    assert!(
+        frame.contains(&format!("Switched to {SECOND_EMAIL}")),
+        "{frame}"
+    );
+    assert!(
+        frame.contains("more."),
+        "the older news is counted\n{frame}"
+    );
+}
+
+/// Rewriting Credentials to land where you already are is the one thing a
+/// Switch can do that is worse than doing nothing, and the picker is where an
+/// arrow key makes it easy to ask for.
+#[test]
+fn switching_to_the_account_that_is_already_active_says_there_is_nothing_to_do() {
+    let host = machine_with_a_group();
+
+    // Down onto the active Account, which the ranking put second.
+    let screen = browse(
+        &host,
+        vec![
+            Some(Signal::Down),
+            Some(Signal::Switch),
+            Some(Signal::Leave),
+        ],
+    );
+
+    let frame = screen.last_frame();
+    assert!(frame.contains("already the active Account"), "{frame}");
+    assert!(frame.contains("Nothing was changed"), "{frame}");
+    assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
+}
+
+/// A Quarantine is never a statement that the Account is gone, so it stays
+/// listed and stays selectable — and choosing it names the one command that
+/// ends it rather than failing obscurely.
+#[test]
+fn choosing_a_quarantined_account_names_perch_relogin() {
+    let host = machine_with_a_group();
+    quarantine(&host, SECOND_EMAIL);
+
+    // Down onto it: a Quarantined Account is one no Cycle would choose, so the
+    // ranking puts it below every Account one would.
+    for key in [Signal::Switch, Signal::Run] {
+        let screen = browse(
+            &host,
+            vec![Some(Signal::Down), Some(key), Some(Signal::Leave)],
+        );
+
+        let frame = screen.last_frame();
+        // Read across the line breaks the terminal put in: the refusal is
+        // broken between words to fit, and the clause naming the repair is the
+        // end of a sentence rather than the end of a line.
+        let said = frame.split_whitespace().collect::<Vec<&str>>().join(" ");
+        assert!(said.contains("is Quarantined"), "{key:?}\n{frame}");
+        assert!(
+            said.contains(&format!("`perch relogin {SECOND_EMAIL}`")),
+            "{key:?}\n{frame}"
+        );
+        assert_eq!(
+            registry_of(&host).active.as_deref(),
+            Some(EMAIL),
+            "{key:?} changed nothing"
+        );
+    }
+}
+
+/// A Run lasts as long as somebody's session, so the view ends with the Account
+/// to launch as rather than trying to come back from it: the terminal is given
+/// back, and only then is anything launched into it.
+#[test]
+fn the_run_key_leaves_the_view_naming_the_account_to_launch() {
+    let host = machine_with_a_group();
+
+    assert_eq!(
+        left_after(&host, vec![Some(Signal::Down), Some(Signal::Run)]),
+        Left::ToRun(EMAIL.to_string()),
+    );
+    assert_eq!(
+        left_after(&host, vec![Some(Signal::Leave)]),
+        Left::Alone,
+        "`q` leaves and launches nothing",
+    );
+}
+
+/// A Run from the picker is the Run `perch run` performs: the client against
+/// that Account's Profile, the active Account untouched, and what the client
+/// said coming back as Perch's own exit code.
+#[test]
+fn a_run_the_view_was_left_for_hands_the_terminal_over_and_reports_what_it_said() {
+    let host = machine_with_figures().with_login(client_exiting(3));
+    let mut said = Vec::new();
+
+    let ended =
+        perch::commands::tui::hand_over(&host, Left::ToRun(SECOND_EMAIL.to_string()), &mut said)
+            .expect("the client ran");
+
+    assert_eq!(ended, 3, "what the client said is what a script reads");
+    let said = String::from_utf8(said).expect("output is UTF-8");
+    assert!(
+        said.contains(&format!("Running Claude Code as {SECOND_EMAIL}")),
+        "{said}"
+    );
+    assert!(said.contains("in this terminal alone"), "{said}");
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(EMAIL),
+        "a Run is not a Switch",
+    );
 }
 
 /// The interactive view is one command among several (ADR 0011), so where
