@@ -311,6 +311,96 @@ fn the_watchers_may_act_field_is_off_until_it_is_asked_for() {
     );
 }
 
+/// The rest of the watcher's policy: how often it may act, how much emptier the
+/// Account it moves to has to be, and whether coming straight back is allowed
+/// (ADR 0013). All three are the Group's, in the vocabulary the other settings
+/// already use.
+#[test]
+fn the_watchers_cooldown_margin_and_no_return_are_the_groups_to_set() {
+    let host = three_accounts_in_one_group();
+
+    let (result, printed) = config_set(&host, &["work", "watcher-cooldown-minutes", "30"]);
+    result.expect("a cooldown is a count of minutes");
+    assert_eq!(group_config(&host, "work").watcher_cooldown_minutes, 30);
+    assert!(
+        printed.contains("at least"),
+        "and what it now means: {printed}"
+    );
+
+    let (result, printed) = config_set(&host, &["work", "watcher-margin-percent", "25"]);
+    result.expect("a margin is a percentage");
+    assert_eq!(group_config(&host, "work").watcher_margin_percent, 25);
+    assert!(
+        printed.contains("55%"),
+        "the margin is only meaningful beside the threshold, so the figure a \
+         candidate now has to clear is worked out rather than left to the \
+         reader: {printed}"
+    );
+
+    let (result, printed) = config_set(&host, &["work", "watcher-no-return", "false"]);
+    result.expect("no-return is a yes or a no");
+    assert!(!group_config(&host, "work").watcher_no_return);
+    assert!(printed.contains("ping-pong"), "{printed}");
+
+    for (key, value) in [
+        ("watcher-cooldown-minutes", "30"),
+        ("watcher-margin-percent", "25"),
+        ("watcher-no-return", "false"),
+    ] {
+        let (result, printed) = config_get(&host, &["work", key]);
+        result.expect("what was set can be read");
+        assert_eq!(printed.trim(), value, "reading `{key}` back");
+    }
+}
+
+/// The defaults ADR 0013 names, as `perch config get` reports them. A default
+/// is a promise, and this is where it is kept.
+#[test]
+fn a_group_starts_with_the_watcher_policy_the_adr_names() {
+    let host = three_accounts_in_one_group();
+
+    let (result, printed) = config_get(&host, &["work"]);
+
+    result.expect("naming a Group asks about everything it carries");
+    for expected in [
+        "work watcher-threshold-percent 80",
+        "work watcher-cooldown-minutes 15",
+        "work watcher-margin-percent 10",
+        "work watcher-no-return true",
+    ] {
+        assert!(printed.contains(expected), "{expected} — got: {printed}");
+    }
+}
+
+/// A number the policy cannot hold is refused with the numbers it can, so the
+/// script that mistyped one is not left to guess twice.
+#[test]
+fn a_watcher_number_out_of_range_is_refused_with_the_range_it_accepts() {
+    let host = three_accounts_in_one_group();
+
+    for (key, value, accepted) in [
+        ("watcher-margin-percent", "101", "100"),
+        ("watcher-margin-percent", "-5", "100"),
+        ("watcher-margin-percent", "a tenth", "100"),
+        ("watcher-cooldown-minutes", "10081", "10080"),
+        ("watcher-cooldown-minutes", "-1", "10080"),
+        ("watcher-cooldown-minutes", "quarter of an hour", "10080"),
+    ] {
+        let (result, _) = config_set(&host, &["work", key, value]);
+
+        let error = result.expect_err("out of the range the key accepts");
+        assert_eq!(error.exit_code(), EXIT_INVALID, "{error}");
+        assert!(
+            error.to_string().contains(accepted),
+            "the numbers that would have been accepted are named: {error}"
+        );
+    }
+
+    let config = group_config(&host, "work");
+    assert_eq!(config.watcher_margin_percent, 10, "refused, so unchanged");
+    assert_eq!(config.watcher_cooldown_minutes, 15, "refused, so unchanged");
+}
+
 #[test]
 fn an_unknown_key_is_refused_and_names_the_ones_a_group_carries() {
     let host = three_accounts_in_one_group();
@@ -324,6 +414,9 @@ fn an_unknown_key_is_refused_and_names_the_ones_a_group_carries() {
     assert!(message.contains("strategy"), "{message}");
     assert!(message.contains("watcher-may-act"), "{message}");
     assert!(message.contains("watcher-threshold-percent"), "{message}");
+    assert!(message.contains("watcher-cooldown-minutes"), "{message}");
+    assert!(message.contains("watcher-margin-percent"), "{message}");
+    assert!(message.contains("watcher-no-return"), "{message}");
 }
 
 #[test]

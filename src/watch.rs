@@ -17,9 +17,9 @@
 //! [`crate::commands::watch`]'s; what a round *means* is here, where it can be
 //! argued with in a unit test.
 
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, Duration, SecondsFormat, Utc};
 
-use crate::registry::Account;
+use crate::registry::{Account, GroupConfig};
 
 /// How long the watcher waits between Refreshing the Account it is on.
 ///
@@ -43,6 +43,64 @@ pub const REFRESH_INTERVAL_MILLIS: u64 = 150_000;
 pub fn how_often() -> String {
     let seconds = REFRESH_INTERVAL_MILLIS / 1_000;
     format!("{}m{:02}s", seconds / 60, seconds % 60)
+}
+
+/// The rules a Group gives the watcher for Switching within it (ADR 0013).
+///
+/// Four numbers, and each answers a different question about the same move:
+/// *when* it is wanted, *how often* it may happen, *how much better* the
+/// destination has to be, and *whether* the Account just left counts. Read off
+/// the Group rather than held as constants, because all four are preferences —
+/// unlike [`REFRESH_INTERVAL_MILLIS`], which is arithmetic about Anthropic's
+/// allowance and is nobody's to prefer.
+///
+/// A copy taken at the top of a round rather than a borrow of the Group, so the
+/// round decides against one policy throughout: a `perch config set` landing
+/// mid-round cannot make the threshold that was read differ from the margin
+/// that is applied.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Policy {
+    /// How full the Account you are on has to be before moving off it is
+    /// wanted, as a percentage of its fullest Quota Window.
+    pub threshold: u8,
+    /// The least wall-clock between two Switches, in minutes.
+    pub cooldown_minutes: u32,
+    /// How far under the threshold a candidate has to be to be worth moving to,
+    /// in percentage points.
+    pub margin: u8,
+    /// Whether the Account just left is barred for one cooldown.
+    pub no_return: bool,
+}
+
+impl Policy {
+    pub fn of(config: &GroupConfig) -> Policy {
+        Policy {
+            threshold: config.watcher_threshold_percent,
+            cooldown_minutes: config.watcher_cooldown_minutes,
+            margin: config.watcher_margin_percent,
+            no_return: config.watcher_no_return,
+        }
+    }
+
+    /// The Utilization a candidate has to be at or under to be worth moving to
+    /// — the threshold less the margin.
+    ///
+    /// Named for the figure rather than for the rule, because "barred" in this
+    /// module is no-return's word and one of the two would end up meaning the
+    /// other.
+    ///
+    /// Saturating, so a margin wider than the threshold is a Group that will
+    /// only move to an Account with nothing used at all rather than a Group
+    /// that will never move at all. Refusing that arrangement instead would
+    /// make the order two `perch config set`s are typed in matter, which is the
+    /// kind of rule a script finds out about at three in the morning.
+    pub fn ceiling(&self) -> u8 {
+        self.threshold.saturating_sub(self.margin)
+    }
+
+    pub fn cooldown(&self) -> Duration {
+        Duration::minutes(i64::from(self.cooldown_minutes))
+    }
 }
 
 /// The Quota Window an Account's fullness is judged by, and how full it is.
@@ -92,22 +150,200 @@ impl Fullest {
     }
 }
 
+/// The one thing the loop carries from one round to the next: when it last
+/// Switched, and what it Switched off.
+///
+/// In memory and nowhere else, which is the whole of why `perch watch` still
+/// "writes no file of its own". A cooldown is about the loop somebody is
+/// running, not about the machine: two watchers would be two people watching,
+/// and a cooldown recorded in the registry would have one of them pacing the
+/// other's decisions. Stopping the loop and starting it again is a person
+/// saying "go on then", and it starts with nothing to wait for.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Recently {
+    switched: Option<Switched>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Switched {
+    at: DateTime<Utc>,
+    off: String,
+}
+
+impl Recently {
+    /// A loop that has just started, which owes nobody a wait.
+    pub fn nothing() -> Recently {
+        Recently::default()
+    }
+
+    pub fn switched(&mut self, off: &str, at: DateTime<Utc>) {
+        self.switched = Some(Switched {
+            at,
+            off: off.to_string(),
+        });
+    }
+
+    /// Why nothing may move yet, or `None` when something may.
+    ///
+    /// The cooldown is the floor under how often the watcher acts, and it is
+    /// checked before the candidates are read rather than after: a round that
+    /// cannot act has no business spending an allowance on figures it will not
+    /// use.
+    pub fn resting(&self, policy: &Policy, now: DateTime<Utc>) -> Option<String> {
+        let left = self.left_of_the_cooldown(policy, now)?;
+        let switched = self.switched.as_ref()?;
+        Some(format!(
+            "the last Switch was {} ago and this Group leaves at least {} \
+             between two, so nothing moves for another {}.",
+            minutes(now - switched.at),
+            minutes(policy.cooldown()),
+            minutes(left),
+        ))
+    }
+
+    /// The Account not to go back to, or `None` when there is none.
+    ///
+    /// A second lock on the same door as [`Self::resting`], and the honest
+    /// thing to say about it is that today the first lock always reaches it
+    /// first: no Switch happens inside the cooldown, so no Switch back can
+    /// either, and the two windows coincide by construction. That is why a
+    /// Group with `watcher-cooldown-minutes 0` has no no-return whatever
+    /// `watcher-no-return` says — a no-return of no minutes bars nothing, and
+    /// `perch config` says so rather than leaving it to be discovered.
+    ///
+    /// It is written all the same, because the rule about *where* not to go is
+    /// not the rule about *whether* to go, and a rule nobody wrote down is one
+    /// that gets relaxed by accident the first time the other one is. The
+    /// unit test below is what holds it; the loop cannot, because the loop
+    /// never gets far enough to ask.
+    pub fn barred(&self, policy: &Policy, now: DateTime<Utc>) -> Option<&str> {
+        if !policy.no_return {
+            return None;
+        }
+        self.left_of_the_cooldown(policy, now)?;
+        self.switched.as_ref().map(|switched| switched.off.as_str())
+    }
+
+    /// How much of the cooldown is left, or `None` where none of it is — which
+    /// is also the answer when nothing has been Switched yet.
+    fn left_of_the_cooldown(&self, policy: &Policy, now: DateTime<Utc>) -> Option<Duration> {
+        let switched = self.switched.as_ref()?;
+        let left = policy.cooldown() - (now - switched.at);
+        (left > Duration::zero()).then_some(left)
+    }
+}
+
+/// A span as a count of minutes, for the sentences that quote one. Rounded
+/// down, because "another 1 minute" said of fifty seconds is a promise the
+/// clock keeps and "another 2" is one it does not.
+fn minutes(span: Duration) -> String {
+    match span.num_minutes() {
+        1 => "1 minute".to_string(),
+        count => format!("{count} minutes"),
+    }
+}
+
+/// A candidate as this round read it, ready to be judged against the margin.
+///
+/// The name is carried alongside the address because the sentence explaining
+/// why an Account was passed over is read by the person who named it, and
+/// `crate::registry::Registry::named_for_the_user` is the only thing that knows
+/// what they called it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Considered {
+    pub email: String,
+    pub named: String,
+    pub fullest: Option<Fullest>,
+}
+
+/// The Accounts a Switch may not land on this round, and the one sentence
+/// saying why.
+///
+/// The margin is what kills the ping-pong (ADR 0013): at an 80% threshold
+/// nothing is moved to unless it is at 70% or better, so two Accounts hovering
+/// either side of the line cannot trade places with each other every few
+/// minutes. It is applied by setting candidates aside rather than by second
+/// guessing the winner, because the Strategy is entitled to rank whatever
+/// clears the bar — a `soonest-reset` Group would otherwise be told there is
+/// nowhere to go while a perfectly empty Account sat behind the fullest one.
+///
+/// An Account Perch has never observed at all is set aside too. The Cycle ranks
+/// one above an exhausted Account, which is right for a Switch somebody asked
+/// for — but here it would be the watcher moving to an Account it knows nothing
+/// about, and "no figure" is not evidence of room. A candidate whose Refresh
+/// merely failed this round is *not* this case: it still carries whatever was
+/// cached, is judged by the margin on that, and what could not be read is said
+/// on the decision line instead.
+pub fn set_aside(
+    policy: &Policy,
+    group: &str,
+    considered: &[Considered],
+    barred: Option<&str>,
+) -> crate::cycle::SetAside {
+    let mut emails = Vec::new();
+    let mut clauses = Vec::new();
+    for candidate in considered {
+        let why = if Some(candidate.email.as_str()) == barred {
+            format!(
+                "{} is the Account this watcher just left, and no-return holds \
+                 for the rest of the cooldown",
+                candidate.named,
+            )
+        } else {
+            match &candidate.fullest {
+                Some(fullest) if fullest.used_percent > f64::from(policy.ceiling()) => format!(
+                    "{} is at {:.0}% used and nothing over {}% is worth moving to",
+                    candidate.named,
+                    fullest.used_percent,
+                    policy.ceiling(),
+                ),
+                Some(_) => continue,
+                None => format!(
+                    "Perch has never observed how full {} is, and a Switch onto \
+                     a figure it has not got is a Switch made blind",
+                    candidate.named,
+                ),
+            }
+        };
+        emails.push(candidate.email.clone());
+        clauses.push(why);
+    }
+
+    // Nothing set aside is nothing to explain, and a sentence built out of no
+    // clauses would be one waiting to be printed with a hole in it.
+    if emails.is_empty() {
+        return crate::cycle::SetAside::nothing();
+    }
+    crate::cycle::SetAside {
+        because: format!(
+            "Nothing in Group `{group}` is worth Switching to yet — {}. Nothing \
+             was changed.",
+            clauses.join("; "),
+        ),
+        emails,
+    }
+}
+
 /// What a round decided.
 ///
-/// Five outcomes, and four of them change nothing. That is the ordinary shape
+/// Six outcomes, and five of them change nothing. That is the ordinary shape
 /// of watching something: the decisions where nothing happens are the ones that
 /// have to be printed most carefully, because they are the evidence that the
 /// watcher is awake and has an opinion.
 ///
-/// They are also four different reasons for nothing happening, and the
+/// They are also five different reasons for nothing happening, and the
 /// difference is the whole of what a person reading the log needs: waiting
-/// resolves itself, nowhere resolves itself by a reset, held resolves itself by
-/// the network coming back, and refused resolves itself when whatever is
-/// running stops.
+/// resolves itself, cooling resolves itself by the clock, nowhere resolves
+/// itself by a reset, held resolves itself by the network coming back, and
+/// refused resolves itself when whatever is running stops.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
     /// The Account is not full enough to want moving off.
     Waiting,
+    /// It was, and the Group's cooldown has not run out since the last Switch.
+    /// Nothing was read of the candidates: a round that may not act has no
+    /// business spending an allowance on figures it cannot use.
+    Cooling { why: String },
     /// It was, and this is why the Account it landed on won.
     ///
     /// No field for where it went, because the reason names it: the Cycle
@@ -137,6 +373,7 @@ impl Outcome {
     fn word(&self) -> &'static str {
         match self {
             Outcome::Waiting => "waiting",
+            Outcome::Cooling { .. } => "cooling",
             Outcome::Switched { .. } => "switched",
             Outcome::Nowhere { .. } => "nowhere",
             Outcome::Held { .. } => "held",
@@ -190,6 +427,7 @@ impl Round {
     fn reason(&self) -> String {
         match &self.outcome {
             Outcome::Waiting => "under it, so nothing was wanted.".to_string(),
+            Outcome::Cooling { why } => format!("over it, and too soon to move again: {why}"),
             Outcome::Switched { because } => format!("over it. Switched — {because}"),
             Outcome::Nowhere { why } => format!("over it, and nowhere to go: {why}"),
             Outcome::Held { why } => {
@@ -245,6 +483,12 @@ mod tests {
     fn every_decision_names_the_figure_the_threshold_the_outcome_and_the_reason() {
         let decisions = [
             round(at(42.0), Outcome::Waiting),
+            round(
+                at(86.0),
+                Outcome::Cooling {
+                    why: "the last Switch was 4 minutes ago.".to_string(),
+                },
+            ),
             round(
                 at(86.0),
                 Outcome::Switched {
@@ -336,5 +580,207 @@ mod tests {
         };
         assert!(fullest.at_or_over(80));
         assert!(!fullest.at_or_over(81));
+    }
+
+    fn policy() -> Policy {
+        Policy::of(&GroupConfig::default())
+    }
+
+    /// The Group's defaults, read as the watcher reads them.
+    #[test]
+    fn the_default_policy_moves_you_at_eighty_and_only_onto_seventy_or_better() {
+        let policy = policy();
+        assert_eq!(policy.threshold, 80);
+        assert_eq!(policy.ceiling(), 70);
+        assert_eq!(policy.cooldown(), Duration::minutes(15));
+        assert!(policy.no_return);
+    }
+
+    /// A margin wider than the threshold is a Group that will only move onto an
+    /// Account with nothing used, rather than one that has quietly stopped
+    /// moving at all or one whose two settings have to be typed in the right
+    /// order.
+    #[test]
+    fn a_margin_wider_than_the_threshold_bars_everything_but_an_empty_account() {
+        let strict = Policy {
+            threshold: 50,
+            margin: 90,
+            ..policy()
+        };
+        assert_eq!(strict.ceiling(), 0);
+    }
+
+    /// The cooldown is a floor under how often the watcher acts, and it is
+    /// counted from the Switch rather than from the round.
+    #[test]
+    fn nothing_moves_again_until_the_cooldown_has_run_out() {
+        let mut recently = Recently::nothing();
+        assert_eq!(
+            recently.resting(&policy(), now()),
+            None,
+            "a loop that has just started owes nobody a wait"
+        );
+
+        recently.switched("left@example.com", now());
+
+        let waiting = recently
+            .resting(&policy(), now() + Duration::minutes(4))
+            .expect("four minutes into a fifteen minute cooldown");
+        assert!(waiting.contains("4 minutes ago"), "{waiting}");
+        assert!(waiting.contains("15 minutes"), "the cooldown: {waiting}");
+        assert!(
+            waiting.contains("another 11"),
+            "and what is left: {waiting}"
+        );
+
+        assert_eq!(
+            recently.resting(&policy(), now() + Duration::minutes(15)),
+            None,
+            "a cooldown of fifteen minutes is over after fifteen minutes, not \
+             after sixteen"
+        );
+    }
+
+    /// A cooldown of nothing is a Group that has asked for no cooldown, not one
+    /// that waits a round anyway.
+    #[test]
+    fn a_cooldown_of_zero_never_holds_anything_back() {
+        let mut recently = Recently::nothing();
+        recently.switched("left@example.com", now());
+        let eager = Policy {
+            cooldown_minutes: 0,
+            ..policy()
+        };
+
+        assert_eq!(recently.resting(&eager, now()), None);
+        assert_eq!(recently.barred(&eager, now()), None);
+    }
+
+    /// The Account just left is barred by name, and the Group can say it should
+    /// not be — the cooldown and the no-return are two rules, and turning one
+    /// off is not a way of giving up the other.
+    #[test]
+    fn the_account_just_left_is_no_candidate_until_the_cooldown_has_passed() {
+        let mut recently = Recently::nothing();
+        recently.switched("left@example.com", now());
+
+        assert_eq!(
+            recently.barred(&policy(), now() + Duration::minutes(4)),
+            Some("left@example.com"),
+        );
+        assert_eq!(
+            recently.barred(&policy(), now() + Duration::minutes(15)),
+            None,
+            "one cooldown, and no longer"
+        );
+        assert_eq!(
+            recently.barred(
+                &Policy {
+                    no_return: false,
+                    ..policy()
+                },
+                now() + Duration::minutes(4)
+            ),
+            None,
+            "a Group that says coming back is fine is a Group that may come back"
+        );
+    }
+
+    fn considered(named: &str, used_percent: Option<f64>) -> Considered {
+        Considered {
+            email: format!("{named}@example.com"),
+            named: format!("{named}@example.com"),
+            fullest: used_percent.map(|used_percent| Fullest {
+                window: "5-hour".to_string(),
+                used_percent,
+            }),
+        }
+    }
+
+    /// The margin, which is the whole of what stops a ping-pong: at an 80%
+    /// threshold nothing under 70% may be moved to, so the Account that is only
+    /// just emptier than the one you are on is passed over.
+    #[test]
+    fn a_candidate_that_is_barely_emptier_than_the_threshold_is_set_aside() {
+        let set_aside = set_aside(
+            &policy(),
+            "work",
+            &[
+                considered("just-under", Some(74.0)),
+                considered("at-the-bar", Some(70.0)),
+                considered("roomy", Some(5.0)),
+            ],
+            None,
+        );
+
+        assert_eq!(set_aside.emails, vec!["just-under@example.com".to_string()]);
+        assert!(set_aside.because.contains("74%"), "{}", set_aside.because);
+        assert!(
+            set_aside.because.contains("70%"),
+            "and the figure it was judged against: {}",
+            set_aside.because
+        );
+    }
+
+    /// The Cycle ranks an Account nobody has ever read above an exhausted one,
+    /// which is right for a Switch somebody asked for. Unasked it is a move onto
+    /// an Account the watcher knows nothing about, and "no figure" is not
+    /// evidence of room.
+    #[test]
+    fn a_candidate_no_figure_was_ever_read_of_is_set_aside_rather_than_read_as_empty() {
+        let set_aside = set_aside(&policy(), "work", &[considered("unseen", None)], None);
+
+        assert_eq!(set_aside.emails, vec!["unseen@example.com".to_string()]);
+        assert!(
+            set_aside.because.contains("never observed"),
+            "{}",
+            set_aside.because
+        );
+    }
+
+    /// A barred Account is set aside whatever its figure says, and the reason
+    /// names the rule rather than the number — it was never judged on a number.
+    #[test]
+    fn the_barred_account_is_set_aside_however_empty_it_looks() {
+        let set_aside = set_aside(
+            &policy(),
+            "work",
+            &[considered("left", Some(2.0))],
+            Some("left@example.com"),
+        );
+
+        assert_eq!(set_aside.emails, vec!["left@example.com".to_string()]);
+        assert!(
+            set_aside.because.contains("no-return"),
+            "{}",
+            set_aside.because
+        );
+        assert!(
+            !set_aside.because.contains("2%"),
+            "quoting the figure would read as the reason, and it was not: {}",
+            set_aside.because
+        );
+    }
+
+    /// Every line answers the same four questions, and a cooling round is a
+    /// round like any other.
+    #[test]
+    fn a_cooling_round_says_it_is_over_the_threshold_and_why_nothing_moved() {
+        let line = round(
+            at(86.0),
+            Outcome::Cooling {
+                why: "the last Switch was 4 minutes ago and this Group leaves at \
+                      least 15 minutes between two, so nothing moves for another \
+                      11 minutes."
+                    .to_string(),
+            },
+        )
+        .line(now());
+
+        assert!(line.contains("cooling"), "{line}");
+        assert!(line.contains("86% used"), "{line}");
+        assert!(line.contains("threshold 80%"), "{line}");
+        assert!(line.contains("too soon to move again"), "{line}");
+        assert!(!line.contains('\n'), "{line}");
     }
 }

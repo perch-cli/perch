@@ -61,7 +61,43 @@ more exhausted than the one it left.
 five-hour window moves slowly enough that fifteen minutes never misses a real
 crossing. The margin is what kills the ping-pong: at an 80% threshold nothing
 is switched to unless it is at 70% or better. All three are per-group
-configuration beside `watcher-threshold-percent`, not constants.
+configuration beside `watcher-threshold-percent`, not constants —
+`watcher-cooldown-minutes`, `watcher-margin-percent` and `watcher-no-return`.
+
+The margin sets candidates aside before the strategy ranks them rather than
+vetoing the winner afterwards. A `soonest-reset` group would otherwise be told
+there is nowhere to go while a perfectly empty account sat behind the fullest
+one, and the strategy is entitled to prefer among whatever clears the ceiling.
+An account perch has never read a figure for is set aside too. Ranking puts an
+unknown above a window that is certainly full, which is right for a switch
+somebody asked for; unasked it is a move onto an account the watcher knows
+nothing about.
+
+The cooldown lives in the running loop and nowhere else. A cooldown is about
+the loop somebody is running, not about the machine — recording it in the
+registry would have one person's watcher pacing another's decisions, and would
+give `perch watch` a file to write when the whole of the record above is that
+it leaves nothing behind. Stopping the loop and starting it again is a person
+saying "go on then".
+
+The cooldown and no-return hold the same window by construction: nothing is
+switched during the cooldown, so nothing can be switched back either. The
+cooldown always gets there first, and `watcher-no-return` changes no trace the
+watcher can be shown today — including at `watcher-cooldown-minutes 0`, where a
+no-return of no minutes bars nothing. This is stated plainly rather than dressed
+up, and `perch config` says it back when either is set.
+
+It is still written as two rules, because they answer different questions —
+*whether* to move and *where* not to — and the second is what a later change to
+the first would otherwise silently repeal. A per-account cooldown, or one that
+paces switches rather than gating them, would leave no-return doing the work
+alone. Unit tests pin it directly; the loop cannot, because the loop never gets
+far enough to ask.
+
+A margin at or above the threshold is not out of range. It is a group that will
+only move onto an account with nothing used at all, which is a coherent thing to
+ask for; refusing it would make the order two `perch config set`s are typed in
+matter.
 
 **It never acts on an ungrouped account.** `cycle-ungrouped` (ADR 0017) lets a
 bare `perch switch` cycle among accounts in no group; it grants the watcher

@@ -18,11 +18,14 @@
 //! reading the configuration and writing it back are the same vocabulary and a
 //! script needs no parser.
 //!
-//! The watcher's two fields say whether `perch watch` may Switch within a
-//! Group and at what Utilization it does (ADR 0013). Both messages about them
-//! say the same thing about what they are not: a Group that may be acted on is
-//! not a service that has been switched on, because nothing acts on it unless
-//! somebody is running the loop.
+//! The watcher's five fields say whether `perch watch` may Switch within a
+//! Group, at what Utilization it does, how often it may, how much emptier the
+//! Account it moves to has to be, and whether the one it just left counts
+//! (ADR 0013). Every message that describes the watcher *acting* says the same
+//! thing about what it is not: a Group that may be acted on is not a service
+//! that has been switched on, because nothing acts on it unless somebody is
+//! running the loop. The one message that need not is the one saying the
+//! watcher may not act on this Group at all.
 
 use std::io::Write;
 
@@ -42,12 +45,12 @@ use crate::registry::{self, GlobalConfig, GroupConfig, Registry, Strategy};
 pub enum ConfigCommand {
     /// Set one setting, and say what it now means.
     ///
-    /// A Group carries `strategy` — `most-headroom` or `soonest-reset` —
-    /// along with `watcher-may-act` and `watcher-threshold-percent`, which say
-    /// whether `perch watch` may Switch within it and at what Utilization
-    /// (ADR 0013). Naming no Group addresses `cycle-ungrouped`, which is
-    /// whether bare `perch switch` may Cycle among the Accounts in no Group at
-    /// all.
+    /// A Group carries `strategy` — `most-headroom` or `soonest-reset` — along
+    /// with the watcher's policy: `watcher-may-act`,
+    /// `watcher-threshold-percent`, `watcher-cooldown-minutes`,
+    /// `watcher-margin-percent` and `watcher-no-return` (ADR 0013). Naming no
+    /// Group addresses `cycle-ungrouped`, which is whether bare `perch switch`
+    /// may Cycle among the Accounts in no Group at all.
     Set {
         /// `<group> <key> <value>`, or `<key> <value>` for a setting that
         /// belongs to no Group.
@@ -155,9 +158,9 @@ fn validated(
     group: &str,
 ) -> Result<GroupConfig> {
     key.write(&mut config, value)?;
-    // The range a percentage has to be in is stated once, where the registry
-    // enforces it on the way in, rather than restated here where it could come
-    // to disagree with it.
+    // Asked again over the whole Group, because the registry is the boundary
+    // every configuration crosses and this one is only a command line. Both
+    // refusals name the same ranges, from the same constants.
     config.validate(group)?;
     Ok(config)
 }
@@ -283,12 +286,18 @@ enum GroupKey {
     Strategy,
     WatcherMayAct,
     WatcherThresholdPercent,
+    WatcherCooldownMinutes,
+    WatcherMarginPercent,
+    WatcherNoReturn,
 }
 
-const GROUP_KEYS: [GroupKey; 3] = [
+const GROUP_KEYS: [GroupKey; 6] = [
     GroupKey::Strategy,
     GroupKey::WatcherMayAct,
     GroupKey::WatcherThresholdPercent,
+    GroupKey::WatcherCooldownMinutes,
+    GroupKey::WatcherMarginPercent,
+    GroupKey::WatcherNoReturn,
 ];
 
 impl GroupKey {
@@ -297,6 +306,9 @@ impl GroupKey {
             GroupKey::Strategy => "strategy",
             GroupKey::WatcherMayAct => "watcher-may-act",
             GroupKey::WatcherThresholdPercent => "watcher-threshold-percent",
+            GroupKey::WatcherCooldownMinutes => "watcher-cooldown-minutes",
+            GroupKey::WatcherMarginPercent => "watcher-margin-percent",
+            GroupKey::WatcherNoReturn => "watcher-no-return",
         }
     }
 
@@ -319,6 +331,9 @@ impl GroupKey {
             GroupKey::Strategy => config.strategy.as_str().to_string(),
             GroupKey::WatcherMayAct => config.watcher_may_act.to_string(),
             GroupKey::WatcherThresholdPercent => config.watcher_threshold_percent.to_string(),
+            GroupKey::WatcherCooldownMinutes => config.watcher_cooldown_minutes.to_string(),
+            GroupKey::WatcherMarginPercent => config.watcher_margin_percent.to_string(),
+            GroupKey::WatcherNoReturn => config.watcher_no_return.to_string(),
         }
     }
 
@@ -327,7 +342,16 @@ impl GroupKey {
             GroupKey::Strategy => config.strategy = strategy(value)?,
             GroupKey::WatcherMayAct => config.watcher_may_act = yes_or_no(self.as_str(), value)?,
             GroupKey::WatcherThresholdPercent => {
-                config.watcher_threshold_percent = percentage(value)?
+                config.watcher_threshold_percent = percentage(self.as_str(), value)?
+            }
+            GroupKey::WatcherCooldownMinutes => {
+                config.watcher_cooldown_minutes = minutes(self.as_str(), value)?
+            }
+            GroupKey::WatcherMarginPercent => {
+                config.watcher_margin_percent = percentage(self.as_str(), value)?
+            }
+            GroupKey::WatcherNoReturn => {
+                config.watcher_no_return = yes_or_no(self.as_str(), value)?
             }
         }
         Ok(())
@@ -363,6 +387,61 @@ impl GroupKey {
                 "`perch watch` Switches within `{group}` once that much of the \
                  fullest Quota Window of the Account you are on has been used. \
                  {ONLY_WHILE_IT_RUNS}"
+            ),
+            GroupKey::WatcherCooldownMinutes if config.watcher_cooldown_minutes == 0 => format!(
+                "`perch watch` will Switch within `{group}` as often as the \
+                 figures say to, with no wait between one Switch and the next — \
+                 and `watcher-no-return` goes with it, because a no-return of no \
+                 minutes bars nothing. The margin is then all that stands \
+                 between two Accounts either side of the threshold and a \
+                 ping-pong. {ONLY_WHILE_IT_RUNS}"
+            ),
+            GroupKey::WatcherCooldownMinutes => format!(
+                "`perch watch` leaves at least that long between two Switches \
+                 within `{group}`, however the figures move in between. \
+                 {}{ONLY_WHILE_IT_RUNS}",
+                match config.watcher_no_return {
+                    true =>
+                        "It is also how long the Account it just left stays \
+                             barred from being Switched back to. ",
+                    false => "",
+                },
+            ),
+            GroupKey::WatcherMarginPercent => format!(
+                "`perch watch` Switches within `{group}` only to an Account with \
+                 no more than {}% of its fullest Quota Window used — that much \
+                 clear of the {}% it moves you at. A candidate barely emptier \
+                 than the Account you are on is what a ping-pong is made of. \
+                 {ONLY_WHILE_IT_RUNS}",
+                crate::watch::Policy::of(config).ceiling(),
+                config.watcher_threshold_percent,
+            ),
+            // A no-return is measured in cooldowns, so a Group with no cooldown
+            // has no no-return either however this reads. Said rather than left
+            // for somebody to find out, because "will not Switch back until the
+            // cooldown of 0 minutes has passed" is a sentence that means the
+            // opposite of what it appears to promise.
+            GroupKey::WatcherNoReturn
+                if config.watcher_no_return && config.watcher_cooldown_minutes == 0 =>
+            {
+                format!(
+                    "`perch watch` bars nothing within `{group}`: no-return lasts \
+                     one cooldown, and `watcher-cooldown-minutes` is 0. Setting a \
+                     cooldown is what gives this something to measure. \
+                     {ONLY_WHILE_IT_RUNS}"
+                )
+            }
+            GroupKey::WatcherNoReturn if config.watcher_no_return => format!(
+                "`perch watch` will not Switch back to the Account it just left \
+                 within `{group}` until the cooldown of {} minutes has passed, \
+                 whatever the figures say in between. {ONLY_WHILE_IT_RUNS}",
+                config.watcher_cooldown_minutes,
+            ),
+            GroupKey::WatcherNoReturn => format!(
+                "`perch watch` may Switch straight back to the Account it just \
+                 left within `{group}`. Only the cooldown and the margin then \
+                 stand between two Accounts either side of the threshold and a \
+                 ping-pong. {ONLY_WHILE_IT_RUNS}"
             ),
         }
     }
@@ -486,13 +565,36 @@ fn yes_or_no(key: &str, value: &str) -> Result<bool> {
     }
 }
 
-fn percentage(value: &str) -> Result<u8> {
-    value.parse::<u8>().map_err(|_| {
-        PerchError::Invalid(format!(
-            "`{value}` is not a percentage. A Utilization threshold is a whole \
-             number between 0 and 100."
-        ))
-    })
+/// A percentage, refused with the numbers that would have been accepted.
+///
+/// The range is the registry's to state (`A_PERCENTAGE`), so the refusal a
+/// number too large for the field gets and the one a number the field can hold
+/// but the policy cannot gets are the same sentence. To the script that
+/// mistyped, `300` and `101` are the same mistake.
+fn percentage(key: &str, value: &str) -> Result<u8> {
+    value
+        .parse::<u8>()
+        .ok()
+        .filter(|percent| *percent <= 100)
+        .ok_or_else(|| not_a_value(key, value, registry::A_PERCENTAGE))
+}
+
+/// A count of minutes, refused the same way.
+fn minutes(key: &str, value: &str) -> Result<u32> {
+    value
+        .parse::<u32>()
+        .ok()
+        .filter(|minutes| *minutes <= registry::MAX_WATCHER_COOLDOWN_MINUTES)
+        .ok_or_else(|| not_a_value(key, value, &registry::a_cooldown()))
+}
+
+/// A value refused for the value it is, said to somebody who just typed it —
+/// which is why it is not the registry's `out_of_range`, whose reader is
+/// somebody looking at a file and needs to be told which Group it is in.
+fn not_a_value(key: &str, value: &str, accepted: &str) -> PerchError {
+    PerchError::Invalid(format!(
+        "`{value}` is not a value `{key}` takes. It takes {accepted}."
+    ))
 }
 
 /// "a, b and c" — a vocabulary said as a sentence, because a refusal that names
@@ -586,6 +688,81 @@ mod tests {
         }
         assert_eq!(restored.groups, registry.groups);
         assert_eq!(restored.global, registry.global);
+    }
+
+    /// Every message about a watcher setting that describes the watcher acting
+    /// says what it is not — a Group that may be acted on is not a service that
+    /// has been switched on (ADR 0013). Asserted over every key in every shape
+    /// its message branches on, because the branch that forgets is always the
+    /// one somebody added last.
+    #[test]
+    fn every_message_about_the_watcher_acting_says_it_only_acts_while_the_loop_runs() {
+        let shapes = [
+            GroupConfig::default(),
+            GroupConfig {
+                watcher_may_act: true,
+                ..GroupConfig::default()
+            },
+            // The two settings that read differently at zero, and the one that
+            // reads differently when no-return is off.
+            GroupConfig {
+                watcher_cooldown_minutes: 0,
+                ..GroupConfig::default()
+            },
+            GroupConfig {
+                watcher_margin_percent: 0,
+                ..GroupConfig::default()
+            },
+            GroupConfig {
+                watcher_no_return: false,
+                ..GroupConfig::default()
+            },
+        ];
+
+        for config in shapes {
+            for key in GROUP_KEYS {
+                if key == GroupKey::Strategy {
+                    continue;
+                }
+                let said = key.what_that_means(&config, "work");
+                assert!(
+                    said.contains(ONLY_WHILE_IT_RUNS) || said.contains("will not act on"),
+                    "`{}` at {config:?} says nothing about being a loop rather \
+                     than a service: {said}",
+                    key.as_str(),
+                );
+            }
+        }
+    }
+
+    /// A no-return is measured in cooldowns, so a Group with no cooldown has no
+    /// no-return. Saying otherwise would be a promise the loop does not keep.
+    #[test]
+    fn no_return_without_a_cooldown_says_it_bars_nothing() {
+        let mut registry = holding_a_group();
+        set(
+            &mut registry,
+            &words(&["work", "watcher-cooldown-minutes", "0"]),
+        )
+        .unwrap();
+
+        let said = set(
+            &mut registry,
+            &words(&["work", "watcher-no-return", "true"]),
+        )
+        .unwrap();
+
+        assert!(
+            said.iter().any(|line| line.contains("bars nothing")),
+            "{said:?}"
+        );
+        assert!(
+            !said
+                .iter()
+                .any(|line| line.contains("will not Switch back")),
+            "a sentence promising it will not Switch back is one the loop does \
+             not keep at a cooldown of zero: {said:?}"
+        );
     }
 
     #[test]

@@ -210,6 +210,24 @@ runs low. It acts only within a Group that has been told it may, and only above
 that Group's threshold.
 _Avoid_: daemon, monitor, background job
 
+**Threshold**:
+How full the Account you are on has to be before the Watcher wants to move off
+it. A Group's, as a percentage of the fullest Quota Window.
+_Avoid_: limit, cap, trigger
+
+**Margin**:
+How far under the Threshold a candidate has to sit before moving to it is worth
+doing. What stops two Accounts either side of the Threshold from trading places
+every few minutes.
+_Avoid_: buffer, hysteresis, gap, slack
+
+**Cooldown**:
+The least wall-clock the Watcher leaves between one Switch and the next,
+whatever the figures do in between. It also names how long the Account a Switch
+just left stays off the candidate list. It belongs to the running loop and is
+forgotten when the loop stops.
+_Avoid_: backoff, debounce, rate limit, throttle
+
 **Run**:
 Launching a program against a chosen Profile without changing which Account is
 active. Scoped to the one invocation, so several Accounts can be running at once
