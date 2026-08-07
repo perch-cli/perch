@@ -16,6 +16,7 @@ use perch::commands::export::ExportArgs;
 use perch::commands::group::GroupCommand;
 use perch::commands::import::ImportArgs;
 use perch::commands::list::ListArgs;
+use perch::commands::purge::PurgeArgs;
 use perch::commands::relogin::ReloginArgs;
 use perch::commands::remove::RemoveArgs;
 use perch::commands::run::RunArgs;
@@ -657,6 +658,18 @@ pub fn run_import(host: &FakeHost, path: &str) -> (perch::Result<()>, String) {
         },
         &mut written,
     );
+    (result, String::from_utf8(written).expect("output is UTF-8"))
+}
+
+/// Runs `perch purge`, returning what it printed alongside how it ended.
+pub fn run_purge(host: &FakeHost) -> (perch::Result<()>, String) {
+    run_purge_with(host, PurgeArgs { yes: false })
+}
+
+/// The same, for the tests that are about the flag a script purges with.
+pub fn run_purge_with(host: &FakeHost, args: PurgeArgs) -> (perch::Result<()>, String) {
+    let mut written = Vec::new();
+    let result = perch::commands::purge::run(host, args, &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 

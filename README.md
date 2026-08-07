@@ -13,7 +13,8 @@ you are on and Cycles when it runs low — in a loop or one check at a time for
 your scheduler — runs a client as one Account without
 switching to it, logs an Account in again when its Credential stops working,
 gives one up when a subscription is retired, writes everything it holds to one
-encrypted file, and takes its configuration from a script.
+encrypted file and puts a whole machine back from one, gives the machine back
+the state it had before Perch, and takes its configuration from a script.
 
 ```
 $ perch status
@@ -690,6 +691,68 @@ Perch is refused rather than half-read. An Account the export carried no
 Credential for is still restored, Quarantine reason and all, and the command says
 which — `perch relogin` is what ends that.
 
+## Giving the machine back
+
+`perch purge` is the other half of that pair: every Profile, every Credential
+Perch holds and Perch's own registry, gone in one act, so the machine is the one
+you had before you installed it. It is what makes room for an import, and what
+you run on the laptop you are handing on.
+
+```
+$ perch purge
+Perch holds 3 Accounts: someone@example.com, overflow@example.com, spare@example.com.
+A Purge deletes every one of their Profiles, every Credential Perch holds for them, and /Users/someone/.config/perch itself. Nothing undoes it: only a fresh login brings an Account back, and it comes back as a new one.
+Claude Code goes on running as whatever it is logged in as — the live Credential is not Perch's to take away.
+Write an Export first? [Y/n]: y
+Where to write it: /Users/someone/perch-backup.age
+This file holds a working Credential for every Account Perch has. It is encrypted with a passphrase you choose, and there is no way into it without one.
+Passphrase:
+Again:
+Exported 3 Accounts to /Users/someone/perch-backup.age, with everything the registry says about them: their Aliases, their Groups, whether Cycling may choose them, and what each Group carries.
+Keep the passphrase somewhere that is not beside the file. Without it there is nothing in there, and nothing Perch holds can get it back.
+Type `purge` to give the machine back: purge
+Purged 3 Accounts. Every Profile, every Credential Perch held and /Users/someone/.config/perch are gone, and Perch is holding nothing on this machine.
+Claude Code is still logged in as whatever it was: the live Credential was not Perch's to take away. `perch import` puts an Export back on a machine like this one.
+```
+
+**It takes no target.** Giving up one Account is `perch remove`, which is
+deliberately narrow — two verbs for one act is exactly the ambiguity the shared
+Alias and Group namespace exists to prevent, so a purge does not accept one.
+
+**It offers an export first, and takes no for an answer.** Perch cannot verify
+that an export exists — the file is wherever you put it, possibly on another
+machine — so requiring one is a check that checks nothing. Offering to write one
+is not: it is a keystroke, and it is the only thing that makes a purge
+survivable. An export that cannot be written — a path that is taken, a directory
+that is not there, a passphrase mistyped — stops the purge with everything still
+where it was, and a path *inside* `~/.config/perch` is refused, because that file
+would go with the purge that offered it.
+
+**The prompt wants the word.** It lists the Accounts by email address rather than
+by Alias — what is being given up is the login, and that is the address you would
+check against your password manager — says that nothing undoes it, and wants
+`purge` typed out. A `y` is what fingers answer before eyes have read anything.
+`--yes` answers ahead of time and writes no export, which is the whole of what a
+script can be asked for; without a terminal and without the flag, a purge is
+refused and end of input is never agreement.
+
+**Whatever Claude Code is logged in as is left exactly where it is.** The live
+Credential in the Default Profile is Claude Code's own rather than a copy Perch
+holds, and a purge that logged you out of the tool you are using would be doing
+more than giving the machine back. A purge is refused while a client is running
+against one of the Profiles, for the same reason every other write into a Live
+Profile is (ADR 0005) — a purge deletes those directories, and what is in them
+belongs to whatever is holding them. That is checked before the questions and
+again after them, because a client started while you were typing was not running
+when the first check ran.
+
+The Credentials go first and the registry naming them goes last, which is what
+makes a purge that stopped part way finishable: a keychain item lives outside
+`~/.config/perch`, so the record of which items there are is the last thing to
+go. A purge that failed anywhere — a store that would not give its Credential up,
+a directory that would not go — leaves the registry standing, and running it
+again finds what it already deleted already gone and carries on.
+
 ## What you have
 
 `perch list` is the one place that answers it: every Account with its Alias, its
@@ -868,8 +931,8 @@ it took.
 | 12 | there is no such thing — no login, no such Account, no such Group |
 | 13 | it collides with something that is already there — an Account added twice, a name already spoken for, a path an Export would have written over, an Import onto a Perch that already holds an Account |
 | 14 | Perch understood it and will not accept it — an ambiguous name, a value out of range, a Group that has not said the watcher may act on it |
-| 15 | there was nothing to do — you are already on that Account, or a check found nothing to do now |
-| 16 | refused: a client is running against that Profile, so its Credential is not Perch's to write |
+| 15 | there was nothing to do — you are already on that Account, a check found nothing to do now, or Perch is holding nothing on this machine to purge |
+| 16 | refused: a client is running against that Profile, so what is in it is not Perch's to write or to delete |
 | 17 | a Cycle found nowhere to land — every Account in the Group is exhausted, or none is a candidate |
 | 18 | a bare Cycle, or a watcher, on an Account nobody has declared interchangeable with anything (ADR 0017) |
 | 19 | that Account is Quarantined — its Credential no longer works, and `perch relogin` repairs it (ADR 0023) |

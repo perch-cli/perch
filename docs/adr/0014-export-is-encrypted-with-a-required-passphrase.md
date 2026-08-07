@@ -130,6 +130,60 @@ The passphrase is prompted once rather than twice. Confirming is what you do to 
 passphrase being *chosen*, because a file nobody can open is not discovered until
 it is needed; one being *checked* is answered by the file itself a moment later.
 
+## Amended: a purge asks for the word, keeps the live login, and finishes
+
+The amendments above settled that purge offers an export first and left the rest
+of the command to whoever wrote it. Four things turned out to be decisions.
+
+**The word rather than a letter.** Every other confirmation in Perch is `[y/N]`,
+and `y` is what fingers answer before eyes have read anything. This is the one
+command nothing undoes, so the prompt lists the accounts by email address — the
+login is what is being given up, and the address is what somebody would check
+against their password manager — states that nothing brings them back, and wants
+`purge` typed out. `--yes` answers ahead of time, the same idiom `perch remove`
+uses, and it answers the export offer too: an export is a path somebody names and
+a passphrase somebody types, neither of which a script can be asked for. Without
+a terminal and without the flag, purge is refused and names the flag rather than
+the terminal — unlike export, whose refusal names the terminal because there is
+deliberately nothing that answers a passphrase ahead of time.
+
+**The offered export goes through the same code as `perch export`**, one function
+below the command, because purge holds the registry lock across the offer and
+could not take it a second time. It carries the path refusals with it: a backup
+command that destroys the file it was pointed at is the failure those checks
+exist for, and a second caller is exactly how a check like that comes to be made
+in one place and not the other. One refusal is purge's alone — a path under
+Perch's own home, which the purge that offered it would take moments later.
+
+**Credentials first, the home last.** A credential in the operating system's
+keychain lives outside `~/.config/perch`, so the registry naming which items
+there are is the only record of them. Removing the home first would strand them
+with nothing left to find them by. Taking every credential first and the home
+whole afterwards means a purge that failed anywhere leaves the registry standing,
+so running it again finds what it already deleted already gone and finishes — and
+a home left behind holding no registry, which is what a purge interrupted in its
+last step leaves, is taken by the next one rather than reported as nothing to do.
+
+**A live profile refuses a purge**, which is ADR 0005's rule at its extreme: a
+purge does not write into those directories, it deletes them. Asked of every
+account, because a purge is all or nothing and a refusal discovered half way
+through is the partial state the check exists to prevent. Doubt counts as a
+client, as it does for the carry: waiting costs a command run again, and not
+waiting costs whatever that client had open.
+
+Asked twice — before the questions and again after them — for the same reason
+the registry hold is re-checked there, and over the same window: somebody may
+have started a client while the passphrase was being typed, and an answer that
+was true four prompts ago says nothing about the profile the next line deletes.
+The first ask earns its place by not putting five questions to somebody who was
+always going to be refused.
+
+What a purge does not touch is the credential in the default profile. That is
+Claude Code's own login rather than a copy Perch holds — the same line
+`perch remove` draws when it gives up the last account — and a purge that logged
+the user out of the tool they are using would be doing more than giving the
+machine back.
+
 ## Verified
 
 `age` 1.3.1 — Filippo Valsorda's Go implementation, the reference one — decrypts

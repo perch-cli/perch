@@ -28,6 +28,7 @@ use crate::commands::{ask_passphrase, ask_secret, refuse_without_a_terminal, say
 use crate::error::{PerchError, Result};
 use crate::export::{self, Export};
 use crate::host::Host;
+use crate::registry::Registry;
 
 #[derive(Debug, Clone)]
 pub struct ExportArgs {
@@ -38,12 +39,35 @@ pub struct ExportArgs {
 pub fn run(host: &dyn Host, args: ExportArgs, out: &mut dyn Write) -> Result<()> {
     // Before the passphrase, because all three are refusals somebody should meet
     // before typing one twice — and before the registry is even read, because
-    // none of them depends on what it says.
+    // none of them depends on what it says and reading it is what adopts the
+    // login on a machine Perch has never run on (ADR 0009). The two about the
+    // path are asked again below, where the write is: what refuses this command
+    // early has to refuse `perch purge` too, and the check that lives in only
+    // one of two callers is the check that stops being made.
     refuse_without_a_terminal(host, "perch export")?;
     refuse_a_directory_that_is_not_there(host, &args.path)?;
     refuse_an_occupied_path(host, &args.path)?;
 
     let (_perch, registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    write_the_export(host, &registry, &args.path, out)
+}
+
+/// Everything an Export is, given a registry somebody else has read: the path
+/// refusals, the passphrase, the gather, the seal, the file and what was
+/// written.
+///
+/// Shared with `perch purge`, which offers to write one before it destroys
+/// anything (ADR 0014) and holds the registry lock across the offer — so it
+/// cannot go through [`run`], which would take that lock a second time and wait
+/// out its own hold.
+pub fn write_the_export(
+    host: &dyn Host,
+    registry: &Registry,
+    path: &Path,
+    out: &mut dyn Write,
+) -> Result<()> {
+    refuse_a_directory_that_is_not_there(host, path)?;
+    refuse_an_occupied_path(host, path)?;
     if registry.accounts.is_empty() {
         return Err(PerchError::NotFound(
             "Perch holds no Accounts, so there is nothing to export.\n\
@@ -53,7 +77,7 @@ pub fn run(host: &dyn Host, args: ExportArgs, out: &mut dyn Write) -> Result<()>
     }
 
     let passphrase = agreed_passphrase(host, out)?;
-    let export = export::gather(host, &registry)?;
+    let export = export::gather(host, registry)?;
     let sealed = export::seal(&export, &passphrase)?;
 
     // Asked again here, because the check above was two blocking questions ago
@@ -61,11 +85,11 @@ pub fn run(host: &dyn Host, args: ExportArgs, out: &mut dyn Write) -> Result<()>
     // on it. A second `perch export` aimed at the same path — or anything else
     // that arrived while the passphrase was being typed — would otherwise be the
     // one thing this refusal exists to stop, just slower.
-    refuse_an_occupied_path(host, &args.path)?;
-    host.write_private_file(&args.path, &sealed)
-        .map_err(|err| PerchError::file_write(args.path.clone(), err))?;
+    refuse_an_occupied_path(host, path)?;
+    host.write_private_file(path, &sealed)
+        .map_err(|err| PerchError::file_write(path.to_path_buf(), err))?;
 
-    report(out, &args.path, &export)
+    report(out, path, &export)
 }
 
 /// Refuses to write over whatever is already at the path.
