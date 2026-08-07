@@ -22,7 +22,7 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::{ask, say};
+use crate::commands::{ask_a_word, say};
 use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
@@ -200,19 +200,12 @@ fn agreed(
 
     let named = registry.named_for_the_user(account.email());
     say(out, &what_it_would_leave(registry, account, consequence))?;
-    let answered = ask(host, out, &format!("Remove {named}? [y/N]: "))?;
+    let answered = ask_a_word(host, out, &format!("Remove {named}? [y/N]: "))?;
 
     // Anything that is not a yes is a no, and so is end of input: a pipe that
     // closed is the one thing that must never read as agreement to delete a
     // Credential.
-    Ok(matches!(
-        answered
-            .as_deref()
-            .map(str::trim)
-            .map(str::to_lowercase)
-            .as_deref(),
-        Some("y" | "yes")
-    ))
+    Ok(matches!(answered.as_deref(), Some("y" | "yes")))
 }
 
 /// What the machine looks like afterwards, in the terms the user is deciding in.

@@ -395,6 +395,12 @@ impl FakeHost {
         self.unwritable.borrow_mut().remove(path.as_ref());
     }
 
+    /// The same for a path that would not go: what a command that stopped part
+    /// way is run again against, once whatever held the path has let go.
+    pub fn deletable_again(&self, path: impl AsRef<Path>) {
+        self.undeletable.borrow_mut().remove(path.as_ref());
+    }
+
     /// A Windows with Developer Mode on, where a symbolic link is something an
     /// ordinary user may make. Means nothing anywhere else, where they always
     /// could.
@@ -1027,8 +1033,15 @@ impl Host for FakeHost {
             .is_some_and(|at| self.files.borrow().contains_key(&at))
     }
 
+    /// Takes a directory and everything under it, unless the directory itself is
+    /// one arranged not to go. A path *inside* it that will not go is not
+    /// consulted: the real call walks what is there, and a test that wants the
+    /// walk to fail says so of the directory it is walking.
     fn remove_dir_all(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::RemovedDir(path.to_path_buf()));
+        if let Some(detail) = self.undeletable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
+        }
         self.dirs.borrow_mut().retain(|dir| !dir.starts_with(path));
         self.links
             .borrow_mut()
