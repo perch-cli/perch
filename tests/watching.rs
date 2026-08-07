@@ -527,8 +527,11 @@ fn a_switch_that_changed_something_and_then_failed_stops_the_loop() {
     let (result, printed) = run_watch(&host);
 
     let stopped = result.expect_err("the machine is part way through a Switch");
+    // The file rather than the path it is at: a Windows Perch joins the two
+    // with the other separator, so the spelling of the path is the platform's
+    // and only the name is Perch's to promise.
     assert!(
-        stopped.to_string().contains(IDENTITY_PATH),
+        stopped.to_string().contains(".claude.json"),
         "and it says what could not be written: {stopped}"
     );
     assert_eq!(
