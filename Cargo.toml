@@ -35,6 +35,21 @@ codegen-units = 1
 age = { version = "0.12.1", default-features = false, features = ["armor"] }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
+
+# The terminal `perch tui` draws in (ADR 0016). Named directly rather than left
+# to `ratatui-crossterm`, and pinned to the version that resolves to, so there
+# is one crossterm in the tree: raw mode is process-global state, and two of
+# them would each think they owned it.
+crossterm = "0.29"
+
+# What draws the frames (ADR 0016). Its default features carry widgets Perch
+# does not use — a calendar among them — so it is taken as the backend and the
+# core alone, which is what a binary somebody downloads pays for.
+ratatui = { version = "0.30.2", default-features = false, features = [
+    "crossterm",
+    "std",
+] }
+
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"

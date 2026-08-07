@@ -31,6 +31,7 @@ pub mod registry;
 pub mod report;
 pub mod switch;
 pub mod target;
+pub mod tui;
 pub mod utilization;
 pub mod watch;
 

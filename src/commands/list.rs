@@ -117,25 +117,62 @@ pub fn render(
 /// The fixed columns, in the order they are printed. The headers are the same
 /// array the rows are measured against, so a renamed column cannot drift from
 /// the width it was measured at.
-const HEADERS: [&str; 4] = ["Account", "Alias", "Group", "State"];
+///
+/// Read by the TUI's Accounts view as well as by `perch list`, because they are
+/// the same listing drawn twice — once in a line and once in a frame (ADR
+/// 0011). Two copies of these columns is how the two surfaces come to disagree
+/// about what an Account is called or what state it is in.
+pub const HEADERS: [&str; 4] = ["Account", "Alias", "Group", "State"];
+
+/// How many there are, for the callers that have to name the array's length in
+/// a type.
+pub const COLUMNS: usize = HEADERS.len();
 
 /// Where the Group sits, for the listings narrow enough to leave it out.
 const GROUP_COLUMN: usize = 2;
+
+/// What those columns hold for one Account: the name you reach it by, what it
+/// is interchangeable with, and whether it is any use.
+pub fn columns(registry: &Registry, account: &Account) -> [String; COLUMNS] {
+    [
+        account.email().to_string(),
+        registry
+            .alias_of(account.email())
+            .unwrap_or("-")
+            .to_string(),
+        account.group.clone().unwrap_or_else(|| "none".to_string()),
+        state_of(account),
+    ]
+}
+
+/// Each column as wide as the widest thing in it, header included. Measured in
+/// characters rather than bytes, because that is what the padding counts — a
+/// name a terminal draws in eight columns pads to eight, not to the eleven
+/// bytes it happens to occupy.
+pub fn widths<'a>(
+    rows: impl IntoIterator<Item = &'a [String; COLUMNS]> + Clone,
+) -> [usize; COLUMNS] {
+    std::array::from_fn(|column| {
+        rows.clone()
+            .into_iter()
+            .map(|row| row[column].chars().count())
+            .chain(std::iter::once(HEADERS[column].chars().count()))
+            .max()
+            .unwrap_or_default()
+    })
+}
 
 /// One row per Account, with the extra Quota Windows carried on rows of their
 /// own so no figure is dropped for want of a column.
 struct Row {
     active: bool,
-    email: String,
-    alias: String,
-    group: String,
-    state: String,
+    cells: [String; COLUMNS],
     figures: Vec<String>,
 }
 
 impl Row {
-    fn columns(&self) -> [&str; HEADERS.len()] {
-        [&self.email, &self.alias, &self.group, &self.state]
+    fn columns(&self) -> [&str; COLUMNS] {
+        self.cells.each_ref().map(String::as_str)
     }
 
     fn marker(&self) -> char {
@@ -148,13 +185,7 @@ fn rows(registry: &Registry, accounts: &[&Account], now: DateTime<Utc>) -> Vec<R
         .iter()
         .map(|account| Row {
             active: registry.active.as_deref() == Some(account.email()),
-            email: account.email().to_string(),
-            alias: registry
-                .alias_of(account.email())
-                .unwrap_or("-")
-                .to_string(),
-            group: account.group.clone().unwrap_or_else(|| "none".to_string()),
-            state: state_of(account),
+            cells: columns(registry, account),
             figures: utilization::lines(account, now),
         })
         .collect()
@@ -222,7 +253,7 @@ fn render_human(
     // one, every row would carry the same answer to a question the heading has
     // already answered.
     let show_group = matches!(scope, Scope::Everything);
-    let widths = widths(&rows);
+    let widths = widths(rows.iter().map(|row| &row.cells));
 
     write_row(out, ' ', HEADERS, "Utilization", &widths, show_group)?;
     for row in &rows {
@@ -239,7 +270,7 @@ fn render_human(
                 // A second Quota Window belongs to the Account above it, so it
                 // is shown under that Account's first figure and nothing else
                 // is repeated.
-                _ => write_row(out, ' ', [""; HEADERS.len()], figure, &widths, show_group)?,
+                _ => write_row(out, ' ', [""; COLUMNS], figure, &widths, show_group)?,
             }
         }
     }
@@ -266,9 +297,9 @@ fn render_human(
 fn write_row(
     out: &mut dyn Write,
     marker: char,
-    columns: [&str; HEADERS.len()],
+    columns: [&str; COLUMNS],
     figure: &str,
-    widths: &[usize; HEADERS.len()],
+    widths: &[usize; COLUMNS],
     show_group: bool,
 ) -> Result<()> {
     let cells: Vec<String> = columns
@@ -286,21 +317,10 @@ fn write_row(
     .map_err(write_failed)
 }
 
-/// Each column is as wide as the widest thing in it, header included. Measured
-/// in characters rather than bytes, because that is what the padding counts.
-fn widths(rows: &[Row]) -> [usize; HEADERS.len()] {
-    std::array::from_fn(|column| {
-        rows.iter()
-            .map(|row| row.columns()[column].chars().count())
-            .chain(std::iter::once(HEADERS[column].chars().count()))
-            .max()
-            .unwrap_or_default()
-    })
-}
-
 /// A listing with nothing in it, said as the state it is rather than as an
-/// empty table.
-fn nothing_here(scope: &Scope) -> String {
+/// empty table. The TUI draws the same sentence, for the same reason it draws
+/// the same columns.
+pub fn nothing_here(scope: &Scope) -> String {
     match scope {
         Scope::Everything => {
             "No Accounts yet. `perch add` logs into one in a Profile of its own.".to_string()
@@ -360,15 +380,8 @@ fn render_json(
 mod tests {
     use super::*;
 
-    fn row(email: &str, alias: &str) -> Row {
-        Row {
-            active: false,
-            email: email.to_string(),
-            alias: alias.to_string(),
-            group: "none".to_string(),
-            state: "enabled".to_string(),
-            figures: vec!["never observed".to_string()],
-        }
+    fn row(email: &str, alias: &str) -> [String; COLUMNS] {
+        [email, alias, "none", "enabled"].map(str::to_string)
     }
 
     #[test]
