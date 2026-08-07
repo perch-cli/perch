@@ -50,7 +50,7 @@ use crate::host::{Host, Waited};
 use crate::observe::{self, Attempt};
 use crate::registry::{Account, Registry};
 use crate::switch::{self, Interrupted};
-use crate::watch::{self, Considered, Fullest, Outcome, Policy, Recently, Round};
+use crate::watch::{self, Backoff, Considered, Fullest, Outcome, Policy, Recently, Round};
 
 pub fn run(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     // Before the first round, so that a Ctrl-C during it is a request to stop
@@ -60,18 +60,25 @@ pub fn run(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     let watching = opening(host, out)?;
     say(out, &watching)?;
 
-    // The one thing carried from one round to the next, and the reason the
-    // cooldown is the loop's rather than the machine's (ADR 0013).
+    // The two things carried from one round to the next, and the reason the
+    // cooldown is the loop's rather than the machine's (ADR 0013). Both are in
+    // memory and nowhere else, which is what "writes no file of its own" means.
     let mut recently = Recently::nothing();
+    let mut backoff = Backoff::none();
 
     loop {
-        let round = one_round(host, out, &mut recently)?;
+        let round = one_round(host, out, &mut recently, &mut backoff)?;
         say(out, &round.line(host.now()))?;
 
         // The one place the loop holds nothing, and therefore the only place it
         // is asked whether to go round again: a stop asked for during a round
         // is answered here, once that round has finished cleanly.
-        if host.wait(watch::REFRESH_INTERVAL_MILLIS) == Waited::Interrupted {
+        //
+        // How long is the round's to say rather than a constant, because a
+        // round that could not read anything is followed by the back-off it
+        // printed. Read off the round rather than worked out again here, so the
+        // wait the line promised and the wait taken cannot come to differ.
+        if host.wait(round.waiting_for()) == Waited::Interrupted {
             break;
         }
     }
@@ -169,7 +176,12 @@ fn permitted(registry: &Registry) -> Result<Watching> {
 /// than being held for the life of the loop. A watcher that held it would shut
 /// every other `perch` out of the machine for as long as it ran, and would
 /// leave a lock behind if it were killed.
-fn one_round(host: &dyn Host, out: &mut dyn Write, recently: &mut Recently) -> Result<Round> {
+fn one_round(
+    host: &dyn Host,
+    out: &mut dyn Write,
+    recently: &mut Recently,
+    backoff: &mut Backoff,
+) -> Result<Round> {
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
     let watching = permitted(&registry)?;
     let email = watching.account.email().to_string();
@@ -189,12 +201,22 @@ fn one_round(host: &dyn Host, out: &mut dyn Write, recently: &mut Recently) -> R
         host.note(not_kept);
     }
 
-    let held = |why: String| {
+    // A hold is not only a decision not to act: it is also the loop deciding to
+    // ask less often, because the endpoint it is asking has a budget and is
+    // already refusing. Both live here, in the one place a hold is made, so a
+    // failure cannot be reported without being counted. The wait it lands on
+    // goes on the line, so a person reading the log knows when the watcher
+    // comes back rather than wondering whether it has given up.
+    let mut held = |why: String| {
+        backoff.failed();
         Ok(Round {
             email: email.clone(),
             fullest: None,
             threshold: watching.policy.threshold,
-            outcome: Outcome::Held { why },
+            outcome: Outcome::Held {
+                why,
+                retrying_in: backoff.waiting_for(),
+            },
         })
     };
 
@@ -217,6 +239,11 @@ fn one_round(host: &dyn Host, out: &mut dyn Write, recently: &mut Recently) -> R
                 .to_string(),
         );
     };
+    // A figure, so whatever was wrong is over. Said here rather than at the end
+    // of the round, because what the loop decides about a figure it has is no
+    // evidence about the endpoint that gave it: a round that finds nowhere to
+    // go has read perfectly well.
+    backoff.read();
 
     let outcome = if !fullest.at_or_over(watching.policy.threshold) {
         Outcome::Waiting
