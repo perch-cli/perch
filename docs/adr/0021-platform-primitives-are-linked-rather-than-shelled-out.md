@@ -38,3 +38,23 @@ is still driven as a subprocess, and so is `curl` — by an absolute path per
 platform, because that path is a security property rather than a convenience:
 `Command::new("curl")` would let anything earlier on `PATH` receive an
 `Authorization: Bearer` header.
+
+## Amended: a fourth primitive, and the rule holding
+
+`perch export` prompts for a passphrase, and a passphrase must not be echoed as
+it is typed (ADR 0014) — which the portable standard library has no way to ask
+for. So the count above is four rather than three: process existence, a
+directory's modification time, echo suppression, and the terminal test that was
+deleted in favour of `std::io::IsTerminal`.
+
+It is decided the same way, which is the point of recording it here rather than
+quietly adding a crate. The whole of it is `ECHO` off, one line, `ECHO` back on:
+`tcgetattr`/`tcsetattr` on unix and `GetConsoleMode`/`SetConsoleMode` on Windows,
+both of which `libc` and `windows-sys` already declare. `rpassword` would package
+it and adds a crate for what is fifteen lines over declarations somebody else
+audits — the same trade `sysinfo` lost.
+
+It is a Host method, which is the part that pays for itself twice: the fake
+records that a passphrase went in by the path that hides it rather than by the
+one that echoes, so the tests hold that line from a machine with no terminal at
+all.

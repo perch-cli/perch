@@ -25,6 +25,17 @@ two Perch processes writing the same file. The name now carries the process id.
 and the fake Host has none — the primitive belongs behind the port, and behind
 the port a pid is the whole of what randomness buys here.
 
+**Encryption**, from `age`, for what `perch export` writes (ADR 0014). It sits on
+neither seam: encryption is not an effect the Host port carries, and it is not
+shared with Claude Code, so nothing here has to be bug-compatible with anything.
+The property that decided it is that an `age` file is decrypted by the standard
+`age` command — an export is meant to outlive the machine it was written on, and
+a backup readable only by the tool that wrote it is a worse backup than one whose
+format somebody else maintains. Against that, the alternative was three crates
+and a header format Perch would version itself. It is the largest dependency
+Perch has by some way, and that is the price of the format rather than of the
+code.
+
 **Directory junctions**, from `junction`, on Windows only. A Reconcile shares a
 directory into a Run's Profile as a junction, because that is the one directory
 link a Windows without Developer Mode can make (ADR 0026) — and a junction is a
@@ -65,6 +76,14 @@ token is ever an argument (ADR 0021), and shelling out means one TLS story on
 the machine rather than two. `std::io::IsTerminal` covers what a
 terminal-detection crate would.
 
+**`rpassword`** — reading the export passphrase without the terminal showing it
+is `ECHO` off, one line, `ECHO` back on: `tcgetattr`/`tcsetattr` on unix and
+`GetConsoleMode`/`SetConsoleMode` on Windows, both of which `libc` and
+`windows-sys` already declare. That is the same trade ADR 0021 made when it
+declined `sysinfo` for two fields, and it is a Host method either way — so a test
+can say the passphrase went in by the path that hides it rather than the one that
+echoes, from a machine with no terminal at all.
+
 **A JSON library, for the splicing** — `.claude.json` belongs to the person
 using Perch, not to Perch. Parsing and re-emitting it would reorder keys,
 reformat numbers and drop the shape they wrote, invisibly. No format-preserving
@@ -74,7 +93,7 @@ own.
 
 ## Consequences
 
-Perch carries hand-rolled code in six places on purpose, and each of them has a
+Perch carries hand-rolled code in seven places on purpose, and each of them has a
 reason of the same kind: a crate would either break the Host seam or break
 fidelity with Claude Code. A future change that removes one of those reasons —
 a `perch tui` that owns its own terminal, say, or a Claude Code that publishes

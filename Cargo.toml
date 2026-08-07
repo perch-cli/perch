@@ -25,6 +25,14 @@ lto = "thin"
 codegen-units = 1
 
 [dependencies]
+# What `perch export` writes (ADR 0014). Encryption sits on neither of Perch's
+# seams — it is not an effect the Host port carries, and it is not shared with
+# Claude Code — so a crate costs nothing here (ADR 0025). The property that
+# decided it is that an `age` file is read by the standard `age` command: a
+# backup meant to outlive the machine should not depend on Perch still existing.
+# `armor` is `age`'s text encoding of the same file, which is what lets the
+# Export go through the Host port's ordinary private write.
+age = { version = "0.12.1", default-features = false, features = ["armor"] }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

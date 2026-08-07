@@ -41,6 +41,17 @@ Target, because it is never about one Account — that is a Remove — and offer
 to write an Export first, which is the only thing that makes it survivable.
 _Avoid_: uninstall, reset, wipe, remove
 
+**Export**:
+Everything Perch holds, written to one file: the whole registry — every Account,
+its Alias, its Group, whether Cycling may choose it, why it is Quarantined where
+it is, and what each Group carries — alongside every Credential. Takes no Target,
+because a selective one is a partial restore, which is the failure it exists to
+prevent. Encrypted with a passphrase that is required rather than offered, and in
+a format something other than Perch maintains, so a backup meant to outlive the
+machine does not depend on Perch still existing. A backup is what one is *for*,
+and the word is fine for that; the thing itself is an Export.
+_Avoid_: dump, snapshot, archive
+
 **Target**:
 What a command is told to act on — an Alias, an Account's email address, or a
 Group name, resolved in that order. Every command that acts on one thing takes

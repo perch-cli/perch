@@ -15,6 +15,7 @@ pub mod commands;
 pub mod credentials;
 pub mod cycle;
 pub mod error;
+pub mod export;
 pub mod host;
 pub mod json;
 pub mod keychain;

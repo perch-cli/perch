@@ -6,6 +6,7 @@ use perch::commands::add::{self, AddArgs};
 use perch::commands::alias::{self, AliasCommand};
 use perch::commands::config::{self, ConfigCommand};
 use perch::commands::enable::{self, EnableCommand};
+use perch::commands::export::{self, ExportArgs};
 use perch::commands::group::{self, GroupCommand};
 use perch::commands::list::{self, ListArgs};
 use perch::commands::relogin::{self, ReloginArgs};
@@ -97,6 +98,23 @@ enum Command {
     Enable {
         /// The Account: its Alias, or its email address.
         target: String,
+    },
+
+    /// Write everything Perch holds to one encrypted file.
+    ///
+    /// The registry and every Credential, in the `age` format, so a dead
+    /// machine or a new laptop does not cost a login for every subscription
+    /// (ADR 0014). There is no per-Account form: a selective export is a
+    /// partial restore.
+    ///
+    /// The passphrase is prompted and confirmed, and cannot be passed as an
+    /// argument — an argument sits in the process table for anything on this
+    /// machine to read. Without a terminal to type it at, the export is
+    /// refused.
+    Export {
+        /// Where to write the file. Nothing is written over: a path that is
+        /// already taken is refused.
+        path: std::path::PathBuf,
     },
 
     /// Declare which Accounts are interchangeable.
@@ -314,6 +332,7 @@ fn main() {
             EnableCommand::Enable { target },
             &mut out,
         )),
+        Command::Export { path } => ok(export::run(&host, ExportArgs { path }, &mut out)),
         Command::Group { action } => ok(group::run(&host, action, &mut out)),
         Command::List { json } => ok(list::run(&host, ListArgs { json }, &mut out)),
         Command::Relogin { target } => ok(relogin::run(&host, ReloginArgs { target }, &mut out)),
@@ -388,5 +407,35 @@ mod tests {
     fn a_command_without_the_separator_is_not_a_command_line() {
         assert!(Cli::try_parse_from(["perch", "run", "dev", "--resume"]).is_err());
         assert!(Cli::try_parse_from(["perch", "run", "dev", "npm", "test"]).is_err());
+    }
+
+    /// An Export takes everything and has no target: a selective one is a
+    /// partial restore, which is the failure the file exists to prevent wearing
+    /// a feature's clothes. So a path is the whole of the surface — and there is
+    /// no flag carrying a passphrase either, because an argument sits in the
+    /// process table for anything on the machine to read (ADR 0014).
+    #[test]
+    fn an_export_takes_a_path_and_nothing_else() {
+        assert!(Cli::try_parse_from(["perch", "export", "/tmp/perch.age"]).is_ok());
+        assert!(Cli::try_parse_from(["perch", "export"]).is_err());
+
+        for narrowed in [
+            &["perch", "export", "/tmp/perch.age", "someone@example.com"][..],
+            &["perch", "export", "/tmp/perch.age", "--account", "work"],
+            &["perch", "export", "/tmp/perch.age", "--group", "work"],
+            &[
+                "perch",
+                "export",
+                "/tmp/perch.age",
+                "--passphrase",
+                "hunter2",
+            ],
+        ] {
+            assert!(
+                Cli::try_parse_from(narrowed).is_err(),
+                "`{}` should not parse",
+                narrowed.join(" ")
+            );
+        }
     }
 }

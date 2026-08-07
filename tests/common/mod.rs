@@ -12,6 +12,7 @@ use perch::commands::add::AddArgs;
 use perch::commands::alias::AliasCommand;
 use perch::commands::config::ConfigCommand;
 use perch::commands::enable::EnableCommand;
+use perch::commands::export::ExportArgs;
 use perch::commands::group::GroupCommand;
 use perch::commands::list::ListArgs;
 use perch::commands::relogin::ReloginArgs;
@@ -630,6 +631,19 @@ pub fn quarantine_for(host: &FakeHost, email: &str, why: Quarantine) {
         "{email} is an Account Perch holds and was not already Quarantined"
     );
     save_registry(host, &registry);
+}
+
+/// Runs `perch export <path>`, returning what it printed alongside how it ended.
+pub fn run_export(host: &FakeHost, path: &str) -> (perch::Result<()>, String) {
+    let mut written = Vec::new();
+    let result = perch::commands::export::run(
+        host,
+        ExportArgs {
+            path: std::path::PathBuf::from(path),
+        },
+        &mut written,
+    );
+    (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
 /// Runs `perch relogin <target>`, returning what it printed alongside how it

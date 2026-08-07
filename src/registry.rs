@@ -980,11 +980,12 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
         })?;
 
     if registry.version > CURRENT_VERSION {
-        return Err(PerchError::Other(format!(
-            "{} was written by a newer Perch (registry version {}, this build understands {CURRENT_VERSION}). Upgrade Perch.",
-            path.display(),
-            registry.version
-        )));
+        return Err(crate::error::written_by_a_newer_perch(
+            &path.display().to_string(),
+            "registry",
+            registry.version,
+            CURRENT_VERSION,
+        ));
     }
 
     // Group configuration is checked on the way in rather than where it is
