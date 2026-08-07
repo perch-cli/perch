@@ -193,13 +193,19 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
 
 fn describe_configuration(out: &mut dyn Write, config: &GroupConfig) -> Result<()> {
     write_line(out, "Strategy", config.strategy.as_str())?;
-    let watcher = if config.watcher_may_act {
-        format!(
-            "may switch unattended at {}%",
-            config.watcher_threshold_percent
-        )
-    } else {
-        format!("off (would act at {}%)", config.watcher_threshold_percent)
+    // The whole policy rather than the threshold alone: a summary that named
+    // only when the watcher acts would read as the whole of what it does, and
+    // the margin is what decides where it lands (ADR 0013).
+    let policy = crate::watch::Policy::of(config);
+    let acting = format!(
+        "at {}%, onto {}% or better, at most every {}m",
+        policy.threshold,
+        policy.ceiling(),
+        policy.cooldown_minutes,
+    );
+    let watcher = match config.watcher_may_act {
+        true => format!("may switch unattended {acting}"),
+        false => format!("off (would act {acting})"),
     };
     write_line(out, "Watcher", &watcher)
 }

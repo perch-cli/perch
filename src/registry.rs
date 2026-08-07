@@ -222,8 +222,43 @@ impl Strategy {
 /// unattended Switch means the Account really is running out.
 pub const DEFAULT_WATCHER_THRESHOLD_PERCENT: u8 = 80;
 
+/// The least wall-clock between two unattended Switches, when nobody has said
+/// otherwise (ADR 0013). A five-hour window moves slowly enough that fifteen
+/// minutes never misses a real crossing, and often enough that a watcher which
+/// has just moved you is not about to move you again.
+pub const DEFAULT_WATCHER_COOLDOWN_MINUTES: u32 = 15;
+
+/// How far below the threshold a candidate has to sit before it is worth moving
+/// to, when nobody has said otherwise. This is what kills the ping-pong: at an
+/// 80% threshold nothing is Switched to unless it is at 70% or better.
+pub const DEFAULT_WATCHER_MARGIN_PERCENT: u8 = 10;
+
+/// The longest cooldown that means anything. The longest Quota Window Anthropic
+/// reports is seven days, so a cooldown past it is one that could never let a
+/// second Switch happen inside any window it is pacing.
+pub const MAX_WATCHER_COOLDOWN_MINUTES: u32 = 7 * 24 * 60;
+
+/// What a percentage accepts, said once so that the refusal a mistyped `perch
+/// config set` gets and the one a hand-edited registry gets are the same words.
+pub const A_PERCENTAGE: &str = "a whole number between 0 and 100";
+
+/// The same for a cooldown, which is a count of minutes rather than a share of
+/// a window. Built from the bound rather than written out beside it, so the
+/// sentence and the number it describes cannot come to disagree.
+pub fn a_cooldown() -> String {
+    format!("a whole number of minutes between 0 and {MAX_WATCHER_COOLDOWN_MINUTES} (seven days)")
+}
+
 /// What a Group carries besides its Accounts: the rules that govern Cycling
 /// within it (ADR 0002), asked and unasked.
+///
+/// Four of these are the watcher's policy, and they are a Group's rather than
+/// constants because they are preferences rather than arithmetic: how full is
+/// too full, how often is too often, how much emptier is worth the move, and
+/// whether coming straight back is allowed (ADR 0013). The interval the loop
+/// Refreshes at is not among them — that one is derived from Anthropic's
+/// allowance rather than from anyone's taste, and lives in
+/// [`crate::watch::REFRESH_INTERVAL_MILLIS`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GroupConfig {
@@ -234,6 +269,14 @@ pub struct GroupConfig {
     pub watcher_may_act: bool,
     /// The Utilization the watcher would act at, as a percentage.
     pub watcher_threshold_percent: u8,
+    /// The least wall-clock between two unattended Switches, in minutes.
+    pub watcher_cooldown_minutes: u32,
+    /// How far under the threshold a candidate has to be before moving to it is
+    /// worth doing, in percentage points.
+    pub watcher_margin_percent: u8,
+    /// Whether the Account a Switch just left is barred from being Switched
+    /// back to for one cooldown.
+    pub watcher_no_return: bool,
 }
 
 impl Default for GroupConfig {
@@ -242,23 +285,60 @@ impl Default for GroupConfig {
             strategy: Strategy::default(),
             watcher_may_act: false,
             watcher_threshold_percent: DEFAULT_WATCHER_THRESHOLD_PERCENT,
+            watcher_cooldown_minutes: DEFAULT_WATCHER_COOLDOWN_MINUTES,
+            watcher_margin_percent: DEFAULT_WATCHER_MARGIN_PERCENT,
+            watcher_no_return: true,
         }
     }
 }
 
 impl GroupConfig {
     /// Refuses configuration that cannot mean what it says. Serde already
-    /// refuses a strategy Perch does not implement; what is left is the range
-    /// a percentage has to be in.
+    /// refuses a strategy Perch does not implement, and a `true`/`false` that
+    /// is neither; what is left is the ranges the numbers have to be in.
+    ///
+    /// Every refusal names the numbers that would have been accepted, because
+    /// the script that mistyped one is the reader, and being told only that it
+    /// was wrong leaves it to guess twice.
     pub fn validate(&self, group: &str) -> Result<()> {
         if self.watcher_threshold_percent > 100 {
-            return Err(PerchError::Invalid(format!(
-                "Group `{group}` has a watcher threshold of {}, but a Utilization threshold is a percentage between 0 and 100.",
-                self.watcher_threshold_percent
-            )));
+            return Err(out_of_range(
+                group,
+                "watcher-threshold-percent",
+                self.watcher_threshold_percent,
+                A_PERCENTAGE,
+            ));
+        }
+        if self.watcher_margin_percent > 100 {
+            return Err(out_of_range(
+                group,
+                "watcher-margin-percent",
+                self.watcher_margin_percent,
+                A_PERCENTAGE,
+            ));
+        }
+        if self.watcher_cooldown_minutes > MAX_WATCHER_COOLDOWN_MINUTES {
+            return Err(out_of_range(
+                group,
+                "watcher-cooldown-minutes",
+                self.watcher_cooldown_minutes,
+                &a_cooldown(),
+            ));
         }
         Ok(())
     }
+}
+
+/// A number a setting cannot hold, refused with the ones it can.
+fn out_of_range(
+    group: &str,
+    key: &str,
+    held: impl std::fmt::Display,
+    accepted: &str,
+) -> PerchError {
+    PerchError::Invalid(format!(
+        "Group `{group}` has a `{key}` of {held}, and it takes {accepted}."
+    ))
 }
 
 /// The configuration that belongs to no Group, because there is no Group for
@@ -1236,18 +1316,82 @@ mod tests {
         );
     }
 
+    /// The three the watcher's policy grew (ADR 0013). Asserted as the numbers
+    /// rather than as the constants, because a default is a promise made in a
+    /// README and a test that reads the constant back cannot notice it change.
     #[test]
-    fn a_threshold_that_is_not_a_percentage_is_refused() {
+    fn the_watchers_policy_has_the_defaults_it_is_documented_with() {
+        let config = GroupConfig::default();
+        assert_eq!(config.watcher_threshold_percent, 80);
+        assert_eq!(config.watcher_cooldown_minutes, 15);
+        assert_eq!(config.watcher_margin_percent, 10);
+        assert!(
+            config.watcher_no_return,
+            "coming straight back to the Account just left is the ping-pong the \
+             policy exists to stop, so it is barred unless somebody says otherwise"
+        );
+    }
+
+    /// A number a setting cannot hold is refused with the ones it can — from a
+    /// hand-edited registry as much as from a mistyped command, because both
+    /// readers have the same next question.
+    #[test]
+    fn a_number_out_of_range_is_refused_with_the_range() {
+        let cases: [(GroupConfig, &str, &str); 3] = [
+            (
+                GroupConfig {
+                    watcher_threshold_percent: 101,
+                    ..GroupConfig::default()
+                },
+                "watcher-threshold-percent",
+                "100",
+            ),
+            (
+                GroupConfig {
+                    watcher_margin_percent: 101,
+                    ..GroupConfig::default()
+                },
+                "watcher-margin-percent",
+                "100",
+            ),
+            (
+                GroupConfig {
+                    watcher_cooldown_minutes: MAX_WATCHER_COOLDOWN_MINUTES + 1,
+                    ..GroupConfig::default()
+                },
+                "watcher-cooldown-minutes",
+                "10080",
+            ),
+        ];
+
+        for (config, key, accepted) in cases {
+            let refusal = config.validate("work").expect_err("out of range");
+            let message = refusal.to_string();
+            assert_eq!(refusal.exit_code(), crate::error::EXIT_INVALID, "{message}");
+            assert!(message.contains("work"), "{message}");
+            assert!(message.contains(key), "{message}");
+            assert!(
+                message.contains(accepted),
+                "a refusal that does not say what would be accepted leaves the \
+                 script to guess twice: {message}"
+            );
+        }
+
+        assert!(GroupConfig::default().validate("work").is_ok());
+    }
+
+    /// A margin at or over the threshold is not out of range — it is a Group
+    /// that will only move to an Account with nothing used at all, which is a
+    /// coherent thing to ask for even if few would. Refusing it would make the
+    /// order two `set`s are typed in matter.
+    #[test]
+    fn a_margin_larger_than_the_threshold_is_a_strict_policy_rather_than_a_refusal() {
         let config = GroupConfig {
-            watcher_threshold_percent: 101,
+            watcher_threshold_percent: 50,
+            watcher_margin_percent: 90,
             ..GroupConfig::default()
         };
-        let message = config.validate("work").unwrap_err().to_string();
-        assert!(
-            message.contains("work") && message.contains("100"),
-            "{message}"
-        );
-        assert!(GroupConfig::default().validate("work").is_ok());
+        assert!(config.validate("work").is_ok());
     }
 
     #[test]

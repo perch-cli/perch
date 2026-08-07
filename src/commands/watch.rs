@@ -13,6 +13,15 @@
 //! [`act`]'s to explain; how often the active one is read is
 //! [`crate::watch::REFRESH_INTERVAL_MILLIS`]'s.
 //!
+//! Being over the threshold is not on its own a reason to move. The rest of the
+//! Group's [`Policy`](crate::watch::Policy) is what stops two Accounts either
+//! side of it from trading places every few minutes: a cooldown under how often
+//! a Switch may happen at all, checked here before anything is read, and a
+//! margin under where one may land, applied by setting candidates aside for the
+//! ranking in [`act`]. The one thing the loop carries between rounds is a
+//! [`Recently`](crate::watch::Recently), which is what those two are measured
+//! from.
+//!
 //! What it does when it acts is a Switch, whole: the outgoing Credential is
 //! Captured first (ADR 0006), Claude Code's locks are taken, and a Live
 //! Profile's token is never Renewed (ADR 0005). Running while Claude Code is
@@ -41,7 +50,7 @@ use crate::host::{Host, Waited};
 use crate::observe::{self, Attempt};
 use crate::registry::{Account, Registry};
 use crate::switch::{self, Interrupted};
-use crate::watch::{self, Fullest, Outcome, Round};
+use crate::watch::{self, Considered, Fullest, Outcome, Policy, Recently, Round};
 
 pub fn run(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     // Before the first round, so that a Ctrl-C during it is a request to stop
@@ -51,8 +60,12 @@ pub fn run(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     let watching = opening(host, out)?;
     say(out, &watching)?;
 
+    // The one thing carried from one round to the next, and the reason the
+    // cooldown is the loop's rather than the machine's (ADR 0013).
+    let mut recently = Recently::nothing();
+
     loop {
-        let round = one_round(host, out)?;
+        let round = one_round(host, out, &mut recently)?;
         say(out, &round.line(host.now()))?;
 
         // The one place the loop holds nothing, and therefore the only place it
@@ -80,21 +93,24 @@ fn opening(host: &dyn Host, out: &mut dyn Write) -> Result<String> {
     let watching = permitted(&registry)?;
     Ok(format!(
         "Watching {} in Group `{}`. Reading how full it is every {}, and \
-         Switching within the Group when its fullest Quota Window reaches {}%. \
+         Switching within the Group when its fullest Quota Window reaches {}% \
+         — to an Account at {}% or under, and never twice inside {} minutes. \
          Ctrl-C stops.",
         registry.named_for_the_user(watching.account.email()),
         watching.group,
         watch::how_often(),
-        watching.threshold,
+        watching.policy.threshold,
+        watching.policy.ceiling(),
+        watching.policy.cooldown_minutes,
     ))
 }
 
-/// The Account being watched, the Group that said it may be, and the figure it
-/// is watched against.
+/// The Account being watched, the Group that said it may be, and the rules it
+/// is watched under.
 struct Watching {
     account: Account,
     group: String,
-    threshold: u8,
+    policy: Policy,
 }
 
 /// Whether there is anything here for a watcher to do, and what.
@@ -143,7 +159,7 @@ fn permitted(registry: &Registry) -> Result<Watching> {
     Ok(Watching {
         account,
         group,
-        threshold: config.watcher_threshold_percent,
+        policy: Policy::of(&config),
     })
 }
 
@@ -153,7 +169,7 @@ fn permitted(registry: &Registry) -> Result<Watching> {
 /// than being held for the life of the loop. A watcher that held it would shut
 /// every other `perch` out of the machine for as long as it ran, and would
 /// leave a lock behind if it were killed.
-fn one_round(host: &dyn Host, out: &mut dyn Write) -> Result<Round> {
+fn one_round(host: &dyn Host, out: &mut dyn Write, recently: &mut Recently) -> Result<Round> {
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
     let watching = permitted(&registry)?;
     let email = watching.account.email().to_string();
@@ -177,7 +193,7 @@ fn one_round(host: &dyn Host, out: &mut dyn Write) -> Result<Round> {
         Ok(Round {
             email: email.clone(),
             fullest: None,
-            threshold: watching.threshold,
+            threshold: watching.policy.threshold,
             outcome: Outcome::Held { why },
         })
     };
@@ -202,14 +218,19 @@ fn one_round(host: &dyn Host, out: &mut dyn Write) -> Result<Round> {
         );
     };
 
-    let outcome = match fullest.at_or_over(watching.threshold) {
-        false => Outcome::Waiting,
-        true => act(host, &mut perch, &mut registry, &watching)?,
+    let outcome = if !fullest.at_or_over(watching.policy.threshold) {
+        Outcome::Waiting
+    } else if let Some(why) = recently.resting(&watching.policy, host.now()) {
+        // Before the candidates are read, so a round that may not act spends
+        // nothing finding out where it would have gone.
+        Outcome::Cooling { why }
+    } else {
+        act(host, &mut perch, &mut registry, &watching, recently)?
     };
     Ok(Round {
         email,
         fullest: Some(fullest),
-        threshold: watching.threshold,
+        threshold: watching.policy.threshold,
         outcome,
     })
 }
@@ -266,18 +287,45 @@ fn act(
     perch: &mut crate::lock::Held<'_>,
     registry: &mut Registry,
     watching: &Watching,
+    recently: &mut Recently,
 ) -> Result<Outcome> {
     let scope = Scope::Group(watching.group.clone());
     let outgoing = watching.account.clone();
 
-    let read = observe::refresh(host, perch, registry, &candidates(registry, watching));
+    // The Account this watcher just came off is not read and not landed on
+    // (ADR 0013). Coming straight back is the second half of a ping-pong, and
+    // an Account nothing could be Switched to is an allowance spent on nothing.
+    let barred = recently
+        .barred(&watching.policy, host.now())
+        .map(str::to_string);
+    let read = observe::refresh(
+        host,
+        perch,
+        registry,
+        &worth_reading(&considered(registry, watching), barred.as_deref()),
+    );
     // What could not be read, carried into the sentence that says where the
     // watcher went: an Account ranked on a figure from an hour ago is the one
     // thing that can make this Switch land somewhere worse than it left, so it
     // is said on the line rather than left for somebody to work out.
     let unread = read.notes();
 
-    let choice = match cycle::choose(registry, &scope, Some(outgoing.email()), host.now()) {
+    // The margin, applied to the figures as this round has them: which Accounts
+    // are not empty enough — or not legible enough — to be worth the move.
+    let set_aside = watch::set_aside(
+        &watching.policy,
+        &watching.group,
+        &considered(registry, watching),
+        barred.as_deref(),
+    );
+
+    let choice = match cycle::choose(
+        registry,
+        &scope,
+        Some(outgoing.email()),
+        &set_aside,
+        host.now(),
+    ) {
         Ok(choice) => choice,
         // Nowhere worth going is an answer rather than a failure: every
         // candidate is exhausted, or the Account Perch is on is still the best
@@ -294,6 +342,10 @@ fn act(
     match landed {
         Ok(_captured) => {
             switch_command::record_active(host, perch, registry, &choice.account)?;
+            // Only a Switch that happened starts a cooldown. A round that was
+            // refused or found nowhere to go has changed nothing, and making it
+            // wait would be pacing the watcher on its failures.
+            recently.switched(outgoing.email(), host.now());
             Ok(Outcome::Switched {
                 because: also(choice.because, &unread),
             })
@@ -339,21 +391,46 @@ fn act(
     }
 }
 
-/// The Accounts a Switch could land on, which are the ones worth spending a
-/// read of the network on.
+/// The Accounts a Switch could land on, with the figures this round has of
+/// them.
 ///
 /// The Account being left is not among them — it was read at the top of this
 /// round, which is what got us here — and neither is one that is disabled or
-/// Quarantined, because ranking has never been able to choose either and a read
-/// for a choice that cannot be made is an allowance spent on nothing.
-fn candidates(registry: &Registry, watching: &Watching) -> Vec<String> {
+/// Quarantined, because ranking has never been able to choose either.
+///
+/// Called twice a round, before the Refresh to say what to read and after it to
+/// say what the margin makes of what was read, so that the figure the margin
+/// judges is the one the ranking will use. Both times through the same walk:
+/// two lists of "the Accounts that could be landed on" would have to be kept in
+/// step, and an Account in one and not the other is one the watcher never reads
+/// and lands on anyway.
+fn considered(registry: &Registry, watching: &Watching) -> Vec<Considered> {
     registry
         .accounts_in(&watching.group)
         .iter()
         .filter(|account| {
             account.email() != watching.account.email() && account.enabled && !account.quarantined()
         })
-        .map(|account| account.email().to_string())
+        .map(|account| Considered {
+            email: account.email().to_string(),
+            named: registry.named_for_the_user(account.email()),
+            fullest: Fullest::of(account),
+        })
+        .collect()
+}
+
+/// Which of them are worth spending a read of the network on: all but the one
+/// no-return has barred, because a read for a choice that cannot be made is an
+/// allowance spent on nothing.
+///
+/// The barred Account stays in [`considered`] even though it is not read — it
+/// has to be set aside by name, and leaving it out of that list would leave it
+/// a candidate.
+fn worth_reading(considered: &[Considered], barred: Option<&str>) -> Vec<String> {
+    considered
+        .iter()
+        .filter(|candidate| Some(candidate.email.as_str()) != barred)
+        .map(|candidate| candidate.email.clone())
         .collect()
 }
 

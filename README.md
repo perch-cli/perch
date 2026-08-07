@@ -187,7 +187,7 @@ who notices.
 
 ```
 $ perch watch
-Watching you@example.com in Group `work`. Reading how full it is every 2m30s, and Switching within the Group when its fullest Quota Window reaches 80%. Ctrl-C stops.
+Watching you@example.com in Group `work`. Reading how full it is every 2m30s, and Switching within the Group when its fullest Quota Window reaches 80% — to an Account at 70% or under, and never twice inside 15 minutes. Ctrl-C stops.
 2026-08-04T12:00:00Z  waiting   you@example.com 40% used, fullest 5-hour; threshold 80% — under it, so nothing was wanted.
 2026-08-04T12:02:30Z  switched  you@example.com 86% used, fullest 5-hour; threshold 80% — over it. Switched — overflow@example.com has the most room: 95% headroom, which is true of every one of its Quota Windows — 5-hour is its fullest, as of just now.
 ^C
@@ -224,6 +224,39 @@ process running.
 
 Neither of those ends the watch. Nowhere to go is resolved by waiting, which is
 what the loop is already doing.
+
+**It does not ping-pong.** Two Accounts hovering either side of the threshold
+would otherwise trade places every couple of minutes, each Switch costing a
+Capture and a Credential write for a few minutes of headroom. Three rules from
+the Group's configuration stop it, and each one is printed when it is what
+decided a round:
+
+- a **margin** — `watcher-margin-percent`, 10 points by default — under the
+  threshold, which nothing is moved to unless it clears. At an 80% threshold
+  that means nothing above 70%.
+- a **cooldown** — `watcher-cooldown-minutes`, 15 by default — between one
+  Switch and the next, whatever the figures do in between. A five-hour window
+  moves slowly enough that fifteen minutes never misses a real crossing.
+- **no return** — `watcher-no-return`, on by default — which keeps the Account
+  a Switch just left off the candidate list for one cooldown. It is not even
+  read: a read for a choice that cannot be made is an allowance spent on
+  nothing.
+
+```
+2026-08-04T12:02:30Z  nowhere   you@example.com 86% used, fullest 5-hour; threshold 80% — over it, and nowhere to go: Nothing in Group `work` is worth Switching to yet — overflow@example.com is at 74% used and nothing over 70% is worth moving to. Nothing was changed.
+2026-08-04T12:05:00Z  cooling   you@example.com 86% used, fullest 5-hour; threshold 80% — over it, and too soon to move again: the last Switch was 2 minutes ago and this Group leaves at least 15 minutes between two, so nothing moves for another 12 minutes.
+```
+
+An Account Perch has never read a figure for is set aside the same way. A
+[Cycle](#cycling) you asked for will land on one — an unknown beats a window
+that is certainly full — but unasked it would be a move onto an Account the
+watcher knows nothing about, and no figure is not evidence of room.
+
+None of it survives the loop. The cooldown lives in the running process and
+nowhere else — stopping `perch watch` and starting it again is you saying "go
+on then", and it starts with nothing to wait for. `watcher-no-return` is
+measured in cooldowns, so a Group with `watcher-cooldown-minutes 0` has no
+no-return either, whatever it is set to.
 
 What it does when it acts is a Switch and nothing else: the outgoing Credential
 is Captured into its own Profile first (ADR 0006), Claude Code's locks are
@@ -546,7 +579,7 @@ $ perch group list
 work
   Accounts     overflow@example.com (as `overflow`)
   Strategy     most-headroom
-  Watcher      off (would act at 80%)
+  Watcher      off (would act at 80%, onto 70% or better, at most every 15m)
 
 In no Group
   Accounts     you@example.com
@@ -572,6 +605,9 @@ cycle-ungrouped true
 work strategy soonest-reset
 work watcher-may-act false
 work watcher-threshold-percent 80
+work watcher-cooldown-minutes 15
+work watcher-margin-percent 10
+work watcher-no-return true
 ```
 
 Three words name a Group; two do not. Most configuration belongs to a Group,
@@ -585,6 +621,9 @@ addressed by naming none (ADR 0017).
 | `strategy` | a Group | `most-headroom`, `soonest-reset` | `most-headroom` |
 | `watcher-may-act` | a Group | `true`, `false` | `false` |
 | `watcher-threshold-percent` | a Group | 0–100 | `80` |
+| `watcher-cooldown-minutes` | a Group | 0–10080 | `15` |
+| `watcher-margin-percent` | a Group | 0–100 | `10` |
+| `watcher-no-return` | a Group | `true`, `false` | `true` |
 | `cycle-ungrouped` | no Group | `true`, `false` | `false` |
 
 The **strategy** is which Account a Cycle prefers when more than one would
@@ -600,13 +639,26 @@ whose figure does not above nothing at all: an Account that says when it comes
 back is preferred to one that does not, and where none of them says, the Cycle
 falls back to the room it can see and says that is what it did.
 
-The **watcher's** two fields govern [`perch watch`](#watching) and nothing else.
-`watcher-may-act` says whether it may Switch within the Group at all, and is off
-by default because a Group only ever changes underneath you because you said it
-could; `watcher-threshold-percent` is how much of the fullest Quota Window of
-the Account you are on has to be used before it moves you. Neither switches
-anything on: they take effect while the loop is running in a terminal, and not
-otherwise.
+The **watcher's** five fields govern [`perch watch`](#watching) and nothing
+else. `watcher-may-act` says whether it may Switch within the Group at all, and
+is off by default because a Group only ever changes underneath you because you
+said it could. The other four are its policy:
+`watcher-threshold-percent` is how much of the fullest Quota Window of the
+Account you are on has to be used before it moves you;
+`watcher-margin-percent` is how far under that a candidate has to sit to be
+worth moving to; `watcher-cooldown-minutes` is the least it will leave between
+two Switches; and `watcher-no-return` keeps the Account it just left off the
+candidate list for one cooldown. None of them switches anything on: they take
+effect while the loop is running in a terminal, and not otherwise.
+
+How often it reads is deliberately *not* configurable. Two and a half minutes
+is derived from Anthropic's allowance of ~28-30 reads an hour rather than from
+anyone's taste, and a Group configured to read every ten seconds would be a
+Group configured to spend that allowance and be refused.
+
+A margin at or above the threshold is not refused — it is a Group that will only
+move onto an Account with nothing used at all. Refusing it would make the order
+you type two `perch config set`s in matter.
 
 Every line `perch config get` prints is the tail of the `perch config set` that
 would restore it, so reading the configuration and writing it back are the same

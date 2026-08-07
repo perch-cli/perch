@@ -295,6 +295,39 @@ struct Ranked<'a> {
     headroom: Headroom,
 }
 
+/// Accounts this Cycle may not land on, whatever the ranking makes of them, and
+/// the one sentence that says why.
+///
+/// The Cycle has no opinion about them. The watcher's margin and its no-return
+/// (ADR 0013) are policy about *when* a move is worth making, which is a
+/// different question from which Account is best, and answering both here would
+/// put a watcher's clock inside the ranking that every `perch switch` uses.
+/// They arrive as a list so that the ranking never lands on one, and with a
+/// sentence so that the refusal — when they turn out to be all of them — says
+/// what set them aside rather than claiming the Group is empty.
+///
+/// A `perch switch` the user typed sets nothing aside: [`SetAside::nothing`].
+#[derive(Debug, Clone, Default)]
+pub struct SetAside {
+    /// The Accounts, by email.
+    pub emails: Vec<String>,
+    /// Why, whole, ready to print in place of a refusal the Cycle would have
+    /// written itself.
+    pub because: String,
+}
+
+impl SetAside {
+    /// Every Account is fair game, which is what asking for a Cycle yourself
+    /// means.
+    pub fn nothing() -> SetAside {
+        SetAside::default()
+    }
+
+    fn holds(&self, email: &str) -> bool {
+        self.emails.iter().any(|held| held == email)
+    }
+}
+
 /// The Account a Cycle picked, with what it will say about having picked it.
 #[derive(Debug)]
 pub struct Choice {
@@ -312,10 +345,14 @@ pub struct Choice {
 /// `leaving` is the Account Perch is on, when it is one of the candidates. It
 /// is ranked like any other and never chosen: landing where you already are
 /// would rewrite Credentials for nothing.
+///
+/// `set_aside` is the caller's own reasons for not landing somewhere, which the
+/// ranking obeys without holding an opinion about (see [`SetAside`]).
 pub fn choose(
     registry: &Registry,
     scope: &Scope,
     leaving: Option<&str>,
+    set_aside: &SetAside,
     now: DateTime<Utc>,
 ) -> Result<Choice> {
     let strategy = scope.strategy(registry);
@@ -359,10 +396,24 @@ pub fn choose(
     let here = ranked
         .iter()
         .find(|ranked| Some(ranked.account.email()) == leaving);
-    let elsewhere: Vec<&Ranked> = ranked
+    let landable: Vec<&Ranked> = ranked
         .iter()
         .filter(|ranked| Some(ranked.account.email()) != leaving && !ranked.headroom.is_exhausted())
         .collect();
+    let elsewhere: Vec<&Ranked> = landable
+        .iter()
+        .copied()
+        .filter(|ranked| !set_aside.holds(ranked.account.email()))
+        .collect();
+
+    // There was somewhere to go and the caller's own policy is the only thing
+    // in the way, so its sentence is the answer. Saying "already the best
+    // Account in the Group" instead would be a claim about a comparison that
+    // was never made, and the reasons below belong to Accounts nobody set
+    // aside.
+    if elsewhere.is_empty() && !landable.is_empty() {
+        return Err(PerchError::NoCandidate(set_aside.because.clone()));
+    }
 
     // Staying put is the right answer only when Perch can see that it is: an
     // Account it has never observed is not evidence that moving would gain
@@ -636,10 +687,15 @@ pub(crate) mod tests {
     }
 
     fn cycle(registry: &Registry) -> Result<Choice> {
+        setting_aside(registry, &SetAside::nothing())
+    }
+
+    fn setting_aside(registry: &Registry, set_aside: &SetAside) -> Result<Choice> {
         choose(
             registry,
             &Scope::Group("work".to_string()),
             registry.active.as_deref(),
+            set_aside,
             now(),
         )
     }
@@ -882,6 +938,96 @@ pub(crate) mod tests {
         );
     }
 
+    /// A Strategy is entitled to rank whatever the caller left it. Setting an
+    /// Account aside has to take it out of the ranking rather than veto the
+    /// winner afterwards — under `soonest-reset` the fullest Account can be the
+    /// one that wins, and vetoing it would report nowhere to go while a
+    /// perfectly empty Account sat behind it.
+    #[test]
+    fn setting_an_account_aside_leaves_the_ranking_to_choose_from_what_is_left() {
+        let registry = preferring(
+            holding(vec![
+                account("here@example.com", vec![resetting("5-hour", 96.0, 9)]),
+                account("soonest@example.com", vec![resetting("5-hour", 74.0, 1)]),
+                account("emptiest@example.com", vec![resetting("5-hour", 4.0, 8)]),
+            ]),
+            Strategy::SoonestReset,
+        );
+
+        assert_eq!(
+            cycle(&registry).expect("there is room").account.email(),
+            "soonest@example.com",
+            "the Strategy prefers the quota about to be thrown away"
+        );
+
+        let set_aside = SetAside {
+            emails: vec!["soonest@example.com".to_string()],
+            because: "nothing over 70% is worth moving to.".to_string(),
+        };
+        assert_eq!(
+            setting_aside(&registry, &set_aside)
+                .expect("there is still somewhere to go")
+                .account
+                .email(),
+            "emptiest@example.com",
+            "and it still prefers among what it was left",
+        );
+    }
+
+    /// The caller's reason is the answer when the caller's reason is the whole
+    /// of it. Anything the Cycle said instead would be a claim about a
+    /// comparison it was never allowed to make.
+    #[test]
+    fn setting_every_landing_place_aside_answers_with_the_reason_it_was_given() {
+        let registry = holding(vec![
+            account("here@example.com", vec![window("5-hour", 90.0)]),
+            account("nearly@example.com", vec![window("5-hour", 74.0)]),
+        ]);
+
+        let refusal = setting_aside(
+            &registry,
+            &SetAside {
+                emails: vec!["nearly@example.com".to_string()],
+                because: "nearly@example.com is at 74% used and nothing over 70% \
+                          is worth moving to."
+                    .to_string(),
+            },
+        )
+        .expect_err("everything that could be landed on was set aside");
+
+        assert_eq!(refusal.exit_code(), crate::error::EXIT_NO_CANDIDATE);
+        assert!(refusal.to_string().contains("74%"), "{refusal}");
+        assert!(
+            !refusal.to_string().contains("already the best"),
+            "staying put was never compared against anything: {refusal}"
+        );
+    }
+
+    /// A caller that sets aside an Account the ranking could not have chosen
+    /// anyway has told the Cycle nothing, and must not take the Cycle's own
+    /// answer away from it.
+    #[test]
+    fn setting_aside_an_exhausted_account_leaves_the_cycles_own_answer_intact() {
+        let registry = holding(vec![
+            account("here@example.com", vec![resetting("5-hour", 100.0, 3)]),
+            account("full@example.com", vec![resetting("5-hour", 100.0, 1)]),
+        ]);
+
+        let refusal = setting_aside(
+            &registry,
+            &SetAside {
+                emails: vec!["full@example.com".to_string()],
+                because: "a reason about the margin".to_string(),
+            },
+        )
+        .expect_err("everything is exhausted");
+
+        assert!(
+            refusal.to_string().contains("frees up soonest"),
+            "when the wait is the answer, saying the wait is the answer: {refusal}"
+        );
+    }
+
     #[test]
     fn a_scope_where_nobody_is_a_candidate_says_which_way_each_account_left_it() {
         let mut registry = holding(vec![
@@ -994,6 +1140,7 @@ mod properties {
             &arrangement.registry,
             &Scope::Group("work".to_string()),
             leaving,
+            &SetAside::nothing(),
             now(),
         )
         .ok()

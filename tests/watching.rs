@@ -6,13 +6,15 @@
 //! loop does about it is asserted from the outside — what it printed, what went
 //! out to the network, and which Credential ended up live.
 //!
-//! Three properties are what this command is for, and each has a test that
+//! Four properties are what this command is for, and each has a test that
 //! fails if it stops holding: only the Account you are on is Refreshed, every
-//! decision is printed including the ones where nothing happens, and nothing is
-//! ever acted on but a figure that was just read (ADR 0013).
+//! decision is printed including the ones where nothing happens, nothing is
+//! ever acted on but a figure that was just read, and two Accounts either side
+//! of the threshold never trade places with each other (ADR 0013).
 
 mod common;
 
+use chrono::{DateTime, Duration, Utc};
 use common::*;
 use perch::anthropic::{PROFILE_URL, TOKEN_URL, USAGE_URL};
 use perch::commands::add::AddArgs;
@@ -103,6 +105,23 @@ fn watching(trace: &[f64], spare: f64) -> FakeHost {
     let host = answering(watched(), ACTIVE_TOKEN, EMAIL, trace);
     let host = answering(host, SPARE_TOKEN, SECOND_EMAIL, &[spare]);
     host.with_interrupt_after(trace.len() as u32)
+}
+
+/// The same, where both Accounts have a trace of their own — for the tests
+/// about moving back and forth, where the Account that was the candidate
+/// becomes the one being watched.
+fn watching_both(here: &[f64], there: &[f64], rounds: u32) -> FakeHost {
+    let host = answering(watched(), ACTIVE_TOKEN, EMAIL, here);
+    let host = answering(host, SPARE_TOKEN, SECOND_EMAIL, there);
+    host.with_interrupt_after(rounds)
+}
+
+/// When a decision was taken, off the front of the line it was printed on.
+fn when(decision: &str) -> DateTime<Utc> {
+    let stamp = decision.split_whitespace().next().expect("a line");
+    DateTime::parse_from_rfc3339(stamp)
+        .unwrap_or_else(|_| panic!("every decision line opens with its time: {decision}"))
+        .with_timezone(&Utc)
 }
 
 /// The decision lines, which is everything printed but the line that says what
@@ -364,6 +383,184 @@ fn nowhere_to_go_is_a_decision_and_the_loop_goes_on_watching() {
         );
     }
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
+}
+
+/// The margin (ADR 0013). At an 80% threshold nothing is moved to unless it is
+/// at 70% or better, so an Account that is only just emptier than the one you
+/// are on is passed over — moving there would buy a few minutes and cost a
+/// Capture, a Credential write, and the same decision again shortly.
+#[test]
+fn a_candidate_only_just_emptier_than_the_threshold_is_never_switched_to() {
+    let host = watching(&[86.0, 88.0], 74.0);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a candidate not worth moving to does not end the watch");
+    let decisions = decisions(&printed);
+    assert_eq!(decisions.len(), 2, "it kept watching: {printed}");
+    for decision in &decisions {
+        assert!(decision.contains("nowhere"), "{decision}");
+        assert!(decision.contains("74%"), "how full it was: {decision}");
+        assert!(
+            decision.contains("70%"),
+            "and the figure that was wanted, which is the threshold less the \
+             margin: {decision}"
+        );
+    }
+    assert_eq!(
+        active(&host).as_deref(),
+        Some(EMAIL),
+        "and nothing moved: {printed}"
+    );
+}
+
+/// The whole of what the margin is for. Two Accounts hovering either side of
+/// the threshold, watched for as long as anyone would: without a margin this is
+/// a Switch every round, each one a Capture and a Credential write, and a
+/// client logged out at the end of it.
+#[test]
+fn two_accounts_hovering_either_side_of_the_threshold_do_not_ping_pong() {
+    let host = watching_both(&[82.0, 79.0, 83.0, 81.0, 84.0, 80.0], &[78.0], 6);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("it was stopped");
+    assert_eq!(
+        printed.matches("switched").count(),
+        0,
+        "nothing here is worth moving to, and doing it anyway is the ping-pong: \
+         {printed}"
+    );
+    assert_eq!(active(&host).as_deref(), Some(EMAIL));
+    assert_eq!(
+        decisions(&printed).len(),
+        6,
+        "and it said so every round: {printed}"
+    );
+}
+
+/// A machine where the Account being watched fills up, the watcher moves off
+/// it, and the Account it moved to fills up in turn — the trace that would
+/// ping-pong if nothing paced it.
+///
+/// The Account left behind is roomy again by then, so the only thing standing
+/// between the two Switches is the cooldown.
+fn filling_up_one_after_the_other() -> FakeHost {
+    // Rounds are 2m30s apart, so a fifteen-minute cooldown is six of them: the
+    // Switch lands on the second round and the earliest the next one may is the
+    // eighth.
+    watching_both(&[40.0, 86.0, 20.0], &[5.0, 90.0], 8)
+}
+
+/// The cooldown (ADR 0013): a floor under how often the watcher acts, whatever
+/// the figures do in between.
+#[test]
+fn two_switches_never_happen_closer_together_than_the_cooldown() {
+    let host = filling_up_one_after_the_other();
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("it was stopped");
+    let decisions = decisions(&printed);
+    let switches: Vec<&String> = decisions
+        .iter()
+        .filter(|decision| decision.contains("switched"))
+        .collect();
+    assert_eq!(switches.len(), 2, "{printed}");
+    assert!(
+        when(switches[1]) - when(switches[0]) >= Duration::minutes(15),
+        "{} then {}",
+        switches[0],
+        switches[1],
+    );
+
+    let cooling: Vec<&String> = decisions
+        .iter()
+        .filter(|decision| decision.contains("cooling"))
+        .collect();
+    assert_eq!(
+        cooling.len(),
+        5,
+        "and every round in between said why it was not acting: {printed}"
+    );
+    for decision in cooling {
+        assert!(decision.contains("90% used"), "what it read: {decision}");
+        assert!(decision.contains("threshold 80%"), "{decision}");
+        assert!(decision.contains("15 minutes"), "the cooldown: {decision}");
+    }
+}
+
+/// No return (ADR 0013): the Account a Switch just left is no candidate until
+/// the cooldown has passed, and it is not read either.
+///
+/// What this trace shows is the pair working — nothing is read of the Account
+/// just left while the cooldown holds, and it is landed on again the first
+/// round after. It cannot separate the two rules, because the cooldown always
+/// reaches the decision first; `Recently::barred` is pinned on its own by a
+/// unit test in `src/watch.rs`.
+#[test]
+fn the_account_just_left_is_no_candidate_until_the_cooldown_has_passed() {
+    let host = filling_up_one_after_the_other();
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("it was stopped");
+    assert_eq!(
+        asked_by(&host),
+        vec![
+            // The Account being watched, then the candidate it moved to.
+            ACTIVE_TOKEN,
+            ACTIVE_TOKEN,
+            SPARE_TOKEN,
+            // Six rounds watching the Account it moved to, five of them held
+            // back by the cooldown with nowhere read.
+            SPARE_TOKEN,
+            SPARE_TOKEN,
+            SPARE_TOKEN,
+            SPARE_TOKEN,
+            SPARE_TOKEN,
+            SPARE_TOKEN,
+            // And the cooldown over, the Account it left is a candidate again.
+            ACTIVE_TOKEN,
+        ],
+        "the Account it came off is not read while it may not be returned to: \
+         {printed}"
+    );
+    assert_eq!(
+        active(&host).as_deref(),
+        Some(EMAIL),
+        "and it is returned to once the cooldown has run out: {printed}"
+    );
+}
+
+/// A Group is free to say the watcher may act as often as the figures warrant,
+/// and the settings that say so are its own.
+#[test]
+fn a_group_that_asks_for_no_cooldown_and_no_margin_may_move_every_round() {
+    let host = watching_both(&[86.0, 20.0], &[79.0, 86.0], 3);
+    for (key, value) in [
+        ("watcher-cooldown-minutes", "0"),
+        ("watcher-margin-percent", "0"),
+        ("watcher-no-return", "false"),
+    ] {
+        config_set(&host, &["work", key, value])
+            .0
+            .expect("all three are the Group's to set");
+    }
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("it was stopped");
+    assert_eq!(
+        printed.matches("switched").count(),
+        2,
+        "with nothing pacing it, it moves whenever the ranking says to: {printed}"
+    );
+    assert_eq!(
+        active(&host).as_deref(),
+        Some(EMAIL),
+        "there and straight back: {printed}"
+    );
 }
 
 /// A Switch that was turned away without changing anything is a decision that

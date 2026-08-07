@@ -129,7 +129,16 @@ fn decide(
     };
 
     say(out, &scope.announcement())?;
-    let choice = cycle::choose(registry, &scope, registry.active.as_deref(), now)?;
+    // Nothing is set aside: a Cycle somebody asked for is one they get, and the
+    // margin and the cooldown are the watcher's rules for acting unasked
+    // (ADR 0013) rather than rules about where a Switch may land.
+    let choice = cycle::choose(
+        registry,
+        &scope,
+        registry.active.as_deref(),
+        &cycle::SetAside::nothing(),
+        now,
+    )?;
     say(out, &choice.because)?;
     Ok(Decision {
         incoming: choice.account,
