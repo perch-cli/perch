@@ -65,6 +65,7 @@ pub enum Effect {
     },
     ExecInteractive {
         program: String,
+        args: Vec<String>,
         config_dir: PathBuf,
     },
     /// A request that went out to the network.
@@ -1156,9 +1157,15 @@ impl Host for FakeHost {
             .ok_or_else(|| HostError::Other(format!("no such program: {program}")))
     }
 
-    /// Stands in for the login the user drives: it writes whatever the
-    /// configured [`Login`] leaves in the directory it was pointed at.
-    fn exec_interactive(&self, program: &str, env: &[(&str, &str)]) -> Result<i32, HostError> {
+    /// Stands in for whatever took the terminal — the login the user drives, or
+    /// the program a Run launched: it writes whatever the configured [`Login`]
+    /// leaves in the directory it was pointed at, and exits as that says.
+    fn exec_interactive(
+        &self,
+        program: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+    ) -> Result<i32, HostError> {
         let config_dir = env
             .iter()
             .find(|(key, _)| *key == "CLAUDE_CONFIG_DIR")
@@ -1167,6 +1174,7 @@ impl Host for FakeHost {
 
         self.record(Effect::ExecInteractive {
             program: program.to_string(),
+            args: args.iter().map(|arg| arg.to_string()).collect(),
             config_dir: config_dir.clone(),
         });
 

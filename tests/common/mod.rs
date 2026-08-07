@@ -151,11 +151,21 @@ pub fn client_exiting(status: i32) -> impl Fn(&FakeHost, &Path) -> i32 {
 /// Runs `perch run <target>`, returning the status the client exited with — or
 /// Perch's refusal to launch one — alongside what was printed.
 pub fn run_run(host: &FakeHost, target: &str) -> (perch::Result<i32>, String) {
+    run_run_with(host, target, &[])
+}
+
+/// The same, with the words somebody typed after `--`.
+pub fn run_run_with(
+    host: &FakeHost,
+    target: &str,
+    command: &[&str],
+) -> (perch::Result<i32>, String) {
     let mut written = Vec::new();
     let result = perch::commands::run::run(
         host,
         RunArgs {
             target: target.to_string(),
+            command: command.iter().map(|word| word.to_string()).collect(),
         },
         &mut written,
     );

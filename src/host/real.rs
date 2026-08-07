@@ -433,9 +433,15 @@ impl Host for RealHost {
         Ok(run(Path::new(program), args, None)?)
     }
 
-    fn exec_interactive(&self, program: &str, env: &[(&str, &str)]) -> Result<i32, HostError> {
+    fn exec_interactive(
+        &self,
+        program: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+    ) -> Result<i32, HostError> {
         let mut command = Command::new(program);
         command
+            .args(args)
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());

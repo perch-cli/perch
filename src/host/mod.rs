@@ -317,9 +317,23 @@ pub trait Host {
     fn exec(&self, program: &str, args: &[&str]) -> Result<Execution, HostError>;
 
     /// Runs a program with the terminal attached and `env` added to its
-    /// environment, returning its exit status. A login is a browser round trip
-    /// the user drives, so this is the one execution Perch does not capture.
-    fn exec_interactive(&self, program: &str, env: &[(&str, &str)]) -> Result<i32, HostError>;
+    /// environment, returning its exit status.
+    ///
+    /// The one execution Perch does not capture, because both callers are
+    /// somebody's session rather than something Perch reads: a login is a
+    /// browser round trip the user drives, and a Run is whatever they asked to
+    /// have launched as an Account.
+    ///
+    /// `args` reach the program as they were given, one word per element:
+    /// nothing here re-quotes them, splits them or reads them, because a Run
+    /// forwards what somebody typed after `--` and a wrapper that interpreted it
+    /// would be a second parser between them and their own command line.
+    fn exec_interactive(
+        &self,
+        program: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+    ) -> Result<i32, HostError>;
 
     /// Whether a process is still running. A Live Profile's Credential is
     /// untouchable because something else is holding it.

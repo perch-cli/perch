@@ -212,6 +212,39 @@ Quarantined is refused with exit code 19 rather than launching a client that
 would ask you to log in. The client's own exit code is Perch's, so `perch run`
 can stand in a script wherever `claude` would.
 
+### Running with arguments, and running something else
+
+Everything after `--` belongs to the program rather than to Perch, and reaches
+it exactly as you typed it — including flags Perch has of its own.
+
+```
+$ perch run overflow -- --resume --model opus
+$ perch run overflow -- npm test
+```
+
+The first word after `--` decides which program runs. A flag is Claude Code's,
+so the first line resumes a session; anything else is the program to launch, so
+the second runs `npm` with your Shared State reachable and `CLAUDE_CONFIG_DIR`
+pointed at the Account's Profile. Nothing is guessed either way: a program you
+could invoke by name never begins with a `-`.
+
+`--` is required, and a flag typed without it is refused rather than claimed:
+
+```
+$ perch run dev --resume
+`--resume` could be Perch's flag or the program's, and Perch will not guess which. Everything meant for the program you are running goes after `--`:
+
+    perch run dev -- --resume
+
+$ echo $?
+2
+```
+
+Both readings of that line are real — Perch has a `--json` and so does Claude
+Code — so Perch takes neither and hands you back the line that would have
+worked. A program typed without the separator (`perch run dev npm test`) is told
+the same thing: nothing but `--` follows a Target.
+
 ## Reserving an Account
 
 `perch disable` keeps an Account out of Cycling without giving it up — for the
@@ -493,8 +526,9 @@ it took.
 `perch run` is the one command these do not describe once it has launched
 something: what the client exited with is what Perch exits with, so a script
 wrapping it reads the program's own code rather than Perch's. Everything that
-stops a Run before the launch — an unknown Target, a Group, a Quarantine, a
-Reconcile that could not be made — is in the table above.
+stops a Run before the launch — a command line without `--`, an unknown Target,
+a Group, a Quarantine, a Reconcile that could not be made — is in the table
+above.
 
 ## Where things are
 

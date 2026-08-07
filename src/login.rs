@@ -56,6 +56,7 @@ pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Pr
     let status = host
         .exec_interactive(
             &claude.to_string_lossy(),
+            &[],
             &[("CLAUDE_CONFIG_DIR", &dir.to_string_lossy())],
         )
         .map_err(|err| PerchError::Other(format!("could not launch a login: {err}")))?;
