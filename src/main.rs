@@ -13,6 +13,7 @@ use perch::commands::remove::{self, RemoveArgs};
 use perch::commands::run::{self, RunArgs};
 use perch::commands::status::{self, StatusArgs};
 use perch::commands::switch::{self, SwitchArgs};
+use perch::commands::watch;
 use perch::error::EXIT_OK;
 use perch::host::RealHost;
 use perch::report;
@@ -203,6 +204,18 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+
+    /// Watch the Account you are on, and Cycle when it runs low.
+    ///
+    /// A loop in this terminal rather than a daemon (ADR 0013): it runs until
+    /// you stop it with Ctrl-C, and leaves nothing behind when you do. Only the
+    /// active Account is read, and only within a Group that has been told the
+    /// watcher may act on it — `perch config set <group> watcher-may-act true`.
+    ///
+    /// Every decision is printed as it is made, including the ones where
+    /// nothing happens, which are most of them. They go to standard output, so
+    /// redirecting them to a file is yours to do.
+    Watch,
 }
 
 /// The exit code a command that either did what it was asked or failed earns.
@@ -312,6 +325,7 @@ fn main() {
             &mut out,
         )),
         Command::Switch { target } => ok(switch::run(&host, SwitchArgs { target }, &mut out)),
+        Command::Watch => ok(watch::run(&host, &mut out)),
     };
 
     let code = ended_as(outcome, &mut out);

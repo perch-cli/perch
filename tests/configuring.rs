@@ -6,11 +6,12 @@
 //! key or a value Perch does not understand is answered with the ones it does,
 //! because a script that mistyped a setting must not go on believing it took.
 //!
-//! Two settings do something in v1. A Group's Strategy decides which Account a
-//! bare `perch switch` lands on, and the global ungrouped-Cycling setting
-//! decides whether it may land anywhere at all from an Account in no Group
-//! (ADR 0017). The watcher's fields are stored and validated and nothing reads
-//! them, which is itself asserted here: the watcher is deferred (ADR 0013).
+//! A Group's Strategy decides which Account a bare `perch switch` lands on, and
+//! the global ungrouped-Cycling setting decides whether it may land anywhere at
+//! all from an Account in no Group (ADR 0017). The watcher's fields govern
+//! `perch watch` and nothing else, which is asserted here too: setting them
+//! switches nothing on, because nothing acts on them until somebody runs the
+//! loop (ADR 0013). What the loop then does with them is `watching.rs`.
 
 mod common;
 
@@ -260,7 +261,7 @@ fn cycling_among_ungrouped_accounts_is_off_until_it_is_turned_on() {
 }
 
 #[test]
-fn the_watchers_fields_are_stored_and_validated_and_nothing_acts_on_them() {
+fn the_watchers_fields_are_stored_and_govern_a_loop_that_has_to_be_run() {
     let host = three_accounts_in_one_group();
     observed(&host, EMAIL, vec![window("5-hour", 99.0)]);
     observed(&host, SECOND_EMAIL, vec![window("5-hour", 98.0)]);
@@ -270,8 +271,13 @@ fn the_watchers_fields_are_stored_and_validated_and_nothing_acts_on_them() {
     result.expect("the field is the watcher's, and it is stored");
     assert!(group_config(&host, "work").watcher_may_act);
     assert!(
-        printed.contains("watcher"),
-        "and what it will and will not do is said: {printed}"
+        printed.contains("perch watch"),
+        "and what now may act is named: {printed}"
+    );
+    assert!(
+        printed.contains("not a daemon"),
+        "along with what it is not — a Group that may be acted on is not a \
+         service that has been switched on (ADR 0013): {printed}"
     );
 
     config_set(&host, &["work", "watcher-threshold-percent", "50"])
@@ -280,12 +286,13 @@ fn the_watchers_fields_are_stored_and_validated_and_nothing_acts_on_them() {
     assert_eq!(group_config(&host, "work").watcher_threshold_percent, 50);
 
     // Both Accounts are well past a 50% threshold and the watcher has been
-    // told it may act. Nothing in v1 reads either field, so nothing switched.
+    // told it may act — and nothing has switched, because nothing is running
+    // the loop that would.
     assert_eq!(
         active(&host).as_deref(),
         Some(EMAIL),
-        "the watcher is deferred entirely (ADR 0013), so storing its fields \
-         changes nothing about what Perch does"
+        "permission is not a process: configuring a Group switches nothing \
+         until `perch watch` is running (ADR 0013)"
     );
 }
 

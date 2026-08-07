@@ -29,6 +29,7 @@ pub mod report;
 pub mod switch;
 pub mod target;
 pub mod utilization;
+pub mod watch;
 
 pub use error::{PerchError, Result};
 pub use host::Host;

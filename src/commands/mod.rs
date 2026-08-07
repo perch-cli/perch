@@ -13,6 +13,7 @@ pub mod remove;
 pub mod run;
 pub mod status;
 pub mod switch;
+pub mod watch;
 
 use std::io::Write;
 

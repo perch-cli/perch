@@ -14,7 +14,7 @@ use chrono::{DateTime, TimeZone, Utc};
 
 use super::{
     Execution, Host, HostError, HttpRequest, HttpResponse, Link, PRIVATE_DIR_MODE,
-    PRIVATE_FILE_MODE, Platform,
+    PRIVATE_FILE_MODE, Platform, Waited,
 };
 use crate::keychain::KeychainError;
 
@@ -45,6 +45,13 @@ pub enum Effect {
     RemovedLink(PathBuf),
     Touched(PathBuf),
     Slept {
+        millis: u64,
+    },
+    /// A wait a loop can be interrupted out of — the watcher's poll interval,
+    /// and nothing else. Distinct from a sleep because they answer different
+    /// questions: how long Perch spent waiting for somebody else's lock, and
+    /// how many times round the loop went.
+    Waited {
         millis: u64,
     },
     KeychainGet {
@@ -127,6 +134,10 @@ pub type Login = Box<dyn Fn(&FakeHost, &Path) -> i32>;
 /// that was already settled before the command began.
 pub type WhileWaiting = Box<dyn Fn(&FakeHost)>;
 
+/// The replies an endpoint gives one asker, in the order it gives them: keyed
+/// the way a single reply is, by URL and by the access token that asked.
+type Traces = BTreeMap<(String, Option<String>), VecDeque<HttpResponse>>;
+
 pub struct FakeHost {
     home: PathBuf,
     /// The directory the command was typed in — the project a Run is about,
@@ -178,8 +189,19 @@ pub struct FakeHost {
     answering_takes_millis: RefCell<u64>,
     /// What each endpoint answers, by URL and by the access token that asked.
     replies: RefCell<BTreeMap<(String, Option<String>), HttpResponse>>,
+    /// What an endpoint answers each time it is asked, where a test is about a
+    /// figure that moves: the trace an Account's Utilization follows while the
+    /// watcher watches it.
+    traces: RefCell<Traces>,
     sent: RefCell<Vec<Sent>>,
     effects: RefCell<Vec<Effect>>,
+    /// Whether anything is listening for the person at the terminal asking a
+    /// loop to stop.
+    listening: RefCell<bool>,
+    /// How many waits go by before that is asked for. `None` is a machine
+    /// nobody interrupts, which is every test but the watcher's.
+    interrupt_after: RefCell<Option<u32>>,
+    waits: RefCell<u32>,
 }
 
 /// The pid this Perch runs under, for the tests that assert on the marker a Run
@@ -241,8 +263,12 @@ impl FakeHost {
             answers: RefCell::new(VecDeque::new()),
             answering_takes_millis: RefCell::new(0),
             replies: RefCell::new(BTreeMap::new()),
+            traces: RefCell::new(BTreeMap::new()),
             sent: RefCell::new(Vec::new()),
             effects: RefCell::new(Vec::new()),
+            listening: RefCell::new(false),
+            interrupt_after: RefCell::new(None),
+            waits: RefCell::new(0),
         }
     }
 
@@ -475,6 +501,23 @@ impl FakeHost {
         self
     }
 
+    /// A person who presses Ctrl-C after the loop has waited this many times,
+    /// which is how many times round it goes.
+    ///
+    /// Counted in waits rather than in rounds because that is what the loop
+    /// actually asks the machine: a test says "three polls and then stop", and
+    /// gets exactly the three the person watching would have seen.
+    pub fn with_interrupt_after(self, waits: u32) -> Self {
+        *self.interrupt_after.borrow_mut() = Some(waits);
+        self
+    }
+
+    /// Whether anything has taken Ctrl-C over from the default handler, which
+    /// is what makes a loop something that can be stopped rather than killed.
+    pub fn is_listening_for_interrupts(&self) -> bool {
+        *self.listening.borrow()
+    }
+
     /// A process that is running, for a world that is already built.
     pub fn set_live_process(&self, pid: u32) {
         self.live_processes
@@ -571,6 +614,27 @@ impl FakeHost {
     /// token rather than on the address.
     pub fn with_reply_to(self, url: &str, bearer: &str, status: u16, body: &str) -> Self {
         self.reply(url, Some(bearer), status, body);
+        self
+    }
+
+    /// What an endpoint answers each time it is asked, in turn: the trace a
+    /// figure follows while something watches it.
+    ///
+    /// The last reply answers every call after it, so a trace says how the
+    /// figure moves and then how it stays — a test about a threshold being
+    /// crossed says the crossing, and does not have to keep saying it for
+    /// however many rounds the loop has left.
+    pub fn with_replies_to(self, url: &str, bearer: &str, replies: &[(u16, &str)]) -> Self {
+        self.traces.borrow_mut().insert(
+            (url.to_string(), Some(bearer.to_string())),
+            replies
+                .iter()
+                .map(|(status, body)| HttpResponse {
+                    status: *status,
+                    body: (*body).to_string(),
+                })
+                .collect(),
+        );
         self
     }
 
@@ -1261,6 +1325,35 @@ impl Host for FakeHost {
         }
     }
 
+    fn listen_for_interrupts(&self) {
+        *self.listening.borrow_mut() = true;
+    }
+
+    /// Passes the time the same way a sleep does, and ends the way the test
+    /// said the person watching would end it.
+    fn wait(&self, millis: u64) -> Waited {
+        self.record(Effect::Waited { millis });
+        let waited = *self.now.borrow() + chrono::Duration::milliseconds(millis as i64);
+        *self.now.borrow_mut() = waited;
+
+        // Taken out before it runs, so it can reach back into the fake without
+        // meeting a borrow this call is still holding.
+        let happens = self.while_waiting.borrow_mut().take();
+        if let Some(happens) = happens {
+            happens(self);
+        }
+
+        let mut waits = self.waits.borrow_mut();
+        *waits += 1;
+        // Nothing is interrupted where nothing is listening, for the same
+        // reason as on a real machine: Ctrl-C ends the process instead, and a
+        // process that has ended waits no more.
+        match *self.interrupt_after.borrow() {
+            Some(after) if *self.listening.borrow() && *waits >= after => Waited::Interrupted,
+            _ => Waited::Fully,
+        }
+    }
+
     fn is_interactive(&self) -> bool {
         *self.interactive.borrow()
     }
@@ -1312,6 +1405,23 @@ impl Host for FakeHost {
         let asked = sent.url.clone();
         let bearer = sent.bearer().map(str::to_string);
         self.sent.borrow_mut().push(sent);
+
+        // A trace answers before a fixed reply does, and its last entry stays
+        // put: a figure that moves is what the test is about, and one that has
+        // stopped moving still has to answer.
+        if let Some(trace) = self
+            .traces
+            .borrow_mut()
+            .get_mut(&(asked.clone(), bearer.clone()))
+        {
+            let answered = match trace.len() {
+                0 | 1 => trace.front().cloned(),
+                _ => trace.pop_front(),
+            };
+            if let Some(answered) = answered {
+                return Ok(answered);
+            }
+        }
 
         let replies = self.replies.borrow();
         replies

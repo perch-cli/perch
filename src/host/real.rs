@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 use super::PRIVATE_DIR_MODE;
 use super::{
     Execution, Host, HostError, HttpRequest, HttpResponse, Link, PRIVATE_FILE_MODE, Platform,
+    Waited,
 };
 use crate::keychain::{
     self, KeychainError, SECURITY_BIN, WritePath, classify, decode_password_output,
@@ -472,6 +473,39 @@ impl Host for RealHost {
         std::thread::sleep(std::time::Duration::from_millis(millis));
     }
 
+    fn listen_for_interrupts(&self) {
+        listen_for_interrupts();
+    }
+
+    /// In slices, checking between them, because the platforms do not agree on
+    /// what a signal does to a sleeping thread and none of them can be relied
+    /// on to cut one short: `nanosleep` reports how much was left and the
+    /// standard library goes back round for the rest. A watcher that noticed
+    /// Ctrl-C only when its poll interval happened to end would take two and a
+    /// half minutes to die.
+    ///
+    /// The slice is what the person waits for after pressing Ctrl-C, and the
+    /// only cost of a shorter one is a wakeup that does nothing.
+    fn wait(&self, millis: u64) -> Waited {
+        const SLICE_MILLIS: u64 = 100;
+
+        let mut left = millis;
+        while left > 0 {
+            if interrupted() {
+                return Waited::Interrupted;
+            }
+            let slice = left.min(SLICE_MILLIS);
+            std::thread::sleep(std::time::Duration::from_millis(slice));
+            left -= slice;
+        }
+        // Asked once more at the end, so a Ctrl-C arriving inside the last
+        // slice ends this wait rather than being carried into the next one.
+        match interrupted() {
+            true => Waited::Interrupted,
+            false => Waited::Fully,
+        }
+    }
+
     fn is_interactive(&self) -> bool {
         use std::io::IsTerminal;
         // Both ends matter: a question needs somewhere to be shown as well as
@@ -696,6 +730,96 @@ fn remove_link(path: &Path) -> Result<(), HostError> {
         Err(err) => Err(HostError::Io(err)),
     }
 }
+
+/// Whether the person at the terminal has asked a loop to stop.
+///
+/// A `static` rather than something the Host owns, because the handler that
+/// sets it is the operating system's to call and it is handed no context to
+/// find a Host through. Everything a signal handler may touch has to be
+/// async-signal-safe, and a single atomic flag is the whole of what this one
+/// touches.
+static INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn interrupted() -> bool {
+    INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Takes Ctrl-C over from the default handler, which would kill the process
+/// where it stands.
+///
+/// Perch links the platform's own primitive rather than taking a crate for it
+/// (ADR 0021): the whole of the unix half is one `signal` call, and the whole
+/// of the Windows half is one `SetConsoleCtrlHandler`.
+///
+/// The handler stands down after one signal, so a **second** Ctrl-C kills the
+/// process the way it always did. The first asks the loop to finish what it is
+/// doing, and there is no bound on how long that takes — a round waiting on a
+/// keychain prompt or on a network that has gone away could sit there — so the
+/// person watching must never be left with a program that has taken their only
+/// way of stopping it and given nothing back.
+///
+/// Idempotent, and safe to call more than once: installing the same handler
+/// twice installs the same handler.
+#[cfg(unix)]
+fn listen_for_interrupts() {
+    unsafe extern "C" fn stop(signal: libc::c_int) {
+        INTERRUPTED.store(true, std::sync::atomic::Ordering::Relaxed);
+        // SAFETY: `signal` is async-signal-safe, and this hands the signal back
+        // to the default handler rather than installing anything of Perch's.
+        unsafe { libc::signal(signal, libc::SIG_DFL) };
+    }
+
+    // SAFETY: the handler stores to an atomic and restores the default
+    // disposition, both async-signal-safe. `signal` returns the previous
+    // handler, which nothing here needs.
+    unsafe {
+        libc::signal(libc::SIGINT, stop as *const () as libc::sighandler_t);
+    }
+}
+
+/// The same on Windows, where Ctrl-C is a console event delivered on a thread
+/// of its own rather than a signal.
+///
+/// Only the two events that mean "stop this program" are claimed, and only the
+/// first of them: the second is answered `FALSE` and left to the default
+/// handler, which ends the process — the same standing-down the unix half does,
+/// for the same reason. A console being closed or a user logging out is never
+/// claimed at all, because those are not requests to finish what you were
+/// doing, and Windows kills a handler that claims them seconds later anyway.
+#[cfg(windows)]
+fn listen_for_interrupts() {
+    use windows_sys::Win32::Foundation::{FALSE, TRUE};
+    use windows_sys::Win32::System::Console::{
+        CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler,
+    };
+
+    unsafe extern "system" fn stop(event: u32) -> windows_sys::core::BOOL {
+        match event {
+            CTRL_C_EVENT | CTRL_BREAK_EVENT
+                if !INTERRUPTED.swap(true, std::sync::atomic::Ordering::Relaxed) =>
+            {
+                TRUE
+            }
+            _ => FALSE,
+        }
+    }
+
+    // SAFETY: the handler stores to an atomic and reads its argument, and the
+    // routine stays valid for the life of the process. A registration that
+    // fails leaves the default handler in place, which ends the process on
+    // Ctrl-C — the behaviour of every other Perch command.
+    unsafe {
+        SetConsoleCtrlHandler(Some(stop), TRUE);
+    }
+}
+
+/// A platform with neither is one where Ctrl-C keeps its default meaning, and
+/// the watcher is killed rather than asked to stop.
+///
+/// Nothing is lost by that: the wait is where the loop holds no lock and no
+/// marker, which is exactly why it is safe to be killed there.
+#[cfg(not(any(unix, windows)))]
+fn listen_for_interrupts() {}
 
 /// Makes the *name* durable, once the bytes behind it are.
 ///

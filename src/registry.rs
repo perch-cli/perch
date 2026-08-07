@@ -222,12 +222,8 @@ impl Strategy {
 /// unattended Switch means the Account really is running out.
 pub const DEFAULT_WATCHER_THRESHOLD_PERCENT: u8 = 80;
 
-/// What a Group carries besides its Accounts: the rules that would govern
-/// Cycling within it (ADR 0002).
-///
-/// Perch stores and validates these and reads none of them yet. They are here
-/// from the first Group rather than added later, so a Group written today is a
-/// Group the watcher can be pointed at when it ships.
+/// What a Group carries besides its Accounts: the rules that govern Cycling
+/// within it (ADR 0002), asked and unasked.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GroupConfig {
@@ -863,9 +859,9 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     }
 
     // Group configuration is checked on the way in rather than where it is
-    // read, because nothing reads it yet: a value that means nothing would
-    // otherwise sit in the file until the watcher shipped and then surprise
-    // someone by acting on it.
+    // read, because the thing that reads it is a loop nobody is watching: a
+    // value that means nothing would otherwise sit in the file until the
+    // watcher next went round and surprise somebody by acting on it.
     for (name, config) in &registry.groups {
         config.validate(name)?;
     }

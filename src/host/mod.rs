@@ -132,6 +132,22 @@ impl Link {
     }
 }
 
+/// How a wait ended: on its own, or because the person at the terminal asked
+/// the loop to stop.
+///
+/// Its own type rather than a bare `bool`, because the two callers of a bare
+/// one would read it in opposite directions — a wait that "returned true" is
+/// either one that completed or one that was cut short, and only the loop that
+/// wrote it would know which.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Waited {
+    /// The whole of the wait passed.
+    Fully,
+    /// Ctrl-C arrived. Whatever the loop was doing is finished; it must not
+    /// start anything else.
+    Interrupted,
+}
+
 /// The permissions a file holding a Credential is created with, and the mode
 /// anything looser is tightened to: the owner, and nobody else (ADR 0020).
 pub const PRIVATE_FILE_MODE: u32 = 0o600;
@@ -366,6 +382,27 @@ pub trait Host {
     /// Waits. Contending for a lock is the only thing Perch waits on, and it is
     /// an effect like any other so that tests do not spend the time.
     fn sleep(&self, millis: u64);
+
+    // ---- being asked to stop --------------------------------------------
+
+    /// Starts listening for the person at the terminal asking a loop to stop.
+    ///
+    /// `perch watch` calls this and nothing else does: every other command is
+    /// over long before anybody could ask, and Ctrl-C during one of them is a
+    /// process killed where it stands (ADR 0013).
+    fn listen_for_interrupts(&self);
+
+    /// Waits up to `millis`, and stops waiting the moment that has been asked
+    /// for.
+    ///
+    /// Its own effect rather than a [`Host::sleep`] with a check around it,
+    /// because the whole of what makes a foreground watcher killable is that
+    /// the wait ends when Ctrl-C arrives rather than two and a half minutes
+    /// later. Nothing may be held across it: what the watcher does between
+    /// waits is a Switch under Claude Code's locks, and the wait is where it
+    /// holds nothing at all, so a process killed here leaves no marker, no lock
+    /// and no half-written Credential.
+    fn wait(&self, millis: u64) -> Waited;
 
     // ---- the person at the terminal -------------------------------------
 

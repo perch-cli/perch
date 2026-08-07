@@ -18,12 +18,11 @@
 //! reading the configuration and writing it back are the same vocabulary and a
 //! script needs no parser.
 //!
-//! The watcher's two fields are stored and validated here and read by nothing:
-//! the watcher itself is deferred (ADR 0013). They are settable now so a Group
-//! configured today is one the watcher can be pointed at without migrating
-//! anything — and every message about them says plainly that nothing is acting
-//! on them yet, because a setting that looks like it took but does nothing is
-//! worse than one that is refused.
+//! The watcher's two fields say whether `perch watch` may Switch within a
+//! Group and at what Utilization it does (ADR 0013). Both messages about them
+//! say the same thing about what they are not: a Group that may be acted on is
+//! not a service that has been switched on, because nothing acts on it unless
+//! somebody is running the loop.
 
 use std::io::Write;
 
@@ -44,10 +43,11 @@ pub enum ConfigCommand {
     /// Set one setting, and say what it now means.
     ///
     /// A Group carries `strategy` — `most-headroom` or `soonest-reset` —
-    /// along with `watcher-may-act` and `watcher-threshold-percent`, which are
-    /// stored and validated and read by nothing yet (ADR 0013). Naming no
-    /// Group addresses `cycle-ungrouped`, which is whether bare `perch switch`
-    /// may Cycle among the Accounts in no Group at all.
+    /// along with `watcher-may-act` and `watcher-threshold-percent`, which say
+    /// whether `perch watch` may Switch within it and at what Utilization
+    /// (ADR 0013). Naming no Group addresses `cycle-ungrouped`, which is
+    /// whether bare `perch switch` may Cycle among the Accounts in no Group at
+    /// all.
     Set {
         /// `<group> <key> <value>`, or `<key> <value>` for a setting that
         /// belongs to no Group.
@@ -334,8 +334,7 @@ impl GroupKey {
     }
 
     /// What the Group now does, which is the half of the answer the value
-    /// itself does not give. For the watcher's fields it is mostly what it
-    /// still does not do.
+    /// itself does not give.
     fn what_that_means(self, config: &GroupConfig, group: &str) -> String {
         match self {
             GroupKey::Strategy => match config.strategy {
@@ -351,25 +350,29 @@ impl GroupKey {
                      chosen however soon it comes back."
                 ),
             },
-            GroupKey::WatcherMayAct if config.watcher_may_act => {
-                format!("Nothing switches within `{group}` unattended yet: {WATCHER_IS_DEFERRED}")
-            }
+            GroupKey::WatcherMayAct if config.watcher_may_act => format!(
+                "`perch watch` may Switch within `{group}` on your behalf when \
+                 the Account you are on reaches its threshold. {ONLY_WHILE_IT_RUNS}"
+            ),
             GroupKey::WatcherMayAct => format!(
-                "Nothing switches within `{group}` unattended — and nothing \
-                 would have anyway: {WATCHER_IS_DEFERRED}"
+                "`perch watch` will not act on `{group}`: started on an Account \
+                 in it, it says so and exits rather than watching. A Group only \
+                 ever changes underneath you because you said it could."
             ),
             GroupKey::WatcherThresholdPercent => format!(
-                "That is the Utilization the watcher would act at within \
-                 `{group}`. Nothing acts on it: {WATCHER_IS_DEFERRED}"
+                "`perch watch` Switches within `{group}` once that much of the \
+                 fullest Quota Window of the Account you are on has been used. \
+                 {ONLY_WHILE_IT_RUNS}"
             ),
         }
     }
 }
 
-/// Said of every watcher field, in one place, because two sentences about it
-/// would sooner or later say two different things (ADR 0013).
-const WATCHER_IS_DEFERRED: &str = "the watcher is not in this version. The \
-     setting is stored and validated, and governs it when it lands.";
+/// Said of both of the watcher's fields, in one place, because two sentences
+/// about it would sooner or later say two different things: nothing here is a
+/// service that has been switched on (ADR 0013).
+const ONLY_WHILE_IT_RUNS: &str = "Only while it is running, and only in the \
+     terminal you run it in: it is a loop you can see and kill, not a daemon.";
 
 /// The settings that belong to no Group, because there is no Group for them to
 /// belong to (ADR 0017).
