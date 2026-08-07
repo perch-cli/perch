@@ -40,6 +40,17 @@ fn a_machine_to_give_back() -> FakeHost {
     host.with_answers(&["n", "purge"])
 }
 
+/// The same directory as Perch would *write* it, which is not the same string
+/// on every platform: a path is displayed with the separator the platform uses,
+/// so a test that matched output against the literal above would pass on two of
+/// the three machines Perch is built for.
+fn perch_home_as_written(host: &FakeHost) -> String {
+    perch::registry::perch_home(host)
+        .expect("home is known")
+        .display()
+        .to_string()
+}
+
 /// The registry as it is on disk, or nothing at all — which is what a machine
 /// given back looks like.
 fn registry_on(host: &FakeHost) -> Option<Registry> {
@@ -141,7 +152,7 @@ fn the_prompt_lists_the_accounts_by_email_and_says_nothing_undoes_it() {
         assert!(printed.contains(email), "{email} is named: {printed}");
     }
     assert!(printed.contains("Nothing undoes it"), "{printed}");
-    assert!(printed.contains(PERCH_HOME), "{printed}");
+    assert!(printed.contains(&perch_home_as_written(&host)), "{printed}");
 }
 
 /// A `y` is what fingers answer before eyes have read anything, and this is the
@@ -282,7 +293,10 @@ fn an_export_inside_what_the_purge_will_take_is_refused() {
 
     let refused = outcome.expect_err("that file would not survive the Purge");
     assert_eq!(refused.exit_code(), EXIT_INVALID, "{refused}");
-    assert!(refused.to_string().contains(PERCH_HOME), "{refused}");
+    assert!(
+        refused.to_string().contains(&perch_home_as_written(&host)),
+        "{refused}"
+    );
     assert_eq!(
         registry_on(&host).map(|registry| registry.accounts.len()),
         Some(3),
@@ -487,7 +501,10 @@ fn a_machine_perch_never_ran_on_has_nothing_to_give_back() {
 
     let refused = outcome.expect_err("there is nothing here");
     assert_eq!(refused.exit_code(), EXIT_NOTHING_TO_DO, "{refused}");
-    assert!(refused.to_string().contains(PERCH_HOME), "{refused}");
+    assert!(
+        refused.to_string().contains(&perch_home_as_written(&host)),
+        "{refused}"
+    );
     assert!(
         !host.path_exists(Path::new(PERCH_HOME)),
         "and no directory was made on the way to saying so"
