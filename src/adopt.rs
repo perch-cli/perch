@@ -7,8 +7,6 @@
 //! 0006), so adoption starts the system in its steady state rather than adding
 //! a case.
 
-use std::io::Write;
-
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::login;
@@ -18,13 +16,13 @@ use crate::registry::{self, Account, Registry};
 
 /// Loads the registry, adopting the existing login the first time Perch runs.
 ///
-/// Anything worth telling the user about adoption is written to `out` before
-/// the command that asked for it renders anything.
+/// Anything worth telling the user about adoption is remarked on rather than
+/// written to the command's own output — see [`report`] for why.
 ///
 /// For the commands that only *read* the registry, and for the two that spend a
 /// browser login before they change anything. A command that is going to write
 /// wants [`ensure_adopted_exclusively`] instead.
-pub fn ensure_adopted(host: &dyn Host, out: &mut dyn Write) -> Result<Registry> {
+pub fn ensure_adopted(host: &dyn Host) -> Result<Registry> {
     login::reap_abandoned(host);
     if let Some(registry) = registry::load(host)? {
         return Ok(registry);
@@ -33,7 +31,7 @@ pub fn ensure_adopted(host: &dyn Host, out: &mut dyn Write) -> Result<Registry> 
     // — two of them adopting at once would each build the first Profile and one
     // would overwrite the other's registry wholesale.
     let mut perch = registry::lock(host)?;
-    load_or_adopt(host, &mut perch, out)
+    load_or_adopt(host, &mut perch)
 }
 
 /// The registry, with every other Perch shut out of it until the returned hold
@@ -44,34 +42,23 @@ pub fn ensure_adopted(host: &dyn Host, out: &mut dyn Write) -> Result<Registry> 
 /// exclusive is the whole load → change → save, not the save. A command holding
 /// a copy read before somebody else's `perch switch` writes that copy back
 /// afterwards and reverts them (see [`registry::lock`]).
-pub fn ensure_adopted_exclusively<'a>(
-    host: &'a dyn Host,
-    out: &mut dyn Write,
-) -> Result<(crate::lock::Held<'a>, Registry)> {
+pub fn ensure_adopted_exclusively(host: &dyn Host) -> Result<(crate::lock::Held<'_>, Registry)> {
     login::reap_abandoned(host);
     let mut held = registry::lock(host)?;
-    let registry = load_or_adopt(host, &mut held, out)?;
+    let registry = load_or_adopt(host, &mut held)?;
     Ok((held, registry))
 }
 
 /// The registry, adopting the existing login if there is none. The lock is the
 /// caller's to have taken — this is the half of adoption that writes.
-fn load_or_adopt(
-    host: &dyn Host,
-    perch: &mut crate::lock::Held<'_>,
-    out: &mut dyn Write,
-) -> Result<Registry> {
+fn load_or_adopt(host: &dyn Host, perch: &mut crate::lock::Held<'_>) -> Result<Registry> {
     match registry::load(host)? {
         Some(registry) => Ok(registry),
-        None => adopt(host, perch, out),
+        None => adopt(host, perch),
     }
 }
 
-fn adopt(
-    host: &dyn Host,
-    perch: &mut crate::lock::Held<'_>,
-    out: &mut dyn Write,
-) -> Result<Registry> {
+fn adopt(host: &dyn Host, perch: &mut crate::lock::Held<'_>) -> Result<Registry> {
     let findings = match probe::probe(host)? {
         Verdict::Recognised(findings) => findings,
         Verdict::NoLogin { version, .. } => {
@@ -85,7 +72,7 @@ fn adopt(
     };
 
     let registry = store_as_first_profile(host, perch, &findings)?;
-    report(out, &findings)?;
+    report(host, &findings);
     Ok(registry)
 }
 
@@ -142,7 +129,18 @@ fn carry_the_identity_block(host: &dyn Host, findings: &Findings, store: &Store)
 
 /// Says what was adopted, so the user can confirm Perch picked up the right
 /// Account before trusting it with anything.
-fn report(out: &mut dyn Write, findings: &Findings) -> Result<()> {
+///
+/// Said as a remark rather than written to `out`, because it is news about the
+/// machine and not the answer to the command somebody ran. Every caller reached
+/// adoption on the way to something else — `perch list`, `perch status`, a
+/// `perch switch` — and two of those render JSON on the very stream this would
+/// otherwise land on first. A document that begins with three lines of prose is
+/// not a document, and the first run is exactly where a script meets it.
+///
+/// That is the reasoning `Host::note` already carries for the stream it writes
+/// to: "a note never lands in the middle of the JSON a script is reading off
+/// stdout". Adoption was the one thing saying its piece on the other one.
+fn report(host: &dyn Host, findings: &Findings) {
     let mut description = findings.identity.email.clone();
     let details: Vec<String> = [
         findings.identity.organization_name.clone(),
@@ -155,18 +153,11 @@ fn report(out: &mut dyn Write, findings: &Findings) -> Result<()> {
         description.push_str(&format!(" ({})", details.join(", ")));
     }
 
-    writeln!(
-        out,
+    host.note(&format!(
         "Adopted the Claude Code login as your first Profile: {description}"
-    )
-    .and_then(|_| {
-        writeln!(
-            out,
-            "It is now the active Account. Claude Code {}.",
-            findings.version
-        )
-    })
-    .map_err(|err| PerchError::Other(err.to_string()))?;
-    writeln!(out).map_err(|err| PerchError::Other(err.to_string()))?;
-    Ok(())
+    ));
+    host.note(&format!(
+        "It is now the active Account. Claude Code {}.",
+        findings.version
+    ));
 }

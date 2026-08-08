@@ -59,8 +59,6 @@ fn a_credential_file_others_could_read_is_tightened_and_reported_rather_than_ref
 
     result.expect("a loose file is not a reason to refuse a working machine");
     assert_eq!(host.mode_of(CREDENTIALS_PATH), Some(0o600));
-    let notes = host.notes();
-    assert_eq!(notes.len(), 1, "said once: {notes:?}");
     // The note spells the path the way this platform joins it, so the
     // expectation derives the same spelling rather than writing one by hand.
     let displayed = perch::probe::default_store(&host)
@@ -68,7 +66,12 @@ fn a_credential_file_others_could_read_is_tightened_and_reported_rather_than_ref
         .credentials_file
         .display()
         .to_string();
-    assert!(notes[0].contains(&displayed), "{notes:?}");
+    let notes = host.notes();
+    let tightened: Vec<&String> = notes
+        .iter()
+        .filter(|note| note.contains(&displayed))
+        .collect();
+    assert_eq!(tightened.len(), 1, "said once: {notes:?}");
 }
 
 #[test]

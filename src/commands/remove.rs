@@ -64,7 +64,7 @@ impl Consequence {
 }
 
 pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()> {
-    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
     let found = target::resolve_account(&registry, &args.target)?;
     say(out, &found.matched)?;

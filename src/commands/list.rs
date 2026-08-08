@@ -88,7 +88,7 @@ pub fn group_heading(name: &str) -> String {
 }
 
 pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
-    let registry = adopt::ensure_adopted(host, out)?;
+    let registry = adopt::ensure_adopted(host)?;
     let now = host.now();
     // `perch list` never fetches (ADR 0015), so there is nothing to report
     // about a refresh: the empty report renders as "nobody asked".

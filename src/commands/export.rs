@@ -48,7 +48,7 @@ pub fn run(host: &dyn Host, args: ExportArgs, out: &mut dyn Write) -> Result<()>
     refuse_a_directory_that_is_not_there(host, &args.path)?;
     refuse_an_occupied_path(host, &args.path)?;
 
-    let (_perch, registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    let (_perch, registry) = adopt::ensure_adopted_exclusively(host)?;
     write_the_export(host, &registry, &args.path, out)
 }
 

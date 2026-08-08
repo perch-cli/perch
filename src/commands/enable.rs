@@ -44,7 +44,7 @@ impl EnableCommand {
 }
 
 pub fn run(host: &dyn Host, command: EnableCommand, out: &mut dyn Write) -> Result<()> {
-    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
     let account = target::resolve_account(&registry, command.target())?;
     let said = set(&mut registry, &account, &command);

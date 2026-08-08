@@ -48,7 +48,7 @@ pub enum GroupCommand {
 const LABEL_WIDTH: usize = 13;
 
 pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Result<()> {
-    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
     match command {
         GroupCommand::Add { name } => {

@@ -63,7 +63,7 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // and a registry lock held across that would shut every other Perch on the
     // machine out for the afternoon — including the second Run this command
     // exists to make possible.
-    let registry = adopt::ensure_adopted(host, out)?;
+    let registry = adopt::ensure_adopted(host)?;
 
     // A Group names a set of Accounts declared interchangeable, which is what a
     // Cycle needs and nothing a Run can act on: there is no one Profile to point

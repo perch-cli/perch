@@ -45,10 +45,10 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
     // same moment.
     let (mut perch, mut registry) = match args.refresh {
         true => {
-            let (perch, registry) = adopt::ensure_adopted_exclusively(host, out)?;
+            let (perch, registry) = adopt::ensure_adopted_exclusively(host)?;
             (Some(perch), registry)
         }
-        false => (None, adopt::ensure_adopted(host, out)?),
+        false => (None, adopt::ensure_adopted(host)?),
     };
     let active = active_email(&registry)?;
 

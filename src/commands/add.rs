@@ -35,7 +35,7 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     // Read rather than held. A login is a browser round trip the user drives,
     // and holding the registry lock across it would block every other Perch on
     // the machine for as long as somebody takes to find their password.
-    let registry = adopt::ensure_adopted(host, out)?;
+    let registry = adopt::ensure_adopted(host)?;
 
     // Everything knowable before the login is checked before the login, so a
     // name Perch was always going to refuse never costs a browser round trip.
@@ -64,7 +64,7 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     // may have taken minutes, and writing it back would revert whatever else
     // ran in the meantime — a `perch switch` in another terminal, most
     // damagingly, whose `active` the next Capture depends on (ADR 0006).
-    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
     refuse_an_account_perch_already_holds(host, &registry, &pending.identity)?;
     registry.refuse_taken_names(args.alias.as_deref(), group.as_deref())?;
 

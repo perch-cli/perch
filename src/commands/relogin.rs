@@ -42,7 +42,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // Read rather than held: the registry lock is not carried across a browser
     // login. It is taken below, against a registry read fresh once the login
     // has come back.
-    let registry = adopt::ensure_adopted(host, out)?;
+    let registry = adopt::ensure_adopted(host)?;
 
     let found = target::resolve_account(&registry, &args.target)?;
     say(out, &found.matched)?;
@@ -81,7 +81,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // From here the registry is the one on disk now, with the other Perches shut
     // out: the copy read before the login is however many commands out of date,
     // and writing it back would revert them.
-    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
     if registry.account(account.email()).is_none() {
         return Err(PerchError::NotFound(format!(
             "{} was removed while that login was happening, so there is nothing \
