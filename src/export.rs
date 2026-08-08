@@ -49,6 +49,19 @@ pub struct Export {
     /// Account travels, reason and all.
     #[serde(default)]
     pub credentials: BTreeMap<String, String>,
+    /// Each Account's own `.claude.json`, by the address of the Account it
+    /// belongs to.
+    ///
+    /// A Profile holds two things, not one. The Credential is what cannot be
+    /// reconstructed, and this is what cannot be reconstructed *faithfully*:
+    /// Claude Code writes an `oauthAccount` block carrying fields beyond the
+    /// four the registry records, and a Switch prefers that block verbatim over
+    /// one Perch composes. An Export without it restores every Account into the
+    /// degraded state [`crate::adopt`] goes out of its way to keep the first one
+    /// out of. It is also what a Run Carries from, so a Profile arriving without
+    /// one meets the onboarding dialog on every single Run (ADR 0003).
+    #[serde(default)]
+    pub identity_files: BTreeMap<String, String>,
 }
 
 /// Reads everything Perch holds: the registry it was handed, and the Credential
@@ -65,9 +78,17 @@ pub struct Export {
 /// and the user would find out on the day they needed it.
 pub fn gather(host: &dyn Host, registry: &Registry) -> Result<Export> {
     let mut credentials = BTreeMap::new();
+    let mut identity_files = BTreeMap::new();
     for account in &registry.accounts {
         if let Some(credential) = read_the_credential(host, account)? {
             credentials.insert(account.email().to_string(), credential);
+        }
+        // Unlike the Credential, an identity file that will not be read does not
+        // stop the Export. It is not a secret and it is not irreplaceable — an
+        // Import composes one from the Identity the registry carries — so the
+        // whole file is worth more than the fidelity of one Profile's copy.
+        if let Some(contents) = read_the_identity_file(host, account) {
+            identity_files.insert(account.email().to_string(), contents);
         }
     }
 
@@ -75,6 +96,7 @@ pub fn gather(host: &dyn Host, registry: &Registry) -> Result<Export> {
         version: CURRENT_VERSION,
         registry: registry.clone(),
         credentials,
+        identity_files,
     })
 }
 
@@ -88,6 +110,11 @@ fn read_the_credential(host: &dyn Host, account: &Account) -> Result<Option<Stri
         ))
     })?;
     Ok(held.map(|held| held.credential))
+}
+
+fn read_the_identity_file(host: &dyn Host, account: &Account) -> Option<String> {
+    let store = account.store(host).ok()?;
+    host.read_file(&store.identity_file).ok()
 }
 
 impl Export {
@@ -212,6 +239,10 @@ mod tests {
             credentials: BTreeMap::from([(
                 "someone@example.com".to_string(),
                 r#"{"claudeAiOauth":{"refreshToken":"sk-ant-ort01-test"}}"#.to_string(),
+            )]),
+            identity_files: BTreeMap::from([(
+                "someone@example.com".to_string(),
+                r#"{"oauthAccount":{"emailAddress":"someone@example.com"}}"#.to_string(),
             )]),
         }
     }

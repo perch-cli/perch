@@ -458,3 +458,59 @@ fn what_an_export_wrote_is_what_an_import_reads_back() {
 
     assert_eq!(registry_of(&onto), exported.1);
 }
+
+/// A Profile holds two things, and both of them travel.
+///
+/// The Credential is the one that cannot be reconstructed at all. The identity
+/// file is the one that cannot be reconstructed *faithfully*: the `oauthAccount`
+/// block Claude Code wrote carries fields beyond the four the registry records,
+/// and a Switch prefers it verbatim over anything Perch composes. Restoring
+/// without it puts every Account into the degraded state adoption goes out of
+/// its way to keep the first one out of — and leaves each Profile with nothing
+/// for a Run to Carry into, so the onboarding dialog comes back on every Run
+/// (ADR 0003).
+#[test]
+fn an_imported_profile_holds_the_identity_file_its_account_had() {
+    let from = machine_with_two_accounts();
+    let sealed = {
+        let host = from.with_secrets(&[PASSPHRASE, PASSPHRASE]);
+        run_export(&host, AT).0.expect("the export is written");
+        host.file(AT).expect("a file was written")
+    };
+
+    let onto = a_new_machine_holding(&sealed);
+    run_import(&onto, AT).0.expect("the import lands");
+
+    for email in [EMAIL, SECOND_EMAIL] {
+        let held = onto
+            .file(store_of(&onto, email).identity_file)
+            .unwrap_or_else(|| panic!("{email}'s Profile holds an identity file"));
+        assert!(
+            held.contains(email),
+            "and it is that Account's own block: {held}"
+        );
+    }
+}
+
+/// An Export written before its Profile ever had one still restores a Profile a
+/// Run can Carry into: the Identity the registry records is enough to compose
+/// the block Claude Code would have written.
+#[test]
+fn an_account_whose_export_carried_no_identity_file_still_gets_one() {
+    let from = machine_with_two_accounts();
+    let unreadable = store_of(&from, SECOND_EMAIL).identity_file;
+    let from = from.with_unreadable_file(unreadable, "Permission denied (os error 13)");
+    let sealed = {
+        let host = from.with_secrets(&[PASSPHRASE, PASSPHRASE]);
+        run_export(&host, AT).0.expect("the export is written");
+        host.file(AT).expect("a file was written")
+    };
+
+    let onto = a_new_machine_holding(&sealed);
+    run_import(&onto, AT).0.expect("the import lands");
+
+    let held = onto
+        .file(store_of(&onto, SECOND_EMAIL).identity_file)
+        .expect("one was composed rather than left absent");
+    assert!(held.contains(SECOND_EMAIL), "{held}");
+}

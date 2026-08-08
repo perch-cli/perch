@@ -24,7 +24,8 @@
 use crate::error::{PerchError, Result};
 use crate::export::Export;
 use crate::host::Host;
-use crate::probe::Store;
+use crate::login;
+use crate::probe::{self, Store};
 use crate::profile;
 use crate::registry::{self, Registry};
 
@@ -138,12 +139,31 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
     for account in &export.registry.accounts {
         let store = account.store(host)?;
         if let Some(credential) = export.credentials.get(account.email()) {
-            placements.push((account.email().to_string(), store, credential));
+            // The Profile's own `.claude.json` travels beside its Credential.
+            // Where the Export carries one it is written verbatim, because the
+            // `oauthAccount` block Claude Code wrote holds fields the registry
+            // does not record and a Switch prefers it over anything Perch would
+            // compose. Where it carries none, one is composed — a Profile
+            // without this file Carries nothing, so every Run against it would
+            // meet the onboarding dialog afresh (ADR 0003).
+            let identity_file = export
+                .identity_files
+                .get(account.email())
+                .cloned()
+                .unwrap_or_else(|| {
+                    probe::fresh_identity_file(&account.identity.oauth_account_block())
+                });
+            placements.push((
+                account.email().to_string(),
+                store,
+                credential,
+                identity_file,
+            ));
         }
     }
 
     let mut placed = Placed::default();
-    for (email, store, credential) in placements {
+    for (email, store, credential, identity_file) in placements {
         // Recorded before it is written rather than after it worked, because
         // what has to come back out is everything this touched: a Profile
         // directory made for a Credential that then would not go into it is
@@ -151,6 +171,7 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
         placed.touched.push(store.clone());
         if let Err(error) = profile::make_dir(host, &store.config_dir)
             .and_then(|()| profile::store_credential(host, &store, credential))
+            .and_then(|()| login::carry_identity_file(host, &identity_file, &store))
         {
             placed.undo(host);
             // Said as "every Profile this had made" rather than as a count,
@@ -204,6 +225,7 @@ mod tests {
             version: CURRENT_VERSION,
             registry,
             credentials: BTreeMap::from([("one@example.com".to_string(), "held".to_string())]),
+            identity_files: BTreeMap::new(),
         }
     }
 
