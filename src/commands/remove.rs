@@ -135,22 +135,15 @@ fn refuse_while_anything_is_running(
     consequence: &Consequence,
 ) -> Result<()> {
     let version = probe::claude_version(host)?;
-    switch::refuse_if_live(host, account, &version)?;
-
-    if consequence.successor.is_some() {
-        // The Default Profile is written on the way out, and its Credential is
-        // the one a running client is holding. Replacing it out from under a
-        // session logs that session out mid-task (ADR 0005), and this removal
-        // would replace it rather than renew it.
-        switch::refuse_if_live_in(
-            host,
-            &probe::default_store(host)?.config_dir,
+    switch::refuse_if_live_anywhere(
+        host,
+        account,
+        consequence.successor.is_some().then_some(
             "the Default Profile, which is where the Account Perch would land on \
              has to be written",
-            &version,
-        )?;
-    }
-    Ok(())
+        ),
+        &version,
+    )
 }
 
 fn consequence_of(registry: &Registry, account: &Account) -> Consequence {
