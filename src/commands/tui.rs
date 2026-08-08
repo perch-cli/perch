@@ -37,7 +37,7 @@ pub fn run(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     // Whatever adoption has to say belongs in the scrollback, where it can be
     // read afterwards — not under an alternate screen that is about to cover
     // it and then be thrown away.
-    let registry = adopt::ensure_adopted(host, out)?;
+    let registry = adopt::ensure_adopted(host)?;
     out.flush().map_err(write_failed)?;
 
     let mut refresher = InAThread::new();

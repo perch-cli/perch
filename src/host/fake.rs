@@ -1008,6 +1008,15 @@ impl Host for FakeHost {
                 path: path.to_path_buf(),
             });
         }
+        // A file whose *permissions* cannot be changed is the same arrangement
+        // as one whose contents cannot: a `chmod` on a file owned by somebody
+        // else fails with `EPERM` however readable it is. Without this the fake
+        // had no way to be a machine where tightening a loose Credential does
+        // not work, which is the branch that decides whether the user is ever
+        // told about a world-readable refresh token.
+        if let Some(detail) = self.unwritable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
+        }
         self.modes
             .borrow_mut()
             .insert(path.to_path_buf(), PRIVATE_FILE_MODE);
@@ -1060,7 +1069,19 @@ impl Host for FakeHost {
 
     fn create_dir_exclusive(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::Took(path.to_path_buf()));
-        if self.path_exists(path) {
+        // A link in the way counts, whether or not it still resolves.
+        //
+        // `path_exists` follows a link and answers `false` for a broken one,
+        // which is right for the question a Reconcile asks and wrong for this
+        // one: `mkdir` does not follow the last component, so it fails
+        // `EEXIST` at a symlink whatever the symlink points at. A fake that
+        // created the directory *over* a dangling link could not represent the
+        // state where a Profile holds a link into a Default Profile that has
+        // gone — and in that state a real `lock::take` gets `AlreadyExists`,
+        // reads the lock as abandoned because the link will not say when it was
+        // written, tries `remove_dir_all` on a symlink and is ignored, and
+        // refuses every Switch and every Run against that Profile for ever.
+        if self.links.borrow().contains_key(path) || self.path_exists(path) {
             return Err(HostError::AlreadyExists {
                 path: path.to_path_buf(),
             });
@@ -1478,5 +1499,44 @@ impl Host for FakeHost {
             .or_else(|| replies.get(&(asked.clone(), None)))
             .cloned()
             .ok_or_else(|| HostError::Other(format!("the fake Host has no network: {asked}")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `mkdir` does not follow the last component of the path it is given, so
+    /// it fails `EEXIST` at a symlink whatever that symlink points at. The fake
+    /// answered this through `path_exists`, which *does* follow — and answers
+    /// `false` for a broken link — so it created the directory straight over
+    /// one.
+    ///
+    /// The state that reaches is a Profile holding a link into a Default
+    /// Profile that has gone, which `reconcile::sweep` exists to prevent and
+    /// which a machine can still arrive at. There, `lock::take` gets
+    /// `AlreadyExists`, reads the lock as abandoned because a dangling link
+    /// will not say when it was written, calls `remove_dir_all` on a symlink
+    /// and has the failure ignored — and then refuses every Switch and every
+    /// Run against that Profile for ever. No behaviour test could reach it.
+    #[test]
+    fn a_directory_is_not_taken_over_a_link_that_points_at_nothing() {
+        let host = FakeHost::new().with_link(
+            Link::Symbolic,
+            "/Users/someone/.claude/.oauth_refresh.lock",
+            "/Users/someone/.config/perch/profiles/a/.oauth_refresh.lock",
+        );
+        let at = Path::new("/Users/someone/.config/perch/profiles/a/.oauth_refresh.lock");
+
+        // The target never existed, so the link dangles.
+        assert!(!host.path_exists(at), "the link resolves to nothing");
+
+        assert!(
+            matches!(
+                host.create_dir_exclusive(at),
+                Err(HostError::AlreadyExists { .. })
+            ),
+            "a link in the way is in the way, as it is to a real `mkdir`"
+        );
     }
 }

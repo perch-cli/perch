@@ -577,3 +577,68 @@ fn nothing_is_asked_of_anthropic_by_a_purge() {
 
     assert!(host.http_calls().is_empty(), "{:?}", host.http_calls());
 }
+
+/// A Purge derives the Credential Stores it empties from the registry, and the
+/// registry is not the whole account of what Perch is holding. A login
+/// abandoned at the browser step leaves a working Credential in a `pending/`
+/// directory, and nothing reaps one under thirty minutes old — so the ordinary
+/// sequence of Ctrl-C at the login and `perch purge` a few minutes later used
+/// to destroy the directory the keychain item's service name is derived from,
+/// leaving a live refresh token nothing could ever find again while the report
+/// said the machine had been given back.
+#[test]
+fn a_purge_takes_the_credential_an_abandoned_login_left_as_well() {
+    let host = machine_with_two_accounts();
+
+    let abandoned = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    let store = perch::probe::store_for_profile(&host, &abandoned).expect("USER is set");
+    host.set_keychain_item(&store.keychain_service, LOGIN_NAME, SECOND_CREDENTIAL);
+    host.set_file(&store.credentials_file, SECOND_CREDENTIAL);
+
+    run_purge_with(&host, perch::commands::purge::PurgeArgs { yes: true })
+        .0
+        .expect("the machine is given back");
+
+    assert_eq!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME),
+        None,
+        "the abandoned login's Credential lives outside Perch's home, and its \
+         directory is the only thing that could ever name it"
+    );
+    assert_eq!(
+        host.keychain_services(),
+        vec![DEFAULT_SERVICE.to_string()],
+        "and the only Credential still on the machine is Claude Code's own \
+         login, which a Purge deliberately leaves alone"
+    );
+    assert!(!host.path_exists(Path::new(PERCH_HOME)));
+}
+
+/// The same hole from the other side: a `perch add` whose registry write failed
+/// leaves a Profile holding a live Credential that no Account names.
+#[test]
+fn a_purge_takes_the_credential_of_a_profile_the_registry_never_recorded() {
+    let host = machine_with_two_accounts();
+
+    let orphan = perch::registry::profiles_dir(&host)
+        .expect("home is known")
+        .join("nobody-example-com");
+    let store = perch::probe::store_for_profile(&host, &orphan).expect("USER is set");
+    host.set_keychain_item(&store.keychain_service, LOGIN_NAME, SECOND_CREDENTIAL);
+    host.set_file(&store.credentials_file, SECOND_CREDENTIAL);
+
+    run_purge_with(&host, perch::commands::purge::PurgeArgs { yes: true })
+        .0
+        .expect("the machine is given back");
+
+    assert_eq!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME),
+        None,
+        "a Profile nothing records is still a Profile Perch made"
+    );
+    assert_eq!(
+        host.keychain_services(),
+        vec![DEFAULT_SERVICE.to_string()],
+        "leaving only Claude Code's own login"
+    );
+}

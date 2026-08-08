@@ -28,7 +28,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::commands::{ask, ask_a_word, export, say};
+use crate::commands::{ask, ask_a_word, export, say, still_ours};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::purge::{self, Purged};
@@ -76,7 +76,7 @@ pub fn run(host: &dyn Host, args: PurgeArgs, out: &mut dyn Write) -> Result<()> 
 
     say(out, &what_will_go(&registry, &home))?;
     if !args.yes {
-        offer_an_export(host, &registry, &home, out)?;
+        offer_an_export(host, &mut perch, &registry, &home, out)?;
         if !agreed(host, out)? {
             return say(out, "Nothing was purged.");
         }
@@ -86,16 +86,7 @@ pub fn run(host: &dyn Host, args: PurgeArgs, out: &mut dyn Write) -> Result<()> 
     // point: the questions above are the one wait in Perch with no bound on
     // them, and everything from this line on deletes Credentials. A registry
     // this Perch may no longer write is one it may no longer act on either.
-    perch.renew();
-    if !perch.still_held() {
-        return Err(PerchError::Other(
-            "Another `perch` changed the registry while that question was \
-             waiting for an answer, so this one is working from a copy that is \
-             out of date.\n\
-             Nothing was purged. Run this again."
-                .to_string(),
-        ));
-    }
+    still_ours(&mut perch, "purged")?;
 
     // Asked again for the same reason the hold is re-checked, and it is the same
     // window: somebody may have started a client while the passphrase was being
@@ -177,6 +168,7 @@ fn what_will_go(registry: &Registry, home: &Path) -> String {
 /// has been destroyed yet — so the answer is to run `perch purge` again.
 fn offer_an_export(
     host: &dyn Host,
+    perch: &mut crate::lock::Held<'_>,
     registry: &Registry,
     home: &Path,
     out: &mut dyn Write,
@@ -214,7 +206,7 @@ fn offer_an_export(
     };
     refuse_a_path_the_purge_would_take(&path, home)?;
 
-    export::write_the_export(host, registry, &path, out)
+    export::write_the_export(host, perch, registry, &path, out)
 }
 
 /// Refuses to write the Export inside the directory this Purge is about to

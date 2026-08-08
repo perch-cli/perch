@@ -72,7 +72,7 @@ pub enum ConfigCommand {
 }
 
 pub fn run(host: &dyn Host, command: ConfigCommand, out: &mut dyn Write) -> Result<()> {
-    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
     match command {
         ConfigCommand::Set { words } => {

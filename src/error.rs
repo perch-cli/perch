@@ -104,6 +104,14 @@ pub enum PerchError {
     #[error("{0}")]
     ProfileLive(String),
 
+    /// Another `perch` is holding a lock this one waited out. Nothing is wrong
+    /// and nothing was changed — the answer is to ask again shortly, which is
+    /// why it carries [`EXIT_HELD`] rather than a general failure: a scheduler
+    /// and the watcher's own loop both need to tell "come back in a minute"
+    /// from "this will fail the same way for ever".
+    #[error("{0}")]
+    Busy(String),
+
     /// A Cycle found nowhere worth landing. Says which Account frees up
     /// soonest, so waiting is a decision the user makes rather than one Perch
     /// makes for them by switching somewhere useless.
@@ -255,6 +263,7 @@ impl PerchError {
             PerchError::NoCandidate(_) => EXIT_NO_CANDIDATE,
             PerchError::NotInterchangeable(_) => EXIT_NOT_INTERCHANGEABLE,
             PerchError::Quarantined { .. } => EXIT_QUARANTINED,
+            PerchError::Busy(_) => EXIT_HELD,
             _ => EXIT_GENERAL,
         }
     }

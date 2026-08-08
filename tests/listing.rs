@@ -340,8 +340,37 @@ fn list_on_a_machine_perch_has_never_run_on_adopts_first() {
 
     result.unwrap();
     assert!(
-        printed.contains("Adopted the Claude Code login"),
-        "{printed}"
+        host.notes()
+            .iter()
+            .any(|note| note.contains("Adopted the Claude Code login")),
+        "{:?}",
+        host.notes()
     );
     assert!(printed.contains(EMAIL), "{printed}");
+}
+
+/// The first run is where a script meets adoption, and adoption used to say its
+/// piece on the stream the document is written to. A `--json` that begins with
+/// three lines of prose is not a document, and `jq` is what finds out.
+#[test]
+fn the_json_of_a_first_run_is_a_document_and_nothing_else() {
+    for json_of in [
+        (|host: &FakeHost| run_list(host, true)) as fn(&FakeHost) -> (perch::Result<()>, String),
+        |host: &FakeHost| run_status(host, true),
+    ] {
+        let host = logged_in_machine();
+
+        let (result, printed) = json_of(&host);
+
+        result.unwrap();
+        assert!(
+            host.notes()
+                .iter()
+                .any(|note| note.contains("Adopted the Claude Code login")),
+            "adoption still says what it did: {:?}",
+            host.notes()
+        );
+        serde_json::from_str::<serde_json::Value>(&printed)
+            .unwrap_or_else(|err| panic!("stdout has to parse whole: {err}\n{printed}"));
+    }
 }

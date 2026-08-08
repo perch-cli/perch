@@ -212,12 +212,25 @@ fn tighten_if_loose(host: &dyn Host, path: &std::path::Path) {
     if host::is_private(mode) {
         return;
     }
-    if host.make_private(path).is_ok() {
-        host.note(&format!(
+    // Said either way. The reasoning above — that a tightened file is a better
+    // outcome than an explained one — assumes the tightening works, and when it
+    // does not the user was getting neither: no error, no remark, and a
+    // world-readable refresh token read on every command from then on. That is
+    // the one outcome worse than an explanation, because nothing is ever going
+    // to mention it again.
+    match host.make_private(path) {
+        Ok(()) => host.note(&format!(
             "{} held a Credential that others could read ({mode:04o}). \
              Its permissions have been narrowed to you alone.",
             path.display()
-        ));
+        )),
+        Err(err) => host.note(&format!(
+            "{} holds a Credential that others could read ({mode:04o}), and its \
+             permissions could not be narrowed: {err}. \
+             Anyone who can read that file can act as this Account until it is \
+             `chmod 600`.",
+            path.display()
+        )),
     }
 }
 

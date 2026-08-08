@@ -167,7 +167,7 @@ pub struct Model {
 
 impl Model {
     pub fn new(registry: Registry, now: DateTime<Utc>) -> Model {
-        let (order, sections) = ranked(&registry);
+        let (order, sections) = ranked(&registry, now);
         Model {
             order,
             sections,
@@ -221,7 +221,7 @@ impl Model {
     pub fn now_holds(&mut self, registry: Registry) {
         let was_on = self.selected().map(|account| account.email().to_string());
         self.registry = registry;
-        (self.order, self.sections) = ranked(&self.registry);
+        (self.order, self.sections) = ranked(&self.registry, self.now);
         self.cursor = was_on
             .and_then(|email| self.row_of(&email))
             .unwrap_or(self.cursor)
@@ -391,12 +391,12 @@ const WAITING_ON_A_REFRESH: &str = "The Refresh you asked for is still out, and 
 /// Both tabs are drawn from this one order, because the cursor is shared
 /// between them: two orders would be a `Tab` that moved what the acting keys
 /// act on.
-fn ranked(registry: &Registry) -> (Vec<usize>, Vec<Section>) {
+fn ranked(registry: &Registry, now: DateTime<Utc>) -> (Vec<usize>, Vec<Section>) {
     let mut order = Vec::with_capacity(registry.accounts.len());
     let mut sections = Vec::new();
     for scope in scopes(registry) {
         let from = order.len();
-        for account in listed(registry, &scope) {
+        for account in listed(registry, &scope, now) {
             let at = registry
                 .accounts
                 .iter()
@@ -424,9 +424,9 @@ fn ranked(registry: &Registry) -> (Vec<usize>, Vec<Section>) {
 /// would not make — the one thing this listing exists not to do — so they are
 /// left as `perch list` shows them, with the Headroom still beside each of them
 /// as the figure it is.
-fn listed<'a>(registry: &'a Registry, scope: &Scope) -> Vec<&'a Account> {
+fn listed<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> Vec<&'a Account> {
     match cycle::may_cycle_within(registry, scope) {
-        true => cycle::ranked(registry, scope),
+        true => cycle::ranked(registry, scope, now),
         false => scope.accounts(registry),
     }
 }

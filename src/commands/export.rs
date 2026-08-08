@@ -24,7 +24,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::adopt;
-use crate::commands::{ask_passphrase, ask_secret, refuse_without_a_terminal, say};
+use crate::commands::{ask_passphrase, ask_secret, refuse_without_a_terminal, say, still_ours};
 use crate::error::{PerchError, Result};
 use crate::export::{self, Export};
 use crate::host::Host;
@@ -48,8 +48,8 @@ pub fn run(host: &dyn Host, args: ExportArgs, out: &mut dyn Write) -> Result<()>
     refuse_a_directory_that_is_not_there(host, &args.path)?;
     refuse_an_occupied_path(host, &args.path)?;
 
-    let (_perch, registry) = adopt::ensure_adopted_exclusively(host, out)?;
-    write_the_export(host, &registry, &args.path, out)
+    let (mut perch, registry) = adopt::ensure_adopted_exclusively(host)?;
+    write_the_export(host, &mut perch, &registry, &args.path, out)
 }
 
 /// Everything an Export is, given a registry somebody else has read: the path
@@ -62,6 +62,7 @@ pub fn run(host: &dyn Host, args: ExportArgs, out: &mut dyn Write) -> Result<()>
 /// out its own hold.
 pub fn write_the_export(
     host: &dyn Host,
+    perch: &mut crate::lock::Held<'_>,
     registry: &Registry,
     path: &Path,
     out: &mut dyn Write,
@@ -86,6 +87,16 @@ pub fn write_the_export(
     // that arrived while the passphrase was being typed — would otherwise be the
     // one thing this refusal exists to stop, just slower.
     refuse_an_occupied_path(host, path)?;
+
+    // And the hold, over the same window and for the same reason the two
+    // destructive commands re-check theirs. The registry above was read before
+    // the passphrase prompts; another `perch add` that claimed a stale lock
+    // while somebody was typing has recorded an Account this copy does not
+    // hold, and sealing that copy writes a file presenting itself as
+    // *everything* Perch holds. A selective Export is the failure the whole
+    // format exists to prevent, and one wearing a complete Export's clothes is
+    // worse than a refusal — it is only found out at the restore.
+    still_ours(perch, "exported")?;
     host.write_private_file(path, &sealed)
         .map_err(|err| PerchError::file_write(path.to_path_buf(), err))?;
 

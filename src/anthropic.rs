@@ -129,8 +129,10 @@ pub fn renew(host: &dyn Host, refresh_token: &str) -> Result<Fresh, Refused> {
 
     let response = send(host, &HttpRequest::post(TOKEN_URL, &headers, &body))?;
     // A refresh token Anthropic has retired comes back as a bad request rather
-    // than as an unauthorized one, and it means the same thing here: this
-    // Account cannot be renewed and has to be logged into again.
+    // than as an unauthorized one, and where the body agrees it means the same
+    // thing here: this Account cannot be renewed and has to be logged into
+    // again. Where the body does not agree, the status is only a 400 — see
+    // [`REVOKED`].
     let document = understand(response, &[400])?;
     let now = host.now();
 
@@ -144,10 +146,20 @@ pub fn renew(host: &dyn Host, refresh_token: &str) -> Result<Fresh, Refused> {
             .get("refresh_token")
             .and_then(Value::as_str)
             .map(str::to_string),
+        // Checked, because this is the one arithmetic in Perch on a number
+        // Anthropic chose, at the one moment nothing can be retried: `renew`
+        // has already caused the old refresh token to be retired, and the
+        // Credential carrying its replacement has not been stored yet. A debug
+        // build would panic there and lose the Account; a release build would
+        // wrap to a negative `expires_at`, which reads as expired and renews
+        // again on every single command. A lifetime that does not fit is a
+        // lifetime the reply did not give: `None` already means that, and the
+        // Credential is simply renewed when something else says it must be.
         expires_at: document
             .get("expires_in")
             .and_then(Value::as_i64)
-            .map(|seconds| now.timestamp_millis() + seconds * 1_000),
+            .and_then(|seconds| seconds.checked_mul(1_000))
+            .and_then(|millis| now.timestamp_millis().checked_add(millis)),
     })
 }
 
@@ -174,15 +186,34 @@ fn send(host: &dyn Host, request: &HttpRequest<'_>) -> Result<HttpResponse, Refu
         .map_err(|err| Refused::Unreachable(err.to_string()))
 }
 
+/// OAuth's own word for "this refresh token is no longer one", and the only
+/// thing a 400 from the token endpoint may be read as a Quarantine.
+///
+/// A 400 is the status a request gets for being wrong in *any* way, and the
+/// caller acts on this one for ever: [`observe`](crate::observe) turns
+/// `Refused::Rejected` from a renewal into `Quarantine::RenewalRejected`, which
+/// only a browser login clears. Reading a malformed request, a proxy's own
+/// error page, or a `client_id` Anthropic has changed its mind about as "log in
+/// again" would walk a whole Group and Quarantine every Account in it — which a
+/// single `perch status --group --refresh` does in one pass.
+const REVOKED: &str = "invalid_grant";
+
 /// The document in a reply, or the reason there is not one.
 ///
 /// `also_rejected` names the statuses this endpoint says "not you" with, over
-/// and above the two every endpoint uses. No reply body reaches a message: what
-/// an endpoint says about a Credential it would not take is not something to
-/// print or to log.
+/// and above the two every endpoint uses, and it is believed only when the body
+/// agrees: see [`REVOKED`]. No reply body reaches a message either way — what an
+/// endpoint says about a Credential it would not take is not something to print
+/// or to log.
 fn understand(response: HttpResponse, also_rejected: &[u16]) -> Result<Value, Refused> {
     if also_rejected.contains(&response.status) {
-        return Err(Refused::Rejected);
+        return match says_revoked(&response.body) {
+            true => Err(Refused::Rejected),
+            // Not terminal, so it is retried rather than recorded: the next
+            // Refresh asks again, and a Credential that was never the problem
+            // goes on working.
+            false => Err(Refused::Unrecognised(format!("HTTP {}", response.status))),
+        };
     }
     match response.status {
         200..=299 => serde_json::from_str(&response.body)
@@ -191,6 +222,20 @@ fn understand(response: HttpResponse, also_rejected: &[u16]) -> Result<Value, Re
         429 => Err(Refused::Throttled),
         status => Err(Refused::Unrecognised(format!("HTTP {status}"))),
     }
+}
+
+/// Whether a refusal body is the endpoint saying the refresh token is retired.
+///
+/// The field OAuth 2.0 gives this is `error`, and Anthropic writes it there.
+/// Anything else — a body that is not JSON, a JSON body with no `error`, or an
+/// `error` naming something the request got wrong — is not this.
+fn says_revoked(body: &str) -> bool {
+    serde_json::from_str::<Value>(body)
+        .ok()
+        .as_ref()
+        .and_then(|document| document.get("error"))
+        .and_then(Value::as_str)
+        == Some(REVOKED)
 }
 
 /// The Quota Windows a usage reply describes.
@@ -336,19 +381,56 @@ mod tests {
             status,
             body: "{}".to_string(),
         };
+        let said = |body: &str| HttpResponse {
+            status: 400,
+            body: body.to_string(),
+        };
 
         assert_eq!(understand(reply(429), &[]), Err(Refused::Throttled));
         assert_eq!(understand(reply(401), &[]), Err(Refused::Rejected));
         assert_eq!(
-            understand(reply(400), &[400]),
+            understand(said(r#"{"error":"invalid_grant"}"#), &[400]),
             Err(Refused::Rejected),
-            "a retired refresh token is a rejection however it is spelled"
+            "a retired refresh token is a rejection, and this is how it says so"
         );
         assert!(matches!(
             understand(reply(400), &[]),
             Err(Refused::Unrecognised(_))
         ));
         assert_eq!(understand(reply(200), &[]), Ok(json!({})));
+    }
+
+    /// A 400 is what a request gets for being wrong in any way, and the caller
+    /// acts on a rejection for ever: it Quarantines the Account, which only a
+    /// browser login clears. So the status alone is not enough — a proxy's
+    /// error page, or a request Anthropic changed its mind about the shape of,
+    /// would otherwise Quarantine every Account in a Group in one pass of
+    /// `perch status --group --refresh`.
+    #[test]
+    fn a_bad_request_that_does_not_say_the_token_is_retired_is_not_terminal() {
+        let refused = |body: &str| {
+            understand(
+                HttpResponse {
+                    status: 400,
+                    body: body.to_string(),
+                },
+                &[400],
+            )
+        };
+
+        for body in [
+            "{}",
+            r#"{"error":"invalid_request"}"#,
+            r#"{"error":{"type":"invalid_request_error"}}"#,
+            "<html>Bad Request</html>",
+            "",
+        ] {
+            assert!(
+                matches!(refused(body), Err(Refused::Unrecognised(_))),
+                "a Quarantine is for ever, and this is not the endpoint asking \
+                 for one: {body}"
+            );
+        }
     }
 
     #[test]
@@ -360,5 +442,35 @@ mod tests {
             "which Account a token belongs to is what this endpoint is for"
         );
         assert_eq!(email_in(&json!({"organization": {"name": "Acme"}})), None);
+    }
+
+    /// The one arithmetic in Perch on a number Anthropic chose, at the one
+    /// moment nothing can be retried: by the time this runs the old refresh
+    /// token has already been retired, and the Credential carrying its
+    /// replacement is not stored yet. A debug build panicked on the overflow
+    /// and lost the Account there; a release build wrapped to a negative
+    /// `expires_at`, which reads as already expired and renews again on every
+    /// command for ever.
+    #[test]
+    fn a_lifetime_that_does_not_fit_is_a_lifetime_the_reply_did_not_give() {
+        let host = crate::host::FakeHost::new();
+        let renewed = |expires_in: &str| {
+            let reply =
+                format!(r#"{{"access_token":"sk-ant-oat01-new","expires_in":{expires_in}}}"#);
+            host.reply(TOKEN_URL, None, 200, &reply);
+            renew(&host, "sk-ant-ort01-old").expect("the endpoint answered")
+        };
+
+        assert_eq!(
+            renewed("3600").expires_at,
+            Some(host.now().timestamp_millis() + 3_600_000),
+            "an ordinary lifetime is still read"
+        );
+        assert_eq!(
+            renewed(&i64::MAX.to_string()).expires_at,
+            None,
+            "and one that cannot be added to now is no answer rather than a panic"
+        );
+        assert_eq!(renewed("9223372036854775").expires_at, None);
     }
 }

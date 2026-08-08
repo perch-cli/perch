@@ -94,7 +94,6 @@ fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     // process does not have. How soon to come back is the scheduler's.
     let round = one_round(
         host,
-        out,
         Watcher::Check,
         &mut Recently::nothing(),
         &mut Backoff::none(),
@@ -108,7 +107,7 @@ fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     // rather than a process killed in the middle of a Switch.
     host.listen_for_interrupts();
 
-    let watching = opening(host, out)?;
+    let watching = opening(host)?;
     say(out, &watching)?;
 
     // The two things carried from one round to the next, and the reason the
@@ -118,7 +117,30 @@ fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     let mut backoff = Backoff::none();
 
     loop {
-        let round = one_round(host, out, Watcher::Loop, &mut recently, &mut backoff)?;
+        let round = match one_round(host, Watcher::Loop, &mut recently, &mut backoff) {
+            Ok(round) => round,
+            // Another `perch` holding the registry is an ordinary event, not a
+            // fault: this loop runs for hours beside the commands a person
+            // types, and `perch status --refresh` holds the lock across every
+            // Renewal and every read it makes — comfortably longer than the few
+            // seconds `lock::take` waits. Ending the watcher over that would
+            // mean a `perch status` could stop it, silently, and the machine
+            // would go unwatched until somebody noticed.
+            //
+            // So it is held like any other round that could not read: counted
+            // against the back-off, said out loud with when it will try again,
+            // and gone round again (ADR 0013, ADR 0018).
+            Err(PerchError::Busy(why)) => {
+                backoff.failed();
+                let waiting_for = backoff.waiting_for();
+                say(out, &watch::held_line(&why, waiting_for, host.now()))?;
+                if host.wait(waiting_for) == Waited::Interrupted {
+                    break;
+                }
+                continue;
+            }
+            Err(other) => return Err(other),
+        };
         say(out, &round.line(host.now()))?;
 
         // The one place the loop holds nothing, and therefore the only place it
@@ -146,8 +168,8 @@ fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
 ///
 /// It is also where a watcher that may not act says so and exits rather than
 /// idling forever having decided nothing.
-fn opening(host: &dyn Host, out: &mut dyn Write) -> Result<String> {
-    let registry = adopt::ensure_adopted(host, out)?;
+fn opening(host: &dyn Host) -> Result<String> {
+    let registry = adopt::ensure_adopted(host)?;
     let watching = permitted(&registry)?;
     Ok(format!(
         "Watching {} in Group `{}`. Reading how full it is every {}, and \
@@ -289,12 +311,11 @@ fn permitted(registry: &Registry) -> Result<Watching> {
 /// leave a lock behind if it were killed.
 fn one_round(
     host: &dyn Host,
-    out: &mut dyn Write,
     watcher: Watcher,
     recently: &mut Recently,
     backoff: &mut Backoff,
 ) -> Result<Round> {
-    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
     let watching = permitted(&registry)?;
     let email = watching.account.email().to_string();
 

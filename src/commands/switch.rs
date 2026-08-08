@@ -42,7 +42,7 @@ struct Decision {
 }
 
 pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()> {
-    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host, out)?;
+    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
     let Decision { incoming, caveat } = decide(&registry, args.target.as_deref(), host.now(), out)?;
     let outgoing = registry.active_account().cloned();

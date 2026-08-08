@@ -27,8 +27,7 @@ fn browse(host: &FakeHost, doing: Vec<Option<Signal>>) -> FakeScreen {
 
 /// The same, for the tests that are about what the Refresh does.
 fn browse_with(host: &FakeHost, screen: &mut FakeScreen, refresher: &mut FakeRefresher) -> Left {
-    let registry = perch::adopt::ensure_adopted(host, &mut std::io::sink())
-        .expect("the machine has a login to adopt");
+    let registry = perch::adopt::ensure_adopted(host).expect("the machine has a login to adopt");
     perch::tui::browse(host, registry, screen, refresher).expect("the TUI leaves cleanly")
 }
 

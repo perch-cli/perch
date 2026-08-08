@@ -173,19 +173,45 @@ impl Headroom {
     /// Nothing compares a reset time against a percentage. They only ever meet
     /// as tiers, and a tie inside one is broken by the order the Accounts were
     /// added.
-    fn ranking(&self, strategy: Strategy) -> (u8, f64) {
+    fn ranking(&self, strategy: Strategy, now: DateTime<Utc>) -> (u8, f64) {
         match self {
             Headroom::Room {
                 percent, resets_at, ..
-            } => match (strategy, resets_at) {
+            } => match (strategy, self.reset_still_to_come(strategy, now)) {
                 // Sooner is better, so the figure sorted on is the reset time
                 // negated.
-                (Strategy::SoonestReset, Some(at)) => (3, -(at.timestamp() as f64)),
+                (Strategy::SoonestReset, true) => {
+                    let at = resets_at.expect("a reset still to come is a reset");
+                    (3, -(at.timestamp() as f64))
+                }
                 _ => (2, *percent),
             },
             Headroom::Unobserved => (1, 0.0),
             Headroom::Exhausted { .. } => (0, 0.0),
         }
+    }
+
+    /// Whether this Account's fullest window has a reset that has not happened
+    /// yet.
+    ///
+    /// A cached figure outlives the window it describes (ADR 0015), so a
+    /// `resets_at` in the past is ordinary rather than strange — it means the
+    /// window has already come back and the percentage beside it is stale. What
+    /// made that a bug is the direction it sorted: the key is the reset time
+    /// negated, so an earlier time ranks higher, and among Accounts whose reset
+    /// had already passed the *stalest* figure won. A six-hour-old reading of
+    /// an Account at 10% headroom beat a one-minute-old reading of one at 90%,
+    /// and `chosen_because` announced it as resetting "any moment now" about a
+    /// window that came back hours ago.
+    ///
+    /// An elapsed reset is no longer a fact about when this Account comes back,
+    /// so it does not rank as one, and the Account falls to the headroom key
+    /// beside every other Account the Strategy could not get a reset for.
+    fn reset_still_to_come(&self, strategy: Strategy, now: DateTime<Utc>) -> bool {
+        matches!(
+            (self, strategy),
+            (Headroom::Room { resets_at: Some(at), .. }, Strategy::SoonestReset) if *at > now
+        )
     }
 
     /// Whether the Strategy got the figure it asked for.
@@ -195,17 +221,8 @@ impl Headroom {
     /// know which of the two they are quoting. Claiming an Account resets
     /// soonest on the strength of a reset time Perch has not got would be the
     /// one thing worse than falling back silently.
-    fn ranked_on_its_reset(&self, strategy: Strategy) -> bool {
-        matches!(
-            (self, strategy),
-            (
-                Headroom::Room {
-                    resets_at: Some(_),
-                    ..
-                },
-                Strategy::SoonestReset
-            )
-        )
+    fn ranked_on_its_reset(&self, strategy: Strategy, now: DateTime<Utc>) -> bool {
+        self.reset_still_to_come(strategy, now)
     }
 
     fn is_exhausted(&self) -> bool {
@@ -230,19 +247,20 @@ impl Headroom {
             return None;
         };
         let age = utilization::age_phrase(*observed_at, now);
+        let percent = utilization::percentage(*percent);
         Some(match (strategy, resets_at) {
             (Strategy::MostHeadroom, _) => format!(
-                "{percent:.0}% headroom, which is true of every one of its Quota \
+                "{percent}% headroom, which is true of every one of its Quota \
                  Windows — {fullest_window} is its fullest, as of {age}"
             ),
             (Strategy::SoonestReset, Some(at)) => format!(
-                "{percent:.0}% headroom, and the window that leaves it least — \
+                "{percent}% headroom, and the window that leaves it least — \
                  {fullest_window} — resets at {}, as of {age}",
                 utilization::reset_phrase(*at, now),
             ),
             // Ranked on its room, because that is what there was to rank it on.
             (Strategy::SoonestReset, None) => format!(
-                "{percent:.0}% headroom, which is true of every one of its Quota \
+                "{percent}% headroom, which is true of every one of its Quota \
                  Windows — {fullest_window} is its fullest — and no cached \
                  figure says when that one comes back, as of {age}"
             ),
@@ -400,8 +418,8 @@ pub fn choose(
     // Stable, so Accounts that rank identically stay in the order they were
     // added and the same command twice makes the same choice.
     ranked.sort_by(|left, right| {
-        let (theirs, them) = right.headroom.ranking(strategy);
-        let (ours, us) = left.headroom.ranking(strategy);
+        let (theirs, them) = right.headroom.ranking(strategy, now);
+        let (ours, us) = left.headroom.ranking(strategy, now);
         theirs.cmp(&ours).then(them.total_cmp(&us))
     });
 
@@ -438,9 +456,9 @@ pub fn choose(
     // nothing, and out of the box no Account has been observed at all.
     if let Some(here) = here
         && let Headroom::Room { .. } = here.headroom
-        && elsewhere
-            .iter()
-            .all(|other| other.headroom.ranking(strategy) <= here.headroom.ranking(strategy))
+        && elsewhere.iter().all(|other| {
+            other.headroom.ranking(strategy, now) <= here.headroom.ranking(strategy, now)
+        })
     {
         return Err(PerchError::NothingToDo(already_the_best(
             registry, scope, here, strategy, now,
@@ -481,14 +499,14 @@ pub fn choose(
 /// A Cycle never leaves the scope it started in (ADR 0002), so there is no
 /// ranking over every Account Perch holds: this is per scope, and a listing
 /// spanning several is those rankings one after another.
-pub fn ranked<'a>(registry: &'a Registry, scope: &Scope) -> Vec<&'a Account> {
+pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> Vec<&'a Account> {
     let strategy = scope.strategy(registry);
     let mut accounts = scope.accounts(registry);
     // Stable, so Accounts that rank identically stay in the order they were
     // added — the same tie-break the choice itself has.
     accounts.sort_by(|left, right| {
-        let (theirs, them) = place(right, strategy);
-        let (ours, us) = place(left, strategy);
+        let (theirs, them) = place(right, strategy, now);
+        let (ours, us) = place(left, strategy, now);
         theirs.cmp(&ours).then(them.total_cmp(&us))
     });
     accounts
@@ -501,9 +519,9 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope) -> Vec<&'a Account> {
 /// still one a Cycle would consider tomorrow; a Disabled or Quarantined one is
 /// not one it would consider at all, and sorting it by its headroom would put a
 /// full-looking Account nobody can use above one they can.
-fn place(account: &Account, strategy: Strategy) -> ((u8, u8), f64) {
+fn place(account: &Account, strategy: Strategy, now: DateTime<Utc>) -> ((u8, u8), f64) {
     let candidate = u8::from(is_a_candidate(account));
-    let (tier, figure) = headroom_of(account).ranking(strategy);
+    let (tier, figure) = headroom_of(account).ranking(strategy, now);
     ((candidate, tier), figure)
 }
 
@@ -567,7 +585,7 @@ pub fn out_of_the_running(accounts: &[&Account]) -> String {
 /// a number: "no figure" and "plenty of room" are opposite pieces of advice.
 pub fn headroom_phrase(account: &Account) -> String {
     match headroom_of(account) {
-        Headroom::Room { percent, .. } => format!("{percent:.0}%"),
+        Headroom::Room { percent, .. } => format!("{}%", utilization::percentage(percent)),
         Headroom::Exhausted { .. } => "exhausted".to_string(),
         Headroom::Unobserved => "never observed".to_string(),
     }
@@ -616,7 +634,8 @@ pub fn headroom_in_full(account: &Account, now: DateTime<Utc>) -> String {
             observed_at,
             ..
         } => format!(
-            "{percent:.0}%  ({fullest_window} is its fullest, as of {})",
+            "{}%  ({fullest_window} is its fullest, as of {})",
+            utilization::percentage(percent),
             utilization::age_phrase(observed_at, now)
         ),
         // The rows underneath say which window is full and when it comes back,
@@ -653,7 +672,7 @@ fn chosen_because(
     };
     match strategy {
         Strategy::MostHeadroom => format!("{named} has the most room: {figure}."),
-        Strategy::SoonestReset if best.headroom.ranked_on_its_reset(strategy) => {
+        Strategy::SoonestReset if best.headroom.ranked_on_its_reset(strategy, now) => {
             format!("{named} resets soonest: {figure}.")
         }
         // Nothing that could be moved to says when it comes back — an Account
@@ -757,7 +776,7 @@ fn already_the_best(
     // only compared the Accounts whose figures carry a reset time, so claiming
     // it beat the ones that do not would be claiming a comparison it could not
     // make.
-    let standing = if here.headroom.ranked_on_its_reset(strategy) {
+    let standing = if here.headroom.ranked_on_its_reset(strategy, now) {
         format!(
             "{named} already comes back soonest of the Accounts in {scope} whose figures say when they do"
         )
@@ -862,7 +881,7 @@ pub(crate) mod tests {
     }
 
     fn ranked_emails(registry: &Registry) -> Vec<&str> {
-        ranked(registry, &work())
+        ranked(registry, &work(), now())
             .into_iter()
             .map(Account::email)
             .collect()
@@ -1189,6 +1208,67 @@ pub(crate) mod tests {
         );
     }
 
+    /// A cached figure outlives the window it describes (ADR 0015), so a
+    /// `resets_at` in the past is ordinary — it means the window has already
+    /// come back and the percentage beside it is stale.
+    ///
+    /// The key is the reset time negated, so an earlier time ranked higher, and
+    /// among Accounts whose reset had already passed the *stalest* figure won.
+    /// `chosen_because` then announced it as resetting "any moment now" about a
+    /// window that came back hours ago.
+    #[test]
+    fn a_reset_that_has_already_happened_is_not_a_reason_to_prefer_an_account() {
+        let registry = preferring(
+            holding(vec![
+                // Read six hours ago, and its window came back an hour after
+                // that: the 10% left is a figure about a window that no longer
+                // exists.
+                account("stale@example.com", vec![resetting("5-hour", 90.0, -5)]),
+                // Read just now, mostly empty, and comes back in three hours.
+                account("fresh@example.com", vec![resetting("5-hour", 10.0, 3)]),
+            ]),
+            Strategy::SoonestReset,
+        );
+
+        let choice = cycle(&registry).expect("there is room");
+
+        assert_eq!(
+            choice.account.email(),
+            "fresh@example.com",
+            "an elapsed reset is not a claim about when an Account comes back"
+        );
+        assert!(
+            choice.because.contains("in 3h"),
+            "and the reset it is announced on is one still to come: {}",
+            choice.because
+        );
+    }
+
+    /// The same rule where nothing is left to fall back on but the percentages:
+    /// with every reset elapsed, the Strategy has no reset to rank on at all and
+    /// ranks on room, rather than crowning whichever figure is oldest.
+    #[test]
+    fn with_every_reset_elapsed_the_choice_falls_back_to_headroom() {
+        let registry = preferring(
+            holding(vec![
+                // Active, and the one with less room. Listed first because
+                // that is what makes it the Account being Cycled off.
+                account("fuller@example.com", vec![resetting("5-hour", 80.0, -9)]),
+                account("emptier@example.com", vec![resetting("5-hour", 20.0, -1)]),
+            ]),
+            Strategy::SoonestReset,
+        );
+
+        let choice = cycle(&registry).expect("there is room");
+
+        assert_eq!(choice.account.email(), "emptier@example.com");
+        assert!(
+            !choice.because.contains("resets soonest"),
+            "nothing may claim a reset it has not got: {}",
+            choice.because
+        );
+    }
+
     #[test]
     fn a_figure_with_no_reset_time_is_never_read_as_the_soonest_to_reset() {
         let registry = preferring(
@@ -1493,12 +1573,12 @@ mod properties {
             let Some(won) = chosen(&arrangement, None) else {
                 continue;
             };
-            let winning = headroom_of(&won).ranking(arrangement.strategy);
+            let winning = headroom_of(&won).ranking(arrangement.strategy, now());
             for held in &arrangement.registry.accounts {
                 if !held.enabled || held.quarantined() || headroom_of(held).is_exhausted() {
                     continue;
                 }
-                let theirs = headroom_of(held).ranking(arrangement.strategy);
+                let theirs = headroom_of(held).ranking(arrangement.strategy, now());
                 assert!(
                     winning.0 > theirs.0 || (winning.0 == theirs.0 && winning.1 >= theirs.1),
                     "{} won at {winning:?}, beaten by {theirs:?}\n{}",

@@ -837,10 +837,31 @@ pub fn patch_oauth_account(
     path: &Path,
     version: &str,
 ) -> Result<String> {
-    json::replace_object_at(contents, IDENTITY_KEY, block).ok_or_else(|| {
+    // Written rather than replaced, so a file that has no `oauthAccount` yet
+    // gets one. Claude Code writes `.claude.json` the moment it is first run —
+    // onboarding, a theme, a project entry — and only writes the identity block
+    // when somebody logs in through it. A machine restored from an Export has
+    // never logged in through Claude Code, and one used with an API key never
+    // will, so "the file is there and the block is not" is an ordinary state
+    // rather than drift.
+    //
+    // Refusing it made the Switch unfinishable rather than failed: the
+    // Credential is live and the registry records the Account by the time this
+    // runs, so every retry got as far as here and stopped in the same place,
+    // and the note saying "run it again to finish the job" was advice that
+    // could never work. Only hand-editing `.claude.json` got out of it.
+    //
+    // The refusal that is left is the one it was always for: a `.claude.json`
+    // that is not a JSON object at all is a file Perch does not recognise, and
+    // nothing can be written into it.
+    json::set_value_at(contents, IDENTITY_KEY, block).ok_or_else(|| {
         refusal(
             assumption::IDENTITY_BLOCK,
-            &format!("{} has no oauthAccount block to patch", path.display()),
+            &format!(
+                "{} is not a JSON object, so there is nowhere to write the \
+                 Account into it",
+                path.display()
+            ),
             version,
         )
     })
@@ -1106,10 +1127,42 @@ mod tests {
         );
     }
 
+    /// Claude Code writes `.claude.json` the first time it runs and writes the
+    /// identity block only when somebody logs in through it, so a file with no
+    /// block is an ordinary machine — one restored from an Export, or one used
+    /// with an API key — rather than drift.
+    ///
+    /// Refusing it wedged the Switch permanently: the Credential is live and
+    /// the registry records the Account by the time this runs, so every retry
+    /// reached here and stopped in the same place, and the note advising
+    /// another run was advice that could not work.
     #[test]
-    fn a_file_with_no_block_to_patch_is_a_refusal_naming_the_assumption() {
-        let error = patch_oauth_account(
+    fn a_file_that_has_no_block_yet_gets_one_rather_than_refusing_for_ever() {
+        let patched = patch_oauth_account(
             r#"{"numStartups": 41}"#,
+            r#"{"emailAddress": "someone@example.com"}"#,
+            Path::new("/Users/someone/.claude.json"),
+            "2.1.221",
+        )
+        .expect("a file with no block is a file to write one into");
+
+        assert!(patched.contains(r#""oauthAccount""#), "{patched}");
+        assert!(
+            patched.contains(r#""emailAddress": "someone@example.com""#),
+            "{patched}"
+        );
+        assert!(
+            patched.contains(r#""numStartups": 41"#),
+            "and every other member is left exactly as it was: {patched}"
+        );
+    }
+
+    /// The refusal that is left is the one it was always for: nothing can be
+    /// written into a `.claude.json` that is not a JSON object.
+    #[test]
+    fn a_file_that_is_not_an_object_is_a_refusal_naming_the_assumption() {
+        let error = patch_oauth_account(
+            r#"["not what this file is"]"#,
             "{}",
             Path::new("/Users/someone/.claude.json"),
             "2.1.221",

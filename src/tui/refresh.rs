@@ -153,12 +153,11 @@ fn taken(emails: Vec<String>) -> Refreshed {
     // have used would land in the middle of the display. They come back as
     // notes instead, which is where every other thing this could not do goes.
     let host = RealHost::keeping_its_remarks();
-    let mut unread = std::io::sink();
 
     // Exclusively, because a Refresh writes: figures, and any Quarantine it
     // discovers. Another `perch` holding the lock is a Refresh that says so
     // rather than one that waits for ever.
-    let (mut perch, mut registry) = match adopt::ensure_adopted_exclusively(&host, &mut unread) {
+    let (mut perch, mut registry) = match adopt::ensure_adopted_exclusively(&host) {
         Ok(held) => held,
         Err(refused) => return Refreshed::nothing_read(vec![refused.to_string()]),
     };

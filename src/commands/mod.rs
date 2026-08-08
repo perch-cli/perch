@@ -78,6 +78,36 @@ pub fn ask_secret(host: &dyn Host, out: &mut dyn Write, question: &str) -> Resul
     Ok(answered)
 }
 
+/// Refuses to go on if the registry lock went stale while a question was
+/// waiting for an answer.
+///
+/// A question put to a person is the one wait in Perch with no bound on it —
+/// somebody may answer in a second or walk away and answer after lunch — so it
+/// is the one place a hold can go stale under a command that is otherwise
+/// behaving. Another `perch` may then have taken the lock and changed the
+/// registry, which leaves this one holding a copy that is out of date and about
+/// to write it back over theirs.
+///
+/// Asked before the first irreversible thing rather than at the save, because
+/// finding out at the save is finding out after the Credentials are gone.
+///
+/// One copy of the guard and one copy of its sentence, because the commands
+/// that need it are the destructive ones and two copies is how the third of
+/// them ships without either. `did` is what this command will not have done —
+/// "removed", "purged", "exported".
+pub fn still_ours(perch: &mut crate::lock::Held<'_>, did: &str) -> Result<()> {
+    perch.renew();
+    if perch.still_held() {
+        return Ok(());
+    }
+    Err(PerchError::Other(format!(
+        "Another `perch` changed the registry while that question was waiting \
+         for an answer, so this one is working from a copy that is out of \
+         date.\n\
+         Nothing was {did}. Run this again."
+    )))
+}
+
 /// The passphrase somebody typed, or `None` when they typed none.
 ///
 /// Empty and end of input are one answer here, because they are one event: a

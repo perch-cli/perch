@@ -45,9 +45,25 @@ fn curl_bin() -> Result<PathBuf, HostError> {
 
 /// The options that are the same for every request, and none of which is a
 /// secret. Everything that is one goes in on stdin instead.
-const CURL_ARGS: [&str; 6] = [
+///
+/// The two timeouts are what make a hung endpoint a *refusal* rather than a
+/// hang. Perch has no thread it can abandon a request from: `perch watch` waits
+/// out every read in its round, and `perch tui` refuses Enter and `r` for as
+/// long as a Refresh is outstanding. A connection that is open and silent would
+/// otherwise stop both indefinitely — which is worse than the network being
+/// down, because ADR 0018 has an answer for that one and no answer for a loop
+/// that never comes back to be told.
+///
+/// Generous rather than tight: what is on the other side is a request Perch
+/// would rather complete than retry, and both numbers are far longer than a
+/// reply that is coming ever takes.
+const CURL_ARGS: [&str; 10] = [
     "--silent",
     "--show-error",
+    "--connect-timeout",
+    "10",
+    "--max-time",
+    "30",
     "--write-out",
     "\n%{http_code}",
     "--config",
@@ -59,8 +75,25 @@ const CURL_ARGS: [&str; 6] = [
 /// The URL, the headers and the body all arrive this way so that none of them
 /// is ever an argument: an `Authorization` header holds an access token, and
 /// argv is readable by every process on the machine.
-fn curl_config(request: &HttpRequest<'_>) -> String {
+fn curl_config(request: &HttpRequest<'_>) -> Result<String, HostError> {
     let quoted = super::double_quoted;
+
+    // `double_quoted` makes a value a token and says so: it does not make one
+    // inert, because a configuration file is read a line at a time and there is
+    // no escape for a newline to be quoted into. `security` has refused these
+    // where they enter since ADR 0008; the `curl` half of the same invariant
+    // was never written, and an access token is a value Perch reads out of a
+    // JSON file it does not own — where `\n` is a legal escape. A token
+    // carrying one would end the `header` line and begin whatever the rest of
+    // it spelled, and `output =` writes a file while `url =` fetches one.
+    super::inert("the URL", request.url)?;
+    for (name, value) in request.headers {
+        super::inert(&format!("the {name} header"), value)?;
+    }
+    if let Some(body) = request.body {
+        super::inert("the request body", body)?;
+    }
+
     let mut config = format!("url = {}\n", quoted(request.url));
     for (name, value) in request.headers {
         config.push_str(&format!(
@@ -73,7 +106,7 @@ fn curl_config(request: &HttpRequest<'_>) -> String {
     if let Some(body) = request.body {
         config.push_str(&format!("data-binary = {}\n", quoted(body)));
     }
-    config
+    Ok(config)
 }
 
 /// Runs a program, optionally with something on its stdin, and reads the whole
@@ -564,7 +597,7 @@ impl Host for RealHost {
     }
 
     fn http(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, HostError> {
-        let execution = curl(&curl_config(request))?;
+        let execution = curl(&curl_config(request)?)?;
         if !execution.succeeded() {
             return Err(HostError::Other(format!(
                 "curl exited {}: {}",
@@ -1128,9 +1161,31 @@ fn home_from(variable: &str, value: Option<std::ffi::OsString>) -> Result<PathBu
 
 /// Whether a process exists. Signal 0 performs the permission and existence
 /// checks without delivering anything.
+///
+/// The identifier is narrowed rather than cast, because `kill` reads the values
+/// a cast can produce as something else entirely: `0` is the caller's own
+/// process group and `-1` is every process it may signal, and both answer "yes"
+/// to a signal that is never delivered. A marker file is named after a number
+/// somebody else wrote (`probe::clients_in` parses any `u32`), so `4294967295`
+/// and `0` are both reachable, and both would otherwise report a live client
+/// that is not there — which refuses every Switch against that Profile forever.
+///
+/// `EPERM` is alive. It means the process exists and belongs to another user,
+/// which is the same reasoning the Windows half already writes down for a
+/// handle it may not open: a Profile that looks Live is one Perch leaves alone,
+/// and that is the safe direction. Only `ESRCH` is dead.
 #[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
-    unsafe { libc::kill(pid as i32, 0) == 0 }
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    if pid <= 0 {
+        return false;
+    }
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
 }
 
 /// Whether a process exists, as `GetExitCodeProcess` tells it: a handle that
@@ -1222,7 +1277,8 @@ mod tests {
     #[test]
     fn the_access_token_travels_on_stdin_rather_than_in_argv() {
         let headers = [("Authorization", "Bearer sk-ant-oat01-secret")];
-        let config = curl_config(&HttpRequest::get("https://example.test/usage", &headers));
+        let config =
+            curl_config(&HttpRequest::get("https://example.test/usage", &headers)).unwrap();
         let expected = "header = \"Authorization: Bearer sk-ant-oat01-secret\"";
 
         assert!(config.contains(expected), "{config}");
@@ -1230,6 +1286,32 @@ mod tests {
             !CURL_ARGS.iter().any(|arg| arg.contains("sk-ant")),
             "nothing about a request may reach the command line"
         );
+    }
+
+    /// The two identifiers a `u32` can carry that `kill` reads as something
+    /// other than a process. A session marker is named after a number Perch did
+    /// not write, so both are reachable, and both would otherwise report a
+    /// client that is not there — which refuses every Switch against that
+    /// Profile for as long as the marker sits there.
+    #[cfg(unix)]
+    #[test]
+    fn a_process_id_that_is_not_one_is_dead_rather_than_a_process_group() {
+        assert!(
+            !process_alive(0),
+            "0 is the caller's own process group, not a process"
+        );
+        assert!(
+            !process_alive(u32::MAX),
+            "4294967295 narrows to -1, which is every process the caller may signal"
+        );
+    }
+
+    /// The corroboration the liveness check is for: this process is running, so
+    /// nothing may conclude otherwise about it.
+    #[cfg(unix)]
+    #[test]
+    fn the_running_process_is_alive() {
+        assert!(process_alive(std::process::id()));
     }
 
     /// The holder here is what Windows Defender amounts to: a handle on the
@@ -1339,11 +1421,43 @@ mod tests {
     #[test]
     fn a_json_body_survives_being_quoted() {
         let body = r#"{"refresh_token":"sk-ant-ort01-\"odd\""}"#;
-        let config = curl_config(&HttpRequest::post("https://example.test/token", &[], body));
+        let config =
+            curl_config(&HttpRequest::post("https://example.test/token", &[], body)).unwrap();
         let expected = r#"data-binary = "{\"refresh_token\":\"sk-ant-ort01-\\\"odd\\\"\"}""#;
 
         assert!(config.contains("url = \"https://example.test/token\""));
         assert!(config.contains(expected), "{config}");
         assert_eq!(config.lines().count(), 2, "one option per line: {config}");
+    }
+
+    /// The invariant `double_quoted` documents and only `security` was keeping:
+    /// a configuration file is read a line at a time, so a value that could end
+    /// its line is refused rather than quoted. An access token comes out of a
+    /// JSON file Perch does not own, where `\n` is an ordinary escape.
+    #[test]
+    fn a_header_that_could_end_its_own_line_is_refused_rather_than_quoted() {
+        let headers = [("Authorization", "Bearer sk-ant\noutput = /tmp/taken")];
+        let refused = curl_config(&HttpRequest::get("https://example.test/usage", &headers));
+
+        let said = refused.expect_err("a newline in a header must not reach curl");
+        assert!(
+            said.to_string().contains("Authorization"),
+            "the refusal names what carried it: {said}"
+        );
+    }
+
+    /// The same for the other two ways into the file, so the check cannot be
+    /// the one that lives on a single field.
+    #[test]
+    fn a_url_or_a_body_that_carries_a_newline_is_refused_too() {
+        assert!(curl_config(&HttpRequest::get("https://example.test/a\nurl = b", &[])).is_err());
+        assert!(
+            curl_config(&HttpRequest::post(
+                "https://example.test/token",
+                &[],
+                "{}\noutput = /tmp/taken"
+            ))
+            .is_err()
+        );
     }
 }

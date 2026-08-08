@@ -257,7 +257,14 @@ fn adoption_happens_once() {
     let (second, second_output) = run_status(&host, false);
     second.unwrap();
 
-    assert!(first_output.contains("Adopted"));
+    // On the remarks channel rather than in the command's own output: the two
+    // commands that reach adoption first also render JSON on that stream.
+    assert!(
+        host.notes().iter().any(|note| note.contains("Adopted")),
+        "{:?}",
+        host.notes()
+    );
+    assert!(!first_output.contains("Adopted"), "{first_output}");
     assert!(
         !second_output.contains("Adopted"),
         "the second run should say nothing about adoption:\n{second_output}"

@@ -951,3 +951,37 @@ fn a_switch_that_changed_something_and_then_failed_stops_the_loop() {
          (ADR 0006)"
     );
 }
+
+/// The loop takes the registry lock every round, waits about four seconds for
+/// it, and used to propagate the refusal — which ended `perch watch`.
+///
+/// That made a `perch status --refresh` in another terminal able to stop the
+/// watcher. It holds the exclusive lock across every Renewal and every read it
+/// makes, comfortably more than four seconds over a Group, and the machine then
+/// went unwatched until somebody noticed the process was gone. ADR 0013 stops
+/// the loop for a Switch that changed something and then failed; contention
+/// over a lock changed nothing at all.
+#[test]
+fn another_perch_holding_the_registry_holds_the_round_rather_than_ending_the_watcher() {
+    let host = watching(&[40.0, 45.0], 5.0).once_while_waiting(|host| {
+        // What another `perch` holding the lock looks like from here.
+        host.create_dir_exclusive(std::path::Path::new(REGISTRY_LOCK))
+            .expect("the other `perch` takes it");
+    });
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a lock somebody else holds is not a fault");
+    let held = decisions(&printed)
+        .into_iter()
+        .find(|line| line.contains("held"))
+        .unwrap_or_else(|| panic!("the round is held and said so: {printed}"));
+    assert!(
+        held.contains("registry") || held.contains("lock"),
+        "and says what was holding it: {held}"
+    );
+    assert!(
+        held.contains("Asking again in"),
+        "a hold that did not say when it comes back reads as having given up: {held}"
+    );
+}

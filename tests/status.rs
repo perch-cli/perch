@@ -154,6 +154,33 @@ fn a_registry_from_a_newer_perch_is_refused_rather_than_misread() {
     assert!(error.to_string().contains("newer Perch"), "{error}");
 }
 
+/// The version has to be read *before* the document is, or the guard only fires
+/// for registries a newer Perch happened to keep readable by this one.
+///
+/// A newer Perch is exactly the thing that writes a value this build has no
+/// variant for — a Strategy it added, a Quarantine reason. Deserializing first
+/// failed on that with serde's words, and the user was told `registry.json` is
+/// not valid JSON, about a file that is perfectly valid JSON. That is the
+/// misdiagnosis the version field exists to prevent, met in the one case it was
+/// added for.
+#[test]
+fn a_registry_from_a_newer_perch_says_so_even_when_it_spells_things_this_build_cannot_read() {
+    let host = logged_in_machine().with_file(
+        REGISTRY_PATH,
+        r#"{"version": 99, "active": "someone@example.com", "accounts": [],
+            "groups": {"work": {"strategy": "least-recently-used"}}}"#,
+    );
+
+    let (result, _) = run_status(&host, false);
+
+    let error = result.expect_err("a registry from the future cannot be trusted");
+    assert!(
+        error.to_string().contains("newer Perch"),
+        "not a complaint about the JSON, which is valid: {error}"
+    );
+    assert!(error.to_string().contains("Upgrade Perch"), "{error}");
+}
+
 /// With Accounts held but Perch on nobody, a login is not the answer: Perch
 /// has Credentials and has simply been left on nobody, which is what `perch
 /// switch` is for — and what `perch remove` itself recommends when it leaves
