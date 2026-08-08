@@ -10,7 +10,7 @@ mod common;
 use common::*;
 use perch::Host;
 use perch::commands::add::AddArgs;
-use perch::error::{EXIT_CONFLICT, EXIT_NOT_FOUND};
+use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND};
 use perch::host::{FakeHost, fake::Effect};
 
 /// A machine with the first Account already adopted and a second login waiting
@@ -792,4 +792,30 @@ fn a_pending_login_directory_with_an_unreadable_name_is_never_reaped() {
         host.path_exists(&unnamed),
         "a directory whose age cannot be established is left alone"
     );
+}
+
+/// What is wrong with a name is said before what it clashes with.
+///
+/// `refuse_taken_names` opens by asking whether the Alias and the Group are the
+/// same name, so running it first answered `--alias '' --group ''` with "`` cannot
+/// be both an Alias and a Group name" — a Conflict, about two names neither of
+/// which was usable to begin with. `--alias ''` on its own was correctly refused
+/// as Invalid, so the same mistake had two answers depending on how much of it
+/// you made.
+#[test]
+fn a_name_that_is_not_usable_is_refused_as_that_rather_than_as_a_collision() {
+    let host = ready_to_add();
+
+    let (result, _) = run_add(
+        &host,
+        AddArgs {
+            alias: Some(String::new()),
+            group: Some(String::new()),
+            ..AddArgs::default()
+        },
+    );
+
+    let refusal = result.expect_err("neither name is usable");
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    assert!(refusal.to_string().contains("cannot be empty"), "{refusal}");
 }

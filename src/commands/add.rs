@@ -39,13 +39,19 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
 
     // Everything knowable before the login is checked before the login, so a
     // name Perch was always going to refuse never costs a browser round trip.
-    registry.refuse_taken_names(args.alias.as_deref(), args.group.as_deref())?;
+    // Shape before collision. `refuse_taken_names` opens by asking whether the
+    // Alias and the Group are the same name, so with the order reversed
+    // `perch add --alias '' --group ''` was refused as "`` cannot be both an
+    // Alias and a Group name" — a Conflict, about two names neither of which
+    // was usable in the first place. What is wrong with a name is worth saying
+    // before what it clashes with.
     if let Some(alias) = &args.alias {
         registry::validate_name(NameKind::Alias, alias)?;
     }
     if let Some(group) = &args.group {
         registry::validate_name(NameKind::Group, group)?;
     }
+    registry.refuse_taken_names(args.alias.as_deref(), args.group.as_deref())?;
     if args.group.is_none() && !args.no_group && !host.is_interactive() {
         return Err(PerchError::Other(
             "There is no terminal to confirm the Group on. Pass `--group <name>` \
