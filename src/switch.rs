@@ -100,6 +100,13 @@ pub fn perform(
     let switched: Result<Captured> = lock::under(host, probe::locks_for(&store), |held| {
         let prepared = prepare(host, incoming, outgoing, version, store)?;
 
+        // Said between every step rather than only after the writes. `prepare`
+        // reads a Credential and `capture` reads and writes one, and a keychain
+        // that stops to ask the user for permission stretches either without
+        // warning — past the ten seconds the config-file lock goes stale in. A
+        // hold renewed only after the slow steps is a hold that was already
+        // lost while they ran.
+        held.renew();
         let captured = capture(host, &prepared, outgoing)
             .map_err(|error| error.with_note(&nothing_happened(outgoing)))?;
 
@@ -145,6 +152,7 @@ pub fn make_live(host: &dyn Host, account: &Account) -> std::result::Result<(), 
     let landed = lock::under(host, probe::locks_for(&store), |held| {
         let prepared = prepare(host, account, None, version, store)?;
 
+        held.renew();
         profile::store_credential(host, &prepared.store, prepared.credential.as_str())?;
         is_live = true;
         held.renew();
