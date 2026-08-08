@@ -172,9 +172,16 @@ pub fn renew(host: &dyn Host, refresh_token: &str) -> Result<Fresh, Refused> {
         // again on every single command. A lifetime that does not fit is a
         // lifetime the reply did not give: `None` already means that, and the
         // Credential is simply renewed when something else says it must be.
+        //
+        // A negative lifetime is the same non-answer reached by an easier
+        // route: `expires_in: -1` yields an `expires_at` a second in the past,
+        // which reads as already expired and renews on every command forever —
+        // the outcome the overflow guard above exists to prevent. A token that
+        // arrives already dead is not a lifetime this reply gave either.
         expires_at: document
             .get("expires_in")
             .and_then(Value::as_i64)
+            .filter(|seconds| *seconds > 0)
             .and_then(|seconds| seconds.checked_mul(1_000))
             .and_then(|millis| now.timestamp_millis().checked_add(millis)),
     })
@@ -489,5 +496,17 @@ mod tests {
             "and one that cannot be added to now is no answer rather than a panic"
         );
         assert_eq!(renewed("9223372036854775").expires_at, None);
+
+        // The same non-answer by an easier route. An `expires_at` a second in
+        // the past reads as already expired, so the Credential would be renewed
+        // again on every single command — which is the outcome the overflow
+        // guard above is written to prevent, reached without overflowing
+        // anything.
+        assert_eq!(
+            renewed("-1").expires_at,
+            None,
+            "a token that arrives already dead is not a lifetime this reply gave"
+        );
+        assert_eq!(renewed("0").expires_at, None);
     }
 }
