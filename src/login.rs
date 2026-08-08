@@ -37,22 +37,48 @@ pub struct Produced {
 /// removed whether it worked or not, so an abandoned login costs a directory
 /// that is then gone and nothing else.
 pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Produced> {
+    // Everything that can fail without leaving anything behind happens first,
+    // so the directory is made only once nothing before it can refuse. All
+    // three are derivations rather than effects: which Claude Code is
+    // installed, where to find it, and what a Profile at that path would be
+    // called.
     let version = probe::claude_version(host)?;
+    let claude = probe::claude_bin(host)?;
     let dir = registry::pending_login_dir(host, host.now())?;
+    let store = probe::store_for_profile(host, &dir)?;
+
     // The login writes its Credential in here, so this is as much a place a
     // Credential lives as a Profile is (ADR 0020).
     host.create_private_dir_all(&dir)
         .map_err(|err| PerchError::Other(format!("could not create {}: {err}", dir.display())))?;
 
-    let store = probe::store_for_profile(host, &dir)?;
+    // From here every way out has to take the directory back out again, which
+    // is what the doc above promises and what `?` in the middle of this would
+    // quietly stop doing. A pending login nobody reaps is only a directory —
+    // no Credential has been written yet — but `reap_abandoned` exists because
+    // they accumulate, and one left by a failure is one it will not tidy for
+    // thirty minutes.
+    let produced = run_the_login(host, out, purpose, &claude, &dir, &store, &version);
+    profile::discard(host, &store);
+    produced
+}
 
+#[allow(clippy::too_many_arguments)]
+fn run_the_login(
+    host: &dyn Host,
+    out: &mut dyn Write,
+    purpose: &str,
+    claude: &std::path::Path,
+    dir: &std::path::Path,
+    store: &probe::Store,
+    version: &str,
+) -> Result<Produced> {
     say(out, purpose)?;
     say(
         out,
         "Quit Claude Code when the login is done to come back here.\n",
     )?;
 
-    let claude = probe::claude_bin(host)?;
     let status = host
         .exec_interactive(
             &claude.to_string_lossy(),
@@ -61,9 +87,7 @@ pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Pr
         )
         .map_err(|err| PerchError::Other(format!("could not launch a login: {err}")))?;
 
-    let produced = what_the_login_left(host, &store, &version, status);
-    profile::discard(host, &store);
-    produced
+    what_the_login_left(host, store, version, status)
 }
 
 /// Reads the Account the login produced, or says why there is not one.
@@ -170,5 +194,68 @@ pub fn leaving_the_active_account_alone(active: Option<&str>) -> String {
     match active {
         Some(active) => format!(" {active} stays active and its session is untouched."),
         None => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host::{Execution, FakeHost, fake::Effect};
+
+    /// A writer that is not there — the ordinary closed pipe.
+    struct Closed;
+
+    impl Write for Closed {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "the pipe closed",
+            ))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn a_machine_with_claude_code() -> FakeHost {
+        FakeHost::new()
+            .with_env("PATH", "/usr/bin")
+            .with_file("/usr/bin/claude", "")
+            .with_exec(
+                "/usr/bin/claude",
+                &["--version"],
+                Execution {
+                    status: 0,
+                    stdout: "2.1.221 (Claude Code)\n".to_string(),
+                    stderr: String::new(),
+                },
+            )
+    }
+
+    /// The directory a login runs in comes back out however `perform` ends.
+    ///
+    /// The doc above says so — "removed whether it worked or not" — and it was
+    /// true of the login itself and not of the steps around it: several `?` sat
+    /// between making the directory and discarding it, so a failure at any of
+    /// them left a pending login behind that `reap_abandoned` would not tidy
+    /// for thirty minutes. A closed pipe is the one that needs no arranging.
+    #[test]
+    fn a_login_that_could_not_be_announced_takes_its_directory_back_out() {
+        let host = a_machine_with_claude_code();
+        let dir = registry::pending_login_dir(&host, host.now()).expect("home is known");
+
+        assert!(
+            perform(&host, &mut Closed, "why Perch is asking").is_err(),
+            "the line before the browser could not be written"
+        );
+
+        assert!(
+            host.effects()
+                .iter()
+                .any(|effect| matches!(effect, Effect::RemovedDir(at) if at == &dir)),
+            "the directory it made for the login is gone again: {:?}",
+            host.effects()
+        );
     }
 }
