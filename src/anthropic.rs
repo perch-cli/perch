@@ -85,7 +85,7 @@ impl std::fmt::Display for Refused {
 }
 
 /// What a renewal hands back.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Fresh {
     pub access_token: String,
     /// The Rotated refresh token, when Anthropic Rotated one. Absent means the
@@ -94,6 +94,23 @@ pub struct Fresh {
     /// When the new access token expires, in milliseconds — the unit a
     /// Credential records it in.
     pub expires_at: Option<i64>,
+}
+
+impl std::fmt::Debug for Fresh {
+    /// A freshly Rotated refresh token is the most valuable secret in Perch —
+    /// it is the only copy there is, the old one having just been retired — so
+    /// it is not one to leave a derived `Debug` able to print.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Fresh")
+            .field("access_token", &"<redacted>")
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
 }
 
 /// Every Quota Window this access token's Account currently has.

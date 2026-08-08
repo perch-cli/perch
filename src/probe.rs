@@ -49,7 +49,7 @@ pub struct Identity {
 /// A Credential, kept as the exact bytes the keychain holds. Perch copies it
 /// verbatim, so the only fields read out are the ones something needs: to
 /// describe the Account, to ask Anthropic a question as it, and to renew it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Credential {
     raw: String,
     /// What proves the caller is this Account for the length of a session.
@@ -92,6 +92,17 @@ impl std::fmt::Display for Credential {
     /// message shows its shape and nothing else.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(formatter, "<credential {} bytes>", self.raw.len())
+    }
+}
+
+impl std::fmt::Debug for Credential {
+    /// The same, because `Debug` is the likelier of the two to reach a log by
+    /// accident. A derived one would print every field — the refresh token
+    /// among them — and defeat the `Display` above from one `{:?}` away, which
+    /// is a formatting specifier away from every `assert_eq!`, `panic!` and
+    /// `unwrap` in the tree.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, formatter)
     }
 }
 
@@ -1309,6 +1320,25 @@ mod tests {
         let credential = understood(r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-secret"}}"#);
         let rendered = format!("{credential}");
         assert!(!rendered.contains("sk-ant-oat01-secret"));
+    }
+
+    /// However it is asked to render.
+    ///
+    /// `Debug` is the likelier of the two to reach a log by accident — it is
+    /// what `assert_eq!`, `panic!` and a failed `unwrap` all reach for — so a
+    /// derived one would put the refresh token in CI output one `{:?}` away
+    /// from the `Display` written to stop exactly that.
+    #[test]
+    fn a_credential_never_debugs_its_secret_either() {
+        let credential = understood(
+            r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-secret","refreshToken":"sk-ant-ort01-secret"}}"#,
+        );
+
+        let rendered = format!("{credential:?}");
+
+        assert!(!rendered.contains("sk-ant-oat01-secret"), "{rendered}");
+        assert!(!rendered.contains("sk-ant-ort01-secret"), "{rendered}");
+        assert!(rendered.contains("credential"), "{rendered}");
     }
 
     fn understood(raw: &str) -> Credential {
