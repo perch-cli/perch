@@ -183,14 +183,29 @@ pub fn double_quoted(value: &str) -> String {
 /// escape, so the value arriving with one is a thing that can happen rather
 /// than a thing that would have to be contrived.
 pub fn inert(what: &str, value: &str) -> Result<(), HostError> {
-    match value.chars().find(|c| c.is_control()) {
-        Some(control) => Err(HostError::Other(format!(
-            "{what} carries a control character (U+{:04X}), which the line it \
-             would be written on has no way to hold as part of a value",
-            control as u32
+    match control_character_in(value) {
+        Some(said) => Err(HostError::Other(format!(
+            "{what} carries {said}, which the line it would be written on has \
+             no way to hold as part of a value"
         ))),
         None => Ok(()),
     }
+}
+
+/// The first control character in a value, named the way a refusal names one.
+///
+/// Shared with [`crate::keychain`]'s own refusal, which is the same check about
+/// the same hazard for the other line-oriented protocol Perch writes — its
+/// companion [`double_quoted`] was deliberately made one copy on the reasoning
+/// that "two copies is how one of them gets fixed and the other does not", and
+/// this half was left as two. What each caller *says* about it stays theirs:
+/// the two protocols break differently and the sentence explaining that is the
+/// part worth having twice.
+pub fn control_character_in(value: &str) -> Option<String> {
+    value
+        .chars()
+        .find(|c| c.is_control())
+        .map(|control| format!("a control character (U+{:04X})", control as u32))
 }
 
 /// Whether a mode lets anybody but the owner near the file.

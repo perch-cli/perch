@@ -69,7 +69,7 @@ pub fn run(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
 /// them: Claude Code, against the chosen Profile, with nothing passed on.
 pub fn hand_over(host: &dyn Host, left: Left, out: &mut dyn Write) -> Result<i32> {
     match left {
-        Left::Alone => Ok(0),
+        Left::Alone => Ok(crate::error::EXIT_OK),
         Left::ToRun(email) => run_command::run(
             host,
             RunArgs {

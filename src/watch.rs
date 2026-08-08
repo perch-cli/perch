@@ -291,8 +291,7 @@ impl Recently {
     /// cannot act has no business spending an allowance on figures it will not
     /// use.
     pub fn resting(&self, policy: &Policy, now: DateTime<Utc>) -> Option<String> {
-        let left = self.left_of_the_cooldown(policy, now)?;
-        let switched = self.switched.as_ref()?;
+        let (switched, left) = self.left_of_the_cooldown(policy, now)?;
         // The rule is named rather than only described, because a check's line
         // is read out of a cron mailbox by somebody who has to know which
         // setting to reach for.
@@ -324,16 +323,26 @@ impl Recently {
         if !policy.no_return {
             return None;
         }
-        self.left_of_the_cooldown(policy, now)?;
-        self.switched.as_ref().map(|switched| switched.off.as_str())
+        let (switched, _) = self.left_of_the_cooldown(policy, now)?;
+        Some(switched.off.as_str())
     }
 
-    /// How much of the cooldown is left, or `None` where none of it is — which
-    /// is also the answer when nothing has been Switched yet.
-    fn left_of_the_cooldown(&self, policy: &Policy, now: DateTime<Utc>) -> Option<Duration> {
+    /// The Switch the cooldown is running from and how much of it is left, or
+    /// `None` where none of it is — which is also the answer when nothing has
+    /// been Switched yet.
+    ///
+    /// Both, because there is no answer that is one without the other: a
+    /// caller asking how long is left is a caller that then names the Switch it
+    /// is left of, and asking twice made every caller repeat a question this
+    /// had already answered.
+    fn left_of_the_cooldown(
+        &self,
+        policy: &Policy,
+        now: DateTime<Utc>,
+    ) -> Option<(&Switched, Duration)> {
         let switched = self.switched.as_ref()?;
         let left = policy.cooldown() - (now - switched.at);
-        (left > Duration::zero()).then_some(left)
+        (left > Duration::zero()).then_some((switched, left))
     }
 }
 
