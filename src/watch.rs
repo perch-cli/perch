@@ -298,10 +298,10 @@ impl Recently {
         // setting to reach for.
         Some(format!(
             "the last Switch was {} ago and this Group's cooldown leaves at \
-             least {} between two, so nothing moves for another {}.",
+             least {} between two, so nothing moves {}.",
             minutes(now - switched.at),
             minutes(policy.cooldown()),
-            minutes(left),
+            still_to_wait(left),
         ))
     }
 
@@ -340,10 +340,27 @@ impl Recently {
 /// A span as a count of minutes, for the sentences that quote one. Rounded
 /// down, because "another 1 minute" said of fifty seconds is a promise the
 /// clock keeps and "another 2" is one it does not.
+///
+/// A span under a minute is said rather than counted: "0 minutes" is not a
+/// length of time anybody can act on, and this line is read out of a cron
+/// mailbox by somebody deciding whether to wait.
 fn minutes(span: Duration) -> String {
     match span.num_minutes() {
+        0 => "under a minute".to_string(),
         1 => "1 minute".to_string(),
         count => format!("{count} minutes"),
+    }
+}
+
+/// How much of the cooldown is left, as the tail of "so nothing moves …".
+///
+/// Its own phrasing because it is the one span in that sentence that can be
+/// under a minute, and neither "for another 0 minutes" nor "for another under a
+/// minute" is something to read at six in the morning.
+fn still_to_wait(left: Duration) -> String {
+    match left.num_minutes() {
+        0 => "for under a minute more".to_string(),
+        _ => format!("for another {}", minutes(left)),
     }
 }
 
@@ -1075,6 +1092,18 @@ mod tests {
             waiting.contains("another 11"),
             "and what is left: {waiting}"
         );
+
+        // The last half-minute of it. "another 0 minutes" is not a wait
+        // anybody can act on, and this is a line read out of a cron mailbox by
+        // somebody deciding whether to sit and wait for it.
+        let nearly = recently
+            .resting(&policy(), now() + Duration::seconds(14 * 60 + 30))
+            .expect("thirty seconds of the cooldown are left");
+        assert!(
+            nearly.contains("under a minute more"),
+            "the tail end is said rather than counted to nothing: {nearly}"
+        );
+        assert!(!nearly.contains("0 minutes"), "{nearly}");
 
         assert_eq!(
             recently.resting(&policy(), now() + Duration::minutes(15)),
