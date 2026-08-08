@@ -501,3 +501,16 @@ fn a_group_listing_says_when_its_watcher_may_switch_unattended() {
         "it is on, so it must not read as off: {printed}"
     );
 }
+
+/// `perch group list` writes nothing, so it does not wait on a writer either.
+#[test]
+fn listing_the_groups_reads_alongside_another_perch_rather_than_waiting_on_it() {
+    let host = three_accounts_in_one_group();
+    let held = perch::registry::lock(&host).expect("the other `perch` has it");
+
+    let (result, printed) = run_group(&host, perch::commands::group::GroupCommand::List);
+
+    result.expect("a read does not wait on a writer");
+    assert!(printed.contains("work"), "{printed}");
+    drop(held);
+}
