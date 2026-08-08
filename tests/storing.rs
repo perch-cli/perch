@@ -271,6 +271,40 @@ fn a_credential_stored_in_the_second_choice_store_empties_the_first() {
     );
 }
 
+/// The same removal, failing. A Profile directory that is read-only fails the
+/// write *and* the unlink, so the Credential goes to the other store and the
+/// one this platform reads first keeps the copy it had — which then beats it on
+/// every later read, for ever. Reported as a failure rather than remarked,
+/// because the caller's next act is to believe the Capture happened, and a
+/// Capture that did not take effect is ADR 0006's silent poisoning by the back
+/// door.
+#[test]
+fn a_superseded_copy_that_survives_in_the_store_read_first_is_a_failure() {
+    let host = two_accounts_off_macos_with_a_keychain();
+    let live = CREDENTIALS_PATH;
+    // Readable, and neither writable nor removable: the file is still there and
+    // still answers, so it still wins.
+    let host = host
+        .with_unwritable_file(live, "Read-only file system (os error 30)")
+        .with_undeletable_file(live, "Read-only file system (os error 30)");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let refused = result.expect_err("the Capture did not take effect");
+    let said = refused.to_string();
+    assert!(said.contains(live), "which store is now lying: {said}");
+    assert!(
+        said.contains("read first"),
+        "and why that is the one that matters: {said}"
+    );
+    assert_eq!(
+        host.file(live).as_deref(),
+        Some(CREDENTIAL),
+        "the copy that survived is the one a read would still find, which is \
+         exactly why this could not be reported as a success"
+    );
+}
+
 #[test]
 fn both_stores_being_unreachable_is_reported_as_the_primary_failing() {
     let host = machine_with_two_accounts();

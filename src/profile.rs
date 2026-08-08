@@ -80,7 +80,17 @@ pub fn store_credential(host: &dyn Host, store: &Store, credential: &str) -> Res
                 // so a copy left in it is worse here than the other way round:
                 // it would win over the Credential just written. Safe to do
                 // now and not before, because this one has been read back.
-                supersede(host, &primary);
+                //
+                // And it *fails* here, where the other direction only remarks.
+                // A copy that loses to what was just written is untidy; a copy
+                // that beats it means every later read hands back the
+                // Credential this call replaced — so returning `Ok` would be
+                // reporting a Capture that did not take effect, which is the
+                // one thing a Capture must never do quietly. Reachable rather
+                // than theoretical: off macOS the plaintext file is the
+                // primary, and a Profile directory that is read-only fails the
+                // write and the removal alike.
+                supersede_or_fail(host, &primary, &fallback)?;
                 Ok(())
             }
             // Both refused, and either may be sitting on a value that is
@@ -141,6 +151,44 @@ fn supersede(host: &dyn Host, other: &CredentialStore) {
             other.describe()
         ));
     }
+}
+
+/// The same, in the direction where a copy left behind may not be untidiness
+/// but a wrong answer: the store still holding the retired Credential is the
+/// one [`credentials::read`] consults first, so a copy that survives there wins
+/// over the one just written and the Profile goes on handing out what this call
+/// was replacing.
+///
+/// *May*, and this is the whole of the check: a removal that failed because the
+/// store will not answer at all — a locked keychain, which is the ordinary
+/// reason the fallback was written in the first place — leaves a copy that
+/// cannot win, because the read that would prefer it fails the same way. So the
+/// store is asked, and only a store that still hands a Credential back is a
+/// failure. Reported rather than remarked there, because the caller's next act
+/// is to believe the write; a store that will not answer either way is the
+/// remark it always was.
+fn supersede_or_fail(
+    host: &dyn Host,
+    preferred: &CredentialStore,
+    written: &CredentialStore,
+) -> Result<()> {
+    let Err(refused) = preferred.forget(host) else {
+        return Ok(());
+    };
+    if !matches!(preferred.read(host), Ok(Some(_))) {
+        host.note(&format!(
+            "A superseded copy of a Credential could not be removed from {}.",
+            preferred.describe()
+        ));
+        return Ok(());
+    }
+    Err(refused.with_note(&format!(
+        "The Credential was written to {}, but the copy it replaces is still in \
+         {} — which is the store read first, so it is the one Claude Code would \
+         go on using. Empty it and run this again.",
+        written.describe(),
+        preferred.describe(),
+    )))
 }
 
 /// A write that did not end with the store holding the Credential, and what
