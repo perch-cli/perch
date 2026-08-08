@@ -1051,7 +1051,30 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
         config.validate(name)?;
     }
 
-    Ok(Some(registry))
+    Ok(Some(with_every_claimed_group_declared(registry)))
+}
+
+/// Declares any Group an Account claims but nothing declared.
+///
+/// The invariant `group_names` states — "a Group an Account claims is always
+/// declared too, `load` sees to that" — and which nothing was enforcing. An
+/// Account claiming an undeclared Group falls out of the TUI's sections
+/// entirely, because those are built from the declared set, so it becomes an
+/// Account the picker cannot reach with the arrow keys; and `perch switch
+/// <that group>` refuses while `perch list` shows the Group.
+///
+/// Declared rather than refused, because the Group's settings are what is
+/// missing and the defaults are what a freshly declared Group carries anyway.
+fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
+    let claimed: Vec<String> = registry
+        .accounts
+        .iter()
+        .filter_map(|account| account.group.clone())
+        .collect();
+    for name in claimed {
+        registry.groups.entry(name).or_default();
+    }
+    registry
 }
 
 /// Writes the registry, under the hold the caller took to read it.
@@ -1080,8 +1103,16 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) ->
     }
 
     let path = registry_path(host)?;
-    let body = serde_json::to_string_pretty(registry)
-        .map_err(|err| PerchError::Other(format!("could not serialise the registry: {err}")))?;
+    // Stamped rather than carried through. `load` returns whatever version the
+    // file claimed and this writes it back, so a document claiming something
+    // else kept claiming it through every write this build made — and the field
+    // is documented as "the version this build writes". A guard that describes
+    // the last writer rather than this one is a guard about nothing.
+    let body = serde_json::to_string_pretty(&Registry {
+        version: CURRENT_VERSION,
+        ..registry.clone()
+    })
+    .map_err(|err| PerchError::Other(format!("could not serialise the registry: {err}")))?;
     write(host, &path, &format!("{body}\n"))
 }
 
@@ -1691,6 +1722,59 @@ mod tests {
         assert!(
             said.contains(&path.display().to_string()),
             "and it names the file: {said}"
+        );
+    }
+
+    /// The invariant `group_names` states, now that something holds it.
+    ///
+    /// An Account claiming a Group nothing declared falls out of the TUI's
+    /// sections — they are built from the declared set — which makes it an
+    /// Account the picker cannot reach with the arrow keys, while `perch list`
+    /// goes on showing the Group and `perch switch <that group>` refuses.
+    #[test]
+    fn a_group_an_account_claims_is_declared_by_the_time_anything_reads_it() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let path = registry_path(&host).unwrap();
+        host.set_file(
+            &path,
+            r#"{"version":1,"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true,"group":"work"}],"groups":{}}"#,
+        );
+
+        let registry = load(&host).expect("it reads").expect("it is there");
+
+        assert!(
+            registry.group_names().contains("work"),
+            "the Group the Account claims is in the declared set: {:?}",
+            registry.group_names()
+        );
+        assert_eq!(
+            registry.group("work"),
+            Some(&GroupConfig::default()),
+            "carrying what a freshly declared Group carries"
+        );
+        assert_eq!(registry.accounts_in("work").len(), 1);
+    }
+
+    /// What this build writes is what the file says it was written by.
+    ///
+    /// `load` hands back whatever version the document claimed and `save` used
+    /// to write it straight back, so a file claiming something else kept
+    /// claiming it through every write — about a document this build had just
+    /// produced.
+    #[test]
+    fn a_registry_this_build_writes_says_so() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let mut perch = lock(&host).expect("the registry lock is free");
+        let stale = Registry {
+            version: 0,
+            ..Registry::default()
+        };
+
+        save(&host, &mut perch, &stale).expect("it writes");
+
+        assert_eq!(
+            load(&host).expect("it reads").expect("it is there").version,
+            CURRENT_VERSION
         );
     }
 }
