@@ -412,12 +412,6 @@ impl NameKind {
     }
 }
 
-/// Refuses a name that could not be told from something else.
-///
-/// Aliases and Group names share one namespace and are both valid Targets for
-/// `switch` and `run`, so a name has to be distinguishable from the other
-/// things a Target can be: an email address, and the word that means no Group
-/// at all.
 /// Whether two names the user chose are the same name.
 ///
 /// Case-insensitively, because nobody remembers which way they capitalised a
@@ -444,6 +438,12 @@ pub fn offerable_name(from: &str) -> Option<String> {
     Some(joined)
 }
 
+/// Refuses a name that could not be told from something else.
+///
+/// Aliases and Group names share one namespace and are both valid Targets for
+/// `switch` and `run`, so a name has to be distinguishable from the other
+/// things a Target can be: an email address, and the word that means no Group
+/// at all.
 pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
     if name.trim().is_empty() {
         return Err(PerchError::Invalid(format!(
@@ -983,7 +983,6 @@ pub fn lock(host: &dyn Host) -> Result<lock::Held<'_>> {
     lock::take_all(host, vec![lock_spec(host)?])
 }
 
-/// Reads the registry, or `None` when Perch has never run here.
 /// The `version` a document claims, read on its own.
 ///
 /// Deliberately not a parse of the whole thing: what this exists to answer is
@@ -1004,6 +1003,7 @@ fn version_of(contents: &str) -> Option<u32> {
     serde_json::from_str::<Versioned>(contents).ok()?.version
 }
 
+/// Reads the registry, or `None` when Perch has never run here.
 pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     let path = &registry_path(host)?;
     let contents = match host.read_file(path) {
