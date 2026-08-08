@@ -107,6 +107,23 @@ pub enum Left {
     ToRun(String),
 }
 
+/// One scope's worth of the listing: what it is, and which rows of the listing
+/// its Accounts are.
+///
+/// A Cycle never leaves the scope it started in (ADR 0002), so the listing is
+/// one ranking per scope rather than one over everything ([`ranked`]) — and the
+/// scope is the only level at which a figure spanning several Accounts means
+/// anything at all ([`crate::reserve`]). Carried rather than worked out per
+/// frame for the same reason the order is: the row the cursor is on cannot
+/// change between deciding it and drawing it.
+#[derive(Debug, Clone)]
+pub struct Section {
+    pub scope: Scope,
+    /// Where its Accounts sit in the listing — positions in
+    /// [`Model::accounts`], not in the registry.
+    pub rows: std::ops::Range<usize>,
+}
+
 /// Everything the TUI is showing.
 pub struct Model {
     /// The Accounts as Perch last held them: read before the terminal was
@@ -122,6 +139,10 @@ pub struct Model {
     /// worked out per frame so that the row the cursor is on cannot change
     /// between deciding it and drawing it.
     order: Vec<usize>,
+    /// Which scope each stretch of the listing belongs to, in the same order.
+    /// Cut from the same pass that builds `order`, so a section can never name
+    /// rows the listing does not have.
+    sections: Vec<Section>,
     /// The clock the ages on the figures are measured against, moved on by the
     /// frame loop rather than read here.
     pub now: DateTime<Utc>,
@@ -146,8 +167,10 @@ pub struct Model {
 
 impl Model {
     pub fn new(registry: Registry, now: DateTime<Utc>) -> Model {
+        let (order, sections) = ranked(&registry);
         Model {
-            order: ranked(&registry),
+            order,
+            sections,
             registry,
             now,
             tab: Tab::Accounts,
@@ -172,6 +195,14 @@ impl Model {
             .collect()
     }
 
+    /// The listing cut into the scopes it is a ranking within, in the order it
+    /// shows them. Every Account is in exactly one, and a scope holding none is
+    /// not among them: a heading over no Accounts is a heading that says
+    /// nothing.
+    pub fn sections(&self) -> &[Section] {
+        &self.sections
+    }
+
     /// The Account under the cursor, or `None` when Perch holds none.
     pub fn selected(&self) -> Option<&Account> {
         self.order
@@ -190,7 +221,7 @@ impl Model {
     pub fn now_holds(&mut self, registry: Registry) {
         let was_on = self.selected().map(|account| account.email().to_string());
         self.registry = registry;
-        self.order = ranked(&self.registry);
+        (self.order, self.sections) = ranked(&self.registry);
         self.cursor = was_on
             .and_then(|email| self.row_of(&email))
             .unwrap_or(self.cursor)
@@ -360,9 +391,11 @@ const WAITING_ON_A_REFRESH: &str = "The Refresh you asked for is still out, and 
 /// Both tabs are drawn from this one order, because the cursor is shared
 /// between them: two orders would be a `Tab` that moved what the acting keys
 /// act on.
-fn ranked(registry: &Registry) -> Vec<usize> {
+fn ranked(registry: &Registry) -> (Vec<usize>, Vec<Section>) {
     let mut order = Vec::with_capacity(registry.accounts.len());
+    let mut sections = Vec::new();
     for scope in scopes(registry) {
+        let from = order.len();
         for account in listed(registry, &scope) {
             let at = registry
                 .accounts
@@ -371,8 +404,14 @@ fn ranked(registry: &Registry) -> Vec<usize> {
                 .expect("the listing is of Accounts the registry holds");
             order.push(at);
         }
+        if order.len() > from {
+            sections.push(Section {
+                scope,
+                rows: from..order.len(),
+            });
+        }
     }
-    order
+    (order, sections)
 }
 
 /// One scope's Accounts: ranked where a Cycle could happen in it, and in the
@@ -386,9 +425,9 @@ fn ranked(registry: &Registry) -> Vec<usize> {
 /// left as `perch list` shows them, with the Headroom still beside each of them
 /// as the figure it is.
 fn listed<'a>(registry: &'a Registry, scope: &Scope) -> Vec<&'a Account> {
-    match scope {
-        Scope::Ungrouped if !registry.global.cycle_ungrouped => registry.ungrouped_accounts(),
-        _ => cycle::ranked(registry, scope),
+    match cycle::may_cycle_within(registry, scope) {
+        true => cycle::ranked(registry, scope),
+        false => scope.accounts(registry),
     }
 }
 

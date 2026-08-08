@@ -54,7 +54,15 @@ pub enum Scope {
 }
 
 impl Scope {
-    fn accounts<'a>(&self, registry: &'a Registry) -> Vec<&'a Account> {
+    /// The Accounts this scope holds, ranked or not.
+    ///
+    /// Public because a Group is also something to *look* at rather than only
+    /// something to Cycle within: what a Group has left to draw on
+    /// ([`crate::reserve`]) is measured over exactly the Accounts a Cycle could
+    /// land on, and a second idea of which Accounts those are is how the figure
+    /// on screen comes to describe a different set from the one that gets
+    /// chosen.
+    pub fn accounts<'a>(&self, registry: &'a Registry) -> Vec<&'a Account> {
         match self {
             Scope::Group(name) => registry.accounts_in(name),
             Scope::Ungrouped => registry.ungrouped_accounts(),
@@ -86,8 +94,18 @@ impl Scope {
     /// The scope as the middle of a sentence: "every Account in {}".
     fn described(&self) -> String {
         match self {
-            Scope::Group(name) => format!("Group `{name}`"),
+            Scope::Group(name) => crate::commands::list::group_heading(name),
             Scope::Ungrouped => "no Group".to_string(),
+        }
+    }
+
+    /// The scope over the Accounts in it, in the words `perch list` heads the
+    /// same set of Accounts with — because it is the same set, and a listing
+    /// that named it two ways would read as two different things.
+    pub fn heading(&self) -> String {
+        match self {
+            Scope::Group(name) => crate::commands::list::group_heading(name),
+            Scope::Ungrouped => crate::commands::IN_NO_GROUP.to_string(),
         }
     }
 }
@@ -367,7 +385,7 @@ pub fn choose(
 
     let mut ranked: Vec<Ranked> = accounts
         .iter()
-        .filter(|account| account.enabled && !account.quarantined())
+        .filter(|account| is_a_candidate(account))
         .map(|account| Ranked {
             account,
             headroom: headroom_of(account),
@@ -484,9 +502,62 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope) -> Vec<&'a Account> {
 /// not one it would consider at all, and sorting it by its headroom would put a
 /// full-looking Account nobody can use above one they can.
 fn place(account: &Account, strategy: Strategy) -> ((u8, u8), f64) {
-    let candidate = u8::from(account.enabled && !account.quarantined());
+    let candidate = u8::from(is_a_candidate(account));
     let (tier, figure) = headroom_of(account).ranking(strategy);
     ((candidate, tier), figure)
+}
+
+/// Whether a Cycle could land on this Account at all — which is a different
+/// question from whether it has room, and is asked first everywhere.
+///
+/// One predicate rather than the same pair of conditions written wherever the
+/// question comes up: what a Cycle may choose and what a Group has left to draw
+/// on ([`crate::reserve`]) must be the same set of Accounts, or the figure on
+/// screen describes a set the Switch does not use.
+pub fn is_a_candidate(account: &Account) -> bool {
+    account.enabled && !account.quarantined()
+}
+
+/// Whether anything has declared the Accounts in this scope interchangeable.
+///
+/// Always true of a Group, which is that declaration (ADR 0002). The Accounts in
+/// no Group are a scope only because a global setting says so (ADR 0017), and
+/// until it does, every surface has to decline the same things about them —
+/// ranking them, and saying what they have left between them. Asked in one place
+/// so the listing and the figures above it cannot end up disagreeing about
+/// whether they are a set.
+pub fn may_cycle_within(registry: &Registry, scope: &Scope) -> bool {
+    match scope {
+        Scope::Group(_) => true,
+        Scope::Ungrouped => registry.global.cycle_ungrouped,
+    }
+}
+
+/// The Accounts a Cycle may not choose, counted once each.
+///
+/// One that is both Disabled and Quarantined is still one Account, and a tally
+/// that put it in both buckets could add up to more Accounts than the scope
+/// holds — a reason that does not survive being checked teaches the reader to
+/// stop checking. Empty where every Account is a candidate.
+///
+/// Shared because the refusal that nobody can be Cycled to and the Reserve that
+/// says what is out of the running are the same count of the same Accounts, and
+/// two copies of it is how one comes to say "2 disabled" where the other says
+/// "1".
+pub fn out_of_the_running(accounts: &[&Account]) -> String {
+    let quarantined = accounts.iter().filter(|a| a.quarantined()).count();
+    let disabled = accounts
+        .iter()
+        .filter(|a| !a.enabled && !a.quarantined())
+        .count();
+    let mut out = Vec::new();
+    if disabled > 0 {
+        out.push(format!("{disabled} disabled"));
+    }
+    if quarantined > 0 {
+        out.push(format!("{quarantined} Quarantined"));
+    }
+    out.join(", ")
 }
 
 /// How much of an Account is left to spend, in a column's worth of words.
@@ -498,6 +569,65 @@ pub fn headroom_phrase(account: &Account) -> String {
     match headroom_of(account) {
         Headroom::Room { percent, .. } => format!("{percent:.0}%"),
         Headroom::Exhausted { .. } => "exhausted".to_string(),
+        Headroom::Unobserved => "never observed".to_string(),
+    }
+}
+
+/// The three answers there are to "how much has this Account left", for the
+/// callers that have to tell them apart rather than print them.
+///
+/// One value rather than a number and a second question beside it. A caller that
+/// asked "has it room?" and then "was it ever read?" would be holding two
+/// predicates that have to stay in agreement, and the day they disagreed would
+/// be a tally that did not add up to the Accounts on screen.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HowMuchIsLeft {
+    /// Every Quota Window has at least this much room left.
+    Room(f64),
+    /// A Quota Window is full, so the Account is blocked whatever its others
+    /// say.
+    Exhausted,
+    /// No figure has ever been read. Never room: "no figure" and "plenty of
+    /// room" are opposite pieces of advice.
+    NeverObserved,
+}
+
+/// Which of those three an Account is, measured the one honest way (ADR 0012).
+pub fn how_much_is_left(account: &Account) -> HowMuchIsLeft {
+    match headroom_of(account) {
+        Headroom::Room { percent, .. } => HowMuchIsLeft::Room(percent),
+        Headroom::Exhausted { .. } => HowMuchIsLeft::Exhausted,
+        Headroom::Unobserved => HowMuchIsLeft::NeverObserved,
+    }
+}
+
+/// How much of an Account is left to spend, with the Quota Window the figure was
+/// taken from and the age of the observation it came from (ADR 0015).
+///
+/// The long form of [`headroom_phrase`], for the surface that gives an Account a
+/// block of its own rather than a column: naming the fullest window is what
+/// makes "taken from its most constrained window" checkable against the rows
+/// underneath rather than a claim in a doc comment.
+pub fn headroom_in_full(account: &Account, now: DateTime<Utc>) -> String {
+    match headroom_of(account) {
+        Headroom::Room {
+            percent,
+            fullest_window,
+            observed_at,
+            ..
+        } => format!(
+            "{percent:.0}%  ({fullest_window} is its fullest, as of {})",
+            utilization::age_phrase(observed_at, now)
+        ),
+        // The rows underneath say which window is full and when it comes back,
+        // so this says the state and leaves the arithmetic to them.
+        Headroom::Exhausted { .. } => match account.observed_utilization() {
+            Some(cached) => format!(
+                "exhausted  (as of {})",
+                utilization::age_phrase(cached.observed_at, now)
+            ),
+            None => "exhausted".to_string(),
+        },
         Headroom::Unobserved => "never observed".to_string(),
     }
 }
@@ -550,30 +680,14 @@ fn staleness(registry: &Registry, best: &Ranked) -> Option<String> {
     ))
 }
 
-/// The scope holds Accounts, but none of them is a candidate.
-///
-/// Each Account is counted once. One that is both disabled and Quarantined is
-/// still one Account, and a tally that put it in both buckets could add up to
-/// more Accounts than the scope holds — a reason that does not survive being
-/// checked teaches the reader to stop checking.
+/// The scope holds Accounts, but none of them is a candidate. Which way each
+/// one left the running is [`out_of_the_running`]'s to count.
 fn nobody_is_a_candidate(scope: &Scope, accounts: &[&Account]) -> String {
-    let quarantined = accounts.iter().filter(|a| a.quarantined()).count();
-    let disabled = accounts
-        .iter()
-        .filter(|a| !a.enabled && !a.quarantined())
-        .count();
-    let mut why = Vec::new();
-    if disabled > 0 {
-        why.push(format!("{disabled} disabled"));
-    }
-    if quarantined > 0 {
-        why.push(format!("{quarantined} Quarantined"));
-    }
     format!(
         "No Account in {} is a Cycle candidate ({}), so there is nowhere to \
          Switch to. Nothing was changed.",
         scope.described(),
-        why.join(", "),
+        out_of_the_running(accounts),
     )
 }
 
@@ -665,7 +779,7 @@ pub(crate) mod tests {
     use crate::registry::Quarantine;
     use chrono::TimeZone;
 
-    pub(super) fn now() -> DateTime<Utc> {
+    pub(crate) fn now() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap()
     }
 
@@ -686,7 +800,7 @@ pub(crate) mod tests {
         assert!(said.contains("1 Quarantined"), "{said}");
     }
 
-    pub(super) fn account(email: &str, windows: Vec<WindowUtilization>) -> Account {
+    pub(crate) fn account(email: &str, windows: Vec<WindowUtilization>) -> Account {
         Account {
             identity: Identity {
                 email: email.to_string(),
@@ -705,7 +819,7 @@ pub(crate) mod tests {
         }
     }
 
-    pub(super) fn window(name: &str, used_percent: f64) -> WindowUtilization {
+    pub(crate) fn window(name: &str, used_percent: f64) -> WindowUtilization {
         WindowUtilization {
             window: name.to_string(),
             used_percent,
@@ -713,14 +827,14 @@ pub(crate) mod tests {
         }
     }
 
-    pub(super) fn resetting(name: &str, used_percent: f64, hours: i64) -> WindowUtilization {
+    pub(crate) fn resetting(name: &str, used_percent: f64, hours: i64) -> WindowUtilization {
         WindowUtilization {
             resets_at: Some(now() + chrono::Duration::hours(hours)),
             ..window(name, used_percent)
         }
     }
 
-    pub(super) fn holding(accounts: Vec<Account>) -> Registry {
+    pub(crate) fn holding(accounts: Vec<Account>) -> Registry {
         let mut registry = Registry::default();
         registry.declare_group("work").unwrap();
         registry.active = accounts.first().map(|first| first.email().to_string());
@@ -731,7 +845,7 @@ pub(crate) mod tests {
     }
 
     /// The same Group, told to prefer the other of the two Strategies.
-    pub(super) fn preferring(
+    pub(crate) fn preferring(
         mut registry: Registry,
         strategy: crate::registry::Strategy,
     ) -> Registry {
@@ -846,6 +960,52 @@ pub(crate) mod tests {
             headroom_phrase(&account("a@example.com", vec![])),
             "never observed",
             "'no figure' and 'plenty of room' are opposite pieces of advice",
+        );
+    }
+
+    /// The long form names the window the figure came from, so "taken from its
+    /// most constrained window" can be checked against the rows underneath it
+    /// rather than taken on trust — and every one of the three answers carries
+    /// the age of what it was read from, or says it was never read at all.
+    #[test]
+    fn the_headroom_said_in_full_names_its_window_and_its_age() {
+        let roomy = account(
+            "a@example.com",
+            vec![window("5-hour", 4.0), window("7-day", 95.0)],
+        );
+        assert_eq!(
+            headroom_in_full(&roomy, now()),
+            "5%  (7-day is its fullest, as of 4m ago)"
+        );
+
+        // The rows underneath say which window is full and when it comes back,
+        // so this says the state and leaves the arithmetic to them.
+        let full = account("a@example.com", vec![window("5-hour", 100.0)]);
+        assert_eq!(headroom_in_full(&full, now()), "exhausted  (as of 4m ago)");
+
+        assert_eq!(
+            headroom_in_full(&account("a@example.com", vec![]), now()),
+            "never observed",
+            "'no figure' and 'plenty of room' are opposite pieces of advice",
+        );
+    }
+
+    /// The three answers are one value rather than a number and a second
+    /// question beside it, so a caller counting them cannot hold two predicates
+    /// that disagree.
+    #[test]
+    fn how_much_is_left_tells_the_three_answers_apart_in_one_pass() {
+        assert_eq!(
+            how_much_is_left(&account("a@example.com", vec![window("5-hour", 40.0)])),
+            HowMuchIsLeft::Room(60.0)
+        );
+        assert_eq!(
+            how_much_is_left(&account("a@example.com", vec![window("5-hour", 100.0)])),
+            HowMuchIsLeft::Exhausted
+        );
+        assert_eq!(
+            how_much_is_left(&account("a@example.com", vec![])),
+            HowMuchIsLeft::NeverObserved
         );
     }
 

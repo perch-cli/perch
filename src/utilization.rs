@@ -44,6 +44,49 @@ pub fn write_figures(out: &mut dyn Write, account: &Account, now: DateTime<Utc>)
 /// An Account with no observation is never rendered as zero: "no figure" and
 /// "plenty of room" are opposite pieces of advice.
 pub fn lines(account: &Account, now: DateTime<Utc>) -> Vec<String> {
+    rows(account, now, |window| {
+        format!("{:<8} {:>3.0}%", window.window, window.used_percent)
+    })
+}
+
+/// The same rows with when each Quota Window comes back, for the surfaces that
+/// give an Account a block of its own rather than a row in a table.
+///
+/// The fill says how much is gone and the reset says how long that lasts, and
+/// deciding where to work needs both: a five-hour window at 90% that comes back
+/// in twenty minutes and one at 90% that comes back in four hours are the same
+/// number and opposite advice. It is a second rendering rather than a longer
+/// [`lines`] because `perch list` puts these in a column beside four others, and
+/// a clock time there would push the table past the width of a terminal — the
+/// two surfaces differ in the room they have, which is exactly what this splits
+/// on.
+pub fn lines_with_resets(account: &Account, now: DateTime<Utc>) -> Vec<String> {
+    rows(account, now, |window| {
+        format!(
+            // "used", because this row sits under a Headroom figure saying how
+            // much is *left*: two percentages of the same window an inch apart,
+            // and the reader is not asked to tell them apart by context.
+            "{:<8} {:>3.0}% used  {}",
+            window.window,
+            window.used_percent,
+            // Said as its absence rather than left out, because a row with no
+            // reset clause reads as a window that does not reset.
+            match window.resets_at {
+                Some(at) => format!("resets {}", reset_phrase(at, now)),
+                None => "no reset time cached".to_string(),
+            }
+        )
+    })
+}
+
+/// One row per Quota Window, however each surface says the window itself, with
+/// the age of the observation on every one of them (ADR 0015) — or the single
+/// line that says nothing has ever been observed.
+fn rows(
+    account: &Account,
+    now: DateTime<Utc>,
+    said: impl Fn(&crate::registry::WindowUtilization) -> String,
+) -> Vec<String> {
     match account.observed_utilization() {
         None => vec!["never observed".to_string()],
         Some(cached) => {
@@ -51,12 +94,7 @@ pub fn lines(account: &Account, now: DateTime<Utc>) -> Vec<String> {
             cached
                 .windows
                 .iter()
-                .map(|window| {
-                    format!(
-                        "{:<8} {:>3.0}%  (as of {age})",
-                        window.window, window.used_percent
-                    )
-                })
+                .map(|window| format!("{}  (as of {age})", said(window)))
                 .collect()
         }
     }

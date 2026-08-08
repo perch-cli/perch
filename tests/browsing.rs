@@ -9,6 +9,7 @@ mod common;
 
 use common::*;
 
+use chrono::Duration;
 use perch::host::{FakeHost, Host};
 use perch::registry::Registry;
 use perch::tui::fake::{FakeRefresher, FakeScreen};
@@ -171,8 +172,320 @@ fn the_age_of_every_figure_is_on_the_utilization_view() {
     }
     assert_eq!(
         frame.matches("as of").count(),
-        2,
-        "both figures carry their own age\n{frame}"
+        4,
+        "each Account's Headroom and each of its Quota Windows carries its own \
+         age\n{frame}"
+    );
+}
+
+/// An Account has several Quota Windows at once and is limited by whichever
+/// fills first, so each gets a row — and the row says how long the fill lasts
+/// as well as what it is: 90% that comes back in twenty minutes and 90% that
+/// comes back in four hours are the same number and opposite advice.
+#[test]
+fn every_quota_window_gets_a_row_with_its_fill_and_when_it_resets() {
+    let host = machine_with_figures();
+    observed(
+        &host,
+        EMAIL,
+        vec![
+            resetting("5-hour", 42.0, host.now() + Duration::hours(3)),
+            resetting("7-day", 88.0, host.now() + Duration::hours(50)),
+        ],
+    );
+
+    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+
+    let frame = screen.last_frame();
+    let row = |window: &str| -> String {
+        frame
+            .lines()
+            .find(|line| line.trim_start().starts_with(window))
+            .unwrap_or_else(|| panic!("{window} has a row of its own in\n{frame}"))
+            .to_string()
+    };
+    assert!(row("5-hour").contains("42%"), "{frame}");
+    assert!(row("5-hour").contains("resets"), "{frame}");
+    assert!(row("5-hour").contains("(in 3h)"), "{frame}");
+    assert!(row("7-day").contains("88%"), "{frame}");
+    assert!(row("7-day").contains("(in 2d)"), "{frame}");
+    for row in [row("5-hour"), row("7-day")] {
+        assert!(row.contains("(as of 4m ago)"), "{row}");
+    }
+}
+
+/// ADR 0012: an Account is only ever as free as its fullest window, so the one
+/// figure it is compared on comes from that window — and names it, so the claim
+/// can be checked against the rows underneath rather than taken on trust.
+#[test]
+fn each_account_shows_the_headroom_its_most_constrained_window_leaves() {
+    let host = machine_with_figures();
+    observed(
+        &host,
+        EMAIL,
+        vec![window("5-hour", 4.0), window("7-day", 95.0)],
+    );
+
+    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+
+    let frame = screen.last_frame();
+    // Its own block's heading, and not the tab bar's "active:" label.
+    let heading = frame
+        .lines()
+        .find(|line| line.contains(EMAIL) && !line.contains("active:"))
+        .unwrap_or_else(|| panic!("{EMAIL} heads its own block in\n{frame}"));
+    assert!(heading.contains("Headroom 5%"), "{heading}");
+    assert!(
+        heading.contains("7-day is its fullest"),
+        "the generous window never hides the exhausted one: {heading}"
+    );
+    assert!(heading.contains("as of 4m ago"), "{heading}");
+}
+
+/// A Group has no single figure and never will: its Accounts sit on different
+/// plans and Perch only ever sees percentages, so what it has left is said as a
+/// count and one Account's own figure.
+#[test]
+fn a_group_says_how_many_accounts_still_have_headroom_and_how_much_the_best_has() {
+    let host = machine_with_a_group();
+
+    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+
+    let frame = screen.last_frame();
+    assert!(frame.contains("Group `work`"), "{frame}");
+    assert!(
+        frame.contains("Reserve: 2 of 2 Accounts have Headroom, the best 93% left (as of 4m ago)"),
+        "{frame}"
+    );
+}
+
+/// Summing or averaging percentages across Accounts produces a number that
+/// looks quantitative, is not, and is exactly the kind of number people plan
+/// around. So every figure a Group's rows quote is one an Account reported.
+#[test]
+fn no_figure_on_the_tab_is_one_no_account_reported() {
+    let host = machine_with_a_group();
+
+    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+
+    // The two Accounts are 42% and 7% full, so the only honest percentages on
+    // screen are those, the Headroom each leaves, and nothing else.
+    let frame = screen.last_frame();
+    let reported = ["42%", "7%", "58%", "93%"];
+    let shown: Vec<&str> = frame
+        .split(|character: char| !character.is_ascii_digit() && character != '%')
+        .filter(|word| word.ends_with('%') && word.len() > 1)
+        .collect();
+    assert!(!shown.is_empty(), "{frame}");
+    for percentage in &shown {
+        assert!(
+            reported.contains(percentage),
+            "{percentage} is a figure no Account reported — a pooled or averaged \
+             one: {shown:?}\n{frame}"
+        );
+    }
+    for pooled in ["Total", "total", "average", "Average", "combined"] {
+        assert!(!frame.contains(pooled), "{pooled} appears in\n{frame}");
+    }
+}
+
+/// Within one window kind the comparison at least means something, which is
+/// what answers "this Group is fine on the weekly window and empty on the
+/// five-hour one" — the case a single figure per Account hides.
+#[test]
+fn a_groups_per_window_rows_are_one_per_quota_window_kind() {
+    let host = machine_with_a_group();
+    observed(
+        &host,
+        EMAIL,
+        vec![window("5-hour", 99.0), window("7-day", 30.0)],
+    );
+    observed(
+        &host,
+        SECOND_EMAIL,
+        vec![window("5-hour", 96.0), window("7-day", 12.0)],
+    );
+
+    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+
+    let frame = screen.last_frame();
+    assert!(
+        frame.contains("5-hour   emptiest  96% used across 2 Accounts (as of 4m ago)"),
+        "the Group is nearly out on its five-hour window\n{frame}"
+    );
+    assert!(
+        frame.contains("7-day    emptiest  12% used across 2 Accounts (as of 4m ago)"),
+        "and fine on its seven-day one\n{frame}"
+    );
+}
+
+/// ADR 0017: being in no Group is the absence of a declaration that Accounts
+/// are interchangeable. A Reserve over Accounts nobody has said are
+/// interchangeable would be a figure about a set that is not one.
+#[test]
+fn the_accounts_in_no_group_get_no_reserve_until_cycling_may_choose_them() {
+    let host = machine_with_figures();
+
+    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+
+    let frame = screen.last_frame();
+    assert!(frame.contains("In no Group"), "{frame}");
+    assert!(!frame.contains("Reserve"), "{frame}");
+    assert!(
+        frame.contains("only moves between these when you say it may"),
+        "and it says what would have to change\n{frame}"
+    );
+
+    config_set(&host, &["cycle-ungrouped", "true"])
+        .0
+        .expect("they are declared interchangeable");
+    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+
+    assert!(
+        screen
+            .last_frame()
+            .contains("Reserve: 2 of 2 Accounts have Headroom, the best 93% left"),
+        "{}",
+        screen.last_frame()
+    );
+}
+
+/// A Quarantined Credential does not work and a Disabled Account is never
+/// chosen, so neither is part of what a Group has left to draw on — and a count
+/// that quietly dropped them would not add up to the Accounts on screen.
+#[test]
+fn what_a_cycle_may_not_choose_is_not_counted_as_something_the_group_has() {
+    let host = machine_with_a_group();
+    disable_account(&host, SECOND_EMAIL)
+        .0
+        .expect("it is spared");
+
+    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+
+    let frame = screen.last_frame();
+    assert!(
+        frame.contains("Reserve: 1 of 1 Account has Headroom, the best 58% left"),
+        "{frame}"
+    );
+    assert!(
+        frame.contains("1 disabled, so nothing Cycles to it."),
+        "{frame}"
+    );
+    assert!(
+        frame.contains(SECOND_EMAIL),
+        "and it is still listed with its own figures\n{frame}"
+    );
+}
+
+/// A Group's figures are read from cache like every other figure, so a Refresh
+/// moves them and their age — and a failed one leaves them standing (ADR 0018).
+/// Said of a Group rather than of one Account, because the Reserve and the
+/// per-window rows are worked out afresh from whatever the registry now holds.
+#[test]
+fn a_refresh_moves_the_groups_figures_and_a_failed_one_leaves_them_standing() {
+    let host = machine_with_a_group();
+    let mut fresher = registry_of(&host);
+    for (email, used) in [(EMAIL, 12.0), (SECOND_EMAIL, 3.0)] {
+        fresher
+            .account_mut(email)
+            .expect("an Account Perch holds")
+            .utilization = Some(perch::registry::CachedUtilization {
+            observed_at: host.now(),
+            windows: vec![window("5-hour", used)],
+        });
+    }
+    let mut refresher = FakeRefresher::answering(
+        Refreshed {
+            registry: Some(fresher),
+            notes: Vec::new(),
+        },
+        1,
+    );
+    let mut screen = FakeScreen::scripted(vec![
+        Some(Signal::NextTab),
+        Some(Signal::Refresh),
+        None,
+        Some(Signal::Leave),
+    ]);
+
+    browse_with(&host, &mut screen, &mut refresher);
+
+    assert!(
+        screen.frames()[1].contains("the best 93% left (as of 4m ago)"),
+        "the Reserve before the Refresh\n{}",
+        screen.frames()[1]
+    );
+    let frame = screen.last_frame();
+    assert!(
+        frame.contains("the best 97% left (as of just now)"),
+        "the Reserve moved with the figures it is made of\n{frame}"
+    );
+    assert!(
+        frame.contains("5-hour   emptiest   3% used across 2 Accounts (as of just now)"),
+        "{frame}"
+    );
+
+    // And one that could not read anything leaves every figure with the age it
+    // had, rather than the Group's rows emptying because Anthropic was busy.
+    let mut failed = FakeRefresher::answering(
+        Refreshed::nothing_read(vec!["overflow@example.com: no answer".to_string()]),
+        0,
+    );
+    let mut screen = FakeScreen::scripted(vec![
+        Some(Signal::NextTab),
+        Some(Signal::Refresh),
+        Some(Signal::Leave),
+    ]);
+
+    browse_with(&host, &mut screen, &mut failed);
+
+    let frame = screen.last_frame();
+    assert!(frame.contains("no answer"), "{frame}");
+    assert!(
+        frame.contains("the best 93% left (as of 4m ago)"),
+        "the Reserve is still there, with its age\n{frame}"
+    );
+}
+
+/// A Group with nothing left says so rather than counting to zero, and each
+/// Account says it is exhausted rather than showing a Headroom of nought.
+#[test]
+fn a_group_with_no_room_left_says_what_is_in_the_way_and_how_old_that_is() {
+    let host = machine_with_a_group();
+    observed(&host, EMAIL, vec![window("5-hour", 100.0)]);
+    observed(&host, SECOND_EMAIL, vec![window("5-hour", 100.0)]);
+
+    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+
+    let frame = screen.last_frame();
+    assert!(
+        frame.contains("Reserve: none of 2 Accounts have Headroom (2 exhausted)"),
+        "{frame}"
+    );
+    assert!(
+        frame.contains("Read 4m ago at the oldest."),
+        "a count read from cache says how old the readings behind it are\n{frame}"
+    );
+    assert!(
+        frame.contains("Headroom exhausted  (as of 4m ago)"),
+        "{frame}"
+    );
+}
+
+/// Fill and room are both percentages, and two of them an inch apart are told
+/// apart by a word rather than by context.
+#[test]
+fn a_figure_says_whether_it_is_room_left_or_quota_used() {
+    let host = machine_with_a_group();
+
+    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+
+    let frame = screen.last_frame();
+    assert!(frame.contains("the best 93% left"), "{frame}");
+    assert!(frame.contains("emptiest   7% used"), "{frame}");
+    assert!(
+        frame.contains("5-hour     7% used  no reset time cached"),
+        "and the Account's own row says it too\n{frame}"
     );
 }
 
@@ -381,7 +694,7 @@ fn a_refresh_that_lands_replaces_the_figures_and_their_age() {
     browse_with(&host, &mut screen, &mut refresher);
 
     assert!(
-        screen.frames()[1].contains("42%  (as of 4m ago)"),
+        screen.frames()[1].contains("42% used  no reset time cached  (as of 4m ago)"),
         "the figure before the Refresh\n{}",
         screen.frames()[1]
     );
