@@ -127,8 +127,9 @@ impl<'a> Held<'a> {
     fn release(&mut self) {
         let host = self.host;
         for taken in self.taken.drain(..).rev() {
-            let stamp = host.modified_at(&taken.lock.dir).ok();
-            if taken.stamp.is_some() && still_ours(&taken, stamp) {
+            // `still_ours` is already `false` for a hold Perch has established
+            // it no longer has, which is what a `stamp` of `None` means.
+            if still_ours(&taken, host.modified_at(&taken.lock.dir).ok()) {
                 let _ = host.remove_dir_all(&taken.lock.dir);
             }
         }
@@ -189,10 +190,34 @@ pub fn take_all(host: &dyn Host, locks: Vec<LockSpec>) -> Result<Held<'_>> {
         }
 
         take(host, &lock)?;
-        let stamp = host.modified_at(&lock.dir).ok();
+
+        // The stamp is the only identity a lock artifact has, so a take that
+        // cannot read one is a take that failed — every question asked later
+        // answers the wrong way without it. `renew` skips the touch and says
+        // nothing, so the lock goes stale under a command that is behaving
+        // perfectly; `still_held` is false for ever, so `registry::save`
+        // refuses to write and tells the user another `perch` took the lock
+        // over when none did; and `release` will not give the artifact back, so
+        // Perch's own lock leaks for the whole staleness window. There is no
+        // right behaviour left, so the directory just created goes back and the
+        // failure is reported as itself.
+        let stamp = match host.modified_at(&lock.dir) {
+            Ok(stamp) => stamp,
+            Err(err) => {
+                let _ = host.remove_dir_all(&lock.dir);
+                return Err(PerchError::Other(format!(
+                    "{} ({}) was taken and then would not say when it was \
+                     written ({err}), which is the only thing that makes a hold \
+                     on it checkable.\n\
+                     Nothing was changed, and the lock was given back.",
+                    lock.name,
+                    lock.dir.display(),
+                )));
+            }
+        };
         held.taken.push(Taken {
             lock,
-            stamp,
+            stamp: Some(stamp),
             said: host.now(),
         });
     }
@@ -450,6 +475,45 @@ mod tests {
                 .iter()
                 .any(|effect| matches!(effect, Effect::Slept { .. })),
             "it is waited on"
+        );
+    }
+
+    /// And a lock that is *taken* and then will not say when it was written is
+    /// a take that failed, rather than a hold with no identity.
+    ///
+    /// The stamp is the only identity a lock artifact has. Without one, `renew`
+    /// skips the touch and says nothing — so the lock goes stale under a
+    /// command that is behaving perfectly — `still_held` is false for ever, so
+    /// `registry::save` refuses to write and blames a `perch` that does not
+    /// exist, and `release` will not give the artifact back. Three wrong
+    /// answers, none of them recoverable, so the take is what fails.
+    #[test]
+    fn a_lock_that_will_not_say_when_it_was_written_is_given_back_rather_than_held() {
+        let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
+        // Nothing is at the path, so the take itself succeeds — and then the
+        // stamp cannot be read.
+        let host = FakeHost::new().with_unreadable_file(&lock.dir, "Permission denied");
+
+        let mut ran = false;
+        let outcome: Result<()> = under(&host, vec![lock.clone()], |_| {
+            ran = true;
+            Ok(())
+        });
+
+        let refusal = outcome.expect_err("a hold nothing can be checked is no hold");
+        assert!(!ran, "and the work under it never started");
+        assert!(
+            refusal
+                .to_string()
+                .contains("would not say when it was written"),
+            "{refusal}"
+        );
+        assert!(
+            host.effects()
+                .iter()
+                .any(|effect| matches!(effect, Effect::RemovedDir(at) if at == &lock.dir)),
+            "the directory it had just made is given back: {:?}",
+            host.effects()
         );
     }
 
