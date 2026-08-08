@@ -458,3 +458,42 @@ fn the_default_profile_is_never_reconciled_into_itself() {
         host.effects()
     );
 }
+
+/// A link at a held-back name is taken away, whether or not its target is
+/// still there.
+///
+/// The denylist is enforced where links are *made*: those names are filtered
+/// out before anything is established. So nothing ever looked at one already
+/// sitting there, and a link at `.credentials.json` or `sessions` would stay
+/// for good. What it means is not a tidiness question — a Profile whose
+/// Credential Store is a link into the Default Profile has no Credential of its
+/// own, so a Capture or a `perch relogin` writing into it writes into the live
+/// store; and a `sessions` link makes every Profile Live at once (ADR 0027).
+#[test]
+fn a_link_at_a_held_back_name_is_taken_away_even_though_its_target_is_there() {
+    let host = machine()
+        .with_link(
+            Link::Symbolic,
+            shared(".credentials.json"),
+            profile(".credentials.json"),
+        )
+        .with_link(Link::Symbolic, shared("sessions"), profile("sessions"));
+
+    run_reconcile(&host).expect("the links are swept up");
+
+    assert!(
+        host.link_at(profile(".credentials.json")).is_none(),
+        "a Profile's Credential Store is never the Default Profile's"
+    );
+    assert!(
+        host.link_at(profile("sessions")).is_none(),
+        "and its sessions are never every other Profile's"
+    );
+    assert!(
+        !entries_of(&host)
+            .iter()
+            .any(|entry| entry == ".credentials.json"),
+        "{:?}",
+        entries_of(&host)
+    );
+}

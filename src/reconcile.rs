@@ -238,7 +238,19 @@ fn sweep(host: &dyn Host, shared: &Path, into: &Path) -> Result<()> {
         let Ok(Some(points_at)) = host.link_target(&at) else {
             continue;
         };
-        if plain(&points_at).starts_with(plain(shared)) && !host.path_exists(&at) {
+        if !plain(&points_at).starts_with(plain(shared)) {
+            continue;
+        }
+        // A link at a held-back name goes whether or not its target is still
+        // there. The denylist is enforced where links are *made* — those names
+        // are filtered out before anything is established — so nothing here
+        // would ever look at one sitting at `.credentials.json` or `sessions`
+        // again, and it would stay for good. What it means is not a tidiness
+        // question: a Profile whose Credential Store is a link into the Default
+        // Profile has no Credential of its own, so a Capture or a relogin
+        // writing into it writes into the live store; and a `sessions` link
+        // makes every Profile Live at once (ADR 0027).
+        if held_back(&at) || !host.path_exists(&at) {
             unlink(host, &at)?;
         }
     }
