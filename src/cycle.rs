@@ -175,16 +175,11 @@ impl Headroom {
     /// added.
     fn ranking(&self, strategy: Strategy, now: DateTime<Utc>) -> (u8, f64) {
         match self {
-            Headroom::Room {
-                percent, resets_at, ..
-            } => match (strategy, self.reset_still_to_come(strategy, now)) {
+            Headroom::Room { percent, .. } => match self.ranked_on_reset(strategy, now) {
                 // Sooner is better, so the figure sorted on is the reset time
                 // negated.
-                (Strategy::SoonestReset, true) => {
-                    let at = resets_at.expect("a reset still to come is a reset");
-                    (3, -(at.timestamp() as f64))
-                }
-                _ => (2, *percent),
+                Some(at) => (3, -(at.timestamp() as f64)),
+                None => (2, *percent),
             },
             Headroom::Unobserved => (1, 0.0),
             Headroom::Exhausted { .. } => (0, 0.0),
@@ -207,22 +202,22 @@ impl Headroom {
     /// An elapsed reset is no longer a fact about when this Account comes back,
     /// so it does not rank as one, and the Account falls to the headroom key
     /// beside every other Account the Strategy could not get a reset for.
-    fn reset_still_to_come(&self, strategy: Strategy, now: DateTime<Utc>) -> bool {
-        matches!(
-            (self, strategy),
-            (Headroom::Room { resets_at: Some(at), .. }, Strategy::SoonestReset) if *at > now
-        )
-    }
-
-    /// Whether the Strategy got the figure it asked for.
-    ///
-    /// Soonest-reset falls back to headroom for an Account whose figure does
-    /// not say when it comes back, so the sentences that quote a reason have to
-    /// know which of the two they are quoting. Claiming an Account resets
-    /// soonest on the strength of a reset time Perch has not got would be the
-    /// one thing worse than falling back silently.
-    fn ranked_on_its_reset(&self, strategy: Strategy, now: DateTime<Utc>) -> bool {
-        self.reset_still_to_come(strategy, now)
+    /// One answer, because everything that has to agree about it asks here:
+    /// the key that sorts the Accounts, the sentence that says why one won, and
+    /// the sentence that says why staying put is already the best there is.
+    /// Three questions phrased three ways is how the ranking came to be fixed
+    /// and the sentence beside it did not.
+    fn ranked_on_reset(&self, strategy: Strategy, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        match (self, strategy) {
+            (
+                Headroom::Room {
+                    resets_at: Some(at),
+                    ..
+                },
+                Strategy::SoonestReset,
+            ) if *at > now => Some(*at),
+            _ => None,
+        }
     }
 
     fn is_exhausted(&self) -> bool {
@@ -248,7 +243,12 @@ impl Headroom {
         };
         let age = utilization::age_phrase(*observed_at, now);
         let percent = utilization::percentage(*percent);
-        Some(match (strategy, resets_at) {
+        // Asked of the same predicate the ranking asked, because a number
+        // quoted as the reason has to be the number that decided it. Reading
+        // `resets_at` directly here is what let this quote a reset time as
+        // "any moment now" about a window that came back hours ago — in the
+        // same sentence as the clause explaining there was no reset to rank on.
+        Some(match (strategy, self.ranked_on_reset(strategy, now)) {
             (Strategy::MostHeadroom, _) => format!(
                 "{percent}% headroom, which is true of every one of its Quota \
                  Windows — {fullest_window} is its fullest, as of {age}"
@@ -256,14 +256,26 @@ impl Headroom {
             (Strategy::SoonestReset, Some(at)) => format!(
                 "{percent}% headroom, and the window that leaves it least — \
                  {fullest_window} — resets at {}, as of {age}",
-                utilization::reset_phrase(*at, now),
+                utilization::reset_phrase(at, now),
             ),
             // Ranked on its room, because that is what there was to rank it on.
-            (Strategy::SoonestReset, None) => format!(
-                "{percent}% headroom, which is true of every one of its Quota \
-                 Windows — {fullest_window} is its fullest — and no cached \
-                 figure says when that one comes back, as of {age}"
-            ),
+            // A reset that has already elapsed is said as one: the figure is
+            // stale rather than absent, and "no cached figure says when it
+            // comes back" would be untrue of an Account whose cache says
+            // exactly that about a time now past.
+            (Strategy::SoonestReset, None) => match resets_at {
+                Some(at) => format!(
+                    "{percent}% headroom, and the window that leaves it least — \
+                     {fullest_window} — was due back at {}, which has passed, so \
+                     there was no reset still to come to rank it on, as of {age}",
+                    utilization::reset_phrase(*at, now),
+                ),
+                None => format!(
+                    "{percent}% headroom, which is true of every one of its Quota \
+                     Windows — {fullest_window} is its fullest — and no cached \
+                     figure says when that one comes back, as of {age}"
+                ),
+            },
         })
     }
 }
@@ -672,7 +684,7 @@ fn chosen_because(
     };
     match strategy {
         Strategy::MostHeadroom => format!("{named} has the most room: {figure}."),
-        Strategy::SoonestReset if best.headroom.ranked_on_its_reset(strategy, now) => {
+        Strategy::SoonestReset if best.headroom.ranked_on_reset(strategy, now).is_some() => {
             format!("{named} resets soonest: {figure}.")
         }
         // Nothing that could be moved to says when it comes back — an Account
@@ -776,7 +788,7 @@ fn already_the_best(
     // only compared the Accounts whose figures carry a reset time, so claiming
     // it beat the ones that do not would be claiming a comparison it could not
     // make.
-    let standing = if here.headroom.ranked_on_its_reset(strategy, now) {
+    let standing = if here.headroom.ranked_on_reset(strategy, now).is_some() {
         format!(
             "{named} already comes back soonest of the Accounts in {scope} whose figures say when they do"
         )
@@ -1267,6 +1279,44 @@ pub(crate) mod tests {
             "nothing may claim a reset it has not got: {}",
             choice.because
         );
+        // The half that was missed when the ranking was fixed: the clause
+        // beside the reason read `resets_at` for itself, so it announced a
+        // window as coming back "any moment now" an hour after it had, in the
+        // same sentence as the explanation that there was no reset to rank on.
+        assert!(
+            !choice.because.contains("resets at"),
+            "and the clause quoting the figure may not either: {}",
+            choice.because
+        );
+        assert!(
+            choice.because.contains("has passed"),
+            "it says the reading is stale rather than absent: {}",
+            choice.because
+        );
+    }
+
+    /// The same disagreement on the staying-put path, which quotes the same
+    /// clause about the Account you are already on.
+    #[test]
+    fn staying_put_on_an_elapsed_reset_does_not_quote_it_as_still_to_come() {
+        let registry = preferring(
+            holding(vec![
+                // Active, the most room, and a reset that came back an hour ago.
+                account("here@example.com", vec![resetting("5-hour", 20.0, -1)]),
+                account("other@example.com", vec![window("5-hour", 60.0)]),
+            ]),
+            Strategy::SoonestReset,
+        );
+
+        let said = cycle(&registry)
+            .expect_err("there is nowhere better to go")
+            .to_string();
+
+        assert!(
+            !said.contains("resets at"),
+            "an elapsed reset is not a reset still to come: {said}"
+        );
+        assert!(said.contains("has passed"), "{said}");
     }
 
     #[test]
