@@ -254,6 +254,37 @@ fn the_export_it_offers_is_written_before_anything_is_destroyed() {
     );
 }
 
+/// The Export is offered before the word is asked for, so a Purge can be
+/// declined *after* one has been written. That leaves a file holding a working
+/// Credential for every Account at a path the user is about to stop thinking
+/// about — and `perch export` refuses a path that is taken, so the next
+/// `perch purge` offering the same one aborts before it asks anything. Both are
+/// things "Nothing was purged." on its own does not say.
+#[test]
+fn declining_after_an_export_was_written_says_the_file_is_there() {
+    let host = a_machine_to_give_back()
+        .with_answers(&["y", AT, "n"])
+        .with_secrets(&[PASSPHRASE, PASSPHRASE]);
+
+    let (outcome, printed) = run_purge(&host);
+
+    outcome.expect("changing your mind is an answer, not a failure");
+    assert!(printed.contains("Nothing was purged"), "{printed}");
+    assert!(
+        printed.contains(AT),
+        "the file full of Credentials is named: {printed}"
+    );
+    assert!(
+        host.file(AT).is_some(),
+        "and it is still there, which is why it had to be said"
+    );
+    assert_eq!(
+        registry_on(&host).map(|registry| registry.accounts.len()),
+        Some(3),
+        "nothing was given back: {printed}"
+    );
+}
+
 /// Written before anything is destroyed means exactly that: an Export that could
 /// not be written stops the Purge, with everything still there. A path that is
 /// taken is something somebody has to go and settle, and nothing has been lost
