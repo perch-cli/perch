@@ -504,6 +504,44 @@ fn a_profile_that_cannot_be_completed_is_not_left_half_built() {
     assert_the_active_account_survived(&host);
 }
 
+/// The same one step later: the Profile is complete and the registry will not
+/// take it.
+///
+/// A Profile nothing records is worse than no Profile at all — it holds a live
+/// refresh token, and `reap_abandoned` walks the pending logins and never
+/// `profiles/`, so nothing would ever look at it or delete it. That is the slow
+/// accumulation of working logins for Accounts the user believes they never
+/// added, reached by the one door that was still open.
+#[test]
+fn a_profile_the_registry_would_not_record_is_taken_back_out_again() {
+    let host = logged_in_machine();
+    run_status(&host, false).0.unwrap();
+    let services_before = host.keychain_services();
+
+    let host = host
+        .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE))
+        .with_unwritable_file(REGISTRY_PATH, "Permission denied (os error 13)");
+
+    let (result, _) = run_add(&host, add_to_group("work"));
+
+    let refusal = result.expect_err("the registry could not be written");
+    assert!(
+        refusal.to_string().contains("taken back out"),
+        "it says the machine is as it was: {refusal}"
+    );
+    assert_eq!(
+        host.keychain_services(),
+        services_before,
+        "no Credential is left in a namespace nothing names"
+    );
+    assert!(
+        host.file("/Users/someone/.config/perch/profiles/overflow-example-com/.claude.json")
+            .is_none(),
+        "and no Profile directory either"
+    );
+    assert_the_active_account_survived(&host);
+}
+
 #[test]
 fn adding_an_account_makes_no_network_call() {
     let host = ready_to_add();

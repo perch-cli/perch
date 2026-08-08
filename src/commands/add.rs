@@ -85,11 +85,27 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
 
     let account = settle_into_a_profile(host, pending, group.clone())?;
     let email = account.email().to_string();
+    // Kept before the Account is handed to the registry, because it is what
+    // takes the Profile back out if the write below fails.
+    let placed = account.store(host)?;
     registry.upsert(account);
     if let Some(alias) = &args.alias {
         registry.set_alias(alias, &email);
     }
-    registry::save(host, &mut perch, &registry)?;
+    // A Profile that nothing records is worse than no Profile at all: it holds
+    // a live refresh token, and nothing ever looks at it again. `reap_abandoned`
+    // walks the pending logins and never `profiles/`, so this one would sit
+    // there for good — the slow accumulation of working logins for Accounts the
+    // user believes they never added. The same all-or-nothing an Import makes.
+    if let Err(error) = registry::save(host, &mut perch, &registry) {
+        profile::discard(host, &placed);
+        return Err(error.with_note(&format!(
+            "Nothing was added, and the Profile this had made for {email} has \
+             been taken back out again: a Credential Perch holds and does not \
+             record is one nothing would ever look at or delete.\n\
+             The login itself worked, so `perch add` will need running again."
+        )));
+    }
 
     report(
         out,
