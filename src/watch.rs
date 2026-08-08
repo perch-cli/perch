@@ -398,7 +398,7 @@ pub fn set_aside(
                 Some(fullest) if fullest.used_percent > f64::from(policy.ceiling()) => format!(
                     "{} is at {}% used and nothing over {}% is worth moving to",
                     candidate.named,
-                    fullest.used_percent,
+                    crate::utilization::percentage(fullest.used_percent),
                     policy.ceiling(),
                 ),
                 Some(_) => continue,

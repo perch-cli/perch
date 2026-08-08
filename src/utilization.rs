@@ -45,7 +45,11 @@ pub fn write_figures(out: &mut dyn Write, account: &Account, now: DateTime<Utc>)
 /// "plenty of room" are opposite pieces of advice.
 pub fn lines(account: &Account, now: DateTime<Utc>) -> Vec<String> {
     rows(account, now, |window| {
-        format!("{:<8} {:>3.0}%", window.window, window.used_percent)
+        format!(
+            "{:<8} {:>3}%",
+            window.window,
+            percentage(window.used_percent)
+        )
     })
 }
 
@@ -66,9 +70,9 @@ pub fn lines_with_resets(account: &Account, now: DateTime<Utc>) -> Vec<String> {
             // "used", because this row sits under a Headroom figure saying how
             // much is *left*: two percentages of the same window an inch apart,
             // and the reader is not asked to tell them apart by context.
-            "{:<8} {:>3.0}% used  {}",
+            "{:<8} {:>3}% used  {}",
             window.window,
-            window.used_percent,
+            percentage(window.used_percent),
             // Said as its absence rather than left out, because a row with no
             // reset clause reads as a window that does not reset.
             match window.resets_at {
@@ -260,5 +264,78 @@ mod tests {
         assert_eq!(percentage(42.5), "42");
         assert_eq!(percentage(43.5), "44");
         assert_eq!(percentage(99.0), "99");
+    }
+
+    /// And the surfaces that print one go through it.
+    ///
+    /// These two rows are the only place in Perch that prints the words
+    /// "% used" about a raw window figure, which is the rounding the doc above
+    /// calls the worse of the two: they formatted `used_percent` themselves, so
+    /// an Account at 99.6% used rendered as `100% used` directly beneath a
+    /// Headroom figure saying it had room, and `perch switch` would land on it
+    /// happily. A helper nothing calls is a rule nothing follows.
+    #[test]
+    fn the_rows_that_print_a_percentage_print_it_the_way_every_surface_does() {
+        let account = observed_at_the_edges();
+
+        let rows = lines(&account, at(12, 0));
+        assert!(rows[0].starts_with("5-hour   >99%"), "{rows:?}");
+        assert!(rows[1].starts_with("7-day     <1%"), "{rows:?}");
+
+        let rows = lines_with_resets(&account, at(12, 0));
+        assert!(rows[0].starts_with("5-hour   >99% used"), "{rows:?}");
+        assert!(rows[1].starts_with("7-day     <1% used"), "{rows:?}");
+    }
+
+    /// An ordinary figure keeps the column it always had: the two edges are the
+    /// only rows whose width this could have moved.
+    #[test]
+    fn an_ordinary_figure_lands_in_the_same_column_it_always_did() {
+        let mut account = observed_at_the_edges();
+        account.utilization.as_mut().expect("observed").windows =
+            vec![crate::registry::WindowUtilization {
+                window: "5-hour".to_string(),
+                used_percent: 7.0,
+                resets_at: None,
+            }];
+
+        assert!(
+            lines_with_resets(&account, at(12, 0))[0].starts_with("5-hour     7% used"),
+            "{:?}",
+            lines_with_resets(&account, at(12, 0))
+        );
+    }
+
+    fn observed_at_the_edges() -> Account {
+        let mut account = Account {
+            identity: crate::probe::Identity {
+                email: "someone@example.com".to_string(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            enabled: true,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        };
+        account.utilization = Some(crate::registry::CachedUtilization {
+            observed_at: at(12, 0),
+            windows: vec![
+                crate::registry::WindowUtilization {
+                    window: "5-hour".to_string(),
+                    // Not exhausted, and the watcher is still deciding about it.
+                    used_percent: 99.6,
+                    resets_at: None,
+                },
+                crate::registry::WindowUtilization {
+                    window: "7-day".to_string(),
+                    used_percent: 0.4,
+                    resets_at: None,
+                },
+            ],
+        });
+        account
     }
 }
