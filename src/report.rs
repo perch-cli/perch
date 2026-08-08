@@ -22,11 +22,28 @@ pub fn install_panic_hook() {
     let runtime = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic| {
         runtime(panic);
-        eprintln!(
-            "{}",
-            bug_report(std::env::var_os("RUST_BACKTRACE").is_some())
-        );
+        eprintln!("{}", bug_report(backtrace_was_asked_for()));
     }));
+}
+
+/// Whether the runtime just printed a backtrace.
+///
+/// Split from the reading of the variable so the rule can be tested without a
+/// test mutating the environment of a process that is running three hundred
+/// others in parallel — and the rule is the part that was wrong.
+fn backtrace_was_asked_for() -> bool {
+    asked_for(std::env::var_os("RUST_BACKTRACE").as_deref())
+}
+
+/// The runtime's own reading of `RUST_BACKTRACE`: nought is off, anything else
+/// is on, unset is off.
+///
+/// The variable's mere presence is not the question. `RUST_BACKTRACE=0` is how
+/// the runtime is told *not* to print one, so reading it as "already asked for"
+/// withheld the suggestion from exactly the person who has no backtrace to
+/// send.
+fn asked_for(set: Option<&std::ffi::OsStr>) -> bool {
+    set.is_some_and(|asked| asked != "0")
 }
 
 /// The section Perch adds, as one block of text.
@@ -67,5 +84,19 @@ mod tests {
     #[test]
     fn a_run_that_already_asked_for_a_backtrace_is_not_asked_again() {
         assert!(!bug_report(true).contains("RUST_BACKTRACE"));
+    }
+
+    /// And the value that means "do not print one" is not the thing already
+    /// done. `RUST_BACKTRACE=0` is how the runtime is told to stay quiet, so
+    /// reading the variable's mere presence as agreement withheld the
+    /// suggestion from the one person who has no backtrace to send.
+    #[test]
+    fn nought_is_the_value_that_asks_for_no_backtrace_at_all() {
+        let set = |value: &str| asked_for(Some(std::ffi::OsStr::new(value)));
+
+        assert!(!asked_for(None), "unset asks for none");
+        assert!(!set("0"), "and nought is how the runtime is told not to");
+        assert!(set("1"));
+        assert!(set("full"));
     }
 }

@@ -22,6 +22,28 @@ use crate::registry::{Account, CachedUtilization};
 /// after the other, so they line up.
 pub const LABEL_WIDTH: usize = 14;
 
+/// How wide the Quota Window name column has to be for these windows, and never
+/// narrower than the two every Account has.
+///
+/// Measured rather than fixed, because a Quota Window's name is Anthropic's:
+/// `window_name` turns `seven_day_sonnet` into `7-day-sonnet`, and there is a
+/// window per model with more of them to come. A fixed eight pushed the
+/// percentage right on the per-model rows alone, so they stepped out of line
+/// with the `5-hour` and `7-day` above them — in the one place the eye is
+/// running down a column. A fixed twelve would line them up by making every
+/// block four columns wider whether or not anything needed it, and the
+/// Utilization rows already run close to eighty.
+///
+/// The floor is the width of `5-hour`, which keeps a block that happens to hold
+/// only short names in the column every other block puts them in.
+pub fn window_width<'a>(windows: impl Iterator<Item = &'a str>) -> usize {
+    windows
+        .map(str::len)
+        .chain(std::iter::once("5-hour".len()))
+        .max()
+        .unwrap_or_default()
+}
+
 /// Writes a label and a value in that column, for the surfaces that render an
 /// Account as labelled lines.
 pub fn write_labelled(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {
@@ -44,9 +66,9 @@ pub fn write_figures(out: &mut dyn Write, account: &Account, now: DateTime<Utc>)
 /// An Account with no observation is never rendered as zero: "no figure" and
 /// "plenty of room" are opposite pieces of advice.
 pub fn lines(account: &Account, now: DateTime<Utc>) -> Vec<String> {
-    rows(account, now, |window| {
+    rows(account, now, |window, width| {
         format!(
-            "{:<8} {:>3}%",
+            "{:<width$} {:>3}%",
             window.window,
             percentage(window.used_percent)
         )
@@ -65,12 +87,12 @@ pub fn lines(account: &Account, now: DateTime<Utc>) -> Vec<String> {
 /// two surfaces differ in the room they have, which is exactly what this splits
 /// on.
 pub fn lines_with_resets(account: &Account, now: DateTime<Utc>) -> Vec<String> {
-    rows(account, now, |window| {
+    rows(account, now, |window, width| {
         format!(
             // "used", because this row sits under a Headroom figure saying how
             // much is *left*: two percentages of the same window an inch apart,
             // and the reader is not asked to tell them apart by context.
-            "{:<8} {:>3}% used  {}",
+            "{:<width$} {:>3}% used  {}",
             window.window,
             percentage(window.used_percent),
             // Said as its absence rather than left out, because a row with no
@@ -89,16 +111,17 @@ pub fn lines_with_resets(account: &Account, now: DateTime<Utc>) -> Vec<String> {
 fn rows(
     account: &Account,
     now: DateTime<Utc>,
-    said: impl Fn(&crate::registry::WindowUtilization) -> String,
+    said: impl Fn(&crate::registry::WindowUtilization, usize) -> String,
 ) -> Vec<String> {
     match account.observed_utilization() {
         None => vec!["never observed".to_string()],
         Some(cached) => {
             let age = age_phrase(cached.observed_at, now);
+            let width = window_width(cached.windows.iter().map(|window| window.window.as_str()));
             cached
                 .windows
                 .iter()
-                .map(|window| format!("{}  (as of {age})", said(window)))
+                .map(|window| format!("{}  (as of {age})", said(window, width)))
                 .collect()
         }
     }
@@ -132,7 +155,14 @@ fn windows_json(cached: &CachedUtilization, now: DateTime<Utc>) -> Vec<serde_jso
                 "used_percent": window.used_percent,
                 "resets_at": window.resets_at.map(|at| at.to_rfc3339()),
                 "observed_at": cached.observed_at.to_rfc3339(),
-                "observed_seconds_ago": (now - cached.observed_at).num_seconds().max(0),
+                // Not clamped at nought. A figure stamped in the future is a
+                // clock that ran backwards, and clamping reports it to a script
+                // as maximally fresh — the one reading that gets a stale figure
+                // trusted rather than doubted. `age_phrase` refuses to make
+                // that claim in prose and says "in the future"; the two
+                // surfaces answer for the same cache and must not disagree
+                // about whether it can be believed.
+                "observed_seconds_ago": (now - cached.observed_at).num_seconds(),
             })
         })
         .collect()
@@ -223,6 +253,66 @@ mod tests {
         assert_eq!(age_phrase(at(13, 0), at(12, 0)), "in the future");
     }
 
+    /// And the script reading the same cache is told the same thing. Clamping
+    /// the age at nought reported a figure stamped in the future as maximally
+    /// fresh — the one reading that gets a stale figure trusted rather than
+    /// doubted, and the opposite of what the prose beside it says.
+    #[test]
+    fn the_document_does_not_claim_freshness_the_prose_refuses_to() {
+        let mut account = observed_at_the_edges();
+        account.utilization.as_mut().expect("observed").observed_at = at(13, 0);
+
+        let document = document(&account, at(12, 0));
+        let ago = document["windows"][0]["observed_seconds_ago"]
+            .as_i64()
+            .expect("a number of seconds");
+
+        assert_eq!(
+            ago, -3600,
+            "an hour in the future is an hour in the future, not this instant"
+        );
+    }
+
+    /// A Quota Window's name is Anthropic's, and there is one per model:
+    /// `seven_day_sonnet` becomes `7-day-sonnet`, which is twelve characters
+    /// against `5-hour`'s six. A fixed column narrower than that does not
+    /// truncate — it shoves the percentage right on the long rows alone, so
+    /// they step out of line with the two above them.
+    #[test]
+    fn the_window_column_is_as_wide_as_the_widest_window_that_is_in_it() {
+        let mut account = observed_at_the_edges();
+        account.utilization.as_mut().expect("observed").windows = ["5-hour", "7-day-sonnet"]
+            .into_iter()
+            .map(|window| crate::registry::WindowUtilization {
+                window: window.to_string(),
+                used_percent: 7.0,
+                resets_at: None,
+            })
+            .collect();
+
+        let rows = lines(&account, at(12, 0));
+        let percentage_at = |row: &str| row.find('%').expect("every row prints one");
+        assert_eq!(
+            percentage_at(&rows[0]),
+            percentage_at(&rows[1]),
+            "the figures line up down the block: {rows:?}"
+        );
+
+        // And a block with nothing long in it keeps the column every other
+        // block puts a short name in, rather than closing up around itself.
+        account
+            .utilization
+            .as_mut()
+            .expect("observed")
+            .windows
+            .pop();
+        assert!(
+            lines(&account, at(12, 0))[0].starts_with("5-hour   7%"),
+            "{:?}",
+            lines(&account, at(12, 0))
+        );
+    }
+
     #[test]
     fn a_reset_is_said_as_a_clock_time_and_as_a_wait() {
         assert_eq!(
@@ -279,12 +369,12 @@ mod tests {
         let account = observed_at_the_edges();
 
         let rows = lines(&account, at(12, 0));
-        assert!(rows[0].starts_with("5-hour   >99%"), "{rows:?}");
-        assert!(rows[1].starts_with("7-day     <1%"), "{rows:?}");
+        assert!(rows[0].starts_with("5-hour >99%"), "{rows:?}");
+        assert!(rows[1].starts_with("7-day   <1%"), "{rows:?}");
 
         let rows = lines_with_resets(&account, at(12, 0));
-        assert!(rows[0].starts_with("5-hour   >99% used"), "{rows:?}");
-        assert!(rows[1].starts_with("7-day     <1% used"), "{rows:?}");
+        assert!(rows[0].starts_with("5-hour >99% used"), "{rows:?}");
+        assert!(rows[1].starts_with("7-day   <1% used"), "{rows:?}");
     }
 
     /// An ordinary figure keeps the column it always had: the two edges are the
@@ -300,7 +390,7 @@ mod tests {
             }];
 
         assert!(
-            lines_with_resets(&account, at(12, 0))[0].starts_with("5-hour     7% used"),
+            lines_with_resets(&account, at(12, 0))[0].starts_with("5-hour   7% used"),
             "{:?}",
             lines_with_resets(&account, at(12, 0))
         );

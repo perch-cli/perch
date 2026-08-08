@@ -309,11 +309,11 @@ fn a_groups_per_window_rows_are_one_per_quota_window_kind() {
 
     let frame = screen.last_frame();
     assert!(
-        frame.contains("5-hour   emptiest  96% used across 2 Accounts (as of 4m ago)"),
+        frame.contains("5-hour emptiest  96% used across 2 Accounts (as of 4m ago)"),
         "the Group is nearly out on its five-hour window\n{frame}"
     );
     assert!(
-        frame.contains("7-day    emptiest  12% used across 2 Accounts (as of 4m ago)"),
+        frame.contains("7-day  emptiest  12% used across 2 Accounts (as of 4m ago)"),
         "and fine on its seven-day one\n{frame}"
     );
 }
@@ -420,7 +420,7 @@ fn a_refresh_moves_the_groups_figures_and_a_failed_one_leaves_them_standing() {
         "the Reserve moved with the figures it is made of\n{frame}"
     );
     assert!(
-        frame.contains("5-hour   emptiest   3% used across 2 Accounts (as of just now)"),
+        frame.contains("5-hour emptiest   3% used across 2 Accounts (as of just now)"),
         "{frame}"
     );
 
@@ -483,7 +483,7 @@ fn a_figure_says_whether_it_is_room_left_or_quota_used() {
     assert!(frame.contains("the best 93% left"), "{frame}");
     assert!(frame.contains("emptiest   7% used"), "{frame}");
     assert!(
-        frame.contains("5-hour     7% used  no reset time cached"),
+        frame.contains("5-hour   7% used  no reset time cached"),
         "and the Account's own row says it too\n{frame}"
     );
 }

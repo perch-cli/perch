@@ -185,8 +185,10 @@ impl<'a> Reserve<'a> {
             return Vec::new();
         }
 
+        let kinds = window_kinds(&read_for);
+        let width = utilization::window_width(kinds.iter().map(String::as_str));
         let mut lines = Vec::new();
-        for kind in window_kinds(&read_for) {
+        for kind in kinds {
             let mut emptiest: Option<(&Account, f64)> = None;
             let mut read = 0;
             for account in &read_for {
@@ -208,7 +210,7 @@ impl<'a> Reserve<'a> {
             // percentages of the same window an inch apart, and the reader is
             // not asked to tell them apart by context.
             lines.push(format!(
-                "{kind:<8} emptiest {:>3}% used across {} ({})",
+                "{kind:<width$} emptiest {:>3}% used across {} ({})",
                 crate::utilization::percentage(used_percent),
                 accounts(read),
                 observed(account, now),
@@ -417,8 +419,8 @@ mod tests {
         assert_eq!(
             windows_of(&registry),
             [
-                "5-hour   emptiest  91% used across 2 Accounts (as of 4m ago)",
-                "7-day    emptiest  12% used across 2 Accounts (as of 4m ago)",
+                "5-hour emptiest  91% used across 2 Accounts (as of 4m ago)",
+                "7-day  emptiest  12% used across 2 Accounts (as of 4m ago)",
             ]
         );
     }
@@ -439,7 +441,7 @@ mod tests {
         assert_eq!(
             windows_of(&registry),
             [
-                "5-hour   emptiest  40% used across 3 Accounts (as of 4m ago)",
+                "5-hour     emptiest  40% used across 3 Accounts (as of 4m ago)",
                 "7-day-opus emptiest   8% used across 1 Account (as of 4m ago)",
             ]
         );
