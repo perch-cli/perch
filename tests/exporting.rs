@@ -449,3 +449,40 @@ fn a_machine_holding_no_accounts_is_told_so_rather_than_given_an_empty_file() {
     assert_eq!(refused.exit_code(), EXIT_NOT_FOUND, "{refused}");
     assert_eq!(host.file(AT), None);
 }
+
+/// The passphrase is asked for twice, and the registry was read before either
+/// prompt. That is the same unbounded wait `perch purge` and `perch remove`
+/// re-check their hold across, and `perch export` was the one that did not:
+/// it re-asked whether the *path* was still free and never whether the registry
+/// was still its own.
+///
+/// An Account added by another `perch` while somebody was typing is an Account
+/// the copy being sealed does not hold — so the file would present itself as
+/// everything Perch holds while being a partial one. That is a selective Export,
+/// which is the failure the format exists to prevent, and it is found out at the
+/// restore rather than here.
+#[test]
+fn an_export_whose_registry_went_stale_while_the_passphrase_was_typed_writes_nothing() {
+    let host = typing_the_passphrase(a_machine_worth_backing_up())
+        // Past the staleness window, which is what makes the lock claimable.
+        .with_a_terminal_that_takes(120_000)
+        .once_while_waiting(|host| {
+            let lock = perch::registry::lock_spec(host).expect("home is known");
+            host.remove_dir_all(&lock.dir).expect("it was abandoned");
+            host.create_dir_exclusive(&lock.dir)
+                .expect("the other `perch` takes it");
+        });
+
+    let (outcome, _) = run_export(&host, AT);
+
+    let refused = outcome.expect_err("this Perch may no longer speak for the registry");
+    assert!(
+        refused.to_string().contains("Nothing was exported"),
+        "{refused}"
+    );
+    assert_eq!(
+        host.file(std::path::Path::new(AT)),
+        None,
+        "a partial Export is worse than none: it is only found out at the restore"
+    );
+}

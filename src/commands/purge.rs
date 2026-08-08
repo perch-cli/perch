@@ -76,7 +76,7 @@ pub fn run(host: &dyn Host, args: PurgeArgs, out: &mut dyn Write) -> Result<()> 
 
     say(out, &what_will_go(&registry, &home))?;
     if !args.yes {
-        offer_an_export(host, &registry, &home, out)?;
+        offer_an_export(host, &mut perch, &registry, &home, out)?;
         if !agreed(host, out)? {
             return say(out, "Nothing was purged.");
         }
@@ -168,6 +168,7 @@ fn what_will_go(registry: &Registry, home: &Path) -> String {
 /// has been destroyed yet — so the answer is to run `perch purge` again.
 fn offer_an_export(
     host: &dyn Host,
+    perch: &mut crate::lock::Held<'_>,
     registry: &Registry,
     home: &Path,
     out: &mut dyn Write,
@@ -205,7 +206,7 @@ fn offer_an_export(
     };
     refuse_a_path_the_purge_would_take(&path, home)?;
 
-    export::write_the_export(host, registry, &path, out)
+    export::write_the_export(host, perch, registry, &path, out)
 }
 
 /// Refuses to write the Export inside the directory this Purge is about to
