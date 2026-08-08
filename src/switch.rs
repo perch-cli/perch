@@ -192,11 +192,20 @@ pub struct NotLanded {
 /// disagreeing, and running the same command again is how it is repaired: so
 /// this asks Claude Code's own file rather than only Perch's record of who is
 /// active, or the repair would be turned away as unnecessary.
+///
+/// Both, and not the Identity alone. `claude /logout` empties the live store
+/// and leaves `.claude.json` naming whoever was there — so an Identity read on
+/// its own says a Switch has already landed onto a machine that is logged out,
+/// and `perch switch <that account>` is exactly the command that would put it
+/// back. It is the same shape of half-state as the interrupted Switch, reached
+/// from the other side, and it wants the same answer.
 pub fn already_landed(host: &dyn Host, account: &Account) -> Result<bool> {
     let version = probe::claude_version(host)?;
     let store = probe::default_store(host)?;
-    Ok(probe::read_identity(host, &store, &version)?
-        .is_some_and(|identity| identity.email.eq_ignore_ascii_case(account.email())))
+    let named = probe::read_identity(host, &store, &version)?
+        .is_some_and(|identity| identity.email.eq_ignore_ascii_case(account.email()));
+
+    Ok(named && probe::read_credential(host, &store, &version)?.is_some())
 }
 
 /// The two things that are true whatever else is: which Claude Code is

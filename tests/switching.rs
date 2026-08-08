@@ -692,6 +692,29 @@ fn switching_to_the_account_that_is_already_active_changes_nothing() {
     );
 }
 
+/// `claude /logout` empties the live store and leaves `.claude.json` naming
+/// whoever was there. Perch's record still says that Account is active, and it
+/// is — as a claim about which Credential is live, which is now none.
+///
+/// Read off the Identity alone that looks like a Switch that already landed,
+/// and the command turned away as unnecessary is precisely the one that would
+/// put the Credential back. It is the interrupted Switch's half-state reached
+/// from the other side, and it wants the same answer: run it.
+#[test]
+fn switching_to_the_active_account_after_a_logout_puts_its_credential_back() {
+    let host = machine_with_two_accounts();
+    host.forget_keychain_item(DEFAULT_SERVICE, LOGIN_NAME);
+
+    let (result, printed) = run_switch(&host, EMAIL);
+
+    result.expect("the repair runs rather than being refused as unnecessary");
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(CREDENTIAL),
+        "the Account Perch says is active is the one a client now reads: {printed}"
+    );
+}
+
 #[test]
 fn a_switch_takes_a_lock_a_process_died_holding_and_waits_for_one_still_held() {
     let host = machine_with_two_accounts();
