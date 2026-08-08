@@ -22,7 +22,7 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::{ask_a_word, say};
+use crate::commands::{ask_a_word, say, still_ours};
 use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
@@ -104,16 +104,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     // everything from this line on deletes Credentials, and finding out
     // afterwards that the registry recording them was never ours to write is
     // finding out too late.
-    perch.renew();
-    if !perch.still_held() {
-        return Err(PerchError::Other(
-            "Another `perch` changed the registry while that question was \
-             waiting for an answer, so this one is working from a copy that is \
-             out of date.\n\
-             Nothing was removed. Run this again."
-                .to_string(),
-        ));
-    }
+    still_ours(&mut perch, "removed")?;
 
     // Somewhere to land before anything is deleted. A failure here has cost
     // nothing: the Account is still held, and its Credential is still live.
