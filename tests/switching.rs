@@ -689,7 +689,19 @@ fn something_at_a_lock_path_that_is_not_a_lock_is_named_rather_than_blamed_on_cl
         said.contains("is not a lock directory"),
         "it says what is wrong: {said}"
     );
-    assert!(said.contains(REFRESH_LOCK), "and where: {said}");
+    // The file name rather than the whole path: a `Path` renders with the
+    // separator of whatever is running the test, so a fixture spelled with `/`
+    // comes back mixed on Windows and an assertion on the whole string would be
+    // testing the separator rather than the message.
+    assert!(
+        said.contains(
+            Path::new(REFRESH_LOCK)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .expect("the lock is a named file")
+        ),
+        "and where: {said}"
+    );
     assert!(
         !said.contains("quit it"),
         "and does not send somebody looking for a Claude Code to quit: {said}"
