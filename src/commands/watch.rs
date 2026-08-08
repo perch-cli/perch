@@ -117,7 +117,30 @@ fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     let mut backoff = Backoff::none();
 
     loop {
-        let round = one_round(host, Watcher::Loop, &mut recently, &mut backoff)?;
+        let round = match one_round(host, Watcher::Loop, &mut recently, &mut backoff) {
+            Ok(round) => round,
+            // Another `perch` holding the registry is an ordinary event, not a
+            // fault: this loop runs for hours beside the commands a person
+            // types, and `perch status --refresh` holds the lock across every
+            // Renewal and every read it makes — comfortably longer than the few
+            // seconds `lock::take` waits. Ending the watcher over that would
+            // mean a `perch status` could stop it, silently, and the machine
+            // would go unwatched until somebody noticed.
+            //
+            // So it is held like any other round that could not read: counted
+            // against the back-off, said out loud with when it will try again,
+            // and gone round again (ADR 0013, ADR 0018).
+            Err(PerchError::Busy(why)) => {
+                backoff.failed();
+                let waiting_for = backoff.waiting_for();
+                say(out, &watch::held_line(&why, waiting_for, host.now()))?;
+                if host.wait(waiting_for) == Waited::Interrupted {
+                    break;
+                }
+                continue;
+            }
+            Err(other) => return Err(other),
+        };
         say(out, &round.line(host.now()))?;
 
         // The one place the loop holds nothing, and therefore the only place it

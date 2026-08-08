@@ -623,6 +623,27 @@ impl Round {
 /// decision log is a line per decision — a reason that wraps onto its own line
 /// stops being attached to the decision it explains the moment two rounds are
 /// read together.
+/// A hold that happened before there was a [`Round`] to hold.
+///
+/// The loop cannot always get as far as reading the registry — another `perch`
+/// may be holding it — and a round that never learned which Account it was
+/// watching has no Account to name and no threshold to quote. Said in the same
+/// shape as every other line so a log stays one column of timestamps and words,
+/// with the fields it does not have said as unread rather than left blank,
+/// which is how [`Round::figure`] already says a figure that was not read.
+pub fn held_line(why: &str, retrying_in: u64, now: DateTime<Utc>) -> String {
+    format!(
+        "{}  {:<8}  unread unread; threshold unread — {}",
+        now.to_rfc3339_opts(SecondsFormat::Secs, true),
+        "held",
+        one_line(&format!(
+            "nothing current to decide on, so nothing was decided: {why} \
+             Asking again in {}.",
+            how_long(retrying_in),
+        )),
+    )
+}
+
 fn one_line(said: &str) -> String {
     said.split_whitespace().collect::<Vec<_>>().join(" ")
 }
