@@ -661,7 +661,10 @@ fn a_home_that_will_not_go_says_the_credentials_are_gone_and_the_rest_finishes_l
         said.contains("Every Credential Perch held is deleted"),
         "the destructive half really did happen: {said}"
     );
-    assert!(said.contains(PERCH_HOME), "{said}");
+    // Rendered as the Host built it rather than as the constant spells it: home
+    // is reached by joining, so the separators are the platform's.
+    let home = perch::registry::perch_home(&host).expect("home is known");
+    assert!(said.contains(&home.display().to_string()), "{said}");
     assert!(
         said.contains("Device or resource busy"),
         "what stopped it is what the user has to fix: {said}"
