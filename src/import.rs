@@ -131,6 +131,31 @@ impl Placed {
 /// Credential discover there is none and record why, which is the one place that
 /// decision is made.
 pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
+    // Every Credential in the file belongs to an Account the file lists, or
+    // this is not the whole restore it claims to be. `gather` cannot write such
+    // an Export, so this is about a file written by something else — and the
+    // failure it guards is the one ADR 0014 exists to prevent, arriving
+    // quietly: an Import that reports success having restored less than the
+    // file held.
+    let unlisted: Vec<&str> = export
+        .credentials
+        .keys()
+        .map(String::as_str)
+        .filter(|email| export.registry.account(email).is_none())
+        .collect();
+    if !unlisted.is_empty() {
+        return Err(PerchError::Malformed {
+            path: "the Export".to_string(),
+            detail: format!(
+                "it holds a Credential for {}, which it does not list as an \
+                 Account. Nothing was imported: a Credential with no Account \
+                 to belong to would be restored into a Profile nothing names, \
+                 or not at all, and neither is the whole file.",
+                unlisted.join(", "),
+            ),
+        });
+    }
+
     // Every Profile is named before any is made. Where one of them lands is
     // derivation and not a write, and an address no directory can be named after
     // is a refusal (see [`registry::profile_dir_for`]) — meeting it half way
@@ -378,6 +403,28 @@ mod tests {
         assert!(
             !host.path_exists(&registry::profile_dir_for(&host, "one@example.com").unwrap()),
             "and the Profile of the Account listed before it was never made"
+        );
+    }
+
+    /// A Credential for an Account the file does not list is a file that is not
+    /// the whole restore it claims to be.
+    ///
+    /// `gather` cannot write one, so this is about a file written by something
+    /// else — and dropping it silently is the failure ADR 0014 exists to
+    /// prevent, arriving as a success message.
+    #[test]
+    fn a_credential_for_an_account_the_export_does_not_list_is_refused() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let mut export = an_export();
+        export
+            .credentials
+            .insert("nobody@example.com".to_string(), "held".to_string());
+
+        let refused = place(&host, &export).expect_err("that Credential belongs to nothing");
+
+        assert!(
+            refused.to_string().contains("nobody@example.com"),
+            "it names the Account that is missing: {refused}"
         );
     }
 }

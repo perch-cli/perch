@@ -724,25 +724,39 @@ fn a_leftover_profile_whose_credential_will_not_go_stops_the_purge_rather_than_b
     );
 }
 
-/// The other half of the same walk: a directory that will not say where its
-/// Credential lives is not a reason to fail. There is nothing there to delete
-/// and nothing to report, and the home it sits in still goes.
+/// The other half of the same walk answers the way the first half does: a
+/// directory that will not say where its Credential lives stops the Purge.
 ///
 /// Reached the way it happens — a Purge that stopped in its last step, so the
 /// registry is already gone — on a machine whose keychain account name cannot
 /// be derived at all.
+///
+/// The two halves used to disagree. A store is unnameable when the platform
+/// will not say who the user is, which is not a fact about one directory, so
+/// `erase` refused at the first Account in the registry and shrugged the
+/// identical directory off in the walk — Perch refusing to purge a machine
+/// holding Accounts and reporting success on the same machine holding only
+/// their leftovers. Removing the directory says nothing about the keychain item
+/// beside it, and "the machine is given back" is exactly the claim a Purge must
+/// not make while a working login is still stored.
 #[test]
-fn a_leftover_directory_that_names_no_store_does_not_stop_the_purge() {
+fn a_leftover_directory_that_names_no_store_stops_the_purge_rather_than_being_passed_over() {
     let host = machine_with_three_accounts();
     host.remove_file(Path::new(REGISTRY_PATH))
         .expect("what a Purge that stopped in its last step leaves");
     let host = host.without_env("USER").with_answers(&["purge"]);
 
-    let (result, printed) = run_purge(&host);
+    let (result, _) = run_purge(&host);
 
-    result.expect("a directory Perch cannot read a store out of is not a failure");
+    let refusal = result.expect_err("a Credential that cannot be named cannot be deleted");
     assert!(
-        !host.path_exists(Path::new(PERCH_HOME)),
-        "and the home those directories sit in still goes: {printed}"
+        refusal
+            .to_string()
+            .contains("already deleted is already gone"),
+        "it says what a second run would finish: {refusal}"
+    );
+    assert!(
+        host.path_exists(Path::new(PERCH_HOME)),
+        "and the home is still there, because the Purge did not finish"
     );
 }
