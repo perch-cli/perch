@@ -171,6 +171,28 @@ pub fn double_quoted(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
+/// The refusal [`double_quoted`] says has to happen somewhere else.
+///
+/// A control character is what neither protocol can be told to treat as data,
+/// so a value carrying one stops being a value and becomes further instructions:
+/// a newline in a `curl` configuration ends the option it was in and begins
+/// another, and `output =` writes a file while a second `url =` fetches one.
+///
+/// Perch does not author most of what goes through here. An access token is
+/// read out of a JSON file Perch does not own, where `\n` is an ordinary
+/// escape, so the value arriving with one is a thing that can happen rather
+/// than a thing that would have to be contrived.
+pub fn inert(what: &str, value: &str) -> Result<(), HostError> {
+    match value.chars().find(|c| c.is_control()) {
+        Some(control) => Err(HostError::Other(format!(
+            "{what} carries a control character (U+{:04X}), which the line it \
+             would be written on has no way to hold as part of a value",
+            control as u32
+        ))),
+        None => Ok(()),
+    }
+}
+
 /// Whether a mode lets anybody but the owner near the file.
 pub fn is_private(mode: u32) -> bool {
     mode & 0o077 == 0

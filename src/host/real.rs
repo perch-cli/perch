@@ -59,8 +59,25 @@ const CURL_ARGS: [&str; 6] = [
 /// The URL, the headers and the body all arrive this way so that none of them
 /// is ever an argument: an `Authorization` header holds an access token, and
 /// argv is readable by every process on the machine.
-fn curl_config(request: &HttpRequest<'_>) -> String {
+fn curl_config(request: &HttpRequest<'_>) -> Result<String, HostError> {
     let quoted = super::double_quoted;
+
+    // `double_quoted` makes a value a token and says so: it does not make one
+    // inert, because a configuration file is read a line at a time and there is
+    // no escape for a newline to be quoted into. `security` has refused these
+    // where they enter since ADR 0008; the `curl` half of the same invariant
+    // was never written, and an access token is a value Perch reads out of a
+    // JSON file it does not own — where `\n` is a legal escape. A token
+    // carrying one would end the `header` line and begin whatever the rest of
+    // it spelled, and `output =` writes a file while `url =` fetches one.
+    super::inert("the URL", request.url)?;
+    for (name, value) in request.headers {
+        super::inert(&format!("the {name} header"), value)?;
+    }
+    if let Some(body) = request.body {
+        super::inert("the request body", body)?;
+    }
+
     let mut config = format!("url = {}\n", quoted(request.url));
     for (name, value) in request.headers {
         config.push_str(&format!(
@@ -73,7 +90,7 @@ fn curl_config(request: &HttpRequest<'_>) -> String {
     if let Some(body) = request.body {
         config.push_str(&format!("data-binary = {}\n", quoted(body)));
     }
-    config
+    Ok(config)
 }
 
 /// Runs a program, optionally with something on its stdin, and reads the whole
@@ -564,7 +581,7 @@ impl Host for RealHost {
     }
 
     fn http(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, HostError> {
-        let execution = curl(&curl_config(request))?;
+        let execution = curl(&curl_config(request)?)?;
         if !execution.succeeded() {
             return Err(HostError::Other(format!(
                 "curl exited {}: {}",
@@ -1244,7 +1261,8 @@ mod tests {
     #[test]
     fn the_access_token_travels_on_stdin_rather_than_in_argv() {
         let headers = [("Authorization", "Bearer sk-ant-oat01-secret")];
-        let config = curl_config(&HttpRequest::get("https://example.test/usage", &headers));
+        let config =
+            curl_config(&HttpRequest::get("https://example.test/usage", &headers)).unwrap();
         let expected = "header = \"Authorization: Bearer sk-ant-oat01-secret\"";
 
         assert!(config.contains(expected), "{config}");
@@ -1387,11 +1405,43 @@ mod tests {
     #[test]
     fn a_json_body_survives_being_quoted() {
         let body = r#"{"refresh_token":"sk-ant-ort01-\"odd\""}"#;
-        let config = curl_config(&HttpRequest::post("https://example.test/token", &[], body));
+        let config =
+            curl_config(&HttpRequest::post("https://example.test/token", &[], body)).unwrap();
         let expected = r#"data-binary = "{\"refresh_token\":\"sk-ant-ort01-\\\"odd\\\"\"}""#;
 
         assert!(config.contains("url = \"https://example.test/token\""));
         assert!(config.contains(expected), "{config}");
         assert_eq!(config.lines().count(), 2, "one option per line: {config}");
+    }
+
+    /// The invariant `double_quoted` documents and only `security` was keeping:
+    /// a configuration file is read a line at a time, so a value that could end
+    /// its line is refused rather than quoted. An access token comes out of a
+    /// JSON file Perch does not own, where `\n` is an ordinary escape.
+    #[test]
+    fn a_header_that_could_end_its_own_line_is_refused_rather_than_quoted() {
+        let headers = [("Authorization", "Bearer sk-ant\noutput = /tmp/taken")];
+        let refused = curl_config(&HttpRequest::get("https://example.test/usage", &headers));
+
+        let said = refused.expect_err("a newline in a header must not reach curl");
+        assert!(
+            said.to_string().contains("Authorization"),
+            "the refusal names what carried it: {said}"
+        );
+    }
+
+    /// The same for the other two ways into the file, so the check cannot be
+    /// the one that lives on a single field.
+    #[test]
+    fn a_url_or_a_body_that_carries_a_newline_is_refused_too() {
+        assert!(curl_config(&HttpRequest::get("https://example.test/a\nurl = b", &[])).is_err());
+        assert!(
+            curl_config(&HttpRequest::post(
+                "https://example.test/token",
+                &[],
+                "{}\noutput = /tmp/taken"
+            ))
+            .is_err()
+        );
     }
 }
