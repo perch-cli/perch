@@ -222,10 +222,18 @@ impl Model {
         let was_on = self.selected().map(|account| account.email().to_string());
         self.registry = registry;
         (self.order, self.sections) = ranked(&self.registry, self.now);
-        self.cursor = was_on
-            .and_then(|email| self.row_of(&email))
-            .unwrap_or(self.cursor)
-            .min(self.last_row());
+
+        let found = was_on.and_then(|email| self.row_of(&email));
+        if found.is_none() {
+            // The Account the cursor was on is gone — another `perch remove`
+            // while this was open, say. The cursor keeps its row number, so it
+            // is on a different Account now, and a report left standing beside
+            // it would be a report about the wrong one. That is the rule
+            // `move_to` exists for; this is the other way the cursor comes to
+            // point somewhere new.
+            self.said.clear();
+        }
+        self.cursor = found.unwrap_or(self.cursor).min(self.last_row());
     }
 
     /// Where an Account sits in the listing now, or `None` if it is no longer
@@ -684,6 +692,68 @@ mod tests {
             Some("second@example.com"),
             "and the cursor went with it",
         );
+    }
+
+    /// And where it cannot follow, it drops what was said about where it was.
+    ///
+    /// An Account can go while the picker is open — another `perch remove` in
+    /// a second terminal — and then there is nothing to follow. The cursor
+    /// keeps its row number, which is a different Account, so a report left
+    /// standing beside it is a report about the wrong one: the rule `move_to`
+    /// exists for, reached the other way.
+    #[test]
+    fn a_report_does_not_outlive_the_account_it_was_about() {
+        let mut model = model_holding(vec![
+            in_group(used(account("first@example.com"), 10.0), "work"),
+            in_group(used(account("second@example.com"), 50.0), "work"),
+        ]);
+        let _ = model.act_on(Signal::Down);
+        model.said = vec!["Switched to second@example.com.".to_string()];
+
+        // Somebody removed it in another terminal while this was open.
+        model.refreshed(Refreshed {
+            registry: Some(registry_of(vec![in_group(
+                used(account("first@example.com"), 10.0),
+                "work",
+            )])),
+            notes: Vec::new(),
+        });
+
+        assert_eq!(
+            model.selected().map(Account::email),
+            Some("first@example.com"),
+            "the cursor lands on what is left"
+        );
+        assert!(
+            model.said.is_empty(),
+            "and says nothing about it that was said of somebody else: {:?}",
+            model.said
+        );
+    }
+
+    /// The cursor is also clamped, so a listing that shrank under it does not
+    /// leave it pointing past the end and the body drawing empty.
+    #[test]
+    fn a_listing_that_shrank_leaves_the_cursor_inside_it() {
+        let mut model = model_holding(vec![
+            in_group(used(account("first@example.com"), 10.0), "work"),
+            in_group(used(account("second@example.com"), 50.0), "work"),
+            in_group(used(account("third@example.com"), 90.0), "work"),
+        ]);
+        let _ = model.act_on(Signal::Down);
+        let _ = model.act_on(Signal::Down);
+        assert_eq!(model.cursor, 2);
+
+        model.refreshed(Refreshed {
+            registry: Some(registry_of(vec![in_group(
+                used(account("first@example.com"), 10.0),
+                "work",
+            )])),
+            notes: Vec::new(),
+        });
+
+        assert_eq!(model.cursor, 0);
+        assert!(model.selected().is_some(), "and points at something");
     }
 
     /// A Quarantine is never a statement that the Account is gone, so it is
