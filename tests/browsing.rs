@@ -702,6 +702,48 @@ fn a_refresh_that_lands_replaces_the_figures_and_their_age() {
     assert!(frame.contains("(as of just now)"), "{frame}");
 }
 
+/// A Refresh that came back is not one that is still out, so `r` works again.
+///
+/// The loop guards the key on `outstanding()` — one Refresh at a time, because
+/// each spends from an hourly budget that does not refill early (ADR 0015) —
+/// and the whole of that guard is that the flag comes back down when the answer
+/// lands. Nothing at this level said so, and a `FakeRefresher` that could only
+/// answer once would have made the test that says it pass against a frozen loop
+/// rather than fail.
+#[test]
+fn a_second_refresh_is_asked_for_once_the_first_has_landed() {
+    let host = machine_with_figures();
+    let mut refresher = FakeRefresher::answering(
+        Refreshed {
+            registry: Some(registry_of(&host)),
+            notes: Vec::new(),
+        },
+        1,
+    );
+    let mut screen = FakeScreen::scripted(vec![
+        Some(Signal::Refresh),
+        // The frame the first one lands on.
+        None,
+        Some(Signal::Refresh),
+        None,
+        Some(Signal::Leave),
+    ]);
+
+    browse_with(&host, &mut screen, &mut refresher);
+
+    assert_eq!(
+        refresher.asked().len(),
+        2,
+        "the second `r` reached the Refresher rather than being swallowed by a \
+         flag nothing put back down"
+    );
+    assert!(
+        !screen.last_frame().contains("Refreshing"),
+        "and the display is not still waiting on one that came back:\n{}",
+        screen.last_frame()
+    );
+}
+
 /// ADR 0018: a Refresh that failed degrades the display rather than emptying
 /// it. The figures stand with the age they had, and what could not be read is
 /// said beside them.

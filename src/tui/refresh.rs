@@ -25,6 +25,7 @@ use crate::registry::Registry;
 /// more than figures: it is the one thing that finds out an Account is beyond
 /// repair, and a display that took the numbers but not the Quarantine would
 /// show an Account as merely idle.
+#[derive(Clone)]
 pub struct Refreshed {
     /// The registry as the Refresh left it, or `None` when it never got far
     /// enough to have one — then what is already on screen stands (ADR 0018).
