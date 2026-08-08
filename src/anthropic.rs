@@ -146,10 +146,20 @@ pub fn renew(host: &dyn Host, refresh_token: &str) -> Result<Fresh, Refused> {
             .get("refresh_token")
             .and_then(Value::as_str)
             .map(str::to_string),
+        // Checked, because this is the one arithmetic in Perch on a number
+        // Anthropic chose, at the one moment nothing can be retried: `renew`
+        // has already caused the old refresh token to be retired, and the
+        // Credential carrying its replacement has not been stored yet. A debug
+        // build would panic there and lose the Account; a release build would
+        // wrap to a negative `expires_at`, which reads as expired and renews
+        // again on every single command. A lifetime that does not fit is a
+        // lifetime the reply did not give: `None` already means that, and the
+        // Credential is simply renewed when something else says it must be.
         expires_at: document
             .get("expires_in")
             .and_then(Value::as_i64)
-            .map(|seconds| now.timestamp_millis() + seconds * 1_000),
+            .and_then(|seconds| seconds.checked_mul(1_000))
+            .and_then(|millis| now.timestamp_millis().checked_add(millis)),
     })
 }
 
@@ -432,5 +442,35 @@ mod tests {
             "which Account a token belongs to is what this endpoint is for"
         );
         assert_eq!(email_in(&json!({"organization": {"name": "Acme"}})), None);
+    }
+
+    /// The one arithmetic in Perch on a number Anthropic chose, at the one
+    /// moment nothing can be retried: by the time this runs the old refresh
+    /// token has already been retired, and the Credential carrying its
+    /// replacement is not stored yet. A debug build panicked on the overflow
+    /// and lost the Account there; a release build wrapped to a negative
+    /// `expires_at`, which reads as already expired and renews again on every
+    /// command for ever.
+    #[test]
+    fn a_lifetime_that_does_not_fit_is_a_lifetime_the_reply_did_not_give() {
+        let host = crate::host::FakeHost::new();
+        let renewed = |expires_in: &str| {
+            let reply =
+                format!(r#"{{"access_token":"sk-ant-oat01-new","expires_in":{expires_in}}}"#);
+            host.reply(TOKEN_URL, None, 200, &reply);
+            renew(&host, "sk-ant-ort01-old").expect("the endpoint answered")
+        };
+
+        assert_eq!(
+            renewed("3600").expires_at,
+            Some(host.now().timestamp_millis() + 3_600_000),
+            "an ordinary lifetime is still read"
+        );
+        assert_eq!(
+            renewed(&i64::MAX.to_string()).expires_at,
+            None,
+            "and one that cannot be added to now is no answer rather than a panic"
+        );
+        assert_eq!(renewed("9223372036854775").expires_at, None);
     }
 }
