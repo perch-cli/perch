@@ -369,6 +369,20 @@ impl FakeHost {
         self
     }
 
+    /// The same, and its undoing, for a test whose subject is a path becoming
+    /// unreadable *while* a command is running — a lock artifact somebody
+    /// changes the permissions of mid-hold — rather than one that was so from
+    /// the start.
+    pub fn set_unreadable(&self, path: impl AsRef<Path>, detail: &str) {
+        self.unreadable
+            .borrow_mut()
+            .insert(path.as_ref().to_path_buf(), detail.to_string());
+    }
+
+    pub fn forget_unreadable(&self, path: impl AsRef<Path>) {
+        self.unreadable.borrow_mut().remove(path.as_ref());
+    }
+
     /// A path that cannot be written to, so a test can fail one step of a
     /// multi-step write and see what is left behind.
     pub fn with_unwritable_file(self, path: impl AsRef<Path>, detail: &str) -> Self {
@@ -376,6 +390,18 @@ impl FakeHost {
             .borrow_mut()
             .insert(path.as_ref().to_path_buf(), detail.to_string());
         self
+    }
+
+    /// The same pair, for a path that becomes unwritable partway through a
+    /// command rather than before it.
+    pub fn set_unwritable(&self, path: impl AsRef<Path>, detail: &str) {
+        self.unwritable
+            .borrow_mut()
+            .insert(path.as_ref().to_path_buf(), detail.to_string());
+    }
+
+    pub fn forget_unwritable(&self, path: impl AsRef<Path>) {
+        self.unwritable.borrow_mut().remove(path.as_ref());
     }
 
     /// A file that is there and will not go — a directory whose permissions
@@ -1154,8 +1180,8 @@ impl Host for FakeHost {
             });
         }
         // A path arranged as unwritable will not take a touch either — which is
-        // how `lock::renew`'s "somebody took this over" branch is reached
-        // without arranging a whole second holder.
+        // how `lock::renew`'s "the artifact would not take a fresh timestamp"
+        // branch is reached without arranging a filesystem that misbehaves.
         if let Some(detail) = self.unwritable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
