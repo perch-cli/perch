@@ -548,6 +548,51 @@ fn a_marker_that_does_not_say_when_its_session_began_is_no_evidence_of_a_client(
         .expect("an uncorroborated marker does not hold a Profile");
 }
 
+/// A marker Perch cannot see the *contents* of is a different thing from one
+/// whose contents say nothing.
+///
+/// Root-owned after a `sudo claude`, or halfway through being written by a
+/// client that is starting up right now. Nothing about it has been established,
+/// so it resolves the way every other doubt in the probe resolves — towards
+/// Live — rather than being read as an empty Profile a Switch may write under.
+/// That is the mid-task logout ADR 0005 exists to prevent.
+#[test]
+fn a_marker_that_cannot_be_read_at_all_holds_the_profile_of_a_running_client() {
+    let host = machine_with_two_accounts()
+        .with_file(format!("{FIRST_PROFILE}/sessions/4242.json"), "")
+        .with_unreadable_file(
+            format!("{FIRST_PROFILE}/sessions/4242.json"),
+            "Permission denied",
+        )
+        .with_live_process(4242);
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("nothing about that marker has been established");
+    assert_eq!(error.exit_code(), EXIT_PROBE_REFUSED);
+    assert!(
+        error.to_string().contains("4242.json"),
+        "and it names the file to go and look at: {error}"
+    );
+}
+
+/// The same file with nothing running under it is litter, not doubt. A marker
+/// nobody can read beside a process that is not there must not refuse every
+/// Switch against this Profile for ever.
+#[test]
+fn an_unreadable_marker_whose_process_is_gone_holds_nothing() {
+    let host = machine_with_two_accounts()
+        .with_file(format!("{FIRST_PROFILE}/sessions/4242.json"), "")
+        .with_unreadable_file(
+            format!("{FIRST_PROFILE}/sessions/4242.json"),
+            "Permission denied",
+        );
+
+    run_switch(&host, SECOND_EMAIL)
+        .0
+        .expect("no client is holding that Profile");
+}
+
 #[test]
 fn a_marker_that_is_not_json_is_no_evidence_of_a_client() {
     let host = machine_with_two_accounts()

@@ -829,8 +829,23 @@ fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32
             Some(pid) => pid,
             None => continue,
         };
-        let Some(session_began) = session_start_in(host, &marker) else {
-            continue;
+        let session_began = match session_start_in(host, &marker) {
+            Marker::Began(at) => at,
+            // Parsed, or not, and either way it does not say what a marker has
+            // to say. That is a judgement about the *content* of a file Perch
+            // can see all of, and the answer is that a Profile is Live when
+            // something says so rather than when nothing does.
+            Marker::SaysNothing => continue,
+            // A different thing entirely: the marker is there and would not be
+            // read — root-owned after a `sudo claude`, or halfway through being
+            // written by a client that is starting up right now. Nothing about
+            // it has been established, so it resolves the way every other doubt
+            // in this function resolves, which is towards Live. Only for a pid
+            // that is actually running: a file nobody can read beside a process
+            // that is not there is litter, and litter must not refuse every
+            // Switch against this Profile for ever.
+            Marker::Unreadable if host.process_alive(pid) => return Err(Unsure::Marker(marker)),
+            Marker::Unreadable => continue,
         };
 
         match host.process_started_at(pid) {
@@ -848,12 +863,40 @@ fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32
     Ok(running)
 }
 
-/// The marker's own record of when its session began. A marker that cannot be
-/// read, or does not say, holds nothing worth corroborating.
-fn session_start_in(host: &dyn Host, marker: &Path) -> Option<i64> {
-    let contents = host.read_file(marker).ok()?;
-    let recorded: SessionMarker = serde_json::from_str(&contents).ok()?;
-    recorded.started_at
+/// What a session marker turned out to be.
+///
+/// Three answers rather than an `Option`, because the two ways of having no
+/// timestamp resolve in opposite directions and folding them together resolved
+/// both the wrong way — towards "nothing is running", in the one function whose
+/// every other doubt resolves towards Live.
+enum Marker {
+    /// It says when its session began.
+    Began(i64),
+    /// Perch read the whole file and it is not a marker, or is one that does
+    /// not say. A judgement about content, which is settled: a Profile is Live
+    /// when something says so, not when nothing does.
+    SaysNothing,
+    /// Perch could not read it. Nothing has been established either way.
+    Unreadable,
+}
+
+/// The marker's own record of when its session began.
+fn session_start_in(host: &dyn Host, marker: &Path) -> Marker {
+    // A marker that has gone between the listing and the read is one the client
+    // took with it on its way out, which is the ordinary end of a session
+    // rather than a doubt about one.
+    let contents = match host.read_file(marker) {
+        Ok(contents) => contents,
+        Err(HostError::NotFound { .. }) => return Marker::SaysNothing,
+        Err(_) => return Marker::Unreadable,
+    };
+    match serde_json::from_str::<SessionMarker>(&contents) {
+        Ok(recorded) => match recorded.started_at {
+            Some(at) => Marker::Began(at),
+            None => Marker::SaysNothing,
+        },
+        Err(_) => Marker::SaysNothing,
+    }
 }
 
 /// The key of `.claude.json` that says who the Account is. The only key of that
@@ -1303,9 +1346,12 @@ mod tests {
         let written = session_marker(4242, began);
 
         let host = FakeHost::new().with_file("/tmp/profile/sessions/4242.json", &written);
-        assert_eq!(
-            session_start_in(&host, Path::new("/tmp/profile/sessions/4242.json")),
-            Some(NOON)
+        assert!(
+            matches!(
+                session_start_in(&host, Path::new("/tmp/profile/sessions/4242.json")),
+                Marker::Began(NOON)
+            ),
+            "the marker a Run writes says when its session began"
         );
         assert_eq!(
             session_marker_at(Path::new("/tmp/profile"), 4242),
