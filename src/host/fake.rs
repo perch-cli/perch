@@ -899,7 +899,18 @@ impl Host for FakeHost {
     }
 
     fn env_var(&self, key: &str) -> Option<String> {
-        self.env.borrow().get(key).cloned()
+        // Empty filtered out, as the real Host filters it: `export
+        // CLAUDE_CONFIG_DIR=` is ordinary shell state, and it reads as unset
+        // there. Without this the fake answers `Some("")`, which derives a
+        // store whose config directory is `""` and whose plaintext store is
+        // `.credentials.json` relative to wherever the process happens to be —
+        // a state no real machine can produce, and one a test could be written
+        // against in either direction.
+        self.env
+            .borrow()
+            .get(key)
+            .filter(|value| !value.is_empty())
+            .cloned()
     }
 
     fn platform(&self) -> Platform {

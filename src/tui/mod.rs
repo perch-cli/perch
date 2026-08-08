@@ -115,6 +115,17 @@ impl Signal {
                 _ => None,
             };
         }
+        // Alt and Super the same way, and they have to be said rather than
+        // fallen through: the match below reads `key.code` alone, so without
+        // this `Alt-x` hands the terminal to a client and `Alt-Enter` Switches.
+        // A terminal sends a great many of those combinations for meanings of
+        // its own, and none of them is a keystroke Perch was offered.
+        if key
+            .modifiers
+            .intersects(KeyModifiers::ALT | KeyModifiers::SUPER)
+        {
+            return None;
+        }
         match key.code {
             KeyCode::Char('q') => Some(Signal::Leave),
             KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => Some(Signal::NextTab),
@@ -265,6 +276,21 @@ mod tests {
             ))),
             None
         );
+
+        // Which is true of every modifier and not only Control. Only Control
+        // was short-circuited, and the match after it read `key.code` alone —
+        // so the two keystrokes with consequences, the one that hands the
+        // terminal to a client and the one that Switches, both fired with Alt
+        // held.
+        for held in [KeyModifiers::ALT, KeyModifiers::SUPER] {
+            for code in [KeyCode::Char('x'), KeyCode::Enter, KeyCode::Char('q')] {
+                assert_eq!(
+                    Signal::of(&Event::Key(KeyEvent::new(code, held))),
+                    None,
+                    "{code:?} with {held:?} held is not a keystroke Perch was offered"
+                );
+            }
+        }
     }
 
     #[test]
