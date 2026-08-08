@@ -1076,6 +1076,9 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
         .parse()
         .ok()?;
 
+    // SAFETY: `sysconf` reads a value the C library holds and takes no pointer.
+    // A name it does not know answers -1, which the check below treats as no
+    // answer rather than as a rate.
     let ticks_per_second = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
     if ticks_per_second <= 0 {
         return None;
@@ -1093,9 +1096,15 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
 /// `unsafe` ADR 0021 exists to avoid.
 #[cfg(target_os = "macos")]
 fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
+    // SAFETY: `proc_bsdinfo` is plain old data, so an all-zero value is a valid
+    // one for the kernel to fill in.
     let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
     let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
 
+    // SAFETY: the buffer is the `info` above and `size` is that same type's
+    // size, so the kernel cannot write past it. That the two agree is exactly
+    // what the vetted `libc` declaration buys — a hand-written `kinfo_proc`
+    // getting the size wrong is the class of mistake ADR 0021 declined to risk.
     let written = unsafe {
         libc::proc_pidinfo(
             pid as libc::c_int,
@@ -1134,6 +1143,15 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
     /// The epoch, in milliseconds after the point `FILETIME` counts from.
     const EPOCH_MILLIS_AFTER_1601: i64 = 11_644_473_600_000;
 
+    // `STILL_ACTIVE` is 259, so a process that exits with code 259 reads as
+    // running. That is the safe direction here and deliberately so: "running"
+    // means Perch leaves the Profile alone, and a marker corroborated by a
+    // process that has in fact exited costs a refusal the user can clear by
+    // deleting the file.
+    //
+    // SAFETY: every call takes either a handle this block opened or a value
+    // owned by this frame, and the handle is closed on every path out —
+    // including the two early returns below.
     unsafe {
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if process.is_null() {

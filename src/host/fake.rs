@@ -1003,6 +1003,15 @@ impl Host for FakeHost {
                 path: path.to_path_buf(),
             });
         }
+        // Windows has no mode and relies on the profile ACL (ADR 0020), and the
+        // real Host answers `None` there. A fake that answered with a number
+        // would let a test drive `tighten_if_loose` — reading the mode, making
+        // the file private, remarking that others could read it — on a platform
+        // where none of that happens, which is a test asserting behaviour the
+        // real Host cannot produce.
+        if self.platform() == Platform::Windows {
+            return Ok(None);
+        }
         Ok(Some(self.mode_of(path).unwrap_or(
             if self.dirs.borrow().contains(path) {
                 ORDINARY_DIR_MODE
@@ -1092,6 +1101,13 @@ impl Host for FakeHost {
 
     fn create_dir_exclusive(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::Took(path.to_path_buf()));
+        // Told apart from the path being taken. `AlreadyExists` is contention
+        // and anything else is the filesystem refusing, and `lock::take` answers
+        // them differently — one is waited out and the other is reported — so a
+        // fake that could only produce the first left the second untested.
+        if let Some(detail) = self.unwritable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
+        }
         // A link in the way counts, whether or not it still resolves.
         //
         // `path_exists` follows a link and answers `false` for a broken one,
@@ -1136,6 +1152,12 @@ impl Host for FakeHost {
             return Err(HostError::NotFound {
                 path: path.to_path_buf(),
             });
+        }
+        // A path arranged as unwritable will not take a touch either — which is
+        // how `lock::renew`'s "somebody took this over" branch is reached
+        // without arranging a whole second holder.
+        if let Some(detail) = self.unwritable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
         }
         self.mark_written(path);
         Ok(())
