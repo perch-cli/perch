@@ -1047,13 +1047,22 @@ fn an_identity_file_that_is_not_json_leaves_a_switch_that_says_how_to_finish_it(
 #[test]
 fn an_identity_file_that_cannot_be_read_stops_the_switch_at_its_last_step() {
     let host = machine_with_two_accounts().with_unreadable_file(IDENTITY_PATH, "permission denied");
+    // Derived rather than spelled: `~/.claude.json` is a join, so a Windows
+    // build renders it `/Users/someone\.claude.json` and the constant the
+    // fixture arranges the failure with is not the string the refusal prints.
+    let identity = probe::default_store(&host)
+        .expect("home is known")
+        .identity_file;
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
     let said = result
         .expect_err("the Identity could not be read")
         .to_string();
-    assert!(said.contains(IDENTITY_PATH), "it names the file: {said}");
+    assert!(
+        said.contains(&identity.display().to_string()),
+        "it names the file: {said}"
+    );
     assert_eq!(
         live_credential(&host).as_deref(),
         Some(SECOND_CREDENTIAL),
