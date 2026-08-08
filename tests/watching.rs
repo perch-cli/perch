@@ -431,8 +431,10 @@ fn a_reply_perch_cannot_read_is_a_failed_refresh_rather_than_a_reading_of_zero()
             "a partial reply is not an Account with nothing used: {decision}"
         );
     }
+    // A window shaped like one that will not say how full it is is named, so
+    // the line says which window drifted rather than only that something did.
     assert!(
-        decisions[0].contains("named no Quota Window"),
+        decisions[0].contains("five_hour") && decisions[0].contains("utilization"),
         "and the line says what could not be read: {}",
         decisions[0]
     );

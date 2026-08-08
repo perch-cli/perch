@@ -116,7 +116,7 @@ impl std::fmt::Debug for Fresh {
 /// Every Quota Window this access token's Account currently has.
 pub fn utilization(host: &dyn Host, access_token: &str) -> Result<QuotaWindows, Refused> {
     let document = read(host, USAGE_URL, access_token)?;
-    let windows = windows_in(&document);
+    let windows = windows_in(&document).map_err(Refused::Unrecognised)?;
     if windows.is_empty() {
         return Err(Refused::Unrecognised(
             "the usage endpoint named no Quota Window".to_string(),
@@ -268,26 +268,49 @@ fn says_revoked(body: &str) -> bool {
 /// called: a five-hour window, a seven-day window and one per model are what
 /// there are today, and a per-model window added tomorrow is recorded without
 /// Perch having to learn its name first.
-fn windows_in(document: &Value) -> QuotaWindows {
+fn windows_in(document: &Value) -> std::result::Result<QuotaWindows, String> {
     let Some(fields) = document.as_object() else {
-        return QuotaWindows::new();
+        return Ok(QuotaWindows::new());
     };
 
-    let mut windows: QuotaWindows = fields
-        .iter()
-        .filter_map(|(name, value)| window_from(name, value))
-        .collect();
+    let mut windows = QuotaWindows::new();
+    for (name, value) in fields {
+        // A key whose value is not an object is not a window. The reply carries
+        // fields beside the windows and Perch is not entitled to an opinion
+        // about those — every object-valued key is read as a window, which is
+        // what lets a window Anthropic adds be recorded without Perch having to
+        // learn its name first.
+        let Some(window) = value.as_object() else {
+            continue;
+        };
+
+        // One that *is* shaped like a window and will not say how full it is is
+        // drift, and refusing is the only safe answer. Dropped silently it
+        // becomes a window nothing would ever rank on: a reply where the
+        // five-hour window stops being a number leaves the weekly one as the
+        // fullest Perch can see, so an Account reading 90% headroom is one whose
+        // five-hour window is 98% full — precisely the "switch you onto an
+        // account about to die" ADR 0012 exists to prevent, arriving through a
+        // type change rather than a name change.
+        let Some(used_percent) = window.get("utilization").and_then(Value::as_f64) else {
+            return Err(format!(
+                "the usage endpoint named the Quota Window `{name}` without a \
+                 numeric `utilization`, so how full it is could not be read"
+            ));
+        };
+        windows.push(window_from(name, used_percent, value));
+    }
+
     windows.sort_by(|one, other| {
         rank(&one.window)
             .cmp(&rank(&other.window))
             .then_with(|| one.window.cmp(&other.window))
     });
-    windows
+    Ok(windows)
 }
 
-fn window_from(name: &str, value: &Value) -> Option<WindowUtilization> {
-    let used_percent = value.get("utilization").and_then(Value::as_f64)?;
-    Some(WindowUtilization {
+fn window_from(name: &str, used_percent: f64, value: &Value) -> WindowUtilization {
+    WindowUtilization {
         window: window_name(name),
         // How full a window is, and a window cannot be less than empty or more
         // than full. Anything outside that is a reply Perch does not understand
@@ -299,7 +322,7 @@ fn window_from(name: &str, value: &Value) -> Option<WindowUtilization> {
             .and_then(Value::as_str)
             .and_then(|at| DateTime::parse_from_rfc3339(at).ok())
             .map(|at| at.with_timezone(&Utc)),
-    })
+    }
 }
 
 /// A window's name as the rest of Perch says it: `five_hour` is the `5-hour`
@@ -347,7 +370,7 @@ mod tests {
         )
         .unwrap();
 
-        let windows = super::windows_in(&document);
+        let windows = super::windows_in(&document).expect("both say how full they are");
 
         assert_eq!(windows[0].used_percent, 0.0);
         assert_eq!(windows[1].used_percent, 100.0);
@@ -365,6 +388,7 @@ mod tests {
 
     fn windows() -> QuotaWindows {
         windows_in(&serde_json::from_str(USAGE).expect("valid JSON"))
+            .expect("every window says how full it is")
     }
 
     #[test]
@@ -396,7 +420,36 @@ mod tests {
     #[test]
     fn anything_in_the_reply_that_is_not_a_window_is_not_read_as_one() {
         assert!(!windows().iter().any(|w| w.window == "session"));
-        assert!(windows_in(&json!("not an object")).is_empty());
+        assert!(
+            windows_in(&json!("not an object"))
+                .expect("nothing shaped like a window is nothing to refuse")
+                .is_empty()
+        );
+    }
+
+    /// A window that is shaped like one and will not say how full it is is
+    /// drift, and drift is refused rather than dropped.
+    ///
+    /// Dropping it silently leaves the windows that did parse looking like the
+    /// whole picture. Here the five-hour window is 98% full and unreadable, so
+    /// the weekly one at 10% becomes the fullest Perch can see — an Account
+    /// reporting 90% headroom that a Cycle would land on and that dies
+    /// immediately. That is the ADR 0012 failure mode arriving through a type
+    /// change rather than through a name Perch had not been taught.
+    #[test]
+    fn a_window_that_will_not_say_how_full_it_is_is_drift_rather_than_one_fewer_window() {
+        let document: Value = serde_json::from_str(
+            r#"{"five_hour": {"utilization": "98"}, "seven_day": {"utilization": 10}}"#,
+        )
+        .unwrap();
+
+        let refused = windows_in(&document).expect_err("half a picture is not a picture");
+
+        assert!(
+            refused.contains("five_hour"),
+            "it names the window: {refused}"
+        );
+        assert!(refused.contains("utilization"), "{refused}");
     }
 
     #[test]
