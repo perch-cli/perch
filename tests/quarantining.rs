@@ -40,6 +40,13 @@ const FRESH_TOKEN: &str = "sk-ant-oat01-fresh";
 
 const USAGE: &str = r#"{"five_hour": {"utilization": 42}}"#;
 
+/// The body OAuth gives a refresh token that has been retired, and the only
+/// thing a refusal from the token endpoint may be read as a Quarantine. The
+/// status it arrives under is deliberately not what decides that: a refusal
+/// about Perch's own `client_id` wears the same statuses and is nobody's
+/// Account's fault.
+const RETIRED: &str = r#"{"error":"invalid_grant"}"#;
+
 fn profile_naming(email: &str) -> String {
     format!(r#"{{"account": {{"email_address": "{email}"}}}}"#)
 }
@@ -59,7 +66,7 @@ fn is_held(host: &FakeHost, email: &str) -> bool {
 
 #[test]
 fn a_credential_anthropic_will_not_renew_quarantines_its_account() {
-    let host = about_to_renew(SPENT).with_reply(TOKEN_URL, 401, "");
+    let host = about_to_renew(SPENT).with_reply(TOKEN_URL, 401, RETIRED);
 
     let (result, printed) = run_status_refresh(&host, false);
 
@@ -187,6 +194,41 @@ fn a_refusal_that_might_pass_is_not_a_quarantine() {
     );
 }
 
+/// The refusal that is about Perch rather than about the Account. A token
+/// endpoint answers `invalid_client` with a 401, and `invalid_client` is a
+/// statement about the `client_id` in the request — Perch's own, hard-coded,
+/// and the same in every renewal it ever sends. Read as "this refresh token is
+/// retired", one such answer walks a whole Group and Quarantines every Account
+/// in it in a single pass, and only a browser login for each would clear it.
+#[test]
+fn a_renewal_refused_over_something_other_than_the_token_quarantines_nobody() {
+    let host = machine_with_two_accounts();
+    declare_group(&host, "work");
+    for email in [EMAIL, SECOND_EMAIL] {
+        move_to_group(&host, email, "work").0.expect("joined");
+    }
+    // Both Accounts have to renew, and the endpoint turns both down without
+    // ever saying the tokens are the problem.
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
+    host.set_keychain_item(
+        &store_of(&host, SECOND_EMAIL).keychain_service,
+        LOGIN_NAME,
+        SPENT,
+    );
+    let host = host.with_reply(TOKEN_URL, 401, r#"{"error":"invalid_client"}"#);
+
+    let (result, printed) = run_status_group_refresh(&host, false);
+
+    result.expect("a refresh degrades the display rather than failing it");
+    for email in [EMAIL, SECOND_EMAIL] {
+        assert_eq!(
+            quarantine_of(&host, email),
+            None,
+            "{email} was condemned for a refusal that was never about it: {printed}"
+        );
+    }
+}
+
 #[test]
 fn a_quarantined_account_is_not_asked_again() {
     let host = machine_with_two_accounts();
@@ -304,7 +346,7 @@ fn an_account_quarantined_by_a_refresh_leaves_the_cycling_pool_from_that_moment(
     let host = host
         .with_reply_to(PROFILE_URL, FRESH_TOKEN, 200, &profile_naming(EMAIL))
         .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE)
-        .with_reply(TOKEN_URL, 401, "");
+        .with_reply(TOKEN_URL, 401, RETIRED);
 
     run_status_group_refresh(&host, false)
         .0
@@ -334,7 +376,7 @@ fn an_account_quarantined_by_a_refresh_leaves_the_cycling_pool_from_that_moment(
 /// against the Account it was read for, and a Quarantine is a recording too.
 #[test]
 fn a_credential_that_may_be_somebody_elses_quarantines_nobody() {
-    let host = about_to_renew(SPENT).with_reply(TOKEN_URL, 401, "");
+    let host = about_to_renew(SPENT).with_reply(TOKEN_URL, 401, RETIRED);
     // The evidence that the live Credential is not the active Account's: Claude
     // Code writes the Identity beside the Credential it belongs to, and this
     // one names somebody else.
