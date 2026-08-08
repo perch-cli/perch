@@ -1008,6 +1008,15 @@ impl Host for FakeHost {
                 path: path.to_path_buf(),
             });
         }
+        // A file whose *permissions* cannot be changed is the same arrangement
+        // as one whose contents cannot: a `chmod` on a file owned by somebody
+        // else fails with `EPERM` however readable it is. Without this the fake
+        // had no way to be a machine where tightening a loose Credential does
+        // not work, which is the branch that decides whether the user is ever
+        // told about a world-readable refresh token.
+        if let Some(detail) = self.unwritable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
+        }
         self.modes
             .borrow_mut()
             .insert(path.to_path_buf(), PRIVATE_FILE_MODE);

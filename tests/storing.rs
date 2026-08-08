@@ -74,6 +74,48 @@ fn a_credential_file_others_could_read_is_tightened_and_reported_rather_than_ref
     assert_eq!(tightened.len(), 1, "said once: {notes:?}");
 }
 
+/// The reasoning for tightening rather than refusing is that a tightened file
+/// is a better outcome than an explained one. When the tightening does not
+/// work, the user was getting neither: the remark sat inside the success arm,
+/// so a `chmod` that failed produced no error, no note, and a world-readable
+/// refresh token read on every command from then on.
+///
+/// A `.credentials.json` left owned by root by a `sudo claude`, or restored
+/// from a backup, is how a machine arrives here.
+#[test]
+fn a_credential_file_that_cannot_be_tightened_is_still_said_out_loud() {
+    let host = logged_in_machine_off_macos()
+        .with_file_mode(CREDENTIALS_PATH, 0o644)
+        .with_unwritable_file(CREDENTIALS_PATH, "Operation not permitted");
+
+    let (result, _) = run_status(&host, false);
+
+    result.expect("a loose file is not a reason to refuse a working machine");
+    let displayed = perch::probe::default_store(&host)
+        .expect("the store derives")
+        .credentials_file
+        .display()
+        .to_string();
+    let said = host
+        .notes()
+        .into_iter()
+        .find(|note| note.contains(&displayed))
+        .unwrap_or_else(|| panic!("nothing said it: {:?}", host.notes()));
+    assert!(
+        said.contains("could not be narrowed"),
+        "and says the tightening did not happen: {said}"
+    );
+    assert!(
+        said.contains("chmod 600"),
+        "with the one thing that puts it right: {said}"
+    );
+    assert_eq!(
+        host.mode_of(CREDENTIALS_PATH),
+        Some(0o644),
+        "the file really is still loose"
+    );
+}
+
 #[test]
 fn a_second_account_off_macos_gets_a_file_of_its_own() {
     let host = logged_in_machine_off_macos()
