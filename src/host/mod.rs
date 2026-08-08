@@ -501,10 +501,39 @@ fn mode_to_carry_across(host: &dyn Host, path: &Path) -> u32 {
 /// would cost them all of that. Writing beside it and moving it into place
 /// means the file is either the old one or the new one.
 pub fn write_atomically(host: &dyn Host, path: &Path, contents: &str) -> Result<(), HostError> {
+    let path = &through_any_link(host, path);
     // The temp file carries the target's mode from the moment it exists: it
     // holds the whole of the target's contents, so a temp file at the umask
     // would leak everything the mode on the target is protecting.
     replace_via_tmp(host, path, contents, mode_to_carry_across(host, path))
+}
+
+/// What a path names, following one symbolic link if the last component is one.
+///
+/// `rename` replaces the **link**, not what it points at, so without this the
+/// first `perch switch` on a machine where `~/.claude.json` is managed by stow,
+/// chezmoi or yadm silently turned that link into an ordinary file: the copy in
+/// the user's dotfiles repository stops being the live one, and every edit they
+/// make there afterwards does nothing. Nothing says so, and the repair is to
+/// notice.
+///
+/// One hop rather than a full canonicalisation, because one hop is what a
+/// dotfile manager makes and a walk would need a loop guard for no case anybody
+/// has. A relative target is resolved against the directory the link sits in,
+/// which is what the operating system does with it.
+///
+/// Deliberately not in [`replace_via_tmp`]: that is shared with the write that
+/// stores a Credential, and following a link to decide where a *secret* lands
+/// is how a planted link redirects one. `.claude.json` is the user's own
+/// configuration and the link is theirs.
+fn through_any_link(host: &dyn Host, path: &Path) -> PathBuf {
+    let Ok(Some(target)) = host.link_target(path) else {
+        return path.to_path_buf();
+    };
+    match target.is_absolute() {
+        true => target,
+        false => path.parent().unwrap_or(Path::new("")).join(target),
+    }
 }
 
 /// The whole of writing beside a file and moving the result over it, including
@@ -563,5 +592,48 @@ mod tests {
         write_atomically(&host, Path::new(PATH), "{}").expect("it is written");
 
         assert_eq!(host.mode_of(PATH), Some(PRIVATE_FILE_MODE));
+    }
+
+    /// A managed `.claude.json` is written *through*, not replaced.
+    ///
+    /// `rename` replaces the link rather than what it points at, so the first
+    /// `perch switch` on a machine using stow, chezmoi or yadm turned the link
+    /// into an ordinary file — the copy in the dotfiles repository stops being
+    /// the live one, silently, and every edit made there afterwards does
+    /// nothing.
+    #[test]
+    fn a_file_that_is_a_link_is_written_through_rather_than_replaced() {
+        let real = "/Users/someone/dotfiles/claude.json";
+        let host = FakeHost::new()
+            .with_file(real, "{}")
+            .with_link(Link::Symbolic, real, PATH);
+
+        write_atomically(&host, Path::new(PATH), "{\"a\":1}").expect("it is written");
+
+        assert_eq!(
+            host.file(real).as_deref(),
+            Some("{\"a\":1}"),
+            "the file the link names is the one that changed"
+        );
+        assert!(
+            host.link_at(PATH).is_some(),
+            "and the link is still a link, so what manages it goes on managing it"
+        );
+    }
+
+    /// A relative target is resolved the way the operating system resolves it:
+    /// against the directory the link sits in, not the working directory.
+    #[test]
+    fn a_link_pointing_somewhere_relative_is_followed_from_where_it_sits() {
+        let real = "/Users/someone/dotfiles/claude.json";
+        let host = FakeHost::new().with_file(real, "{}").with_link(
+            Link::Symbolic,
+            "dotfiles/claude.json",
+            PATH,
+        );
+
+        write_atomically(&host, Path::new(PATH), "{\"a\":1}").expect("it is written");
+
+        assert_eq!(host.file(real).as_deref(), Some("{\"a\":1}"));
     }
 }
