@@ -745,3 +745,31 @@ fn a_target_that_names_nothing_is_refused_before_anything_is_linked() {
     );
     assert!(launched(&host).is_empty(), "{:?}", launched(&host));
 }
+
+/// An empty first word names a program no more than a leading `-` does.
+///
+/// The rule after `--` is that the first word decides, and decides totally: a
+/// word beginning with `-` is an argument because nothing beginning with `-`
+/// names a program the operating system would find. The empty string does not
+/// either — `PATH` is searched for names and a path is written with a separator
+/// — but it does not begin with `-`, so it was taken as the program and handed
+/// to the operating system to launch, under the announcement "Running `` as".
+#[test]
+fn an_empty_first_word_is_an_argument_rather_than_a_program() {
+    let host = machine();
+
+    let outcome = run_run_with(&host, SECOND_EMAIL, &["", "--resume"])
+        .0
+        .expect("Claude Code ran");
+
+    assert_eq!(outcome, 0);
+    assert_eq!(
+        command_lines(&host),
+        vec![vec![
+            CLAUDE_BIN.to_string(),
+            String::new(),
+            "--resume".to_string(),
+        ]],
+        "Claude Code, handed both words as they were typed"
+    );
+}

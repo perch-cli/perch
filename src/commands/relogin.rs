@@ -54,22 +54,9 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // Asked before the login rather than after: a Profile Perch may not write
     // to is one no browser round trip was going to repair (ADR 0005).
     let version = probe::claude_version(host)?;
-    switch::refuse_if_live(host, &account, &version)?;
-
     let repairing_the_account_you_are_on = registry.active.as_deref() == Some(account.email());
-    if repairing_the_account_you_are_on {
-        // The Default Profile is written too in that case, and its Credential
-        // is the one a running client is holding. Renewing it out from under a
-        // session logs that session out mid-task, which is the whole of ADR
-        // 0005 — and this would not renew it but replace it.
-        switch::refuse_if_live_in(
-            host,
-            &probe::default_store(host)?.config_dir,
-            "the Default Profile, which is where this Account's repaired \
-             Credential has to land",
-            &version,
-        )?;
-    }
+    refuse_while_anything_is_running(host, &account, repairing_the_account_you_are_on, &version)?;
+
     let produced = login::perform(
         host,
         out,
@@ -92,11 +79,17 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     }
 
     // Asked again, because the first answer is minutes old. A browser round
-    // trip is the longest wait in Perch, and the next line writes a Credential
-    // into that Profile — so a `perch run` started while the person was logging
-    // in would be written under (ADR 0027). The login itself ran against a
-    // directory of its own, so it can never be what this finds.
-    switch::refuse_if_live(host, &account, &version)?;
+    // trip is the longest wait in Perch, and what follows writes a Credential
+    // into both of those Profiles — so a `perch run`, or a `claude`, started
+    // while the person was logging in would be written under (ADR 0027). The
+    // login itself ran against a directory of its own, so it can never be what
+    // this finds.
+    //
+    // Whether the Default Profile is written is asked of the registry as it is
+    // now: another terminal may have switched away during the login, and then
+    // this repair lands in the Account's own Profile alone.
+    let repairing_the_account_you_are_on = registry.active.as_deref() == Some(account.email());
+    refuse_while_anything_is_running(host, &account, repairing_the_account_you_are_on, &version)?;
 
     settle_into_its_own_profile(host, &account, &produced)?;
 
@@ -108,11 +101,12 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
 
     report(out, &registry, &account, was_quarantined)?;
 
-    // Asked of the registry as it is rather than as it was before the login: if
-    // another terminal switched away in the meantime, the live Credential is
+    // The same answer the liveness check above was given, deliberately: if
+    // another terminal switched away during the login, the live Credential is
     // somebody else's now, and putting this one over it without a Capture would
-    // destroy theirs (ADR 0006).
-    if registry.active.as_deref() != Some(account.email()) {
+    // destroy theirs (ADR 0006). Reading it twice is how the Profile that gets
+    // written comes to be one that was never checked.
+    if !repairing_the_account_you_are_on {
         return Ok(());
     }
     if let Err(error) = make_it_live(host, &account) {
@@ -131,6 +125,31 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
              everywhere without a Switch.",
             account.email()
         ),
+    )
+}
+
+/// The Profiles this repair writes into, refused while a client is holding one.
+///
+/// Repairing the Account you are on writes its fresh Credential into the Default
+/// Profile as well, and that Credential is the one a running client is holding —
+/// so both are asked about, and both are asked about twice: once before the
+/// login, so a Profile Perch may not write to never costs a browser round trip
+/// (ADR 0005), and once after, because a browser round trip is the longest wait
+/// in Perch and the machine has had minutes to move on.
+fn refuse_while_anything_is_running(
+    host: &dyn Host,
+    account: &Account,
+    repairing_the_account_you_are_on: bool,
+    version: &str,
+) -> Result<()> {
+    switch::refuse_if_live_anywhere(
+        host,
+        account,
+        repairing_the_account_you_are_on.then_some(
+            "the Default Profile, which is where this Account's repaired \
+             Credential has to land",
+        ),
+        version,
     )
 }
 

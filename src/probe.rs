@@ -49,7 +49,7 @@ pub struct Identity {
 /// A Credential, kept as the exact bytes the keychain holds. Perch copies it
 /// verbatim, so the only fields read out are the ones something needs: to
 /// describe the Account, to ask Anthropic a question as it, and to renew it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Credential {
     raw: String,
     /// What proves the caller is this Account for the length of a session.
@@ -92,6 +92,17 @@ impl std::fmt::Display for Credential {
     /// message shows its shape and nothing else.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(formatter, "<credential {} bytes>", self.raw.len())
+    }
+}
+
+impl std::fmt::Debug for Credential {
+    /// The same, because `Debug` is the likelier of the two to reach a log by
+    /// accident. A derived one would print every field — the refresh token
+    /// among them — and defeat the `Display` above from one `{:?}` away, which
+    /// is a formatting specifier away from every `assert_eq!`, `panic!` and
+    /// `unwrap` in the tree.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, formatter)
     }
 }
 
@@ -734,18 +745,44 @@ struct SessionMarker {
 /// corroborated nor dismissed, and guessing either way is silently wrong on
 /// one side or the other, so the answer is a refusal naming the assumption.
 pub fn live_clients(host: &dyn Host, config_dir: &Path, version: &str) -> Result<Vec<u32>> {
-    clients_in(host, config_dir).map_err(|marker| {
-        refusal(
-            assumption::SESSION_MARKER,
-            &format!(
+    clients_in(host, config_dir)
+        .map_err(|unsure| refusal(assumption::SESSION_MARKER, &unsure.detail(), version))
+}
+
+/// Why whether anything is running went unanswered.
+///
+/// Both are doubt rather than an answer, and neither is decided here: a caller
+/// that must not write under a client reads either as one, and the caller that
+/// can name a Claude Code version turns either into a refusal that says which
+/// it met.
+enum Unsure {
+    /// A marker naming a running process whose start the operating system will
+    /// not say, so it can be neither corroborated nor dismissed.
+    Marker(PathBuf),
+    /// The sessions directory is there and would not be read. Told apart from
+    /// an absent one, which is the ordinary "nothing is running" and the whole
+    /// reason [`Host::list_dir`] reports the two differently.
+    Unlistable { dir: PathBuf, why: HostError },
+}
+
+impl Unsure {
+    fn detail(&self) -> String {
+        match self {
+            Unsure::Marker(marker) => format!(
                 "{} names a running process, but when that process began could \
                  not be read, so the marker can be neither corroborated nor \
                  dismissed. If that session is dead, delete the file",
                 marker.display()
             ),
-            version,
-        )
-    })
+            Unsure::Unlistable { dir, why } => format!(
+                "{} could not be read ({why}), so whether a client is running \
+                 against this Profile is not a question that got an answer. \
+                 Nothing is assumed either way — make that directory readable, \
+                 or delete it if no client is running",
+                dir.display()
+            ),
+        }
+    }
 }
 
 /// Whether anything may be running against a config directory, where a marker
@@ -767,10 +804,18 @@ pub fn anything_running(host: &dyn Host, config_dir: &Path) -> bool {
 /// The processes running against a config directory, or the marker that could
 /// be neither corroborated nor dismissed. Both callers phrase that doubt in
 /// their own terms, and neither decides it.
-fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32>, PathBuf> {
-    let markers = match host.list_dir(&sessions_dir(config_dir)) {
+fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32>, Unsure> {
+    let dir = sessions_dir(config_dir);
+    let markers = match host.list_dir(&dir) {
         Ok(markers) => markers,
-        Err(_) => return Ok(Vec::new()),
+        // Never having run a client is the ordinary case, and it is the *only*
+        // one that means nothing is running. A directory that is there and will
+        // not be read — root-owned after a `sudo claude`, say — is doubt, and
+        // reading it as emptiness is how a Switch comes to write the Credential
+        // out from under a session (ADR 0005). Every other doubt in this
+        // function resolves towards Live; so does this one.
+        Err(HostError::NotFound { .. }) => return Ok(Vec::new()),
+        Err(why) => return Err(Unsure::Unlistable { dir, why }),
     };
 
     let mut running = Vec::new();
@@ -797,7 +842,7 @@ fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32
             // No start to compare. The process being gone is the ordinary way
             // that happens — a marker left behind by a client that died.
             None if !host.process_alive(pid) => {}
-            None => return Err(marker),
+            None => return Err(Unsure::Marker(marker)),
         }
     }
     Ok(running)
@@ -1275,6 +1320,25 @@ mod tests {
         let credential = understood(r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-secret"}}"#);
         let rendered = format!("{credential}");
         assert!(!rendered.contains("sk-ant-oat01-secret"));
+    }
+
+    /// However it is asked to render.
+    ///
+    /// `Debug` is the likelier of the two to reach a log by accident — it is
+    /// what `assert_eq!`, `panic!` and a failed `unwrap` all reach for — so a
+    /// derived one would put the refresh token in CI output one `{:?}` away
+    /// from the `Display` written to stop exactly that.
+    #[test]
+    fn a_credential_never_debugs_its_secret_either() {
+        let credential = understood(
+            r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-secret","refreshToken":"sk-ant-ort01-secret"}}"#,
+        );
+
+        let rendered = format!("{credential:?}");
+
+        assert!(!rendered.contains("sk-ant-oat01-secret"), "{rendered}");
+        assert!(!rendered.contains("sk-ant-ort01-secret"), "{rendered}");
+        assert!(rendered.contains("credential"), "{rendered}");
     }
 
     fn understood(raw: &str) -> Credential {

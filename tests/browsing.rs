@@ -1047,3 +1047,39 @@ fn a_view_left_alone_hands_nothing_over_and_ends_well() {
         "nor was anything switched"
     );
 }
+
+/// Selecting an Account below the fold shows its figures, not just its name.
+///
+/// The scroll keeps one line in view by pinning it to the bottom of the
+/// viewport. On the Accounts tab that line is the row, which is the whole of
+/// the content. On the Utilization tab each Account's Quota Window rows come
+/// *after* its heading, so pinning the heading put every figure below the
+/// bottom edge: the selected Account rendered as a bare name with its
+/// Utilization scrolled off, on the one tab whose whole purpose is the figures.
+#[test]
+fn moving_down_the_utilization_view_keeps_the_selected_accounts_figures_on_screen() {
+    let host = machine_with_figures();
+    // Short enough that the second Account's block cannot share the screen with
+    // the first, so the view has to scroll to reach it at all.
+    let mut screen = FakeScreen::sized(
+        80,
+        7,
+        vec![
+            Some(Signal::NextTab),
+            Some(Signal::Down),
+            Some(Signal::Leave),
+        ],
+    );
+
+    browse_with(&host, &mut screen, &mut FakeRefresher::out_for_ever());
+
+    let frame = screen.last_frame();
+    assert!(
+        frame.contains(SECOND_EMAIL),
+        "the selected Account is on screen:\n{frame}"
+    );
+    assert!(
+        frame.contains("7% used"),
+        "and so is the figure that is the whole reason for this view:\n{frame}"
+    );
+}

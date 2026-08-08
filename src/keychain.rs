@@ -107,12 +107,11 @@ pub fn add_command_line(
 
 /// Refuses a value that would be punctuation rather than a value.
 fn inert(what: &str, value: &str) -> Result<(), KeychainError> {
-    match value.chars().find(|c| c.is_control()) {
-        Some(control) => Err(KeychainError::Unavailable {
+    match crate::host::control_character_in(value) {
+        Some(said) => Err(KeychainError::Unavailable {
             detail: format!(
-                "{what} carries a control character (U+{:04X}), which `security` \
-                 would read as the end of one command and the start of another",
-                control as u32
+                "{what} carries {said}, which `security` would read as the end \
+                 of one command and the start of another"
             ),
         }),
         None => Ok(()),

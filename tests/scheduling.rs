@@ -391,3 +391,35 @@ fn figures_that_were_read_but_could_not_be_kept_are_said_rather_than_swallowed()
         "and what could not be written is named: {failed}"
     );
 }
+
+/// A check whose Switch went live and then failed still records the cooldown.
+///
+/// The Credential moved, so the check moved — and the pacing has to survive the
+/// process, because every check is a fresh one. Without that record the next
+/// scheduled check saw no cooldown and no no-return, and was free to move
+/// straight back: "a check that moved and let the next one move straight back",
+/// which is what ADR 0013 says the persisted record exists to prevent.
+#[test]
+fn a_check_that_switched_and_then_failed_still_paces_the_next_one() {
+    let host = checked(&[86.0], &[5.0]);
+    // The Credential is written and the Identity patch is what fails, so the
+    // machine is part way through a Switch rather than untouched.
+    let host = host.with_unwritable_file(IDENTITY_PATH, "read-only file");
+    let switched_at = host.now();
+
+    let (result, _) = run_watch_once(&host);
+
+    result.expect_err("the Switch went live and then could not be finished");
+    assert_eq!(
+        active(&host).as_deref(),
+        Some(SECOND_EMAIL),
+        "the Credential moved, so which Account is active moved with it"
+    );
+
+    let checks = registry_of(&host).checks;
+    let recorded = checks
+        .get("work")
+        .expect("a check that moved records that it moved");
+    assert_eq!(recorded.switched_off, EMAIL);
+    assert_eq!(recorded.switched_at, switched_at);
+}

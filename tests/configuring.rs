@@ -639,3 +639,68 @@ fn a_set_naming_a_group_and_a_key_says_the_value_is_what_is_missing() {
         "and a refused `set` changes nothing"
     );
 }
+
+/// `perch config get` writes nothing, so it does not wait on a writer.
+///
+/// The same rule `perch status` states for itself and `perch list` follows.
+/// Both halves of `perch config` took the write lock, so reading a setting
+/// while `perch watch` was between rounds — it takes that lock every round, and
+/// `perch status --refresh` holds it across every network read — waited the
+/// wait out and then failed with "another `perch` holds it", about a command
+/// that only ever reads.
+#[test]
+fn getting_a_setting_reads_alongside_another_perch_rather_than_waiting_on_it() {
+    let host = three_accounts_in_one_group();
+    let held = perch::registry::lock(&host).expect("the other `perch` has it");
+
+    let (result, printed) = config_get(&host, &["work", "strategy"]);
+
+    result.expect("a read does not wait on a writer");
+    assert_eq!(printed.trim(), "most-headroom", "{printed}");
+    drop(held);
+}
+
+/// The other half of the same rule: `set` writes, so it does take the lock.
+#[test]
+fn setting_one_waits_for_the_other_perch_because_it_writes() {
+    let host = three_accounts_in_one_group();
+    let _held = perch::registry::lock(&host).expect("the other `perch` has it");
+
+    let (result, _) = config_set(&host, &["work", "strategy", "soonest-reset"]);
+
+    let refused = result.expect_err("a writer waits on a writer");
+    assert!(
+        refused.to_string().contains("the Perch registry lock"),
+        "{refused}"
+    );
+}
+
+/// The round trip above is why a Group name cannot hold a space.
+///
+/// `perch config get` prints `<group> <key> <value>` and `perch config set`
+/// reads it back by counting words, so a Group called `my work` would print a
+/// four-word line that `set` answers with "how a `set` is addressed". Refused at
+/// the one moment somebody can still choose another name, rather than printing
+/// output that cannot be typed back in.
+#[test]
+fn a_group_name_with_a_space_in_it_is_refused_rather_than_breaking_the_round_trip() {
+    let host = machine_with_two_accounts();
+
+    let (result, _) = run_group(
+        &host,
+        perch::commands::group::GroupCommand::Add {
+            name: "my work".to_string(),
+        },
+    );
+
+    let refusal = result.expect_err("a name no line of `config get` could name");
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    assert!(
+        refusal.to_string().contains("has a space in it"),
+        "{refusal}"
+    );
+    assert!(
+        registry_of(&host).groups.is_empty(),
+        "and no Group was declared"
+    );
+}

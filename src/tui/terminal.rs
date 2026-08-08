@@ -13,7 +13,8 @@
 //! on the alternate one that is about to disappear.
 
 use std::io::{Stdout, stdout};
-use std::sync::Once;
+use std::sync::{Mutex, Once, PoisonError};
+use std::thread::ThreadId;
 use std::time::Duration;
 
 use crossterm::cursor::Show;
@@ -39,15 +40,18 @@ impl TerminalScreen {
     pub fn enter() -> Result<TerminalScreen> {
         restore_before_a_panic_is_printed();
         terminal::enable_raw_mode().map_err(the_terminal_refused)?;
+        held_by(Some(std::thread::current().id()));
         // Raw mode is on, so from here a failure has something to give back.
         if let Err(err) = stdout().execute(EnterAlternateScreen) {
             let _ = give_it_back();
+            held_by(None);
             return Err(the_terminal_refused(err));
         }
         match Terminal::new(CrosstermBackend::new(stdout())) {
             Ok(terminal) => Ok(TerminalScreen { terminal }),
             Err(err) => {
                 let _ = give_it_back();
+                held_by(None);
                 Err(the_terminal_refused(err))
             }
         }
@@ -76,7 +80,44 @@ impl Drop for TerminalScreen {
     /// this is the last thing that happens to the terminal.
     fn drop(&mut self) {
         let _ = give_it_back();
+        held_by(None);
     }
+}
+
+/// Which thread has the terminal, or `None` when nothing has.
+///
+/// The panic hook is process-global and cannot be taken off again — `set_hook`
+/// replaces, and putting the previous one back would race any other hook
+/// installed since. So the hook stays and this is what it asks, which turns
+/// "always restore" into "restore when there is something to restore, and only
+/// for the thread that took it".
+///
+/// Both halves are load-bearing. Without the thread: [`crate::tui::refresh`]
+/// runs a Refresh on a thread of its own *while* the frame loop is drawing, and
+/// a panic there is not fatal — the loop reads the closed channel, says the
+/// Refresh did not finish, and carries on. Restoring the terminal on that
+/// thread's panic would leave the loop drawing frames into a cooked,
+/// non-alternate terminal, over the top of the panic report. Without the
+/// `None`: once `browse` has returned, every later panic in the process would
+/// still emit `\x1b[?1049l` and a cursor-show — onto stdout, which is where
+/// `perch list --json` writes.
+fn terminal_holder() -> &'static Mutex<Option<ThreadId>> {
+    static HOLDER: Mutex<Option<ThreadId>> = Mutex::new(None);
+    &HOLDER
+}
+
+fn held_by(thread: Option<ThreadId>) {
+    *terminal_holder()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = thread;
+}
+
+/// Whether the panicking thread is the one holding the terminal.
+fn ours_to_give_back() -> bool {
+    *terminal_holder()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        == Some(std::thread::current().id())
 }
 
 /// Raw mode off, then the ordinary screen and the cursor back — and every one
@@ -111,7 +152,11 @@ fn restore_before_a_panic_is_printed() {
     INSTALLED.call_once(|| {
         let already_there = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |panicked| {
-            first(give_it_back, &*already_there, panicked)
+            first(
+                || ours_to_give_back().then(give_it_back),
+                &*already_there,
+                panicked,
+            )
         }));
     });
 }
@@ -151,5 +196,43 @@ mod tests {
         );
 
         assert_eq!(*ORDER.lock().expect("still fine"), ["restored", "reported"]);
+    }
+
+    /// And it is only given back by the thread that took it, while it holds it.
+    ///
+    /// The hook is process-global and permanent — `set_hook` replaces, and
+    /// putting the previous one back would race anything installed since — so
+    /// what stops it firing wrongly is this question rather than its absence.
+    ///
+    /// A Refresh runs on a thread of its own while the frame loop draws, and a
+    /// panic there is not fatal: the loop reads the closed channel and carries
+    /// on. Restoring on that thread would leave the loop drawing into a cooked,
+    /// non-alternate terminal. And once the TUI has exited, a restore would put
+    /// escape sequences on stdout — where `perch list --json` writes.
+    #[test]
+    fn only_the_thread_holding_the_terminal_gives_it_back() {
+        held_by(None);
+        assert!(
+            !ours_to_give_back(),
+            "nothing holds it, so there is nothing to give back"
+        );
+
+        held_by(Some(std::thread::current().id()));
+        assert!(ours_to_give_back());
+
+        let elsewhere = std::thread::spawn(ours_to_give_back)
+            .join()
+            .expect("the thread ran");
+        assert!(
+            !elsewhere,
+            "a panic on the Refresh thread must not restore the terminal the \
+             frame loop is still drawing in"
+        );
+
+        held_by(None);
+        assert!(
+            !ours_to_give_back(),
+            "and once the TUI has exited, nothing is restored onto stdout"
+        );
     }
 }

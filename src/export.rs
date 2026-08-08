@@ -49,6 +49,19 @@ pub struct Export {
     /// Account travels, reason and all.
     #[serde(default)]
     pub credentials: BTreeMap<String, String>,
+    /// Each Account's own `.claude.json`, by the address of the Account it
+    /// belongs to.
+    ///
+    /// A Profile holds two things, not one. The Credential is what cannot be
+    /// reconstructed, and this is what cannot be reconstructed *faithfully*:
+    /// Claude Code writes an `oauthAccount` block carrying fields beyond the
+    /// four the registry records, and a Switch prefers that block verbatim over
+    /// one Perch composes. An Export without it restores every Account into the
+    /// degraded state [`crate::adopt`] goes out of its way to keep the first one
+    /// out of. It is also what a Run Carries from, so a Profile arriving without
+    /// one meets the onboarding dialog on every single Run (ADR 0003).
+    #[serde(default)]
+    pub identity_files: BTreeMap<String, String>,
 }
 
 /// Reads everything Perch holds: the registry it was handed, and the Credential
@@ -65,9 +78,17 @@ pub struct Export {
 /// and the user would find out on the day they needed it.
 pub fn gather(host: &dyn Host, registry: &Registry) -> Result<Export> {
     let mut credentials = BTreeMap::new();
+    let mut identity_files = BTreeMap::new();
     for account in &registry.accounts {
         if let Some(credential) = read_the_credential(host, account)? {
             credentials.insert(account.email().to_string(), credential);
+        }
+        // Unlike the Credential, an identity file that will not be read does not
+        // stop the Export. It is not a secret and it is not irreplaceable — an
+        // Import composes one from the Identity the registry carries — so the
+        // whole file is worth more than the fidelity of one Profile's copy.
+        if let Some(contents) = read_the_identity_file(host, account) {
+            identity_files.insert(account.email().to_string(), contents);
         }
     }
 
@@ -75,6 +96,7 @@ pub fn gather(host: &dyn Host, registry: &Registry) -> Result<Export> {
         version: CURRENT_VERSION,
         registry: registry.clone(),
         credentials,
+        identity_files,
     })
 }
 
@@ -88,6 +110,11 @@ fn read_the_credential(host: &dyn Host, account: &Account) -> Result<Option<Stri
         ))
     })?;
     Ok(held.map(|held| held.credential))
+}
+
+fn read_the_identity_file(host: &dyn Host, account: &Account) -> Option<String> {
+    let store = account.store(host).ok()?;
+    host.read_file(&store.identity_file).ok()
 }
 
 impl Export {
@@ -156,20 +183,71 @@ pub fn unseal(sealed: &str, passphrase: &str) -> Result<Export> {
         other => PerchError::Invalid(format!("This is not an `age` file Perch can read: {other}")),
     })?;
 
-    let export: Export = serde_json::from_slice(&plain).map_err(|err| PerchError::Malformed {
+    // Both versions first, off a shape that is only the versions, and before
+    // the document is read as an Export. This is the order the guards need to
+    // be any use at all: a newer Perch is exactly the thing that writes a value
+    // this build has no variant for — a Strategy it added, a Quarantine reason —
+    // and reading the document first fails on that with serde's own words. The
+    // user is then told their *backup file is corrupt*, about a file that is
+    // perfectly valid JSON, on the day the machine it would have restored is
+    // gone. `registry::load` gets this right and says so; this did not, so both
+    // version fields were dead in the only case they were written for.
+    refuse_a_newer_perch(&plain)?;
+
+    serde_json::from_slice(&plain).map_err(|err| PerchError::Malformed {
         path: "the Export".to_string(),
         detail: err.to_string(),
-    })?;
+    })
+}
 
-    if export.version > CURRENT_VERSION {
+/// The two versions an Export carries, read on their own.
+///
+/// A shape holding one number deserializes out of any JSON object that carries
+/// it, whatever else the object holds and whatever the rest of it means — which
+/// is the whole point. An absent version is "it does not say", which is not a
+/// claim about a newer Perch: the caller goes on to read the document properly
+/// and reports what it finds there.
+fn refuse_a_newer_perch(plain: &[u8]) -> Result<()> {
+    #[derive(Deserialize)]
+    struct JustTheVersion {
+        version: Option<u32>,
+    }
+
+    #[derive(Deserialize)]
+    struct Versioned {
+        version: Option<u32>,
+        registry: Option<JustTheVersion>,
+    }
+
+    let Ok(versioned) = serde_json::from_slice::<Versioned>(plain) else {
+        return Ok(());
+    };
+
+    if versioned
+        .version
+        .is_some_and(|claimed| claimed > CURRENT_VERSION)
+    {
         return Err(crate::error::written_by_a_newer_perch(
             "This Export",
             "export",
-            export.version,
+            versioned.version.unwrap_or_default(),
             CURRENT_VERSION,
         ));
     }
-    Ok(export)
+
+    // The registry travels inside carrying its own version, and it is the half
+    // that holds the enums — so it is the likelier of the two to be what this
+    // build cannot read.
+    let inside = versioned.registry.and_then(|registry| registry.version);
+    if inside.is_some_and(|claimed| claimed > crate::registry::CURRENT_VERSION) {
+        return Err(crate::error::written_by_a_newer_perch(
+            "The registry inside this Export",
+            "registry",
+            inside.unwrap_or_default(),
+            crate::registry::CURRENT_VERSION,
+        ));
+    }
+    Ok(())
 }
 
 fn recipient(passphrase: &str) -> age::scrypt::Recipient {
@@ -212,6 +290,10 @@ mod tests {
             credentials: BTreeMap::from([(
                 "someone@example.com".to_string(),
                 r#"{"claudeAiOauth":{"refreshToken":"sk-ant-ort01-test"}}"#.to_string(),
+            )]),
+            identity_files: BTreeMap::from([(
+                "someone@example.com".to_string(),
+                r#"{"oauthAccount":{"emailAddress":"someone@example.com"}}"#.to_string(),
             )]),
         }
     }
@@ -297,6 +379,51 @@ mod tests {
         let sealed = seal(&ahead, PASSPHRASE).expect("it seals");
 
         let refused = unseal(&sealed, PASSPHRASE).expect_err("this build does not understand it");
+        assert!(refused.to_string().contains("Upgrade Perch"), "{refused}");
+    }
+
+    /// And refused as *that*, rather than as a corrupt file.
+    ///
+    /// The test above builds the newer Export out of this build's own shape and
+    /// bumps the integer, which is the one way the case never actually arrives.
+    /// A newer Perch is precisely the thing that writes a value this build has
+    /// no variant for — a Strategy it added, a Quarantine reason — so what turns
+    /// up is a document that is perfectly valid JSON and will not deserialize
+    /// here. Read as an `Export` first, that is reported as a malformed file:
+    /// the user is told their backup is corrupt, on the day the machine it
+    /// would have restored is gone.
+    #[test]
+    fn an_export_this_build_cannot_parse_is_still_refused_as_a_newer_perchs() {
+        let ahead = format!(
+            r#"{{"version":{},"registry":{{"version":{},"accounts":[{{"identity":{{"email":"someone@example.com"}},"enabled":true,"quarantine":"SomethingThisBuildHasNeverHeardOf"}}]}},"credentials":{{}}}}"#,
+            CURRENT_VERSION + 1,
+            crate::registry::CURRENT_VERSION + 1,
+        );
+        let sealed = age::encrypt_and_armor(&recipient(PASSPHRASE), ahead.as_bytes())
+            .expect("the fixture seals");
+
+        let refused = unseal(&sealed, PASSPHRASE).expect_err("this build does not understand it");
+
+        assert!(refused.to_string().contains("Upgrade Perch"), "{refused}");
+        assert!(
+            !refused.to_string().contains("not valid JSON"),
+            "a file that is perfectly good JSON is not reported as corrupt: {refused}"
+        );
+    }
+
+    /// The registry inside carries its own version, and it is the half holding
+    /// the enums — so it is the likelier of the two to be unreadable here.
+    #[test]
+    fn a_registry_from_a_newer_perch_inside_a_readable_envelope_is_refused_too() {
+        let ahead = format!(
+            r#"{{"version":{CURRENT_VERSION},"registry":{{"version":{},"accounts":[]}},"credentials":{{}}}}"#,
+            crate::registry::CURRENT_VERSION + 1,
+        );
+        let sealed = age::encrypt_and_armor(&recipient(PASSPHRASE), ahead.as_bytes())
+            .expect("the fixture seals");
+
+        let refused = unseal(&sealed, PASSPHRASE).expect_err("the registry inside is newer");
+
         assert!(refused.to_string().contains("Upgrade Perch"), "{refused}");
     }
 

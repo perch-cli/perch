@@ -899,7 +899,18 @@ impl Host for FakeHost {
     }
 
     fn env_var(&self, key: &str) -> Option<String> {
-        self.env.borrow().get(key).cloned()
+        // Empty filtered out, as the real Host filters it: `export
+        // CLAUDE_CONFIG_DIR=` is ordinary shell state, and it reads as unset
+        // there. Without this the fake answers `Some("")`, which derives a
+        // store whose config directory is `""` and whose plaintext store is
+        // `.credentials.json` relative to wherever the process happens to be —
+        // a state no real machine can produce, and one a test could be written
+        // against in either direction.
+        self.env
+            .borrow()
+            .get(key)
+            .filter(|value| !value.is_empty())
+            .cloned()
     }
 
     fn platform(&self) -> Platform {
@@ -992,6 +1003,15 @@ impl Host for FakeHost {
                 path: path.to_path_buf(),
             });
         }
+        // Windows has no mode and relies on the profile ACL (ADR 0020), and the
+        // real Host answers `None` there. A fake that answered with a number
+        // would let a test drive `tighten_if_loose` — reading the mode, making
+        // the file private, remarking that others could read it — on a platform
+        // where none of that happens, which is a test asserting behaviour the
+        // real Host cannot produce.
+        if self.platform() == Platform::Windows {
+            return Ok(None);
+        }
         Ok(Some(self.mode_of(path).unwrap_or(
             if self.dirs.borrow().contains(path) {
                 ORDINARY_DIR_MODE
@@ -1051,6 +1071,18 @@ impl Host for FakeHost {
         if let Some(detail) = self.undeletable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
+        // A link or a plain file at the path is not a directory, and the real
+        // call says so rather than removing it — `remove_dir_all` does not
+        // follow the last component. A fake that removed it anyway would
+        // recover from the one state a real machine cannot: see the note on
+        // `create_dir_exclusive` below, which is what puts Perch there.
+        let is_a_link = self.links.borrow().contains_key(path);
+        if is_a_link || self.files.borrow().contains_key(path) {
+            return Err(HostError::Other(format!(
+                "{}: Not a directory (os error 20)",
+                path.display()
+            )));
+        }
         self.dirs.borrow_mut().retain(|dir| !dir.starts_with(path));
         self.links
             .borrow_mut()
@@ -1069,6 +1101,13 @@ impl Host for FakeHost {
 
     fn create_dir_exclusive(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::Took(path.to_path_buf()));
+        // Told apart from the path being taken. `AlreadyExists` is contention
+        // and anything else is the filesystem refusing, and `lock::take` answers
+        // them differently — one is waited out and the other is reported — so a
+        // fake that could only produce the first left the second untested.
+        if let Some(detail) = self.unwritable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
+        }
         // A link in the way counts, whether or not it still resolves.
         //
         // `path_exists` follows a link and answers `false` for a broken one,
@@ -1113,6 +1152,12 @@ impl Host for FakeHost {
             return Err(HostError::NotFound {
                 path: path.to_path_buf(),
             });
+        }
+        // A path arranged as unwritable will not take a touch either — which is
+        // how `lock::renew`'s "somebody took this over" branch is reached
+        // without arranging a whole second holder.
+        if let Some(detail) = self.unwritable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
         }
         self.mark_written(path);
         Ok(())
@@ -1252,6 +1297,12 @@ impl Host for FakeHost {
             return Err(HostError::NotFound {
                 path: path.to_path_buf(),
             });
+        }
+        // A directory that is there and will not be read is a different answer
+        // from one that is not there, and callers are entitled to tell them
+        // apart. Arranged the same way an unreadable file is.
+        if let Some(detail) = self.unreadable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
         }
         let held = |candidate: &PathBuf| candidate.parent() == Some(path);
         let mut found: BTreeSet<PathBuf> = self

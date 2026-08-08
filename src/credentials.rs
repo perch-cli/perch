@@ -53,10 +53,24 @@ pub fn stores_for(host: &dyn Host, config: &Store) -> [CredentialStore; 2] {
 
 /// A Credential, and which store it came out of — so a complaint about bytes
 /// Perch cannot make sense of names the store they are actually in.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct StoredCredential {
     pub kept_in: CredentialStore,
     pub credential: String,
+}
+
+impl std::fmt::Debug for StoredCredential {
+    /// Names the store and the size, never the bytes. This is read Credential
+    /// text before anything has understood it, so it is the one shape that is
+    /// still a bare `String` — and a derived `Debug` would print it.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "StoredCredential {{ kept_in: {:?}, credential: <{} bytes> }}",
+            self.kept_in,
+            self.credential.len()
+        )
+    }
 }
 
 /// The Credential a config directory holds, from whichever of its two stores

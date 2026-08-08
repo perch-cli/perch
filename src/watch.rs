@@ -291,17 +291,16 @@ impl Recently {
     /// cannot act has no business spending an allowance on figures it will not
     /// use.
     pub fn resting(&self, policy: &Policy, now: DateTime<Utc>) -> Option<String> {
-        let left = self.left_of_the_cooldown(policy, now)?;
-        let switched = self.switched.as_ref()?;
+        let (switched, left) = self.left_of_the_cooldown(policy, now)?;
         // The rule is named rather than only described, because a check's line
         // is read out of a cron mailbox by somebody who has to know which
         // setting to reach for.
         Some(format!(
             "the last Switch was {} ago and this Group's cooldown leaves at \
-             least {} between two, so nothing moves for another {}.",
+             least {} between two, so nothing moves {}.",
             minutes(now - switched.at),
             minutes(policy.cooldown()),
-            minutes(left),
+            still_to_wait(left),
         ))
     }
 
@@ -324,26 +323,53 @@ impl Recently {
         if !policy.no_return {
             return None;
         }
-        self.left_of_the_cooldown(policy, now)?;
-        self.switched.as_ref().map(|switched| switched.off.as_str())
+        let (switched, _) = self.left_of_the_cooldown(policy, now)?;
+        Some(switched.off.as_str())
     }
 
-    /// How much of the cooldown is left, or `None` where none of it is — which
-    /// is also the answer when nothing has been Switched yet.
-    fn left_of_the_cooldown(&self, policy: &Policy, now: DateTime<Utc>) -> Option<Duration> {
+    /// The Switch the cooldown is running from and how much of it is left, or
+    /// `None` where none of it is — which is also the answer when nothing has
+    /// been Switched yet.
+    ///
+    /// Both, because there is no answer that is one without the other: a
+    /// caller asking how long is left is a caller that then names the Switch it
+    /// is left of, and asking twice made every caller repeat a question this
+    /// had already answered.
+    fn left_of_the_cooldown(
+        &self,
+        policy: &Policy,
+        now: DateTime<Utc>,
+    ) -> Option<(&Switched, Duration)> {
         let switched = self.switched.as_ref()?;
         let left = policy.cooldown() - (now - switched.at);
-        (left > Duration::zero()).then_some(left)
+        (left > Duration::zero()).then_some((switched, left))
     }
 }
 
 /// A span as a count of minutes, for the sentences that quote one. Rounded
 /// down, because "another 1 minute" said of fifty seconds is a promise the
 /// clock keeps and "another 2" is one it does not.
+///
+/// A span under a minute is said rather than counted: "0 minutes" is not a
+/// length of time anybody can act on, and this line is read out of a cron
+/// mailbox by somebody deciding whether to wait.
 fn minutes(span: Duration) -> String {
     match span.num_minutes() {
+        0 => "under a minute".to_string(),
         1 => "1 minute".to_string(),
         count => format!("{count} minutes"),
+    }
+}
+
+/// How much of the cooldown is left, as the tail of "so nothing moves …".
+///
+/// Its own phrasing because it is the one span in that sentence that can be
+/// under a minute, and neither "for another 0 minutes" nor "for another under a
+/// minute" is something to read at six in the morning.
+fn still_to_wait(left: Duration) -> String {
+    match left.num_minutes() {
+        0 => "for under a minute more".to_string(),
+        _ => format!("for another {}", minutes(left)),
     }
 }
 
@@ -398,7 +424,7 @@ pub fn set_aside(
                 Some(fullest) if fullest.used_percent > f64::from(policy.ceiling()) => format!(
                     "{} is at {}% used and nothing over {}% is worth moving to",
                     candidate.named,
-                    fullest.used_percent,
+                    crate::utilization::percentage(fullest.used_percent),
                     policy.ceiling(),
                 ),
                 Some(_) => continue,
@@ -1075,6 +1101,18 @@ mod tests {
             waiting.contains("another 11"),
             "and what is left: {waiting}"
         );
+
+        // The last half-minute of it. "another 0 minutes" is not a wait
+        // anybody can act on, and this is a line read out of a cron mailbox by
+        // somebody deciding whether to sit and wait for it.
+        let nearly = recently
+            .resting(&policy(), now() + Duration::seconds(14 * 60 + 30))
+            .expect("thirty seconds of the cooldown are left");
+        assert!(
+            nearly.contains("under a minute more"),
+            "the tail end is said rather than counted to nothing: {nearly}"
+        );
+        assert!(!nearly.contains("0 minutes"), "{nearly}");
 
         assert_eq!(
             recently.resting(&policy(), now() + Duration::minutes(15)),

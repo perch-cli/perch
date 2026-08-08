@@ -433,6 +433,40 @@ fn a_group_with_nobody_left_to_cycle_to_says_so_rather_than_switching() {
     let error = result.expect_err("every other Account is out of the pool");
     assert_eq!(error.exit_code(), EXIT_NO_CANDIDATE);
     assert!(error.to_string().contains("work"), "{error}");
+
+    // Two Accounts with full headroom are sitting in that Group, and the fix is
+    // `perch enable` rather than waiting for a quota reset. The refusal was
+    // measured over the candidates alone, so it said "every Account in Group
+    // `work` is exhausted" and then advised waiting — about a Group where
+    // nothing was exhausted but the one Account being left.
+    let said = error.to_string();
+    assert!(
+        said.contains("2 disabled"),
+        "it says which way the others left the running: {said}"
+    );
+    assert!(
+        said.contains("Cycling may choose"),
+        "and does not claim the whole Group is exhausted: {said}"
+    );
+}
+
+/// Where every Account really is a candidate, the sentence stays the plain one:
+/// nothing is out of the running, so nothing is said about anything being.
+#[test]
+fn a_group_where_every_account_is_exhausted_says_only_that() {
+    let host = three_accounts_in_one_group();
+    for email in [EMAIL, SECOND_EMAIL, THIRD_EMAIL] {
+        observed(&host, email, vec![window("5-hour", 100.0)]);
+    }
+
+    let (result, _) = run_cycle(&host);
+
+    let said = result.expect_err("there is nowhere with room").to_string();
+    assert!(said.contains("is exhausted"), "{said}");
+    assert!(
+        !said.contains("out of the running"),
+        "nothing was set aside, so nothing is said about it: {said}"
+    );
 }
 
 #[test]

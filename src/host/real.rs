@@ -117,6 +117,11 @@ fn curl_config(request: &HttpRequest<'_>) -> Result<String, HostError> {
 /// between a pipe and `/dev/null` is the same choice in both cases and is made
 /// once.
 fn run(program: &Path, args: &[&str], stdin: Option<&str>) -> std::io::Result<Execution> {
+    // Named here rather than by each caller. `Command::spawn`'s error carries
+    // no path, so a machine without `/usr/bin/curl` failed `perch status
+    // --refresh` with "No such file or directory (os error 2)" and nothing at
+    // all about what was missing or where Perch looked. The kind is kept, so
+    // anything matching on `NotFound` still does.
     let mut child = Command::new(program)
         .args(args)
         .stdin(if stdin.is_some() {
@@ -126,7 +131,13 @@ fn run(program: &Path, args: &[&str], stdin: Option<&str>) -> std::io::Result<Ex
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()?;
+        .spawn()
+        .map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!("could not run {}: {err}", program.display()),
+            )
+        })?;
 
     if let Some(input) = stdin {
         use std::io::Write;
@@ -183,11 +194,34 @@ fn security(
             detail: format!("could not run {SECURITY_BIN}: {err}"),
         })?;
 
-    if execution.succeeded() && !execution.stderr.to_lowercase().contains("error") {
+    // The stderr check belongs to `-i` and nothing else. That is the mode where
+    // a failed sub-command is reported on stderr while the process still exits
+    // 0; every other invocation says so with its exit code, and reading their
+    // stderr for a complaint would turn a warning into a failure.
+    let complained = args == ["-i"] && said_something_went_wrong(&execution.stderr);
+    if execution.succeeded() && !complained {
         Ok(execution)
     } else {
         Err(classify(&execution, service, account))
     }
+}
+
+/// Whether `security` wrote a diagnostic of its own.
+///
+/// Matched on the `security:` prefix it writes those with, rather than on the
+/// word "error". Its failure lines routinely carry no such word —
+///
+/// ```text
+/// security: -25299: The specified item already exists in the keychain.
+/// security: SecKeychainItemCreateFromContent (<NULL>): The user name or passphrase you entered is not correct.
+/// ```
+///
+/// — so a substring search for "error" misses exactly the failures the check
+/// exists to catch, which is the silent-write case ADR 0008 is about.
+fn said_something_went_wrong(stderr: &str) -> bool {
+    stderr
+        .lines()
+        .any(|line| line.trim_start().starts_with("security:"))
 }
 
 #[derive(Debug)]
@@ -1042,6 +1076,9 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
         .parse()
         .ok()?;
 
+    // SAFETY: `sysconf` reads a value the C library holds and takes no pointer.
+    // A name it does not know answers -1, which the check below treats as no
+    // answer rather than as a rate.
     let ticks_per_second = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
     if ticks_per_second <= 0 {
         return None;
@@ -1059,9 +1096,15 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
 /// `unsafe` ADR 0021 exists to avoid.
 #[cfg(target_os = "macos")]
 fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
+    // SAFETY: `proc_bsdinfo` is plain old data, so an all-zero value is a valid
+    // one for the kernel to fill in.
     let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
     let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
 
+    // SAFETY: the buffer is the `info` above and `size` is that same type's
+    // size, so the kernel cannot write past it. That the two agree is exactly
+    // what the vetted `libc` declaration buys — a hand-written `kinfo_proc`
+    // getting the size wrong is the class of mistake ADR 0021 declined to risk.
     let written = unsafe {
         libc::proc_pidinfo(
             pid as libc::c_int,
@@ -1100,6 +1143,15 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
     /// The epoch, in milliseconds after the point `FILETIME` counts from.
     const EPOCH_MILLIS_AFTER_1601: i64 = 11_644_473_600_000;
 
+    // `STILL_ACTIVE` is 259, so a process that exits with code 259 reads as
+    // running. That is the safe direction here and deliberately so: "running"
+    // means Perch leaves the Profile alone, and a marker corroborated by a
+    // process that has in fact exited costs a refusal the user can clear by
+    // deleting the file.
+    //
+    // SAFETY: every call takes either a handle this block opened or a value
+    // owned by this frame, and the handle is closed on every path out —
+    // including the two early returns below.
     unsafe {
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if process.is_null() {
@@ -1374,12 +1426,38 @@ mod tests {
         assert!(touched > created, "touched {touched}, created {created}");
     }
 
-    /// The temp path a replacement is written at is `<path>.perch-tmp` — fixed,
-    /// unrandomised, and therefore predictable. `CLAUDE_CONFIG_DIR` is taken
-    /// verbatim and can name a directory somebody else may write to, so a
-    /// symlink planted there would have Perch write the Identity through it to
-    /// a file of the attacker's choosing. The file is unlinked and created
-    /// afresh instead, which is the shape the Credential writer always used.
+    /// `security` reports a failed sub-command of `-i` on stderr while still
+    /// exiting 0, which is the whole reason its stderr is read at all. The
+    /// check used to be for the word "error", and its own failure lines
+    /// routinely do not carry one — so the failures it exists to catch were
+    /// exactly the ones it let through.
+    #[test]
+    fn a_complaint_from_security_is_recognised_without_the_word_error() {
+        assert!(said_something_went_wrong(
+            "security: -25299: The specified item already exists in the keychain.\n"
+        ));
+        assert!(said_something_went_wrong(
+            "security: SecKeychainItemCreateFromContent (<NULL>): The user name or \
+             passphrase you entered is not correct.\n"
+        ));
+        assert!(said_something_went_wrong(
+            "some other line\nsecurity: something went wrong\n"
+        ));
+
+        assert!(!said_something_went_wrong(""));
+        assert!(
+            !said_something_went_wrong("password has been deleted.\n"),
+            "an ordinary remark is not a complaint"
+        );
+    }
+
+    /// The temp path a replacement is written at sits beside the target and
+    /// carries this process's id, so it is guessable rather than secret.
+    /// `CLAUDE_CONFIG_DIR` is taken verbatim and can name a directory somebody
+    /// else may write to, so a symlink planted there would have Perch write the
+    /// Identity through it to a file of the attacker's choosing. What stops it
+    /// is not the name: the file is unlinked and created afresh with `O_EXCL`,
+    /// which is the shape the Credential writer always used.
     #[cfg(unix)]
     #[test]
     fn a_replacement_is_never_written_through_something_left_at_the_temp_path() {

@@ -334,6 +334,50 @@ fn a_run_started_during_the_login_stops_the_repair_before_it_writes() {
     );
 }
 
+/// And the Default Profile is asked about on that side of the login too.
+///
+/// Repairing the Account you are on writes the fresh Credential into the Default
+/// Profile as well, so a `claude` started while the browser was open is holding
+/// the file the last step of the repair replaces (ADR 0005). The check before
+/// the login covers it; the check after has to cover the same pair, or the
+/// second ask is weaker than the first and the whole minutes-long window it
+/// exists for is the one it does not see.
+#[test]
+fn a_client_started_during_the_login_stops_the_repair_of_the_account_you_are_on() {
+    let host = machine_with_two_accounts();
+    quarantine(&host, EMAIL);
+    let host = host.with_login(|host: &FakeHost, dir: &std::path::Path| {
+        // Somebody starts a client on the Default Profile while the browser is
+        // open — nothing to do with the directory the login itself runs in.
+        host.set_file(
+            "/Users/someone/.claude/sessions/4242.json",
+            &format!(
+                r#"{{"pid":4242,"cwd":"/Users/someone/work","startedAt":{}}}"#,
+                host.now().timestamp_millis()
+            ),
+        );
+        host.set_live_process(4242);
+        login_producing(REPAIRED, IDENTITY_FILE)(host, dir)
+    });
+    host.forget_effects();
+
+    let (result, _) = run_relogin(&host, EMAIL);
+
+    let error = result.expect_err("the repair would write under that client");
+    assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
+    assert!(error.to_string().contains("4242"), "{error}");
+    assert_eq!(
+        host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
+        Some(CREDENTIAL),
+        "the session goes on holding exactly what it was holding"
+    );
+    assert_eq!(
+        quarantine_of(&host, EMAIL),
+        Some(Quarantine::RenewalRejected),
+        "and the Account is still broken, because nothing was repaired"
+    );
+}
+
 #[test]
 fn repairing_the_account_you_are_on_is_refused_while_a_client_holds_the_default_profile() {
     // The Default Profile is the one a repair of the active Account writes, and

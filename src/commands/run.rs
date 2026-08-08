@@ -181,7 +181,12 @@ struct Launch {
 /// no arguments: the command's first and commonest form.
 fn what_to_launch(host: &dyn Host, command: &[String]) -> Result<Launch> {
     match command.split_first() {
-        Some((program, args)) if !program.starts_with('-') => Ok(Launch {
+        // The empty string names a program the operating system would find no
+        // more than a leading `-` does, and for the same reason: `PATH` is
+        // searched for names and a path is written with a separator. Without
+        // this, `perch run dev -- '' --resume` announced "Running `` as …" and
+        // handed `""` to the operating system to launch.
+        Some((program, args)) if !program.is_empty() && !program.starts_with('-') => Ok(Launch {
             program: program.clone(),
             args: args.to_vec(),
             said: format!("`{program}`"),

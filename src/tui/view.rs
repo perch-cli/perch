@@ -228,9 +228,6 @@ fn render_utilization(frame: &mut Frame, model: &Model, area: Rect) {
 
         for index in section.rows.clone() {
             let account = accounts[index];
-            if index == model.cursor {
-                cursor_line = lines.len();
-            }
             let heading = Line::from(format!(
                 "{}{:widest$}   Headroom {}",
                 markers(model, account, index),
@@ -250,6 +247,17 @@ fn render_utilization(frame: &mut Frame, model: &Model, area: Rect) {
                         .into_iter()
                         .map(|figure| Line::from(format!("      {figure}"))),
                 );
+            }
+
+            // The *last* line of the selected Account's block rather than its
+            // heading. `scrolled_to` pins the line it is given to the bottom of
+            // the view, which is right on the Accounts tab where the row is the
+            // whole of the content — but here the Quota Window rows come after
+            // the heading, so pinning the heading scrolls every one of them off.
+            // Selecting an Account below the fold showed its name and hid its
+            // figures, on the one tab whose whole purpose is the figures.
+            if index == model.cursor {
+                cursor_line = lines.len().saturating_sub(1);
             }
             lines.push(Line::from(""));
         }

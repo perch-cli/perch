@@ -100,6 +100,13 @@ pub fn perform(
     let switched: Result<Captured> = lock::under(host, probe::locks_for(&store), |held| {
         let prepared = prepare(host, incoming, outgoing, version, store)?;
 
+        // Said between every step rather than only after the writes. `prepare`
+        // reads a Credential and `capture` reads and writes one, and a keychain
+        // that stops to ask the user for permission stretches either without
+        // warning — past the ten seconds the config-file lock goes stale in. A
+        // hold renewed only after the slow steps is a hold that was already
+        // lost while they ran.
+        held.renew();
         let captured = capture(host, &prepared, outgoing)
             .map_err(|error| error.with_note(&nothing_happened(outgoing)))?;
 
@@ -145,6 +152,7 @@ pub fn make_live(host: &dyn Host, account: &Account) -> std::result::Result<(), 
     let landed = lock::under(host, probe::locks_for(&store), |held| {
         let prepared = prepare(host, account, None, version, store)?;
 
+        held.renew();
         profile::store_credential(host, &prepared.store, prepared.credential.as_str())?;
         is_live = true;
         held.renew();
@@ -333,6 +341,43 @@ pub fn refuse_if_live_in(
          quit it, or switch to a different Account.",
         pids.join(", ")
     )))
+}
+
+/// Both Profiles a command may write into, refused while a client is holding
+/// either.
+///
+/// One place, because every command that needs this asks it twice — once before
+/// it puts an unbounded wait to the person, and once after, because the first
+/// answer is about a machine that has since had minutes to move on. Two
+/// spellings of the same pair of checks is how the second ask comes to be
+/// weaker than the first, and the second ask is the one standing between a
+/// running session and a Credential written out from under it.
+///
+/// `the_default_profile_too` is the sentence saying why the Default Profile is
+/// written as well, and `None` is a command that leaves it alone. Named rather
+/// than derived, because what makes the Default Profile the wrong thing to
+/// overwrite is different for a repair and for a removal, and the refusal is
+/// read by somebody deciding which client to quit.
+pub fn refuse_if_live_anywhere(
+    host: &dyn Host,
+    account: &Account,
+    the_default_profile_too: Option<&str>,
+    version: &str,
+) -> Result<()> {
+    refuse_if_live(host, account, version)?;
+
+    if let Some(whose) = the_default_profile_too {
+        // Its Credential is the one a running client is holding, and this would
+        // replace it rather than renew it — the mid-task logout ADR 0005 exists
+        // to prevent.
+        refuse_if_live_in(
+            host,
+            &probe::default_store(host)?.config_dir,
+            whose,
+            version,
+        )?;
+    }
+    Ok(())
 }
 
 fn nothing_happened(outgoing: Option<&Account>) -> String {

@@ -39,13 +39,19 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
 
     // Everything knowable before the login is checked before the login, so a
     // name Perch was always going to refuse never costs a browser round trip.
-    registry.refuse_taken_names(args.alias.as_deref(), args.group.as_deref())?;
+    // Shape before collision. `refuse_taken_names` opens by asking whether the
+    // Alias and the Group are the same name, so with the order reversed
+    // `perch add --alias '' --group ''` was refused as "`` cannot be both an
+    // Alias and a Group name" — a Conflict, about two names neither of which
+    // was usable in the first place. What is wrong with a name is worth saying
+    // before what it clashes with.
     if let Some(alias) = &args.alias {
         registry::validate_name(NameKind::Alias, alias)?;
     }
     if let Some(group) = &args.group {
         registry::validate_name(NameKind::Group, group)?;
     }
+    registry.refuse_taken_names(args.alias.as_deref(), args.group.as_deref())?;
     if args.group.is_none() && !args.no_group && !host.is_interactive() {
         return Err(PerchError::Other(
             "There is no terminal to confirm the Group on. Pass `--group <name>` \
@@ -79,11 +85,27 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
 
     let account = settle_into_a_profile(host, pending, group.clone())?;
     let email = account.email().to_string();
+    // Kept before the Account is handed to the registry, because it is what
+    // takes the Profile back out if the write below fails.
+    let placed = account.store(host)?;
     registry.upsert(account);
     if let Some(alias) = &args.alias {
         registry.set_alias(alias, &email);
     }
-    registry::save(host, &mut perch, &registry)?;
+    // A Profile that nothing records is worse than no Profile at all: it holds
+    // a live refresh token, and nothing ever looks at it again. `reap_abandoned`
+    // walks the pending logins and never `profiles/`, so this one would sit
+    // there for good — the slow accumulation of working logins for Accounts the
+    // user believes they never added. The same all-or-nothing an Import makes.
+    if let Err(error) = registry::save(host, &mut perch, &registry) {
+        profile::discard(host, &placed);
+        return Err(error.with_note(&format!(
+            "Nothing was added, and the Profile this had made for {email} has \
+             been taken back out again: a Credential Perch holds and does not \
+             record is one nothing would ever look at or delete.\n\
+             The login itself worked, so `perch add` will need running again."
+        )));
+    }
 
     report(
         out,
@@ -206,13 +228,14 @@ fn resolve_group(
     }
 
     // Only offered when it would be a usable Group name: an organization Perch
-    // would go on to refuse is no help as a default.
+    // would go on to refuse is no help as a default. An organization name is
+    // whatever Anthropic holds rather than something chosen to be typed, so its
+    // spaces become the separator the names people pick already use — `Overflow
+    // Ltd` is offered as `overflow-ltd` rather than not offered at all.
     let offered = identity
         .organization_name
         .as_deref()
-        .map(str::trim)
-        .filter(|organization| registry::validate_name(NameKind::Group, organization).is_ok())
-        .map(str::to_string);
+        .and_then(registry::offerable_name);
 
     let question = match &offered {
         Some(organization) => format!(

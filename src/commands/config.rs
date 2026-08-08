@@ -72,10 +72,15 @@ pub enum ConfigCommand {
 }
 
 pub fn run(host: &dyn Host, command: ConfigCommand, out: &mut dyn Write) -> Result<()> {
-    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
-
+    // The lock is taken inside the match rather than above it, so it is taken
+    // only by the half that writes. `perch config get` reads, and a reader that
+    // takes the write lock waits out whatever holds it and then fails with
+    // "another `perch` holds it" — `perch watch` takes that lock every round,
+    // and `perch status --refresh` holds it across every network read. Same
+    // rule `perch status` states for itself and `perch list` follows.
     match command {
         ConfigCommand::Set { words } => {
+            let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
             let said = set(&mut registry, &words)?;
             registry::save(host, &mut perch, &registry)?;
             for line in said {
@@ -84,6 +89,7 @@ pub fn run(host: &dyn Host, command: ConfigCommand, out: &mut dyn Write) -> Resu
             Ok(())
         }
         ConfigCommand::Get { words } => {
+            let registry = adopt::ensure_adopted(host)?;
             for line in get(&registry, &words)? {
                 say(out, &line)?;
             }

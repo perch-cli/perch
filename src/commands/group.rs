@@ -48,6 +48,14 @@ pub enum GroupCommand {
 const LABEL_WIDTH: usize = 13;
 
 pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Result<()> {
+    // Read-only where it reads. `perch group list` writes nothing, and taking
+    // the write lock to read it means waiting out a `perch watch` round or a
+    // `perch status --refresh` and then failing as though somebody else had
+    // done something wrong.
+    if let GroupCommand::List = command {
+        return list(out, &adopt::ensure_adopted(host)?);
+    }
+
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
     match command {
@@ -69,6 +77,7 @@ pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Resul
             say(out, &account.matched)?;
             say(out, &moved)
         }
+        // Answered above, before the lock.
         GroupCommand::List => list(out, &registry),
     }
 }

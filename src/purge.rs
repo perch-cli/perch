@@ -152,13 +152,27 @@ fn forget_what_the_registry_does_not_name(host: &dyn Host) -> Result<()> {
     }
 
     for dir in left_over {
-        // A directory that will not say where its Credential lives is not a
-        // reason to fail a Purge — but one that names a store which then
-        // refuses to give a Credential up is exactly the case `erase` must not
-        // shrug off, so that half propagates.
-        let Ok(store) = probe::store_for_profile(host, &dir) else {
-            continue;
-        };
+        // The same answer `forget_the_credential` gives, and for its reason: a
+        // store that cannot even be named is one whose Credential cannot be
+        // deleted, and passing over it would report a machine given back while
+        // a keychain went on holding a working login.
+        //
+        // These two disagreed. A store is unnameable when the platform will not
+        // say who the user is, which is not a fact about one directory — so a
+        // Purge failed on the first Account in the registry and shrugged the
+        // identical directory off here, and the walk is only reached at all
+        // once the registry is empty. Perch was refusing to purge a machine
+        // holding Accounts and reporting success on the same machine holding
+        // only their leftovers.
+        let store = probe::store_for_profile(host, &dir).map_err(|error| {
+            error.with_note(&format!(
+                "Perch's registry is untouched and every Credential already \
+                 deleted is already gone. {} is still there, and until Perch \
+                 can say which Credential Store it belongs to there is no way \
+                 to tell whether one is being left behind.",
+                dir.display(),
+            ))
+        })?;
         for kept_in in credentials::stores_for(host, &store) {
             kept_in.forget(host).map_err(|error| {
                 error.with_note(&format!(

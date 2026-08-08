@@ -548,6 +548,15 @@ fn act(
         // watcher that carried on watching would be deciding what to do next
         // about a machine nobody has looked at yet.
         Err(Interrupted { error, .. }) => {
+            // The Switch happened — the incoming Credential is live — so it
+            // starts a cooldown like any other, and this is written before the
+            // save below so that the one save carries both. Without it a check
+            // that moved and then failed left no record of having moved, and
+            // the next scheduled one was free to move straight back: exactly
+            // the "cooldown that did not survive the process" ADR 0013 names.
+            recently.switched(outgoing.email(), host.now());
+            watcher.remember(registry, &watching.group, outgoing.email(), host.now());
+
             // Which Account is active is a fact about which Credential is in
             // the Default Profile, so it is recorded before the failure is
             // reported — anything else would send the next Capture into the

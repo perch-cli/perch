@@ -24,7 +24,8 @@
 use crate::error::{PerchError, Result};
 use crate::export::Export;
 use crate::host::Host;
-use crate::probe::Store;
+use crate::login;
+use crate::probe::{self, Store};
 use crate::profile;
 use crate::registry::{self, Registry};
 
@@ -130,6 +131,31 @@ impl Placed {
 /// Credential discover there is none and record why, which is the one place that
 /// decision is made.
 pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
+    // Every Credential in the file belongs to an Account the file lists, or
+    // this is not the whole restore it claims to be. `gather` cannot write such
+    // an Export, so this is about a file written by something else — and the
+    // failure it guards is the one ADR 0014 exists to prevent, arriving
+    // quietly: an Import that reports success having restored less than the
+    // file held.
+    let unlisted: Vec<&str> = export
+        .credentials
+        .keys()
+        .map(String::as_str)
+        .filter(|email| export.registry.account(email).is_none())
+        .collect();
+    if !unlisted.is_empty() {
+        return Err(PerchError::Malformed {
+            path: "the Export".to_string(),
+            detail: format!(
+                "it holds a Credential for {}, which it does not list as an \
+                 Account. Nothing was imported: a Credential with no Account \
+                 to belong to would be restored into a Profile nothing names, \
+                 or not at all, and neither is the whole file.",
+                unlisted.join(", "),
+            ),
+        });
+    }
+
     // Every Profile is named before any is made. Where one of them lands is
     // derivation and not a write, and an address no directory can be named after
     // is a refusal (see [`registry::profile_dir_for`]) — meeting it half way
@@ -138,12 +164,31 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
     for account in &export.registry.accounts {
         let store = account.store(host)?;
         if let Some(credential) = export.credentials.get(account.email()) {
-            placements.push((account.email().to_string(), store, credential));
+            // The Profile's own `.claude.json` travels beside its Credential.
+            // Where the Export carries one it is written verbatim, because the
+            // `oauthAccount` block Claude Code wrote holds fields the registry
+            // does not record and a Switch prefers it over anything Perch would
+            // compose. Where it carries none, one is composed — a Profile
+            // without this file Carries nothing, so every Run against it would
+            // meet the onboarding dialog afresh (ADR 0003).
+            let identity_file = export
+                .identity_files
+                .get(account.email())
+                .cloned()
+                .unwrap_or_else(|| {
+                    probe::fresh_identity_file(&account.identity.oauth_account_block())
+                });
+            placements.push((
+                account.email().to_string(),
+                store,
+                credential,
+                identity_file,
+            ));
         }
     }
 
     let mut placed = Placed::default();
-    for (email, store, credential) in placements {
+    for (email, store, credential, identity_file) in placements {
         // Recorded before it is written rather than after it worked, because
         // what has to come back out is everything this touched: a Profile
         // directory made for a Credential that then would not go into it is
@@ -151,6 +196,7 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
         placed.touched.push(store.clone());
         if let Err(error) = profile::make_dir(host, &store.config_dir)
             .and_then(|()| profile::store_credential(host, &store, credential))
+            .and_then(|()| login::carry_identity_file(host, &identity_file, &store))
         {
             placed.undo(host);
             // Said as "every Profile this had made" rather than as a count,
@@ -204,6 +250,7 @@ mod tests {
             version: CURRENT_VERSION,
             registry,
             credentials: BTreeMap::from([("one@example.com".to_string(), "held".to_string())]),
+            identity_files: BTreeMap::new(),
         }
     }
 
@@ -356,6 +403,28 @@ mod tests {
         assert!(
             !host.path_exists(&registry::profile_dir_for(&host, "one@example.com").unwrap()),
             "and the Profile of the Account listed before it was never made"
+        );
+    }
+
+    /// A Credential for an Account the file does not list is a file that is not
+    /// the whole restore it claims to be.
+    ///
+    /// `gather` cannot write one, so this is about a file written by something
+    /// else — and dropping it silently is the failure ADR 0014 exists to
+    /// prevent, arriving as a success message.
+    #[test]
+    fn a_credential_for_an_account_the_export_does_not_list_is_refused() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let mut export = an_export();
+        export
+            .credentials
+            .insert("nobody@example.com".to_string(), "held".to_string());
+
+        let refused = place(&host, &export).expect_err("that Credential belongs to nothing");
+
+        assert!(
+            refused.to_string().contains("nobody@example.com"),
+            "it names the Account that is missing: {refused}"
         );
     }
 }

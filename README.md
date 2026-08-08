@@ -1107,7 +1107,7 @@ it took.
 | 17 | a Cycle found nowhere to land — every Account in the Group is exhausted, or none is a candidate |
 | 18 | a bare Cycle, or a watcher, on an Account nobody has declared interchangeable with anything (ADR 0017) |
 | 19 | that Account is Quarantined — its Credential no longer works, and `perch relogin` repairs it (ADR 0023) |
-| 20 | `perch watch --once` held: there was no current figure to decide on, and the Refresh that would have got one failed (ADR 0013) |
+| 20 | held: a lock somebody else has, or a `perch watch --once` with no current figure to decide on (ADR 0013). Nothing is wrong and nothing was changed — ask again shortly |
 
 `perch run` is the one command these do not describe once it has launched
 something: what the client exited with is what Perch exits with, so a script

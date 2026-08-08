@@ -414,6 +414,14 @@ fn renew_under_the_lock(host: &dyn Host, asked: &Asked, version: &str) -> Step<S
                 detail: None,
             })?;
 
+        // Said before the network round trip rather than only after it. The
+        // config-file lock goes stale in ten seconds and a request to Anthropic
+        // can take longer than that on its own, so a renewal that only happens
+        // between steps leaves the longest step of all running under a lock
+        // somebody else may take over — and the takeover is then discovered
+        // afterwards, when the Rotation has already happened.
+        held.renew();
+
         // Anthropic may Rotate here. Everything after this line is Perch making
         // sure the Rotation is not lost.
         let renewal = anthropic::renew(host, &refresh_token);
