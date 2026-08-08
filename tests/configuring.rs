@@ -533,3 +533,109 @@ fn a_key_named_with_no_value_is_refused_with_both_forms_of_the_command() {
         "and so is the form that addresses a setting belonging to none: {message}"
     );
 }
+
+/// One word to `get` is either a key belonging to no Group or a Group name.
+/// When it is neither, the answer has to be the vocabulary rather than "not
+/// found": a mistyped setting read back as an error with no alternatives is a
+/// script that goes on believing it asked something meaningful.
+#[test]
+fn a_get_of_one_word_that_is_neither_a_key_nor_a_group_answers_with_both_vocabularies() {
+    let host = three_accounts_in_one_group();
+
+    let (result, _) = config_get(&host, &["stratergy"]);
+
+    let refusal = result.expect_err("`stratergy` is neither");
+    assert_eq!(refusal.exit_code(), EXIT_NOT_FOUND);
+    let said = refusal.to_string();
+    assert!(said.contains("`stratergy` is neither"), "{said}");
+    assert!(
+        said.contains("Settings belonging to no Group:"),
+        "it names the keys: {said}"
+    );
+    assert!(
+        said.contains("Groups Perch holds: work."),
+        "and the Groups: {said}"
+    );
+}
+
+/// The same refusal before any Group has been declared. Listing the Groups
+/// Perch holds would be an empty list, which reads as though the answer were
+/// missing rather than as though there were nothing to name.
+#[test]
+fn the_same_refusal_says_so_plainly_when_no_group_has_been_declared() {
+    let host = machine_with_two_accounts();
+
+    let (result, _) = config_get(&host, &["nonsense"]);
+
+    let said = result.expect_err("`nonsense` is neither").to_string();
+    assert!(said.contains("No Groups have been declared yet."), "{said}");
+    assert!(
+        !said.contains("Groups Perch holds:"),
+        "there are none to hold: {said}"
+    );
+}
+
+/// `get` and `set` do not take the same shapes — naming fewer words asks about
+/// more rather than being short of a value — so being told the forms of `set`
+/// after mis-addressing a `get` would name a form that does not exist.
+#[test]
+fn a_get_of_too_many_words_is_answered_with_the_forms_get_takes() {
+    let host = three_accounts_in_one_group();
+
+    let (result, _) = config_get(&host, &["work", "strategy", "extra"]);
+
+    let refusal = result.expect_err("`get` takes at most two words");
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    let said = refusal.to_string();
+    assert!(said.contains("was given 3 words"), "{said}");
+    assert!(said.contains("perch config get <group> <key>"), "{said}");
+    assert!(
+        said.contains("reads every setting there is"),
+        "it names the bare form too: {said}"
+    );
+    assert!(
+        !said.contains("perch config set"),
+        "the forms of `set` are not the forms of `get`: {said}"
+    );
+}
+
+/// A count of one is said as one word rather than "1 words".
+#[test]
+fn a_single_word_is_counted_as_one_word() {
+    let host = three_accounts_in_one_group();
+
+    let (result, _) = config_set(&host, &["strategy"]);
+
+    let said = result.expect_err("`set` needs a value").to_string();
+    assert!(said.contains("was given 1 word"), "{said}");
+    assert!(!said.contains("1 words"), "{said}");
+}
+
+/// Two words to `set` name a key and a value — unless the first is a Group, in
+/// which case what is missing is the value rather than the meaning. Being told
+/// "no such key" there would send somebody looking for a spelling mistake that
+/// is not the problem.
+#[test]
+fn a_set_naming_a_group_and_a_key_says_the_value_is_what_is_missing() {
+    let host = three_accounts_in_one_group();
+    let before = registry_of(&host).groups;
+
+    let (result, _) = config_set(&host, &["work", "strategy"]);
+
+    let refusal = result.expect_err("nothing was given to set it to");
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    let said = refusal.to_string();
+    assert!(
+        said.contains("names the Group `work` and a key, but nothing to set it to"),
+        "{said}"
+    );
+    assert!(
+        said.contains("perch config set <group> <key> <value>"),
+        "{said}"
+    );
+    assert_eq!(
+        registry_of(&host).groups,
+        before,
+        "and a refused `set` changes nothing"
+    );
+}

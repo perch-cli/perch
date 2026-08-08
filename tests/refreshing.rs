@@ -521,3 +521,68 @@ fn figures_are_not_recorded_against_an_account_the_credential_is_not_for() {
     assert!(printed.contains("never observed"), "{printed}");
     assert!(cached_windows(&host, EMAIL).is_empty());
 }
+
+/// Whoever was holding Claude Code's lock while Perch waited for it may have
+/// renewed the very Credential Perch was about to renew. So the Credential is
+/// read again once the lock is held, and a Rotation that has already happened
+/// is used rather than spent again — a second Renewal would hand back a token
+/// the other holder's Rotation has already invalidated (ADR 0006).
+#[test]
+fn a_credential_renewed_while_perch_waited_for_the_lock_is_not_renewed_again() {
+    let host = machine_with_two_accounts();
+    let now = host.now();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
+    let host = host
+        .with_reply(TOKEN_URL, 200, RENEWED)
+        .with_reply_to(PROFILE_URL, FRESH_TOKEN, 200, &profile_of(EMAIL))
+        .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE)
+        // Somebody else is holding Claude Code's lock, so Perch waits for it.
+        .with_dir_held_since(CONFIG_LOCK, now)
+        .once_while_waiting(|host| {
+            // And while Perch waits, they renew it and give the lock back.
+            host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
+            host.remove_dir_all(std::path::Path::new(CONFIG_LOCK))
+                .expect("they give the lock back");
+        });
+    host.forget_effects();
+
+    let (result, _) = run_status_refresh(&host, false);
+
+    result.expect("the read works off the Credential that is now there");
+    assert!(
+        host.sent_to(TOKEN_URL).is_empty(),
+        "the re-read under the lock found a usable Credential, so nothing was \
+         renewed a second time"
+    );
+    assert_eq!(
+        host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
+        Some(FRESH),
+        "and the other holder's Rotation was left exactly where it was"
+    );
+}
+
+/// A refresh that failed outright, in the form a script parses. The reason has
+/// to travel with it: an outcome of "failed" with no detail is one nothing can
+/// be done about without running the command again by hand.
+#[test]
+fn a_refresh_that_failed_is_named_as_one_in_json_with_the_reason() {
+    let host = ready();
+    run_status_refresh(&host, false)
+        .0
+        .expect("the first read works");
+    host.reply(USAGE_URL, Some(FRESH_TOKEN), 500, "the endpoint is unwell");
+
+    let (result, printed) = run_status_refresh(&host, true);
+
+    result.expect("a failed read still reports the cached figure");
+    let document: serde_json::Value = serde_json::from_str(&printed).expect("valid JSON");
+    assert_eq!(document["refresh"]["accounts"][0]["outcome"], "failed");
+    assert!(
+        document["refresh"]["accounts"][0]["detail"].is_string(),
+        "a failure with no reason is one nobody can act on: {printed}"
+    );
+    assert_eq!(
+        document["utilization"]["windows"][0]["used_percent"], 42.0,
+        "and the figure shown is the one that was cached"
+    );
+}

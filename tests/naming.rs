@@ -417,3 +417,85 @@ fn a_name_is_one_name_however_it_is_capitalised_in_any_language() {
         }
     );
 }
+
+/// Unsetting a name that reaches an Account but is not an Alias. It is not an
+/// unresolvable Target — `perch alias --unset` on an email address finds
+/// something — so the refusal has to say what it found rather than "no such
+/// name", which would read as a typo in an address that is spelled correctly.
+#[test]
+fn unsetting_a_name_that_is_an_account_rather_than_an_alias_says_what_it_reached() {
+    let host = machine_with_two_accounts();
+
+    let (result, _) = unset_alias(&host, EMAIL);
+
+    let refusal = result.expect_err("an email address is not an Alias");
+    assert_eq!(refusal.exit_code(), EXIT_NOT_FOUND);
+    let said = refusal.to_string();
+    assert!(
+        said.contains(&format!("There is no Alias called `{EMAIL}`")),
+        "{said}"
+    );
+    assert!(
+        said.contains(EMAIL),
+        "it says what the name did reach: {said}"
+    );
+}
+
+/// Aliases and Group names share one namespace and a name reaches one Account.
+/// Handing a name that already names somebody else to a second Account would
+/// leave `perch switch <name>` meaning whichever the registry happened to
+/// resolve first — so it is refused, and the refusal names the command that
+/// frees the name rather than leaving somebody to guess at it.
+#[test]
+fn a_name_that_already_reaches_another_account_is_refused_and_says_how_to_free_it() {
+    let host = machine_with_two_accounts();
+    set_alias(&host, "overflow", SECOND_EMAIL)
+        .0
+        .expect("the name is free");
+
+    let (result, _) = set_alias(&host, "overflow", EMAIL);
+
+    let refusal = result.expect_err("`overflow` already reaches somebody");
+    assert_eq!(refusal.exit_code(), EXIT_CONFLICT);
+    let said = refusal.to_string();
+    assert!(
+        said.contains(&format!("`overflow` already names {SECOND_EMAIL}")),
+        "{said}"
+    );
+    assert!(
+        said.contains("perch alias overflow --unset"),
+        "it names the command that frees it: {said}"
+    );
+    assert_eq!(
+        registry_of(&host).alias_of(SECOND_EMAIL),
+        Some("overflow"),
+        "and the Account that held it still does"
+    );
+    assert_eq!(registry_of(&host).alias_of(EMAIL), None);
+}
+
+/// The same name given back to the Account that already answers to it is not a
+/// collision with itself, so it is not refused — and renaming an Account to a
+/// free name gives up the one it held, because an Account answers to one Alias
+/// at a time.
+#[test]
+fn renaming_an_account_gives_up_the_name_it_answered_to_before() {
+    let host = machine_with_two_accounts();
+    set_alias(&host, "overflow", SECOND_EMAIL)
+        .0
+        .expect("the name is free");
+
+    let (result, printed) = set_alias(&host, "spare", SECOND_EMAIL);
+
+    result.expect("a free name is a rename, not a collision");
+    assert!(
+        printed.contains("`overflow` no longer does"),
+        "it says which name was given up: {printed}"
+    );
+    assert_eq!(registry_of(&host).alias_of(SECOND_EMAIL), Some("spare"));
+    assert_eq!(
+        registry_of(&host).declared_alias("overflow"),
+        None,
+        "and the old name is free to use again"
+    );
+}
