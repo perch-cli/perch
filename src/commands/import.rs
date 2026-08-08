@@ -23,7 +23,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::commands::{ask_passphrase, refuse_without_a_terminal, say};
+use crate::commands::{ask_passphrase, refuse_without_a_terminal, say, still_ours};
 use crate::error::{PerchError, Result};
 use crate::export::{self, Export};
 use crate::host::{Host, HostError};
@@ -54,6 +54,14 @@ pub fn run(host: &dyn Host, args: ImportArgs, out: &mut dyn Write) -> Result<()>
 
     // Nothing above this line has written anything, which is the whole of what
     // "a wrong passphrase fails before anything is written" means.
+    //
+    // And the last thing before something is: the passphrase prompt above is
+    // the one wait here with no bound on it, so the hold taken before it may
+    // have gone stale under another `perch` that has since taken it and added
+    // an Account. Asked here rather than at the save, because `place` writes
+    // every Credential the file holds — and finding out at the save is finding
+    // out after the rollback has deleted whatever that other Perch put down.
+    still_ours(&mut perch, "imported")?;
     let placed = import::place(host, &export)?;
     registry::save(host, &mut perch, &restored).map_err(|error| {
         placed.undo(host);

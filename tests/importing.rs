@@ -55,6 +55,45 @@ fn registry_on(host: &FakeHost) -> Option<Registry> {
     perch::registry::load(host).expect("whatever is there is readable")
 }
 
+/// The fourth command with an unbounded prompt under the registry lock, and
+/// the one that skipped the guard the other three take.
+///
+/// A passphrase is the one wait in Perch with no bound on it, so it is the one
+/// place a hold can go stale under a command that is behaving perfectly.
+/// Another `perch` may then have claimed the abandoned lock and put an Account
+/// down — and `import::place` writes every Credential the file holds before
+/// `registry::save` ever asks. Finding out at the save means finding out after
+/// the rollback has deleted the Profile and the keychain item that other Perch
+/// just created, under a line reading "Nothing was imported."
+#[test]
+fn an_import_whose_registry_went_stale_while_the_passphrase_was_typed_writes_nothing() {
+    let host = a_new_machine_holding(&an_export_of_a_whole_machine())
+        // Past the staleness window, which is what makes the lock claimable.
+        .with_a_terminal_that_takes(120_000)
+        .once_while_waiting(|host| {
+            let lock = perch::registry::lock_spec(host).expect("home is known");
+            host.remove_dir_all(&lock.dir).expect("it was abandoned");
+            host.create_dir_exclusive(&lock.dir)
+                .expect("the other `perch` takes it");
+        });
+
+    let (outcome, _) = run_import(&host, AT);
+
+    let refused = outcome.expect_err("this Perch may no longer speak for the registry");
+    assert!(
+        refused.to_string().contains("Nothing was imported"),
+        "{refused}"
+    );
+    for email in [EMAIL, SECOND_EMAIL, THIRD_EMAIL] {
+        assert_eq!(
+            credential_of(&host, email),
+            None,
+            "no Credential is written before the hold is re-checked, so there is \
+             nothing for a rollback to take back out from under anybody"
+        );
+    }
+}
+
 /// The whole of what the pair promises: a new machine arrives with the setup the
 /// old one had rather than a pile of nameless logins.
 #[test]
