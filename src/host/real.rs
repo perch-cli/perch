@@ -1128,9 +1128,31 @@ fn home_from(variable: &str, value: Option<std::ffi::OsString>) -> Result<PathBu
 
 /// Whether a process exists. Signal 0 performs the permission and existence
 /// checks without delivering anything.
+///
+/// The identifier is narrowed rather than cast, because `kill` reads the values
+/// a cast can produce as something else entirely: `0` is the caller's own
+/// process group and `-1` is every process it may signal, and both answer "yes"
+/// to a signal that is never delivered. A marker file is named after a number
+/// somebody else wrote (`probe::clients_in` parses any `u32`), so `4294967295`
+/// and `0` are both reachable, and both would otherwise report a live client
+/// that is not there — which refuses every Switch against that Profile forever.
+///
+/// `EPERM` is alive. It means the process exists and belongs to another user,
+/// which is the same reasoning the Windows half already writes down for a
+/// handle it may not open: a Profile that looks Live is one Perch leaves alone,
+/// and that is the safe direction. Only `ESRCH` is dead.
 #[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
-    unsafe { libc::kill(pid as i32, 0) == 0 }
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    if pid <= 0 {
+        return false;
+    }
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
 }
 
 /// Whether a process exists, as `GetExitCodeProcess` tells it: a handle that
@@ -1230,6 +1252,32 @@ mod tests {
             !CURL_ARGS.iter().any(|arg| arg.contains("sk-ant")),
             "nothing about a request may reach the command line"
         );
+    }
+
+    /// The two identifiers a `u32` can carry that `kill` reads as something
+    /// other than a process. A session marker is named after a number Perch did
+    /// not write, so both are reachable, and both would otherwise report a
+    /// client that is not there — which refuses every Switch against that
+    /// Profile for as long as the marker sits there.
+    #[cfg(unix)]
+    #[test]
+    fn a_process_id_that_is_not_one_is_dead_rather_than_a_process_group() {
+        assert!(
+            !process_alive(0),
+            "0 is the caller's own process group, not a process"
+        );
+        assert!(
+            !process_alive(u32::MAX),
+            "4294967295 narrows to -1, which is every process the caller may signal"
+        );
+    }
+
+    /// The corroboration the liveness check is for: this process is running, so
+    /// nothing may conclude otherwise about it.
+    #[cfg(unix)]
+    #[test]
+    fn the_running_process_is_alive() {
+        assert!(process_alive(std::process::id()));
     }
 
     /// The holder here is what Windows Defender amounts to: a handle on the
