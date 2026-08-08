@@ -494,9 +494,17 @@ pub trait Host {
 /// taken verbatim and can name a shared location. The pid is what randomness
 /// buys here; a crate that generates a better one would want a real filesystem,
 /// and this sits behind the Host port where there is not always one (ADR 0025).
-pub fn temp_beside(path: &Path) -> PathBuf {
+///
+/// The pid comes through the port rather than from `std::process::id`, because
+/// the one thing this name has to be is *this process's*, and behind a fake
+/// there is a different answer to who that is. Taken from the process directly,
+/// a fake whose Runs write session markers naming pid 700 wrote its temp files
+/// under the pid of the test binary — so the collision this name exists to
+/// prevent was the one thing it could not model, and no two runs of the suite
+/// produced the same paths.
+pub fn temp_beside(host: &dyn Host, path: &Path) -> PathBuf {
     let mut beside = path.as_os_str().to_os_string();
-    beside.push(format!(".perch-tmp.{}", std::process::id()));
+    beside.push(format!(".perch-tmp.{}", host.process_id()));
     PathBuf::from(beside)
 }
 
@@ -571,7 +579,7 @@ pub fn replace_via_tmp(
     contents: &str,
     mode: u32,
 ) -> Result<(), HostError> {
-    let beside = temp_beside(path);
+    let beside = temp_beside(host, path);
     host.create_file_with_mode(&beside, contents, mode)?;
     match host.rename(&beside, path) {
         Ok(()) => Ok(()),
@@ -588,6 +596,7 @@ pub fn replace_via_tmp(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::fake::Effect;
 
     const PATH: &str = "/Users/someone/.claude.json";
 
@@ -642,6 +651,39 @@ mod tests {
             host.link_at(PATH).is_some(),
             "and the link is still a link, so what manages it goes on managing it"
         );
+    }
+
+    /// A private write is the same choreography, and the fake performs it
+    /// rather than describing it.
+    ///
+    /// Worth asserting because the fake used to write straight to the path. The
+    /// real host's failure and the fake's landed in different places — a full
+    /// disk stops the real one at the copy *beside* the target, leaving the
+    /// target untouched, while the fake stopped at the target itself — so the
+    /// registry's "no half-written copy is left beside it" test was asserting
+    /// the absence of something the fake could not have created, and the whole
+    /// suite would have stayed green through a `RealHost::write_private_file`
+    /// rewritten as a plain truncate-and-write.
+    #[test]
+    fn a_private_write_is_created_beside_the_file_and_moved_over_it() {
+        let host = FakeHost::new().with_file(PATH, "{}");
+        let beside = temp_beside(&host, Path::new(PATH));
+        host.forget_effects();
+
+        host.write_private_file(Path::new(PATH), "{\"a\":1}")
+            .expect("it is written");
+
+        assert!(
+            host.effects().iter().any(|effect| matches!(
+                effect,
+                Effect::Renamed { from, to } if from == &beside && to == Path::new(PATH)
+            )),
+            "the file at the path is one that arrived whole: {:?}",
+            host.effects()
+        );
+        assert_eq!(host.file(PATH).as_deref(), Some("{\"a\":1}"));
+        assert_eq!(host.mode_of(PATH), Some(PRIVATE_FILE_MODE));
+        assert_eq!(host.file(&beside), None, "and nothing is left beside it");
     }
 
     /// A relative target is resolved the way the operating system resolves it:

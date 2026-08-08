@@ -1494,7 +1494,7 @@ mod tests {
         let target = dir.join("config.json");
         let elsewhere = dir.join("elsewhere");
         std::fs::write(&elsewhere, "not Perch's to write").unwrap();
-        std::os::unix::fs::symlink(&elsewhere, crate::host::temp_beside(&target)).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, crate::host::temp_beside(&host, &target)).unwrap();
 
         let written = crate::host::write_atomically(&host, &target, "{\"mine\":true}");
 

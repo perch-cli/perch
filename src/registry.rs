@@ -1329,7 +1329,7 @@ mod tests {
             "a reader still sees the registry that was there"
         );
         assert_eq!(
-            host.file(crate::host::temp_beside(Path::new(path))),
+            host.file(crate::host::temp_beside(&host, Path::new(path))),
             None,
             "and the half-written copy is not left beside it"
         );

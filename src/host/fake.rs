@@ -871,6 +871,26 @@ impl FakeHost {
             .insert(path.to_path_buf(), *self.now.borrow());
     }
 
+    /// The file a write is *for*: the path itself, or — for the copy written
+    /// beside a target by [`super::replace_via_tmp`] — the target it is about
+    /// to be renamed over.
+    ///
+    /// Every arrangement a test makes is about a file it can name. It cannot
+    /// name the copy beside one, because that copy carries the pid of whoever
+    /// is writing it, and the arrangement is about the disk and the directory
+    /// rather than about a filename anyway.
+    fn intended(&self, path: &Path) -> PathBuf {
+        let suffix = format!(".perch-tmp.{}", self.process_id());
+        match path
+            .as_os_str()
+            .to_str()
+            .and_then(|at| at.strip_suffix(&suffix))
+        {
+            Some(target) => PathBuf::from(target),
+            None => path.to_path_buf(),
+        }
+    }
+
     /// What a path actually ends up holding, which is what was written to it
     /// unless a test arranged otherwise.
     fn as_stored(&self, path: &Path, contents: &str) -> String {
@@ -980,37 +1000,47 @@ impl Host for FakeHost {
         mode: u32,
     ) -> Result<(), HostError> {
         self.record(Effect::WroteFile(path.to_path_buf()));
-        if let Some(detail) = self.unwritable.borrow().get(path) {
+        // Both questions are asked of the file this one is *for*, which is the
+        // same path unless it is the copy written beside a target. A test
+        // arranging a full disk or a truncating store names the file it cares
+        // about, and the real machine answers the same way for the copy beside
+        // it: they are the same directory, and it is the same disk.
+        let intended = self.intended(path);
+        if let Some(detail) = self.unwritable.borrow().get(&intended) {
             return Err(HostError::Other(detail.clone()));
         }
         self.note_directories_of(path);
         self.files
             .borrow_mut()
-            .insert(path.to_path_buf(), contents.to_string());
+            .insert(path.to_path_buf(), self.as_stored(&intended, contents));
         self.modes.borrow_mut().insert(path.to_path_buf(), mode);
         self.mark_written(path);
         Ok(())
     }
 
-    /// Records the mode as well as the contents, because "created private" and
-    /// "made private afterwards" are the distinction ADR 0020 turns on and a
-    /// fake that only kept the bytes could not tell them apart.
+    /// Written beside and moved into place, exactly as the real one is.
+    ///
+    /// Through [`super::replace_via_tmp`] rather than straight into the map,
+    /// because what this call promises is not only "the bytes and the mode" but
+    /// "and never a half-written file at the path". A fake that wrote directly
+    /// could not fail the way the real one fails — the real host's `ENOSPC`
+    /// lands on the copy *beside* the target and leaves the target untouched,
+    /// while this one used to fail at the target itself — so
+    /// `a_save_that_fails_leaves_the_registry_exactly_as_it_was` asserted the
+    /// absence of a temp file the fake could never have created, and rewriting
+    /// the real one as a plain truncate-and-write would have left the suite
+    /// green. For the file the registry module calls the whole of Perch's
+    /// state.
+    ///
+    /// The mode is still recorded, which is the other thing this call promises:
+    /// "created private" and "made private afterwards" are the distinction ADR
+    /// 0020 turns on, and `create_file_with_mode` underneath keeps it.
     fn write_private_file(&self, path: &Path, contents: &str) -> Result<(), HostError> {
         self.record(Effect::WrotePrivateFile(path.to_path_buf()));
-        if let Some(detail) = self.unwritable.borrow().get(path) {
-            return Err(HostError::Other(detail.clone()));
-        }
         if let Some(parent) = path.parent() {
             self.make_dirs(parent, PRIVATE_DIR_MODE);
         }
-        self.files
-            .borrow_mut()
-            .insert(path.to_path_buf(), self.as_stored(path, contents));
-        self.modes
-            .borrow_mut()
-            .insert(path.to_path_buf(), PRIVATE_FILE_MODE);
-        self.mark_written(path);
-        Ok(())
+        super::replace_via_tmp(self, path, contents, PRIVATE_FILE_MODE)
     }
 
     fn create_private_dir_all(&self, path: &Path) -> Result<(), HostError> {
