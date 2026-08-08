@@ -83,10 +83,49 @@ pub fn store_credential(host: &dyn Host, store: &Store, credential: &str) -> Res
                 supersede(host, &primary);
                 Ok(())
             }
-            // Both refused. The primary's failure is the one to report: it is
-            // the store this machine was supposed to be using.
-            Err(_) => Err(primary_failed),
+            // Both refused, and either may be sitting on a value that is
+            // neither the Credential asked for nor the one it replaced —
+            // `security`'s stdin buffer truncates mid-argument without saying
+            // so (ADR 0008), which is the whole reason for the read-back. Left
+            // there it is worse than nothing: a reader hands Claude Code bytes
+            // it cannot parse, and every retry now fails a step earlier than
+            // this one, with no way back but deleting the item by hand.
+            //
+            // Only a copy known to be bad is removed. A write that failed
+            // outright left the store holding the Credential it had before,
+            // which is the best one there is and not this function's to throw
+            // away.
+            Err(fallback_failed) => {
+                discard_a_bad_copy(host, &primary, &primary_failed);
+                discard_a_bad_copy(host, &fallback, &fallback_failed);
+                // The primary's failure is the one to report: it is the store
+                // this machine was supposed to be using.
+                Err(primary_failed.error)
+            }
         },
+    }
+}
+
+/// Takes out a copy the store accepted and then read back as something else.
+///
+/// Best-effort, like [`supersede`], and for the same reason: this runs on a path
+/// that is already failing, and the error worth reporting is the one that got
+/// here. What it leaves behind is a Profile with no Credential — which is a
+/// Quarantine, said in words, with `perch relogin` as the way out.
+fn discard_a_bad_copy(host: &dyn Host, store: &CredentialStore, why: &NotKept) {
+    if !why.holds_a_bad_copy {
+        return;
+    }
+    host.note(&format!(
+        "{} was left holding a Credential that did not read back intact, so it \
+         was removed rather than left for Claude Code to find.",
+        store.describe()
+    ));
+    if store.forget(host).is_err() {
+        host.note(&format!(
+            "That copy could not be removed from {}.",
+            store.describe()
+        ));
     }
 }
 
@@ -104,13 +143,42 @@ fn supersede(host: &dyn Host, other: &CredentialStore) {
     }
 }
 
-fn write_and_read_back(host: &dyn Host, kept_in: &CredentialStore, credential: &str) -> Result<()> {
-    kept_in.write(host, credential)?;
+/// A write that did not end with the store holding the Credential, and what
+/// that leaves behind.
+///
+/// The two ways it fails are not the same state on disk, and a caller cleaning
+/// up has to tell them apart: a store that refused the write still holds
+/// whatever it held before, and a store that took the write and read back as
+/// something else is holding bytes nothing wrote on purpose.
+struct NotKept {
+    error: PerchError,
+    holds_a_bad_copy: bool,
+}
 
-    if kept_in.read(host)?.as_deref() != Some(credential) {
+fn write_and_read_back(
+    host: &dyn Host,
+    kept_in: &CredentialStore,
+    credential: &str,
+) -> std::result::Result<(), NotKept> {
+    kept_in.write(host, credential).map_err(|error| NotKept {
+        error,
+        holds_a_bad_copy: false,
+    })?;
+
+    let read_back = kept_in.read(host).map_err(|error| NotKept {
+        error,
+        // The write was accepted and the store will not say what it holds, so
+        // whether it is the Credential is exactly what is not known. Treated as
+        // bad, because the cost of removing a good copy here is a Quarantine
+        // that says how to repair it, and the cost of keeping a bad one is a
+        // Profile nothing can use and nothing explains.
+        holds_a_bad_copy: true,
+    })?;
+
+    if read_back.as_deref() != Some(credential) {
         // Reported as a failure of the store it happened in, so the exit code a
         // script branches on still says which half of the machine to look at.
-        return Err(match kept_in {
+        let error = match kept_in {
             CredentialStore::Keychain { .. } => PerchError::KeychainUnavailable(format!(
                 "the Credential written to {} did not read back intact",
                 kept_in.describe()
@@ -118,6 +186,10 @@ fn write_and_read_back(host: &dyn Host, kept_in: &CredentialStore, credential: &
             CredentialStore::Plaintext { path } => {
                 PerchError::file_write(path.clone(), "the Credential did not read back intact")
             }
+        };
+        return Err(NotKept {
+            error,
+            holds_a_bad_copy: true,
         });
     }
     Ok(())

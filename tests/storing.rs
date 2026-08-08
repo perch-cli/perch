@@ -403,4 +403,50 @@ fn a_switch_neither_store_would_keep_intact_stops_at_the_write() {
         Some(CREDENTIAL),
         "and the Capture that ran before the write still stands"
     );
+
+    // The store the write was aimed at is the Default Profile's. Both halves of
+    // it took a value and read it back as something else, and a truncated
+    // Credential left where Claude Code looks is worse than none: it parses as
+    // nothing, so every retry fails a step earlier than this one did, and the
+    // only way back is deleting the item by hand.
+    assert_eq!(
+        host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME),
+        None,
+        "the copy the keychain mangled was taken back out"
+    );
+    assert_eq!(
+        host.file(CREDENTIALS_PATH),
+        None,
+        "and so was the one the file mangled"
+    );
+    assert!(
+        host.notes()
+            .iter()
+            .any(|note| note.contains("did not read back intact")),
+        "and the machine says what it removed and why: {:?}",
+        host.notes()
+    );
+}
+
+/// A store that refuses the write outright is a different state, and its
+/// Credential is not this function's to throw away.
+///
+/// Nothing was written, so what it holds is what it held before — the last
+/// Credential that worked. Removing that would turn a failed Switch into a
+/// Quarantine, which is the one outcome worse than the failure being reported.
+#[test]
+fn a_store_that_would_not_take_the_write_at_all_keeps_the_credential_it_had() {
+    let host = machine_with_two_accounts()
+        .with_locked_keychain("the keychain is locked")
+        .with_unwritable_file(CREDENTIALS_PATH, "Permission denied (os error 13)");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect_err("neither store would take it");
+    assert_eq!(
+        host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
+        Some(CREDENTIAL),
+        "the Credential that was already live is untouched"
+    );
+    assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
 }
