@@ -185,10 +185,10 @@ fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
     say(
         out,
         &format!(
-            "Exported {accounts} {} to {}, with everything the registry says \
-             about them: their Aliases, their Groups, whether Cycling may choose \
-             them, and what each Group carries.",
-            if accounts == 1 { "Account" } else { "Accounts" },
+            "Exported {} to {}, with everything the registry says about them: \
+             their Aliases, their Groups, whether Cycling may choose them, and \
+             what each Group carries.",
+            crate::commands::accounts(accounts),
             path.display(),
         ),
     )?;
@@ -203,10 +203,9 @@ fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
                  `perch relogin` is what ends that, and it is worth doing before \
                  this file is the only copy.",
                 bare.join(", "),
-                if bare.len() == 1 {
-                    "Account"
-                } else {
-                    "Accounts"
+                match bare.len() {
+                    1 => "Account",
+                    _ => "Accounts",
                 },
             ),
         )?;

@@ -734,6 +734,46 @@ fn a_switch_the_machine_turned_away_is_said_and_the_loop_carries_on() {
     );
 }
 
+/// A Switch the watcher discovers is impossible for good records why, the same
+/// as the command would.
+///
+/// The two paths meet the same state — an Account whose Profile holds no
+/// Credential at all — and only one of them was covered. A Quarantine the
+/// watcher found and did not write down is one rediscovered on the next round,
+/// and the round after that: the loop would go on choosing an Account it has
+/// already watched fail, at a browser round trip each time, for as long as it
+/// runs.
+#[test]
+fn an_account_the_watcher_finds_broken_is_recorded_rather_than_rediscovered() {
+    let host = watching(&[86.0, 88.0], 5.0);
+    // The Account it would move to has nothing in either store — a Rotation
+    // that went missing, or a store somebody cleared out.
+    host.forget_keychain_item(&store_of(&host, SECOND_EMAIL).keychain_service, LOGIN_NAME);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("an Account that turns out to be broken does not end the watch");
+    assert_eq!(
+        quarantine_of(&host, SECOND_EMAIL),
+        Some(perch::registry::Quarantine::NoCredential),
+        "written down where it was found: {printed}"
+    );
+    assert_eq!(
+        active(&host).as_deref(),
+        Some(EMAIL),
+        "and nothing was switched onto it"
+    );
+    // The second round has the Quarantine to read, so it never gets as far as
+    // trying: nowhere to go rather than a Switch refused.
+    let decisions = decisions(&printed);
+    assert_eq!(decisions.len(), 2, "{printed}");
+    assert!(
+        decisions[1].contains("nowhere"),
+        "the round after knows better than to try again: {}",
+        decisions[1]
+    );
+}
+
 /// Ctrl-C stops it and leaves nothing behind. That is a property of the loop
 /// holding nothing across a wait, not of the handler: the registry lock is
 /// taken and given back inside each round.

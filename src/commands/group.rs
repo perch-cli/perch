@@ -100,7 +100,7 @@ fn remove(registry: &mut Registry, name: &str) -> Result<String> {
     if !held.is_empty() {
         return Err(PerchError::Conflict(format!(
             "The Group `{declared}` still holds {}:\n  {}\nMove them first with `perch group move <target> <group>`, or out of every Group with `perch group move <target> {NO_GROUP}`.",
-            accounts_phrase(held.len()),
+            crate::commands::accounts(held.len()),
             held.join("\n  ")
         )));
     }
@@ -221,12 +221,4 @@ fn describe_configuration(out: &mut dyn Write, config: &GroupConfig) -> Result<(
 
 fn write_line(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {
     writeln!(out, "  {label:LABEL_WIDTH$}{value}").map_err(write_failed)
-}
-
-fn accounts_phrase(count: usize) -> String {
-    if count == 1 {
-        "1 Account".to_string()
-    } else {
-        format!("{count} Accounts")
-    }
 }

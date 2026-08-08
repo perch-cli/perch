@@ -53,6 +53,18 @@ struct Taken {
     said: DateTime<Utc>,
 }
 
+impl Taken {
+    /// Records that this hold is over, and says why alongside what it costs.
+    ///
+    /// One place, because the two ways a hold ends have to leave the same state
+    /// behind and only differ in the sentence: what the lock protected is the
+    /// same either way, and it is [`LockSpec::lost_means`] that says it.
+    fn give_up(&mut self, host: &dyn Host, why: &str) {
+        self.stamp = None;
+        host.note(&format!("{why} {}", self.lock.lost_means));
+    }
+}
+
 impl<'a> Held<'a> {
     /// Says that the locks are still held, for the holders of the ones whose
     /// update interval has passed.
@@ -80,26 +92,69 @@ impl<'a> Held<'a> {
             // stamp against the one it has just replaced and reports a takeover
             // that never happened.
             //
-            // A lock that cannot be touched, or that no longer says what Perch
-            // left it saying, is one somebody else has taken over. It is said
-            // out loud, and the lock is never given back afterwards, because
-            // giving back somebody else's lock is how the loss spreads to a
-            // third process.
-            if still_ours(taken, host.modified_at(&taken.lock.dir).ok())
-                && host.touch(&taken.lock.dir).is_ok()
-                && let Ok(stamp) = host.modified_at(&taken.lock.dir)
-            {
-                taken.stamp = Some(stamp);
+            // A lock that no longer says what Perch left it saying is one
+            // somebody else has taken over. It is said out loud, and the lock
+            // is never given back afterwards, because giving back somebody
+            // else's lock is how the loss spreads to a third process.
+            //
+            // A stamp that disagrees, and an artifact that is not there at all,
+            // are both that. Anything *else* the filesystem says is Perch's own
+            // I/O faltering, and is told apart below rather than folded in with
+            // it: giving a hold up is expensive in three separate ways, and
+            // none of them is worth spending on a filesystem that hiccuped.
+            match host.modified_at(&taken.lock.dir) {
+                Ok(seen) if still_ours(taken, Some(seen)) => {}
+                Ok(_) | Err(HostError::NotFound { .. }) => {
+                    taken.give_up(
+                        host,
+                        &format!(
+                            "{} ({}) was taken over while Perch was working under it.",
+                            taken.lock.name,
+                            taken.lock.dir.display(),
+                        ),
+                    );
+                    continue;
+                }
+                // There and unreadable. Nothing here is evidence either way, so
+                // nothing is concluded and nothing is touched — touching an
+                // artifact Perch cannot check would overwrite the one stamp
+                // that makes the check possible. The next `renew` asks again,
+                // and `update_millis` is short enough against `stale_millis`
+                // that there are a dozen more chances before the artifact goes
+                // stale. One that never becomes readable ends as a genuine
+                // takeover, which the arm above catches as one.
+                Err(_) => continue,
+            }
+
+            // Ours, and the artifact would not take a fresh timestamp. On
+            // Windows that is the handle contention `rename_replacing` retries
+            // for, arriving at a `touch_now` that does not — a hiccup rather
+            // than a loss. Nothing is inconsistent in leaving the hold as it
+            // was: an artifact that was not touched still carries the stamp
+            // Perch knows, so the next `renew` simply tries again.
+            if host.touch(&taken.lock.dir).is_err() {
                 continue;
             }
 
-            taken.stamp = None;
-            host.note(&format!(
-                "{} ({}) was taken over while Perch was working under it. {}",
-                taken.lock.name,
-                taken.lock.dir.display(),
-                taken.lock.lost_means,
-            ));
+            // Touched, and then the artifact would not say what it now carries.
+            // This is the one branch where the hold really is over: the stamp
+            // Perch remembers has just been overwritten by one it cannot read,
+            // so every question asked later answers the wrong way — the same
+            // dead end `take` refuses a lock outright for. Given up rather than
+            // held blind, and said as what it is rather than as a takeover.
+            match host.modified_at(&taken.lock.dir) {
+                Ok(stamp) => taken.stamp = Some(stamp),
+                Err(err) => taken.give_up(
+                    host,
+                    &format!(
+                        "{} ({}) was renewed and then would not say when it was \
+                         written ({err}), which is the only thing that makes a \
+                         hold on it checkable.",
+                        taken.lock.name,
+                        taken.lock.dir.display(),
+                    ),
+                ),
+            }
         }
     }
 
@@ -453,6 +508,80 @@ mod tests {
             host.notes().iter().any(|note| note.contains("taken over")),
             "and the loss is said out loud rather than passed over: {:?}",
             host.notes()
+        );
+    }
+
+    /// The mirror, and the reason a takeover is read off the stamp alone: a
+    /// touch that will not go through is this machine's I/O faltering, not
+    /// another process arriving. On Windows it is the handle contention
+    /// `rename_replacing` retries for, reaching a `touch_now` that does not.
+    ///
+    /// Read as a loss it would cost three things at once, none of them
+    /// recoverable within the command: `still_held` false for the rest of it,
+    /// so `registry::save` refuses and blames a `perch` that does not exist; a
+    /// `release` that then declines to give Perch's *own* artifact back,
+    /// leaving the next command to wait out the whole staleness window; and a
+    /// line telling somebody their lock was taken when it was not.
+    #[test]
+    fn a_touch_that_will_not_go_through_is_a_hiccup_rather_than_a_takeover() {
+        let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
+        let host = FakeHost::new();
+
+        let mut still_held = false;
+        let ran: Result<()> = under(&host, vec![lock.clone()], |held| {
+            host.sleep(90_000);
+            host.set_unwritable(&lock.dir, "Permission denied");
+            held.renew();
+            still_held = held.still_held();
+            host.forget_unwritable(&lock.dir);
+            Ok(())
+        });
+        ran.expect("the work finishes");
+
+        assert!(still_held, "the hold Perch has is the hold Perch reports");
+        assert!(
+            !host.notes().iter().any(|note| note.contains("taken over")),
+            "and nobody is blamed for a filesystem that hiccuped: {:?}",
+            host.notes()
+        );
+        assert!(
+            !host.path_exists(Path::new(&lock.dir)),
+            "the artifact is given back rather than leaked for the whole \
+             staleness window"
+        );
+    }
+
+    /// The same for the read either side of the touch. An artifact that is
+    /// there and will not say when it was written is no evidence about who
+    /// holds it — and it is deliberately not touched on the way past, because
+    /// touching would overwrite the one stamp that makes the check possible.
+    #[test]
+    fn an_artifact_that_will_not_say_when_it_was_written_is_left_alone() {
+        let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
+        let host = FakeHost::new();
+
+        let mut still_held = false;
+        let ran: Result<()> = under(&host, vec![lock.clone()], |held| {
+            host.sleep(90_000);
+            host.set_unreadable(&lock.dir, "Permission denied");
+            held.renew();
+            still_held = held.still_held();
+            host.forget_unreadable(&lock.dir);
+            Ok(())
+        });
+        ran.expect("the work finishes");
+
+        assert!(
+            still_held,
+            "nothing was established, so nothing is concluded"
+        );
+        assert!(
+            !host
+                .effects()
+                .iter()
+                .any(|effect| matches!(effect, Effect::Touched(_))),
+            "and the stamp the check rests on is not overwritten: {:?}",
+            host.effects()
         );
     }
 

@@ -199,6 +199,58 @@ fn the_credential_the_outgoing_account_rotated_to_is_captured_before_it_is_repla
     );
 }
 
+/// Perch is not the only thing that writes the Default Profile. Somebody who
+/// runs `claude` and logs in directly leaves Perch's record of who is active
+/// behind, and the live Credential is then a stranger's. Capturing it into the
+/// Profile of the Account Perch *believes* is active would overwrite that
+/// Account's own Credential with somebody else's — and a later Switch back
+/// would make the stranger's Credential live under the Account's name, so
+/// Claude Code would act as one person while displaying another.
+#[test]
+fn a_live_credential_belonging_to_a_login_made_outside_perch_is_not_captured() {
+    let host = machine_with_two_accounts();
+    let held = stored_credential(&host, EMAIL).expect("the first Account has a Credential");
+
+    // A login made outside Perch: a Credential Perch never filed, and the
+    // Identity Claude Code writes beside it naming whose it is.
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, THIRD_CREDENTIAL);
+    host.set_file(IDENTITY_PATH, THIRD_IDENTITY_FILE);
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect("the Switch runs");
+    assert_eq!(
+        stored_credential(&host, EMAIL).as_deref(),
+        Some(held.as_str()),
+        "{EMAIL}'s own Credential is untouched, not overwritten with {THIRD_EMAIL}'s"
+    );
+    assert!(
+        printed.contains(THIRD_EMAIL) && printed.contains("not Captured"),
+        "and the Switch says whose the live Credential was: {printed}"
+    );
+}
+
+/// The mirror, so the guard above cannot be satisfied by never Capturing at
+/// all: an Identity that says nothing is no evidence against, and a Rotation
+/// made under a Profile Claude Code has never written an Identity into must
+/// still be kept.
+#[test]
+fn a_live_credential_with_no_identity_beside_it_is_captured_rather_than_left() {
+    let host = machine_with_two_accounts();
+    let rotated = CREDENTIAL.replace("sk-ant-ort01-test", "sk-ant-ort01-rotated");
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, &rotated);
+    host.remove_file(Path::new(IDENTITY_PATH))
+        .expect("the identity file was there to remove");
+
+    run_switch(&host, SECOND_EMAIL).0.expect("the Switch runs");
+
+    assert_eq!(
+        stored_credential(&host, EMAIL).as_deref(),
+        Some(rotated.as_str()),
+        "a Rotation is lost if an absent Identity is read as evidence against"
+    );
+}
+
 /// An identity file either side of its `oauthAccount` block — the whole of it
 /// that does not belong to the Account.
 fn around_the_block(text: &str) -> (String, String) {
@@ -496,6 +548,51 @@ fn a_marker_that_does_not_say_when_its_session_began_is_no_evidence_of_a_client(
         .expect("an uncorroborated marker does not hold a Profile");
 }
 
+/// A marker Perch cannot see the *contents* of is a different thing from one
+/// whose contents say nothing.
+///
+/// Root-owned after a `sudo claude`, or halfway through being written by a
+/// client that is starting up right now. Nothing about it has been established,
+/// so it resolves the way every other doubt in the probe resolves — towards
+/// Live — rather than being read as an empty Profile a Switch may write under.
+/// That is the mid-task logout ADR 0005 exists to prevent.
+#[test]
+fn a_marker_that_cannot_be_read_at_all_holds_the_profile_of_a_running_client() {
+    let host = machine_with_two_accounts()
+        .with_file(format!("{FIRST_PROFILE}/sessions/4242.json"), "")
+        .with_unreadable_file(
+            format!("{FIRST_PROFILE}/sessions/4242.json"),
+            "Permission denied",
+        )
+        .with_live_process(4242);
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("nothing about that marker has been established");
+    assert_eq!(error.exit_code(), EXIT_PROBE_REFUSED);
+    assert!(
+        error.to_string().contains("4242.json"),
+        "and it names the file to go and look at: {error}"
+    );
+}
+
+/// The same file with nothing running under it is litter, not doubt. A marker
+/// nobody can read beside a process that is not there must not refuse every
+/// Switch against this Profile for ever.
+#[test]
+fn an_unreadable_marker_whose_process_is_gone_holds_nothing() {
+    let host = machine_with_two_accounts()
+        .with_file(format!("{FIRST_PROFILE}/sessions/4242.json"), "")
+        .with_unreadable_file(
+            format!("{FIRST_PROFILE}/sessions/4242.json"),
+            "Permission denied",
+        );
+
+    run_switch(&host, SECOND_EMAIL)
+        .0
+        .expect("no client is holding that Profile");
+}
+
 #[test]
 fn a_marker_that_is_not_json_is_no_evidence_of_a_client() {
     let host = machine_with_two_accounts()
@@ -563,7 +660,7 @@ fn a_switch_that_cannot_patch_the_identity_says_what_it_left_where() {
     assert_eq!(stored_credential(&host, EMAIL).as_deref(), Some(CREDENTIAL));
     assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
     assert_eq!(
-        host.file(perch::host::temp_beside(Path::new(IDENTITY_PATH))),
+        host.file(perch::host::temp_beside(&host, Path::new(IDENTITY_PATH))),
         None,
         "a write that did not land leaves nothing beside the file Claude Code \
          reads"
@@ -637,6 +734,29 @@ fn switching_to_the_account_that_is_already_active_changes_nothing() {
         )),
         "none of Claude Code's locks is taken, and no Credential is rewritten, \
          for a Switch that would change nothing"
+    );
+}
+
+/// `claude /logout` empties the live store and leaves `.claude.json` naming
+/// whoever was there. Perch's record still says that Account is active, and it
+/// is — as a claim about which Credential is live, which is now none.
+///
+/// Read off the Identity alone that looks like a Switch that already landed,
+/// and the command turned away as unnecessary is precisely the one that would
+/// put the Credential back. It is the interrupted Switch's half-state reached
+/// from the other side, and it wants the same answer: run it.
+#[test]
+fn switching_to_the_active_account_after_a_logout_puts_its_credential_back() {
+    let host = machine_with_two_accounts();
+    host.forget_keychain_item(DEFAULT_SERVICE, LOGIN_NAME);
+
+    let (result, printed) = run_switch(&host, EMAIL);
+
+    result.expect("the repair runs rather than being refused as unnecessary");
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(CREDENTIAL),
+        "the Account Perch says is active is the one a client now reads: {printed}"
     );
 }
 

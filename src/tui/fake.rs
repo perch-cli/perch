@@ -111,8 +111,17 @@ pub struct FakeRefresher {
     /// What each Refresh was asked to read, in order.
     asked: Vec<Vec<String>>,
     /// How many more times [`Refresher::collect`] answers with nothing before
-    /// the outstanding Refresh lands.
+    /// the outstanding Refresh lands. Counted down per Refresh, and put back
+    /// when the next one is asked for: `rounds` is how long *a* Refresh takes,
+    /// not how long the first one took.
     still_out: usize,
+    takes: usize,
+    /// What every Refresh comes back with. Kept rather than taken, because a
+    /// Refresher that could answer once looked identical to a frozen loop: the
+    /// second `r` set `out` and then collected `None` for ever, so the display
+    /// drew `Refreshing…` to the end of the run and `outstanding` stayed true.
+    /// A test written to say that a Refresh which came back is not one that is
+    /// still out would have asserted against that instead of failing.
     coming: Option<Refreshed>,
     /// Whether one has been asked for and not yet collected — the same
     /// question the real one answers by whether its channel is still there.
@@ -131,6 +140,7 @@ impl FakeRefresher {
     pub fn answering(refreshed: Refreshed, rounds: usize) -> FakeRefresher {
         FakeRefresher {
             still_out: rounds,
+            takes: rounds,
             coming: Some(refreshed),
             ..FakeRefresher::default()
         }
@@ -150,18 +160,19 @@ impl FakeRefresher {
 impl Refresher for FakeRefresher {
     fn ask(&mut self, emails: Vec<String>) {
         self.asked.push(emails);
+        self.still_out = self.takes;
         self.out = true;
     }
 
     fn collect(&mut self) -> Option<Refreshed> {
-        if self.asked.is_empty() {
+        if !self.out {
             return None;
         }
         if self.still_out > 0 {
             self.still_out -= 1;
             return None;
         }
-        let refreshed = self.coming.take()?;
+        let refreshed = self.coming.clone()?;
         self.out = false;
         Some(refreshed)
     }

@@ -76,9 +76,28 @@ pub fn run(host: &dyn Host, args: PurgeArgs, out: &mut dyn Write) -> Result<()> 
 
     say(out, &what_will_go(&registry, &home))?;
     if !args.yes {
-        offer_an_export(host, &mut perch, &registry, &home, out)?;
+        let exported = offer_an_export(host, &mut perch, &registry, &home, out)?;
         if !agreed(host, out)? {
-            return say(out, "Nothing was purged.");
+            // What the machine is holding now, which is not always nothing. An
+            // Export written a question ago is a file full of working
+            // Credentials sitting at a path the user is about to stop thinking
+            // about — and `perch export` refuses a path that is taken, so the
+            // next Purge offering the same one aborts before it asks anything.
+            // Both are things somebody has to be told to act on.
+            return match exported {
+                Some(path) => say(
+                    out,
+                    &format!(
+                        "Nothing was purged. The Export at {} was written before \
+                         you declined and still stands — it holds a working \
+                         Credential for every Account, so keep it somewhere you \
+                         would keep those, or delete it. `perch purge` will not \
+                         write over it.",
+                        path.display(),
+                    ),
+                ),
+                None => say(out, "Nothing was purged."),
+            };
         }
     }
 
@@ -136,18 +155,13 @@ fn what_will_go(registry: &Registry, home: &Path) -> String {
     }
 
     format!(
-        "Perch holds {} {}: {}.\n\
+        "Perch holds {}: {}.\n\
          A Purge deletes every one of their Profiles, every Credential Perch \
          holds for them, and {} itself. Nothing undoes it: only a fresh login \
          brings an Account back, and it comes back as a new one.\n\
          Claude Code goes on running as whatever it is logged in as — the live \
          Credential is not Perch's to take away.",
-        accounts.len(),
-        if accounts.len() == 1 {
-            "Account"
-        } else {
-            "Accounts"
-        },
+        crate::commands::accounts(accounts.len()),
         accounts.join(", "),
         home.display(),
     )
@@ -166,18 +180,23 @@ fn what_will_go(registry: &Registry, home: &Path) -> String {
 /// path that is taken, a directory that is not there and a passphrase typed
 /// twice differently are all things somebody has to go and settle, and nothing
 /// has been destroyed yet — so the answer is to run `perch purge` again.
+///
+/// Returns where one was written, because the Purge it was offered for may
+/// still be declined at the next question — and a file holding every Credential
+/// on the machine is not something to leave a user unaware of on the strength
+/// of "Nothing was purged."
 fn offer_an_export(
     host: &dyn Host,
     perch: &mut crate::lock::Held<'_>,
     registry: &Registry,
     home: &Path,
     out: &mut dyn Write,
-) -> Result<()> {
+) -> Result<Option<PathBuf>> {
     // Nothing to put in one. `perch export` refuses this too, and meeting that
     // refusal here would be a Purge failing over an offer it should not have
     // made.
     if registry.accounts.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
 
     let answered = ask_a_word(host, out, "Write an Export first? [Y/n]: ")?;
@@ -185,7 +204,7 @@ fn offer_an_export(
     // this is there to type a passphrase at the two prompts that follow.
     // Everything else — including plain Return — writes one.
     if matches!(answered.as_deref(), None | Some("n" | "no")) {
-        return Ok(());
+        return Ok(None);
     }
 
     let Some(path) = ask(host, out, "Where to write it: ")?
@@ -206,7 +225,8 @@ fn offer_an_export(
     };
     refuse_a_path_the_purge_would_take(&path, home)?;
 
-    export::write_the_export(host, perch, registry, &path, out)
+    export::write_the_export(host, perch, registry, &path, out)?;
+    Ok(Some(path))
 }
 
 /// Refuses to write the Export inside the directory this Purge is about to
@@ -260,9 +280,9 @@ fn report(out: &mut dyn Write, home: &Path, purged: &Purged) -> Result<()> {
                 home.display(),
             ),
             accounts => format!(
-                "Purged {accounts} {}. Every Profile, every Credential Perch held \
-                 and {} are gone, and Perch is holding nothing on this machine.",
-                if accounts == 1 { "Account" } else { "Accounts" },
+                "Purged {}. Every Profile, every Credential Perch held and {} \
+                 are gone, and Perch is holding nothing on this machine.",
+                crate::commands::accounts(accounts),
                 home.display(),
             ),
         },

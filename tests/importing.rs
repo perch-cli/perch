@@ -55,6 +55,45 @@ fn registry_on(host: &FakeHost) -> Option<Registry> {
     perch::registry::load(host).expect("whatever is there is readable")
 }
 
+/// The fourth command with an unbounded prompt under the registry lock, and
+/// the one that skipped the guard the other three take.
+///
+/// A passphrase is the one wait in Perch with no bound on it, so it is the one
+/// place a hold can go stale under a command that is behaving perfectly.
+/// Another `perch` may then have claimed the abandoned lock and put an Account
+/// down — and `import::place` writes every Credential the file holds before
+/// `registry::save` ever asks. Finding out at the save means finding out after
+/// the rollback has deleted the Profile and the keychain item that other Perch
+/// just created, under a line reading "Nothing was imported."
+#[test]
+fn an_import_whose_registry_went_stale_while_the_passphrase_was_typed_writes_nothing() {
+    let host = a_new_machine_holding(&an_export_of_a_whole_machine())
+        // Past the staleness window, which is what makes the lock claimable.
+        .with_a_terminal_that_takes(120_000)
+        .once_while_waiting(|host| {
+            let lock = perch::registry::lock_spec(host).expect("home is known");
+            host.remove_dir_all(&lock.dir).expect("it was abandoned");
+            host.create_dir_exclusive(&lock.dir)
+                .expect("the other `perch` takes it");
+        });
+
+    let (outcome, _) = run_import(&host, AT);
+
+    let refused = outcome.expect_err("this Perch may no longer speak for the registry");
+    assert!(
+        refused.to_string().contains("Nothing was imported"),
+        "{refused}"
+    );
+    for email in [EMAIL, SECOND_EMAIL, THIRD_EMAIL] {
+        assert_eq!(
+            credential_of(&host, email),
+            None,
+            "no Credential is written before the hold is re-checked, so there is \
+             nothing for a rollback to take back out from under anybody"
+        );
+    }
+}
+
 /// The whole of what the pair promises: a new machine arrives with the setup the
 /// old one had rather than a pile of nameless logins.
 #[test]
@@ -153,6 +192,43 @@ fn nothing_is_made_active_by_an_import() {
         "the live Credential is not an Import's to replace"
     );
     assert!(printed.contains("perch switch"), "{printed}");
+}
+
+/// The same rule, for the other claim a registry makes about right now.
+///
+/// `checks` is what a `perch watch --once` on the *other* machine did — a
+/// Switch it made, and when — and the cooldown and the no-return are measured
+/// from it. Carried across, an Export taken this morning has the first check on
+/// the new machine reporting `cooling`, and bars the Account that machine last
+/// left, on the strength of something that happened somewhere else.
+#[test]
+fn no_watcher_has_run_here_yet_however_recently_one_ran_where_the_export_was_taken() {
+    // A machine whose scheduled check Switched a moment ago, exported.
+    let host = machine_with_three_accounts();
+    declare_group(&host, "work");
+    move_to_group(&host, EMAIL, "work").0.expect("it joins");
+    let mut registry = registry_of(&host);
+    registry.checks.insert(
+        "work".to_string(),
+        perch::registry::Checked {
+            switched_at: host.now(),
+            switched_off: EMAIL.to_string(),
+        },
+    );
+    save_registry(&host, &registry);
+    let host = host.with_secrets(&[PASSPHRASE, PASSPHRASE]);
+    run_export(&host, AT).0.expect("the export is written");
+    let sealed = host.file(AT).expect("a file was written");
+
+    let onto = a_new_machine_holding(&sealed);
+    run_import(&onto, AT).0.expect("the import lands");
+
+    assert!(
+        registry_of(&onto).checks.is_empty(),
+        "a new machine's first check is its first check, not one paced by \
+         another machine's: {:?}",
+        registry_of(&onto).checks
+    );
 }
 
 /// Every other command reads the registry through adoption, which takes the

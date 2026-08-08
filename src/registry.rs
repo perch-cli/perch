@@ -1047,8 +1047,20 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     // read, because the thing that reads it is a loop nobody is watching: a
     // value that means nothing would otherwise sit in the file until the
     // watcher next went round and surprise somebody by acting on it.
+    //
+    // Checked here means every command meets it, including `perch config set`
+    // — the one that would otherwise be the repair. So the refusal has to name
+    // the file: a value only a hand edit can produce is a value only a hand
+    // edit can take back out, and a range with nowhere to apply it is a dead
+    // end rather than an instruction.
     for (name, config) in &registry.groups {
-        config.validate(name)?;
+        config.validate(name).map_err(|refusal| {
+            refusal.with_note(&format!(
+                "It is in {}, and every Perch command reads that file — including \
+                 the one that would set it. Edit the value there.",
+                path.display(),
+            ))
+        })?;
     }
 
     Ok(Some(with_every_claimed_group_declared(registry)))
@@ -1065,6 +1077,15 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
 ///
 /// Declared rather than refused, because the Group's settings are what is
 /// missing and the defaults are what a freshly declared Group carries anyway.
+///
+/// A claim that differs from a declaration only in case is the *same* Group,
+/// and is rewritten to the declared spelling rather than declared a second
+/// time. Everywhere else in this module two names differing in case are one
+/// name — [`same_name`] is what `declare_group` refuses on and what
+/// [`Registry::ensure_group`] returns the held spelling for — so a second key
+/// here would be a Group nothing but this function believes in: an empty
+/// section in the picker, an `accounts_in` that matches nobody, and a
+/// `declared_group` answering with whichever the map happened to order first.
 fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
     let claimed: Vec<String> = registry
         .accounts
@@ -1072,7 +1093,20 @@ fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
         .filter_map(|account| account.group.clone())
         .collect();
     for name in claimed {
-        registry.groups.entry(name).or_default();
+        match registry.declared_group(&name) {
+            Some(declared) if declared != name => {
+                let declared = declared.to_string();
+                for account in &mut registry.accounts {
+                    if account.group.as_deref().is_some_and(|of| of == name) {
+                        account.group = Some(declared.clone());
+                    }
+                }
+            }
+            Some(_) => {}
+            None => {
+                registry.groups.insert(name, GroupConfig::default());
+            }
+        }
     }
     registry
 }
@@ -1295,7 +1329,7 @@ mod tests {
             "a reader still sees the registry that was there"
         );
         assert_eq!(
-            host.file(crate::host::temp_beside(Path::new(path))),
+            host.file(crate::host::temp_beside(&host, Path::new(path))),
             None,
             "and the half-written copy is not left beside it"
         );
@@ -1753,6 +1787,72 @@ mod tests {
             "carrying what a freshly declared Group carries"
         );
         assert_eq!(registry.accounts_in("work").len(), 1);
+    }
+
+    /// The other half of the same repair, and the reason it is a repair rather
+    /// than a bare insert: two names differing only in case are one name
+    /// everywhere else in this module, so a claim spelled `Work` against a
+    /// declared `work` must join it rather than become a second Group nothing
+    /// else believes in — an empty section in the picker, an `accounts_in` that
+    /// matches nobody, and a `declared_group` answering with whichever the map
+    /// ordered first.
+    #[test]
+    fn a_group_an_account_claims_in_another_case_joins_the_one_that_is_declared() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let path = registry_path(&host).unwrap();
+        host.set_file(
+            &path,
+            r#"{"version":1,"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true,"group":"Work"}],"groups":{"work":{"watcher_threshold_percent":65}}}"#,
+        );
+
+        let registry = load(&host).expect("it reads").expect("it is there");
+
+        assert_eq!(
+            registry.group_names().len(),
+            1,
+            "one Group, not two: {:?}",
+            registry.group_names()
+        );
+        assert_eq!(
+            registry.accounts_in("work").len(),
+            1,
+            "and the Account is in it, rather than in a namesake beside it"
+        );
+        assert_eq!(
+            registry.group("work").unwrap().watcher_threshold_percent,
+            65,
+            "the declared Group keeps the policy it was declared with"
+        );
+    }
+
+    /// A number that means nothing is refused where the file is read, so a
+    /// watcher nobody is looking at never acts on one. That is the right place
+    /// for it, and it has one consequence worth writing down: every command
+    /// reads the registry, so a hand-edited value out of range turns all of
+    /// them away — `perch config set` among them, which is otherwise the
+    /// repair. The refusal has to name the file, or it is a dead end.
+    #[test]
+    fn a_number_out_of_range_in_the_file_is_refused_by_the_read_and_names_the_file() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let path = registry_path(&host).unwrap();
+        host.set_file(
+            &path,
+            r#"{"version":1,"accounts":[],"groups":{"work":{"watcher_threshold_percent":101}}}"#,
+        );
+
+        let refused = load(&host).expect_err("101 is not a percentage");
+
+        assert_eq!(refused.exit_code(), crate::error::EXIT_INVALID);
+        let said = refused.to_string();
+        assert!(said.contains("work"), "which Group: {said}");
+        assert!(
+            said.contains("watcher-threshold-percent"),
+            "which setting, spelled the way it is set: {said}"
+        );
+        assert!(
+            said.contains(&path.display().to_string()),
+            "and where to go and change it, because no command can: {said}"
+        );
     }
 
     /// What this build writes is what the file says it was written by.

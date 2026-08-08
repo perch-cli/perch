@@ -249,7 +249,14 @@ impl PerchError {
             | PerchError::NoCandidate(message)
             | PerchError::NotInterchangeable(message)
             | PerchError::Other(message) => Some(message),
-            _ => None,
+            // Spelled out rather than caught by a `_`, and the same at
+            // `exit_code`: a variant added later would otherwise be folded into
+            // `Other` by a note and exit as a general failure, silently, and
+            // `one_of_each` would not be extended to notice. Three arms is the
+            // price of the compiler asking.
+            PerchError::FileRead { .. }
+            | PerchError::FileWrite { .. }
+            | PerchError::Malformed { .. } => None,
         }
     }
 
@@ -267,7 +274,10 @@ impl PerchError {
             PerchError::NotInterchangeable(_) => EXIT_NOT_INTERCHANGEABLE,
             PerchError::Quarantined { .. } => EXIT_QUARANTINED,
             PerchError::Busy(_) => EXIT_HELD,
-            _ => EXIT_GENERAL,
+            PerchError::FileRead { .. }
+            | PerchError::FileWrite { .. }
+            | PerchError::Malformed { .. }
+            | PerchError::Other(_) => EXIT_GENERAL,
         }
     }
 }

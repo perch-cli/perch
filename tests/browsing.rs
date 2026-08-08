@@ -309,11 +309,11 @@ fn a_groups_per_window_rows_are_one_per_quota_window_kind() {
 
     let frame = screen.last_frame();
     assert!(
-        frame.contains("5-hour   emptiest  96% used across 2 Accounts (as of 4m ago)"),
+        frame.contains("5-hour emptiest  96% used across 2 Accounts (as of 4m ago)"),
         "the Group is nearly out on its five-hour window\n{frame}"
     );
     assert!(
-        frame.contains("7-day    emptiest  12% used across 2 Accounts (as of 4m ago)"),
+        frame.contains("7-day  emptiest  12% used across 2 Accounts (as of 4m ago)"),
         "and fine on its seven-day one\n{frame}"
     );
 }
@@ -420,7 +420,7 @@ fn a_refresh_moves_the_groups_figures_and_a_failed_one_leaves_them_standing() {
         "the Reserve moved with the figures it is made of\n{frame}"
     );
     assert!(
-        frame.contains("5-hour   emptiest   3% used across 2 Accounts (as of just now)"),
+        frame.contains("5-hour emptiest   3% used across 2 Accounts (as of just now)"),
         "{frame}"
     );
 
@@ -483,7 +483,7 @@ fn a_figure_says_whether_it_is_room_left_or_quota_used() {
     assert!(frame.contains("the best 93% left"), "{frame}");
     assert!(frame.contains("emptiest   7% used"), "{frame}");
     assert!(
-        frame.contains("5-hour     7% used  no reset time cached"),
+        frame.contains("5-hour   7% used  no reset time cached"),
         "and the Account's own row says it too\n{frame}"
     );
 }
@@ -700,6 +700,48 @@ fn a_refresh_that_lands_replaces_the_figures_and_their_age() {
     let frame = screen.last_frame();
     assert!(frame.contains("3%"), "{frame}");
     assert!(frame.contains("(as of just now)"), "{frame}");
+}
+
+/// A Refresh that came back is not one that is still out, so `r` works again.
+///
+/// The loop guards the key on `outstanding()` — one Refresh at a time, because
+/// each spends from an hourly budget that does not refill early (ADR 0015) —
+/// and the whole of that guard is that the flag comes back down when the answer
+/// lands. Nothing at this level said so, and a `FakeRefresher` that could only
+/// answer once would have made the test that says it pass against a frozen loop
+/// rather than fail.
+#[test]
+fn a_second_refresh_is_asked_for_once_the_first_has_landed() {
+    let host = machine_with_figures();
+    let mut refresher = FakeRefresher::answering(
+        Refreshed {
+            registry: Some(registry_of(&host)),
+            notes: Vec::new(),
+        },
+        1,
+    );
+    let mut screen = FakeScreen::scripted(vec![
+        Some(Signal::Refresh),
+        // The frame the first one lands on.
+        None,
+        Some(Signal::Refresh),
+        None,
+        Some(Signal::Leave),
+    ]);
+
+    browse_with(&host, &mut screen, &mut refresher);
+
+    assert_eq!(
+        refresher.asked().len(),
+        2,
+        "the second `r` reached the Refresher rather than being swallowed by a \
+         flag nothing put back down"
+    );
+    assert!(
+        !screen.last_frame().contains("Refreshing"),
+        "and the display is not still waiting on one that came back:\n{}",
+        screen.last_frame()
+    );
 }
 
 /// ADR 0018: a Refresh that failed degrades the display rather than emptying
@@ -1045,6 +1087,52 @@ fn a_view_left_alone_hands_nothing_over_and_ends_well() {
         registry_of(&host).active.as_deref(),
         Some(EMAIL),
         "nor was anything switched"
+    );
+}
+
+/// A listing taller than the frame still says what its columns are.
+///
+/// The header is line zero of the paragraph the rows are in, and a paragraph
+/// scrolled by n skips its first n lines — so the one line that has to stay put
+/// was the first one to go, as soon as the cursor moved far enough down. Five
+/// Accounts on a short terminal is enough; twenty-two is enough on a standard
+/// one, which is a number of subscriptions this is meant to be used with.
+#[test]
+fn a_listing_that_scrolls_keeps_the_row_that_says_what_the_columns_are() {
+    let host = machine_with_figures();
+    let mut registry = registry_of(&host);
+    // Enough Accounts that the cursor has to leave the first screenful.
+    let spare = registry.accounts[1].clone();
+    for at in 0..8 {
+        let mut another = spare.clone();
+        another.identity.email = format!("spare{at}@example.com");
+        registry.accounts.push(another);
+    }
+
+    let mut screen = FakeScreen::sized(
+        80,
+        6,
+        std::iter::repeat_n(Some(Signal::Down), 9)
+            .chain([Some(Signal::Leave)])
+            .collect(),
+    );
+    perch::tui::browse(
+        &host,
+        registry,
+        &mut screen,
+        &mut FakeRefresher::out_for_ever(),
+    )
+    .expect("the TUI leaves cleanly");
+
+    let frame = screen.last_frame();
+    assert!(
+        frame.contains("spare7@example.com"),
+        "the Account under the cursor is on screen:\n{frame}"
+    );
+    assert!(
+        frame.contains("Headroom"),
+        "and so is the row that says what the columns are — a column somebody \
+         has to scroll up to read is a column that goes unread:\n{frame}"
     );
 }
 

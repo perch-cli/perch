@@ -915,6 +915,42 @@ pub(crate) mod tests {
             .collect()
     }
 
+    /// The Account you are on is the only one left, and Perch has never read a
+    /// figure for it.
+    ///
+    /// Not a Cycle with nowhere to land, which is what "everything is
+    /// exhausted" says, and not one that stayed put because it compared well —
+    /// nothing was compared. Perch cannot see that staying is right, so it says
+    /// which Account and how to get a figure rather than switching onto an
+    /// exhausted one to look busy.
+    ///
+    /// Worth pinning by example, because this is the branch carrying
+    /// `expect("something unexhausted is here or elsewhere")`, and what makes
+    /// that safe is spread over three earlier checks: everything-exhausted is
+    /// caught above, so something is not exhausted; and if it is not `here` it
+    /// is in `elsewhere`, which was just found empty.
+    #[test]
+    fn the_only_account_left_being_one_nothing_was_read_for_is_said_rather_than_switched_off() {
+        let registry = holding(vec![
+            account("here@example.com", vec![]),
+            account("full@example.com", vec![window("5-hour", 100.0)]),
+        ]);
+
+        let refused = cycle(&registry).expect_err("there is nowhere better to go");
+
+        assert_eq!(refused.exit_code(), crate::error::EXIT_NOTHING_TO_DO);
+        let said = refused.to_string();
+        assert!(said.contains("here@example.com"), "which Account: {said}");
+        assert!(
+            said.contains("never observed how full it is"),
+            "and why staying put is not a comparison Perch made: {said}"
+        );
+        assert!(
+            said.contains("perch status --group --refresh"),
+            "and how to get a figure so it can be one: {said}"
+        );
+    }
+
     /// The order a picker shows is the order the choice makes, so the Account
     /// at the top is the one a bare `perch switch` would land on.
     #[test]

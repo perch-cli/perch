@@ -148,9 +148,9 @@ pub fn renew(host: &dyn Host, refresh_token: &str) -> Result<Fresh, Refused> {
     // A refresh token Anthropic has retired comes back as a bad request rather
     // than as an unauthorized one, and where the body agrees it means the same
     // thing here: this Account cannot be renewed and has to be logged into
-    // again. Where the body does not agree, the status is only a 400 — see
-    // [`REVOKED`].
-    let document = understand(response, &[400])?;
+    // again. Where the body does not agree, the status is only a status — see
+    // [`REVOKED`] and [`REFUSALS`].
+    let document = understand(response, REFUSALS)?;
     let now = host.now();
 
     Ok(Fresh {
@@ -211,10 +211,10 @@ fn send(host: &dyn Host, request: &HttpRequest<'_>) -> Result<HttpResponse, Refu
 }
 
 /// OAuth's own word for "this refresh token is no longer one", and the only
-/// thing a 400 from the token endpoint may be read as a Quarantine.
+/// thing a refusal from the token endpoint may be read as a Quarantine.
 ///
-/// A 400 is the status a request gets for being wrong in *any* way, and the
-/// caller acts on this one for ever: [`observe`](crate::observe) turns
+/// A refusal there is the status a request gets for being wrong in *any* way,
+/// and the caller acts on this one for ever: [`observe`](crate::observe) turns
 /// `Refused::Rejected` from a renewal into `Quarantine::RenewalRejected`, which
 /// only a browser login clears. Reading a malformed request, a proxy's own
 /// error page, or a `client_id` Anthropic has changed its mind about as "log in
@@ -222,13 +222,30 @@ fn send(host: &dyn Host, request: &HttpRequest<'_>) -> Result<HttpResponse, Refu
 /// single `perch status --group --refresh` does in one pass.
 const REVOKED: &str = "invalid_grant";
 
+/// The statuses the token endpoint refuses with, every one of them held to
+/// [`REVOKED`] before it is believed.
+///
+/// All three, rather than the 400 Anthropic sends today, because which one a
+/// refusal arrives under is not something Perch gets to decide and the cost of
+/// guessing wrong is terminal. RFC 6749 §5.2 gives `invalid_client` a 401, and
+/// `invalid_client` is a statement about the `client_id` in the request — which
+/// is Perch's, hard-coded at [`CLIENT_ID`], and the same in every renewal it
+/// ever sends. A 401 read as "this Account's refresh token is retired" would
+/// Quarantine every Account in a Group the day Anthropic retires that client
+/// id, and nothing short of a login for each would clear it.
+///
+/// A 401 or 403 whose body *does* say `invalid_grant` still Quarantines, which
+/// is the whole point of asking the body rather than the status.
+const REFUSALS: &[u16] = &[400, 401, 403];
+
 /// The document in a reply, or the reason there is not one.
 ///
-/// `also_rejected` names the statuses this endpoint says "not you" with, over
-/// and above the two every endpoint uses, and it is believed only when the body
-/// agrees: see [`REVOKED`]. No reply body reaches a message either way — what an
-/// endpoint says about a Credential it would not take is not something to print
-/// or to log.
+/// `also_rejected` names the statuses this endpoint says "not you" with, and it
+/// is believed only when the body agrees: see [`REVOKED`]. It *overrides* the
+/// generic reading below rather than adding to it, which is what lets the token
+/// endpoint hold its 401 and 403 to the same evidence as its 400 — see
+/// [`REFUSALS`]. No reply body reaches a message either way: what an endpoint
+/// says about a Credential it would not take is not something to print or log.
 fn understand(response: HttpResponse, also_rejected: &[u16]) -> Result<Value, Refused> {
     if also_rejected.contains(&response.status) {
         return match says_revoked(&response.body) {
@@ -508,6 +525,55 @@ mod tests {
                  for one: {body}"
             );
         }
+    }
+
+    /// The same rule, over every status the token endpoint refuses with rather
+    /// than only the 400 Anthropic sends today.
+    ///
+    /// Which status a refusal arrives under is not Perch's to decide, and the
+    /// cost of guessing wrong is terminal: RFC 6749 §5.2 gives `invalid_client`
+    /// a 401, and `invalid_client` is about the `client_id` in the request —
+    /// Perch's own, the same in every renewal it sends. Read as "this Account's
+    /// refresh token is retired", one such 401 Quarantines every Account in a
+    /// Group in a single `perch status --group --refresh`, and only a login for
+    /// each clears it.
+    #[test]
+    fn a_renewal_refused_without_saying_the_token_is_retired_is_never_terminal() {
+        let refused = |status: u16, body: &str| {
+            understand(
+                HttpResponse {
+                    status,
+                    body: body.to_string(),
+                },
+                REFUSALS,
+            )
+        };
+
+        for status in REFUSALS.iter().copied() {
+            assert!(
+                matches!(refused(status, "{}"), Err(Refused::Unrecognised(_))),
+                "HTTP {status} alone is not the endpoint asking for a Quarantine"
+            );
+            assert_eq!(
+                refused(status, r#"{"error":"invalid_grant"}"#),
+                Err(Refused::Rejected),
+                "and a body that does say so still is, whatever it arrives under"
+            );
+        }
+    }
+
+    /// The read endpoints are the mirror, and must stay that way: there the
+    /// bearer token really is the Account's Credential, so a 401 needs no body
+    /// to corroborate it.
+    #[test]
+    fn a_read_endpoint_still_rejects_on_the_status_alone() {
+        let reply = |status: u16| HttpResponse {
+            status,
+            body: String::new(),
+        };
+
+        assert_eq!(understand(reply(401), &[]), Err(Refused::Rejected));
+        assert_eq!(understand(reply(403), &[]), Err(Refused::Rejected));
     }
 
     #[test]

@@ -132,9 +132,14 @@ pub fn write_path_for(command_line: &str) -> WritePath {
 }
 
 pub fn hex_encode(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+
+    // Written into the buffer rather than formatted into a `String` per byte,
+    // which is a transient allocation for every one of the several thousand a
+    // Credential runs to.
     let mut out = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
-        out.push_str(&format!("{byte:02X}"));
+        let _ = write!(out, "{byte:02X}");
     }
     out
 }

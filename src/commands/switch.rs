@@ -160,15 +160,12 @@ fn decide(
 /// character for character, from here, rather than a second sentence about the
 /// same state.
 pub(crate) fn refuse_a_quarantined_account(registry: &Registry, incoming: &Account) -> Result<()> {
-    let Some(why) = incoming.quarantine else {
-        return Ok(());
-    };
-    Err(why.refusal(
-        &registry.named_for_the_user(incoming.email()),
+    crate::commands::refuse_a_quarantined_account(
+        registry,
         incoming.email(),
         "Nothing was changed — switching to it would make a Credential live \
          that no longer works, and cost you the Account you are on.",
-    ))
+    )
 }
 
 /// The Account a bare `perch switch` would be leaving, which is the one whose
@@ -262,6 +259,20 @@ fn report(
         Captured::Copied { from } => say(
             out,
             &format!("Captured {from}'s live Credential into its own Profile."),
+        )?,
+        // The one case where a Capture was declined rather than found
+        // unnecessary, so it says both what was live and what was spared: the
+        // Account Perch believed was active keeps the Credential it already
+        // held, and the login somebody made outside Perch is about to be
+        // replaced without ever having been filed anywhere.
+        Captured::NotTheirs { outgoing, live } => say(
+            out,
+            &format!(
+                "The live Credential names {live}, not {outgoing}, so it was not \
+                 Captured — {outgoing}'s own Credential is untouched. A login \
+                 made outside Perch is not kept: run `perch add` before \
+                 switching to keep one."
+            ),
         )?,
         // Worth saying, because it is the one case where switching back to that
         // Account will need a login rather than just working.

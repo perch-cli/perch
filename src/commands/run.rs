@@ -331,18 +331,12 @@ fn the_default_profile(host: &dyn Host) -> Result<Store> {
 /// anything, and a refusal arriving after that is one the user reads with the
 /// view they were choosing in already gone.
 pub(crate) fn refuse_a_quarantined_account(registry: &Registry, email: &str) -> Result<()> {
-    let account = registry
-        .account(email)
-        .expect("resolution named an Account Perch holds");
-    let Some(why) = account.quarantine else {
-        return Ok(());
-    };
-    Err(why.refusal(
-        &registry.named_for_the_user(email),
+    crate::commands::refuse_a_quarantined_account(
+        registry,
         email,
         "Nothing was launched — the client would open on an Account it cannot \
          authenticate as and ask you to log in.",
-    ))
+    )
 }
 
 /// What is about to happen, and what is not.
