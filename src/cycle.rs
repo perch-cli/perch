@@ -437,7 +437,7 @@ pub fn choose(
 
     if ranked.iter().all(|ranked| ranked.headroom.is_exhausted()) {
         return Err(PerchError::NoCandidate(everyone_is_exhausted(
-            registry, scope, &ranked, now,
+            registry, scope, &accounts, &ranked, now,
         )));
     }
 
@@ -728,6 +728,7 @@ fn nobody_is_a_candidate(scope: &Scope, accounts: &[&Account]) -> String {
 fn everyone_is_exhausted(
     registry: &Registry,
     scope: &Scope,
+    accounts: &[&Account],
     ranked: &[Ranked],
     now: DateTime<Utc>,
 ) -> String {
@@ -766,9 +767,24 @@ fn everyone_is_exhausted(
         ));
     }
 
+    // What the filter took out before any of this was measured. Without it the
+    // refusal says "every Account in Group `work` is exhausted" about a Group
+    // holding two Accounts with full headroom that happen to be disabled, and
+    // sends the user off to wait for a quota reset when the fix is `perch
+    // enable`. Its sibling refusal counts them, and so does the Reserve; this
+    // was the one that dropped them.
+    let set_aside = out_of_the_running(accounts);
+    let (every, also) = match set_aside.is_empty() {
+        true => (String::new(), String::new()),
+        false => (
+            " Cycling may choose".to_string(),
+            format!(" The others are out of the running ({set_aside})."),
+        ),
+    };
+
     format!(
-        "Every Account in {} is exhausted, so there is nowhere useful to \
-         Switch. Nothing was changed.\n{waiting}",
+        "Every Account in {}{every} is exhausted, so there is nowhere useful \
+         to Switch. Nothing was changed.{also}\n{waiting}",
         scope.described(),
     )
 }
