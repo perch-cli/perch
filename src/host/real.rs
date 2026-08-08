@@ -45,9 +45,25 @@ fn curl_bin() -> Result<PathBuf, HostError> {
 
 /// The options that are the same for every request, and none of which is a
 /// secret. Everything that is one goes in on stdin instead.
-const CURL_ARGS: [&str; 6] = [
+///
+/// The two timeouts are what make a hung endpoint a *refusal* rather than a
+/// hang. Perch has no thread it can abandon a request from: `perch watch` waits
+/// out every read in its round, and `perch tui` refuses Enter and `r` for as
+/// long as a Refresh is outstanding. A connection that is open and silent would
+/// otherwise stop both indefinitely — which is worse than the network being
+/// down, because ADR 0018 has an answer for that one and no answer for a loop
+/// that never comes back to be told.
+///
+/// Generous rather than tight: what is on the other side is a request Perch
+/// would rather complete than retry, and both numbers are far longer than a
+/// reply that is coming ever takes.
+const CURL_ARGS: [&str; 10] = [
     "--silent",
     "--show-error",
+    "--connect-timeout",
+    "10",
+    "--max-time",
+    "30",
     "--write-out",
     "\n%{http_code}",
     "--config",
