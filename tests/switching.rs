@@ -199,6 +199,58 @@ fn the_credential_the_outgoing_account_rotated_to_is_captured_before_it_is_repla
     );
 }
 
+/// Perch is not the only thing that writes the Default Profile. Somebody who
+/// runs `claude` and logs in directly leaves Perch's record of who is active
+/// behind, and the live Credential is then a stranger's. Capturing it into the
+/// Profile of the Account Perch *believes* is active would overwrite that
+/// Account's own Credential with somebody else's — and a later Switch back
+/// would make the stranger's Credential live under the Account's name, so
+/// Claude Code would act as one person while displaying another.
+#[test]
+fn a_live_credential_belonging_to_a_login_made_outside_perch_is_not_captured() {
+    let host = machine_with_two_accounts();
+    let held = stored_credential(&host, EMAIL).expect("the first Account has a Credential");
+
+    // A login made outside Perch: a Credential Perch never filed, and the
+    // Identity Claude Code writes beside it naming whose it is.
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, THIRD_CREDENTIAL);
+    host.set_file(IDENTITY_PATH, THIRD_IDENTITY_FILE);
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect("the Switch runs");
+    assert_eq!(
+        stored_credential(&host, EMAIL).as_deref(),
+        Some(held.as_str()),
+        "{EMAIL}'s own Credential is untouched, not overwritten with {THIRD_EMAIL}'s"
+    );
+    assert!(
+        printed.contains(THIRD_EMAIL) && printed.contains("not Captured"),
+        "and the Switch says whose the live Credential was: {printed}"
+    );
+}
+
+/// The mirror, so the guard above cannot be satisfied by never Capturing at
+/// all: an Identity that says nothing is no evidence against, and a Rotation
+/// made under a Profile Claude Code has never written an Identity into must
+/// still be kept.
+#[test]
+fn a_live_credential_with_no_identity_beside_it_is_captured_rather_than_left() {
+    let host = machine_with_two_accounts();
+    let rotated = CREDENTIAL.replace("sk-ant-ort01-test", "sk-ant-ort01-rotated");
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, &rotated);
+    host.remove_file(Path::new(IDENTITY_PATH))
+        .expect("the identity file was there to remove");
+
+    run_switch(&host, SECOND_EMAIL).0.expect("the Switch runs");
+
+    assert_eq!(
+        stored_credential(&host, EMAIL).as_deref(),
+        Some(rotated.as_str()),
+        "a Rotation is lost if an absent Identity is read as evidence against"
+    );
+}
+
 /// An identity file either side of its `oauthAccount` block — the whole of it
 /// that does not belong to the Account.
 fn around_the_block(text: &str) -> (String, String) {

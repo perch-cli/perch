@@ -36,6 +36,15 @@ pub enum Captured {
     Copied { from: String },
     /// Nothing was live to Capture — Claude Code is logged out.
     NothingLive,
+    /// Something was live, and the Identity beside it names somebody other than
+    /// the Account Perch believes is active — so it was left where it was rather
+    /// than filed under a Profile it does not belong to.
+    NotTheirs {
+        /// The Account it was about to be written into.
+        outgoing: String,
+        /// Who the Identity beside the live Credential names instead.
+        live: String,
+    },
     /// Perch holds no active Account, so there was nothing to Capture into.
     NoOutgoing,
 }
@@ -249,6 +258,25 @@ fn prepare(
 }
 
 /// Step one: the live Credential goes back where it belongs.
+///
+/// "Where it belongs" is the part worth being careful about. Perch is not the
+/// only thing that writes the Default Profile: somebody who runs `claude` and
+/// logs in directly leaves Perch's record of who is active behind, and the live
+/// Credential then belongs to a login Perch never made. Writing it into the
+/// outgoing Account's Profile would destroy that Account's own Credential — and
+/// worse than lose it, because a later Switch back would make the stranger's
+/// Credential live while the Identity was patched to name the Account Perch
+/// thinks it is, so Claude Code would act as one person while displaying
+/// another.
+///
+/// The evidence is the machine's own, and the same [`already_landed`] and
+/// [`only_off_a_credential_that_is_theirs`] read: Claude Code writes the
+/// Credential and the Identity beside it together, so a `.claude.json` naming
+/// the outgoing Account says the live Credential is theirs. An Identity that is
+/// absent or cannot be read is *not* evidence against, and still Captures —
+/// losing a Rotation is the failure this step exists to prevent.
+///
+/// [`only_off_a_credential_that_is_theirs`]: crate::observe
 fn capture(host: &dyn Host, prepared: &Prepared, outgoing: Option<&Account>) -> Result<Captured> {
     let Some(outgoing) = outgoing else {
         return Ok(Captured::NoOutgoing);
@@ -258,6 +286,15 @@ fn capture(host: &dyn Host, prepared: &Prepared, outgoing: Option<&Account>) -> 
     let Some(live) = live else {
         return Ok(Captured::NothingLive);
     };
+
+    if let Ok(Some(identity)) = probe::read_identity(host, &prepared.store, &prepared.version)
+        && !identity.email.eq_ignore_ascii_case(outgoing.email())
+    {
+        return Ok(Captured::NotTheirs {
+            outgoing: outgoing.email().to_string(),
+            live: identity.email,
+        });
+    }
 
     profile::store_credential(host, &outgoing.store(host)?, live.as_str())?;
 
@@ -396,6 +433,10 @@ fn only_captured(captured: &Captured, outgoing: Option<&Account>, incoming: &Acc
         (Captured::Copied { from }, _) => format!(
             "{from}'s live Credential was Captured into its own Profile first, \
              so nothing has been lost."
+        ),
+        (Captured::NotTheirs { outgoing, live }, _) => format!(
+            "The live Credential belongs to {live} rather than to {outgoing}, so \
+             it was left where it was and {outgoing}'s Profile is untouched."
         ),
         (_, Some(outgoing)) => format!("{}'s Profile is unchanged.", outgoing.email()),
         (_, None) => String::new(),
