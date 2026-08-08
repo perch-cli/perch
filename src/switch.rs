@@ -471,10 +471,6 @@ fn live_but_unnamed(prepared: &Prepared, outgoing: Option<&Account>, incoming: &
          {incoming} while displaying {named}.\n\
          Run `perch switch {incoming}` again to finish the job.",
         incoming = incoming.email(),
-        file = display(&prepared.store.identity_file),
+        file = prepared.store.identity_file.display(),
     )
-}
-
-fn display(path: &Path) -> String {
-    path.display().to_string()
 }

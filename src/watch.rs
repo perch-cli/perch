@@ -646,13 +646,6 @@ impl Round {
     }
 }
 
-/// A message from anywhere else, as one line.
-///
-/// The refusals the Cycle writes are written to be read on a terminal by
-/// somebody who just typed the command, so they run to two or three lines. A
-/// decision log is a line per decision — a reason that wraps onto its own line
-/// stops being attached to the decision it explains the moment two rounds are
-/// read together.
 /// A hold that happened before there was a [`Round`] to hold.
 ///
 /// The loop cannot always get as far as reading the registry — another `perch`
@@ -674,6 +667,13 @@ pub fn held_line(why: &str, retrying_in: u64, now: DateTime<Utc>) -> String {
     )
 }
 
+/// A message from anywhere else, as one line.
+///
+/// The refusals the Cycle writes are written to be read on a terminal by
+/// somebody who just typed the command, so they run to two or three lines. A
+/// decision log is a line per decision — a reason that wraps onto its own line
+/// stops being attached to the decision it explains the moment two rounds are
+/// read together.
 fn one_line(said: &str) -> String {
     said.split_whitespace().collect::<Vec<_>>().join(" ")
 }

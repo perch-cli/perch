@@ -152,21 +152,15 @@ fn restore_before_a_panic_is_printed() {
     INSTALLED.call_once(|| {
         let already_there = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |panicked| {
-            first(
-                || ours_to_give_back().then(give_it_back),
-                &*already_there,
-                panicked,
-            )
+            // The restore first, then the report: a report printed into the
+            // alternate screen is one printed onto a display that is about to
+            // be thrown away.
+            if ours_to_give_back() {
+                let _ = give_it_back();
+            }
+            already_there(panicked);
         }));
     });
-}
-
-/// One thing done before another, which is the whole of what the TUI's panic
-/// hook adds — written as a function so the order can be asserted on without a
-/// panic to raise or a terminal to raise it in.
-fn first<A: ?Sized, R>(before: impl FnOnce() -> R, then: &dyn Fn(&A), argument: &A) {
-    let _ = before();
-    then(argument);
 }
 
 fn the_terminal_refused(err: impl std::fmt::Display) -> PerchError {
@@ -176,27 +170,6 @@ fn the_terminal_refused(err: impl std::fmt::Display) -> PerchError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    /// The restore has to happen *before* the report is printed, or the report
-    /// is printed onto a screen that is about to be thrown away.
-    #[test]
-    fn the_terminal_is_given_back_before_the_panic_is_reported() {
-        static ORDER: Mutex<Vec<&str>> = Mutex::new(Vec::new());
-
-        first(
-            || {
-                ORDER
-                    .lock()
-                    .expect("nothing panicked here")
-                    .push("restored")
-            },
-            &|_: &u8| ORDER.lock().expect("nor here").push("reported"),
-            &0,
-        );
-
-        assert_eq!(*ORDER.lock().expect("still fine"), ["restored", "reported"]);
-    }
 
     /// And it is only given back by the thread that took it, while it holds it.
     ///

@@ -31,20 +31,13 @@ pub fn object_at<'a>(contents: &'a str, key: &str) -> Option<&'a str> {
     value_at(contents, key).filter(|value| value.starts_with('{'))
 }
 
-/// The same document with the object value of `key` replaced by `block`, and
-/// every byte outside that value identical. A key that is not there, or does
-/// not hold an object, is not written.
+/// The same document with `key` holding `value` — replacing what it held, or
+/// writing it as the document's first member where it held nothing. Every byte
+/// outside that value is identical.
 ///
-/// The block is written at the indentation of the key that introduces it,
+/// The value is written at the indentation of the key that introduces it,
 /// whatever indentation it arrived with, so a block copied between two files
 /// does not step further right each time.
-pub fn replace_object_at(contents: &str, key: &str, block: &str) -> Option<String> {
-    object_at(contents, key)?;
-    set_value_at(contents, key, block)
-}
-
-/// The same document with `key` holding `value` — replacing what it held, or
-/// writing it as the document's first member where it held nothing.
 ///
 /// Written first rather than last because that is the one position needing no
 /// commas moved: the member the file already opens with keeps its comma, and
@@ -343,7 +336,7 @@ mod tests {
     #[test]
     fn everything_outside_the_value_survives_byte_for_byte() {
         let patched =
-            replace_object_at(DOCUMENT, "block", "{\n  \"name\": \"someone-else\"\n}").unwrap();
+            set_value_at(DOCUMENT, "block", "{\n  \"name\": \"someone-else\"\n}").unwrap();
 
         assert!(patched.contains(r#""name": "someone-else""#));
         assert!(!patched.contains(r#""name": "someone""#));
@@ -360,7 +353,7 @@ mod tests {
     fn a_block_is_written_at_the_indentation_of_the_key_that_introduces_it() {
         // What taking a block out of another file hands over: indented already,
         // for a document that is not this one.
-        let patched = replace_object_at(
+        let patched = set_value_at(
             DOCUMENT,
             "block",
             "{\n        \"name\": \"someone-else\"\n      }",
@@ -387,7 +380,6 @@ mod tests {
         assert_eq!(object_at(r#"{"projects": {}}"#, "block"), None);
         assert_eq!(object_at(r#"{"block": "a string"}"#, "block"), None);
         assert_eq!(object_at("not json at all", "block"), None);
-        assert_eq!(replace_object_at(r#"{"a": 1}"#, "block", "{}"), None);
     }
 
     /// `.claude.json` keeps the person's state in values of every kind — a flag

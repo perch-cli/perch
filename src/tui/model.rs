@@ -239,9 +239,12 @@ impl Model {
     /// Where an Account sits in the listing now, or `None` if it is no longer
     /// held at all.
     fn row_of(&self, email: &str) -> Option<usize> {
-        self.accounts()
+        // Over `order` rather than over `accounts()`, which allocates the whole
+        // listing to find one position — and this runs on every landed Refresh
+        // and every Switch.
+        self.order
             .iter()
-            .position(|account| account.email() == email)
+            .position(|at| self.registry.accounts[*at].email() == email)
     }
 
     /// Which Accounts a Refresh covers: the ones on screen, and no others.

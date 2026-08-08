@@ -34,10 +34,12 @@ pub fn run(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         ));
     }
 
-    // Whatever adoption has to say belongs in the scrollback, where it can be
-    // read afterwards — not under an alternate screen that is about to cover
-    // it and then be thrown away.
     let registry = adopt::ensure_adopted(host)?;
+    // Anything already written belongs in the scrollback, where it can be read
+    // afterwards — not under an alternate screen about to cover it and then be
+    // thrown away. Adoption itself says nothing here: it takes no writer, and
+    // its remarks go out through `Host::note`. This is about whatever the
+    // caller had written before handing the stream over.
     out.flush().map_err(write_failed)?;
 
     let mut refresher = InAThread::new();

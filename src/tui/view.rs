@@ -59,9 +59,13 @@ pub fn render(frame: &mut Frame, model: &Model) {
     .areas(frame.area());
 
     render_bar(frame, model, bar);
-    match model.tab {
-        Tab::Accounts => render_accounts(frame, model, body),
-        Tab::Utilization => render_utilization(frame, model, body),
+    // Asked once rather than at the head of each tab: holding no Accounts is a
+    // fact about the machine, not about which view is showing, and both tabs
+    // answered it with the same three lines.
+    match (model.accounts().is_empty(), model.tab) {
+        (true, _) => render_nothing_held(frame, body),
+        (false, Tab::Accounts) => render_accounts(frame, model, body),
+        (false, Tab::Utilization) => render_utilization(frame, model, body),
     }
     frame.render_widget(
         Paragraph::new(notes.into_iter().map(Line::from).collect::<Vec<Line<'_>>>()),
@@ -143,10 +147,6 @@ const HEADROOM: &str = "Headroom";
 /// so the ranking `perch switch` makes is visible rather than hidden.
 fn render_accounts(frame: &mut Frame, model: &Model, area: Rect) {
     let accounts = model.accounts();
-    if accounts.is_empty() {
-        return render_nothing_held(frame, area);
-    }
-
     let cells: Vec<[String; ACCOUNT_COLUMNS]> = accounts
         .iter()
         .map(|account| {
@@ -212,10 +212,6 @@ fn render_accounts(frame: &mut Frame, model: &Model, area: Rect) {
 /// actually reported.
 fn render_utilization(frame: &mut Frame, model: &Model, area: Rect) {
     let accounts = model.accounts();
-    if accounts.is_empty() {
-        return render_nothing_held(frame, area);
-    }
-
     // One column for the Headroom of every Account on screen, so the figures
     // line up down the view and the eye can run over them rather than hunting
     // for each one at the end of a different-length address.
