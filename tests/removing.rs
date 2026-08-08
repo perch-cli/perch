@@ -575,3 +575,36 @@ fn an_answer_that_arrives_after_another_perch_took_the_lock_removes_nothing() {
         "nothing was made live in the Default Profile either"
     );
 }
+
+/// The refusals above run before the question, and the question is the one wait
+/// in Perch with no bound on it. A client started while somebody was deciding
+/// was not running when the check ran — and the very next thing this command
+/// does is delete that Profile's Credential and then the Profile itself, out
+/// from under a session mid-task.
+///
+/// `perch purge` and `perch relogin` both ask twice over exactly this window.
+/// `perch remove` is the only command that deletes an Account's Credential, and
+/// it was the one asking once.
+#[test]
+fn a_client_that_starts_while_the_question_is_answered_stops_the_removal() {
+    let host = machine_with_two_accounts()
+        .with_answers(&["y"])
+        // The fake performs this the first time Perch waits, which is the
+        // confirmation: the terminal has to take some time for there to be a
+        // window at all.
+        .with_a_terminal_that_takes(1_000)
+        .once_while_waiting(|host| a_run_against(host, EMAIL, host.now()));
+
+    let (result, printed) = run_remove(&host, EMAIL);
+
+    let refused = result.expect_err("something started holding that Profile");
+    assert_eq!(refused.exit_code(), EXIT_PROFILE_LIVE, "{refused}");
+    assert!(
+        holds(&host, EMAIL),
+        "and nothing was removed, however the question was answered: {printed}"
+    );
+    assert!(
+        credential_of(&host, EMAIL).is_some(),
+        "the Credential the client is holding is still there"
+    );
+}
