@@ -207,51 +207,49 @@ impl PerchError {
     /// pieces of knowledge: the failure belongs to whatever failed, and what it
     /// left belongs to whatever was running the sequence. The kind is kept, so
     /// the exit code a script branches on is still the one the failure earned.
-    pub fn with_note(self, note: &str) -> PerchError {
-        match self {
-            PerchError::ProbeRefused {
-                assumption,
-                detail,
-                version,
-            } => PerchError::ProbeRefused {
-                assumption,
-                detail: format!("{detail}\n\n{note}"),
-                version,
-            },
-            PerchError::KeychainUnavailable(message) => {
-                PerchError::KeychainUnavailable(format!("{message}\n\n{note}"))
+    pub fn with_note(mut self, note: &str) -> PerchError {
+        // Every variant that carries its own sentence keeps its kind, so the
+        // exit code a script branches on survives the note — including
+        // [`PerchError::Busy`], where it matters most: a lock somebody else is
+        // holding is the one failure that resolves on its own, and a Remove or
+        // a Relogin noting what it left behind must not cost the scheduler
+        // reading the code the fact that retrying works.
+        match self.message_mut() {
+            Some(message) => {
+                message.push_str(&format!("\n\n{note}"));
+                self
             }
-            PerchError::NotUnderstood(message) => {
-                PerchError::NotUnderstood(format!("{message}\n\n{note}"))
-            }
-            PerchError::NotFound(message) => PerchError::NotFound(format!("{message}\n\n{note}")),
-            PerchError::Conflict(message) => PerchError::Conflict(format!("{message}\n\n{note}")),
-            PerchError::Invalid(message) => PerchError::Invalid(format!("{message}\n\n{note}")),
-            PerchError::NothingToDo(message) => {
-                PerchError::NothingToDo(format!("{message}\n\n{note}"))
-            }
-            // Kept as itself for the reason the variant exists: a lock somebody
-            // else is holding is the one failure that resolves on its own, and
-            // a Remove or a Relogin that notes what it left behind must not
-            // cost the scheduler reading the code the fact that retrying works.
-            PerchError::Busy(message) => PerchError::Busy(format!("{message}\n\n{note}")),
-            PerchError::ProfileLive(message) => {
-                PerchError::ProfileLive(format!("{message}\n\n{note}"))
-            }
-            PerchError::NoCandidate(message) => {
-                PerchError::NoCandidate(format!("{message}\n\n{note}"))
-            }
-            PerchError::NotInterchangeable(message) => {
-                PerchError::NotInterchangeable(format!("{message}\n\n{note}"))
-            }
-            PerchError::Quarantined { why, said } => PerchError::Quarantined {
-                why,
-                said: format!("{said}\n\n{note}"),
-            },
             // The rest carry structure rather than a message. They all exit as
             // a general failure already, so folding them into one loses the
             // shape and nothing a caller could act on.
-            other => PerchError::Other(format!("{other}\n\n{note}")),
+            None => PerchError::Other(format!("{self}\n\n{note}")),
+        }
+    }
+
+    /// The one sentence a variant carries, for the things that add to it rather
+    /// than replace it.
+    ///
+    /// `None` is a variant built out of fields instead — a path and a reason,
+    /// say — which has no single sentence to append to. Written once because
+    /// thirteen arms spelling out `Variant(m) => Variant(format!("{m}…"))` is
+    /// thirteen chances for one of them to be spelled differently, and the
+    /// difference would be an exit code silently changing under a note.
+    fn message_mut(&mut self) -> Option<&mut String> {
+        match self {
+            PerchError::ProbeRefused { detail, .. } => Some(detail),
+            PerchError::Quarantined { said, .. } => Some(said),
+            PerchError::KeychainUnavailable(message)
+            | PerchError::NotUnderstood(message)
+            | PerchError::NotFound(message)
+            | PerchError::Conflict(message)
+            | PerchError::Invalid(message)
+            | PerchError::NothingToDo(message)
+            | PerchError::Busy(message)
+            | PerchError::ProfileLive(message)
+            | PerchError::NoCandidate(message)
+            | PerchError::NotInterchangeable(message)
+            | PerchError::Other(message) => Some(message),
+            _ => None,
         }
     }
 
