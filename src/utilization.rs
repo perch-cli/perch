@@ -134,6 +134,30 @@ fn windows_json(cached: &CachedUtilization, now: DateTime<Utc>) -> Vec<serde_jso
         .collect()
 }
 
+/// A percentage as every surface prints one, without the two roundings that
+/// say the opposite of what is true.
+///
+/// `{:.0}` rounds to nearest, so 0.4 renders as `0` and 99.6 as `100`. Both
+/// ends of that are read as a state rather than as a number: an Account with
+/// 0.4% headroom is not exhausted and is perfectly choosable, but "0% headroom"
+/// in the sentence explaining why Perch just switched to it reads as a mistake.
+/// The mirror is worse — 99.6% *used* printed as "100% used" reads as an
+/// Account that is finished when it is one the watcher is still deciding about.
+///
+/// So the two edges say which side of the boundary they are on and leave the
+/// exact figure, which nobody is acting on at that precision, unsaid. Only the
+/// open interval is bent: a real 0 and a real 100 are states, and they still
+/// print as themselves.
+pub fn percentage(value: f64) -> String {
+    if value > 0.0 && value < 1.0 {
+        return "<1".to_string();
+    }
+    if value > 99.0 && value < 100.0 {
+        return ">99".to_string();
+    }
+    format!("{value:.0}")
+}
+
 /// "just now", "3m ago", "2h ago", "4d ago".
 pub fn age_phrase(observed_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
     let seconds = (now - observed_at).num_seconds();
@@ -213,5 +237,28 @@ mod tests {
             reset_phrase(at(11, 0), at(12, 0)),
             "2026-08-04 11:00 UTC (any moment now)"
         );
+    }
+
+    /// `{:.0}` rounds to nearest, and both ends of that round into a word
+    /// rather than a number: "0% headroom" reads as exhausted and "100% used"
+    /// reads as finished, about Accounts that are neither.
+    #[test]
+    fn a_percentage_never_rounds_into_a_state_the_account_is_not_in() {
+        assert_eq!(percentage(0.4), "<1", "0.4% headroom is not none");
+        assert_eq!(percentage(0.999), "<1");
+        assert_eq!(percentage(99.6), ">99", "99.6% used is not full");
+        assert_eq!(percentage(99.0001), ">99");
+
+        // The two that really are states still say so.
+        assert_eq!(percentage(0.0), "0");
+        assert_eq!(percentage(100.0), "100");
+
+        // And everything between rounds as it always did.
+        assert_eq!(percentage(1.0), "1");
+        assert_eq!(percentage(42.4), "42");
+        // Half-to-even, which is what `{:.0}` has always done here.
+        assert_eq!(percentage(42.5), "42");
+        assert_eq!(percentage(43.5), "44");
+        assert_eq!(percentage(99.0), "99");
     }
 }

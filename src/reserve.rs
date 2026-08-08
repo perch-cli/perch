@@ -109,10 +109,11 @@ impl<'a> Reserve<'a> {
     pub fn lines(&self, now: DateTime<Utc>) -> Vec<String> {
         let mut lines = vec![match self.best() {
             Some((account, percent)) => format!(
-                "Reserve: {} of {} {} Headroom, the best {percent:.0}% left ({})",
+                "Reserve: {} of {} {} Headroom, the best {}% left ({})",
                 self.with_headroom.len(),
                 accounts(self.candidates.len()),
                 verb(self.with_headroom.len()),
+                crate::utilization::percentage(percent),
                 observed(account, now),
             ),
             // Nothing was read to reach this one: being Disabled or Quarantined
@@ -207,7 +208,8 @@ impl<'a> Reserve<'a> {
             // percentages of the same window an inch apart, and the reader is
             // not asked to tell them apart by context.
             lines.push(format!(
-                "{kind:<8} emptiest {used_percent:>3.0}% used across {} ({})",
+                "{kind:<8} emptiest {:>3}% used across {} ({})",
+                crate::utilization::percentage(used_percent),
                 accounts(read),
                 observed(account, now),
             ));

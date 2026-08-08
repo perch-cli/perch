@@ -226,7 +226,11 @@ impl Fullest {
     }
 
     fn as_a_clause(&self) -> String {
-        format!("{:.0}% used, fullest {}", self.used_percent, self.window)
+        format!(
+            "{}% used, fullest {}",
+            crate::utilization::percentage(self.used_percent),
+            self.window
+        )
     }
 }
 
@@ -392,7 +396,7 @@ pub fn set_aside(
         } else {
             match &candidate.fullest {
                 Some(fullest) if fullest.used_percent > f64::from(policy.ceiling()) => format!(
-                    "{} is at {:.0}% used and nothing over {}% is worth moving to",
+                    "{} is at {}% used and nothing over {}% is worth moving to",
                     candidate.named,
                     fullest.used_percent,
                     policy.ceiling(),

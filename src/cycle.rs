@@ -247,19 +247,20 @@ impl Headroom {
             return None;
         };
         let age = utilization::age_phrase(*observed_at, now);
+        let percent = utilization::percentage(*percent);
         Some(match (strategy, resets_at) {
             (Strategy::MostHeadroom, _) => format!(
-                "{percent:.0}% headroom, which is true of every one of its Quota \
+                "{percent}% headroom, which is true of every one of its Quota \
                  Windows — {fullest_window} is its fullest, as of {age}"
             ),
             (Strategy::SoonestReset, Some(at)) => format!(
-                "{percent:.0}% headroom, and the window that leaves it least — \
+                "{percent}% headroom, and the window that leaves it least — \
                  {fullest_window} — resets at {}, as of {age}",
                 utilization::reset_phrase(*at, now),
             ),
             // Ranked on its room, because that is what there was to rank it on.
             (Strategy::SoonestReset, None) => format!(
-                "{percent:.0}% headroom, which is true of every one of its Quota \
+                "{percent}% headroom, which is true of every one of its Quota \
                  Windows — {fullest_window} is its fullest — and no cached \
                  figure says when that one comes back, as of {age}"
             ),
@@ -584,7 +585,7 @@ pub fn out_of_the_running(accounts: &[&Account]) -> String {
 /// a number: "no figure" and "plenty of room" are opposite pieces of advice.
 pub fn headroom_phrase(account: &Account) -> String {
     match headroom_of(account) {
-        Headroom::Room { percent, .. } => format!("{percent:.0}%"),
+        Headroom::Room { percent, .. } => format!("{}%", utilization::percentage(percent)),
         Headroom::Exhausted { .. } => "exhausted".to_string(),
         Headroom::Unobserved => "never observed".to_string(),
     }
@@ -633,7 +634,8 @@ pub fn headroom_in_full(account: &Account, now: DateTime<Utc>) -> String {
             observed_at,
             ..
         } => format!(
-            "{percent:.0}%  ({fullest_window} is its fullest, as of {})",
+            "{}%  ({fullest_window} is its fullest, as of {})",
+            utilization::percentage(percent),
             utilization::age_phrase(observed_at, now)
         ),
         // The rows underneath say which window is full and when it comes back,
