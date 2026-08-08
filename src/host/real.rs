@@ -284,7 +284,32 @@ impl Host for RealHost {
     }
 
     fn env_var(&self, key: &str) -> Option<String> {
-        std::env::var(key).ok().filter(|value| !value.is_empty())
+        // Read as bytes and converted here, rather than `std::env::var`, so a
+        // value that is present and not text is told apart from one that is not
+        // there. `var().ok()` folds them together, and the two mean opposite
+        // things to every caller: `CLAUDE_CONFIG_DIR` read as unset sends a
+        // Credential to `~/.claude` instead of to the directory somebody
+        // pointed at, and `PERCH_HOME` read as unset puts Perch's own state
+        // somewhere they did not ask for.
+        //
+        // Still `None`, because there is nothing usable to hand back — a path
+        // Perch cannot spell cannot be joined or compared — but said out loud,
+        // because being ignored silently is what makes it a mystery rather than
+        // a mistake.
+        let held = std::env::var_os(key)?;
+        if held.is_empty() {
+            return None;
+        }
+        match held.into_string() {
+            Ok(value) => Some(value),
+            Err(_) => {
+                self.note(&format!(
+                    "{key} is set to something that is not text, so Perch cannot \
+                     read it and is carrying on as though it were unset."
+                ));
+                None
+            }
+        }
     }
 
     fn platform(&self) -> Platform {

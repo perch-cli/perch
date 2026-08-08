@@ -250,6 +250,14 @@ pub trait Host {
     /// allowed by exactly this path (ADR 0003).
     fn current_dir(&self) -> Result<PathBuf, HostError>;
 
+    /// What a variable is set to, or `None` for one that is unset, empty, or
+    /// set to something that is not text.
+    ///
+    /// Those last two are folded in with "unset" because there is nothing
+    /// usable to hand back either way — every caller here wants a path or a
+    /// name, and one Perch cannot spell cannot be joined or compared. A value
+    /// that was *there* and could not be read is a remark on the way past, so
+    /// being ignored is a mistake somebody can see rather than a mystery.
     fn env_var(&self, key: &str) -> Option<String>;
 
     /// Which platform this is, which is what decides where a Credential is
