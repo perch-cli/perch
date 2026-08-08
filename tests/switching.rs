@@ -733,3 +733,43 @@ fn a_client_that_starts_during_the_lock_wait_still_stops_the_switch() {
         "and nothing was written"
     );
 }
+
+/// Claude Code writes `.claude.json` the first time it is run — onboarding, a
+/// theme, a project entry — and writes the `oauthAccount` block into it only
+/// when somebody logs in through it. A machine restored from an Export has
+/// never logged in through Claude Code, so "the file is there and the block is
+/// not" is an ordinary state rather than drift.
+///
+/// Refusing it wedged the Switch permanently rather than failing it: the
+/// Credential is already live and the registry already records the Account by
+/// the time the Identity is patched, so every retry got exactly this far and
+/// stopped in the same place. The note advising another run was advice that
+/// could never work, and hand-editing `.claude.json` was the only way out.
+#[test]
+fn a_switch_finishes_against_a_claude_json_that_has_no_identity_block_yet() {
+    let host = machine_with_two_accounts();
+    host.set_file(
+        Path::new(IDENTITY_PATH),
+        r#"{"numStartups": 41, "theme": "dark"}"#,
+    );
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect("a file with no block is a file to write one into");
+    let identity = host
+        .file(Path::new(IDENTITY_PATH))
+        .expect("the file is still there");
+    assert!(
+        identity.contains(SECOND_EMAIL),
+        "and it comes to name the Account whose Credential is now live: {identity}"
+    );
+    assert!(
+        identity.contains(r#""numStartups": 41"#) && identity.contains(r#""theme": "dark""#),
+        "with every other member of it untouched (ADR 0001): {identity}"
+    );
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(SECOND_EMAIL),
+        "{printed}"
+    );
+}
