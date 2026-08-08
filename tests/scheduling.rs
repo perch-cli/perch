@@ -18,8 +18,8 @@ use chrono::Duration;
 use common::*;
 use perch::anthropic::{PROFILE_URL, USAGE_URL};
 use perch::error::{
-    EXIT_HELD, EXIT_INVALID, EXIT_NO_CANDIDATE, EXIT_NOT_INTERCHANGEABLE, EXIT_NOTHING_TO_DO,
-    EXIT_OK,
+    EXIT_HELD, EXIT_INVALID, EXIT_NO_CANDIDATE, EXIT_NOT_FOUND, EXIT_NOT_INTERCHANGEABLE,
+    EXIT_NOTHING_TO_DO, EXIT_OK,
 };
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
@@ -336,5 +336,58 @@ fn a_switch_the_machine_turned_away_exits_fifteen_and_says_so() {
         credential_of(&host, EMAIL).as_deref(),
         Some(ACTIVE),
         "least of all the Profile the client is holding"
+    );
+}
+
+/// Permission is read on every check rather than once, and the Account it is
+/// read about is the active one — so a machine that records nobody active has
+/// no check to make. Saying which command makes one active matters here more
+/// than elsewhere: whatever scheduled this is not watching the output.
+#[test]
+fn a_check_with_nobody_active_says_there_is_nothing_to_watch() {
+    let host = checked(&[10.0], &[10.0]);
+    let mut registry = registry_of(&host);
+    registry.active = None;
+    save_registry(&host, &registry);
+
+    let (result, printed) = run_watch_once(&host);
+
+    let refused = result.expect_err("there is no Account to watch");
+    assert_eq!(refused.exit_code(), EXIT_NOT_FOUND, "{refused}");
+    assert!(
+        refused.to_string().contains("nothing to watch"),
+        "{refused}"
+    );
+    assert!(
+        refused.to_string().contains("perch switch"),
+        "and it names what makes one active: {refused}"
+    );
+    assert_eq!(printed, "", "nothing is decided, so nothing is logged");
+}
+
+/// A check reads a figure and writes it down, and the write can fail on its
+/// own. What the round decides is still made on the figure it just read — that
+/// one is current whatever happened to the record — and the user is told, once,
+/// that the next command will show the older figure (ADR 0018).
+#[test]
+fn figures_that_were_read_but_could_not_be_kept_are_said_rather_than_swallowed() {
+    let host = checked(&[95.0], &[10.0]).with_unwritable_file(REGISTRY_PATH, "read-only");
+
+    let (result, printed) = run_watch_once(&host);
+
+    assert!(
+        host.notes()
+            .iter()
+            .any(|note| note.contains("could not write them to its own record")),
+        "the degradation is said rather than swallowed: {:?}\n{printed}",
+        host.notes()
+    );
+    let failed = result.expect_err("a record that will not take the Switch stops the check");
+    // Rendered as the Host built it rather than as the constant spells it: the
+    // registry is reached by joining, so the separators are the platform's.
+    let registry = perch::registry::registry_path(&host).expect("home is known");
+    assert!(
+        failed.to_string().contains(&registry.display().to_string()),
+        "and what could not be written is named: {failed}"
     );
 }

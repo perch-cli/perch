@@ -12,7 +12,8 @@ mod common;
 use chrono::Duration;
 use common::*;
 use perch::error::{
-    EXIT_NO_CANDIDATE, EXIT_NOT_INTERCHANGEABLE, EXIT_NOTHING_TO_DO, EXIT_PROFILE_LIVE,
+    EXIT_NO_CANDIDATE, EXIT_NOT_FOUND, EXIT_NOT_INTERCHANGEABLE, EXIT_NOTHING_TO_DO,
+    EXIT_PROFILE_LIVE,
 };
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
@@ -493,4 +494,47 @@ fn a_cycle_away_from_a_live_profile_is_refused() {
     let error = result.expect_err("the Capture would write under that client");
     assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
+}
+
+/// A bare Cycle asks the Group of the Account it is leaving where it may look,
+/// so a Perch that records nobody as active has no question to answer rather
+/// than an empty one. The refusal names the way out, which is not a Perch
+/// command: nothing here is repaired by adding an Account, only by there being
+/// a login to adopt in the first place.
+#[test]
+fn a_bare_switch_with_nobody_active_says_there_is_no_group_to_cycle_within() {
+    let host = three_accounts_in_one_group();
+    let mut registry = registry_of(&host);
+    registry.active = None;
+    save_registry(&host, &registry);
+
+    let written_before = credentials_written(&host);
+
+    let (result, printed) = run_cycle(&host);
+
+    let refused = result.expect_err("there is no Account to cycle away from");
+    assert_eq!(refused.exit_code(), EXIT_NOT_FOUND, "{refused}");
+    assert!(
+        refused.to_string().contains("no Group to Cycle within"),
+        "{refused}"
+    );
+    assert!(
+        refused.to_string().contains("log in"),
+        "and it names the way out: {refused}"
+    );
+    assert_eq!(
+        credentials_written(&host),
+        written_before,
+        "nothing is rewritten for a Cycle that never had a starting point: {printed}"
+    );
+}
+
+/// How many Credentials have been written to the live store so far. Counted
+/// rather than asserted absent, because the fixtures reach this point by adding
+/// Accounts, and adding one writes.
+fn credentials_written(host: &FakeHost) -> usize {
+    host.effects()
+        .iter()
+        .filter(|effect| matches!(effect, Effect::KeychainSet { .. }))
+        .count()
 }

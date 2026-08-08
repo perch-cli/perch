@@ -642,3 +642,107 @@ fn a_purge_takes_the_credential_of_a_profile_the_registry_never_recorded() {
         "leaving only Claude Code's own login"
     );
 }
+
+/// The home directory goes last and goes whole, so a home that will not go is a
+/// Purge that took every Credential and stopped one step from done. It has to
+/// say both halves: the Credentials really are gone, and the one thing left is
+/// a directory that running it again will take.
+#[test]
+fn a_home_that_will_not_go_says_the_credentials_are_gone_and_the_rest_finishes_later() {
+    let host = a_machine_to_give_back()
+        .with_answers(&["n", "purge"])
+        .with_undeletable_file(PERCH_HOME, "Device or resource busy");
+
+    let (stopped, printed) = run_purge(&host);
+
+    let failed = stopped.expect_err("the home directory would not go");
+    let said = failed.to_string();
+    assert!(
+        said.contains("Every Credential Perch held is deleted"),
+        "the destructive half really did happen: {said}"
+    );
+    // Rendered as the Host built it rather than as the constant spells it: home
+    // is reached by joining, so the separators are the platform's.
+    let home = perch::registry::perch_home(&host).expect("home is known");
+    assert!(said.contains(&home.display().to_string()), "{said}");
+    assert!(
+        said.contains("Device or resource busy"),
+        "what stopped it is what the user has to fix: {said}"
+    );
+    assert!(
+        said.contains("Run `perch purge` again"),
+        "and the way to finish is named: {said}"
+    );
+
+    for email in [EMAIL, SECOND_EMAIL, THIRD_EMAIL] {
+        assert_eq!(
+            credential_of(&host, email),
+            None,
+            "{email} really is given up, whatever the directory did: {printed}"
+        );
+    }
+
+    host.deletable_again(Path::new(PERCH_HOME));
+    let (finished, printed) =
+        run_purge_with(&host, perch::commands::purge::PurgeArgs { yes: true });
+    finished.expect("running it again finishes it");
+    assert!(!host.path_exists(Path::new(PERCH_HOME)), "{printed}");
+}
+
+/// A Profile the registry does not name is reached by walking the directory, so
+/// the walk is where a store that will not give a Credential up shows up. It
+/// must not be shrugged off: a Purge that reported success with a Credential
+/// still on the machine is the one failure this command cannot have.
+#[test]
+fn a_leftover_profile_whose_credential_will_not_go_stops_the_purge_rather_than_being_skipped() {
+    let host = machine_with_two_accounts();
+
+    let orphan = perch::registry::profiles_dir(&host)
+        .expect("home is known")
+        .join("nobody-example-com");
+    let store = perch::probe::store_for_profile(&host, &orphan).expect("USER is set");
+    host.set_file(&store.credentials_file, SECOND_CREDENTIAL);
+
+    let host = host.with_undeletable_file(&store.credentials_file, "read-only");
+
+    let (stopped, printed) = run_purge_with(&host, perch::commands::purge::PurgeArgs { yes: true });
+
+    let failed = stopped.expect_err("a Credential that will not go is not a Purge that worked");
+    let said = failed.to_string();
+    assert!(
+        said.contains("Perch's registry is untouched"),
+        "so running it again is a whole Purge rather than a partial one: {said}"
+    );
+    assert!(said.contains("`perch purge` can be run again"), "{said}");
+    assert!(
+        registry_on(&host).is_some(),
+        "the registry really is still there: {printed}"
+    );
+    assert!(
+        host.path_exists(Path::new(PERCH_HOME)),
+        "and so is home, so nothing claims to have finished"
+    );
+}
+
+/// The other half of the same walk: a directory that will not say where its
+/// Credential lives is not a reason to fail. There is nothing there to delete
+/// and nothing to report, and the home it sits in still goes.
+///
+/// Reached the way it happens — a Purge that stopped in its last step, so the
+/// registry is already gone — on a machine whose keychain account name cannot
+/// be derived at all.
+#[test]
+fn a_leftover_directory_that_names_no_store_does_not_stop_the_purge() {
+    let host = machine_with_three_accounts();
+    host.remove_file(Path::new(REGISTRY_PATH))
+        .expect("what a Purge that stopped in its last step leaves");
+    let host = host.without_env("USER").with_answers(&["purge"]);
+
+    let (result, printed) = run_purge(&host);
+
+    result.expect("a directory Perch cannot read a store out of is not a failure");
+    assert!(
+        !host.path_exists(Path::new(PERCH_HOME)),
+        "and the home those directories sit in still goes: {printed}"
+    );
+}

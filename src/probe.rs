@@ -936,7 +936,7 @@ fn refusal(assumption: &str, detail: &str, version: &str) -> PerchError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::{FakeHost, Platform};
+    use crate::host::{Execution, FakeHost, Platform};
 
     #[test]
     fn claude_is_the_first_match_on_path() {
@@ -1324,5 +1324,217 @@ mod tests {
         let back = understood(&rotated);
         assert_eq!(back.refresh_token.as_deref(), Some("still-good"));
         assert_eq!(back.access_token, "new-access");
+    }
+
+    /// A `claude` that is there and will not run at all. The refusal names the
+    /// assumption rather than the command, because "not installed" is the thing
+    /// a user can act on and `exec` failing is not.
+    #[test]
+    fn a_claude_that_cannot_be_run_is_a_refusal_naming_the_assumption() {
+        let host = FakeHost::new()
+            .with_env("PATH", "/usr/bin")
+            .with_file("/usr/bin/claude", "");
+
+        let refused = claude_version(&host).expect_err("nothing answers `--version`");
+
+        match refused {
+            PerchError::ProbeRefused {
+                assumption,
+                detail,
+                version,
+            } => {
+                assert_eq!(assumption, assumption::INSTALLED);
+                assert!(
+                    detail.contains("could not run `claude --version`"),
+                    "{detail}"
+                );
+                assert_eq!(version, "not installed");
+            }
+            other => panic!("an assumption failed, so it is a refusal: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_claude_that_exits_non_zero_is_a_refusal_saying_what_it_exited_with() {
+        let host = FakeHost::new()
+            .with_env("PATH", "/usr/bin")
+            .with_file("/usr/bin/claude", "")
+            .with_exec(
+                "/usr/bin/claude",
+                &["--version"],
+                Execution {
+                    status: 127,
+                    stdout: String::new(),
+                    stderr: "not found".to_string(),
+                },
+            );
+
+        let refused = claude_version(&host).expect_err("it exited 127");
+
+        let said = refused.to_string();
+        assert!(said.contains("exited 127"), "{said}");
+        assert!(
+            said.contains("Claude Code unknown"),
+            "the version is unknown rather than guessed: {said}"
+        );
+    }
+
+    /// A clean exit that printed something other than a version. Worth its own
+    /// refusal because the alternative is a version called `error:` quoted back
+    /// in every later refusal that names which Claude Code Perch was talking to.
+    #[test]
+    fn a_version_that_does_not_start_with_a_digit_is_not_taken_as_one() {
+        let refused =
+            version_printing("error: could not start\n").expect_err("`error:` is not a version");
+
+        let said = refused.to_string();
+        assert!(
+            said.contains("`error: could not start`, which is not a version"),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn a_claude_that_printed_nothing_says_nothing_rather_than_quoting_emptiness() {
+        let refused = version_printing("   \n").expect_err("nothing is not a version");
+
+        assert!(refused.to_string().contains("printed nothing"), "{refused}");
+    }
+
+    #[test]
+    fn the_leading_token_of_the_version_line_is_the_version() {
+        assert_eq!(
+            version_printing("2.1.221 (Claude Code)\n").expect("that is a version"),
+            "2.1.221"
+        );
+    }
+
+    /// A `claude --version` that exits cleanly having printed `printed`.
+    fn version_printing(printed: &str) -> Result<String> {
+        let host = FakeHost::new()
+            .with_env("PATH", "/usr/bin")
+            .with_file("/usr/bin/claude", "")
+            .with_exec(
+                "/usr/bin/claude",
+                &["--version"],
+                Execution {
+                    status: 0,
+                    stdout: printed.to_string(),
+                    stderr: String::new(),
+                },
+            );
+        claude_version(&host)
+    }
+
+    /// The three ways a Credential stops being one Perch recognises. Each names
+    /// the store it came out of, so a refusal says which Account went wrong
+    /// rather than that some Credential somewhere did.
+    #[test]
+    fn a_credential_that_is_not_json_names_the_store_it_came_out_of() {
+        let refused = understand_credential(
+            "not json at all".to_string(),
+            "the Credential Perch holds for someone@example.com",
+            "2.1.221",
+        )
+        .expect_err("that is not JSON");
+
+        let said = refused.to_string();
+        assert!(said.contains(assumption::CREDENTIAL_SHAPE), "{said}");
+        assert!(said.contains("someone@example.com"), "{said}");
+        assert!(said.contains("is not JSON Perch understands"), "{said}");
+    }
+
+    #[test]
+    fn a_credential_with_no_oauth_block_is_refused_as_the_wrong_shape() {
+        let refused = understand_credential(
+            r#"{"somethingElse": {}}"#.to_string(),
+            "the keychain",
+            "2.1.221",
+        )
+        .expect_err("there is no claudeAiOauth block");
+
+        assert!(
+            refused.to_string().contains("has no claudeAiOauth block"),
+            "{refused}"
+        );
+    }
+
+    #[test]
+    fn a_credential_with_no_access_token_is_refused_rather_than_used_empty() {
+        let refused = understand_credential(
+            r#"{"claudeAiOauth": {"refreshToken": "sk-ant-ort01-x"}}"#.to_string(),
+            "the keychain",
+            "2.1.221",
+        )
+        .expect_err("there is nothing to ask Anthropic with");
+
+        assert!(
+            refused
+                .to_string()
+                .contains("the claudeAiOauth block has no accessToken"),
+            "{refused}"
+        );
+    }
+
+    #[test]
+    fn a_credential_perch_understands_carries_its_bytes_verbatim() {
+        let raw =
+            r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-x","refreshToken":"sk-ant-ort01-x"}}"#;
+
+        let credential = understand_credential(raw.to_string(), "the keychain", "2.1.221")
+            .expect("that is a Credential");
+
+        assert_eq!(credential.access_token, "sk-ant-oat01-x");
+        assert_eq!(credential.refresh_token.as_deref(), Some("sk-ant-ort01-x"));
+        assert_eq!(
+            credential.as_str(),
+            raw,
+            "the bytes are copied rather than re-serialised"
+        );
+    }
+
+    /// A Rotation rewrites one key of a Credential Perch already holds, so the
+    /// two ways that Credential could be unreadable are refusals about the
+    /// Credential being renewed rather than about the reply.
+    #[test]
+    fn a_rotation_onto_a_credential_that_is_not_json_is_refused() {
+        let broken = Credential {
+            raw: "{ not json".to_string(),
+            access_token: "sk-ant-oat01-old".to_string(),
+            refresh_token: None,
+            expires_at: None,
+            subscription_type: None,
+        };
+
+        let refused = credential_after_rotation(&broken, "sk-ant-oat01-new", None, None, "2.1.221")
+            .expect_err("what is being renewed is not JSON");
+
+        assert!(
+            refused
+                .to_string()
+                .contains("the Credential being renewed is not JSON Perch understands"),
+            "{refused}"
+        );
+    }
+
+    #[test]
+    fn a_rotation_onto_a_credential_with_no_oauth_block_is_refused() {
+        let broken = Credential {
+            raw: r#"{"somethingElse": {}}"#.to_string(),
+            access_token: "sk-ant-oat01-old".to_string(),
+            refresh_token: None,
+            expires_at: None,
+            subscription_type: None,
+        };
+
+        let refused = credential_after_rotation(&broken, "sk-ant-oat01-new", None, None, "2.1.221")
+            .expect_err("there is no block to write into");
+
+        assert!(
+            refused
+                .to_string()
+                .contains("the Credential being renewed has no claudeAiOauth block"),
+            "{refused}"
+        );
     }
 }
