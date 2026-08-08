@@ -181,8 +181,12 @@ fn with_no_group_the_organization_is_offered_and_accepted_by_confirming() {
     let (result, printed) = run_add(&host, AddArgs::default());
     assert!(result.is_ok(), "{:?}", result.err());
 
+    // An organization name is whatever Anthropic holds rather than something
+    // chosen to be typed, and `Overflow Ltd` is not a name a Group can carry —
+    // settings are read back a word at a time. So its spaces become the
+    // separator the names people pick already use, and the offer survives.
     assert!(
-        printed.contains("Overflow Ltd"),
+        printed.contains("Overflow-Ltd"),
         "the organization should be offered as the default:\n{printed}"
     );
     assert_eq!(
@@ -191,7 +195,7 @@ fn with_no_group_the_organization_is_offered_and_accepted_by_confirming() {
             .unwrap()
             .group
             .as_deref(),
-        Some("Overflow Ltd")
+        Some("Overflow-Ltd")
     );
 }
 

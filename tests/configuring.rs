@@ -674,3 +674,33 @@ fn setting_one_waits_for_the_other_perch_because_it_writes() {
         "{refused}"
     );
 }
+
+/// The round trip above is why a Group name cannot hold a space.
+///
+/// `perch config get` prints `<group> <key> <value>` and `perch config set`
+/// reads it back by counting words, so a Group called `my work` would print a
+/// four-word line that `set` answers with "how a `set` is addressed". Refused at
+/// the one moment somebody can still choose another name, rather than printing
+/// output that cannot be typed back in.
+#[test]
+fn a_group_name_with_a_space_in_it_is_refused_rather_than_breaking_the_round_trip() {
+    let host = machine_with_two_accounts();
+
+    let (result, _) = run_group(
+        &host,
+        perch::commands::group::GroupCommand::Add {
+            name: "my work".to_string(),
+        },
+    );
+
+    let refusal = result.expect_err("a name no line of `config get` could name");
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    assert!(
+        refusal.to_string().contains("has a space in it"),
+        "{refusal}"
+    );
+    assert!(
+        registry_of(&host).groups.is_empty(),
+        "and no Group was declared"
+    );
+}

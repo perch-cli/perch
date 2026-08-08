@@ -430,6 +430,20 @@ pub fn same_name(one: &str, other: &str) -> bool {
     one.to_lowercase() == other.to_lowercase()
 }
 
+/// A Group name offered as a default, made from something that was never
+/// chosen to be one — an organization name, which is whatever Anthropic holds
+/// and commonly has spaces in it.
+///
+/// Only the spaces are touched, and only into the separator the names people
+/// pick already use. Anything else wrong with it — an `@`, or `none` — leaves
+/// no offer at all, because a suggestion is a convenience and inventing a name
+/// around a refusal is not.
+pub fn offerable_name(from: &str) -> Option<String> {
+    let joined = from.split_whitespace().collect::<Vec<_>>().join("-");
+    validate_name(NameKind::Group, &joined).ok()?;
+    Some(joined)
+}
+
 pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
     if name.trim().is_empty() {
         return Err(PerchError::Invalid(format!(
@@ -437,9 +451,19 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
             kind.names()
         )));
     }
-    if name != name.trim() {
+    // Any whitespace, not only at the ends. `perch config get` prints each
+    // setting as the tail of the `perch config set` that would restore it —
+    // `<group> <key> <value>`, read back by counting words — so a Group with a
+    // space in its name prints a line that cannot be typed back in. A name that
+    // breaks the round trip the output promises is worth refusing at the one
+    // moment somebody can still choose another.
+    if name.chars().any(char::is_whitespace) {
         return Err(PerchError::Invalid(format!(
-            "`{name}` starts or ends with a space, which would make it impossible to type reliably."
+            "`{name}` has a space in it. {} are read back a word at a time — \
+             `perch config get` prints settings as the `perch config set` that \
+             would restore them — so a name with a space in it is one no line \
+             of that output could name.",
+            kind.names()
         )));
     }
     if means_no_group(name) {
@@ -1530,6 +1554,13 @@ mod tests {
                 "None",
                 " work",
                 "work ",
+                // Not only at the ends: `perch config get` prints settings as
+                // the `perch config set` that would restore them, read back a
+                // word at a time, so a name with a space in it is one no line
+                // of that output could name.
+                "my work",
+                "Overflow Ltd",
+                "two\twords",
                 "someone@example.com",
             ] {
                 assert!(
@@ -1537,7 +1568,7 @@ mod tests {
                     "`{name}` should not be usable as a {kind:?} name"
                 );
             }
-            for name in ["work", "Overflow Ltd", "personal-2"] {
+            for name in ["work", "overflow-ltd", "personal-2"] {
                 assert!(validate_name(kind, name).is_ok(), "`{name}` should be fine");
             }
         }

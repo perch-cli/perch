@@ -206,13 +206,14 @@ fn resolve_group(
     }
 
     // Only offered when it would be a usable Group name: an organization Perch
-    // would go on to refuse is no help as a default.
+    // would go on to refuse is no help as a default. An organization name is
+    // whatever Anthropic holds rather than something chosen to be typed, so its
+    // spaces become the separator the names people pick already use — `Overflow
+    // Ltd` is offered as `overflow-ltd` rather than not offered at all.
     let offered = identity
         .organization_name
         .as_deref()
-        .map(str::trim)
-        .filter(|organization| registry::validate_name(NameKind::Group, organization).is_ok())
-        .map(str::to_string);
+        .and_then(registry::offerable_name);
 
     let question = match &offered {
         Some(organization) => format!(
