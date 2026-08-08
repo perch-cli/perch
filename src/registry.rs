@@ -1568,4 +1568,98 @@ mod tests {
             .ensure_group("work")
             .expect("naming it again in passing is not a conflict");
     }
+
+    /// The machine-readable name of a Quarantine, which is what `--json` puts in
+    /// front of a script (`reason`, beside the prose `detail`). Every kind needs
+    /// one, and no two may share it: a script branching on why an Account is
+    /// Quarantined branches on this string and nothing else.
+    #[test]
+    fn every_quarantine_has_its_own_machine_readable_name() {
+        let every = [
+            Quarantine::RenewalRejected,
+            Quarantine::RotationLost,
+            Quarantine::NoRefreshToken,
+            Quarantine::NoCredential,
+        ];
+
+        let named: Vec<&str> = every.iter().map(Quarantine::as_str).collect();
+        assert_eq!(
+            named,
+            [
+                "renewal-rejected",
+                "rotation-lost",
+                "no-refresh-token",
+                "no-credential"
+            ]
+        );
+
+        let mut unique = named.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), named.len(), "two Quarantines share a name");
+
+        for why in every {
+            assert!(
+                !why.because().is_empty(),
+                "{why:?} says nothing about itself"
+            );
+        }
+    }
+
+    /// `PERCH_HOME` moves everything Perch keeps, which is what lets a test —
+    /// or a second Perch on one machine — run without touching the real one.
+    /// It passes through verbatim: no `.config/perch` is appended to it.
+    #[test]
+    fn perch_home_is_taken_from_the_environment_verbatim_when_it_is_set() {
+        let host = crate::host::FakeHost::new()
+            .with_env("HOME", "/Users/someone")
+            .with_env("PERCH_HOME", "/tmp/somewhere-else");
+
+        assert_eq!(
+            perch_home(&host).unwrap(),
+            std::path::PathBuf::from("/tmp/somewhere-else")
+        );
+        assert_eq!(
+            registry_path(&host).unwrap(),
+            std::path::PathBuf::from("/tmp/somewhere-else/registry.json"),
+            "and everything under it moves with it"
+        );
+    }
+
+    #[test]
+    fn without_the_override_perch_keeps_its_registry_under_the_config_directory() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+
+        assert_eq!(
+            perch_home(&host).unwrap(),
+            std::path::PathBuf::from("/Users/someone/.config/perch")
+        );
+    }
+
+    /// A registry that is not there is a Perch that holds nothing, and a
+    /// registry that is there and will not be read is a failure. Saying "no
+    /// Accounts" for the second would be a Perch that quietly forgot everything
+    /// the moment a permission went wrong.
+    #[test]
+    fn a_registry_that_cannot_be_read_is_a_failure_rather_than_an_empty_perch() {
+        let absent = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        assert_eq!(
+            load(&absent).expect("a machine Perch has never run on holds nothing"),
+            None
+        );
+
+        let path = registry_path(&absent).unwrap();
+        let unreadable = crate::host::FakeHost::new()
+            .with_env("HOME", "/Users/someone")
+            .with_file(&path, "{}")
+            .with_unreadable_file(&path, "permission denied");
+
+        let failed = load(&unreadable).expect_err("a registry that is there must be readable");
+        let said = failed.to_string();
+        assert!(said.contains("permission denied"), "{said}");
+        assert!(
+            said.contains(&path.display().to_string()),
+            "and it names the file: {said}"
+        );
+    }
 }

@@ -12,7 +12,7 @@ mod common;
 
 use common::*;
 use perch::commands::remove::RemoveArgs;
-use perch::error::{EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROFILE_LIVE};
+use perch::error::{EXIT_HELD, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROFILE_LIVE};
 use perch::host::{FakeHost, Host};
 use perch::probe::Identity;
 use perch::registry::Account;
@@ -23,6 +23,10 @@ const SECOND_PROFILE: &str = "/Users/someone/.config/perch/profiles/overflow-exa
 /// The config directory every client reads — where a Switch, and the landing a
 /// removal makes, has to write.
 const DEFAULT_PROFILE: &str = "/Users/someone/.claude";
+
+/// The lock Claude Code takes around a token refresh — the one a Switch, and so
+/// the landing a removal makes, has to wait for.
+const REFRESH_LOCK: &str = "/Users/someone/.claude/.oauth_refresh.lock";
 
 /// What the live store holds right now — the Credential every client reads.
 fn live_credential(host: &FakeHost) -> Option<String> {
@@ -606,5 +610,46 @@ fn a_client_that_starts_while_the_question_is_answered_stops_the_removal() {
     assert!(
         credential_of(&host, EMAIL).is_some(),
         "the Credential the client is holding is still there"
+    );
+}
+
+/// The lock somebody else is holding is the one failure a Remove reports that
+/// resolves on its own, and the exit code is the only place that says so.
+///
+/// Removing the active Account lands on its successor first (ADR 0024), and
+/// landing takes Claude Code's locks. A `claude` holding one of them stops the
+/// removal before anything is deleted — which is a "try again in a moment",
+/// not a fault. It is reported with a note about what the machine is holding,
+/// and the note must not cost the code the scheduler branches on.
+#[test]
+fn a_lock_somebody_is_holding_stops_a_removal_as_held_rather_than_as_a_fault() {
+    let host = machine_with_two_accounts();
+    let now = host.now();
+    // Held, and touched just now: somebody is alive behind it.
+    let host = host
+        .with_dir_held_since(REFRESH_LOCK, now)
+        .with_answers(&["y"]);
+
+    let (result, printed) = run_remove(&host, EMAIL);
+
+    let refused = result.expect_err("the lock is Claude Code's");
+    assert_eq!(
+        refused.exit_code(),
+        EXIT_HELD,
+        "a lock that will be given back is not a permanent failure: {refused}"
+    );
+    assert!(
+        refused.to_string().contains("is held by Claude Code"),
+        "{refused}"
+    );
+    assert!(
+        refused.to_string().contains("Nothing was removed"),
+        "and it still says what the machine is holding now: {refused}"
+    );
+    assert!(holds(&host, EMAIL), "nothing was removed: {printed}");
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(CREDENTIAL),
+        "and the Credential is still the live one"
     );
 }

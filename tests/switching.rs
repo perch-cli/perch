@@ -773,3 +773,78 @@ fn a_switch_finishes_against_a_claude_json_that_has_no_identity_block_yet() {
         "{printed}"
     );
 }
+
+/// A Capture needs somewhere to put what it finds, and a Perch that records no
+/// active Account has nowhere. Saying so matters because it is the one case
+/// where whatever was live is replaced rather than kept anywhere: it belonged
+/// to no Account Perch holds, so no Profile is the right home for it.
+#[test]
+fn switching_with_no_active_account_recorded_says_there_was_nothing_to_capture() {
+    let host = machine_with_two_accounts();
+    let mut registry = registry_of(&host);
+    registry.active = None;
+    save_registry(&host, &registry);
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect("an Account Perch holds is still somewhere to land");
+    assert!(
+        printed.contains("Perch held no active Account, so there was nothing to Capture."),
+        "{printed}"
+    );
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "and the Switch itself still happened"
+    );
+    assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+}
+
+/// Switching away from a Claude Code that is logged out. Worth saying rather
+/// than passing over in silence, because it is the one case where switching
+/// *back* to that Account will need a login rather than just working: there was
+/// no live Credential to put back into its Profile.
+#[test]
+fn switching_from_a_logged_out_claude_code_says_there_was_nothing_live_to_capture() {
+    let host = machine_with_two_accounts();
+    host.keychain_delete(DEFAULT_SERVICE, LOGIN_NAME)
+        .expect("the login is given up");
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect("a logged-out machine is still one that can be switched");
+    assert!(
+        printed.contains("There was no live Credential to Capture — Claude Code was logged out."),
+        "{printed}"
+    );
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "and the incoming Credential is live"
+    );
+}
+
+/// The Switch is three writes to the machine and one to Perch's own record, and
+/// only the last of them can fail without the machine having moved. When it
+/// does, the note has to say that the Switch worked — otherwise the obvious
+/// reading of the failure is that it did not, and the obvious next step is to
+/// run it again against a machine that is already there.
+#[test]
+fn a_switch_that_worked_but_could_not_be_recorded_says_the_machine_did_move() {
+    let host = machine_with_two_accounts().with_unwritable_file(REGISTRY_PATH, "read-only");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let failed = result.expect_err("the record could not be written");
+    let said = failed.to_string();
+    assert!(
+        said.contains("The Switch itself worked"),
+        "the machine moved even though the record did not: {said}"
+    );
+    assert!(said.contains(SECOND_EMAIL), "{said}");
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "and that is what the note claims"
+    );
+}

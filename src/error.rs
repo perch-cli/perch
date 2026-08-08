@@ -230,6 +230,11 @@ impl PerchError {
             PerchError::NothingToDo(message) => {
                 PerchError::NothingToDo(format!("{message}\n\n{note}"))
             }
+            // Kept as itself for the reason the variant exists: a lock somebody
+            // else is holding is the one failure that resolves on its own, and
+            // a Remove or a Relogin that notes what it left behind must not
+            // cost the scheduler reading the code the fact that retrying works.
+            PerchError::Busy(message) => PerchError::Busy(format!("{message}\n\n{note}")),
             PerchError::ProfileLive(message) => {
                 PerchError::ProfileLive(format!("{message}\n\n{note}"))
             }
@@ -281,3 +286,274 @@ impl From<KeychainError> for PerchError {
 }
 
 pub type Result<T> = std::result::Result<T, PerchError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry::Quarantine;
+
+    /// One of every variant, so the tables below are about the whole enum
+    /// rather than about whichever variants somebody remembered. A variant
+    /// added without a line here is one the note and the exit code say nothing
+    /// about, and nothing else would notice.
+    fn one_of_each() -> Vec<(&'static str, PerchError)> {
+        vec![
+            (
+                "ProbeRefused",
+                PerchError::ProbeRefused {
+                    assumption: "the credential lives in the keychain".to_string(),
+                    detail: "it does not".to_string(),
+                    version: "2.1.221".to_string(),
+                },
+            ),
+            (
+                "KeychainUnavailable",
+                PerchError::KeychainUnavailable("locked".to_string()),
+            ),
+            (
+                "NotUnderstood",
+                PerchError::NotUnderstood("--json before --".to_string()),
+            ),
+            (
+                "NotFound",
+                PerchError::NotFound("no such Account".to_string()),
+            ),
+            (
+                "Conflict",
+                PerchError::Conflict("already added".to_string()),
+            ),
+            (
+                "Invalid",
+                PerchError::Invalid("not a percentage".to_string()),
+            ),
+            (
+                "NothingToDo",
+                PerchError::NothingToDo("already active".to_string()),
+            ),
+            (
+                "ProfileLive",
+                PerchError::ProfileLive("a client is running".to_string()),
+            ),
+            (
+                "Busy",
+                PerchError::Busy("another perch holds it".to_string()),
+            ),
+            (
+                "NoCandidate",
+                PerchError::NoCandidate("everything is exhausted".to_string()),
+            ),
+            (
+                "NotInterchangeable",
+                PerchError::NotInterchangeable("nobody said so".to_string()),
+            ),
+            (
+                "Quarantined",
+                PerchError::Quarantined {
+                    why: Quarantine::RenewalRejected,
+                    said: "it is Quarantined".to_string(),
+                },
+            ),
+            (
+                "FileRead",
+                PerchError::file_read("/tmp/registry.json", "denied"),
+            ),
+            (
+                "FileWrite",
+                PerchError::file_write("/tmp/registry.json", "read-only"),
+            ),
+            (
+                "Malformed",
+                PerchError::Malformed {
+                    path: "/tmp/registry.json".to_string(),
+                    detail: "expected `,`".to_string(),
+                },
+            ),
+            ("Other", PerchError::Other("something else".to_string())),
+        ]
+    }
+
+    /// The property the whole of `with_note` rests on: a sequence that failed
+    /// part way through can say what the machine is holding now without costing
+    /// the script wrapping it the code it branches on.
+    #[test]
+    fn a_note_never_changes_the_exit_code_the_failure_earned() {
+        for (name, error) in one_of_each() {
+            let earned = error.exit_code();
+            let noted = error.with_note("Nothing was removed.");
+            assert_eq!(
+                noted.exit_code(),
+                earned,
+                "{name} changed its exit code when a note was added"
+            );
+        }
+    }
+
+    /// A note is added to what failed rather than said instead of it. Where it
+    /// lands differs by variant — [`PerchError::ProbeRefused`] renders its
+    /// detail mid-sentence, so the note goes inside that rather than after the
+    /// version — but nothing else about the message moves either way.
+    #[test]
+    fn a_note_is_said_alongside_what_failed_rather_than_instead_of_it() {
+        for (name, error) in one_of_each() {
+            let was = error.to_string();
+            let noted = error.with_note("Nothing was removed.").to_string();
+
+            assert!(
+                noted.contains("Nothing was removed."),
+                "{name} dropped the note: {noted}"
+            );
+            assert_eq!(
+                noted.replace("\n\nNothing was removed.", ""),
+                was,
+                "{name} changed what it said for more than the note"
+            );
+        }
+    }
+
+    /// The variants that carry a message keep their shape, so a second note
+    /// lands beside the first rather than folding the whole thing into
+    /// [`PerchError::Other`] on the way.
+    #[test]
+    fn a_second_note_lands_beside_the_first_rather_than_swallowing_it() {
+        let noted = PerchError::NotFound("no such Account".to_string())
+            .with_note("first")
+            .with_note("second");
+
+        assert_eq!(noted.exit_code(), EXIT_NOT_FOUND);
+        let said = noted.to_string();
+        assert!(said.contains("first") && said.contains("second"), "{said}");
+        assert!(
+            said.find("first") < said.find("second"),
+            "the notes are in the order they were added: {said}"
+        );
+    }
+
+    /// A Quarantine travels beside the message rather than only inside it, so
+    /// the command that has to record why still can after a note is added.
+    #[test]
+    fn a_noted_quarantine_still_carries_the_reason_it_was_raised_for() {
+        let noted = PerchError::Quarantined {
+            why: Quarantine::RotationLost,
+            said: "it is Quarantined".to_string(),
+        }
+        .with_note("Nothing was switched.");
+
+        match noted {
+            PerchError::Quarantined { why, said } => {
+                assert_eq!(why, Quarantine::RotationLost);
+                assert!(said.contains("Nothing was switched."), "{said}");
+            }
+            other => panic!("a noted Quarantine is still one: {other:?}"),
+        }
+    }
+
+    /// The variants that carry structure rather than a message exit as a
+    /// general failure already, so folding them loses nothing a caller could
+    /// act on — but what they said about the file has to survive the fold.
+    #[test]
+    fn a_note_on_a_structured_failure_keeps_what_it_said_about_the_file() {
+        let noted = PerchError::file_write("/tmp/registry.json", "read-only")
+            .with_note("Perch's registry is untouched.");
+
+        assert_eq!(noted.exit_code(), EXIT_GENERAL);
+        let said = noted.to_string();
+        assert!(said.contains("/tmp/registry.json"), "{said}");
+        assert!(said.contains("read-only"), "{said}");
+        assert!(said.contains("Perch's registry is untouched."), "{said}");
+    }
+
+    #[test]
+    fn every_kind_of_failure_earns_the_code_a_script_branches_on() {
+        let expected = [
+            (EXIT_PROBE_REFUSED, "ProbeRefused"),
+            (EXIT_KEYCHAIN_UNAVAILABLE, "KeychainUnavailable"),
+            (EXIT_NOT_UNDERSTOOD, "NotUnderstood"),
+            (EXIT_NOT_FOUND, "NotFound"),
+            (EXIT_CONFLICT, "Conflict"),
+            (EXIT_INVALID, "Invalid"),
+            (EXIT_NOTHING_TO_DO, "NothingToDo"),
+            (EXIT_PROFILE_LIVE, "ProfileLive"),
+            (EXIT_HELD, "Busy"),
+            (EXIT_NO_CANDIDATE, "NoCandidate"),
+            (EXIT_NOT_INTERCHANGEABLE, "NotInterchangeable"),
+            (EXIT_QUARANTINED, "Quarantined"),
+            (EXIT_GENERAL, "FileRead"),
+            (EXIT_GENERAL, "FileWrite"),
+            (EXIT_GENERAL, "Malformed"),
+            (EXIT_GENERAL, "Other"),
+        ];
+
+        let actual: Vec<(i32, &str)> = one_of_each()
+            .iter()
+            .map(|(name, error)| (error.exit_code(), *name))
+            .collect();
+
+        assert_eq!(actual, expected);
+    }
+
+    /// No two codes mean the same thing, because telling one failure from
+    /// another is the whole reason they are numbered rather than prose.
+    #[test]
+    fn the_codes_that_mean_different_things_are_different_numbers() {
+        let mut codes = vec![
+            EXIT_OK,
+            EXIT_GENERAL,
+            EXIT_NOT_UNDERSTOOD,
+            EXIT_PROBE_REFUSED,
+            EXIT_KEYCHAIN_UNAVAILABLE,
+            EXIT_NOT_FOUND,
+            EXIT_CONFLICT,
+            EXIT_INVALID,
+            EXIT_NOTHING_TO_DO,
+            EXIT_PROFILE_LIVE,
+            EXIT_NO_CANDIDATE,
+            EXIT_NOT_INTERCHANGEABLE,
+            EXIT_QUARANTINED,
+            EXIT_HELD,
+        ];
+        let count = codes.len();
+        codes.sort_unstable();
+        codes.dedup();
+        assert_eq!(codes.len(), count, "two failures share an exit code");
+    }
+
+    /// A keychain with no such item and a keychain that will not answer are
+    /// different problems with different repairs, and this conversion is where
+    /// that distinction is either kept or lost (ADR 0008).
+    #[test]
+    fn a_missing_item_is_not_found_and_anything_else_is_the_keychain_being_unavailable() {
+        let missing: PerchError = KeychainError::NotFound {
+            service: "Claude Code-credentials".to_string(),
+            account: "someone".to_string(),
+        }
+        .into();
+        assert_eq!(missing.exit_code(), EXIT_NOT_FOUND);
+        let said = missing.to_string();
+        assert!(said.contains("someone"), "{said}");
+        assert!(said.contains("Claude Code-credentials"), "{said}");
+
+        let locked: PerchError = KeychainError::Unavailable {
+            detail: "User interaction is not allowed".to_string(),
+        }
+        .into();
+        assert_eq!(locked.exit_code(), EXIT_KEYCHAIN_UNAVAILABLE);
+        assert!(
+            locked
+                .to_string()
+                .contains("User interaction is not allowed"),
+            "what the keychain said is what the user needs: {locked}"
+        );
+    }
+
+    #[test]
+    fn a_file_written_by_a_newer_perch_says_how_far_ahead_it_is_and_what_to_do() {
+        let refused = written_by_a_newer_perch("The registry", "registry", 4, 2);
+
+        assert_eq!(refused.exit_code(), EXIT_GENERAL);
+        let said = refused.to_string();
+        assert!(said.contains("The registry"), "{said}");
+        assert!(said.contains("version 4"), "{said}");
+        assert!(said.contains("understands 2"), "{said}");
+        assert!(said.contains("Upgrade Perch."), "{said}");
+    }
+}
