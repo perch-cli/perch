@@ -1048,6 +1048,52 @@ fn a_view_left_alone_hands_nothing_over_and_ends_well() {
     );
 }
 
+/// A listing taller than the frame still says what its columns are.
+///
+/// The header is line zero of the paragraph the rows are in, and a paragraph
+/// scrolled by n skips its first n lines — so the one line that has to stay put
+/// was the first one to go, as soon as the cursor moved far enough down. Five
+/// Accounts on a short terminal is enough; twenty-two is enough on a standard
+/// one, which is a number of subscriptions this is meant to be used with.
+#[test]
+fn a_listing_that_scrolls_keeps_the_row_that_says_what_the_columns_are() {
+    let host = machine_with_figures();
+    let mut registry = registry_of(&host);
+    // Enough Accounts that the cursor has to leave the first screenful.
+    let spare = registry.accounts[1].clone();
+    for at in 0..8 {
+        let mut another = spare.clone();
+        another.identity.email = format!("spare{at}@example.com");
+        registry.accounts.push(another);
+    }
+
+    let mut screen = FakeScreen::sized(
+        80,
+        6,
+        std::iter::repeat_n(Some(Signal::Down), 9)
+            .chain([Some(Signal::Leave)])
+            .collect(),
+    );
+    perch::tui::browse(
+        &host,
+        registry,
+        &mut screen,
+        &mut FakeRefresher::out_for_ever(),
+    )
+    .expect("the TUI leaves cleanly");
+
+    let frame = screen.last_frame();
+    assert!(
+        frame.contains("spare7@example.com"),
+        "the Account under the cursor is on screen:\n{frame}"
+    );
+    assert!(
+        frame.contains("Headroom"),
+        "and so is the row that says what the columns are — a column somebody \
+         has to scroll up to read is a column that goes unread:\n{frame}"
+    );
+}
+
 /// Selecting an Account below the fold shows its figures, not just its name.
 ///
 /// The scroll keeps one line in view by pinning it to the bottom of the

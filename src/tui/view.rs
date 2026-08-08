@@ -159,28 +159,40 @@ fn render_accounts(frame: &mut Frame, model: &Model, area: Rect) {
     let headers: [&str; ACCOUNT_COLUMNS] = with_headroom(list::HEADERS, HEADROOM);
     let widths = list::widths(&headers, &cells);
 
-    let mut lines = vec![
-        Line::from(format!(
-            "{MARKERS}{}",
-            row(&headers.map(str::to_string), &widths)
-        ))
-        .style(Style::new().add_modifier(Modifier::BOLD)),
-    ];
-    lines.extend(cells.iter().enumerate().map(|(index, cells)| {
-        let line = Line::from(format!(
-            "{}{}",
-            markers(model, accounts[index], index),
-            row(cells, &widths)
-        ));
-        match index == model.cursor {
-            true => line.style(Style::new().add_modifier(Modifier::REVERSED)),
-            false => line,
-        }
-    }));
+    let rows: Vec<Line<'_>> = cells
+        .iter()
+        .enumerate()
+        .map(|(index, cells)| {
+            let line = Line::from(format!(
+                "{}{}",
+                markers(model, accounts[index], index),
+                row(cells, &widths)
+            ));
+            match index == model.cursor {
+                true => line.style(Style::new().add_modifier(Modifier::REVERSED)),
+                false => line,
+            }
+        })
+        .collect();
 
-    // One for the header, which does not scroll away: a column somebody has to
-    // scroll up to read is a column that goes unread.
-    render_scrolled(frame, area, lines, model.cursor + 1);
+    // A row of its own, outside the scrolled area, because a column somebody
+    // has to scroll up to read is a column that goes unread. Inside it the
+    // header is line zero of the paragraph, and a paragraph scrolled by n
+    // simply skips its first n lines — so the one line that has to stay is the
+    // first one to go, as soon as the listing is taller than the frame.
+    let [heading, listing] =
+        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
+    frame.render_widget(
+        Paragraph::new(
+            Line::from(format!(
+                "{MARKERS}{}",
+                row(&headers.map(str::to_string), &widths)
+            ))
+            .style(Style::new().add_modifier(Modifier::BOLD)),
+        ),
+        heading,
+    );
+    render_scrolled(frame, listing, rows, model.cursor);
 }
 
 /// The figures, at the two levels there are honest figures for: one Account, and
