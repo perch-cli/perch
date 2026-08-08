@@ -300,3 +300,37 @@ fn a_login_whose_address_names_no_directory_is_refused_rather_than_adopted() {
         "and nothing was written on the way to finding out"
     );
 }
+
+/// An `oauthAccount` block that is there and names nobody. Different from a
+/// file with no block at all — that is a Claude Code nobody has logged into —
+/// and different again from one Perch cannot parse. The address is what every
+/// Profile path, keychain namespace, Alias target and Group membership is keyed
+/// on, so a block without one is refused where it enters rather than somewhere
+/// downstream that has already derived a path from nothing.
+#[test]
+fn an_identity_block_that_names_no_address_is_refused_and_names_the_assumption() {
+    let host = machine_with_claude_code()
+        .with_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, CREDENTIAL)
+        .with_file(
+            IDENTITY_PATH,
+            r#"{"numStartups": 1, "oauthAccount": {"accountUuid": "account-uuid-1"}, "projects": {}}"#,
+        );
+
+    let (result, _) = run_status(&host, false);
+
+    let error = result.expect_err("an Account with no address is not one Perch can hold");
+    assert_eq!(error.exit_code(), EXIT_PROBE_REFUSED);
+    let message = error.to_string();
+    assert!(
+        message.contains("oauthAccount with no emailAddress"),
+        "{message}"
+    );
+    assert!(
+        message.contains(CLAUDE_VERSION),
+        "it dates the belief against the Claude Code that broke it: {message}"
+    );
+    assert!(
+        host.file(REGISTRY_PATH).is_none(),
+        "and nothing was written on the way to finding out"
+    );
+}

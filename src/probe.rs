@@ -1199,6 +1199,34 @@ mod tests {
         assert!(!block.contains("organization"), "{block}");
     }
 
+    /// The other half of the same rule: what the Identity does know is carried
+    /// through. An Account belonging to an organization is one Claude Code
+    /// displays by that organization, so a composed block that dropped it would
+    /// leave the client naming the person and not the team they are working as.
+    #[test]
+    fn a_composed_block_carries_the_organization_when_the_identity_has_one() {
+        let block = Identity {
+            email: "someone@example.com".into(),
+            account_uuid: Some("account-uuid-1".into()),
+            organization_name: Some("Example Ltd".into()),
+            organization_uuid: Some("org-uuid-9".into()),
+        }
+        .oauth_account_block();
+
+        assert!(
+            block.contains(r#""organizationName": "Example Ltd""#),
+            "{block}"
+        );
+        assert!(
+            block.contains(r#""organizationUuid": "org-uuid-9""#),
+            "{block}"
+        );
+        assert!(
+            block.contains(r#""emailAddress": "someone@example.com""#),
+            "{block}"
+        );
+    }
+
     #[test]
     fn the_locks_are_the_three_claude_code_takes_in_the_order_it_takes_them() {
         let store = Store {

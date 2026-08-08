@@ -848,3 +848,248 @@ fn a_switch_that_worked_but_could_not_be_recorded_says_the_machine_did_move() {
         "and that is what the note claims"
     );
 }
+
+/// A machine that is not a Mac, holding the same two Accounts. Off macOS a
+/// Profile keeps its Credential in a file (ADR 0020), which is the only way to
+/// make one particular store refuse a write while the others still work — a
+/// locked keychain locks all of them at once, and stops the Switch a step
+/// earlier than these tests are about.
+fn two_accounts_off_macos() -> FakeHost {
+    let host = logged_in_machine_off_macos()
+        .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE));
+    run_add(
+        &host,
+        perch::commands::add::AddArgs {
+            no_group: true,
+            ..Default::default()
+        },
+    )
+    .0
+    .expect("the second Account is added");
+    host
+}
+
+/// The Capture is the first write a Switch makes, and the one thing that must
+/// never be got wrong: it is the only good copy of the outgoing Account's live
+/// Credential (ADR 0006). When it fails, nothing has moved — and the note has
+/// to say so plainly, because the reasonable fear on reading a failed Switch is
+/// that the Credential was lost somewhere between the two Profiles.
+#[test]
+fn a_switch_that_cannot_capture_says_nothing_moved_and_moves_nothing() {
+    let host = two_accounts_off_macos();
+    let outgoing = store_of(&host, EMAIL).credentials_file;
+    let host = host.with_unwritable_file(&outgoing, "read-only file");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let said = result
+        .expect_err("the Capture could not be written")
+        .to_string();
+    assert!(
+        said.contains("Nothing was switched."),
+        "the first write failing means nothing happened: {said}"
+    );
+    assert!(
+        said.contains(EMAIL) && said.contains("still the active Account"),
+        "it names who is still active: {said}"
+    );
+
+    // And the machine agrees with the note in the one place that decides it.
+    assert_eq!(
+        host.file(CREDENTIALS_PATH).as_deref(),
+        Some(CREDENTIAL),
+        "the live Credential is the outgoing Account's, untouched"
+    );
+    assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
+}
+
+/// The live write failing with no active Account recorded. There is no
+/// outgoing Profile to reassure anybody about and nothing was Captured, so the
+/// note is the one fact that holds: the live Credential was not replaced. It
+/// still has to name the Account that did not become active, or the failure
+/// says nothing about what was being attempted.
+#[test]
+fn a_live_write_that_fails_with_nothing_active_names_the_account_that_did_not_land() {
+    let host = two_accounts_off_macos();
+    let mut registry = registry_of(&host);
+    registry.active = None;
+    save_registry(&host, &registry);
+    let host = host.with_unwritable_file(CREDENTIALS_PATH, "read-only file");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let said = result
+        .expect_err("the live store could not be written")
+        .to_string();
+    assert!(
+        said.contains(&format!("{SECOND_EMAIL} was not made active")),
+        "{said}"
+    );
+    assert!(
+        !said.contains("Captured") && !said.contains("Profile is unchanged"),
+        "with nothing active there is no Profile to say anything about: {said}"
+    );
+    assert_eq!(
+        host.file(CREDENTIALS_PATH).as_deref(),
+        Some(CREDENTIAL),
+        "and the live store is as it was found"
+    );
+}
+
+/// Between the Capture and the live write, the outgoing Credential is safe in
+/// its own Profile and the incoming one is not yet live. The note has to say
+/// both halves: nothing was lost, and the Switch did not happen.
+#[test]
+fn a_switch_that_captured_but_could_not_go_live_says_nothing_was_lost() {
+    let host = two_accounts_off_macos().with_unwritable_file(CREDENTIALS_PATH, "read-only file");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let said = result
+        .expect_err("the live store could not be written")
+        .to_string();
+    assert!(
+        said.contains("was Captured into its own Profile first")
+            && said.contains("nothing has been lost"),
+        "{said}"
+    );
+    assert!(
+        said.contains(&format!("{SECOND_EMAIL} was not made active")),
+        "and it says the Switch did not happen: {said}"
+    );
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(EMAIL),
+        "the machine never moved"
+    );
+}
+
+/// The same step, from a logged-out Claude Code: there was no live Credential
+/// to Capture, so the reassurance above would be a claim about a write that
+/// never happened. What is true instead is that the outgoing Profile is as it
+/// was found.
+#[test]
+fn a_live_write_that_fails_with_nothing_captured_says_the_profile_is_unchanged() {
+    let host = two_accounts_off_macos();
+    host.remove_file(std::path::Path::new(CREDENTIALS_PATH))
+        .expect("the login is given up");
+    let host = host.with_unwritable_file(CREDENTIALS_PATH, "read-only file");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let said = result
+        .expect_err("the live store could not be written")
+        .to_string();
+    assert!(
+        said.contains(&format!("{EMAIL}'s Profile is unchanged.")),
+        "{said}"
+    );
+    assert!(
+        !said.contains("Captured"),
+        "nothing was Captured, so nothing may claim it was: {said}"
+    );
+}
+
+/// The last step of a Switch, failing with no outgoing Account recorded. The
+/// machine has moved — the incoming Credential is live — but `.claude.json`
+/// still names whoever it named, and Perch does not know who that was.
+#[test]
+fn an_identity_that_cannot_be_patched_with_nothing_active_still_says_what_to_run() {
+    let host = machine_with_two_accounts().with_unwritable_file(IDENTITY_PATH, "read-only file");
+    let mut registry = registry_of(&host);
+    registry.active = None;
+    save_registry(&host, &registry);
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let said = result
+        .expect_err("the Identity could not be patched")
+        .to_string();
+    assert!(
+        said.contains("another Account"),
+        "with nobody recorded, the file names an Account Perch cannot name: {said}"
+    );
+    assert!(
+        said.contains(&format!("perch switch {SECOND_EMAIL}")),
+        "it still names the way out: {said}"
+    );
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "and the machine did move, which is what makes running it again safe"
+    );
+}
+
+/// A `.claude.json` that is not JSON at all. The Switch has already made the
+/// incoming Credential live by the time the file is read, so this is the same
+/// half-finished state — and it must be reported as one rather than as a parse
+/// error with no advice attached.
+#[test]
+fn an_identity_file_that_is_not_json_leaves_a_switch_that_says_how_to_finish_it() {
+    let host = machine_with_two_accounts();
+    host.set_file(IDENTITY_PATH, "not json at all");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let said = result
+        .expect_err("the Identity could not be patched")
+        .to_string();
+    assert!(
+        said.contains(&format!("perch switch {SECOND_EMAIL}")),
+        "{said}"
+    );
+    assert_eq!(live_credential(&host).as_deref(), Some(SECOND_CREDENTIAL));
+}
+
+/// A `.claude.json` that cannot be read at all is different from one that is
+/// absent: absent is a Claude Code that has never run here and is written
+/// fresh, unreadable is a file that is there and says nothing.
+#[test]
+fn an_identity_file_that_cannot_be_read_stops_the_switch_at_its_last_step() {
+    let host = machine_with_two_accounts().with_unreadable_file(IDENTITY_PATH, "permission denied");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let said = result
+        .expect_err("the Identity could not be read")
+        .to_string();
+    assert!(said.contains(IDENTITY_PATH), "it names the file: {said}");
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "the Credential went live before the file was read"
+    );
+}
+
+/// A Credential Perch holds that is no longer in a shape Perch understands.
+/// Quarantining is for a Credential that is *missing*; this one is present and
+/// unreadable, which is a refusal that names the Account and changes nothing.
+#[test]
+fn a_stored_credential_that_cannot_be_understood_stops_the_switch_before_it_writes() {
+    let host = machine_with_two_accounts();
+    host.set_keychain_item(
+        &profile_service(&host, SECOND_EMAIL),
+        LOGIN_NAME,
+        "{\"claudeAiOauth\":{}}",
+    );
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let said = result
+        .expect_err("the Credential is not one Perch understands")
+        .to_string();
+    assert!(
+        said.contains("has no accessToken"),
+        "it says which belief the stored Credential broke: {said}"
+    );
+    assert!(
+        said.contains(CLAUDE_VERSION),
+        "and against which Claude Code, which is what dates the belief: {said}"
+    );
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(CREDENTIAL),
+        "nothing was written: the Credential is read before the first write"
+    );
+    assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
+}

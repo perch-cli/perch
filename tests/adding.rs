@@ -702,3 +702,90 @@ fn a_group_name_that_is_already_an_alias_is_asked_about_again() {
         "and the second answer is the one that stands"
     );
 }
+
+/// A login that exits cleanly having written nothing is somebody who closed the
+/// browser tab rather than one whose Claude Code failed. Both end with no
+/// Account, but only one of them has an exit status worth repeating back — a
+/// status of zero says nothing, so the refusal must not pretend it does.
+#[test]
+fn a_login_that_finished_without_logging_anybody_in_says_just_that() {
+    let host = logged_in_machine().with_login(|_host, _dir| 0);
+
+    let (result, _) = run_add(&host, AddArgs::default());
+
+    let said = result.expect_err("nobody logged in").to_string();
+    assert!(said.contains("The login did not complete"), "{said}");
+    assert!(
+        !said.contains("exited 0"),
+        "an exit status of zero is not a reason: {said}"
+    );
+    assert!(said.contains("Nothing changed."), "{said}");
+    assert_eq!(
+        registry_of(&host).accounts.len(),
+        1,
+        "and no Account was gained"
+    );
+}
+
+/// The other half of the same branch: a login that failed has a status, and the
+/// status is the only extra thing anybody can act on.
+#[test]
+fn a_login_that_exited_badly_repeats_the_status_it_exited_with() {
+    let host = logged_in_machine().with_login(|_host, _dir| 7);
+
+    let (result, _) = run_add(&host, AddArgs::default());
+
+    let said = result.expect_err("the login failed").to_string();
+    assert!(said.contains("The login exited 7"), "{said}");
+    assert_eq!(registry_of(&host).accounts.len(), 1);
+}
+
+/// A `.claude.json` that is there but cannot be read is a different thing from
+/// one that is absent, and saying "nobody logged in" would be the wrong
+/// diagnosis: the login may well have worked. The refusal names the file.
+#[test]
+fn a_login_whose_identity_file_cannot_be_read_is_refused_by_name() {
+    let host = logged_in_machine();
+    let pending = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    let store = perch::probe::store_for_profile(&host, &pending).expect("USER is set");
+
+    let host = host
+        .with_unreadable_file(&store.identity_file, "permission denied")
+        .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE));
+
+    let (result, _) = run_add(&host, AddArgs::default());
+
+    let said = result
+        .expect_err("the Identity could not be read")
+        .to_string();
+    assert!(said.contains("could not read"), "{said}");
+    assert!(said.contains(".claude.json"), "it names the file: {said}");
+    assert!(
+        !said.contains("did not complete"),
+        "an unreadable file is not an abandoned login: {said}"
+    );
+    assert_eq!(registry_of(&host).accounts.len(), 1);
+}
+
+/// The reaper walks a directory of logins named after when each one started. A
+/// name it cannot read a moment out of is left alone rather than guessed at:
+/// being wrong in that direction costs a stale directory, and being wrong in
+/// the other costs somebody the login they are in the middle of.
+#[test]
+fn a_pending_login_directory_with_an_unreadable_name_is_never_reaped() {
+    let host = logged_in_machine();
+    run_list(&host, false).0.expect("the Account is adopted");
+
+    let pending = perch::registry::pending_logins_dir(&host).expect("home is known");
+    let unnamed = pending.join("login-not-a-moment");
+    host.set_file(unnamed.join("marker"), "left by something else");
+
+    // Far past the point where anything reapable would have gone.
+    host.set_now(host.now() + chrono::Duration::days(30));
+    run_list(&host, false).0.expect("a listing");
+
+    assert!(
+        host.path_exists(&unnamed),
+        "a directory whose age cannot be established is left alone"
+    );
+}

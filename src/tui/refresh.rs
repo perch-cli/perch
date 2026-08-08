@@ -171,3 +171,161 @@ fn taken(emails: Vec<String>) -> Refreshed {
         notes,
     }
 }
+
+/// What the frame loop sees, driven through the channel the real Refresh
+/// answers on.
+///
+/// [`InAThread::ask`] and [`taken`] are deliberately not exercised here: between
+/// them they build a [`RealHost`], take Perch's lock and write the registry of
+/// whoever is running the tests. What is worth asserting is everything either
+/// side of that — a channel is handed to `coming` directly, which is exactly
+/// what `ask` does with it, and the loop is then asked the questions it asks
+/// once a frame.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    /// A Refresh that has been asked for and not yet answered, and the end of
+    /// the channel the thread would have answered on.
+    fn outstanding_one() -> (InAThread, mpsc::Sender<Refreshed>) {
+        let (send, coming) = mpsc::channel();
+        (
+            InAThread {
+                coming: Some(coming),
+            },
+            send,
+        )
+    }
+
+    fn a_refresh() -> Refreshed {
+        Refreshed {
+            registry: Some(Registry::default()),
+            notes: vec!["one window could not be read".to_string()],
+        }
+    }
+
+    #[test]
+    fn nothing_is_outstanding_until_a_refresh_is_asked_for() {
+        let mut fresh = InAThread::new();
+
+        assert!(!fresh.outstanding());
+        assert!(fresh.collect().is_none());
+    }
+
+    /// The loop calls this once a frame and must never be held up by it: while
+    /// the Refresh is still going there is simply nothing to take.
+    #[test]
+    fn a_refresh_still_going_gives_the_frame_loop_nothing_and_keeps_it_drawing() {
+        let (mut refresher, _thread) = outstanding_one();
+
+        assert!(refresher.collect().is_none());
+        assert!(refresher.collect().is_none());
+        assert!(
+            refresher.outstanding(),
+            "it has not answered, so it is still out"
+        );
+    }
+
+    #[test]
+    fn the_answer_is_collected_once_and_then_nothing_is_outstanding() {
+        let (mut refresher, thread) = outstanding_one();
+        thread.send(a_refresh()).expect("the loop is listening");
+
+        let collected = refresher.collect().expect("the answer is there to take");
+        assert!(collected.registry.is_some());
+        assert_eq!(collected.notes, ["one window could not be read"]);
+
+        assert!(!refresher.outstanding());
+        assert!(
+            refresher.collect().is_none(),
+            "the same answer is not handed out twice"
+        );
+    }
+
+    /// A panic on the Refresh thread drops the sender without anything having
+    /// been sent. The frame loop is not the place to die of that (ADR 0018):
+    /// what was already on screen stands, and a note says why it did not move.
+    #[test]
+    fn a_refresh_thread_that_died_becomes_a_note_rather_than_a_frame_loop_that_stops() {
+        let (mut refresher, thread) = outstanding_one();
+        drop(thread);
+
+        let collected = refresher.collect().expect("a disconnect is an answer too");
+        assert!(
+            collected.registry.is_none(),
+            "nothing was read, so nothing replaces what is on screen"
+        );
+        assert_eq!(collected.notes.len(), 1);
+        assert!(
+            collected.notes[0].contains("did not finish"),
+            "{:?}",
+            collected.notes
+        );
+
+        assert!(!refresher.outstanding());
+        assert!(refresher.collect().is_none(), "and it is not asked again");
+    }
+
+    #[test]
+    fn a_refresh_that_read_nothing_has_no_registry_to_show_for_it() {
+        let nothing = Refreshed::nothing_read(vec!["Perch's lock is held".to_string()]);
+
+        assert!(nothing.registry.is_none());
+        assert_eq!(nothing.notes, ["Perch's lock is held"]);
+    }
+
+    /// The way out of the TUI waits so the registry write finishes and Perch's
+    /// lock goes back. With nothing outstanding there is nothing to wait for,
+    /// and `q` must not pause on the way out.
+    #[test]
+    fn leaving_with_no_refresh_outstanding_waits_for_nothing() {
+        let mut fresh = InAThread::new();
+
+        let began = Instant::now();
+        fresh.wait_for_it(FINISHING_MILLIS);
+
+        assert!(
+            began.elapsed() < Duration::from_millis(FINISHING_MILLIS),
+            "it waited out the full allowance with nothing to wait for"
+        );
+    }
+
+    #[test]
+    fn leaving_returns_as_soon_as_the_refresh_is_done() {
+        let (mut refresher, thread) = outstanding_one();
+        thread.send(a_refresh()).expect("the loop is listening");
+
+        let began = Instant::now();
+        refresher.wait_for_it(FINISHING_MILLIS);
+
+        assert!(began.elapsed() < Duration::from_millis(FINISHING_MILLIS));
+        assert!(!refresher.outstanding());
+    }
+
+    /// A Refresh that outlasts the allowance is given up on rather than holding
+    /// the process open for ever. Nothing kills the thread — it goes on to
+    /// finish the write that the wait was about — but nobody is listening for
+    /// what it hands back, which is the case [`InAThread::ask`] discards the
+    /// send result for.
+    #[test]
+    fn a_refresh_that_outlasts_the_wait_is_given_up_on_and_answers_to_nobody() {
+        let (mut refresher, thread) = outstanding_one();
+
+        let began = Instant::now();
+        refresher.wait_for_it(20);
+
+        assert!(
+            began.elapsed() < Duration::from_millis(FINISHING_MILLIS),
+            "it waited the allowance it was given, not the one the way out uses"
+        );
+        assert!(
+            !refresher.outstanding(),
+            "it was given up on, so nothing waits for it twice"
+        );
+        assert!(
+            thread.send(a_refresh()).is_err(),
+            "there is no frame left to draw the answer on"
+        );
+    }
+}

@@ -435,3 +435,69 @@ fn managing_groups_makes_no_network_call() {
 
     assert!(host.http_calls().is_empty());
 }
+
+/// Moving an Account out of no Group into no Group. It is not a failure — the
+/// Account is where it was asked to be — but it must not be reported as a move
+/// either, or a script reads a no-op as a change.
+#[test]
+fn moving_an_ungrouped_account_out_of_a_group_says_it_was_already_in_none() {
+    let host = machine_with_two_accounts();
+
+    let (result, printed) = run_group(
+        &host,
+        perch::commands::group::GroupCommand::Move {
+            target: EMAIL.to_string(),
+            group: "none".to_string(),
+        },
+    );
+
+    result.expect("it is already where it was asked to be");
+    assert!(
+        printed.contains(&format!("{EMAIL} was already in no Group.")),
+        "{printed}"
+    );
+    assert_eq!(registry_of(&host).account(EMAIL).expect("held").group, None);
+}
+
+/// A Group name nothing resembles, with Groups declared. The refusal names the
+/// ones that exist and how to declare the one that does not — a near miss gets
+/// the suggestion instead, on the grounds that it is a typo rather than an
+/// intention.
+#[test]
+fn a_group_name_resembling_nothing_is_answered_with_the_groups_that_exist() {
+    let host = three_accounts_in_one_group();
+
+    let (result, _) = move_to_group(&host, SECOND_EMAIL, "zzzzzzzz");
+
+    let said = result.expect_err("there is no such Group").to_string();
+    assert!(said.contains("No Group called `zzzzzzzz`"), "{said}");
+    assert!(said.contains("Groups Perch holds: work."), "{said}");
+    assert!(
+        said.contains("perch group add zzzzzzzz"),
+        "and how to declare it: {said}"
+    );
+}
+
+/// A Group whose watcher has been turned on reads as one that may act, with
+/// the whole policy rather than the threshold alone: a summary naming only when
+/// it acts would read as the whole of what it does (ADR 0013).
+#[test]
+fn a_group_listing_says_when_its_watcher_may_switch_unattended() {
+    let host = three_accounts_in_one_group();
+    config_set(&host, &["work", "watcher-may-act", "true"])
+        .0
+        .expect("the watcher is turned on");
+
+    let (result, printed) = run_group(&host, perch::commands::group::GroupCommand::List);
+
+    result.expect("a listing");
+    assert!(printed.contains("may switch unattended at"), "{printed}");
+    assert!(
+        printed.contains("onto") && printed.contains("at most every"),
+        "the whole policy, not the threshold alone: {printed}"
+    );
+    assert!(
+        !printed.contains("off (would act"),
+        "it is on, so it must not read as off: {printed}"
+    );
+}

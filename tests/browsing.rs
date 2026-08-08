@@ -1024,3 +1024,26 @@ fn perch_tui_is_refused_where_there_is_no_terminal() {
     assert!(said.contains("perch list"), "{said}");
     assert!(said.contains("perch status"), "{said}");
 }
+
+/// Leaving the view without choosing anything launches nothing and succeeds.
+/// A picker that exited non-zero because nobody picked would make `perch tui`
+/// unusable in anything that checks a status.
+#[test]
+fn a_view_left_alone_hands_nothing_over_and_ends_well() {
+    let host = machine_with_figures();
+    let mut said = Vec::new();
+
+    let ended = perch::commands::tui::hand_over(&host, Left::Alone, &mut said)
+        .expect("leaving is not a failure");
+
+    assert_eq!(ended, 0);
+    assert!(
+        said.is_empty(),
+        "and nothing was said about a Run that did not happen"
+    );
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(EMAIL),
+        "nor was anything switched"
+    );
+}

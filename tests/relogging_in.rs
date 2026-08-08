@@ -456,3 +456,39 @@ fn a_repair_that_could_not_be_made_live_leaves_nothing_to_capture_into() {
         "the fresh Credential survives the Switch that follows"
     );
 }
+
+/// A browser round trip is the longest wait in Perch, and the registry is read
+/// again afterwards for exactly that reason. An Account given up in another
+/// terminal while the login was open leaves nothing to repair — and the login
+/// itself worked, so the sentence has to say where that Credential went rather
+/// than leaving somebody thinking they lost it.
+#[test]
+fn an_account_removed_while_its_login_was_open_says_the_login_still_worked() {
+    let host = broken_second_account().with_login(|host, dir| {
+        // Somebody in another terminal gives the Account up while the browser
+        // is still open.
+        let mut registry = registry_of(host);
+        registry
+            .accounts
+            .retain(|account| account.email() != SECOND_EMAIL);
+        save_registry(host, &registry);
+
+        login_producing(SECOND_REPAIRED, SECOND_IDENTITY_FILE)(host, dir)
+    });
+
+    let (result, _) = run_relogin(&host, SECOND_EMAIL);
+
+    let refusal = result.expect_err("there is nothing left to repair");
+    assert_eq!(refusal.exit_code(), EXIT_NOT_FOUND);
+    let said = refusal.to_string();
+    assert!(
+        said.contains(&format!(
+            "{SECOND_EMAIL} was removed while that login was happening"
+        )),
+        "{said}"
+    );
+    assert!(
+        said.contains("The login itself worked") && said.contains("perch add"),
+        "it says the Credential is not lost, and how to keep it: {said}"
+    );
+}

@@ -433,6 +433,43 @@ fn main() {
 mod tests {
     use super::*;
 
+    /// A Run is the exception every other command is measured against: what the
+    /// client said is what a script reads. Everything else earns nought for
+    /// having worked, and the failure decides the code when it did not.
+    #[test]
+    fn a_command_that_worked_is_nought_and_one_that_failed_is_its_own_code() {
+        assert_eq!(ok(Ok(())).expect("it worked"), EXIT_OK);
+
+        let refused = ok(Err(perch::error::PerchError::NotFound("gone".to_string())))
+            .expect_err("it did not");
+        assert_eq!(refused.exit_code(), perch::error::EXIT_NOT_FOUND);
+    }
+
+    /// What Perch exits with, and where a failure is said. Standard output is
+    /// flushed first: a refusal on stderr that overtook the lines the command
+    /// had already printed would read as being about the wrong thing.
+    #[test]
+    fn what_a_command_ended_as_is_its_code_and_a_failure_says_why_on_the_way_out() {
+        let mut out = Vec::new();
+        assert_eq!(
+            ended_as(Ok(3), &mut out),
+            3,
+            "a Run's code is passed through"
+        );
+        assert!(out.is_empty(), "and nothing is added to what it said");
+
+        let mut out = Vec::new();
+        let code = ended_as(
+            Err(perch::error::PerchError::Invalid("no".to_string())),
+            &mut out,
+        );
+        assert_eq!(code, perch::error::EXIT_INVALID);
+        assert!(
+            out.is_empty(),
+            "a failure is said on stderr, not on the stream a script is parsing"
+        );
+    }
+
     fn command_of(line: &[&str]) -> Vec<String> {
         match Cli::try_parse_from(line).expect("the line parses").command {
             Command::Run { command, .. } => command,

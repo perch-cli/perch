@@ -653,3 +653,143 @@ fn a_lock_somebody_is_holding_stops_a_removal_as_held_rather_than_as_a_fault() {
         "and the Credential is still the live one"
     );
 }
+
+/// The Credential is deleted before Perch's own record is written, because a
+/// record naming an Account whose Credential is gone is recoverable and a
+/// Credential deleted for an Account nothing records is not. When the record
+/// then cannot be written, the note has to say which way round it failed.
+#[test]
+fn a_removal_that_deleted_the_credential_but_could_not_be_recorded_says_so() {
+    let host = machine_with_two_accounts().with_unwritable_file(REGISTRY_PATH, "read-only");
+
+    let (result, _) = run_remove_with(
+        &host,
+        RemoveArgs {
+            target: SECOND_EMAIL.to_string(),
+            yes: true,
+        },
+    );
+
+    let said = result
+        .expect_err("the record could not be written")
+        .to_string();
+    assert!(
+        said.contains(&format!(
+            "The Credential Perch held for {SECOND_EMAIL} is already deleted"
+        )),
+        "{said}"
+    );
+    assert!(
+        said.contains("can no longer switch to"),
+        "it says what the record it still holds is worth: {said}"
+    );
+}
+
+/// Removing the active Account lands on a successor before deleting anything.
+/// The landing is a live Credential and a record of it, and if that record
+/// cannot be written the Credential is live for an Account Perch does not call
+/// active — the state a later Switch would Capture over and destroy (ADR 0006).
+/// Nothing is removed, and the note names the one command that repairs it.
+#[test]
+fn a_landing_that_cannot_be_recorded_removes_nothing_and_names_the_repair() {
+    let host = machine_with_two_accounts().with_unwritable_file(REGISTRY_PATH, "read-only");
+
+    let (result, _) = run_remove_with(
+        &host,
+        RemoveArgs {
+            target: EMAIL.to_string(),
+            yes: true,
+        },
+    );
+
+    let said = result
+        .expect_err("the landing could not be recorded")
+        .to_string();
+    assert!(said.contains("Nothing was removed."), "{said}");
+    assert!(
+        said.contains(&format!("{SECOND_EMAIL}'s Credential is the live one now")),
+        "{said}"
+    );
+    assert!(
+        said.contains(&format!("perch switch {SECOND_EMAIL}")),
+        "it names the repair: {said}"
+    );
+    assert!(holds(&host, EMAIL), "and the Account is still held");
+}
+
+/// Removing the active Account out of three, with nowhere to land. Perch says
+/// how many are left rather than naming one, because with more than one there
+/// is no "the one it still holds" to name.
+#[test]
+fn removing_the_active_account_with_several_left_counts_them_rather_than_naming_one() {
+    let host = machine_with_three_accounts();
+    for email in [SECOND_EMAIL, THIRD_EMAIL] {
+        disable_account(&host, email)
+            .0
+            .expect("it stops being a candidate");
+    }
+
+    let (result, printed) = run_remove_with(
+        &host,
+        RemoveArgs {
+            target: EMAIL.to_string(),
+            yes: true,
+        },
+    );
+
+    result.expect("it is removed");
+    assert!(
+        printed.contains("Perch holds no active Account now"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("one of the 2 it still holds"),
+        "with two left there is no single one to name: {printed}"
+    );
+}
+
+/// The same with one Account left, where counting would read as evasion: there
+/// is exactly one, and naming it as such is what a person would say.
+#[test]
+fn removing_the_active_account_with_one_left_names_it_as_the_one() {
+    let host = machine_with_two_accounts();
+    disable_account(&host, SECOND_EMAIL)
+        .0
+        .expect("it stops being a candidate");
+
+    let (result, printed) = run_remove_with(
+        &host,
+        RemoveArgs {
+            target: EMAIL.to_string(),
+            yes: true,
+        },
+    );
+
+    result.expect("it is removed");
+    assert!(printed.contains("the one it still holds"), "{printed}");
+    assert!(!printed.contains("one of the 1"), "{printed}");
+}
+
+/// A Profile directory that will not go is worth a note and not a failure: the
+/// Credential is out of the Credential Store by then, and what is left is a
+/// directory holding nothing secret.
+#[test]
+fn a_profile_directory_that_will_not_go_is_a_note_rather_than_a_failure() {
+    let host = machine_with_two_accounts().with_undeletable_file(SECOND_PROFILE, "in use");
+
+    let (result, _) = run_remove_with(
+        &host,
+        RemoveArgs {
+            target: SECOND_EMAIL.to_string(),
+            yes: true,
+        },
+    );
+
+    result.expect("a directory that will not go is not a failed removal");
+    assert!(!holds(&host, SECOND_EMAIL), "the Account is forgotten");
+    let notes = host.notes().join("\n");
+    assert!(
+        notes.contains(SECOND_PROFILE) && notes.contains("deleting it by hand is safe"),
+        "{notes}"
+    );
+}

@@ -985,3 +985,66 @@ fn another_perch_holding_the_registry_holds_the_round_rather_than_ending_the_wat
         "a hold that did not say when it comes back reads as having given up: {held}"
     );
 }
+
+/// A 200 carrying no Quota Window at all. The status says the endpoint was
+/// happy, so the temptation is to treat the body as a reading — but an answer
+/// that says nothing about how full an Account is says nothing about whether to
+/// leave it. The round holds rather than reading an empty body as an empty
+/// Account and switching off a subscription that was never measured.
+#[test]
+fn a_200_carrying_no_quota_window_holds_the_round_rather_than_reading_as_empty() {
+    let host = unreadable(&[(200, "{}")], 1);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("an answer with nothing in it is not a fault");
+    let held = decisions(&printed)
+        .into_iter()
+        .find(|line| line.contains("held"))
+        .unwrap_or_else(|| panic!("the round is held and said so: {printed}"));
+    assert!(
+        held.contains("named no Quota Window"),
+        "it says what was wrong with the answer: {held}"
+    );
+    assert!(
+        held.contains("nothing current to decide on"),
+        "and that this is why nothing was decided: {held}"
+    );
+    assert!(
+        held.contains("Asking again in"),
+        "a hold that did not say when it comes back reads as having given up: {held}"
+    );
+    assert_eq!(
+        active(&host).as_deref(),
+        Some(EMAIL),
+        "and nothing was switched on the strength of it"
+    );
+}
+
+/// The Account being watched is over its threshold and the one it would move to
+/// cannot be read. There is nowhere to go, which is a decision rather than a
+/// failure — but the line has to carry why the candidate was not considered, or
+/// it reads as though every Account were genuinely full.
+#[test]
+fn nowhere_to_go_says_which_candidates_could_not_be_read() {
+    let host = watched()
+        .with_reply_to(PROFILE_URL, ACTIVE_TOKEN, 200, &profile_of(EMAIL))
+        .with_replies_to(USAGE_URL, ACTIVE_TOKEN, &[(200, &usage(95.0))])
+        .with_reply_to(PROFILE_URL, SPARE_TOKEN, 200, &profile_of(SECOND_EMAIL))
+        .with_replies_to(USAGE_URL, SPARE_TOKEN, &[(500, "the endpoint is unwell")])
+        .with_interrupt_after(1);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("nowhere to go is an answer, not a fault");
+    let decided = decisions(&printed).join("\n");
+    assert!(
+        decided.contains(SECOND_EMAIL),
+        "the candidate that could not be read is named: {decided}"
+    );
+    assert_eq!(
+        active(&host).as_deref(),
+        Some(EMAIL),
+        "and the loop stayed where it was"
+    );
+}

@@ -486,3 +486,79 @@ fn an_export_whose_registry_went_stale_while_the_passphrase_was_typed_writes_not
         "a partial Export is worse than none: it is only found out at the restore"
     );
 }
+
+/// An Export of a machine Perch holds nothing on. There is a difference between
+/// a backup of nothing and a backup that failed, and writing an empty file
+/// would make the two indistinguishable on the day it is restored from.
+#[test]
+fn exporting_a_machine_with_no_accounts_refuses_rather_than_writing_an_empty_file() {
+    // The state is reached the only way it can be: the last Account given up.
+    // A machine that never had one is refused by adoption long before this.
+    let host = typing_the_passphrase(logged_in_machine());
+    run_remove_with(
+        &host,
+        perch::commands::remove::RemoveArgs {
+            target: EMAIL.to_string(),
+            yes: true,
+        },
+    )
+    .0
+    .expect("the last Account is given up");
+    assert!(registry_of(&host).accounts.is_empty(), "as we start");
+
+    let (result, _) = run_export(&host, AT);
+
+    let refusal = result.expect_err("there is nothing to export");
+    let said = refusal.to_string();
+    assert!(
+        said.contains("Perch holds no Accounts, so there is nothing to export."),
+        "{said}"
+    );
+    assert!(said.contains("perch add"), "it names the way out: {said}");
+    assert_eq!(host.file(AT), None, "and nothing was written");
+}
+
+/// A path with no directory in it names the current directory, which exists by
+/// definition. Refusing it as "no such directory" would turn the shortest form
+/// of the command into the one that never works.
+#[test]
+fn exporting_to_a_bare_filename_is_not_refused_for_want_of_a_directory() {
+    let host = a_machine_worth_backing_up();
+
+    let (result, printed) = run_export(&host, "perch-backup.age");
+
+    result.expect("the current directory is somewhere that exists");
+    assert!(printed.contains("Exported 3 Accounts"), "{printed}");
+    assert!(
+        host.file("perch-backup.age").is_some(),
+        "the file is where it was asked for"
+    );
+}
+
+/// More than one Account with no Credential anywhere. The sentence naming them
+/// has to agree in number, because this is the line that tells somebody their
+/// backup is less complete than they think.
+#[test]
+fn an_export_says_accounts_in_the_plural_when_several_have_no_credential() {
+    let host = machine_with_three_accounts();
+    for email in [SECOND_EMAIL, THIRD_EMAIL] {
+        let store = store_of(&host, email);
+        host.forget_keychain_item(&store.keychain_service, LOGIN_NAME);
+        host.remove_file(&store.credentials_file).ok();
+        quarantine_for(&host, email, Quarantine::RenewalRejected);
+    }
+    let host = typing_the_passphrase(host);
+
+    let (result, printed) = run_export(&host, AT);
+
+    result.expect("an Export is still written");
+    assert!(
+        printed.contains("carries the Accounts without one"),
+        "two of them, so the plural: {printed}"
+    );
+    assert!(
+        printed.contains(SECOND_EMAIL) && printed.contains(THIRD_EMAIL),
+        "and it names which: {printed}"
+    );
+    assert!(printed.contains("perch relogin"), "{printed}");
+}
