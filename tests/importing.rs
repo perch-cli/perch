@@ -194,6 +194,43 @@ fn nothing_is_made_active_by_an_import() {
     assert!(printed.contains("perch switch"), "{printed}");
 }
 
+/// The same rule, for the other claim a registry makes about right now.
+///
+/// `checks` is what a `perch watch --once` on the *other* machine did — a
+/// Switch it made, and when — and the cooldown and the no-return are measured
+/// from it. Carried across, an Export taken this morning has the first check on
+/// the new machine reporting `cooling`, and bars the Account that machine last
+/// left, on the strength of something that happened somewhere else.
+#[test]
+fn no_watcher_has_run_here_yet_however_recently_one_ran_where_the_export_was_taken() {
+    // A machine whose scheduled check Switched a moment ago, exported.
+    let host = machine_with_three_accounts();
+    declare_group(&host, "work");
+    move_to_group(&host, EMAIL, "work").0.expect("it joins");
+    let mut registry = registry_of(&host);
+    registry.checks.insert(
+        "work".to_string(),
+        perch::registry::Checked {
+            switched_at: host.now(),
+            switched_off: EMAIL.to_string(),
+        },
+    );
+    save_registry(&host, &registry);
+    let host = host.with_secrets(&[PASSPHRASE, PASSPHRASE]);
+    run_export(&host, AT).0.expect("the export is written");
+    let sealed = host.file(AT).expect("a file was written");
+
+    let onto = a_new_machine_holding(&sealed);
+    run_import(&onto, AT).0.expect("the import lands");
+
+    assert!(
+        registry_of(&onto).checks.is_empty(),
+        "a new machine's first check is its first check, not one paced by \
+         another machine's: {:?}",
+        registry_of(&onto).checks
+    );
+}
+
 /// Every other command reads the registry through adoption, which takes the
 /// existing Claude Code login over the first time Perch runs. An Import that did
 /// that would make the machine non-empty on the way to refusing itself for being
