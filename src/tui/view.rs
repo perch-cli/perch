@@ -16,9 +16,11 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Tabs};
 
+use crate::commands::CYCLING_AMONG_UNGROUPED;
 use crate::commands::list::{self, COLUMNS};
 use crate::cycle;
 use crate::registry::Account;
+use crate::reserve::Reserve;
 use crate::tui::model::{Model, Refreshing, Tab};
 use crate::utilization;
 
@@ -181,43 +183,97 @@ fn render_accounts(frame: &mut Frame, model: &Model, area: Rect) {
     render_scrolled(frame, area, lines, model.cursor + 1);
 }
 
-/// The figures, one Account at a time, each with the age of the observation it
-/// came from (ADR 0015).
+/// The figures, at the two levels there are honest figures for: one Account, and
+/// one Group (ADR 0015 for the age on every one of them).
 ///
 /// A block per Account rather than a row, because an Account has several Quota
 /// Windows at once and is limited by whichever fills first: one line per
 /// Account would have to pick one of them, and the one it picked would be the
-/// one hiding the other.
+/// one hiding the other. Above the block, the Headroom those rows come to —
+/// taken from the fullest of them (ADR 0012), and naming which, so the figure
+/// can be checked against the rows underneath rather than taken on trust.
+///
+/// Above each Group, its Reserve and one row per Quota Window kind
+/// ([`crate::reserve`]). There is deliberately **no total**: Accounts sit on
+/// different plans and Perch only ever sees percentages, so nothing here sums or
+/// averages anything, and every figure on a Group's rows is one an Account
+/// actually reported.
 fn render_utilization(frame: &mut Frame, model: &Model, area: Rect) {
     let accounts = model.accounts();
     if accounts.is_empty() {
         return render_nothing_held(frame, area);
     }
 
+    // One column for the Headroom of every Account on screen, so the figures
+    // line up down the view and the eye can run over them rather than hunting
+    // for each one at the end of a different-length address.
+    let widest = accounts
+        .iter()
+        .map(|account| account.email().chars().count())
+        .max()
+        .unwrap_or_default();
+
     let mut lines = Vec::new();
     let mut cursor_line = 0;
-    for (index, account) in accounts.iter().enumerate() {
-        if index == model.cursor {
-            cursor_line = lines.len();
-        }
-        let heading = Line::from(format!(
-            "{}{}",
-            markers(model, account, index),
-            account.email()
-        ));
-        lines.push(match index == model.cursor {
-            true => heading.style(Style::new().add_modifier(Modifier::REVERSED)),
-            false => heading.style(Style::new().add_modifier(Modifier::BOLD)),
-        });
+    for section in model.sections() {
+        lines.push(
+            Line::from(section.scope.heading()).style(Style::new().add_modifier(Modifier::BOLD)),
+        );
         lines.extend(
-            utilization::lines(account, model.now)
+            group_figures(model, &section.scope)
                 .into_iter()
-                .map(|figure| Line::from(format!("    {figure}"))),
+                .map(|figure| Line::from(format!("  {figure}"))),
         );
         lines.push(Line::from(""));
+
+        for index in section.rows.clone() {
+            let account = accounts[index];
+            if index == model.cursor {
+                cursor_line = lines.len();
+            }
+            let heading = Line::from(format!(
+                "{}{:widest$}   Headroom {}",
+                markers(model, account, index),
+                account.email(),
+                cycle::headroom_in_full(account, model.now),
+            ));
+            lines.push(match index == model.cursor {
+                true => heading.style(Style::new().add_modifier(Modifier::REVERSED)),
+                false => heading.style(Style::new().add_modifier(Modifier::BOLD)),
+            });
+            // Nothing under an Account nobody has ever read a figure for: the
+            // Headroom beside its name has already said so, and a row saying it
+            // again reads as a Quota Window called "never observed".
+            if account.observed_utilization().is_some() {
+                lines.extend(
+                    utilization::lines_with_resets(account, model.now)
+                        .into_iter()
+                        .map(|figure| Line::from(format!("      {figure}"))),
+                );
+            }
+            lines.push(Line::from(""));
+        }
     }
 
     render_scrolled(frame, area, lines, cursor_line);
+}
+
+/// What is said above one scope's Accounts.
+///
+/// A Group is a declaration that its Accounts are interchangeable, which is what
+/// makes "what is left across them" a question with an answer. Being in no Group
+/// is the absence of that declaration (ADR 0017), so those Accounts get a
+/// heading and nothing else until `cycle-ungrouped` says a Cycle may move
+/// between them — a Reserve over Accounts nobody has said are interchangeable
+/// would be a figure about a set that is not one.
+fn group_figures(model: &Model, scope: &cycle::Scope) -> Vec<String> {
+    if !cycle::may_cycle_within(model.registry(), scope) {
+        return vec![format!("Cycling {CYCLING_AMONG_UNGROUPED}.")];
+    }
+    let reserve = Reserve::of(model.registry(), scope);
+    let mut figures = reserve.lines(model.now);
+    figures.extend(reserve.window_lines(model.now));
+    figures
 }
 
 /// Perch holding nothing at all, said as the state it is rather than as an

@@ -63,7 +63,7 @@ impl Scope {
     fn heading(&self) -> Option<String> {
         match self {
             Scope::Everything => None,
-            Scope::Group(name) => Some(format!("Group `{name}`")),
+            Scope::Group(name) => Some(group_heading(name)),
             Scope::Ungrouped => Some(IN_NO_GROUP.to_string()),
         }
     }
@@ -75,6 +75,16 @@ impl Scope {
             Scope::Ungrouped => json!({"kind": "ungrouped", "name": serde_json::Value::Null}),
         }
     }
+}
+
+/// One Group, said as the line above the Accounts in it.
+///
+/// Shared with the TUI ([`crate::cycle::Scope::heading`]), which heads the same
+/// set of Accounts and would otherwise name it in a second place: the two
+/// surfaces are the same listing drawn twice (ADR 0011), and a Group that read
+/// one way in a line and another in a frame would read as two Groups.
+pub fn group_heading(name: &str) -> String {
+    format!("Group `{name}`")
 }
 
 pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {

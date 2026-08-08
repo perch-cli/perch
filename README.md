@@ -834,24 +834,75 @@ exactly the hidden claim this listing exists not to make. Their Headroom is
 still shown; it is a figure rather than a running order. Set `cycle-ungrouped`
 and they rank like any Group.
 
-The Utilization view is the same Accounts in the same order, with their figures,
-one row per Quota Window and each carrying its own age. The order is shared
-because the cursor is: two orders would make `Tab` move what `Enter` acts on.
+The Utilization view is the same Accounts in the same order, with their figures
+at the two levels there are honest figures for. The order is shared because the
+cursor is: two orders would make `Tab` move what `Enter` acts on.
 
 ```
  Accounts | Utilization                             active: someone@example.com
->  overflow@example.com
-    5-hour     7%  (as of 4m ago)
+Group `work`
+  Reserve: 2 of 2 Accounts have Headroom, the best 39% left (as of 4m ago)
+  5-hour   emptiest   7% used across 2 Accounts (as of 4m ago)
+  7-day    emptiest  61% used across 2 Accounts (as of 4m ago)
 
- * someone@example.com
-    5-hour    42%  (as of 4m ago)
-    7-day     18%  (as of 4m ago)
+>  overflow@example.com   Headroom 39%  (7-day is its fullest, as of 4m ago)
+      5-hour     7% used  resets 2026-08-04 14:00 UTC (in 2h)  (as of 4m ago)
+      7-day     61% used  resets 2026-08-08 12:00 UTC (in 4d)  (as of 4m ago)
 
-   spare@example.com
-    never observed
+ * someone@example.com    Headroom 18%  (7-day is its fullest, as of 4m ago)
+      5-hour    42% used  resets 2026-08-04 15:00 UTC (in 3h)  (as of 4m ago)
+      7-day     82% used  resets 2026-08-06 14:00 UTC (in 2d)  (as of 4m ago)
+
+In no Group
+  Cycling only moves between these when you say it may.
+
+   spare@example.com      Headroom never observed
 
 q  quit   Tab  view   Up/Down  move   Enter  switch   x  run   r  refresh
 ```
+
+Each Account gets a block rather than a line, because it has several Quota
+Windows at once and is limited by whichever fills first: one line per Account
+would have to pick one of them, and the one it picked would be the one hiding
+the other. Each window says its fill, when it comes back and how old the reading
+is — 90% that resets in twenty minutes and 90% that resets in four hours are the
+same number and opposite advice. An Account nobody has ever read a figure for
+says so rather than showing a zero; "no figure" and "plenty of room" are
+opposite pieces of advice.
+
+Beside each Account's name is its **Headroom**: how much is left to spend, taken
+from its most constrained window and naming which, so an Account is only ever as
+free as its fullest window and a generous-looking figure never hides an
+exhausted one (ADR 0012). It is the figure the ranking on the Accounts view was
+made on, and the rows underneath are what it can be checked against.
+
+Above each Group is its **Reserve**: what the Group has left to draw on, said as
+how many of its Accounts still have Headroom and how much the best of them has.
+A Disabled or Quarantined Account is not part of it — a Credential that does not
+work is quota nothing can spend — and where a Group holds one it says so on a
+line of its own rather than dropping it from a count that would then not add up
+to the Accounts on screen. Under the Reserve, one row per Quota Window kind: the
+emptiest Account in that window, which is the best the Group can currently offer
+there. Fill and room are both percentages and are never left to be told apart by
+context: a Reserve says how much is *left* and a window row says how much is
+*used*, and the row says the word. That is what answers "fine on the weekly window, empty on the five-hour
+one", which is the case a single figure per Account hides.
+
+**There is no total, anywhere.** Never one pooled figure across Accounts.
+Accounts sit on different plans and Perch only ever sees percentages — a `pro`
+Account at 50% and a `max` Account at 50% do not have the same quota left, and
+Perch never sees the allowance behind either. Summing or averaging them produces
+a number that looks quantitative, isn't, and is exactly the kind of number
+people plan around. So every percentage on this view is one an Account actually
+reported, and the per-window rows are the only figure drawn across a Group's
+Accounts at all, because within one window kind the comparison at least means
+something.
+
+The Accounts in no Group get a heading and no Reserve. Being ungrouped is the
+absence of a declaration that Accounts are interchangeable (ADR 0017), and a
+figure for what a set has left to draw on is a figure about a set — so it
+appears once `perch config set cycle-ungrouped true` says a Cycle may move
+between them, and not before.
 
 ### It acts, and acts on exactly two things
 
