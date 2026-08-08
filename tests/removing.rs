@@ -775,7 +775,14 @@ fn removing_the_active_account_with_one_left_names_it_as_the_one() {
 /// directory holding nothing secret.
 #[test]
 fn a_profile_directory_that_will_not_go_is_a_note_rather_than_a_failure() {
-    let host = machine_with_two_accounts().with_undeletable_file(SECOND_PROFILE, "in use");
+    let host = machine_with_two_accounts();
+    // Derived the way the note derives it rather than spelled by hand: a
+    // Windows build joins paths with the other separator, so the directory this
+    // is about renders as `/Users/someone\.config\...` there and a fixture
+    // holding the forward-slash spelling would be asserting on a path nothing
+    // ever prints.
+    let profile = store_of(&host, SECOND_EMAIL).config_dir;
+    let host = host.with_undeletable_file(&profile, "in use");
 
     let (result, _) = run_remove_with(
         &host,
@@ -789,7 +796,8 @@ fn a_profile_directory_that_will_not_go_is_a_note_rather_than_a_failure() {
     assert!(!holds(&host, SECOND_EMAIL), "the Account is forgotten");
     let notes = host.notes().join("\n");
     assert!(
-        notes.contains(SECOND_PROFILE) && notes.contains("deleting it by hand is safe"),
+        notes.contains(&profile.display().to_string())
+            && notes.contains("deleting it by hand is safe"),
         "{notes}"
     );
 }
