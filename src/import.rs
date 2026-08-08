@@ -51,7 +51,7 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
          Nothing was imported and the file was not opened. `perch purge` gives \
          the machine back and is what makes room — it offers to write an Export \
          first.",
-        if accounts == 1 { "Account" } else { "Accounts" },
+        crate::commands::accounts(accounts),
     )))
 }
 

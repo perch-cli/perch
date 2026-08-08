@@ -147,6 +147,47 @@ pub fn refuse_without_a_terminal(host: &dyn Host, command: &str) -> Result<()> {
     )))
 }
 
+/// A count of Accounts, with the noun agreeing with it.
+///
+/// One place, because "1 Accounts" is the kind of thing that ships and stays
+/// shipped, and there were three spellings of this fragment across seven call
+/// sites — `"Account"/"Accounts"` beside a count somebody else formatted, a
+/// private copy in `group`, and another in `reserve`. Which is how one of them
+/// gets a plural nobody noticed was missing.
+pub fn accounts(count: usize) -> String {
+    match count {
+        1 => "1 Account".to_string(),
+        _ => format!("{count} Accounts"),
+    }
+}
+
+/// Refuses to act on an Account whose Credential no longer works, in the words
+/// of whichever command was asked.
+///
+/// One function rather than the two `run` and `switch` had, which differed only
+/// in whether they were handed an email address or an `Account` and in the
+/// sentence about what did not happen — and [`Quarantine::refusal`] already
+/// takes that sentence as a parameter. Two copies is how the shape of the
+/// refusal comes to differ between two commands that meet the same state, and
+/// the picker calls both: it names an Account by cursor, so what it says has to
+/// be the refusal the command would have given, character for character.
+///
+/// `consequence` is what did not happen and why it would have been worse than
+/// nothing.
+pub fn refuse_a_quarantined_account(
+    registry: &crate::registry::Registry,
+    email: &str,
+    consequence: &str,
+) -> Result<()> {
+    let account = registry
+        .account(email)
+        .expect("resolution named an Account Perch holds");
+    match account.quarantine {
+        None => Ok(()),
+        Some(why) => Err(why.refusal(&registry.named_for_the_user(email), email, consequence)),
+    }
+}
+
 /// What the Accounts in no Group are shown under. Being in no Group is not a
 /// Group (ADR 0017), so it is never a heading that reads like one.
 pub const IN_NO_GROUP: &str = "In no Group";

@@ -155,18 +155,13 @@ fn what_will_go(registry: &Registry, home: &Path) -> String {
     }
 
     format!(
-        "Perch holds {} {}: {}.\n\
+        "Perch holds {}: {}.\n\
          A Purge deletes every one of their Profiles, every Credential Perch \
          holds for them, and {} itself. Nothing undoes it: only a fresh login \
          brings an Account back, and it comes back as a new one.\n\
          Claude Code goes on running as whatever it is logged in as — the live \
          Credential is not Perch's to take away.",
-        accounts.len(),
-        if accounts.len() == 1 {
-            "Account"
-        } else {
-            "Accounts"
-        },
+        crate::commands::accounts(accounts.len()),
         accounts.join(", "),
         home.display(),
     )
@@ -285,9 +280,9 @@ fn report(out: &mut dyn Write, home: &Path, purged: &Purged) -> Result<()> {
                 home.display(),
             ),
             accounts => format!(
-                "Purged {accounts} {}. Every Profile, every Credential Perch held \
-                 and {} are gone, and Perch is holding nothing on this machine.",
-                if accounts == 1 { "Account" } else { "Accounts" },
+                "Purged {}. Every Profile, every Credential Perch held and {} \
+                 are gone, and Perch is holding nothing on this machine.",
+                crate::commands::accounts(accounts),
                 home.display(),
             ),
         },

@@ -26,6 +26,7 @@
 
 use chrono::{DateTime, Utc};
 
+use crate::commands::accounts;
 use crate::cycle::{self, HowMuchIsLeft, Scope};
 use crate::registry::{Account, Registry};
 use crate::utilization;
@@ -273,13 +274,6 @@ fn window_kinds(accounts: &[&Account]) -> Vec<String> {
 
 /// "3 Accounts", "1 Account" — a count that reads as a sentence rather than as
 /// a number with a plural bolted on.
-fn accounts(count: usize) -> String {
-    match count {
-        1 => "1 Account".to_string(),
-        _ => format!("{count} Accounts"),
-    }
-}
-
 /// When the figure being quoted was read (ADR 0015), for the Account it was read
 /// for.
 fn observed(account: &Account, now: DateTime<Utc>) -> String {
