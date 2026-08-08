@@ -359,6 +359,53 @@ fn the_switch_reports_where_it_landed_and_what_the_cache_says_about_it() {
     );
 }
 
+/// A sessions directory that is there and will not be read is doubt, not
+/// emptiness.
+///
+/// `sudo claude` leaves `sessions` owned by root inside a Profile the user owns,
+/// and from then on listing it fails with a permission error rather than saying
+/// the directory is absent. Reading that as "nothing is running" would let a
+/// Switch Capture over the Credential a client is holding — the mid-task logout
+/// ADR 0005 exists to prevent, arriving through the one answer the Host port
+/// goes out of its way to keep distinct from an absent directory.
+#[test]
+fn a_sessions_directory_that_will_not_be_read_stops_the_switch_rather_than_reading_as_empty() {
+    let host = machine_with_two_accounts()
+        .with_file(format!("{FIRST_PROFILE}/sessions/77.json"), "{}")
+        .with_unreadable_file(
+            format!("{FIRST_PROFILE}/sessions"),
+            "Permission denied (os error 13)",
+        );
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("whether a client is running got no answer");
+    assert_eq!(error.exit_code(), EXIT_PROBE_REFUSED);
+    assert!(
+        error.to_string().contains("sessions"),
+        "it names the directory that would not be read: {error}"
+    );
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(CREDENTIAL),
+        "and nothing was written, because the doubt is resolved towards Live"
+    );
+    assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
+}
+
+/// An absent one is the ordinary case and still means nothing is running: a
+/// machine where no client has ever started has no such directory, and refusing
+/// there would refuse every first Switch.
+#[test]
+fn a_profile_that_never_ran_a_client_has_no_sessions_directory_and_switches() {
+    let host = machine_with_two_accounts();
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect("nowhere to look is not the same as something to worry about");
+    assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+}
+
 /// The Capture is the write, and it writes into the *outgoing* Account's own
 /// Profile — so that Profile being Live is what stops a Switch (ADR 0006).
 #[test]

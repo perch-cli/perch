@@ -1253,6 +1253,12 @@ impl Host for FakeHost {
                 path: path.to_path_buf(),
             });
         }
+        // A directory that is there and will not be read is a different answer
+        // from one that is not there, and callers are entitled to tell them
+        // apart. Arranged the same way an unreadable file is.
+        if let Some(detail) = self.unreadable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
+        }
         let held = |candidate: &PathBuf| candidate.parent() == Some(path);
         let mut found: BTreeSet<PathBuf> = self
             .files
