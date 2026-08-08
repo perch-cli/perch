@@ -960,6 +960,26 @@ pub fn lock(host: &dyn Host) -> Result<lock::Held<'_>> {
 }
 
 /// Reads the registry, or `None` when Perch has never run here.
+/// The `version` a document claims, read on its own.
+///
+/// Deliberately not a parse of the whole thing: what this exists to answer is
+/// "was this written by something newer than me", and a document from something
+/// newer is exactly the document this build cannot deserialize. A shape holding
+/// one number deserializes out of any JSON object that carries it, whatever
+/// else the object holds and whatever the rest of it means.
+///
+/// `None` is "it does not say", which is not a claim about a newer Perch: the
+/// caller goes on to read the document properly and reports what it finds
+/// there.
+fn version_of(contents: &str) -> Option<u32> {
+    #[derive(serde::Deserialize)]
+    struct Versioned {
+        version: Option<u32>,
+    }
+
+    serde_json::from_str::<Versioned>(contents).ok()?.version
+}
+
 pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     let path = &registry_path(host)?;
     let contents = match host.read_file(path) {
@@ -973,20 +993,31 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
         }
     };
 
+    // The version first, off a shape that is only the version, and before the
+    // whole document is read as a Registry.
+    //
+    // This is the order the guard needs to be any use. A newer Perch is exactly
+    // the thing that writes a value this build has no variant for — a Strategy
+    // it added, a Quarantine reason — and reading the document first fails on
+    // that with serde's own words. The user is then told `registry.json` is not
+    // valid JSON, about a file that is perfectly valid JSON, which is precisely
+    // the misdiagnosis the version field exists to prevent.
+    if let Some(version) = version_of(&contents)
+        && version > CURRENT_VERSION
+    {
+        return Err(crate::error::written_by_a_newer_perch(
+            &path.display().to_string(),
+            "registry",
+            version,
+            CURRENT_VERSION,
+        ));
+    }
+
     let registry: Registry =
         serde_json::from_str(&contents).map_err(|err| PerchError::Malformed {
             path: path.display().to_string(),
             detail: err.to_string(),
         })?;
-
-    if registry.version > CURRENT_VERSION {
-        return Err(crate::error::written_by_a_newer_perch(
-            &path.display().to_string(),
-            "registry",
-            registry.version,
-            CURRENT_VERSION,
-        ));
-    }
 
     // Group configuration is checked on the way in rather than where it is
     // read, because the thing that reads it is a loop nobody is watching: a
