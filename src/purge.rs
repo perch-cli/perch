@@ -101,6 +101,7 @@ pub fn erase(host: &dyn Host, registry: &Registry) -> Result<Purged> {
             credentials += 1;
         }
     }
+    forget_what_the_registry_does_not_name(host)?;
 
     host.remove_dir_all(&home).map_err(|err| {
         PerchError::Other(format!(
@@ -115,6 +116,61 @@ pub fn erase(host: &dyn Host, registry: &Registry) -> Result<Purged> {
         accounts: registry.accounts.len(),
         credentials,
     })
+}
+
+/// Empties the Credential Store of every directory under Perch's home that has
+/// one, whether or not the registry names it.
+///
+/// The registry is not the whole account of what Perch is holding, and the
+/// difference is not exotic. A login abandoned at the browser step leaves a
+/// working Credential in `pending/login-<millis>/` — Ctrl-C there is the
+/// documented flow rather than an accident — and nothing reaps one under thirty
+/// minutes old. A `perch add` whose registry write failed leaves the same thing
+/// in `profiles/<slug>/`. Neither is in `registry.accounts`.
+///
+/// What makes that fatal rather than untidy is where a Credential lives. On
+/// macOS it is a keychain item outside Perch's home, and its service name is
+/// derived from the directory — so `remove_dir_all` destroys the only thing
+/// that could ever name it again. The item stays, live, holding a refresh
+/// token, while the Purge reports the machine given back.
+///
+/// Deletions are counted for nothing and reported as nothing: what these
+/// directories hold are Credentials for Accounts the user does not believe they
+/// have, and a Purge that announced two more than it was asked about would be
+/// answering a question nobody put.
+fn forget_what_the_registry_does_not_name(host: &dyn Host) -> Result<()> {
+    let mut left_over = Vec::new();
+    for parent in [
+        registry::profiles_dir(host)?,
+        registry::pending_logins_dir(host)?,
+    ] {
+        // Absent is the ordinary case for both: no login has been abandoned
+        // here, or every Profile the registry names is every Profile there is.
+        if let Ok(entries) = host.list_dir(&parent) {
+            left_over.extend(entries);
+        }
+    }
+
+    for dir in left_over {
+        // A directory that will not say where its Credential lives is not a
+        // reason to fail a Purge — but one that names a store which then
+        // refuses to give a Credential up is exactly the case `erase` must not
+        // shrug off, so that half propagates.
+        let Ok(store) = probe::store_for_profile(host, &dir) else {
+            continue;
+        };
+        for kept_in in credentials::stores_for(host, &store) {
+            kept_in.forget(host).map_err(|error| {
+                error.with_note(&format!(
+                    "Perch's registry is untouched and every Credential already \
+                     deleted is already gone, so `perch purge` can be run again once \
+                     {} can be written to, and it will finish.",
+                    kept_in.describe(),
+                ))
+            })?;
+        }
+    }
+    Ok(())
 }
 
 /// Takes an Account's Credential out of both of its stores, and says whether
