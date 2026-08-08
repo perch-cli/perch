@@ -667,6 +667,58 @@ fn a_switch_takes_a_lock_a_process_died_holding_and_waits_for_one_still_held() {
     );
 }
 
+/// Something at a lock path that is not a lock is said, rather than reported as
+/// a Claude Code that will not let go.
+///
+/// A lock is a directory and `remove_dir_all` does not follow the last
+/// component, so a plain file there fails with `ENOTDIR` every time. That
+/// failure was discarded, which turned it into five attempts of no progress and
+/// then "is held by Claude Code and was not given back. … quit it and run this
+/// again" — about a path with no Claude Code behind it, where the advice can
+/// never work. Every Switch, Run and Renewal failed that way until somebody
+/// deleted the path by hand.
+#[test]
+fn something_at_a_lock_path_that_is_not_a_lock_is_named_rather_than_blamed_on_claude_code() {
+    let host = machine_with_two_accounts().with_file(REFRESH_LOCK, "not a lock directory");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let refusal = result.expect_err("nothing can take that lock");
+    let said = refusal.to_string();
+    assert!(
+        said.contains("is not a lock directory"),
+        "it says what is wrong: {said}"
+    );
+    assert!(said.contains(REFRESH_LOCK), "and where: {said}");
+    assert!(
+        !said.contains("quit it"),
+        "and does not send somebody looking for a Claude Code to quit: {said}"
+    );
+    assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
+}
+
+/// A takeover on the last attempt gets the lock it just freed.
+///
+/// The takeover used to `continue`, which spent the attempt — so a holder that
+/// died just before the final try was cleared and then reported as holding the
+/// lock this very call had freed.
+#[test]
+fn a_lock_abandoned_on_the_last_attempt_is_taken_rather_than_reported_as_held() {
+    let host = machine_with_two_accounts();
+    let now = host.now();
+    // The refresh lock goes stale at 60s, and each of the four waits advances
+    // the fake clock by a second. Held since 56.5s ago, it reads as alive on
+    // attempts one to four and as abandoned on the fifth — the last one there
+    // is.
+    let host = host.with_dir_held_since(REFRESH_LOCK, now - chrono::Duration::milliseconds(56_500));
+
+    run_switch(&host, SECOND_EMAIL)
+        .0
+        .expect("the lock was free by the time the last attempt asked");
+
+    assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+}
+
 #[test]
 fn a_lock_somebody_is_holding_stops_the_switch_without_changing_anything() {
     let host = machine_with_two_accounts();

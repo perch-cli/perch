@@ -1062,6 +1062,18 @@ impl Host for FakeHost {
         if let Some(detail) = self.undeletable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
+        // A link or a plain file at the path is not a directory, and the real
+        // call says so rather than removing it — `remove_dir_all` does not
+        // follow the last component. A fake that removed it anyway would
+        // recover from the one state a real machine cannot: see the note on
+        // `create_dir_exclusive` below, which is what puts Perch there.
+        let is_a_link = self.links.borrow().contains_key(path);
+        if is_a_link || self.files.borrow().contains_key(path) {
+            return Err(HostError::Other(format!(
+                "{}: Not a directory (os error 20)",
+                path.display()
+            )));
+        }
         self.dirs.borrow_mut().retain(|dir| !dir.starts_with(path));
         self.links
             .borrow_mut()

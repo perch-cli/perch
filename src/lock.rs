@@ -211,8 +211,19 @@ fn take(host: &dyn Host, lock: &LockSpec) -> Result<()> {
                     // Whoever held this died holding it. Claude Code clears
                     // such a lock and takes it, so Perch does too — leaving it
                     // would mean nobody could ever switch on this machine again.
-                    let _ = host.remove_dir_all(&lock.dir);
-                    continue;
+                    clear_the_abandoned(host, lock)?;
+
+                    // Tried again now rather than after this attempt's wait:
+                    // the lock is free as of this instant, and the attempt that
+                    // found it abandoned is the one that should get it.
+                    // Otherwise a takeover on the last attempt clears the lock
+                    // and then reports it as held — about a lock this very call
+                    // just freed.
+                    if host.create_dir_exclusive(&lock.dir).is_ok() {
+                        return Ok(());
+                    }
+                    // Somebody else got in between, which makes them a holder
+                    // like any other: wait on them.
                 }
                 if attempt < ATTEMPTS {
                     host.sleep(WAIT_MILLIS);
@@ -240,6 +251,32 @@ fn take(host: &dyn Host, lock: &LockSpec) -> Result<()> {
         lock.dir.display(),
         lock.held_by,
     )))
+}
+
+/// Clears a lock nobody is holding any more, refusing rather than spinning when
+/// what is in the way is not a lock at all.
+///
+/// A lock is a directory, and `remove_dir_all` does not follow the last
+/// component — so a plain file or a dangling symlink at the path fails with
+/// `ENOTDIR`, for ever. Discarded, that failure became five attempts of no
+/// progress and then `Busy`, which says the lock "is held by Claude Code and was
+/// not given back" and advises quitting it and trying again. There is no Claude
+/// Code to quit and the advice never works: every Switch, every Run and every
+/// Renewal against that path fails that way until somebody deletes it by hand.
+///
+/// So this is a refusal of its own, naming the path and saying what is wrong
+/// with it — the one message that turns an unrecoverable state into a
+/// five-second fix.
+fn clear_the_abandoned(host: &dyn Host, lock: &LockSpec) -> Result<()> {
+    host.remove_dir_all(&lock.dir).map_err(|err| {
+        PerchError::Other(format!(
+            "{} ({}) is not a lock directory and could not be cleared: {err}.\n\
+             Nothing was changed. A lock is a directory, and nothing will be \
+             able to take this one until whatever is at that path is removed.",
+            lock.name,
+            lock.dir.display(),
+        ))
+    })
 }
 
 /// Whether a lock is one its holder died still holding.
