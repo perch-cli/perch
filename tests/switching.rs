@@ -568,6 +568,68 @@ fn a_live_credential_perch_cannot_read_does_not_stop_a_switch_to_another_account
     );
 }
 
+/// A store that will not answer is not a store holding rubbish.
+///
+/// The two arrived at the same place: `read_credential` failed, the Capture was
+/// declined, and the Switch went on to write the incoming Credential over
+/// whatever was there. For bytes that are not a Credential that is right —
+/// nothing is lost, and the write is the repair. For a `.credentials.json` left
+/// owned by root by a `sudo claude`, it is not: the file very likely holds the
+/// outgoing Account's own Credential, Rotated several times past the copy in
+/// its Profile, and the store said nothing at all about what it holds. The
+/// Switch destroyed the only good copy and reported success.
+#[test]
+fn a_live_store_that_will_not_answer_stops_the_switch_rather_than_being_written_over() {
+    let host = two_accounts_off_macos();
+    host.set_unreadable(CREDENTIALS_PATH, "Permission denied");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("a Credential that cannot be read cannot be Captured");
+    assert!(
+        error.to_string().contains("Nothing was changed"),
+        "{error}"
+    );
+    assert!(
+        error.to_string().contains(EMAIL),
+        "and names the Account whose Credential it may be: {error}"
+    );
+    host.forget_unreadable(CREDENTIALS_PATH);
+    assert_eq!(
+        host.file(CREDENTIALS_PATH).as_deref(),
+        Some(CREDENTIAL),
+        "the live store still holds what it held"
+    );
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(EMAIL),
+        "and nothing moved"
+    );
+}
+
+/// The same machine, and a store that answers with bytes nothing understands:
+/// still a declined Capture and still a Switch that lands, because that is the
+/// one the store cannot be repaired without.
+#[test]
+fn a_live_store_that_answers_with_rubbish_is_still_switched_over() {
+    let host = two_accounts_off_macos();
+    host.set_file(CREDENTIALS_PATH, "{ truncated");
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect("bytes nothing understands are not a Rotation to lose");
+    assert_eq!(
+        host.file(CREDENTIALS_PATH).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "{printed}"
+    );
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(CREDENTIAL),
+        "and the rubbish was never filed under the Account's own Profile: {printed}"
+    );
+}
+
 /// The other direction is not the same danger and is not refused (ADR 0027).
 ///
 /// A Switch only ever *reads* the incoming Account's Profile, to copy its
