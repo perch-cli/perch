@@ -13,6 +13,8 @@
 //! business and therefore [`crate::probe`]'s; this module knows only how to
 //! hold what it is handed.
 
+use std::path::{Path, PathBuf};
+
 use chrono::{DateTime, Utc};
 
 use crate::error::{PerchError, Result};
@@ -297,12 +299,11 @@ fn take(host: &dyn Host, lock: &LockSpec) -> Result<()> {
         match host.create_dir_exclusive(&lock.dir) {
             Ok(()) => return Ok(()),
             Err(HostError::AlreadyExists { .. }) => {
-                if abandoned(host, lock) {
-                    // Whoever held this died holding it. Claude Code clears
-                    // such a lock and takes it, so Perch does too — leaving it
-                    // would mean nobody could ever switch on this machine again.
-                    clear_the_abandoned(host, lock)?;
-
+                // Asked here only to keep the ordinary contended wait free of
+                // the artifact below: a lock Claude Code is holding right now is
+                // the common case, and it is not a takeover. The answer that
+                // decides anything is the one `take_over` asks under the claim.
+                if abandoned(host, lock) && take_over(host, lock)? {
                     // Tried again now rather than after this attempt's wait:
                     // the lock is free as of this instant, and the attempt that
                     // found it abandoned is the one that should get it.
@@ -343,6 +344,69 @@ fn take(host: &dyn Host, lock: &LockSpec) -> Result<()> {
     )))
 }
 
+/// Where a process says it is the one clearing this abandoned lock.
+///
+/// Beside the lock rather than inside it, because what is being claimed is the
+/// right to *delete* the lock. Held for the two calls it takes to ask whether
+/// the lock is stale and to remove it, and given back on every way out.
+///
+/// [`crate::reconcile`] holds this back along with the lock it guards: it is an
+/// answer about one configuration directory, and one crossed into another is
+/// the hazard ADR 0026's denylist exists for.
+fn takeover_claim(lock: &LockSpec) -> PathBuf {
+    let mut claim = lock.dir.clone().into_os_string();
+    claim.push(TAKEOVER_SUFFIX);
+    PathBuf::from(claim)
+}
+
+/// The suffix that names one. Public to [`crate::reconcile`], which has to
+/// recognise it without knowing what it is for.
+pub const TAKEOVER_SUFFIX: &str = ".perch-takeover";
+
+/// Clears an abandoned lock, but only for the one process that gets to.
+///
+/// Answers whether this call is now free to create the lock. `false` is
+/// "somebody else is doing this, or it turned out not to be abandoned after
+/// all" — both of which mean waiting like an ordinary contender.
+///
+/// The claim is what this is for. `abandoned` and `remove_dir_all` are two
+/// calls with a gap between them, and two perches that both read the same stale
+/// timestamp both removed and both created: the second one's `remove_dir_all`
+/// took away the lock the first had *just made*, and both walked away believing
+/// they held it. `mkdir` is the only operation here that cannot be raced, so it
+/// is what decides who clears — and the staleness question is asked again
+/// underneath it, where the answer cannot change. That second ask is the whole
+/// of the fix: the loser arrives after the winner has already taken the lock,
+/// finds an artifact touched a moment ago, and waits on it.
+///
+/// A claim outliving the process that made it would stop this lock ever being
+/// taken over again, which is the wedge [`clear_the_abandoned`] is written
+/// about. So one as stale as the lock it guards is itself cleared, and the next
+/// attempt a second later gets it.
+fn take_over(host: &dyn Host, lock: &LockSpec) -> Result<bool> {
+    let claim = takeover_claim(lock);
+    if let Err(refused) = host.create_dir_exclusive(&claim) {
+        if matches!(refused, HostError::AlreadyExists { .. })
+            && gone_quiet_for(host, &claim, lock.stale_millis)
+        {
+            let _ = host.remove_dir_all(&claim);
+        }
+        return Ok(false);
+    }
+
+    // Asked again, under the claim. The answer read before it was about a
+    // moment that has passed, and what it decides is a deletion.
+    let cleared = match abandoned(host, lock) {
+        true => clear_the_abandoned(host, lock).map(|()| true),
+        false => Ok(false),
+    };
+
+    // On every way out, including the refusal: a claim that stays is a lock
+    // nothing can ever take over.
+    let _ = host.remove_dir_all(&claim);
+    cleared
+}
+
 /// Clears a lock nobody is holding any more, refusing rather than spinning when
 /// what is in the way is not a lock at all.
 ///
@@ -374,8 +438,17 @@ fn clear_the_abandoned(host: &dyn Host, lock: &LockSpec) -> Result<()> {
 /// A holder says it is still there by touching the artifact; an artifact that
 /// has gone quiet for longer than its staleness window belongs to nobody.
 fn abandoned(host: &dyn Host, lock: &LockSpec) -> bool {
-    match host.modified_at(&lock.dir) {
-        Ok(modified) => (host.now() - modified).num_milliseconds() > lock.stale_millis,
+    gone_quiet_for(host, &lock.dir, lock.stale_millis)
+}
+
+/// Whether an artifact has said nothing for longer than it is allowed to.
+///
+/// Shared by the lock and by the claim on taking one over, because they go
+/// stale by the same rule and for the same reason — a directory nobody is
+/// touching belongs to a process that is not there.
+fn gone_quiet_for(host: &dyn Host, at: &Path, stale_millis: i64) -> bool {
+    match host.modified_at(at) {
+        Ok(modified) => (host.now() - modified).num_milliseconds() > stale_millis,
         // Gone between the two calls: whoever held it has given it back, and
         // the next attempt simply takes it.
         Err(HostError::NotFound { .. }) => true,
@@ -707,6 +780,103 @@ mod tests {
             "work that failed still gives back what it took, innermost first"
         );
         assert!(!host.path_exists(Path::new(&first.dir)));
+    }
+
+    /// A lock whose holder died is taken over, which is the behaviour every
+    /// rule below is a qualification of.
+    #[test]
+    fn a_lock_that_has_gone_quiet_for_longer_than_its_window_is_taken_over() {
+        let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
+        let host = FakeHost::new();
+        let long_ago = host.now() - chrono::Duration::seconds(120);
+        let host = host.with_dir_held_since(&lock.dir, long_ago);
+
+        take(&host, &lock).expect("nobody is holding it any more");
+
+        assert!(
+            !host.path_exists(&takeover_claim(&lock)),
+            "and the claim on clearing it is given back: {:?}",
+            host.effects()
+        );
+    }
+
+    /// The race the claim exists for.
+    ///
+    /// `abandoned` and `remove_dir_all` are two calls with a gap between them.
+    /// Two perches that both read the same stale timestamp both removed and
+    /// both created — and the second one's removal took away the lock the first
+    /// had just made, so both walked away believing they held it. Two processes
+    /// writing one Credential, which is the one thing the lock exists to
+    /// prevent.
+    ///
+    /// Asserted as the loser sees it: while somebody else holds the claim, an
+    /// abandoned lock is not cleared however stale it looks.
+    #[test]
+    fn an_abandoned_lock_is_not_cleared_while_somebody_else_is_clearing_it() {
+        let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
+        let host = FakeHost::new();
+        let now = host.now();
+        let host = host
+            .with_dir_held_since(&lock.dir, now - chrono::Duration::seconds(120))
+            // The other perch, between its two calls.
+            .with_dir_held_since(takeover_claim(&lock), now);
+
+        assert!(
+            !take_over(&host, &lock).expect("nothing failed"),
+            "this call does not get to clear it"
+        );
+        assert!(
+            host.path_exists(&lock.dir),
+            "so the artifact the other perch is about to replace is still there"
+        );
+        assert!(
+            host.path_exists(&takeover_claim(&lock)),
+            "and its claim was not taken away either"
+        );
+    }
+
+    /// The winner's side of the same moment, which is what makes the loser's
+    /// wait right rather than merely late: by the time the claim is free, the
+    /// lock is one somebody is holding, and the staleness question asked under
+    /// the claim says so.
+    #[test]
+    fn a_lock_taken_over_while_this_one_waited_is_not_taken_over_again() {
+        let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
+        let host = FakeHost::new();
+        let now = host.now();
+        // What the winner left: a fresh lock, and the claim given back.
+        let host = host.with_dir_held_since(&lock.dir, now);
+
+        assert!(
+            !take_over(&host, &lock).expect("nothing failed"),
+            "the answer read before the claim was about a moment that has passed"
+        );
+        assert!(host.path_exists(&lock.dir), "somebody is holding it");
+    }
+
+    /// A claim outliving the process that made it would stop this lock ever
+    /// being taken over again — the wedge `clear_the_abandoned` exists to keep
+    /// a machine out of, arriving through the thing that fixed it. So one as
+    /// stale as the lock it guards is cleared, and the next attempt gets it.
+    #[test]
+    fn a_claim_left_behind_by_a_death_is_cleared_rather_than_waited_on_for_ever() {
+        let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
+        let host = FakeHost::new();
+        let long_ago = host.now() - chrono::Duration::seconds(120);
+        let host = host
+            .with_dir_held_since(&lock.dir, long_ago)
+            .with_dir_held_since(takeover_claim(&lock), long_ago);
+
+        assert!(
+            !take_over(&host, &lock).expect("nothing failed"),
+            "this attempt makes no claim of its own"
+        );
+        assert!(
+            !host.path_exists(&takeover_claim(&lock)),
+            "but it clears the one nobody is behind"
+        );
+
+        take(&host, &lock).expect("so the next attempt takes the lock");
     }
 }
 
