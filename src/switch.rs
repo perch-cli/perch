@@ -163,6 +163,11 @@ pub fn perform(
 /// The Credential written is the one in the Account's own Profile, read back
 /// out of it rather than passed in, so the same store that a `perch switch`
 /// tomorrow will read is the store this proves works today.
+///
+/// It asks the liveness question under the locks, as [`perform`] does. The
+/// caller has asked it too, before the browser round trip and again after — but
+/// both of those are minutes and a lock wait away from the write, and this is
+/// the last moment at which the answer cannot change.
 pub fn make_live(host: &dyn Host, account: &Account) -> std::result::Result<(), NotLanded> {
     let (version, store) = ground(host).map_err(|error| NotLanded {
         error,
@@ -171,6 +176,25 @@ pub fn make_live(host: &dyn Host, account: &Account) -> std::result::Result<(), 
 
     let mut is_live = false;
     let landed = lock::under(host, probe::locks_for(&store), |held| {
+        // Under the locks, for the reason [`Prepared`] gives and `perch
+        // relogin` had no equivalent of: the caller asked this question minutes
+        // ago, across a browser round trip, and taking these locks can take
+        // seconds more. A `claude` started in that gap is one no earlier answer
+        // saw, and what happens next replaces the very Credential it is holding
+        // — the mid-task logout ADR 0005 exists to prevent, reached by the one
+        // path that writes the Default Profile without Capturing first.
+        //
+        // The Default Profile alone. The Account's own Profile is only read
+        // here, and reading a Credential takes nothing away from the session
+        // using it (ADR 0027).
+        refuse_if_live_in(
+            host,
+            &store.config_dir,
+            "the Default Profile, which is where this Account's repaired \
+             Credential has to land",
+            &version,
+        )?;
+
         let prepared = prepare(host, account, None, version, store)?;
 
         held.renew();

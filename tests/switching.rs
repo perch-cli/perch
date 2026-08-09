@@ -586,10 +586,7 @@ fn a_live_store_that_will_not_answer_stops_the_switch_rather_than_being_written_
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
     let error = result.expect_err("a Credential that cannot be read cannot be Captured");
-    assert!(
-        error.to_string().contains("Nothing was changed"),
-        "{error}"
-    );
+    assert!(error.to_string().contains("Nothing was changed"), "{error}");
     assert!(
         error.to_string().contains(EMAIL),
         "and names the Account whose Credential it may be: {error}"
