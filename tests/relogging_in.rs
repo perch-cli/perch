@@ -562,11 +562,13 @@ fn a_repair_that_could_not_be_made_live_leaves_nothing_to_capture_into() {
 fn an_account_removed_while_its_login_was_open_says_the_login_still_worked() {
     let host = broken_second_account().with_login(|host, dir| {
         // Somebody in another terminal gives the Account up while the browser
-        // is still open.
+        // is still open. Through `forget`, which is what `perch remove` calls:
+        // dropping the entry by hand left the Alias it answered to pointing at
+        // an Account nothing held, which is a registry `load` now refuses
+        // outright — so the fixture was arranging a state no `perch remove`
+        // produces and the refusal under test was never reached.
         let mut registry = registry_of(host);
-        registry
-            .accounts
-            .retain(|account| account.email() != SECOND_EMAIL);
+        registry.forget(SECOND_EMAIL);
         save_registry(host, &registry);
 
         login_producing(SECOND_REPAIRED, SECOND_IDENTITY_FILE)(host, dir)

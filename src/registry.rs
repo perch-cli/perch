@@ -1140,6 +1140,70 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
     for name in registry.aliases.keys() {
         refuse_a_name_nothing_would_have_accepted(registry, NameKind::Alias, name, path)?;
     }
+
+    // What each Alias points *at*, which the loop above does not look at: it
+    // asks whether the key is a name Perch would have given, and never whether
+    // the value names an Account Perch holds.
+    //
+    // A dangling one is not a refusal anywhere downstream — it is a panic.
+    // `target::matched` builds a `Target::Alias` straight out of the map with no
+    // existence check, and `perch switch`, `perch remove`, `perch relogin` and
+    // `perch run` all then reach for `registry.account(&email)` behind an
+    // `expect` that says resolution named an Account Perch holds. The `active`
+    // pointer has never had this problem, because `active_account` resolves
+    // through `and_then(account)` and its callers turn `None` into a refusal;
+    // the Alias half had no equivalent.
+    for (alias, email) in &registry.aliases {
+        if registry.account(email).is_none() {
+            return Err(PerchError::Invalid(format!(
+                "The registry gives the Alias `{alias}` to {email}, which is not \
+                 an Account Perch holds.\n\
+                 It is in {}, and every Perch command reads that file — including \
+                 the ones that would set it. Edit the value there.",
+                path.display(),
+            )));
+        }
+    }
+
+    // Two names in the *same* half of the namespace that differ only in case.
+    // The loop above catches the collision across the two halves, and
+    // `declare_group` and `refuse_taken_names` refuse both kinds at creation —
+    // but nothing was asking it of a file somebody had edited, and `target`
+    // states the answer as an assumption: "the registry refuses an Alias or a
+    // Group that differs from a held name only in case, so there is never more
+    // than one candidate to find".
+    //
+    // With two, which one is found is which one a `BTreeMap` yields first.
+    // `aliases` holding both `work` and `Work` renders one of them in `perch
+    // list` and resolves `perch switch work` to the other, and freeing `work`
+    // frees neither reliably.
+    refuse_two_names_that_differ_only_in_case(NameKind::Group, registry.groups.keys(), path)?;
+    refuse_two_names_that_differ_only_in_case(NameKind::Alias, registry.aliases.keys(), path)
+}
+
+/// Refuses a pair of names in one half of the namespace that only case tells
+/// apart. Both halves, because the namespace is shared and one copy of the rule
+/// is how the two cannot come to disagree about it.
+fn refuse_two_names_that_differ_only_in_case<'a>(
+    kind: NameKind,
+    names: impl Iterator<Item = &'a String>,
+    path: &Path,
+) -> Result<()> {
+    let mut seen: Vec<&str> = Vec::new();
+    for name in names {
+        if let Some(already) = seen.iter().find(|held| same_name(held, name)) {
+            return Err(PerchError::Invalid(format!(
+                "The registry holds {} `{already}` and `{name}`, which differ \
+                 only in case — so which one a Target finds is not decided by \
+                 anything.\n\
+                 It is in {}, and every Perch command reads that file — including \
+                 the ones that would set it. Edit the value there.",
+                kind.article(),
+                path.display(),
+            )));
+        }
+        seen.push(name);
+    }
     Ok(())
 }
 
@@ -2042,6 +2106,75 @@ mod tests {
             assert!(
                 said.contains("registry.json"),
                 "and the refusal names the file to edit: {said}"
+            );
+        }
+    }
+
+    /// What an Alias points at, which walking the keys never asked.
+    ///
+    /// Downstream this is not a refusal but a panic: `target::matched` builds a
+    /// `Target::Alias` straight out of the map, and `perch switch`, `perch
+    /// remove`, `perch relogin` and `perch run` all then reach for the Account
+    /// behind an `expect` saying resolution named one Perch holds. A file that
+    /// `load` accepts and every command panics on is the state `validate` exists
+    /// to turn into a sentence.
+    #[test]
+    fn an_alias_for_an_account_perch_does_not_hold_is_refused_and_names_both() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let path = registry_path(&host).unwrap();
+        host.set_file(
+            &path,
+            r#"{"version":1,"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true}],"aliases":{"overflow":"gone@example.com"}}"#,
+        );
+
+        let refused = load(&host).expect_err("the Alias names nobody");
+
+        assert_eq!(refused.exit_code(), crate::error::EXIT_INVALID);
+        let said = refused.to_string();
+        assert!(said.contains("overflow"), "which Alias: {said}");
+        assert!(
+            said.contains("gone@example.com"),
+            "and who it names: {said}"
+        );
+        assert!(
+            said.contains("registry.json"),
+            "and the file to edit: {said}"
+        );
+    }
+
+    /// Two names in one half of the namespace that only case tells apart.
+    ///
+    /// `declare_group` and `refuse_taken_names` refuse both kinds at creation,
+    /// and the collision *across* the halves is already caught — but nothing
+    /// asked it of a hand-edited file, while `target` states the answer as an
+    /// assumption it relies on: "the registry refuses an Alias or a Group that
+    /// differs from a held name only in case, so there is never more than one
+    /// candidate to find". With two, which one is found is whichever a
+    /// `BTreeMap` happens to yield first, so `perch list` renders one and `perch
+    /// switch` lands on the other.
+    #[test]
+    fn two_names_in_one_half_of_the_namespace_that_differ_only_in_case_are_refused() {
+        let holdings = [
+            r#""groups":{"work":{},"Work":{}}"#,
+            r#""aliases":{"work":"someone@example.com","Work":"someone@example.com"}"#,
+        ];
+
+        for held in holdings {
+            let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+            let path = registry_path(&host).unwrap();
+            host.set_file(
+                &path,
+                &format!(
+                    r#"{{"version":1,"accounts":[{{"identity":{{"email":"someone@example.com"}},"enabled":true}}],{held}}}"#
+                ),
+            );
+
+            let refused = load(&host).expect_err("which of the two a Target finds is undecided");
+            let said = refused.to_string();
+            assert!(said.contains("differ only in case"), "`{held}`: {said}");
+            assert!(
+                said.contains("registry.json"),
+                "and the file to edit: {said}"
             );
         }
     }
