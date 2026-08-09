@@ -40,7 +40,11 @@ use crate::utilization;
 /// listed, and still said here — as what is out of the running rather than as
 /// part of what is left.
 pub struct Reserve<'a> {
-    /// The Accounts a Cycle may land on, in the order the scope ranks them.
+    /// The Accounts a Cycle may land on, in the order the registry holds them.
+    /// Nothing here reads them in order — `best` reads the separately sorted
+    /// `with_headroom`, and the rest are counts — so this is deliberately not
+    /// the Cycle's ranking: claiming an order nothing establishes is an
+    /// invitation for the next caller to rely on one that is not there.
     candidates: Vec<&'a Account>,
     /// Those of them with Headroom, best first — an Account and the room in its
     /// fullest Quota Window.
@@ -170,8 +174,9 @@ impl<'a> Reserve<'a> {
     ///
     /// The figure is one Account's own, so it is the best that window can
     /// currently offer rather than an average of Accounts that cannot be added
-    /// up. In the order the windows were first seen, which is the order
-    /// Anthropic reports them in.
+    /// In the order the windows were first seen across the candidates, which is
+    /// the order `anthropic::windows_in` sorted them into: the five-hour window,
+    /// then the seven-day, then the rest by name.
     ///
     /// Nothing at all below two observed candidates: with one, the row is that
     /// Account's row said twice.
@@ -272,8 +277,6 @@ fn window_kinds(accounts: &[&Account]) -> Vec<String> {
     kinds
 }
 
-/// "3 Accounts", "1 Account" — a count that reads as a sentence rather than as
-/// a number with a plural bolted on.
 /// When the figure being quoted was read (ADR 0015), for the Account it was read
 /// for.
 fn observed(account: &Account, now: DateTime<Utc>) -> String {
