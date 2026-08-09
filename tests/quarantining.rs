@@ -33,6 +33,12 @@ const SPENT_WITH_NOTHING_LEFT: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant
 /// a Rotation that retires the refresh token Perch sent.
 const RENEWED: &str = r#"{"access_token":"sk-ant-oat01-renewed","refresh_token":"sk-ant-ort01-rotated","expires_in":28800}"#;
 
+/// The same renewal without a Rotation, which is the other half of what the
+/// token endpoint does: a fresh access token, and the refresh token Perch sent
+/// left exactly as live as it was.
+const RENEWED_WITHOUT_ROTATION: &str =
+    r#"{"access_token":"sk-ant-oat01-renewed","expires_in":28800}"#;
+
 /// A Credential with an hour left on it at the clock these fixtures run at, so
 /// nothing has to renew it to ask a question with it.
 const FRESH: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-fresh","refreshToken":"sk-ant-ort01-fresh","expiresAt":1785848400000,"subscriptionType":"pro"}}"#;
@@ -110,6 +116,39 @@ fn a_rotation_that_could_not_be_stored_quarantines_rather_than_reading_as_a_fail
         Some(Quarantine::RotationLost),
         "the refresh token that was retired to get this one is gone, so a write \
          to try again would have nothing to try: {printed}"
+    );
+}
+
+/// The other half of the same moment, and the one that must not read the same
+/// way. A Renewal only sometimes Rotates: where Anthropic handed no new refresh
+/// token over, the one Perch holds is untouched and still buys a token, so the
+/// write that failed cost a cached access token and nothing else. Quarantining
+/// there would take an Account out for good over a keychain somebody had
+/// locked for the afternoon — and a `perch status --group --refresh` would take
+/// the whole Group out that way, each with a reason that is not true.
+#[test]
+fn a_renewal_that_rotated_nothing_is_a_failed_reading_rather_than_a_quarantine() {
+    let host = machine_with_two_accounts()
+        .with_unwritable_file(CREDENTIALS_PATH, "no space left on device")
+        .with_reply(TOKEN_URL, 200, RENEWED_WITHOUT_ROTATION);
+    host.forget_keychain_item(DEFAULT_SERVICE, LOGIN_NAME);
+    host.set_file(CREDENTIALS_PATH, SPENT);
+    host.lock_keychain("User interaction is not allowed");
+    host.forget_effects();
+
+    let (result, printed) = run_status_refresh(&host, false);
+
+    result.expect("a refresh degrades the display rather than failing it (ADR 0018)");
+    assert_eq!(
+        quarantine_of(&host, EMAIL),
+        None,
+        "nothing was retired, so nothing is unrecoverable: {printed}"
+    );
+    assert_eq!(
+        host.file(CREDENTIALS_PATH).as_deref(),
+        Some(SPENT),
+        "the store that refused the write is left holding what it held, which \
+         is a Credential that still renews: {printed}"
     );
 }
 

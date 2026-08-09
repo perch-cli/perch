@@ -332,21 +332,55 @@ fn which_kind_of_target_matched_is_said_before_the_client_takes_the_terminal() {
         .expect("the Alias is given");
 
     let (_, printed) = run_run(&host, "overflow");
+    let said = host.notes().join("\n");
     assert!(
-        printed.contains(&format!("`overflow` is an Alias for {SECOND_EMAIL}.")),
-        "{printed}"
+        said.contains(&format!("`overflow` is an Alias for {SECOND_EMAIL}.")),
+        "{said}"
     );
     assert!(
-        printed.contains(&format!(
+        said.contains(&format!(
             "Running Claude Code as {SECOND_EMAIL} (as `overflow`)"
         )),
-        "{printed}"
+        "{said}"
+    );
+    assert!(
+        printed.is_empty(),
+        "and none of it on the stream the client is about to write to: {printed}"
     );
 
-    let (_, printed) = run_run(&host, SECOND_EMAIL);
+    host.forget_notes();
+    let _ = run_run(&host, SECOND_EMAIL);
+    let said = host.notes().join("\n");
     assert!(
-        printed.contains(&format!("`{SECOND_EMAIL}` is an Account.")),
-        "{printed}"
+        said.contains(&format!("`{SECOND_EMAIL}` is an Account.")),
+        "{said}"
+    );
+}
+
+/// The client inherits this process's standard output, and a Run is meant to
+/// stand in a script wherever `claude` would — so `perch run dev -- claude -p
+/// … --output-format json | jq .` has to be a document `jq` can read. Two lines
+/// of Perch's own in front of it is not. Everything a Run says about the machine
+/// goes to standard error, which is where every other remark of Perch's already
+/// goes.
+#[test]
+fn a_run_says_nothing_on_the_stream_the_client_writes_to() {
+    let host = machine();
+    set_alias(&host, "overflow", SECOND_EMAIL)
+        .0
+        .expect("the Alias is given");
+    host.forget_notes();
+
+    let (ended, printed) = run_run_with(&host, "overflow", &["--print", "hello"]);
+
+    assert_eq!(ended.expect("the client ran"), 0);
+    assert_eq!(
+        printed, "",
+        "stdout belongs to the client from the moment the Run starts"
+    );
+    assert!(
+        !host.notes().is_empty(),
+        "and what Perch had to say was still said, on stderr"
     );
 }
 
@@ -356,11 +390,12 @@ fn which_kind_of_target_matched_is_said_before_the_client_takes_the_terminal() {
 fn a_run_says_which_account_stays_active_everywhere_else() {
     let host = machine();
 
-    let (_, printed) = run_run(&host, SECOND_EMAIL);
+    let _ = run_run(&host, SECOND_EMAIL);
 
+    let said = host.notes().join("\n");
     assert!(
-        printed.contains(&format!("{EMAIL} stays the active Account everywhere else")),
-        "{printed}"
+        said.contains(&format!("{EMAIL} stays the active Account everywhere else")),
+        "{said}"
     );
 }
 
@@ -464,18 +499,21 @@ fn a_program_named_after_the_separator_is_what_runs() {
 fn the_program_being_launched_is_named_when_it_is_not_claude_code() {
     let host = machine();
 
-    let (_, printed) = run_run_with(&host, SECOND_EMAIL, &["npm", "test"]);
+    let _ = run_run_with(&host, SECOND_EMAIL, &["npm", "test"]);
+    let said = host.notes().join("\n");
     assert!(
-        printed.contains(&format!(
+        said.contains(&format!(
             "Running `npm` as {SECOND_EMAIL}, in this terminal alone."
         )),
-        "{printed}"
+        "{said}"
     );
 
-    let (_, printed) = run_run_with(&host, SECOND_EMAIL, &["--resume"]);
+    host.forget_notes();
+    let _ = run_run_with(&host, SECOND_EMAIL, &["--resume"]);
+    let said = host.notes().join("\n");
     assert!(
-        printed.contains(&format!("Running Claude Code as {SECOND_EMAIL}")),
-        "{printed}"
+        said.contains(&format!("Running Claude Code as {SECOND_EMAIL}")),
+        "{said}"
     );
 }
 

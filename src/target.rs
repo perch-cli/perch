@@ -15,7 +15,7 @@
 //! mistyped name is far more common than an imagined one.
 
 use crate::error::{PerchError, Result};
-use crate::registry::Registry;
+use crate::registry::{self, Registry};
 
 /// What a Target turned out to name, and how it matched.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,10 +106,18 @@ fn matched(registry: &Registry, target: &str) -> Option<Target> {
             email: email.to_string(),
         });
     }
+    // The same comparison Aliases and Group names get, and the same one a
+    // Profile is derived under: `registry::slug` lowercases the whole of
+    // Unicode, so `CAFÉ@example.com` and `café@example.com` already share one
+    // Profile and `perch add` already refuses the second as a collision. Asked
+    // in ASCII here, this was the one place that disagreed — a held
+    // `café@example.com` could not be reached by typing it with a capital É,
+    // and the refusal said Perch holds nothing by that name about an Account it
+    // holds and would not let you have two of.
     if let Some(account) = registry
         .accounts
         .iter()
-        .find(|held| held.email().eq_ignore_ascii_case(target))
+        .find(|held| registry::same_name(held.email(), target))
     {
         return Some(Target::Account {
             email: account.email().to_string(),
@@ -182,7 +190,7 @@ fn allowed_mistakes(name: &str) -> usize {
 /// first — at most three, so the refusal stays readable.
 fn near_matches(candidates: &[String], target: &str) -> Vec<String> {
     let typed = target.to_lowercase();
-    let mut scored: Vec<(usize, &String)> = candidates
+    let mut scored: Vec<((bool, usize), &String)> = candidates
         .iter()
         .filter_map(|candidate| {
             let name = candidate.to_lowercase();
@@ -190,10 +198,16 @@ fn near_matches(candidates: &[String], target: &str) -> Vec<String> {
             // A name the typed Target starts is a suggestion whatever the
             // distance says: somebody typing `over` for `overflow@example.com`
             // has not made a mistake so much as stopped early.
-            let close_enough = name.starts_with(&typed) && typed.chars().count() >= 3;
-            (close_enough || distance <= allowed_mistakes(&typed)).then_some((distance, candidate))
+            let started = name.starts_with(&typed) && typed.chars().count() >= 3;
+            (started || distance <= allowed_mistakes(&typed))
+                .then_some(((!started, distance), candidate))
         })
         .collect();
+    // In its own bucket, ahead of everything, because the sort is what the rule
+    // above needed and did not have. Ranked on the raw distance, `over` put
+    // `over1`, `over2` and `over3` — one edit each — ahead of
+    // `overflow@example.com` at sixteen, and the list is cut at three: the one
+    // candidate the rule was written for was the one it dropped.
     scored.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(right.1)));
     scored
         .into_iter()
@@ -254,6 +268,30 @@ mod tests {
         assert!(
             near_matches(&names, "so").is_empty(),
             "two characters is not enough of a start to guess from"
+        );
+    }
+
+    /// "However long it is" was a claim the filter made and the sort took back.
+    /// Ranked on the raw edit distance, a name the Target starts sinks in
+    /// proportion to how much of it is left to type, and the list is cut at
+    /// three — so `over` offered `over1`, `over2` and `over3`, one edit each,
+    /// and dropped the `overflow@example.com` the rule exists for at sixteen.
+    #[test]
+    fn a_name_the_target_starts_outranks_a_shorter_name_it_does_not() {
+        let names = vec![
+            "overflow@example.com".to_string(),
+            "aver".to_string(),
+            "oves".to_string(),
+            "ever".to_string(),
+        ];
+
+        let offered = near_matches(&names, "over");
+
+        assert!(
+            offered.contains(&"overflow@example.com".to_string()),
+            "somebody typing `over` has stopped early rather than made sixteen \
+             mistakes, and three one-edit names must not crowd it out: \
+             {offered:?}"
         );
     }
 }

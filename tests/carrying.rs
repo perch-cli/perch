@@ -329,9 +329,13 @@ fn nothing_is_written_while_a_client_is_running_against_that_profile() {
     let host = host.with_live_process(4242);
     let before = identity_of(&host, SECOND_EMAIL);
 
-    run_run(&host, SECOND_EMAIL).0.expect("the client ran");
+    let outcome = run_run(&host, SECOND_EMAIL).0.expect("the client ran");
 
     assert_eq!(identity_of(&host, SECOND_EMAIL), before);
+    assert_eq!(
+        outcome, 0,
+        "and the Run still launched: a Carry that does nothing is not a refusal"
+    );
 }
 
 /// The same precondition, read from the other end. A Run makes the Profile it
@@ -386,17 +390,40 @@ fn a_profile_that_cannot_be_written_is_remarked_on_and_the_run_happens_anyway() 
     );
 }
 
-/// Nothing to copy is not a failure. The Run is what matters, and a person who
+/// Nothing to copy *into* is not a failure either, and it is the first thing
+/// `carry` asks: a Profile with no `.claude.json` of its own is one there is
+/// nowhere to splice a key into. The Run is what matters, and a person who
 /// answers one onboarding question has lost less than one who was refused a
 /// client.
+///
+/// This test used to run against the ordinary fixture, whose Default Profile is
+/// full of things to copy from, and assert only that the Run returned nought —
+/// so it passed whatever `carry` did, under a name claiming otherwise.
 #[test]
-fn a_run_still_launches_when_there_is_nothing_to_copy_from() {
+fn a_profile_with_no_identity_file_of_its_own_is_never_given_one() {
     let host = machine();
+    let destination = profile_of(&host, SECOND_EMAIL).join(".claude.json");
+    host.remove_file(&destination)
+        .expect("`perch add` left one there");
     host.forget_effects();
 
     let outcome = run_run(&host, SECOND_EMAIL).0.expect("the client ran");
 
-    assert_eq!(outcome, 0);
+    assert_eq!(outcome, 0, "nothing to carry is not a refusal");
+    assert_eq!(
+        host.file(&destination),
+        None,
+        "and a file Perch invented would be one Claude Code never wrote: the \
+         keys that cross are spliced into what is already there"
+    );
+    assert!(
+        !host
+            .notes()
+            .iter()
+            .any(|note| note.contains(".claude.json")),
+        "nor is it worth remarking on: {:?}",
+        host.notes()
+    );
 }
 
 /// The second Run of the same pair has nothing left to say, and a file rewritten

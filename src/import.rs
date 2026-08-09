@@ -44,7 +44,7 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
     }
 
     Err(PerchError::Conflict(format!(
-        "Perch already holds {accounts} {}, and an Import does not merge: the \
+        "Perch already holds {}, and an Import does not merge: the \
          same Account on both sides one Rotation apart has no answer to which \
          Credential is live, and an Alias can mean different Accounts on two \
          machines.\n\
@@ -77,14 +77,13 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
 /// machine last left, on the strength of something that happened somewhere
 /// else. Both are claims about a watcher, and no watcher has run here yet.
 pub fn restored(export: &Export) -> Result<Registry> {
-    if export.registry.version > registry::CURRENT_VERSION {
-        return Err(crate::error::written_by_a_newer_perch(
-            "The registry inside this Export",
-            "registry",
-            export.registry.version,
-            registry::CURRENT_VERSION,
-        ));
-    }
+    // The registry's own version is not checked here. `export::unseal` reads
+    // both versions off a shape that is only the versions, *before* the document
+    // is read as an Export, and it has to: a newer Perch is exactly the thing
+    // that writes a value this build has no variant for, and reading the
+    // document first fails on that with serde's own words. So nothing can reach
+    // this function without having passed the identical check, and a second
+    // spelling of it was two things to keep in step for one guard.
 
     // The same check the registry gets on the way in off disk, for the same
     // reason: a value that means nothing would otherwise sit in the file until
@@ -108,11 +107,6 @@ pub struct Placed {
 }
 
 impl Placed {
-    /// How many Profiles it has made.
-    pub fn profiles_made(&self) -> usize {
-        self.touched.len()
-    }
-
     /// Takes back everything this Import placed, leaving the machine as it was.
     ///
     /// Best-effort, like every other undo in Perch: the interesting failure is
@@ -171,6 +165,31 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
     // derivation and not a write, and an address no directory can be named after
     // is a refusal (see [`registry::profile_dir_for`]) — meeting it half way
     // through would mean undoing work that never had to be started.
+    // And no two of them may land in one place. Two addresses can flatten to one
+    // Profile name — `user+work@` and `user.work@` do — and `perch add` refuses
+    // that collision where a login enters, because storing over it supersedes
+    // the Credential already there and destroys a refresh token nothing can
+    // recover. An Export written on a machine that never had both can still be
+    // restored onto one where they collide, and this loop wrote the second over
+    // the first and reported success. Named before anything is made, like every
+    // other refusal here.
+    for (at, account) in export.registry.accounts.iter().enumerate() {
+        if let Some(clash) = export.registry.accounts[..at]
+            .iter()
+            .find(|earlier| registry::same_profile(earlier.email(), account.email()))
+        {
+            return Err(PerchError::Conflict(format!(
+                "{} and {} share the Profile they would be kept in, so importing \
+                 both would mean each one's Credential replacing the other's.\n\
+                 Nothing was imported. This Export cannot be restored whole onto \
+                 this machine — one of the two has to be removed on a machine \
+                 that still holds it, and the Export taken again.",
+                clash.email(),
+                account.email(),
+            )));
+        }
+    }
+
     let mut placements = Vec::new();
     for account in &export.registry.accounts {
         let store = account.store(host)?;
@@ -289,6 +308,23 @@ mod tests {
             "{refused}"
         );
         assert!(refused.to_string().contains("perch purge"), "{refused}");
+        assert!(
+            refused
+                .to_string()
+                .contains("Perch already holds 1 Account,"),
+            "the count is rendered once, by the one function that says it in \
+             words: {refused}"
+        );
+
+        held.upsert(account("another@example.com"));
+        let refused =
+            refuse_a_machine_that_is_not_empty(Some(&held)).expect_err("there are Accounts here");
+        assert!(
+            refused
+                .to_string()
+                .contains("Perch already holds 2 Accounts,"),
+            "{refused}"
+        );
     }
 
     /// Being active is a claim about which Credential is in *this* machine's
@@ -306,18 +342,6 @@ mod tests {
             Some(Quarantine::RenewalRejected),
             "a Quarantined Account arrives Quarantined, with its reason"
         );
-    }
-
-    /// The Export's envelope carries a version and so does the registry inside
-    /// it. Both are guards against the future: the machine holding two builds,
-    /// where the wrong answer is a file half-read rather than refused.
-    #[test]
-    fn a_registry_from_a_newer_perch_is_refused_rather_than_guessed_at() {
-        let mut export = an_export();
-        export.registry.version = registry::CURRENT_VERSION + 1;
-
-        let refused = restored(&export).expect_err("this build does not understand it");
-        assert!(refused.to_string().contains("Upgrade Perch"), "{refused}");
     }
 
     /// The same check the registry gets off disk. A value that means nothing
@@ -358,9 +382,12 @@ mod tests {
                 .store(&host)
                 .unwrap();
 
-            let placed = place(&host, &export).expect("the one Profile can be made");
+            place(&host, &export).expect("the one Profile can be made");
 
-            assert_eq!(placed.profiles_made(), 1);
+            assert!(
+                host.path_exists(&store.config_dir),
+                "the one Profile the Export holds a Credential for was made"
+            );
             assert_eq!(
                 crate::credentials::read(&host, &store)
                     .unwrap()
@@ -436,6 +463,39 @@ mod tests {
         assert!(
             refused.to_string().contains("nobody@example.com"),
             "it names the Account that is missing: {refused}"
+        );
+    }
+
+    /// Two addresses can flatten to one Profile name, and plus-addressing on a
+    /// single inbox is exactly how somebody comes to hold several Accounts.
+    /// `perch add` refuses that collision where a login enters, because storing
+    /// over it supersedes the Credential already there and destroys a refresh
+    /// token nothing can recover. An Import placed the second over the first and
+    /// reported success.
+    #[test]
+    fn two_accounts_that_would_share_one_profile_are_refused_before_either_is_placed() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let mut export = an_export();
+        export.registry.upsert(account("user+work@example.com"));
+        export.registry.upsert(account("user.work@example.com"));
+        for email in ["user+work@example.com", "user.work@example.com"] {
+            export.credentials.insert(
+                email.to_string(),
+                r#"{"claudeAiOauth":{"refreshToken":"sk-ant-ort01-other"}}"#.to_string(),
+            );
+        }
+
+        let refused = place(&host, &export).expect_err("both would land in one Profile");
+
+        assert!(
+            refused.to_string().contains("user+work@example.com")
+                && refused.to_string().contains("user.work@example.com"),
+            "it names both: {refused}"
+        );
+        assert!(
+            host.effects().is_empty(),
+            "and nothing was written on the way to finding out: {:?}",
+            host.effects()
         );
     }
 }

@@ -813,19 +813,32 @@ fn the_decision_log_is_standard_output_and_no_file_is_written() {
     let (_, printed) = run_watch(&host);
 
     assert_eq!(decisions(&printed).len(), 2);
-    let logs: Vec<_> = host
+
+    // Named rather than filtered by what a logfile might be called. Asked as
+    // "nothing with `log` or `watch` in its name", a watcher writing
+    // `~/.config/perch/decisions.jsonl` or `history.txt` passed — and ADR
+    // 0013's property is about which files are written, not what they are
+    // called.
+    let written: Vec<_> = host
         .effects()
         .iter()
         .filter_map(|effect| match effect {
             Effect::WroteFile(path) | Effect::WrotePrivateFile(path) => Some(path.clone()),
             _ => None,
         })
-        .filter(|path| {
-            let name = path.to_string_lossy().to_lowercase();
-            name.contains("log") || name.contains("watch")
-        })
         .collect();
-    assert!(logs.is_empty(), "a file was written for the log: {logs:?}");
+    let registry = perch::registry::registry_path(&host).expect("home is known");
+    assert!(
+        written
+            .iter()
+            // The registry, and the copy beside it its atomic write goes
+            // through on the way.
+            .all(|path| path
+                .to_string_lossy()
+                .starts_with(&*registry.to_string_lossy())),
+        "the registry is the only file a watcher writes, and it writes that \
+         because a Switch happened: {written:?}"
+    );
 }
 
 /// `cycle-ungrouped` lets a bare `perch switch` Cycle among the Accounts in no

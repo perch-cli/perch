@@ -280,6 +280,18 @@ fn report(
             out,
             "There was no live Credential to Capture — Claude Code was logged out.",
         )?,
+        // The live store held something and it was not a Credential. Said
+        // rather than swallowed, because the Account being left is now relying
+        // on whatever its Profile already held — but not refused either: bytes
+        // nothing can read are not a Rotation, and this Switch is what puts a
+        // Credential Claude Code can use back in front of it.
+        Captured::Unreadable { outgoing, why } => say(
+            out,
+            &format!(
+                "The live Credential could not be read, so it was not Captured \
+                 and {outgoing}'s own Credential is untouched: {why}"
+            ),
+        )?,
         // Also worth saying: whatever was live belonged to no Account Perch
         // holds, so it was replaced rather than kept anywhere.
         Captured::NoOutgoing => say(

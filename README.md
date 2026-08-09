@@ -38,6 +38,17 @@ shell prompt (ADR 0015).
 `perch add` gains an Account by running a login in a Profile of its own, so the
 Account you are using stays active and its session is untouched (ADR 0009).
 
+```
+$ perch add --group work --alias overflow
+```
+
+`--group <name>` says which Group the new Account joins, and `--no-group` says
+it joins none. One of the two is required where there is no terminal, because
+the Group is otherwise a question — the Account's organization is offered as a
+default for you to confirm — and a script has nobody to answer it. `--alias
+<name>` names the Account in the same breath, so it never has to be typed as an
+email address.
+
 ## Reading current Utilization
 
 `perch status --refresh` is the one command that fetches. Everything else — and
@@ -1008,8 +1019,10 @@ In no Group
   Cycling      only moves between these when you say it may
 ```
 
-`perch group move <target> none` takes an Account out of every Group, and a
-Group that still holds Accounts is not removed until they have somewhere to go.
+`perch group move <target> none` takes an Account out of every Group, and
+`perch group remove <name>` gives up the Group itself — refused while it still
+holds Accounts, so the Accounts in it are never quietly left somewhere they
+cannot Cycle from.
 
 ## Configuration
 
@@ -1101,7 +1114,7 @@ it took.
 | 11 | the keychain is locked, denied, or unavailable |
 | 12 | there is no such thing — no login, no such Account, no such Group |
 | 13 | it collides with something that is already there — an Account added twice, a name already spoken for, a path an Export would have written over, an Import onto a Perch that already holds an Account |
-| 14 | Perch understood it and will not accept it — an ambiguous name, a value out of range, a Group that has not said the watcher may act on it |
+| 14 | Perch understood it and will not accept it — an ambiguous name, a value out of range, a Group that has not said the watcher may act on it, a command that needs a terminal run where there is none |
 | 15 | there was nothing to do — you are already on that Account, a check found nothing to do now, or Perch is holding nothing on this machine to purge |
 | 16 | refused: a client is running against that Profile, so what is in it is not Perch's to write or to delete |
 | 17 | a Cycle found nowhere to land — every Account in the Group is exhausted, or none is a candidate |
@@ -1147,14 +1160,16 @@ everywhere. The toolchain is pinned in `rust-toolchain.toml` — Rust 1.97.1,
 edition 2024 — so rustup will fetch the right one on first build.
 
 ```
-# touches nothing on the machine
-cargo test --lib --test adoption --test status --test adding --test grouping \
-           --test naming --test listing --test switching --test cycling \
-           --test refreshing --test storing
-# asserts beliefs against this machine
-cargo test --test contract
-# both
+# touches nothing on the machine: every suite but the contract ones, which are
+# held back by a feature rather than by a list somebody has to maintain
 cargo test
+
+# asserts beliefs against this machine, so it wants Claude Code installed
+cargo test --features contract --test contract --test contract_credentials \
+           --test contract_sessions --test contract_links
+
+# both
+cargo test --all-features
 ```
 
 On macOS the contract tests read and write items of their own in the login

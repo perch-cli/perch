@@ -1063,7 +1063,73 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
         })?;
     }
 
+    // The same, for the Group *names* an Account claims, and for the same
+    // reason. `with_every_claimed_group_declared` below repairs a hand-edited
+    // registry by declaring what it finds — and a hand-edited registry is
+    // exactly where a name nothing would have accepted comes from. Declared by
+    // a raw insert, a claim of `none` became a Group `move_account` can never
+    // move an Account into, because `means_no_group` is asked first; a claim of
+    // `my work` became one whose `perch config get` line cannot be typed back
+    // into `perch config set`, which is the round-trip whitespace is refused to
+    // protect; and a claim colliding with an Alias planted the namespace
+    // collision `refuse_taken_names` exists to make impossible, after which
+    // `target::matched` resolves the name to the Alias and the Group is
+    // unreachable.
+    for name in registry
+        .accounts
+        .iter()
+        .filter_map(|account| account.group.as_deref())
+    {
+        refuse_a_claim_nothing_would_have_accepted(&registry, name, path)?;
+    }
+
     Ok(Some(with_every_claimed_group_declared(registry)))
+}
+
+/// Refuses a Group name an Account claims that `declare_group` would not have
+/// allowed in the first place.
+///
+/// Named rather than repaired, for the reason the configuration check above
+/// gives: a value only a hand edit can produce is a value only a hand edit can
+/// take back out, and every command reads this file — including the ones that
+/// would otherwise be the repair.
+fn refuse_a_claim_nothing_would_have_accepted(
+    registry: &Registry,
+    name: &str,
+    path: &Path,
+) -> Result<()> {
+    let refused = if means_no_group(name) {
+        Some(format!(
+            "`{name}` means no Group at all, so an Account cannot be in it"
+        ))
+    } else {
+        validate_name(NameKind::Group, name)
+            .err()
+            .map(|refusal| refusal.to_string())
+            .or_else(|| {
+                registry
+                    .aliases
+                    .keys()
+                    .find(|alias| same_name(alias, name))
+                    .map(|alias| {
+                        format!(
+                            "`{alias}` is already an Alias, and Aliases and Group \
+                             names share one namespace"
+                        )
+                    })
+            })
+    };
+
+    match refused {
+        None => Ok(()),
+        Some(why) => Err(PerchError::Invalid(format!(
+            "An Account claims the Group `{name}`, which is not a Group name \
+             Perch would have accepted: {why}.\n\
+             It is in {}, and every Perch command reads that file — including \
+             the ones that would set it. Edit the value there.",
+            path.display(),
+        ))),
+    }
 }
 
 /// Declares any Group an Account claims but nothing declared.
@@ -1823,6 +1889,52 @@ mod tests {
             65,
             "the declared Group keeps the policy it was declared with"
         );
+    }
+
+    /// The repair declares what it finds, and a hand-edited registry is exactly
+    /// where a name nothing would have accepted comes from. Inserted raw, each
+    /// of these produced a Group that exists and cannot be used: `none` is one
+    /// `move_account` can never move an Account into, because `means_no_group`
+    /// is asked first; `my work` is one whose `perch config get` line cannot be
+    /// typed back into `perch config set`, which is the round-trip whitespace is
+    /// refused to protect; and a claim colliding with an Alias plants the
+    /// namespace collision `refuse_taken_names` exists to make impossible, after
+    /// which the name resolves to the Alias and the Group is unreachable.
+    #[test]
+    fn a_claim_declare_group_would_have_refused_is_named_rather_than_declared() {
+        let claims = [
+            (r#""none""#, "{}", "means no Group"),
+            (r#""my work""#, "{}", "has a space in it"),
+            (r#""overflow""#, r#"{}"#, "already an Alias"),
+        ];
+
+        for (claimed, groups, expected) in claims {
+            let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+            let path = registry_path(&host).unwrap();
+            let aliases = if expected == "already an Alias" {
+                r#","aliases":{"overflow":"someone@example.com"}"#
+            } else {
+                ""
+            };
+            host.set_file(
+                &path,
+                &format!(
+                    r#"{{"version":1,"accounts":[{{"identity":{{"email":"someone@example.com"}},"enabled":true,"group":{claimed}}}],"groups":{groups}{aliases}}}"#
+                ),
+            );
+
+            let refused = load(&host).expect_err("that is not a Group name");
+            let said = refused.to_string();
+            assert!(
+                said.contains(expected),
+                "`{claimed}` should be refused for `{expected}`: {said}"
+            );
+            assert!(
+                said.contains("registry.json"),
+                "and the refusal names the file, because every command reads it \
+                 — including the ones that would set this: {said}"
+            );
+        }
     }
 
     /// A number that means nothing is refused where the file is read, so a

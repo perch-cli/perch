@@ -31,16 +31,18 @@ use crate::tui::model::Model;
 /// user asked for exactly this, and a Switch reaches no network. The one wait
 /// that could be long — Perch's own lock, held by a Refresh — is refused before
 /// it gets here ([`Model::act_on`]).
-pub fn switch(host: &dyn Host, model: &mut Model) {
-    let Some(email) = model.selected().map(|account| account.email().to_string()) else {
-        return;
-    };
-
+///
+/// The Account comes from the model along with the decision to act, rather than
+/// being looked up again here: `ask_for_a_switch` has just had it in hand to ask
+/// whether it is Quarantined, so a second lookup could only ever agree or be a
+/// bug — and the `else` arm it needed was unreachable, because the model has
+/// already answered `Nothing` when there is no Account under the cursor.
+pub fn switch(host: &dyn Host, model: &mut Model, email: &str) {
     let mut written = Vec::new();
     let ended = switch::run(
         host,
         SwitchArgs {
-            target: Some(email),
+            target: Some(email.to_string()),
         },
         &mut written,
     );

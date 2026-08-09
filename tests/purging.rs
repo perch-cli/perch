@@ -400,6 +400,12 @@ fn without_a_terminal_and_without_the_flag_a_purge_is_refused_and_names_it() {
     let (outcome, _printed) = run_purge(&host);
 
     let refused = outcome.expect_err("there is nobody to confirm with");
+    assert_eq!(
+        refused.exit_code(),
+        EXIT_INVALID,
+        "a request Perch understood and refused on its own terms, which a \
+         script has to be able to tell from a disk that filled up: {refused}"
+    );
     assert!(refused.to_string().contains("--yes"), "{refused}");
     assert!(
         registry_on(&host).is_some(),
@@ -432,6 +438,45 @@ fn a_client_running_against_a_profile_stops_the_purge() {
     );
 }
 
+/// The registry is not the whole account of what Perch holds, and the Purge's
+/// own deletion pass says so at length: a login abandoned or in progress lives
+/// under `pending/` and is in no `registry.accounts`. It is still a directory
+/// this command deletes, and it was the one Live Profile nothing protected —
+/// a `perch add` sitting at the browser step in another terminal had the login
+/// deleted out from under it, and the Anthropic session it had just created went
+/// with it.
+#[test]
+fn a_login_in_progress_stops_the_purge_though_no_account_names_it() {
+    let host = a_machine_to_give_back();
+
+    // What another terminal's `perch add` looks like from here: a directory
+    // under `pending/`, with a client running against it.
+    let pending = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    host.set_file(
+        perch::probe::session_marker_at(&pending, 5150),
+        &perch::probe::session_marker(5150, host.now()),
+    );
+    host.set_live_process(5150);
+
+    let (outcome, _printed) = run_purge(&host);
+
+    let refused = outcome.expect_err("something is holding that login");
+    assert_eq!(refused.exit_code(), EXIT_PROFILE_LIVE, "{refused}");
+    assert!(
+        refused.to_string().contains("no Account of Perch's names"),
+        "there is no address to name it by, so it is named by its directory: \
+         {refused}"
+    );
+    assert!(
+        host.path_exists(&pending),
+        "and the login somebody is in the middle of is still there"
+    );
+    assert!(
+        registry_on(&host).is_some(),
+        "along with everything else: a Purge is all or nothing"
+    );
+}
+
 /// The refusal above is checked before the questions and again after them, and
 /// the window in between is however long somebody takes over four prompts. A
 /// client started in there was not running when the first check ran, and its
@@ -455,6 +500,48 @@ fn a_client_that_starts_while_the_questions_are_answered_stops_the_purge_too() {
         "and nothing was purged, however far the questions had got: {printed}"
     );
     assert_eq!(credential_of(&host, EMAIL).as_deref(), Some(CREDENTIAL));
+}
+
+/// An Export written a question ago is a file full of working Credentials at a
+/// path the user is about to stop thinking about — and `perch export` refuses a
+/// path that is taken, so the next `perch purge` offering the same one aborts
+/// before it asks anything. Only the *declined* Purge said so, and every other
+/// way one can stop after that point said nothing at all: every failure test
+/// here answers `n` to the offer, which is why.
+#[test]
+fn a_purge_that_wrote_an_export_and_then_stopped_says_the_file_is_there() {
+    let host = a_machine_to_give_back()
+        .with_answers(&["y", AT, "purge"])
+        .with_secrets(&[PASSPHRASE, PASSPHRASE])
+        // Somebody starts a client while the passphrase is being typed, which is
+        // the window the second liveness check exists for.
+        .with_a_terminal_that_takes(1_000)
+        .once_while_waiting(|host| a_run_against(host, SECOND_EMAIL, host.now()));
+
+    let (outcome, _printed) = run_purge(&host);
+
+    let refused = outcome.expect_err("something started holding that Profile");
+    let said = refused.to_string();
+    assert!(
+        said.contains(AT),
+        "the file that was written is named: {said}"
+    );
+    assert!(
+        said.contains("will not write over it"),
+        "and so is what the next Purge will do about it: {said}"
+    );
+    assert_eq!(
+        export::unseal(&host.file(AT).expect("a file was written"), PASSPHRASE)
+            .expect("it opens")
+            .accounts(),
+        3,
+        "and it is a whole Export rather than a stub"
+    );
+    assert_eq!(
+        registry_on(&host).map(|registry| registry.accounts.len()),
+        Some(3),
+        "with nothing purged"
+    );
 }
 
 /// A Purge that stopped part way is run again, and finishes. The Credentials go

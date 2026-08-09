@@ -174,13 +174,27 @@ impl Headroom {
     /// as tiers, and a tie inside one is broken by the order the Accounts were
     /// added.
     fn ranking(&self, strategy: Strategy, now: DateTime<Utc>) -> (u8, f64) {
+        match self.ranked_on_reset(strategy, now) {
+            // Sooner is better, so the figure sorted on is the reset time
+            // negated.
+            Some(at) => (3, -(at.timestamp() as f64)),
+            None => self.by_room(),
+        }
+    }
+
+    /// The same ordering with the Strategy left out of it: how much is left, and
+    /// nothing about when it comes back.
+    ///
+    /// The bottom three tiers of [`ranking`], which is what they always were —
+    /// `soonest-reset` only ever added a tier on top. Named on its own because
+    /// one question genuinely wants it: whether moving would gain any room. A
+    /// Strategy says which of the places worth going is preferred, and that is a
+    /// different question from whether it is worth going anywhere.
+    ///
+    /// [`ranking`]: Headroom::ranking
+    fn by_room(&self) -> (u8, f64) {
         match self {
-            Headroom::Room { percent, .. } => match self.ranked_on_reset(strategy, now) {
-                // Sooner is better, so the figure sorted on is the reset time
-                // negated.
-                Some(at) => (3, -(at.timestamp() as f64)),
-                None => (2, *percent),
-            },
+            Headroom::Room { percent, .. } => (2, *percent),
             Headroom::Unobserved => (1, 0.0),
             Headroom::Exhausted { .. } => (0, 0.0),
         }
@@ -466,10 +480,21 @@ pub fn choose(
     // Staying put is the right answer only when Perch can see that it is: an
     // Account it has never observed is not evidence that moving would gain
     // nothing, and out of the box no Account has been observed at all.
+    //
+    // Both orderings, and the second is the one that matters. A Strategy says
+    // which of the places worth going is preferred; it does not get to say that
+    // nowhere is worth going. Asked on the Strategy's ranking alone, a
+    // `soonest-reset` Group whose active Account resets in an hour stayed on it
+    // at 95% full while an empty Account sat behind it resetting in four —
+    // because tier three sorts on the reset time and nothing else, and the
+    // Account you are on was being ranked in it. That is the failure ADR 0013
+    // sets candidates aside to prevent, reached through the staying-put check
+    // instead of through a post-hoc veto.
     if let Some(here) = here
         && let Headroom::Room { .. } = here.headroom
         && elsewhere.iter().all(|other| {
             other.headroom.ranking(strategy, now) <= here.headroom.ranking(strategy, now)
+                && other.headroom.by_room() <= here.headroom.by_room()
         })
     {
         return Err(PerchError::NothingToDo(already_the_best(
@@ -1269,6 +1294,59 @@ pub(crate) mod tests {
             choice.because.contains("resets soonest"),
             "{}",
             choice.because
+        );
+    }
+
+    /// A Strategy says which of the places worth going is preferred. It does
+    /// not get to say that nowhere is worth going — and asked on the Strategy's
+    /// ranking alone it did, because the Account you are on is ranked in tier
+    /// three beside the candidates and tier three sorts on the reset time and
+    /// nothing else. So the Account that resets soonest was the Account you
+    /// stayed on, however full it was and however empty the alternative.
+    ///
+    /// This is the failure ADR 0013 sets candidates aside to prevent, reached
+    /// from the other end: the watcher wants off a 95%-full Account, the margin
+    /// sets nothing aside, and the Cycle then reports there is nowhere to go.
+    #[test]
+    fn soonest_reset_never_pins_you_to_a_full_account_because_it_comes_back_first() {
+        let registry = preferring(
+            holding(vec![
+                account("here@example.com", vec![resetting("5-hour", 95.0, 1)]),
+                account("spare@example.com", vec![resetting("5-hour", 5.0, 4)]),
+            ]),
+            Strategy::SoonestReset,
+        );
+
+        let choice = cycle(&registry).expect("an Account with room is right there");
+
+        assert_eq!(
+            choice.account.email(),
+            "spare@example.com",
+            "5% full and four hours off beats 95% full and an hour off, whatever \
+             the Group prefers among the places it could go"
+        );
+    }
+
+    /// The other side of the same rule, which is what keeps the Strategy worth
+    /// setting: where the room is the same, the Group that prefers perishable
+    /// quota still moves onto the Account that resets first.
+    #[test]
+    fn soonest_reset_still_moves_off_an_account_that_holds_its_quota_longer() {
+        let registry = preferring(
+            holding(vec![
+                account("here@example.com", vec![resetting("5-hour", 40.0, 6)]),
+                account("perishing@example.com", vec![resetting("5-hour", 40.0, 1)]),
+            ]),
+            Strategy::SoonestReset,
+        );
+
+        let choice = cycle(&registry).expect("there is room in both");
+
+        assert_eq!(
+            choice.account.email(),
+            "perishing@example.com",
+            "the same room in both, so the one about to be thrown away is the \
+             one to spend"
         );
     }
 

@@ -83,21 +83,36 @@ fn store_as_first_profile(
 ) -> Result<Registry> {
     let dir = registry::profile_dir_for(host, &findings.identity.email)?;
     let store = profile::create(host, &dir, findings.credential.as_str())?;
-    carry_the_identity_block(host, findings, &store)?;
 
-    let mut registry = Registry::default();
-    registry.upsert(Account {
-        identity: findings.identity.clone(),
-        plan: findings.credential.subscription_type.clone(),
-        enabled: true,
-        quarantine: None,
-        group: None,
-        utilization: None,
-    });
-    registry.active = Some(findings.identity.email.clone());
+    // Everything after the Credential is written is undone if it fails, for the
+    // reason `perch add` gives at its own version of this: a Profile that
+    // nothing records is worse than no Profile at all. It holds a copy of the
+    // live Credential — a keychain item outside Perch's home, on macOS — that
+    // no registry names, that `reap_abandoned` never walks because it only
+    // walks `pending/`, and that the user has no way to know about. A first run
+    // on a machine whose registry cannot be written is all it takes.
+    let made = (|| {
+        carry_the_identity_block(host, findings, &store)?;
 
-    registry::save(host, perch, &registry)?;
-    Ok(registry)
+        let mut registry = Registry::default();
+        registry.upsert(Account {
+            identity: findings.identity.clone(),
+            plan: findings.credential.subscription_type.clone(),
+            enabled: true,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        });
+        registry.active = Some(findings.identity.email.clone());
+
+        registry::save(host, perch, &registry)?;
+        Ok(registry)
+    })();
+
+    if made.is_err() {
+        profile::discard(host, &store);
+    }
+    made
 }
 
 /// Keeps the `oauthAccount` block Claude Code wrote for the adopted Account in

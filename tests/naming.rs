@@ -370,6 +370,27 @@ fn a_name_is_reached_however_it_is_capitalised() {
         "an address is one address however it is typed, which is the rule \
          `already_landed` has always compared by"
     );
+
+    // And over the whole of Unicode, not the ASCII half. `registry::slug`
+    // lowercases everything, so `CAFÉ@` and `café@` already share one Profile
+    // and `perch add` already refuses the second as a collision — resolving in
+    // ASCII made this the one place that disagreed, and the refusal said Perch
+    // holds nothing by that name about an Account it holds and will not let you
+    // have two of.
+    let mut registry = registry;
+    let accented = "café@example.com";
+    let mut account = registry.account(EMAIL).expect("the Account").clone();
+    account.identity.email = accented.to_string();
+    registry.upsert(account);
+
+    assert_eq!(
+        target::resolve(&registry, "CAFÉ@EXAMPLE.COM").expect("the Account is reached"),
+        Target::Account {
+            email: accented.to_string()
+        },
+        "the rule that two names differing only in case are one name is not an \
+         ASCII rule anywhere else it is asked"
+    );
 }
 
 /// The same rule reaching the command that acts on it, rather than only the

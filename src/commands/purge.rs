@@ -75,8 +75,9 @@ pub fn run(host: &dyn Host, args: PurgeArgs, out: &mut dyn Write) -> Result<()> 
     purge::refuse_while_anything_is_running(host, &registry)?;
 
     say(out, &what_will_go(&registry, &home))?;
+    let mut exported = None;
     if !args.yes {
-        let exported = offer_an_export(host, &mut perch, &registry, &home, out)?;
+        exported = offer_an_export(host, &mut perch, &registry, &home, out)?;
         if !agreed(host, out)? {
             // What the machine is holding now, which is not always nothing. An
             // Export written a question ago is a file full of working
@@ -101,11 +102,20 @@ pub fn run(host: &dyn Host, args: PurgeArgs, out: &mut dyn Write) -> Result<()> 
         }
     }
 
+    // Every failure from here on carries the same note the declined Purge does,
+    // and for the same two reasons: a file full of working Credentials is
+    // sitting at a path the user is about to stop thinking about, and `perch
+    // export` refuses a path that is taken — so the next Purge offering the same
+    // one aborts before it asks anything. Reported only where the run stops
+    // before the Purge is complete: a Purge that finished says where the file is
+    // in its own report.
+    let and_the_export = |error: PerchError| still_standing(error, exported.as_deref());
+
     // The same guard `perch remove` takes, for the same reason and at the same
     // point: the questions above are the one wait in Perch with no bound on
     // them, and everything from this line on deletes Credentials. A registry
     // this Perch may no longer write is one it may no longer act on either.
-    still_ours(&mut perch, "purged")?;
+    still_ours(&mut perch, "purged").map_err(and_the_export)?;
 
     // Asked again for the same reason the hold is re-checked, and it is the same
     // window: somebody may have started a client while the passphrase was being
@@ -113,10 +123,32 @@ pub fn run(host: &dyn Host, args: PurgeArgs, out: &mut dyn Write) -> Result<()> 
     // about the Profile this is about to delete. Asked first *and* last, because
     // the first ask is what stops a Purge putting five questions to somebody it
     // was always going to refuse.
-    purge::refuse_while_anything_is_running(host, &registry)?;
+    purge::refuse_while_anything_is_running(host, &registry).map_err(and_the_export)?;
 
-    let purged = purge::erase(host, &registry)?;
+    let purged = purge::erase(host, &registry).map_err(and_the_export)?;
     report(out, &home, &purged)
+}
+
+/// Adds the whereabouts of an Export this run wrote to a failure that came
+/// after it.
+///
+/// Only the decline arm used to say this, so every other way a Purge can stop —
+/// a registry another Perch took over, a client started while the passphrase was
+/// being typed, a Credential Store that would not empty — left an armored file
+/// holding a working Credential for every Account at a path nothing had
+/// mentioned. The next `perch purge` then aborted on it before asking anything,
+/// because `perch export` refuses a path that is taken.
+fn still_standing(error: PerchError, exported: Option<&std::path::Path>) -> PerchError {
+    match exported {
+        Some(path) => error.with_note(&format!(
+            "The Export at {} was written before this stopped and still stands \
+             — it holds a working Credential for every Account, so keep it \
+             somewhere you would keep those, or delete it. `perch purge` will \
+             not write over it.",
+            path.display(),
+        )),
+        None => error,
+    }
 }
 
 /// Refuses a Purge nobody is there to agree to.
@@ -129,7 +161,7 @@ fn refuse_without_a_terminal_or_the_flag(host: &dyn Host, yes: bool) -> Result<(
     if yes || host.is_interactive() {
         return Ok(());
     }
-    Err(PerchError::Other(
+    Err(PerchError::Invalid(
         "There is no terminal to confirm on, and a Purge deletes every Profile, \
          every Credential Perch holds and its own registry.\n\
          Nothing was purged. Pass `--yes` to purge without being asked."

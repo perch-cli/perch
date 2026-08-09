@@ -7,6 +7,7 @@
 mod common;
 
 use common::*;
+use perch::Host;
 use perch::error::{EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NOT_FOUND, EXIT_PROBE_REFUSED};
 use perch::host::{Execution, FakeHost};
 use perch::registry;
@@ -298,6 +299,47 @@ fn a_login_whose_address_names_no_directory_is_refused_rather_than_adopted() {
     assert!(
         host.file(REGISTRY_PATH).is_none(),
         "and nothing was written on the way to finding out"
+    );
+}
+
+/// Adoption is the other way an Account arrives, and it writes a Credential
+/// before it writes the registry that names it. A first run on a machine whose
+/// registry cannot be written — a disk with nothing left on it, a directory
+/// somebody made read-only — left a Profile holding a copy of the live
+/// Credential that no registry named, that the reaper never walks because it
+/// only walks `pending/`, and that the user has no way to learn about. On macOS
+/// that copy is a keychain item outside Perch's home entirely.
+///
+/// `perch add` has said for a while that a Profile nothing records is worse
+/// than no Profile at all. Adoption is the copy of that argument that was
+/// missed.
+#[test]
+fn an_adoption_that_could_not_be_recorded_leaves_no_credential_behind() {
+    let host = logged_in_machine().with_unwritable_file(REGISTRY_PATH, "no space left on device");
+    let dir = perch::registry::profile_dir_for(&host, EMAIL).expect("home is known");
+    let store = perch::probe::store_for_profile(&host, &dir).expect("USER is set");
+
+    let (result, _) = run_status(&host, false);
+
+    result.expect_err("the registry could not be written");
+    assert!(
+        host.file(REGISTRY_PATH).is_none(),
+        "nothing records the Account"
+    );
+    assert_eq!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME),
+        None,
+        "so nothing may be holding its Credential either — least of all a \
+         keychain item outside Perch's home"
+    );
+    assert_eq!(host.file(&store.credentials_file), None);
+    assert!(!host.path_exists(&dir), "and no Profile is left over");
+
+    assert_eq!(
+        host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
+        Some(CREDENTIAL),
+        "whatever Claude Code is logged in as is untouched: adoption failing is \
+         not a reason to log somebody out"
     );
 }
 

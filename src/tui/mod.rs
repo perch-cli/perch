@@ -185,7 +185,7 @@ pub fn browse(
             match model.act_on(signal) {
                 Asked::Nothing => {}
                 Asked::ForARefresh => refresher.ask(model.accounts_on_show()),
-                Asked::ForASwitch => act::switch(host, &mut model),
+                Asked::ForASwitch(email) => act::switch(host, &mut model, &email),
             }
         }
 

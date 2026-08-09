@@ -53,7 +53,7 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     }
     registry.refuse_taken_names(args.alias.as_deref(), args.group.as_deref())?;
     if args.group.is_none() && !args.no_group && !host.is_interactive() {
-        return Err(PerchError::Other(
+        return Err(PerchError::Invalid(
             "There is no terminal to confirm the Group on. Pass `--group <name>` \
              or `--no-group`."
                 .to_string(),

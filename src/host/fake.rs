@@ -495,6 +495,13 @@ impl FakeHost {
         });
     }
 
+    /// A keychain that has come back — somebody typed their password, or the
+    /// screen unlocked. What a locked keychain does to Perch is only half the
+    /// story; the other half is what the next command makes of what it left.
+    pub fn unlock_keychain(&self) {
+        *self.keychain_lock.borrow_mut() = None;
+    }
+
     /// A keychain that takes a write, reports success, and keeps only the
     /// first `bytes` of what it was given.
     ///
@@ -765,6 +772,13 @@ impl FakeHost {
     /// without repeats.
     pub fn notes(&self) -> Vec<String> {
         self.notes.borrow().clone()
+    }
+
+    /// The same as [`FakeHost::forget_effects`], for remarks: a test running two
+    /// commands and asserting on the second one's should not have to read past
+    /// the first one's.
+    pub fn forget_notes(&self) {
+        self.notes.borrow_mut().clear();
     }
 
     pub fn keychain_item(&self, service: &str, account: &str) -> Option<String> {

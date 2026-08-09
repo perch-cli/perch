@@ -36,6 +36,19 @@ pub fn say(out: &mut dyn Write, line: &str) -> Result<()> {
     writeln!(out, "{line}").map_err(write_failed)
 }
 
+/// One document to whatever is parsing the command, which is what `--json`
+/// means everywhere it is offered.
+///
+/// Here rather than at the two call sites for the reason `say` is here: the two
+/// commands that emit one were spelling the same three-line incantation, and a
+/// rule about machine-readable output — pretty or compact, stdout or elsewhere —
+/// is a rule with one place to hold it.
+pub fn say_json(out: &mut dyn Write, document: &serde_json::Value) -> Result<()> {
+    let rendered =
+        serde_json::to_string_pretty(document).map_err(|err| PerchError::Other(err.to_string()))?;
+    say(out, &rendered)
+}
+
 /// Puts a question to the person at the terminal and waits for their answer,
 /// or `None` at end of input.
 ///
@@ -138,7 +151,7 @@ pub fn refuse_without_a_terminal(host: &dyn Host, command: &str) -> Result<()> {
     if host.is_interactive() {
         return Ok(());
     }
-    Err(PerchError::Other(format!(
+    Err(PerchError::Invalid(format!(
         "An Export is encrypted with a passphrase, and there is no terminal to \
          prompt for one on.\n\
          There is no flag that answers ahead of time: a passphrase passed as an \

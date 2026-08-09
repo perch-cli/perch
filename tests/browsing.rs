@@ -1038,7 +1038,12 @@ fn a_run_the_view_was_left_for_hands_the_terminal_over_and_reports_what_it_said(
             .expect("the client ran");
 
     assert_eq!(ended, 3, "what the client said is what a script reads");
-    let said = String::from_utf8(said).expect("output is UTF-8");
+    assert_eq!(
+        String::from_utf8(said).expect("output is UTF-8"),
+        "",
+        "stdout belongs to the client, here as much as under `perch run`"
+    );
+    let said = host.notes().join("\n");
     assert!(
         said.contains(&format!("Running Claude Code as {SECOND_EMAIL}")),
         "{said}"
@@ -1062,6 +1067,11 @@ fn perch_tui_is_refused_where_there_is_no_terminal() {
     let refusal =
         perch::commands::tui::run(&host, &mut written).expect_err("there is nothing to draw in");
 
+    assert_eq!(
+        refusal.exit_code(),
+        perch::error::EXIT_INVALID,
+        "a request Perch understood and refused on its own terms: {refusal}"
+    );
     let said = refusal.to_string();
     assert!(said.contains("perch list"), "{said}");
     assert!(said.contains("perch status"), "{said}");
@@ -1138,12 +1148,13 @@ fn a_listing_that_scrolls_keeps_the_row_that_says_what_the_columns_are() {
 
 /// Selecting an Account below the fold shows its figures, not just its name.
 ///
-/// The scroll keeps one line in view by pinning it to the bottom of the
-/// viewport. On the Accounts tab that line is the row, which is the whole of
-/// the content. On the Utilization tab each Account's Quota Window rows come
-/// *after* its heading, so pinning the heading put every figure below the
-/// bottom edge: the selected Account rendered as a bare name with its
-/// Utilization scrolled off, on the one tab whose whole purpose is the figures.
+/// The scroll brings one named line into view with what is around it. On the
+/// Accounts tab that line is the row, which is the whole of the content. On the
+/// Utilization tab each Account's Quota Window rows come *after* its heading, so
+/// naming the heading put every figure below the bottom edge: the selected
+/// Account rendered as a bare name with its Utilization scrolled off, on the one
+/// tab whose whole purpose is the figures. The last row of the block is what is
+/// named instead, which keeps the block together.
 #[test]
 fn moving_down_the_utilization_view_keeps_the_selected_accounts_figures_on_screen() {
     let host = machine_with_figures();

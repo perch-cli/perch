@@ -199,7 +199,7 @@ fn agreed(
         return Ok(true);
     }
     if !host.is_interactive() {
-        return Err(PerchError::Other(format!(
+        return Err(PerchError::Invalid(format!(
             "There is no terminal to confirm on, and this removal is one Perch \
              asks about: {}\n\
              Pass `--yes` to remove it without being asked.",
@@ -377,11 +377,26 @@ fn delete_the_credential_and_its_profile(
     let store = account.store(host)?;
     let mut anything_was_there = false;
     for kept_in in credentials::stores_for(host, &store) {
+        // A Profile has two stores and they are emptied in order, so by the time
+        // the second refuses the first may already be empty. Saying "Nothing was
+        // removed" there is a claim about a Credential that is gone — on macOS
+        // the keychain item goes first and the file second, and a Profile with
+        // one of the two emptied is one `perch switch` may already be unable to
+        // use. The Account stays in the registry either way, so running the
+        // command again is still the answer; what changes is whether the user
+        // has been told they are now relying on it.
         let forgotten = kept_in.forget(host).map_err(|error| {
+            let so_far = match anything_was_there {
+                true => format!(
+                    "{}'s Credential has already been taken out of its other \
+                     store, so it is Quarantined until this finishes",
+                    account.email(),
+                ),
+                false => format!("Nothing was removed — {} is still held", account.email()),
+            };
             error.with_note(&format!(
-                "Nothing was removed — {} is still held, so `perch remove` can be \
-                 run again once {} can be written to.",
-                account.email(),
+                "{so_far}, so `perch remove` can be run again once {} can be \
+                 written to.",
                 kept_in.describe(),
             ))
         })?;

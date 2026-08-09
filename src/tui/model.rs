@@ -78,7 +78,7 @@ pub enum Refreshing {
 /// thing that can act on it and it must not be able to forget: asking is the
 /// difference between a Refresh happening and a screen that says it is waiting
 /// for one that was never asked for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
 pub enum Asked {
     /// Draw the next frame. Nearly every keystroke.
@@ -88,8 +88,10 @@ pub enum Asked {
     /// Somebody pressed the key that makes the Account under the cursor the
     /// active one. The Switch itself is `perch switch`'s
     /// ([`crate::tui::act::switch`]) — everything the model can decide about it
-    /// has been decided by the time this comes back.
-    ForASwitch,
+    /// has been decided by the time this comes back, including which Account it
+    /// is: the model has just had it in hand to check, so carrying it here saves
+    /// the caller a second lookup and the possibility of the two disagreeing.
+    ForASwitch(String),
 }
 
 /// How the view ended, which is not always "it ended".
@@ -302,17 +304,16 @@ impl Model {
         let Some(account) = self.selected() else {
             return Asked::Nothing;
         };
-        if self.refuses(switch::refuse_a_quarantined_account(
-            &self.registry,
-            account,
-        )) {
+        let email = account.email().to_string();
+        let usable = switch::refuse_a_quarantined_account(&self.registry, account);
+        if self.refuses(usable) {
             return Asked::Nothing;
         }
         if self.refreshing == Refreshing::Waiting {
             self.said = vec![WAITING_ON_A_REFRESH.to_string()];
             return Asked::Nothing;
         }
-        Asked::ForASwitch
+        Asked::ForASwitch(email)
     }
 
     /// The Run key: give the terminal back and launch a client as the Account
@@ -796,7 +797,7 @@ mod tests {
         model.refreshed(Refreshed::nothing_read(vec![]));
         assert_eq!(
             model.act_on(Signal::Switch),
-            Asked::ForASwitch,
+            Asked::ForASwitch("one@example.com".to_string()),
             "one that has come back is not one that is out",
         );
     }
