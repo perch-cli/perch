@@ -356,8 +356,13 @@ impl Model {
     /// though it is that too — it is that a Refresh writes the registry under
     /// Perch's own lock, and the second would sit waiting on the first for as
     /// long as the first took.
+    /// Nothing to read is also nothing to ask for. A Refresh over no Accounts
+    /// still takes Perch's own lock exclusively and still has to be waited out
+    /// on the way `q` — so on a machine holding nothing, `r` said "Refreshing"
+    /// and could block on another `perch` for as long as that one held the
+    /// lock, to read nought Accounts.
     fn ask_for_a_refresh(&mut self) -> Asked {
-        if self.refreshing == Refreshing::Waiting {
+        if self.refreshing == Refreshing::Waiting || self.accounts_on_show().is_empty() {
             return Asked::Nothing;
         }
         self.refreshing = Refreshing::Waiting;

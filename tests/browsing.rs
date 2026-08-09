@@ -784,6 +784,30 @@ fn a_perch_holding_nothing_says_so_rather_than_drawing_an_empty_table() {
     assert!(frame.contains("perch add"), "{frame}");
 }
 
+/// And `r` on that machine asks for nothing. A Refresh takes Perch's own lock
+/// exclusively and has to be waited out on the way `q`, so one over no Accounts
+/// is a screen saying "Refreshing", a thread that may sit on another `perch`'s
+/// lock, and up to ten seconds of `q` doing nothing — to read nought Accounts.
+#[test]
+fn refreshing_a_perch_holding_nothing_asks_for_nothing() {
+    let host = machine_with_figures();
+    let mut refresher = FakeRefresher::out_for_ever();
+    let mut screen = FakeScreen::scripted(vec![Some(Signal::Refresh), Some(Signal::Leave)]);
+
+    perch::tui::browse(&host, Registry::default(), &mut screen, &mut refresher)
+        .expect("the TUI leaves cleanly");
+
+    assert!(
+        refresher.asked().is_empty(),
+        "no Refresh was asked for: {:?}",
+        refresher.asked()
+    );
+    assert!(
+        !refresher.was_waited_for(),
+        "and `q` waited for nothing on the way out"
+    );
+}
+
 /// A Refresh writes the registry under Perch's own lock, and leaving the TUI
 /// is the end of the process — so an exit that walked away from one would leave
 /// that lock behind for the next command to wait out.
