@@ -1160,14 +1160,16 @@ everywhere. The toolchain is pinned in `rust-toolchain.toml` — Rust 1.97.1,
 edition 2024 — so rustup will fetch the right one on first build.
 
 ```
-# touches nothing on the machine
-cargo test --lib --test adoption --test status --test adding --test grouping \
-           --test naming --test listing --test switching --test cycling \
-           --test refreshing --test storing
-# asserts beliefs against this machine
-cargo test --test contract
-# both
+# touches nothing on the machine: every suite but the contract ones, which are
+# held back by a feature rather than by a list somebody has to maintain
 cargo test
+
+# asserts beliefs against this machine, so it wants Claude Code installed
+cargo test --features contract --test contract --test contract_credentials \
+           --test contract_sessions --test contract_links
+
+# both
+cargo test --all-features
 ```
 
 On macOS the contract tests read and write items of their own in the login
