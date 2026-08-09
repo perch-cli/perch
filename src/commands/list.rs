@@ -14,6 +14,7 @@ use std::io::Write;
 
 use chrono::{DateTime, Utc};
 use serde_json::json;
+use unicode_width::UnicodeWidthStr;
 
 use crate::adopt;
 use crate::commands::{CYCLING_AMONG_UNGROUPED, IN_NO_GROUP, say, say_json, write_failed};
@@ -155,10 +156,32 @@ pub fn columns(registry: &Registry, account: &Account) -> [String; COLUMNS] {
     ]
 }
 
-/// Each column as wide as the widest thing in it, header included. Measured in
-/// characters rather than bytes, because that is what the padding counts — a
-/// name a terminal draws in eight columns pads to eight, not to the eleven
-/// bytes it happens to occupy.
+/// How many terminal cells a string is drawn in.
+///
+/// Not its bytes, and not its characters either. A CJK Group name is drawn two
+/// columns per character and a combining mark is drawn in none, so a count of
+/// characters pads to the wrong width — and because the widths are shared by
+/// every row, one such name puts every column after it out of line for the whole
+/// table. What a column is measured in has to be what a terminal draws in.
+///
+/// `unicode-width` was already in the tree by way of ratatui, which draws every
+/// frame with it, so this costs no crate and no seam (ADR 0025) — and it means
+/// the two surfaces that show the same listing measure it the same way.
+pub fn cells(text: &str) -> usize {
+    UnicodeWidthStr::width(text)
+}
+
+/// `text` with spaces after it until it fills `width` cells.
+///
+/// `format!("{text:width$}")` pads to a count of characters, which is
+/// [`cells`]'s mistake from the other side: it would take the right width and
+/// then fill it wrongly.
+pub fn padded(text: &str, width: usize) -> String {
+    format!("{text}{}", " ".repeat(width.saturating_sub(cells(text))))
+}
+
+/// Each column as wide as the widest thing in it, header included, measured in
+/// the cells a terminal draws them in — see [`cells`].
 ///
 /// Written over however many columns there are rather than over these four,
 /// because the TUI's Accounts view shows the same listing with the figure its
@@ -172,8 +195,8 @@ pub fn widths<'a, const N: usize>(
     std::array::from_fn(|column| {
         rows.clone()
             .into_iter()
-            .map(|row| row[column].chars().count())
-            .chain(std::iter::once(headers[column].chars().count()))
+            .map(|row| cells(&row[column]))
+            .chain(std::iter::once(cells(headers[column])))
             .max()
             .unwrap_or_default()
     })
@@ -324,7 +347,7 @@ fn write_row(
         .zip(widths)
         .enumerate()
         .filter(|(column, _)| show_group || *column != GROUP_COLUMN)
-        .map(|(_, (value, width))| format!("{value:width$}"))
+        .map(|(_, (value, width))| padded(value, *width))
         .collect();
     writeln!(
         out,
@@ -434,5 +457,42 @@ mod tests {
         // eleven bytes it happens to occupy.
         let widths = widths(&HEADERS, &[row("a@b.com", "øverfløw")]);
         assert_eq!(widths[1], 8);
+    }
+
+    /// And not in characters either, which is the same mistake one step later.
+    ///
+    /// A CJK name is drawn two columns per character. Measured by character it
+    /// takes half the room it needs, and because one set of widths lays out
+    /// every row, the columns after it step out of line for the whole table —
+    /// on every row, not just the one with the name in it.
+    #[test]
+    fn a_column_is_measured_in_the_cells_a_terminal_draws_it_in() {
+        assert_eq!(cells("作業"), 4, "two characters, four columns");
+        assert_eq!(cells("øverfløw"), 8, "and a narrow one is still one each");
+
+        let in_group = |name: &str| -> [[String; COLUMNS]; 1] {
+            let mut row = row("a@b.com", "-");
+            row[2] = name.to_string();
+            [row]
+        };
+        assert_eq!(
+            widths(&HEADERS, &in_group("作業"))[2],
+            "Group".len(),
+            "the header is still the floor"
+        );
+        assert_eq!(widths(&HEADERS, &in_group("作業作業"))[2], 8);
+    }
+
+    /// Padding fills the width the same way it was measured, or the right
+    /// answer is arrived at and then spent wrongly.
+    #[test]
+    fn padding_fills_a_width_in_cells_rather_than_in_characters() {
+        assert_eq!(padded("作業", 6), "作業  ", "four cells, two to fill");
+        assert_eq!(padded("ab", 4), "ab  ");
+        assert_eq!(
+            padded("作業作業", 4),
+            "作業作業",
+            "and nothing is trimmed to fit: a cell count is a floor here"
+        );
     }
 }

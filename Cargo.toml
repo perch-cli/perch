@@ -55,6 +55,13 @@ serde_json = "1"
 sha2 = "0.11"
 thiserror = "2"
 
+# How wide a string is drawn, for the two surfaces that lay out the same
+# listing in columns. Already in the build transitively — ratatui measures every
+# frame with it — so declaring it adds no crate, and it sits on no seam (ADR
+# 0025): it is a pure function of a string. A hand-rolled table of East Asian
+# widths would be the same data, kept by hand, going wrong quietly.
+unicode-width = "0.2.2"
+
 # Both already in the build transitively — libc through sha2's cpufeatures,
 # windows-sys through clap's anstream — so declaring them adds no crate and buys
 # vetted declarations for the primitives std does not carry (ADR 0021).
