@@ -255,7 +255,7 @@ fn render_human(
     now: DateTime<Utc>,
     report: &Report,
 ) -> Result<()> {
-    report.write_notes(out)?;
+    report.write_notes_beside_the_accounts(out)?;
 
     if let Some(heading) = scope.heading() {
         say(out, &heading)?;
