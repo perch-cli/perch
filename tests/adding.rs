@@ -809,6 +809,49 @@ fn a_login_whose_identity_file_cannot_be_read_is_refused_by_name() {
     assert_eq!(registry_of(&host).accounts.len(), 1);
 }
 
+/// Age is evidence and not proof, and the reaper runs at the start of every
+/// command. Thirty minutes is not generous for a login that wants a password
+/// manager, a second factor and a browser that opened on the wrong profile —
+/// so a `perch status` typed in another terminal was free to delete the
+/// Credential Claude Code had just written and leave the `perch add` driving it
+/// reporting that the login did not complete.
+///
+/// The same evidence every other write asks for settles it (ADR 0022): a login
+/// somebody is in the middle of is a Live Profile, and nothing reaps one.
+#[test]
+fn a_login_somebody_is_still_driving_is_never_reaped_however_old_it_is() {
+    let host = logged_in_machine();
+    run_list(&host, false)
+        .0
+        .expect("the first Account is adopted");
+
+    let pending = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    let store = perch::probe::store_for_profile(&host, &pending).expect("USER is set");
+    host.set_keychain_item(&store.keychain_service, LOGIN_NAME, SECOND_CREDENTIAL);
+    host.set_file(&store.identity_file, SECOND_IDENTITY_FILE);
+
+    // The `claude` this login is being driven through, still running.
+    host.set_file(
+        perch::probe::session_marker_at(&pending, 4242),
+        &perch::probe::session_marker(4242, host.now()),
+    );
+    host.set_live_process(4242);
+
+    // Long past the point where an abandoned one would have gone.
+    host.set_now(host.now() + chrono::Duration::hours(6));
+    run_list(&host, false).0.expect("a listing");
+
+    assert!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME)
+            .is_some(),
+        "the Credential Claude Code just wrote is still there"
+    );
+    assert!(
+        host.path_exists(&pending),
+        "and so is the directory the login is running in"
+    );
+}
+
 /// A Credential Store's name is derived from the directory it belongs to, and
 /// on macOS the item itself lives outside that directory — so the directory is
 /// the only thing that can still name the item. Removing it while a store is

@@ -159,6 +159,12 @@ const ABANDONED_AFTER_MINUTES: i64 = 30;
 /// believes they never added. This runs at the start of every command, which is
 /// the earliest anything can notice.
 ///
+/// Two things have to be true before one is reaped: it is older than any login
+/// somebody could plausibly still be in, and nothing is running against it. The
+/// second is what the first cannot promise — a login somebody is still driving
+/// in another terminal must never be reaped out from under them, and age alone
+/// says nothing about that.
+///
 /// Silent and best-effort throughout. It is tidying up on the way to what the
 /// user actually asked for, and a directory that will not go is not a reason to
 /// fail that.
@@ -180,6 +186,20 @@ pub fn reap_abandoned(host: &dyn Host) {
             continue;
         };
         if started_at > too_old {
+            continue;
+        }
+        // Age is evidence and not proof. Thirty minutes is not generous for a
+        // login that wants a password manager, a second factor and a browser
+        // that opened on the wrong profile — and this runs at the start of
+        // every command, so any `perch status` typed in another terminal was
+        // free to delete the Credential Claude Code had just written and leave
+        // the `perch add` driving it reporting that the login did not complete.
+        //
+        // So the same evidence every other write asks for (ADR 0022): a session
+        // marker naming a process that is still the one that wrote it. A login
+        // somebody is in the middle of is a Live Profile, and nothing reaps one
+        // however old it is.
+        if probe::anything_running(host, &dir) {
             continue;
         }
         if let Ok(store) = probe::store_for_profile(host, &dir) {
