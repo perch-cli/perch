@@ -38,6 +38,17 @@ shell prompt (ADR 0015).
 `perch add` gains an Account by running a login in a Profile of its own, so the
 Account you are using stays active and its session is untouched (ADR 0009).
 
+```
+$ perch add --group work --alias overflow
+```
+
+`--group <name>` says which Group the new Account joins, and `--no-group` says
+it joins none. One of the two is required where there is no terminal, because
+the Group is otherwise a question — the Account's organization is offered as a
+default for you to confirm — and a script has nobody to answer it. `--alias
+<name>` names the Account in the same breath, so it never has to be typed as an
+email address.
+
 ## Reading current Utilization
 
 `perch status --refresh` is the one command that fetches. Everything else — and
@@ -1008,8 +1019,10 @@ In no Group
   Cycling      only moves between these when you say it may
 ```
 
-`perch group move <target> none` takes an Account out of every Group, and a
-Group that still holds Accounts is not removed until they have somewhere to go.
+`perch group move <target> none` takes an Account out of every Group, and
+`perch group remove <name>` gives up the Group itself — refused while it still
+holds Accounts, so the Accounts in it are never quietly left somewhere they
+cannot Cycle from.
 
 ## Configuration
 
