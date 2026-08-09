@@ -258,12 +258,11 @@ fn render_utilization(frame: &mut Frame, model: &Model, area: Rect) {
             }
 
             // The *last* line of the selected Account's block rather than its
-            // heading. `scrolled_to` pins the line it is given to the bottom of
-            // the view, which is right on the Accounts tab where the row is the
-            // whole of the content — but here the Quota Window rows come after
-            // the heading, so pinning the heading scrolls every one of them off.
-            // Selecting an Account below the fold showed its name and hid its
-            // figures, on the one tab whose whole purpose is the figures.
+            // heading. `scrolled_to` brings the line it is given into view with
+            // what is around it, and the Quota Window rows come after the
+            // heading — so naming the heading put the figures below the fold on
+            // the one tab whose whole purpose is the figures. Naming the last of
+            // them keeps the block together.
             if index == model.cursor {
                 cursor_line = lines.len().saturating_sub(1);
             }
@@ -310,17 +309,27 @@ fn render_nothing_held(frame: &mut Frame, area: Rect) {
 
 /// Draws what fits, keeping the line the cursor is on in view.
 fn render_scrolled(frame: &mut Frame, area: Rect, lines: Vec<Line<'_>>, cursor_line: usize) {
-    let offset = scrolled_to(cursor_line, area.height as usize);
+    let offset = scrolled_to(cursor_line, area.height as usize, lines.len());
     frame.render_widget(Paragraph::new(lines).scroll((offset as u16, 0)), area);
 }
 
-/// Which line the listing starts at, so the one the cursor is on is on screen.
+/// Which line the listing starts at, so the one the cursor is on is on screen
+/// with as much of what is around it as will fit.
 ///
-/// It scrolls exactly far enough and no further, which is what makes the frame
-/// a function of the model alone: nothing here is remembered between frames, so
-/// the same model drawn twice is the same picture both times.
-fn scrolled_to(cursor_line: usize, height: usize) -> usize {
-    (cursor_line + 1).saturating_sub(height.max(1))
+/// Still a function of the model alone: nothing is remembered between frames, so
+/// the same model drawn twice is the same picture both times. It is not
+/// "exactly far enough" any more, and that was the bug — scrolling the minimum
+/// puts the cursor on the bottom row for every position past the first
+/// screenful, including when moving *up*. Nothing below the cursor was ever
+/// visible, so on the one screen whose job is comparing Accounts side by side
+/// you could not see the next candidate, or how many were left.
+///
+/// Centred, and clamped to the end of the listing so the last screenful is a
+/// full one rather than the tail padded with blanks.
+fn scrolled_to(cursor_line: usize, height: usize, lines: usize) -> usize {
+    let height = height.max(1);
+    let centred = cursor_line.saturating_sub(height / 2);
+    centred.min(lines.saturating_sub(height))
 }
 
 /// The width of the two markers every row starts with, and the blank the
@@ -454,23 +463,48 @@ mod tests {
     /// The whole listing on a screen with room for it does not scroll at all.
     #[test]
     fn a_listing_that_fits_is_not_scrolled() {
-        assert_eq!(scrolled_to(0, 10), 0);
-        assert_eq!(scrolled_to(9, 10), 0);
+        assert_eq!(scrolled_to(0, 10, 10), 0);
+        assert_eq!(scrolled_to(9, 10, 10), 0);
     }
 
-    /// Past the bottom, it scrolls exactly far enough to bring the cursor into
-    /// view and no further.
+    /// Past the fold, the cursor is brought into view with what is around it
+    /// rather than pinned to the bottom row — and the last screenful is a full
+    /// one rather than the tail padded with blanks.
     #[test]
-    fn a_cursor_below_the_fold_scrolls_the_listing_to_it() {
-        assert_eq!(scrolled_to(10, 10), 1);
-        assert_eq!(scrolled_to(25, 10), 16);
+    fn a_cursor_below_the_fold_is_shown_with_what_is_around_it() {
+        assert_eq!(scrolled_to(10, 10, 40), 5, "centred");
+        assert_eq!(scrolled_to(25, 10, 40), 20);
+        assert_eq!(
+            scrolled_to(39, 10, 40),
+            30,
+            "at the end it stops rather than scrolling into blank space"
+        );
+    }
+
+    /// The property the fix is about: something below the cursor is on screen
+    /// wherever the cursor is, so the next candidate and how many are left can
+    /// both be seen.
+    #[test]
+    fn there_is_always_something_below_the_cursor_to_see() {
+        let (height, lines) = (10, 40);
+        for cursor in 0..lines - 1 {
+            let offset = scrolled_to(cursor, height, lines);
+            assert!(
+                offset <= cursor && cursor < offset + height,
+                "the cursor is on screen at {cursor}"
+            );
+            assert!(
+                cursor + 1 < offset + height,
+                "and so is the line under it, at {cursor}"
+            );
+        }
     }
 
     /// A terminal squeezed to nothing is one row rather than a division by
     /// zero.
     #[test]
     fn a_screen_with_no_room_still_shows_the_row_the_cursor_is_on() {
-        assert_eq!(scrolled_to(4, 0), 4);
+        assert_eq!(scrolled_to(4, 0, 10), 4);
     }
 
     const WIDE: usize = 80;

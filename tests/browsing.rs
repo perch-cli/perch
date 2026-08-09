@@ -1148,12 +1148,13 @@ fn a_listing_that_scrolls_keeps_the_row_that_says_what_the_columns_are() {
 
 /// Selecting an Account below the fold shows its figures, not just its name.
 ///
-/// The scroll keeps one line in view by pinning it to the bottom of the
-/// viewport. On the Accounts tab that line is the row, which is the whole of
-/// the content. On the Utilization tab each Account's Quota Window rows come
-/// *after* its heading, so pinning the heading put every figure below the
-/// bottom edge: the selected Account rendered as a bare name with its
-/// Utilization scrolled off, on the one tab whose whole purpose is the figures.
+/// The scroll brings one named line into view with what is around it. On the
+/// Accounts tab that line is the row, which is the whole of the content. On the
+/// Utilization tab each Account's Quota Window rows come *after* its heading, so
+/// naming the heading put every figure below the bottom edge: the selected
+/// Account rendered as a bare name with its Utilization scrolled off, on the one
+/// tab whose whole purpose is the figures. The last row of the block is what is
+/// named instead, which keeps the block together.
 #[test]
 fn moving_down_the_utilization_view_keeps_the_selected_accounts_figures_on_screen() {
     let host = machine_with_figures();
