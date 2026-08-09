@@ -206,7 +206,7 @@ pub struct NotLanded {
 /// from the other side, and it wants the same answer.
 pub fn already_landed(host: &dyn Host, account: &Account) -> Result<bool> {
     let version = probe::claude_version(host)?;
-    let store = probe::default_store(host)?;
+    let store = registry::the_default_profile(host)?;
     let named = probe::read_identity(host, &store, &version)?
         .is_some_and(|identity| identity.email.eq_ignore_ascii_case(account.email()));
 
@@ -226,7 +226,10 @@ pub fn already_landed(host: &dyn Host, account: &Account) -> Result<bool> {
 /// installed, and where the Default Profile is. Established before the locks,
 /// because the locks are derived from the second of them.
 fn ground(host: &dyn Host) -> Result<(String, Store)> {
-    Ok((probe::claude_version(host)?, probe::default_store(host)?))
+    Ok((
+        probe::claude_version(host)?,
+        registry::the_default_profile(host)?,
+    ))
 }
 
 fn prepare(
@@ -446,7 +449,7 @@ pub fn refuse_if_live_anywhere(
         // to prevent.
         refuse_if_live_in(
             host,
-            &probe::default_store(host)?.config_dir,
+            &registry::the_default_profile(host)?.config_dir,
             whose,
             version,
         )?;

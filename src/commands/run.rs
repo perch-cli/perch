@@ -39,7 +39,6 @@ use crate::adopt;
 use crate::commands;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::probe::Store;
 use crate::registry::{self, Registry};
 use crate::{carry, probe, reconcile, target};
 
@@ -86,7 +85,7 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // preparation for either way.
     let launch = what_to_launch(host, &args.command)?;
     let profile = registry::profile_dir_for(host, &found.email)?;
-    let default_profile = the_default_profile(host)?;
+    let default_profile = registry::the_default_profile(host)?;
     reconcile::reconcile(host, &default_profile.config_dir, &profile)?;
 
     // The one file Reconcile cannot link, because it holds the Account as well
@@ -301,28 +300,6 @@ fn quoted_for_a_shell(word: &str) -> String {
         return word.to_string();
     }
     format!("'{}'", word.replace('\'', r"'\''"))
-}
-
-/// The Default Profile a Run reads the person's things out of: the Shared State
-/// it links, and the `.claude.json` keys it copies.
-///
-/// `CLAUDE_CONFIG_DIR` is honoured, because somebody who moved their
-/// configuration directory moved their Shared State along with it — but never
-/// when it names a Profile, and pointing it at one is exactly what a Run does.
-/// The client a Run launches passes that variable on to everything it starts, so
-/// a `perch run` typed inside one inherits it. Reading Shared State out of the
-/// Profile it is already in would share links to links, and would share nothing
-/// whatever where that Profile is fresh — silently, since a Profile that holds
-/// nothing is not an error to enumerate.
-///
-/// A Profile is where Shared State is made reachable and never where it is read
-/// from. That is the whole of the rule.
-fn the_default_profile(host: &dyn Host) -> Result<Store> {
-    let told = probe::default_store(host)?;
-    if told.config_dir.starts_with(registry::profiles_dir(host)?) {
-        return probe::default_profile_store(host);
-    }
-    Ok(told)
 }
 
 /// Refuses to launch a client against an Account whose Credential is known not

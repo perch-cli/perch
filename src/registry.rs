@@ -851,6 +851,31 @@ pub fn profiles_dir(host: &dyn Host) -> Result<PathBuf> {
     Ok(perch_home(host)?.join("profiles"))
 }
 
+/// The Default Profile, as everything that reads or writes the live Credential
+/// means it: the directory Claude Code falls back to, and never a Profile.
+///
+/// `CLAUDE_CONFIG_DIR` is honoured, because somebody who moved their
+/// configuration directory moved the live Credential along with it — but never
+/// when it names a Profile, and pointing it at one is exactly what a Run does.
+/// The client a Run launches passes that variable on to everything it starts,
+/// so a `perch` typed inside one is told a Profile is the default. It is not.
+///
+/// Here rather than in [`crate::probe`] because the question is which
+/// directories are Perch's own, which is this module's to answer, and one place
+/// because every surface that got this wrong got it wrong the same way. A
+/// Switch taking `CLAUDE_CONFIG_DIR` at its word inside a Run wrote a third
+/// Account's Credential into the running Account's Profile, superseded the copy
+/// it had, and left the registry naming an Account the machine was not on — the
+/// disagreement between Credential and Identity that ADR 0006 exists to keep
+/// impossible, arriving by way of the environment.
+pub fn the_default_profile(host: &dyn Host) -> Result<crate::probe::Store> {
+    let told = crate::probe::default_store(host)?;
+    if told.config_dir.starts_with(profiles_dir(host)?) {
+        return crate::probe::default_profile_store(host);
+    }
+    Ok(told)
+}
+
 /// The Profile directory for an Account. The email is slugged because the path
 /// is hashed into a keychain service name and has to be stable and printable.
 ///

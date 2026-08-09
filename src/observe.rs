@@ -302,7 +302,7 @@ struct Asked {
 fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<Asked> {
     let its_own_profile = account.profile_dir(host)?;
     if registry.active.as_deref() == Some(account.email()) {
-        let store = probe::default_store(host)?;
+        let store = registry::the_default_profile(host)?;
         // Two directories rather than one, and this is the only case where they
         // differ. The copy being renewed is the live one in the Default
         // Profile, but `perch run <this account>` points a client at the

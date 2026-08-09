@@ -985,9 +985,15 @@ impl Identity {
 
 /// The one question this module exists to answer: what do we believe about the
 /// installed Claude Code, and how confident are we?
-pub fn probe(host: &dyn Host) -> Result<Verdict> {
+///
+/// The store is handed in rather than derived, because which directory counts
+/// as the Default Profile is a question about Perch's own layout — a Run points
+/// `CLAUDE_CONFIG_DIR` at a Profile, and adopting one as "the existing login"
+/// would make the Account Perch already holds into a second Account with the
+/// same Credential. [`crate::registry::the_default_profile`] is the answer, and
+/// this module is below the one that can give it.
+pub fn probe(host: &dyn Host, store: Store) -> Result<Verdict> {
     let version = claude_version(host)?;
-    let store = default_store(host)?;
 
     let credential = read_credential(host, &store, &version)?;
     let identity = read_identity(host, &store, &version)?;
