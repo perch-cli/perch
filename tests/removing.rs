@@ -203,6 +203,40 @@ fn a_removal_that_fails_after_landing_still_records_who_is_live() {
     );
 }
 
+/// A Profile has two Credential Stores and they are emptied in order, so by the
+/// time the second refuses the first may already be empty. The refusal used to
+/// say "Nothing was removed" in that case, which is a claim about a Credential
+/// that is gone — and the Account it is about is one `perch switch` can no
+/// longer use.
+#[test]
+fn a_removal_that_emptied_one_store_and_not_the_other_does_not_say_nothing_happened() {
+    let host = machine_with_two_accounts().with_answers(&["y"]);
+    let store = store_of(&host, EMAIL);
+    // Both stores hold a copy — the state a Profile is left in by a machine that
+    // has been both — and only the file will not be given up.
+    host.set_file(&store.credentials_file, CREDENTIAL);
+    let host = host.with_undeletable_file(&store.credentials_file, "read-only");
+
+    let (result, printed) = run_remove(&host, EMAIL);
+
+    let refused = result.expect_err("one of the two stores would not empty");
+    let said = refused.to_string();
+    assert!(
+        !said.contains("Nothing was removed"),
+        "one of the two stores is already empty: {said}"
+    );
+    assert!(
+        said.contains("Quarantined") && said.contains("perch remove"),
+        "so the user is told what state the Account is in and how to finish: \
+         {said}"
+    );
+    assert!(
+        holds(&host, EMAIL),
+        "and the Account is still in the registry, so running it again finishes \
+         the job: {printed}"
+    );
+}
+
 #[test]
 fn declining_removes_nothing_at_all() {
     let host = machine_with_two_accounts().with_answers(&["n"]);
