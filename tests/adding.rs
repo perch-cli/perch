@@ -809,6 +809,62 @@ fn a_login_whose_identity_file_cannot_be_read_is_refused_by_name() {
     assert_eq!(registry_of(&host).accounts.len(), 1);
 }
 
+/// A Credential Store's name is derived from the directory it belongs to, and
+/// on macOS the item itself lives outside that directory — so the directory is
+/// the only thing that can still name the item. Removing it while a store is
+/// still holding a Credential leaves a live refresh token nothing can ever find
+/// again: not a reap, not a Purge, not the user, for an Account they believe
+/// was never added.
+///
+/// So the order is the one `purge` already keeps, and a store that refuses
+/// stops the removal rather than being shrugged off. What is left is a Profile
+/// nothing names, which is untidy and recoverable — the side of that trade to
+/// be on.
+#[test]
+fn a_store_that_will_not_give_a_credential_up_keeps_the_directory_that_names_it() {
+    let host = logged_in_machine();
+    run_list(&host, false)
+        .0
+        .expect("the first Account is adopted");
+
+    let abandoned = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    let store = perch::probe::store_for_profile(&host, &abandoned).expect("USER is set");
+    // The Credential in the keychain, and the directory it is named after — on
+    // macOS the item is outside the directory, which is the whole hazard.
+    host.set_keychain_item(&store.keychain_service, LOGIN_NAME, SECOND_CREDENTIAL);
+    host.set_file(&store.identity_file, SECOND_IDENTITY_FILE);
+    host.lock_keychain("User interaction is not allowed");
+
+    host.set_now(host.now() + chrono::Duration::hours(2));
+    run_list(&host, false).0.expect("a listing");
+
+    assert!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME)
+            .is_some(),
+        "the locked keychain kept it, which is the situation being tested"
+    );
+    assert!(
+        host.path_exists(&abandoned),
+        "so the directory stays: it is the only thing that can name that \
+         keychain item, and the next reap is what finishes the job"
+    );
+    assert!(
+        host.notes().iter().any(|note| note.contains("name the store")),
+        "and the remark says why it is still there: {:?}",
+        host.notes()
+    );
+
+    // The keychain comes back, and the reap that could not finish finishes.
+    host.unlock_keychain();
+    run_list(&host, false).0.expect("a listing");
+
+    assert_eq!(
+        host.keychain_item(&store.keychain_service, LOGIN_NAME),
+        None
+    );
+    assert!(!host.path_exists(&abandoned));
+}
+
 /// The reaper walks a directory of logins named after when each one started. A
 /// name it cannot read a moment out of is left alone rather than guessed at:
 /// being wrong in that direction costs a stale directory, and being wrong in

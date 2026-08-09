@@ -495,6 +495,13 @@ impl FakeHost {
         });
     }
 
+    /// A keychain that has come back — somebody typed their password, or the
+    /// screen unlocked. What a locked keychain does to Perch is only half the
+    /// story; the other half is what the next command makes of what it left.
+    pub fn unlock_keychain(&self) {
+        *self.keychain_lock.borrow_mut() = None;
+    }
+
     /// A keychain that takes a write, reports success, and keeps only the
     /// first `bytes` of what it was given.
     ///

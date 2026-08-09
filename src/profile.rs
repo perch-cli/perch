@@ -248,9 +248,40 @@ fn write_and_read_back(
 ///
 /// Best-effort by design. This runs on the failure path of `add`, where the
 /// interesting error is the one that got us here, not the tidying up.
+///
+/// Best-effort about the *error*, though, and not about the order. The
+/// directory goes only once every store has given its Credential up, because on
+/// macOS a Credential Store is a keychain item outside the directory whose
+/// service name is derived from it — so removing the directory first destroys
+/// the only thing that could ever name the item again, exactly as
+/// `purge::forget_what_the_registry_does_not_name` says. A keychain locked
+/// while `perch add` was running would otherwise leave a live refresh token
+/// under a hash of a path that no longer exists, for an Account the user
+/// believes was never added, invisible to every later reap and Purge.
+///
+/// So a store that refuses keeps the directory, and the remark says why. What
+/// is left behind is a Profile nothing names, which `perch purge` walks and
+/// which the next `perch add` can reap — untidy, and recoverable, which is the
+/// side of the trade to be on.
 pub fn discard(host: &dyn Host, store: &Store) {
+    let mut still_holding = Vec::new();
     for kept_in in credentials::stores_for(host, store) {
-        let _ = kept_in.forget(host);
+        if kept_in.forget(host).is_err() {
+            still_holding.push(kept_in.describe());
+        }
     }
+
+    if !still_holding.is_empty() {
+        host.note(&format!(
+            "{} would not give up the Credential it holds for {}, so that \
+             directory was left where it is: it is the only thing that can \
+             still name the store. `perch purge` empties it, and the next \
+             `perch add` reaps it.",
+            still_holding.join(" and "),
+            store.config_dir.display(),
+        ));
+        return;
+    }
+
     let _ = host.remove_dir_all(&store.config_dir);
 }
