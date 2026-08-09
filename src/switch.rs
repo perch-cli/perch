@@ -45,6 +45,11 @@ pub enum Captured {
         /// Who the Identity beside the live Credential names instead.
         live: String,
     },
+    /// Something was live and it is not a Credential Perch can make sense of,
+    /// so it was left where it was: bytes nothing understands are not a
+    /// Rotation to lose, and filing them under an Account's Profile would
+    /// overwrite the Credential that Account does have with rubbish.
+    Unreadable { outgoing: String, why: String },
     /// Perch holds no active Account, so there was nothing to Capture into.
     NoOutgoing,
 }
@@ -205,7 +210,16 @@ pub fn already_landed(host: &dyn Host, account: &Account) -> Result<bool> {
     let named = probe::read_identity(host, &store, &version)?
         .is_some_and(|identity| identity.email.eq_ignore_ascii_case(account.email()));
 
-    Ok(named && probe::read_credential(host, &store, &version)?.is_some())
+    // A live store holding bytes that are not a Credential has not landed
+    // anywhere: Claude Code cannot use them, and the Switch this would turn
+    // away is the one that writes a good Credential over the bad one. That is
+    // the same half-state as the interrupted Switch above, reached from a third
+    // side, and it wants the same answer — so an unreadable store is `false`
+    // rather than an error. Propagating it refused every Switch on the machine,
+    // including the repair, on the strength of a file it was about to replace.
+    let usable = matches!(probe::read_credential(host, &store, &version), Ok(Some(_)));
+
+    Ok(named && usable)
 }
 
 /// The two things that are true whatever else is: which Claude Code is
@@ -291,7 +305,21 @@ fn capture(host: &dyn Host, prepared: &Prepared, outgoing: Option<&Account>) -> 
         return Ok(Captured::NoOutgoing);
     };
 
-    let live = probe::read_credential(host, &prepared.store, &prepared.version)?;
+    // Bytes that are not a Credential are not a Rotation, and the point of a
+    // Capture is not losing a Rotation. So an unreadable live store is declined
+    // rather than propagated: filing it under the outgoing Account would
+    // overwrite the Credential that Account does have with rubbish, and failing
+    // here would stop every Switch on the machine — including the one that
+    // repairs it by writing a good Credential over the bad one.
+    let live = match probe::read_credential(host, &prepared.store, &prepared.version) {
+        Ok(live) => live,
+        Err(why) => {
+            return Ok(Captured::Unreadable {
+                outgoing: outgoing.email().to_string(),
+                why: why.to_string(),
+            });
+        }
+    };
     let Some(live) = live else {
         return Ok(Captured::NothingLive);
     };

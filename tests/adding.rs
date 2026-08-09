@@ -892,7 +892,9 @@ fn a_store_that_will_not_give_a_credential_up_keeps_the_directory_that_names_it(
          keychain item, and the next reap is what finishes the job"
     );
     assert!(
-        host.notes().iter().any(|note| note.contains("name the store")),
+        host.notes()
+            .iter()
+            .any(|note| note.contains("name the store")),
         "and the remark says why it is still there: {:?}",
         host.notes()
     );

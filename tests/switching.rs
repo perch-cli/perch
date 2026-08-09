@@ -479,6 +479,63 @@ fn switching_away_from_a_profile_a_client_is_running_against_is_refused() {
     assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
 }
 
+/// A live store holding bytes that are not a Credential is the state a
+/// truncating keychain leaves (ADR 0008), and it used to wedge the machine.
+/// Every Switch read the live Credential and parsed it — `already_landed` only
+/// to ask whether one was there, the Capture only to copy the bytes back out —
+/// so the assumption refusal came out of both, and the command that repairs the
+/// store by writing a good Credential over the bad one was turned away on the
+/// strength of the file it was about to replace. There was no way out through
+/// Perch at all.
+#[test]
+fn a_live_credential_perch_cannot_read_is_repaired_by_switching_rather_than_refused() {
+    let host = machine_with_two_accounts();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, "{ truncated");
+
+    let (result, printed) = run_switch(&host, EMAIL);
+
+    result.expect("the Switch that repairs the store is not refused by it");
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(CREDENTIAL),
+        "the store holds a Credential Claude Code can use again: {printed}"
+    );
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(CREDENTIAL),
+        "and the rubbish was never filed under the Account's own Profile — \
+         bytes nothing understands are not a Rotation to keep: {printed}"
+    );
+    assert!(
+        printed.contains("could not be read"),
+        "the declined Capture is said rather than swallowed: {printed}"
+    );
+}
+
+/// The same store, and a Switch onto somebody else: it lands too. The Account
+/// being left keeps the Credential its own Profile already held, which is the
+/// whole of what the Capture was protecting.
+#[test]
+fn a_live_credential_perch_cannot_read_does_not_stop_a_switch_to_another_account() {
+    let host = machine_with_two_accounts();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, "{ truncated");
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect("a Capture that could not be made is not a Switch that failed");
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "{printed}"
+    );
+    assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(CREDENTIAL),
+        "the outgoing Account's Profile is untouched: {printed}"
+    );
+}
+
 /// The other direction is not the same danger and is not refused (ADR 0027).
 ///
 /// A Switch only ever *reads* the incoming Account's Profile, to copy its
