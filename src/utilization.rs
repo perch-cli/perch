@@ -225,9 +225,16 @@ fn wait_phrase(resets_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
     if seconds <= 0 {
         return "any moment now".to_string();
     }
+    // Minutes as far as two hours, which is where the hour form and the minute
+    // form first agree. Handing over at ninety minutes had the two disagreeing
+    // across the boundary — 5399 seconds read "in 90m" and 5400 read "in 2h",
+    // so a wait grew by half an hour as it shortened by a second. Whether to
+    // wait for perishable quota is the decision this line is read for, and half
+    // an hour is the difference between making a cup of tea and doing something
+    // else.
     match seconds {
-        1..=5399 => format!("in {}m", (seconds as f64 / 60.0).ceil() as i64),
-        5400..=86_399 => format!("in {}h", (seconds as f64 / 3600.0).round() as i64),
+        1..=7199 => format!("in {}m", (seconds as f64 / 60.0).ceil() as i64),
+        7200..=86_399 => format!("in {}h", (seconds as f64 / 3600.0).round() as i64),
         _ => format!("in {}d", (seconds as f64 / 86_400.0).round() as i64),
     }
 }
@@ -322,6 +329,27 @@ mod tests {
         assert_eq!(
             reset_phrase(at(12, 20), at(12, 0)),
             "2026-08-04 12:20 UTC (in 20m)"
+        );
+    }
+
+    /// A wait that never grows as it shortens. The minute form and the hour
+    /// form disagreed across the boundary they were handed over at: ninety
+    /// minutes less a second read "in 90m" and ninety minutes read "in 2h", so
+    /// a window a second closer to coming back was advertised as half an hour
+    /// further away. Whether to wait for perishable quota is what this line is
+    /// read for.
+    #[test]
+    fn the_wait_never_grows_as_the_reset_gets_closer() {
+        let now = at(12, 0);
+        let said = |minutes: i64| wait_phrase(now + chrono::Duration::minutes(minutes), now);
+
+        assert_eq!(said(89), "in 89m");
+        assert_eq!(said(90), "in 90m", "rather than jumping to `in 2h`");
+        assert_eq!(said(119), "in 119m");
+        assert_eq!(
+            said(120),
+            "in 2h",
+            "and it hands over where the two forms agree"
         );
     }
 
