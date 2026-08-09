@@ -85,6 +85,21 @@ windows-sys = { version = "0.61", features = [
 # else. CI turns it on for the one step that follows the install.
 contract = []
 
+# The two fakes — `host::fake` and `tui::fake` — which exist so the real command
+# code and the real frame loop can be driven with no machine and no terminal.
+# Behaviour tests are integration tests, so they link the library as any other
+# crate would and `#[cfg(test)]` cannot reach them; without a feature the fakes
+# went into the binary somebody downloads, along with every scripted keystroke,
+# planted keychain item and injected failure they carry.
+#
+# Turned on by the dev-dependency below, which is this package on itself: the
+# documented way to say "the tests need more of the library than the binary
+# does". `cargo test` gets it without being asked, `cargo build` does not.
+fakes = []
+
+[dev-dependencies]
+perch = { path = ".", features = ["fakes"] }
+
 # Declared only so they can be held back by the feature above. Every other test
 # binary is found automatically, which is the point: the list that has to be
 # maintained by hand is the short one of deliberate exclusions, not the growing

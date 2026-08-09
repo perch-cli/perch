@@ -35,6 +35,8 @@
 //! at all.
 
 pub mod act;
+/// Behind a feature, like [`crate::host::fake`] and for the same reason.
+#[cfg(any(test, feature = "fakes"))]
 pub mod fake;
 pub mod model;
 pub mod refresh;

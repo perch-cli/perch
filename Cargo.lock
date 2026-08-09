@@ -1444,6 +1444,7 @@ dependencies = [
  "crossterm",
  "junction",
  "libc",
+ "perch",
  "ratatui",
  "serde",
  "serde_json",

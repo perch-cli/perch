@@ -11,9 +11,15 @@ use chrono::{DateTime, Utc};
 
 use crate::keychain::KeychainError;
 
+/// Behind a feature so it stays out of the binary somebody downloads. It is
+/// only ever reached from a test, and the tests are integration tests — they
+/// link this library as any other crate would, so `#[cfg(test)]` could not
+/// carry it (see the `fakes` feature in `Cargo.toml`).
+#[cfg(any(test, feature = "fakes"))]
 pub mod fake;
 pub mod real;
 
+#[cfg(any(test, feature = "fakes"))]
 pub use fake::FakeHost;
 pub use real::RealHost;
 
