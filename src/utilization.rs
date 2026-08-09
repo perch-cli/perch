@@ -192,6 +192,27 @@ pub fn percentage(value: f64) -> String {
     format!("{value:.0}")
 }
 
+/// A percentage printed beside the figure it is being judged against, at a
+/// precision that cannot contradict the judgement.
+///
+/// [`percentage`] rounds to whole numbers and the comparison is made on what
+/// Anthropic sent, so the two disagreed either side of a threshold: 79.6 is
+/// under 80 and printed as `80`, and the watcher's line read "80% used …
+/// threshold 80% — under it, so nothing was wanted". That line is the whole of
+/// the evidence the policy works, read out of a cron mailbox by somebody
+/// deciding whether the watcher is broken, and a flat self-contradiction on it
+/// is worse than a decimal place.
+///
+/// The same shape as the `<1` and `>99` forms above: a figure is never rounded
+/// into a claim about a boundary it has not reached.
+pub fn percentage_against(value: f64, boundary: u8) -> String {
+    let rounded = percentage(value);
+    if rounded == boundary.to_string() && value != f64::from(boundary) {
+        return format!("{value:.1}");
+    }
+    rounded
+}
+
 /// "just now", "3m ago", "2h ago", "4d ago".
 pub fn age_phrase(observed_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
     let seconds = (now - observed_at).num_seconds();
@@ -357,6 +378,30 @@ mod tests {
             said(120),
             "in 2h",
             "and it hands over where the two forms agree"
+        );
+    }
+
+    /// A figure and the verdict beside it must not disagree. The comparison is
+    /// made on what Anthropic sent and the rendering rounded, so 79.6 against a
+    /// threshold of 80 printed "80% used … threshold 80% — under it".
+    #[test]
+    fn a_percentage_is_never_rounded_into_a_boundary_it_has_not_reached() {
+        assert_eq!(percentage_against(79.6, 80), "79.6");
+        assert_eq!(percentage_against(80.4, 80), "80.4");
+        assert_eq!(
+            percentage_against(80.0, 80),
+            "80",
+            "a figure exactly at the boundary contradicts nothing"
+        );
+        assert_eq!(
+            percentage_against(74.0, 80),
+            "74",
+            "and one nowhere near it is said the ordinary way"
+        );
+        assert_eq!(
+            percentage_against(70.4, 70),
+            "70.4",
+            "the ceiling a candidate is set aside by is the same rule"
         );
     }
 
