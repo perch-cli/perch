@@ -198,10 +198,17 @@ pub fn age_phrase(observed_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
     if seconds < 0 {
         return "in the future".to_string();
     }
+    // Minutes as far as two hours, for the reason `wait_phrase` hands over
+    // there: the two forms first agree at the boundary, and anywhere else they
+    // disagree across it. Handing over at ninety minutes had a figure a second
+    // older reading half an hour fresher — 5399 seconds rounded to "90m ago"
+    // and 5400 to "2h ago" — and under ADR 0015 the age is the whole of what a
+    // reader has to decide whether to trust the number beside it. The hour form
+    // hands over to the day form where those two agree already.
     match seconds {
         0..=44 => "just now".to_string(),
-        45..=5399 => format!("{}m ago", (seconds as f64 / 60.0).round() as i64),
-        5400..=86_399 => format!("{}h ago", (seconds as f64 / 3600.0).round() as i64),
+        45..=7199 => format!("{}m ago", (seconds as f64 / 60.0).round() as i64),
+        7200..=86_399 => format!("{}h ago", (seconds as f64 / 3600.0).round() as i64),
         _ => format!("{}d ago", (seconds as f64 / 86_400.0).round() as i64),
     }
 }
@@ -351,6 +358,27 @@ mod tests {
             "in 2h",
             "and it hands over where the two forms agree"
         );
+    }
+
+    /// The same rule for the other direction: an age that never falls as the
+    /// figure gets older. `wait_phrase` was moved off the ninety-minute
+    /// handover and this was left on it, so a figure read at 89m59s said "90m
+    /// ago" and the same figure a second later said "2h ago" — half an hour
+    /// fresher, on the line ADR 0015 has a reader judging the number by.
+    #[test]
+    fn an_age_never_falls_as_the_figure_gets_older() {
+        let now = at(12, 0);
+        let said = |minutes: i64| age_phrase(now - chrono::Duration::minutes(minutes), now);
+
+        assert_eq!(said(89), "89m ago");
+        assert_eq!(said(90), "90m ago", "rather than jumping back to `2h ago`");
+        assert_eq!(said(119), "119m ago");
+        assert_eq!(
+            said(120),
+            "2h ago",
+            "and it hands over where the two forms agree"
+        );
+        assert_eq!(said(24 * 60), "1d ago", "as the hour form does to the day");
     }
 
     #[test]
