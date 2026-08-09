@@ -650,6 +650,77 @@ fn switching_onto_a_profile_a_client_is_running_against_lands() {
     assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
 }
 
+/// A `~/.claude.json` managed by stow, chezmoi or yadm, switched over.
+///
+/// The link is followed and the file in the dotfiles repository is the one that
+/// changes — but the half worth asserting is what *survives*: `numStartups`,
+/// the project history, the MCP configuration. `patch_identity` reads the file
+/// before it writes it, and a read that answered `NotFound` took the branch
+/// written for "a Claude Code that has never run here", which composes a whole
+/// new `.claude.json` from the Identity alone. Followed by a write that *does*
+/// go through the link, that is somebody's dotfiles repository overwritten with
+/// a two-key file, committed by whatever runs next.
+///
+/// Untestable until now: `FakeHost` followed a link on no read at all, so this
+/// machine could not be built here.
+#[test]
+fn a_switch_on_a_machine_whose_identity_file_is_a_managed_link_writes_through_it() {
+    let host = machine_with_two_accounts();
+    let repository = "/Users/someone/dotfiles/claude.json";
+    let managed = host.file(IDENTITY_PATH).expect("Claude Code wrote one");
+    host.set_file(repository, &managed);
+    host.remove_file(Path::new(IDENTITY_PATH))
+        .expect("the dotfile manager put a link here instead");
+    let host = host.with_link(perch::host::Link::Symbolic, repository, IDENTITY_PATH);
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect("a managed dotfile is not a reason to refuse a Switch");
+    let after = host
+        .file(repository)
+        .expect("the repository still holds it");
+    assert!(
+        after.contains(SECOND_EMAIL),
+        "the file in the repository is the one that changed: {printed}"
+    );
+    assert!(
+        after.contains("numStartups") && after.contains("projects"),
+        "and everything that is the person rather than the Account survived — \
+         which a file composed afresh from the Identity would not carry:\n{after}"
+    );
+    assert!(
+        host.link_at(IDENTITY_PATH).is_some(),
+        "the link is still a link, so what manages it goes on managing it"
+    );
+}
+
+/// A Profile whose `sessions` is a link into the Default Profile reports the
+/// Default Profile's clients as its own.
+///
+/// That is the hazard ADR 0027 names and `reconcile::HELD_BACK` exists to
+/// prevent, and nothing could stand on it: reading a linked `sessions` means
+/// `list_dir` following the link, which the fake did not do. So the Switch is
+/// refused here for a client that is running somewhere else entirely — one
+/// Account made unreachable by a link in another Account's directory.
+#[test]
+fn a_profile_whose_sessions_is_a_link_reads_the_clients_at_the_other_end() {
+    let host = client_running_against(machine_with_two_accounts(), "/Users/someone/.claude", 4242);
+    let host = host.with_link(
+        perch::host::Link::Symbolic,
+        "/Users/someone/.claude/sessions",
+        format!("{FIRST_PROFILE}/sessions"),
+    );
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("that Profile reads as Live through the link");
+    assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
+    assert!(
+        error.to_string().contains("4242"),
+        "naming a client that is running against the Default Profile: {error}"
+    );
+}
+
 #[test]
 fn a_marker_left_behind_by_a_client_that_died_is_not_a_live_profile() {
     let host = machine_with_two_accounts().with_file(

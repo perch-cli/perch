@@ -827,11 +827,18 @@ impl FakeHost {
     /// What a path names once its links are followed, or `None` when it names
     /// nothing — a link whose target has gone, most of all.
     ///
-    /// Only the path itself is followed, not the directories above it: a file
-    /// *inside* a linked directory is not something Perch ever asks this fake
-    /// about, and a fake that half-implemented it would be worse than one that
-    /// does not. Bounded, so two links pointing at each other are an answer
-    /// rather than a hang.
+    /// The directories above it are followed too, which they used to not be on
+    /// the reasoning that "a file inside a linked directory is not something
+    /// Perch ever asks this fake about". It is exactly what Perch asks about:
+    /// the hazard `reconcile::HELD_BACK` holds `sessions` back for is a Profile
+    /// whose `sessions` is a link into another one, and reading a marker there
+    /// is reading a file inside a linked directory. Without this the whole of
+    /// ADR 0027's reason for existing was a state no test could build.
+    ///
+    /// Bounded on both counts: the walk down a chain of links gives up rather
+    /// than hanging on two that point at each other, and the recursion up
+    /// through the parents is one level per component of a path that is already
+    /// finite.
     fn resolved(&self, path: &Path) -> Option<PathBuf> {
         const FOLLOWED: usize = 8;
 
@@ -840,14 +847,64 @@ impl FakeHost {
             if self.files.borrow().contains_key(&at) || self.dirs.borrow().contains(&at) {
                 return Some(at);
             }
-            let target = self
+            if let Some(target) = self
                 .links
                 .borrow()
                 .get(&at)
-                .map(|(_, target)| target.clone());
-            at = target?;
+                .map(|(_, target)| target.clone())
+            {
+                at = target;
+                continue;
+            }
+            // Nothing of that name, which does not mean nothing is there: a
+            // directory *above* it may be a link, and the name has to be tried
+            // again under whatever that resolves to. A rejoin that changes
+            // nothing is a path that was never going to resolve, and stops the
+            // walk rather than spending the rest of its attempts on it.
+            let rejoined = self.resolved(at.parent()?)?.join(at.file_name()?);
+            if rejoined == at {
+                return None;
+            }
+            at = rejoined;
         }
         None
+    }
+
+    /// The path a read lands on, or the refusal it meets on the way.
+    ///
+    /// `RealHost` follows a symbolic link on every read it makes — `read_to_string`,
+    /// `metadata`, `read_dir` all do — and this fake followed one on none of them.
+    /// It was not even consistent with itself: `path_exists(link)` answered `true`
+    /// through [`resolved`](FakeHost::resolved) while `read_file(link)` answered
+    /// `NotFound`. So the machines a link makes could not be built here at all: a
+    /// `~/.claude.json` managed by stow or chezmoi, and the `sessions` linked into
+    /// another Profile that ADR 0027 names.
+    ///
+    /// A path arranged as unreadable refuses whether it is the link or what the
+    /// link points at, because on a real machine either one stops the read.
+    fn through_links(&self, path: &Path) -> Result<PathBuf, HostError> {
+        let at = self.resolved(path).unwrap_or_else(|| path.to_path_buf());
+        for named in [path, at.as_path()] {
+            if let Some(detail) = self.unreadable.borrow().get(named) {
+                return Err(HostError::Other(detail.clone()));
+            }
+        }
+        Ok(at)
+    }
+
+    /// The same for a write. A link whose target has gone is still written
+    /// through: `fs::write` creates the file the link names.
+    fn written_through_links(&self, path: &Path) -> Result<PathBuf, HostError> {
+        let at = self
+            .link_at(path)
+            .map(|(_, target)| target)
+            .unwrap_or_else(|| path.to_path_buf());
+        for named in [path, at.as_path()] {
+            if let Some(detail) = self.unwritable.borrow().get(named) {
+                return Err(HostError::Other(detail.clone()));
+            }
+        }
+        Ok(at)
     }
 
     fn record(&self, effect: Effect) {
@@ -979,28 +1036,26 @@ impl Host for FakeHost {
 
     fn read_file(&self, path: &Path) -> Result<String, HostError> {
         self.record(Effect::ReadFile(path.to_path_buf()));
-        if let Some(detail) = self.unreadable.borrow().get(path) {
-            return Err(HostError::Other(detail.clone()));
-        }
+        let at = self.through_links(path)?;
         self.files
             .borrow()
-            .get(path)
+            .get(&at)
             .cloned()
             .ok_or_else(|| HostError::NotFound {
                 path: path.to_path_buf(),
             })
     }
 
+    /// Through a link, as `fs::write` writes through one — which is what makes
+    /// a `~/.claude.json` managed by stow or chezmoi stay managed.
     fn write_file(&self, path: &Path, contents: &str) -> Result<(), HostError> {
         self.record(Effect::WroteFile(path.to_path_buf()));
-        if let Some(detail) = self.unwritable.borrow().get(path) {
-            return Err(HostError::Other(detail.clone()));
-        }
-        self.note_directories_of(path);
+        let at = self.written_through_links(path)?;
+        self.note_directories_of(&at);
         self.files
             .borrow_mut()
-            .insert(path.to_path_buf(), contents.to_string());
-        self.mark_written(path);
+            .insert(at.clone(), contents.to_string());
+        self.mark_written(&at);
         Ok(())
     }
 
@@ -1068,11 +1123,14 @@ impl Host for FakeHost {
     /// one for a directory, and — since a file the fixtures put there stands in
     /// for one Claude Code wrote — the owner alone for a file.
     fn file_mode(&self, path: &Path) -> Result<Option<u32>, HostError> {
-        if !self.path_exists(path) {
+        // Through a link, as `metadata` reads through one: the mode of a
+        // symbolic link is not a thing anybody asks about.
+        let Some(path) = self.resolved(path).as_deref().map(Path::to_path_buf) else {
             return Err(HostError::NotFound {
                 path: path.to_path_buf(),
             });
-        }
+        };
+        let path = path.as_path();
         // Windows has no mode and relies on the profile ACL (ADR 0020), and the
         // real Host answers `None` there. A fake that answered with a number
         // would let a test drive `tighten_if_loose` — reading the mode, making
@@ -1091,13 +1149,15 @@ impl Host for FakeHost {
         )))
     }
 
+    /// Through a link, as `set_permissions` narrows what one points at.
     fn make_private(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::MadePrivate(path.to_path_buf()));
-        if !self.path_exists(path) {
+        let Some(path) = self.resolved(path) else {
             return Err(HostError::NotFound {
                 path: path.to_path_buf(),
             });
-        }
+        };
+        let path = path.as_path();
         // A file whose *permissions* cannot be changed is the same arrangement
         // as one whose contents cannot: a `chmod` on a file owned by somebody
         // else fails with `EPERM` however readable it is. Without this the fake
@@ -1207,9 +1267,14 @@ impl Host for FakeHost {
         if let Some(detail) = self.unreadable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
+        // Not through a link. `metadata` follows one, but a dangling link is
+        // exactly the state `lock::abandoned` has to be able to meet: the real
+        // call answers `NotFound` there, and so does this — which is the arm
+        // that reads a lock as free. A link that does resolve is followed.
+        let at = self.resolved(path).unwrap_or_else(|| path.to_path_buf());
         self.modified
             .borrow()
-            .get(path)
+            .get(&at)
             .copied()
             .ok_or_else(|| HostError::NotFound {
                 path: path.to_path_buf(),
@@ -1218,11 +1283,12 @@ impl Host for FakeHost {
 
     fn touch(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::Touched(path.to_path_buf()));
-        if !self.path_exists(path) {
+        let Some(path) = self.resolved(path) else {
             return Err(HostError::NotFound {
                 path: path.to_path_buf(),
             });
-        }
+        };
+        let path = path.as_path();
         // A path arranged as unwritable will not take a touch either — which is
         // how `lock::renew`'s "the artifact would not take a fresh timestamp"
         // branch is reached without arranging a filesystem that misbehaves.
@@ -1362,12 +1428,21 @@ impl Host for FakeHost {
         Ok(())
     }
 
-    fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>, HostError> {
-        if !self.dirs.borrow().contains(path) {
+    /// Through a link, as `read_dir` reads through one — but reporting what was
+    /// found under the name that was asked about, which is what `read_dir` does
+    /// with the path it was given. A `sessions` linked into another Profile
+    /// therefore answers with that Profile's markers, which is the whole of the
+    /// hazard ADR 0027 names.
+    fn list_dir(&self, asked: &Path) -> Result<Vec<PathBuf>, HostError> {
+        let Some(path) = self
+            .resolved(asked)
+            .filter(|at| self.dirs.borrow().contains(at))
+        else {
             return Err(HostError::NotFound {
-                path: path.to_path_buf(),
+                path: asked.to_path_buf(),
             });
-        }
+        };
+        let path = path.as_path();
         // A directory that is there and will not be read is a different answer
         // from one that is not there, and callers are entitled to tell them
         // apart. Arranged the same way an unreadable file is.
@@ -1386,7 +1461,15 @@ impl Host for FakeHost {
         // Links included, pointing at something or not: a directory holds the
         // ones it holds, and a broken one is precisely what has to be found.
         found.extend(self.links.borrow().keys().filter(|at| held(at)).cloned());
-        Ok(found.into_iter().collect())
+        // Under the name that was asked about rather than the one it resolves
+        // to, so a caller that joins a name onto what it was given finds it.
+        Ok(found
+            .into_iter()
+            .map(|at| match at.file_name() {
+                Some(name) => asked.join(name),
+                None => at,
+            })
+            .collect())
     }
 
     fn keychain_get(&self, service: &str, account: &str) -> Result<String, KeychainError> {
