@@ -57,7 +57,15 @@ fn curl_bin() -> Result<PathBuf, HostError> {
 /// Generous rather than tight: what is on the other side is a request Perch
 /// would rather complete than retry, and both numbers are far longer than a
 /// reply that is coming ever takes.
-const CURL_ARGS: [&str; 10] = [
+///
+/// `-q` is first because it is only obeyed there, and it is here for the reason
+/// [`curl_bin`] names an absolute path: without it `curl` reads `~/.curlrc`
+/// before anything else, and that file can set `proxy` and `insecure` — which
+/// is a machine-local way of receiving an `Authorization: Bearer` header,
+/// arriving through a different door than `PATH`. It can also set `output`,
+/// which diverts the body to a file and leaves Perch parsing nothing.
+const CURL_ARGS: [&str; 11] = [
+    "-q",
     "--silent",
     "--show-error",
     "--connect-timeout",
@@ -1362,6 +1370,20 @@ mod tests {
         assert!(
             !CURL_ARGS.iter().any(|arg| arg.contains("sk-ant")),
             "nothing about a request may reach the command line"
+        );
+    }
+
+    /// The other half of "an access token only ever goes where Perch put it".
+    /// `curl` reads `~/.curlrc` unless told not to, and it only takes the
+    /// telling as the first argument — a `-q` in the middle is read as a
+    /// request option and the file has already been obeyed. So the position is
+    /// the assertion, not merely the presence.
+    #[test]
+    fn the_users_own_curl_configuration_is_never_read_for_a_request_carrying_a_token() {
+        assert_eq!(
+            CURL_ARGS.first(),
+            Some(&"-q"),
+            "`-q` is only obeyed as the first argument"
         );
     }
 
