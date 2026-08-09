@@ -502,6 +502,48 @@ fn a_client_that_starts_while_the_questions_are_answered_stops_the_purge_too() {
     assert_eq!(credential_of(&host, EMAIL).as_deref(), Some(CREDENTIAL));
 }
 
+/// An Export written a question ago is a file full of working Credentials at a
+/// path the user is about to stop thinking about — and `perch export` refuses a
+/// path that is taken, so the next `perch purge` offering the same one aborts
+/// before it asks anything. Only the *declined* Purge said so, and every other
+/// way one can stop after that point said nothing at all: every failure test
+/// here answers `n` to the offer, which is why.
+#[test]
+fn a_purge_that_wrote_an_export_and_then_stopped_says_the_file_is_there() {
+    let host = a_machine_to_give_back()
+        .with_answers(&["y", AT, "purge"])
+        .with_secrets(&[PASSPHRASE, PASSPHRASE])
+        // Somebody starts a client while the passphrase is being typed, which is
+        // the window the second liveness check exists for.
+        .with_a_terminal_that_takes(1_000)
+        .once_while_waiting(|host| a_run_against(host, SECOND_EMAIL, host.now()));
+
+    let (outcome, _printed) = run_purge(&host);
+
+    let refused = outcome.expect_err("something started holding that Profile");
+    let said = refused.to_string();
+    assert!(
+        said.contains(AT),
+        "the file that was written is named: {said}"
+    );
+    assert!(
+        said.contains("will not write over it"),
+        "and so is what the next Purge will do about it: {said}"
+    );
+    assert_eq!(
+        export::unseal(&host.file(AT).expect("a file was written"), PASSPHRASE)
+            .expect("it opens")
+            .accounts(),
+        3,
+        "and it is a whole Export rather than a stub"
+    );
+    assert_eq!(
+        registry_on(&host).map(|registry| registry.accounts.len()),
+        Some(3),
+        "with nothing purged"
+    );
+}
+
 /// A Purge that stopped part way is run again, and finishes. The Credentials go
 /// first and the registry naming them goes last, so what has already been
 /// deleted is found already gone rather than lost track of.
