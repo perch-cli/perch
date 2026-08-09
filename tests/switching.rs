@@ -568,6 +568,65 @@ fn a_live_credential_perch_cannot_read_does_not_stop_a_switch_to_another_account
     );
 }
 
+/// A store that will not answer is not a store holding rubbish.
+///
+/// The two arrived at the same place: `read_credential` failed, the Capture was
+/// declined, and the Switch went on to write the incoming Credential over
+/// whatever was there. For bytes that are not a Credential that is right —
+/// nothing is lost, and the write is the repair. For a `.credentials.json` left
+/// owned by root by a `sudo claude`, it is not: the file very likely holds the
+/// outgoing Account's own Credential, Rotated several times past the copy in
+/// its Profile, and the store said nothing at all about what it holds. The
+/// Switch destroyed the only good copy and reported success.
+#[test]
+fn a_live_store_that_will_not_answer_stops_the_switch_rather_than_being_written_over() {
+    let host = two_accounts_off_macos();
+    host.set_unreadable(CREDENTIALS_PATH, "Permission denied");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("a Credential that cannot be read cannot be Captured");
+    assert!(error.to_string().contains("Nothing was changed"), "{error}");
+    assert!(
+        error.to_string().contains(EMAIL),
+        "and names the Account whose Credential it may be: {error}"
+    );
+    host.forget_unreadable(CREDENTIALS_PATH);
+    assert_eq!(
+        host.file(CREDENTIALS_PATH).as_deref(),
+        Some(CREDENTIAL),
+        "the live store still holds what it held"
+    );
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(EMAIL),
+        "and nothing moved"
+    );
+}
+
+/// The same machine, and a store that answers with bytes nothing understands:
+/// still a declined Capture and still a Switch that lands, because that is the
+/// one the store cannot be repaired without.
+#[test]
+fn a_live_store_that_answers_with_rubbish_is_still_switched_over() {
+    let host = two_accounts_off_macos();
+    host.set_file(CREDENTIALS_PATH, "{ truncated");
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect("bytes nothing understands are not a Rotation to lose");
+    assert_eq!(
+        host.file(CREDENTIALS_PATH).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "{printed}"
+    );
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(CREDENTIAL),
+        "and the rubbish was never filed under the Account's own Profile: {printed}"
+    );
+}
+
 /// The other direction is not the same danger and is not refused (ADR 0027).
 ///
 /// A Switch only ever *reads* the incoming Account's Profile, to copy its
@@ -589,6 +648,77 @@ fn switching_onto_a_profile_a_client_is_running_against_lands() {
         "the incoming Account's Credential is the live one"
     );
     assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+}
+
+/// A `~/.claude.json` managed by stow, chezmoi or yadm, switched over.
+///
+/// The link is followed and the file in the dotfiles repository is the one that
+/// changes — but the half worth asserting is what *survives*: `numStartups`,
+/// the project history, the MCP configuration. `patch_identity` reads the file
+/// before it writes it, and a read that answered `NotFound` took the branch
+/// written for "a Claude Code that has never run here", which composes a whole
+/// new `.claude.json` from the Identity alone. Followed by a write that *does*
+/// go through the link, that is somebody's dotfiles repository overwritten with
+/// a two-key file, committed by whatever runs next.
+///
+/// Untestable until now: `FakeHost` followed a link on no read at all, so this
+/// machine could not be built here.
+#[test]
+fn a_switch_on_a_machine_whose_identity_file_is_a_managed_link_writes_through_it() {
+    let host = machine_with_two_accounts();
+    let repository = "/Users/someone/dotfiles/claude.json";
+    let managed = host.file(IDENTITY_PATH).expect("Claude Code wrote one");
+    host.set_file(repository, &managed);
+    host.remove_file(Path::new(IDENTITY_PATH))
+        .expect("the dotfile manager put a link here instead");
+    let host = host.with_link(perch::host::Link::Symbolic, repository, IDENTITY_PATH);
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect("a managed dotfile is not a reason to refuse a Switch");
+    let after = host
+        .file(repository)
+        .expect("the repository still holds it");
+    assert!(
+        after.contains(SECOND_EMAIL),
+        "the file in the repository is the one that changed: {printed}"
+    );
+    assert!(
+        after.contains("numStartups") && after.contains("projects"),
+        "and everything that is the person rather than the Account survived — \
+         which a file composed afresh from the Identity would not carry:\n{after}"
+    );
+    assert!(
+        host.link_at(IDENTITY_PATH).is_some(),
+        "the link is still a link, so what manages it goes on managing it"
+    );
+}
+
+/// A Profile whose `sessions` is a link into the Default Profile reports the
+/// Default Profile's clients as its own.
+///
+/// That is the hazard ADR 0027 names and `reconcile::HELD_BACK` exists to
+/// prevent, and nothing could stand on it: reading a linked `sessions` means
+/// `list_dir` following the link, which the fake did not do. So the Switch is
+/// refused here for a client that is running somewhere else entirely — one
+/// Account made unreachable by a link in another Account's directory.
+#[test]
+fn a_profile_whose_sessions_is_a_link_reads_the_clients_at_the_other_end() {
+    let host = client_running_against(machine_with_two_accounts(), "/Users/someone/.claude", 4242);
+    let host = host.with_link(
+        perch::host::Link::Symbolic,
+        "/Users/someone/.claude/sessions",
+        format!("{FIRST_PROFILE}/sessions"),
+    );
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("that Profile reads as Live through the link");
+    assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
+    assert!(
+        error.to_string().contains("4242"),
+        "naming a client that is running against the Default Profile: {error}"
+    );
 }
 
 #[test]

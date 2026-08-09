@@ -55,6 +55,13 @@ serde_json = "1"
 sha2 = "0.11"
 thiserror = "2"
 
+# How wide a string is drawn, for the two surfaces that lay out the same
+# listing in columns. Already in the build transitively — ratatui measures every
+# frame with it — so declaring it adds no crate, and it sits on no seam (ADR
+# 0025): it is a pure function of a string. A hand-rolled table of East Asian
+# widths would be the same data, kept by hand, going wrong quietly.
+unicode-width = "0.2.2"
+
 # Both already in the build transitively — libc through sha2's cpufeatures,
 # windows-sys through clap's anstream — so declaring them adds no crate and buys
 # vetted declarations for the primitives std does not carry (ADR 0021).
@@ -84,6 +91,21 @@ windows-sys = { version = "0.61", features = [
 # assert against, so it is off unless asked for and `cargo test` runs everything
 # else. CI turns it on for the one step that follows the install.
 contract = []
+
+# The two fakes — `host::fake` and `tui::fake` — which exist so the real command
+# code and the real frame loop can be driven with no machine and no terminal.
+# Behaviour tests are integration tests, so they link the library as any other
+# crate would and `#[cfg(test)]` cannot reach them; without a feature the fakes
+# went into the binary somebody downloads, along with every scripted keystroke,
+# planted keychain item and injected failure they carry.
+#
+# Turned on by the dev-dependency below, which is this package on itself: the
+# documented way to say "the tests need more of the library than the binary
+# does". `cargo test` gets it without being asked, `cargo build` does not.
+fakes = []
+
+[dev-dependencies]
+perch = { path = ".", features = ["fakes"] }
 
 # Declared only so they can be held back by the feature above. Every other test
 # binary is found automatically, which is the point: the list that has to be

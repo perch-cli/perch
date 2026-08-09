@@ -378,6 +378,58 @@ fn a_client_started_during_the_login_stops_the_repair_of_the_account_you_are_on(
     );
 }
 
+/// And once more under the locks, which is where a Switch has always asked it.
+///
+/// The check after the login is taken while Perch's own registry lock is held,
+/// and everything between it and the write is still to happen: the registry is
+/// saved, and then Claude Code's three locks are taken — a wait of up to four
+/// seconds against a client that is holding them. A `claude` started in that
+/// gap was one nothing had seen by the time its Credential was replaced, which
+/// is the mid-task logout ADR 0005 exists to prevent, arriving at the one write
+/// that does not Capture first. `switch::perform` closes exactly this window by
+/// asking again once the locks are held; the repair did not.
+#[test]
+fn a_client_that_starts_during_the_lock_wait_still_stops_the_repair() {
+    let host = machine_with_two_accounts().with_login(login_producing(REPAIRED, IDENTITY_FILE));
+    quarantine(&host, EMAIL);
+    let now = host.now();
+    let host = host
+        .with_dir_held_since("/Users/someone/.claude/.oauth_refresh.lock", now)
+        .once_while_waiting(move |host: &FakeHost| {
+            // The holder gives the lock back — and in the same moment somebody
+            // starts working against the Default Profile.
+            host.remove_dir_all(std::path::Path::new(
+                "/Users/someone/.claude/.oauth_refresh.lock",
+            ))
+            .expect("the holder is done");
+            host.set_file(
+                "/Users/someone/.claude/sessions/7788.json",
+                &format!(
+                    r#"{{"pid":7788,"cwd":"/Users/someone/work","startedAt":{}}}"#,
+                    now.timestamp_millis()
+                ),
+            );
+            host.set_live_process(7788);
+        });
+
+    let (result, _) = run_relogin(&host, EMAIL);
+
+    let error = result.expect_err("that Credential belongs to the session holding it");
+    assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
+    assert!(error.to_string().contains("7788"), "{error}");
+    assert_eq!(
+        host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
+        Some(CREDENTIAL),
+        "the session goes on holding exactly what it was holding"
+    );
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(REPAIRED),
+        "and the repair itself stands in the Account's own Profile, which is \
+         what the refusal says"
+    );
+}
+
 #[test]
 fn repairing_the_account_you_are_on_is_refused_while_a_client_holds_the_default_profile() {
     // The Default Profile is the one a repair of the active Account writes, and

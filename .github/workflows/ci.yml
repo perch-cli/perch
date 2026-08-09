@@ -73,6 +73,14 @@ jobs:
       - name: Unit and behaviour tests
         run: cargo test --locked
 
+      # The binary somebody downloads, built with the feature set it ships with
+      # — which is the one the fakes are held back from. `cargo test` turns
+      # `fakes` on through the dev-dependency, so it is the only thing that
+      # proves nothing outside a test reaches for `FakeHost` or `FakeScreen`:
+      # a single stray reference fails here and nowhere else.
+      - name: The shipped binary carries no fakes
+        run: cargo build --locked --bin perch
+
       # A dependency that nothing imports is compile time and audit surface for
       # no call site, and it is invisible: nothing fails when the last use of a
       # crate is deleted. This is the check that would have caught ratatui and

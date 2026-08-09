@@ -803,7 +803,9 @@ not, so a script asking whether it is set reads the same answer it always did
 and now gets the reason with it. `--group` changes the question, so
 it changes the document: `perch status --json` answers about one Account under
 `active`, while the listings answer about a set under `accounts`, with the
-active one named under `active_account`.
+active one named under `active_account`. An Account itself is described the same
+way in both — the same keys, the same answers — so a script written against one
+can be pointed at the other.
 
 ## Choosing by eye
 

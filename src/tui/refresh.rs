@@ -15,7 +15,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::Duration;
 
 use crate::adopt;
-use crate::host::RealHost;
+use crate::host::{Host, RealHost};
 use crate::observe;
 use crate::registry::Registry;
 

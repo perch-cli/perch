@@ -406,6 +406,54 @@ fn an_import_that_fails_part_way_takes_back_what_it_had_already_placed() {
     }
 }
 
+/// And it takes back what it *made*, which is not the same as what it wrote
+/// into.
+///
+/// An Import refuses a machine holding an Account, and that was read one step
+/// wider than it goes: it is the registry that has to be empty, and a Profile
+/// directory nothing names outlives every command that would have named it — a
+/// `perch add` that died at the browser step leaves one, and so does a Purge
+/// that could not empty a store. The rollback deleted it along with its own,
+/// and on macOS the keychain item outside it that only that directory's name
+/// could still reach went with it: a live refresh token for a login nobody was
+/// importing.
+#[test]
+fn a_rollback_leaves_a_profile_that_was_already_on_the_machine_where_it_is() {
+    let sealed = an_export_of_a_whole_machine();
+    let host = machine_with_claude_code()
+        .with_platform(Platform::Other)
+        .with_file(AT, &sealed)
+        .with_secrets(&[PASSPHRASE]);
+    // A Profile from a `perch add` that never finished: a directory holding a
+    // Credential, and a registry that has never named it. The first of the
+    // three, so the Import has written into it by the time the second one
+    // fails.
+    let orphan = store_of(&host, EMAIL);
+    let host = host.with_file(&orphan.credentials_file, CREDENTIAL);
+    let made = store_of(&host, SECOND_EMAIL);
+    let host = host.with_unwritable_file(&made.credentials_file, "No space left on device");
+
+    let (outcome, _printed) = run_import(&host, AT);
+
+    outcome.expect_err("one Credential cannot be stored");
+    assert!(
+        host.path_exists(&orphan.config_dir),
+        "the directory this Import did not make is still there, and on macOS it \
+         is the only thing that can still name the store beside it"
+    );
+    assert!(
+        !host.path_exists(&made.config_dir),
+        "while the one it did make went back out"
+    );
+    assert!(
+        host.notes()
+            .iter()
+            .any(|note| note.contains("already on this machine")),
+        "and the one that stayed is said rather than left to be found: {:?}",
+        host.notes()
+    );
+}
+
 /// The other end of the same promise, and the worse half of it: every Credential
 /// is already in a store by the time the registry is written, so a registry that
 /// will not go down would otherwise leave a machine full of Profiles no command

@@ -1,6 +1,6 @@
 //! The Host implementation that actually touches the machine.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -237,8 +237,10 @@ pub struct RealHost {
     /// What has already been said, so a remark about the machine is made once
     /// however many Accounts provoke it.
     noted: RefCell<BTreeSet<String>>,
-    /// Whether a remark is printed as it is made, or only kept.
-    aloud: bool,
+    /// Whether a remark is printed as it is made, or only kept. A cell because
+    /// `perch tui` turns it off for as long as it holds the screen and back on
+    /// afterwards, through a `&dyn Host` (see [`Host::print_remarks`]).
+    aloud: Cell<bool>,
 }
 
 impl Default for RealHost {
@@ -251,7 +253,7 @@ impl RealHost {
     pub fn new() -> Self {
         RealHost {
             noted: RefCell::new(BTreeSet::new()),
-            aloud: true,
+            aloud: Cell::new(true),
         }
     }
 
@@ -266,15 +268,9 @@ impl RealHost {
     /// could not do.
     pub fn keeping_its_remarks() -> Self {
         RealHost {
-            aloud: false,
+            aloud: Cell::new(false),
             ..RealHost::new()
         }
-    }
-
-    /// Everything [`Host::note`] was given, in the order a `BTreeSet` keeps and
-    /// each of them once.
-    pub fn remarks(&self) -> Vec<String> {
-        self.noted.borrow().iter().cloned().collect()
     }
 }
 
@@ -650,9 +646,18 @@ impl Host for RealHost {
     /// reading off stdout — unless this is a Host built to keep them, whose
     /// caller has the screen and will say them itself.
     fn note(&self, line: &str) {
-        if self.noted.borrow_mut().insert(line.to_string()) && self.aloud {
+        if self.noted.borrow_mut().insert(line.to_string()) && self.aloud.get() {
             eprintln!("perch: {line}");
         }
+    }
+
+    fn print_remarks(&self, aloud: bool) {
+        self.aloud.set(aloud);
+    }
+
+    /// In the order a `BTreeSet` keeps, and each of them once.
+    fn remarks(&self) -> Vec<String> {
+        self.noted.borrow().iter().cloned().collect()
     }
 
     fn read_line(&self) -> Result<Option<String>, HostError> {
