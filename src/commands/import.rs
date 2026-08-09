@@ -50,7 +50,7 @@ pub fn run(host: &dyn Host, args: ImportArgs, out: &mut dyn Write) -> Result<()>
 
     let passphrase = the_passphrase(host, out)?;
     let export = export::unseal(&sealed, &passphrase)?;
-    let restored = import::restored(&export)?;
+    let restored = import::restored(&export, &registry::registry_path(host)?)?;
 
     // Nothing above this line has written anything, which is the whole of what
     // "a wrong passphrase fails before anything is written" means.
