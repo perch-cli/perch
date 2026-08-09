@@ -41,6 +41,38 @@ fn live_credential(host: &FakeHost) -> Option<String> {
     host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME)
 }
 
+/// A Credential that Anthropic Rotated while the outgoing Account was active,
+/// so the copy in that Account's Profile is behind the live one and a Capture
+/// has something to save.
+const ROTATED: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-rotated","refreshToken":"sk-ant-ort01-rotated","expiresAt":1790000000000,"subscriptionType":"pro"}}"#;
+
+/// A Switch that a session marker did not hold back, asserted on what it did
+/// rather than on its not having been refused.
+///
+/// Every one of the markers below used to be checked with a bare `expect` and
+/// nothing else, which measures only "not refused" — a Perch that judged the
+/// Profile idle and then skipped the Capture entirely passed all five. So the
+/// live Credential is Rotated first, and what is asserted is the whole of what a
+/// Switch owes: the Rotation went back into the outgoing Account's Profile, the
+/// incoming Credential is the live one, and Perch records who is active.
+fn assert_the_switch_captured_and_landed(host: &FakeHost, why: &str) {
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
+
+    run_switch(host, SECOND_EMAIL).0.expect(why);
+
+    assert_eq!(
+        credential_of(host, EMAIL).as_deref(),
+        Some(ROTATED),
+        "the Capture ran: {why}"
+    );
+    assert_eq!(
+        live_credential(host).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "and the incoming Credential is the live one: {why}"
+    );
+    assert_eq!(registry_of(host).active.as_deref(), Some(SECOND_EMAIL));
+}
+
 fn stored_credential(host: &FakeHost, email: &str) -> Option<String> {
     host.keychain_item(&profile_service(host, email), LOGIN_NAME)
 }
@@ -566,9 +598,7 @@ fn a_marker_left_behind_by_a_client_that_died_is_not_a_live_profile() {
         &session_marker(9999, Utc.with_ymd_and_hms(2026, 8, 4, 9, 0, 0).unwrap()),
     );
 
-    run_switch(&host, SECOND_EMAIL)
-        .0
-        .expect("nothing is holding that Profile");
+    assert_the_switch_captured_and_landed(&host, "nothing is holding that Profile");
 }
 
 #[test]
@@ -584,9 +614,7 @@ fn a_marker_whose_pid_now_belongs_to_a_younger_process_is_not_a_live_profile() {
         )
         .with_live_process_started_at(4242, Utc.with_ymd_and_hms(2026, 8, 4, 11, 0, 0).unwrap());
 
-    run_switch(&host, SECOND_EMAIL)
-        .0
-        .expect("that client died; the pid was recycled");
+    assert_the_switch_captured_and_landed(&host, "that client died; the pid was recycled");
 }
 
 #[test]
@@ -600,9 +628,10 @@ fn a_marker_that_does_not_say_when_its_session_began_is_no_evidence_of_a_client(
         )
         .with_live_process(4242);
 
-    run_switch(&host, SECOND_EMAIL)
-        .0
-        .expect("an uncorroborated marker does not hold a Profile");
+    assert_the_switch_captured_and_landed(
+        &host,
+        "an uncorroborated marker does not hold a Profile",
+    );
 }
 
 /// A marker Perch cannot see the *contents* of is a different thing from one
@@ -645,9 +674,7 @@ fn an_unreadable_marker_whose_process_is_gone_holds_nothing() {
             "Permission denied",
         );
 
-    run_switch(&host, SECOND_EMAIL)
-        .0
-        .expect("no client is holding that Profile");
+    assert_the_switch_captured_and_landed(&host, "no client is holding that Profile");
 }
 
 #[test]
@@ -659,9 +686,7 @@ fn a_marker_that_is_not_json_is_no_evidence_of_a_client() {
         )
         .with_live_process(4242);
 
-    run_switch(&host, SECOND_EMAIL)
-        .0
-        .expect("a marker Perch cannot read is not evidence");
+    assert_the_switch_captured_and_landed(&host, "a marker Perch cannot read is not evidence");
 }
 
 #[test]

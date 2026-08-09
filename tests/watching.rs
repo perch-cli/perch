@@ -833,7 +833,9 @@ fn the_decision_log_is_standard_output_and_no_file_is_written() {
             .iter()
             // The registry, and the copy beside it its atomic write goes
             // through on the way.
-            .all(|path| path.to_string_lossy().starts_with(&*registry.to_string_lossy())),
+            .all(|path| path
+                .to_string_lossy()
+                .starts_with(&*registry.to_string_lossy())),
         "the registry is the only file a watcher writes, and it writes that \
          because a Switch happened: {written:?}"
     );

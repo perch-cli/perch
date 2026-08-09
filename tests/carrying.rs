@@ -417,7 +417,10 @@ fn a_profile_with_no_identity_file_of_its_own_is_never_given_one() {
          keys that cross are spliced into what is already there"
     );
     assert!(
-        !host.notes().iter().any(|note| note.contains(".claude.json")),
+        !host
+            .notes()
+            .iter()
+            .any(|note| note.contains(".claude.json")),
         "nor is it worth remarking on: {:?}",
         host.notes()
     );
