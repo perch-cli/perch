@@ -525,6 +525,20 @@ fn act(
         // repair — a client holding the outgoing Profile, most often, which
         // stops holding it when it exits. The round says so and the loop goes
         // on watching.
+        //
+        // Only where the next round genuinely has a different answer to give.
+        // A refusal is reported as `nothing to do now`, which is a scheduler's
+        // cue to come back in five minutes and expect the machine to have moved
+        // on — true of a client that will exit and of an Account just
+        // Quarantined, which is recorded here and passed over from the next
+        // round onwards. A locked keychain, a probe that cannot find Claude
+        // Code, a Profile that will not be written: none of those clear
+        // themselves, and folding them in here had `perch watch --once` exiting
+        // 15 every five minutes forever while a cron mailbox read "nothing to
+        // do" — for a machine that needed somebody to look at it. They keep the
+        // code the failure earned (README's table promises `11` for a keychain
+        // nobody can reach), and the loop stops on them rather than retrying a
+        // full Capture-and-write every two and a half minutes.
         Err(Interrupted {
             error,
             incoming_is_live: false,
@@ -538,10 +552,16 @@ fn act(
                     choice.account.email(),
                     why,
                 );
+                return Ok(Outcome::Refused {
+                    why: error.to_string(),
+                });
             }
-            Ok(Outcome::Refused {
-                why: error.to_string(),
-            })
+            match error {
+                PerchError::ProfileLive(_) => Ok(Outcome::Refused {
+                    why: error.to_string(),
+                }),
+                other => Err(other),
+            }
         }
         // The incoming Credential is live and something after that failed, so
         // the machine is part way through a Switch. The loop stops on it: a

@@ -505,8 +505,13 @@ pub enum Outcome {
     /// A Switch was wanted, was attempted, and was turned away without
     /// changing anything — a client running against the Profile the Capture
     /// would write into, most often (ADR 0027). Distinct from a dead end,
-    /// because this one is about the machine rather than about the quota, and
-    /// it clears when whatever was running stops.
+    /// because this one is about the machine rather than about the quota.
+    ///
+    /// Only where waiting is an answer: a client that will exit, or an Account
+    /// this round found unusable and Quarantined, which the next round passes
+    /// over. A failure that clears itself is what earns "nothing to do now",
+    /// and a failure that does not — a keychain nobody can reach, a Profile
+    /// that will not be written — is reported as itself instead.
     Refused { why: String },
 }
 

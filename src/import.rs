@@ -290,7 +290,9 @@ mod tests {
         );
         assert!(refused.to_string().contains("perch purge"), "{refused}");
         assert!(
-            refused.to_string().contains("Perch already holds 1 Account,"),
+            refused
+                .to_string()
+                .contains("Perch already holds 1 Account,"),
             "the count is rendered once, by the one function that says it in \
              words: {refused}"
         );
@@ -299,7 +301,9 @@ mod tests {
         let refused =
             refuse_a_machine_that_is_not_empty(Some(&held)).expect_err("there are Accounts here");
         assert!(
-            refused.to_string().contains("Perch already holds 2 Accounts,"),
+            refused
+                .to_string()
+                .contains("Perch already holds 2 Accounts,"),
             "{refused}"
         );
     }

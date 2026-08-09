@@ -18,8 +18,8 @@ use chrono::Duration;
 use common::*;
 use perch::anthropic::{PROFILE_URL, USAGE_URL};
 use perch::error::{
-    EXIT_HELD, EXIT_INVALID, EXIT_NO_CANDIDATE, EXIT_NOT_FOUND, EXIT_NOT_INTERCHANGEABLE,
-    EXIT_NOTHING_TO_DO, EXIT_OK,
+    EXIT_HELD, EXIT_INVALID, EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NO_CANDIDATE, EXIT_NOT_FOUND,
+    EXIT_NOT_INTERCHANGEABLE, EXIT_NOTHING_TO_DO, EXIT_OK,
 };
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
@@ -336,6 +336,43 @@ fn a_switch_the_machine_turned_away_exits_fifteen_and_says_so() {
         credential_of(&host, EMAIL).as_deref(),
         Some(ACTIVE),
         "least of all the Profile the client is holding"
+    );
+}
+
+/// The other half of the same rule, and the half a scheduler is hurt by.
+///
+/// "Nothing to do now" is a promise that coming back later is the answer, which
+/// is true of a client that will exit and untrue of a store nobody can write
+/// to. A check that reported the second as the first exited 15 every five
+/// minutes forever while a cron mailbox read "under the threshold" — and the
+/// exit-code table promises the failure's own code for exactly this.
+#[test]
+fn a_check_stopped_by_something_that_will_not_clear_itself_exits_on_it() {
+    // The Capture writes the live Credential back into the outgoing Account's
+    // Profile, and neither of that Profile's two stores will take it: the
+    // keychain hands back something other than what it was given — ADR 0008's
+    // truncating `security -i`, which is why every Credential is read back
+    // before it is trusted — and the file it falls back to cannot be written
+    // either.
+    let host = checked(&[86.0], &[5.0]);
+    let plaintext = store_of(&host, EMAIL).credentials_file;
+    let host = host
+        .with_keychain_truncating_after(20)
+        .with_unwritable_file(&plaintext, "no space left on device");
+
+    let (result, printed) = run_watch_once(&host);
+
+    let failed = result.expect_err("a store that will not hold a Credential is a failure");
+    assert_eq!(
+        failed.exit_code(),
+        EXIT_KEYCHAIN_UNAVAILABLE,
+        "the code the failure earned, not the one that means come back in five \
+         minutes: {failed}"
+    );
+    assert_eq!(active(&host).as_deref(), Some(EMAIL), "and nothing moved");
+    assert!(
+        !printed.contains("refused"),
+        "a decision line would say the check had decided something: {printed}"
     );
 }
 
