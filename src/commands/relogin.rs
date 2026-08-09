@@ -97,7 +97,8 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // by now whatever happens next: the Account has a working Credential in its
     // own Profile, which is the whole of what a Quarantine said it did not have.
     let was_quarantined = record(&mut registry, &account, produced);
-    registry::save(host, &mut perch, &registry)?;
+    registry::save(host, &mut perch, &registry)
+        .map_err(|error| unrecorded(&account, repairing_the_account_you_are_on, error))?;
 
     report(out, &registry, &account, was_quarantined)?;
 
@@ -243,6 +244,49 @@ fn make_it_live(host: &dyn Host, account: &Account) -> Result<()> {
             account.email(),
         ))
     })
+}
+
+/// Says what is on the machine after a repair that worked and could not be
+/// recorded.
+///
+/// The Credential in the Account's own Profile is the fresh one; the registry
+/// on disk still says Quarantined. Running the command again finishes the job,
+/// because writing that Profile is idempotent — so the news is that the browser
+/// round trip need not be repeated for nothing.
+///
+/// Repairing the Account you are on is the dangerous half, and it is the same
+/// hazard [`no_longer_on_anybody`] exists for, reached one step earlier: the
+/// broken Credential is still the live one, `active` still names this Account,
+/// and the very next `perch switch` would Capture that broken copy over the
+/// fresh one (ADR 0023). The defence there is to stop recording the Account as
+/// active — which is a registry write, and a registry write is what just
+/// failed. So this warns in the same words that path uses when its own save
+/// fails, because it is the same state and the same thing not to do.
+///
+/// A bare `?` here said only that a file could not be written. It is the one
+/// place in the command with an irreversible write behind it and nothing said
+/// about it; `add`, `remove`, `import` and `switch` all note theirs.
+fn unrecorded(
+    account: &Account,
+    repairing_the_account_you_are_on: bool,
+    error: PerchError,
+) -> PerchError {
+    let email = account.email();
+    if !repairing_the_account_you_are_on {
+        return error.with_note(&format!(
+            "The login itself worked and its Credential is in {email}'s own \
+             Profile, so nothing was lost — only the record of it is behind. \
+             Run `perch relogin {email}` again to finish the job."
+        ));
+    }
+    error.with_note(&format!(
+        "The login itself worked and its Credential is in {email}'s own \
+         Profile, but Perch still records {email} as Quarantined and as the \
+         Account you are on.\n\
+         Do not run `perch switch` until `perch relogin {email}` has worked: a \
+         Switch would Capture the Credential that stopped working over the \
+         fresh one."
+    ))
 }
 
 /// Stops Perch claiming to be on anybody, after a repair that could not be made

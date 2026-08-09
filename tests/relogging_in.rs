@@ -511,6 +511,45 @@ fn repairing_the_account_you_are_on_is_refused_while_a_client_holds_the_default_
     );
 }
 
+/// One step earlier than the test below, and the more dangerous of the two: the
+/// repair happened and could not be *recorded*.
+///
+/// The registry still says Quarantined and still names this Account as the one
+/// you are on, while the broken Credential is still the live one and the fresh
+/// one sits in the Account's own Profile. That is exactly the state
+/// `no_longer_on_anybody` defends against by clearing `active` — and clearing
+/// `active` is a registry write, which is what just failed. So the only defence
+/// left is saying what not to do, and a bare `?` said only that a file could not
+/// be written.
+#[test]
+fn a_repair_that_could_not_be_recorded_says_the_login_worked_and_not_to_switch() {
+    let host = logged_in_machine_off_macos().with_login(login_producing(REPAIRED, IDENTITY_FILE));
+    run_list(&host, false)
+        .0
+        .expect("the first command adopts the login");
+    quarantine(&host, EMAIL);
+
+    let host = host.with_unwritable_file(REGISTRY_PATH, "read-only file system");
+
+    let (result, _) = run_relogin(&host, EMAIL);
+
+    let error = result.expect_err("the repair could not be recorded");
+    let said = error.to_string();
+    assert!(
+        said.contains("The login itself worked"),
+        "the browser round trip is not repeated for nothing: {said}"
+    );
+    assert!(
+        said.contains("Do not run `perch switch`"),
+        "and the Capture that would destroy the repair is named: {said}"
+    );
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(REPAIRED),
+        "the fresh Credential really is in the Account's own Profile"
+    );
+}
+
 #[test]
 fn a_repair_that_could_not_be_made_live_still_stands_and_says_what_is_left() {
     // Off macOS, so the Default Profile's Credential is the file below and the
