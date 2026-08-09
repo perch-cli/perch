@@ -406,6 +406,11 @@ mod tests {
     /// constant, and a constant copied out of a library is one that drifts from
     /// it silently — a terminal left on the alternate screen with no cursor,
     /// discovered by whoever's SSH session dropped.
+    ///
+    /// About the handler, so it is gated with the handler: Windows has neither
+    /// of the two signals and therefore neither the constant nor anything that
+    /// would write it.
+    #[cfg(unix)]
     #[test]
     fn the_escape_sequences_a_signal_writes_are_the_ones_crossterm_sends() {
         use crossterm::Command;
