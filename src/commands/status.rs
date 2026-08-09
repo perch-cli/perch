@@ -18,7 +18,7 @@ use serde_json::json;
 
 use crate::adopt;
 use crate::commands::list::{self, Scope};
-use crate::commands::write_failed;
+use crate::commands::say_json;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::observe::{self, Report};
@@ -184,11 +184,5 @@ fn render_json(
         "refresh": report.document(),
     });
 
-    writeln!(
-        out,
-        "{}",
-        serde_json::to_string_pretty(&document)
-            .map_err(|err| PerchError::Other(err.to_string()))?
-    )
-    .map_err(write_failed)
+    say_json(out, &document)
 }
