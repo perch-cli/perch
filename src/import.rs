@@ -171,6 +171,31 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
     // derivation and not a write, and an address no directory can be named after
     // is a refusal (see [`registry::profile_dir_for`]) — meeting it half way
     // through would mean undoing work that never had to be started.
+    // And no two of them may land in one place. Two addresses can flatten to one
+    // Profile name — `user+work@` and `user.work@` do — and `perch add` refuses
+    // that collision where a login enters, because storing over it supersedes
+    // the Credential already there and destroys a refresh token nothing can
+    // recover. An Export written on a machine that never had both can still be
+    // restored onto one where they collide, and this loop wrote the second over
+    // the first and reported success. Named before anything is made, like every
+    // other refusal here.
+    for (at, account) in export.registry.accounts.iter().enumerate() {
+        if let Some(clash) = export.registry.accounts[..at]
+            .iter()
+            .find(|earlier| registry::same_profile(earlier.email(), account.email()))
+        {
+            return Err(PerchError::Conflict(format!(
+                "{} and {} share the Profile they would be kept in, so importing \
+                 both would mean each one's Credential replacing the other's.\n\
+                 Nothing was imported. This Export cannot be restored whole onto \
+                 this machine — one of the two has to be removed on a machine \
+                 that still holds it, and the Export taken again.",
+                clash.email(),
+                account.email(),
+            )));
+        }
+    }
+
     let mut placements = Vec::new();
     for account in &export.registry.accounts {
         let store = account.store(host)?;
@@ -453,6 +478,39 @@ mod tests {
         assert!(
             refused.to_string().contains("nobody@example.com"),
             "it names the Account that is missing: {refused}"
+        );
+    }
+
+    /// Two addresses can flatten to one Profile name, and plus-addressing on a
+    /// single inbox is exactly how somebody comes to hold several Accounts.
+    /// `perch add` refuses that collision where a login enters, because storing
+    /// over it supersedes the Credential already there and destroys a refresh
+    /// token nothing can recover. An Import placed the second over the first and
+    /// reported success.
+    #[test]
+    fn two_accounts_that_would_share_one_profile_are_refused_before_either_is_placed() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let mut export = an_export();
+        export.registry.upsert(account("user+work@example.com"));
+        export.registry.upsert(account("user.work@example.com"));
+        for email in ["user+work@example.com", "user.work@example.com"] {
+            export.credentials.insert(
+                email.to_string(),
+                r#"{"claudeAiOauth":{"refreshToken":"sk-ant-ort01-other"}}"#.to_string(),
+            );
+        }
+
+        let refused = place(&host, &export).expect_err("both would land in one Profile");
+
+        assert!(
+            refused.to_string().contains("user+work@example.com")
+                && refused.to_string().contains("user.work@example.com"),
+            "it names both: {refused}"
+        );
+        assert!(
+            host.effects().is_empty(),
+            "and nothing was written on the way to finding out: {:?}",
+            host.effects()
         );
     }
 }
