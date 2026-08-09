@@ -182,6 +182,55 @@ fn a_login_that_was_abandoned_changes_nothing_at_all() {
     );
 }
 
+fn leaked(text: &str) -> &'static str {
+    Box::leak(text.to_string().into_boxed_str())
+}
+
+/// The other direction of the same rule: a login under a differently
+/// capitalised spelling is the Account being repaired, not somebody else.
+///
+/// Asked in ASCII, this was the one comparison disagreeing with `add` and
+/// `target`, and it disagreed on the path `add` sends people down. Told that
+/// Perch already holds `café@example.com`, `add` refuses a second login — it
+/// decides both the Profile collision and whether it is one Account over the
+/// whole of Unicode — and names `perch relogin` as the way to repair it
+/// instead. Resolution then succeeded, the browser round trip was spent, and
+/// `é` against `É` under an ASCII fold made them different people. Neither
+/// command could hold the login, and the Account stayed Quarantined for good.
+#[test]
+fn a_login_under_an_accented_spelling_repairs_the_account_rather_than_being_a_stranger() {
+    let accented = "café@example.com";
+    let shouted = "CAFÉ@example.com";
+    let host = machine_with_claude_code()
+        .with_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, CREDENTIAL)
+        .with_file(
+            IDENTITY_PATH,
+            leaked(&IDENTITY_FILE.replace(EMAIL, accented)),
+        )
+        .with_login(login_producing(
+            REPAIRED,
+            leaked(&IDENTITY_FILE.replace(EMAIL, shouted)),
+        ));
+    // The first command adopts the existing login, which is the Account this
+    // repairs (ADR 0009).
+    run_list(&host, false).0.expect("the machine is adopted");
+    quarantine(&host, accented);
+
+    let (result, _) = run_relogin(&host, accented);
+
+    result.expect("the same Account, spelled the other way");
+    assert_eq!(
+        quarantine_of(&host, accented),
+        None,
+        "the Quarantine is over rather than the login being turned away"
+    );
+    assert_eq!(
+        credential_of(&host, accented).as_deref(),
+        Some(REPAIRED),
+        "and the fresh Credential is in the Account's own Profile"
+    );
+}
+
 #[test]
 fn a_login_as_a_different_account_is_refused_and_takes_nothing_over() {
     let host =

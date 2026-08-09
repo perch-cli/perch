@@ -165,7 +165,16 @@ fn refuse_a_different_account(
     account: &Account,
     logged_in: &Identity,
 ) -> Result<()> {
-    if logged_in.email.eq_ignore_ascii_case(account.email()) {
+    // Over the whole of Unicode, as `add` and `target` both ask it. An ASCII
+    // fold was the one comparison left disagreeing with them, and it disagreed
+    // on the path `add` sends people down: told that Perch already holds
+    // `CAFÉ@example.com`, `add` refuses the second login — `same_profile` and
+    // `same_name` both decided over the whole of Unicode — and says to run
+    // `perch relogin CAFÉ@example.com` instead. Resolution then succeeded, the
+    // browser round trip was spent, and this compared `café@` to `CAFÉ@` under
+    // ASCII folding, decided they were different people, and refused. The
+    // Account could not be repaired by either command.
+    if registry::same_name(&logged_in.email, account.email()) {
         return Ok(());
     }
     Err(PerchError::Conflict(format!(
