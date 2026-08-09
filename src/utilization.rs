@@ -41,7 +41,10 @@ pub fn window_width<'a>(windows: impl Iterator<Item = &'a str>) -> usize {
         .map(str::len)
         .chain(std::iter::once("5-hour".len()))
         .max()
-        .unwrap_or_default()
+        // The floor is chained on, so there is always one. `unwrap_or_default`
+        // here answered nought — a width the doc above rules out — for a case
+        // that cannot arise, which is worse than saying so.
+        .expect("the floor is always among them")
 }
 
 /// Writes a label and a value in that column, for the surfaces that render an
