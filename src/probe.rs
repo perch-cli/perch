@@ -652,7 +652,7 @@ pub fn locks_for(store: &Store) -> Vec<LockSpec> {
         LockSpec {
             name: "the refresh lock",
             held_by: "Claude Code",
-            dir: store.config_dir.join(".oauth_refresh.lock"),
+            dir: store.config_dir.join(REFRESH_LOCK),
             stale_millis: REFRESH_STALE_MILLIS,
             update_millis: REFRESH_UPDATE_MILLIS,
             lost_means: CARRIES_ON,
@@ -684,6 +684,14 @@ pub fn locks_for(store: &Store) -> Vec<LockSpec> {
 /// answer "is a client running *here*" is meaningless shared between config
 /// directories — every Profile would report every other Profile's clients.
 pub const SESSIONS: &str = "sessions";
+
+/// The lock Claude Code takes inside a config directory while it renews a
+/// Credential — the one of its three that is not a sibling of the directory but
+/// an entry in it, and so the one a Reconcile would otherwise enumerate.
+///
+/// Named here for the same reason [`SESSIONS`] is: this module derives it, and
+/// [`crate::reconcile`] holds it back from crossing.
+pub const REFRESH_LOCK: &str = ".oauth_refresh.lock";
 
 /// Where Claude Code records the sessions it is running: one `<pid>.json` per
 /// client, in the config directory it was launched against.
@@ -985,9 +993,15 @@ impl Identity {
 
 /// The one question this module exists to answer: what do we believe about the
 /// installed Claude Code, and how confident are we?
-pub fn probe(host: &dyn Host) -> Result<Verdict> {
+///
+/// The store is handed in rather than derived, because which directory counts
+/// as the Default Profile is a question about Perch's own layout — a Run points
+/// `CLAUDE_CONFIG_DIR` at a Profile, and adopting one as "the existing login"
+/// would make the Account Perch already holds into a second Account with the
+/// same Credential. [`crate::registry::the_default_profile`] is the answer, and
+/// this module is below the one that can give it.
+pub fn probe(host: &dyn Host, store: Store) -> Result<Verdict> {
     let version = claude_version(host)?;
-    let store = default_store(host)?;
 
     let credential = read_credential(host, &store, &version)?;
     let identity = read_identity(host, &store, &version)?;

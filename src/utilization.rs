@@ -41,7 +41,10 @@ pub fn window_width<'a>(windows: impl Iterator<Item = &'a str>) -> usize {
         .map(str::len)
         .chain(std::iter::once("5-hour".len()))
         .max()
-        .unwrap_or_default()
+        // The floor is chained on, so there is always one. `unwrap_or_default`
+        // here answered nought — a width the doc above rules out — for a case
+        // that cannot arise, which is worse than saying so.
+        .expect("the floor is always among them")
 }
 
 /// Writes a label and a value in that column, for the surfaces that render an
@@ -192,16 +195,44 @@ pub fn percentage(value: f64) -> String {
     format!("{value:.0}")
 }
 
+/// A percentage printed beside the figure it is being judged against, at a
+/// precision that cannot contradict the judgement.
+///
+/// [`percentage`] rounds to whole numbers and the comparison is made on what
+/// Anthropic sent, so the two disagreed either side of a threshold: 79.6 is
+/// under 80 and printed as `80`, and the watcher's line read "80% used …
+/// threshold 80% — under it, so nothing was wanted". That line is the whole of
+/// the evidence the policy works, read out of a cron mailbox by somebody
+/// deciding whether the watcher is broken, and a flat self-contradiction on it
+/// is worse than a decimal place.
+///
+/// The same shape as the `<1` and `>99` forms above: a figure is never rounded
+/// into a claim about a boundary it has not reached.
+pub fn percentage_against(value: f64, boundary: u8) -> String {
+    let rounded = percentage(value);
+    if rounded == boundary.to_string() && value != f64::from(boundary) {
+        return format!("{value:.1}");
+    }
+    rounded
+}
+
 /// "just now", "3m ago", "2h ago", "4d ago".
 pub fn age_phrase(observed_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
     let seconds = (now - observed_at).num_seconds();
     if seconds < 0 {
         return "in the future".to_string();
     }
+    // Minutes as far as two hours, for the reason `wait_phrase` hands over
+    // there: the two forms first agree at the boundary, and anywhere else they
+    // disagree across it. Handing over at ninety minutes had a figure a second
+    // older reading half an hour fresher — 5399 seconds rounded to "90m ago"
+    // and 5400 to "2h ago" — and under ADR 0015 the age is the whole of what a
+    // reader has to decide whether to trust the number beside it. The hour form
+    // hands over to the day form where those two agree already.
     match seconds {
         0..=44 => "just now".to_string(),
-        45..=5399 => format!("{}m ago", (seconds as f64 / 60.0).round() as i64),
-        5400..=86_399 => format!("{}h ago", (seconds as f64 / 3600.0).round() as i64),
+        45..=7199 => format!("{}m ago", (seconds as f64 / 60.0).round() as i64),
+        7200..=86_399 => format!("{}h ago", (seconds as f64 / 3600.0).round() as i64),
         _ => format!("{}d ago", (seconds as f64 / 86_400.0).round() as i64),
     }
 }
@@ -351,6 +382,51 @@ mod tests {
             "in 2h",
             "and it hands over where the two forms agree"
         );
+    }
+
+    /// A figure and the verdict beside it must not disagree. The comparison is
+    /// made on what Anthropic sent and the rendering rounded, so 79.6 against a
+    /// threshold of 80 printed "80% used … threshold 80% — under it".
+    #[test]
+    fn a_percentage_is_never_rounded_into_a_boundary_it_has_not_reached() {
+        assert_eq!(percentage_against(79.6, 80), "79.6");
+        assert_eq!(percentage_against(80.4, 80), "80.4");
+        assert_eq!(
+            percentage_against(80.0, 80),
+            "80",
+            "a figure exactly at the boundary contradicts nothing"
+        );
+        assert_eq!(
+            percentage_against(74.0, 80),
+            "74",
+            "and one nowhere near it is said the ordinary way"
+        );
+        assert_eq!(
+            percentage_against(70.4, 70),
+            "70.4",
+            "the ceiling a candidate is set aside by is the same rule"
+        );
+    }
+
+    /// The same rule for the other direction: an age that never falls as the
+    /// figure gets older. `wait_phrase` was moved off the ninety-minute
+    /// handover and this was left on it, so a figure read at 89m59s said "90m
+    /// ago" and the same figure a second later said "2h ago" — half an hour
+    /// fresher, on the line ADR 0015 has a reader judging the number by.
+    #[test]
+    fn an_age_never_falls_as_the_figure_gets_older() {
+        let now = at(12, 0);
+        let said = |minutes: i64| age_phrase(now - chrono::Duration::minutes(minutes), now);
+
+        assert_eq!(said(89), "89m ago");
+        assert_eq!(said(90), "90m ago", "rather than jumping back to `2h ago`");
+        assert_eq!(said(119), "119m ago");
+        assert_eq!(
+            said(120),
+            "2h ago",
+            "and it hands over where the two forms agree"
+        );
+        assert_eq!(said(24 * 60), "1d ago", "as the hour form does to the day");
     }
 
     #[test]

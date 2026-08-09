@@ -141,7 +141,11 @@ fn the_installed_claude_code_stores_what_perch_expects_to_find() {
     }
     let host = RealHost::new();
 
-    match probe::probe(&host) {
+    // The Default Profile as Perch means it, which is what this asserts about:
+    // the directory the installed Claude Code falls back to, never a Profile.
+    let store = perch::registry::the_default_profile(&host).expect("home is known");
+
+    match probe::probe(&host, store) {
         Ok(Verdict::Recognised(findings)) => {
             // A real login on this machine: every belief held.
             assert!(findings.identity.email.contains('@'));

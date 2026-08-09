@@ -121,6 +121,16 @@ impl<'a> Reserve<'a> {
                 crate::utilization::percentage(percent),
                 observed(account, now),
             ),
+            // A scope holding no Account at all, which the clause below would
+            // describe as Accounts that may not be Cycled to: `not_candidates`
+            // is nought as well, so the parenthetical saying which way each of
+            // them left the running comes out empty and the sentence asserts
+            // something about nobody. A declared Group with no members is the
+            // ordinary way to reach it — `perch group add spare`, then the
+            // picker.
+            None if self.candidates.is_empty() && self.not_candidates == 0 => {
+                "Reserve: none — no Account is in this Group yet".to_string()
+            }
             // Nothing was read to reach this one: being Disabled or Quarantined
             // is a fact about the registry rather than an observation, so there
             // is no age to carry and none is invented.
@@ -394,6 +404,21 @@ mod tests {
         assert_eq!(
             reserve_of(&holding(vec![broken])),
             ["Reserve: none — no Account here may be Cycled to (1 Quarantined)"]
+        );
+    }
+
+    /// And a Group holding nobody says that instead. The line above is about
+    /// Accounts that may not be Cycled to, and with none to name its
+    /// parenthetical comes out empty — so a Group somebody has only just
+    /// declared was described as full of Accounts nothing may reach.
+    #[test]
+    fn a_group_nobody_is_in_yet_says_that_rather_than_naming_accounts_it_has_not_got() {
+        let mut empty = Registry::default();
+        empty.declare_group("work").expect("a name Perch accepts");
+
+        assert_eq!(
+            reserve_of(&empty),
+            ["Reserve: none — no Account is in this Group yet"]
         );
     }
 

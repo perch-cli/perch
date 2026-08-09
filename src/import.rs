@@ -76,7 +76,7 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
 /// check on the new machine reporting `cooling`, and bars the Account that
 /// machine last left, on the strength of something that happened somewhere
 /// else. Both are claims about a watcher, and no watcher has run here yet.
-pub fn restored(export: &Export) -> Result<Registry> {
+pub fn restored(export: &Export, path: &std::path::Path) -> Result<Registry> {
     // The registry's own version is not checked here. `export::unseal` reads
     // both versions off a shape that is only the versions, *before* the document
     // is read as an Export, and it has to: a newer Perch is exactly the thing
@@ -85,12 +85,18 @@ pub fn restored(export: &Export) -> Result<Registry> {
     // this function without having passed the identical check, and a second
     // spelling of it was two things to keep in step for one guard.
 
-    // The same check the registry gets on the way in off disk, for the same
-    // reason: a value that means nothing would otherwise sit in the file until
-    // the watcher next went round and surprise somebody by acting on it.
-    for (name, config) in &export.registry.groups {
-        config.validate(name)?;
-    }
+    // The check the registry gets on the way in off disk, and the same one: an
+    // Import writes a registry without reading one first, so anything this
+    // accepts and `load` does not is a machine with no working command left on
+    // it — including the `perch purge` that would make room to try again. This
+    // was a narrower copy that walked Group configuration alone, so an Export
+    // holding an Alias keyed by an email address, or a Group name with a space
+    // in it, imported cleanly and wedged the machine on the next command.
+    //
+    // The path named is where the registry is about to be written rather than
+    // where it came from, because that is the file the refusal tells them to
+    // edit — and the Export it came from is encrypted.
+    registry::validate(&export.registry, path)?;
 
     Ok(Registry {
         active: None,
@@ -251,6 +257,10 @@ mod tests {
     use crate::registry::{Account, GroupConfig, Quarantine};
     use std::collections::BTreeMap;
 
+    /// Where the restored registry would be written. It is the file a refusal
+    /// tells somebody to edit, so it is named rather than derived here.
+    const REGISTRY: &str = "/Users/someone/.config/perch/registry.json";
+
     fn account(email: &str) -> Account {
         Account {
             identity: Identity {
@@ -333,7 +343,8 @@ mod tests {
     fn everything_the_registry_said_is_restored_except_which_account_was_active() {
         let export = an_export();
 
-        let restored = restored(&export).expect("this build understands it");
+        let restored =
+            restored(&export, std::path::Path::new(REGISTRY)).expect("this build understands it");
 
         assert_eq!(restored.active, None);
         assert_eq!(restored.accounts.len(), 2);
@@ -357,9 +368,41 @@ mod tests {
             },
         );
 
-        let refused = restored(&export).expect_err("101% is not a percentage");
+        let refused = restored(&export, std::path::Path::new(REGISTRY))
+            .expect_err("101% is not a percentage");
         assert!(
             refused.to_string().contains("watcher-threshold-percent"),
+            "{refused}"
+        );
+    }
+
+    /// And the rest of that check, which an Import used to skip. Anything this
+    /// accepts and `registry::load` refuses is a machine with no working command
+    /// left on it — `perch purge`, the one that would make room to try again,
+    /// reads the registry too. So an Export is held to exactly what a load is.
+    #[test]
+    fn a_registry_no_later_command_could_read_is_refused_rather_than_restored() {
+        let mut named_badly = an_export();
+        named_badly
+            .registry
+            .groups
+            .insert("my work".to_string(), GroupConfig::default());
+        let refused = restored(&named_badly, std::path::Path::new(REGISTRY))
+            .expect_err("no later command could read that");
+        assert!(
+            refused.to_string().contains("has a space in it"),
+            "{refused}"
+        );
+
+        let mut aliased_badly = an_export();
+        aliased_badly.registry.aliases.insert(
+            "one@example.com".to_string(),
+            "other@example.com".to_string(),
+        );
+        let refused = restored(&aliased_badly, std::path::Path::new(REGISTRY))
+            .expect_err("an Alias cannot be an email address");
+        assert!(
+            refused.to_string().contains("looks like an email address"),
             "{refused}"
         );
     }

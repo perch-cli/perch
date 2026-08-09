@@ -208,7 +208,13 @@ fn near_matches(candidates: &[String], target: &str) -> Vec<String> {
     // `over1`, `over2` and `over3` — one edit each — ahead of
     // `overflow@example.com` at sixteen, and the list is cut at three: the one
     // candidate the rule was written for was the one it dropped.
-    scored.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(right.1)));
+    //
+    // Plainly, because `((bool, usize), &String)` already orders that way and
+    // the hand-written comparator was the same thing spelled out — `left.1` is
+    // the candidate, not a second score, so a `then_with` there reads as a
+    // tie-break on distance when it is one on the name. Sorting the tuple keeps
+    // the alphabetical tie-break and says where it comes from.
+    scored.sort();
     scored
         .into_iter()
         .take(3)

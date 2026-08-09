@@ -225,10 +225,12 @@ impl Fullest {
         self.used_percent >= f64::from(threshold)
     }
 
-    fn as_a_clause(&self) -> String {
+    /// Said beside the threshold it is being judged against, so the figure and
+    /// the verdict on the same line cannot disagree.
+    fn as_a_clause(&self, threshold: u8) -> String {
         format!(
             "{}% used, fullest {}",
-            crate::utilization::percentage(self.used_percent),
+            crate::utilization::percentage_against(self.used_percent, threshold),
             self.window
         )
     }
@@ -424,7 +426,7 @@ pub fn set_aside(
                 Some(fullest) if fullest.used_percent > f64::from(policy.ceiling()) => format!(
                     "{} is at {}% used and nothing over {}% is worth moving to",
                     candidate.named,
-                    crate::utilization::percentage(fullest.used_percent),
+                    crate::utilization::percentage_against(fullest.used_percent, policy.ceiling(),),
                     policy.ceiling(),
                 ),
                 Some(_) => continue,
@@ -616,7 +618,7 @@ impl Round {
 
     fn figure(&self) -> String {
         match &self.fullest {
-            Some(fullest) => fullest.as_a_clause(),
+            Some(fullest) => fullest.as_a_clause(self.threshold),
             // Said as a figure that was not read rather than left out, because
             // a line missing the number is a line that reads as an oversight.
             None => "unread".to_string(),

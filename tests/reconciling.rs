@@ -110,6 +110,37 @@ fn the_directory_that_records_who_is_running_does_not_cross() {
     );
 }
 
+/// The fourth entry that stays behind, and the same rule as `sessions`: it
+/// answers a question about *this* configuration directory, so it means nothing
+/// in another one.
+///
+/// `.oauth_refresh.lock` is the only one of Claude Code's three locks that sits
+/// inside the config directory rather than beside it, so it is the only one a
+/// Reconcile ever sees — and it is only there at all while somebody holds it,
+/// which is what made this rare enough to ship. Linked and then released, the
+/// Profile is left with a link to nothing: `mkdir` at a dangling link fails
+/// exactly as it does when the lock is held, so that Profile's client waits on
+/// a lock nobody holds, and `clear_the_abandoned` will not clear it either.
+#[test]
+fn the_lock_a_credential_is_renewed_under_does_not_cross() {
+    let held = machine();
+    let now = held.now();
+    let host = held.with_dir_held_since(shared(".oauth_refresh.lock"), now);
+
+    run_reconcile(&host).expect("everything else can be linked");
+
+    assert_eq!(
+        host.link_at(profile(".oauth_refresh.lock")),
+        None,
+        "a Profile takes its own refresh lock and never the Default Profile's"
+    );
+    assert!(
+        !entries_of(&host).contains(&".oauth_refresh.lock".to_string()),
+        "{:?}",
+        entries_of(&host)
+    );
+}
+
 /// The reason the set is a denylist rather than a list in Perch's source: a
 /// Claude Code release that adds a directory has to follow the user without
 /// waiting for a Perch release.

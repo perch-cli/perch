@@ -328,11 +328,36 @@ fn headroom_of(account: &Account) -> Headroom {
     }
 }
 
+/// The fullest window, and on a tie the one that bites first.
+///
+/// Ties are ordinary rather than exotic: Anthropic answers in whole
+/// percentages, and an Account nothing has been spent on is at nought in every
+/// window. `max_by` hands back the *last* of several equal maxima, and
+/// `windows_in` sorts `5-hour`, then `7-day`, then a window per model — so a tie
+/// always resolved to the longest-period window, which is the one least likely
+/// to say when it resets.
+///
+/// That fed the wrong `resets_at` into [`Headroom::Room`], whose doc says the
+/// window deciding the headroom is the window whose reset decides how
+/// perishable that headroom is. An Account whose `5-hour` quota is thrown away
+/// in an hour, tied with a `7-day-sonnet` carrying no reset, ranked under
+/// `soonest-reset` as an Account with no reset at all — behind one that resets
+/// in three hours. So the tie is broken on perishability: the soonest reset
+/// first, and a window that says when it comes back ahead of one that does not.
 fn fullest_window(cached: &CachedUtilization) -> Option<&WindowUtilization> {
-    cached
-        .windows
-        .iter()
-        .max_by(|left, right| left.used_percent.total_cmp(&right.used_percent))
+    /// Most perishable first. `is_none` leads so that a window saying nothing
+    /// about its reset sorts behind every window that does, rather than ahead
+    /// of them the way a bare `Option` orders.
+    fn perishability(window: &WindowUtilization) -> (bool, Option<DateTime<Utc>>) {
+        (window.resets_at.is_none(), window.resets_at)
+    }
+
+    cached.windows.iter().min_by(|left, right| {
+        right
+            .used_percent
+            .total_cmp(&left.used_percent)
+            .then_with(|| perishability(left).cmp(&perishability(right)))
+    })
 }
 
 /// When an exhausted Account can be used again: the last of its full windows to
@@ -1358,6 +1383,52 @@ pub(crate) mod tests {
     /// among Accounts whose reset had already passed the *stalest* figure won.
     /// `chosen_because` then announced it as resetting "any moment now" about a
     /// window that came back hours ago.
+    /// Two windows equally full is the ordinary case, not the exotic one:
+    /// Anthropic answers in whole percentages, and an Account nothing has been
+    /// spent on is at nought everywhere. `max_by` hands back the last of several
+    /// equal maxima and the windows arrive longest-period last, so the tie went
+    /// to the window least likely to say when it resets — and `Headroom::Room`
+    /// took its `resets_at` from there. An Account whose `5-hour` quota is
+    /// thrown away in an hour then ranked as an Account with no reset at all.
+    #[test]
+    fn windows_equally_full_are_broken_by_which_one_bites_first() {
+        let registry = preferring(
+            holding(vec![
+                account("active@example.com", vec![resetting("5-hour", 40.0, 3)]),
+                // Its `5-hour` and its `7-day-sonnet` are both at 40%, and only
+                // the first of them says when it comes back — in one hour. That
+                // is the window this Account is constrained by, so it is the one
+                // it should be ranked on.
+                account(
+                    "soonest@example.com",
+                    vec![resetting("5-hour", 40.0, 1), window("7-day-sonnet", 40.0)],
+                ),
+            ]),
+            Strategy::SoonestReset,
+        );
+
+        let soonest = registry
+            .account("soonest@example.com")
+            .expect("an Account Perch holds");
+        assert_eq!(
+            fullest_window_of(soonest).map(|window| window.window.as_str()),
+            Some("5-hour"),
+            "the window an Account is measured by is the one that runs out first"
+        );
+
+        let choice = cycle(&registry).expect("there is room");
+        assert_eq!(
+            choice.account.email(),
+            "soonest@example.com",
+            "so it is ranked on that window's reset rather than on no reset at all"
+        );
+        assert!(
+            choice.because.contains("5-hour") && choice.because.contains("in 60m"),
+            "and the reset it is announced on is that window's: {}",
+            choice.because
+        );
+    }
+
     #[test]
     fn a_reset_that_has_already_happened_is_not_a_reason_to_prefer_an_account() {
         let registry = preferring(

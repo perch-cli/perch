@@ -59,7 +59,7 @@ fn load_or_adopt(host: &dyn Host, perch: &mut crate::lock::Held<'_>) -> Result<R
 }
 
 fn adopt(host: &dyn Host, perch: &mut crate::lock::Held<'_>) -> Result<Registry> {
-    let findings = match probe::probe(host)? {
+    let findings = match probe::probe(host, registry::the_default_profile(host)?)? {
         Verdict::Recognised(findings) => findings,
         Verdict::NoLogin { version, .. } => {
             // Nothing to adopt, and nothing worth writing: an empty Profile

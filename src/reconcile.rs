@@ -36,13 +36,30 @@ use crate::{probe, profile};
 /// Profile's clients and its own Run's marker would land in the Default
 /// Profile — so one client would make every Profile Live at once, and the
 /// refusals that protect a Live Profile would fire for every Account on the
-/// machine (ADR 0027). It is the one entry that is not the person's and not the
-/// Account's but the directory's, which is why the denylist ADR 0026 wrote as
-/// two entries is three.
-pub const HELD_BACK: [&str; 3] = [
+/// machine (ADR 0027).
+///
+/// `.oauth_refresh.lock` is the directory's too, and is the same class of
+/// mistake with a worse ending. It is the only one of Claude Code's three locks
+/// that sits *inside* the config directory rather than beside it, so it is the
+/// only one a Reconcile ever sees — and it is only there at all while somebody
+/// is holding it, which is what made this rare enough to ship. A `perch run`
+/// starting while a `perch switch` held it linked the Profile's lock to the
+/// Default Profile's; the Switch then finished and removed the real directory,
+/// leaving a link to nothing. `mkdir` at a dangling link fails exactly as it
+/// does when the lock is held, so that Profile's client waits on a lock nobody
+/// holds — and `clear_the_abandoned` will not clear it either, because
+/// `remove_dir_all` on a symlink is not a lock directory being cleared. Live
+/// rather than dangling is worse: two configuration directories sharing one
+/// lock, each reading the other's mtime as its own.
+///
+/// So the denylist ADR 0026 wrote as two entries is four, and the last two are
+/// one rule — an entry that answers a question about *this* directory means
+/// nothing in another one.
+pub const HELD_BACK: [&str; 4] = [
     probe::CREDENTIALS_FILE,
     probe::IDENTITY_FILE,
     probe::SESSIONS,
+    probe::REFRESH_LOCK,
 ];
 
 /// Makes every piece of Shared State in `shared` reachable from `into`,

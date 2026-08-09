@@ -1415,3 +1415,61 @@ fn a_stored_credential_that_cannot_be_understood_stops_the_switch_before_it_writ
     );
     assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
 }
+
+/// A client launched by a Run hands `CLAUDE_CONFIG_DIR` on to everything it
+/// starts, so a `perch switch` typed inside one arrives with a Profile named in
+/// its environment. It is not the Default Profile, and taking it for one wrote a
+/// third Account's Credential into the Profile the Run is working in — which
+/// superseded the copy that Profile held, logged that session out mid-task, and
+/// left the registry naming an Account the machine was not on.
+///
+/// The Run-side half of the same rule is
+/// `shared_state_is_read_from_the_default_profile_even_inside_another_run`.
+#[test]
+fn a_switch_typed_inside_a_run_lands_on_the_default_profile_rather_than_the_runs() {
+    let inside_a_run =
+        perch::registry::profile_dir_for(&machine_with_three_accounts(), SECOND_EMAIL)
+            .expect("home is known");
+    let host = machine_with_three_accounts()
+        .with_env("CLAUDE_CONFIG_DIR", &inside_a_run.to_string_lossy());
+
+    run_switch(&host, THIRD_EMAIL).0.expect("the Switch lands");
+
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(THIRD_CREDENTIAL),
+        "the live Credential is the one every client falls back to"
+    );
+    assert_eq!(
+        credential_of(&host, SECOND_EMAIL).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "the Profile the Run is working in still holds its own Account's Credential"
+    );
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(CREDENTIAL),
+        "and the outgoing Account was Captured back into its own Profile"
+    );
+}
+
+/// The other half, as the Run path already states it: a configuration directory
+/// somebody deliberately moved is where the live Credential is, and a Switch
+/// writes it there. Only a Profile is disqualified, because only a Profile is
+/// somewhere Perch itself pointed the variable.
+#[test]
+fn a_configuration_directory_that_is_not_a_profile_is_where_a_switch_lands() {
+    let moved = Path::new("/Users/someone/elsewhere");
+    let host = machine_with_two_accounts().with_env("CLAUDE_CONFIG_DIR", &moved.to_string_lossy());
+
+    run_switch(&host, SECOND_EMAIL).0.expect("the Switch lands");
+
+    let store = probe::store_for_profile(&host, moved).expect("USER is set");
+    assert_eq!(
+        perch::credentials::read(&host, &store)
+            .expect("the store could be consulted")
+            .map(|held| held.credential)
+            .as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "the directory they moved their configuration to is the Default Profile"
+    );
+}

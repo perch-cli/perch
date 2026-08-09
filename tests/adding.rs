@@ -670,6 +670,41 @@ fn a_login_under_a_differently_capitalised_address_is_the_account_perch_holds() 
     assert_eq!(registry_of(&host).accounts.len(), 1);
 }
 
+/// And the same for an address whose capitalisation is only a capitalisation
+/// outside ASCII. The collision is found by `same_profile`, which compares
+/// slugs and lowercases over the whole of Unicode; whether it is *one Account*
+/// was asked in ASCII, so these were one Profile and two Accounts. The refusal
+/// then withheld `perch relogin` and advised logging in "under an address that
+/// does not flatten to the same name" — which no address satisfies, because the
+/// two are the same address.
+#[test]
+fn a_login_under_an_accented_spelling_is_the_account_perch_holds_too() {
+    let accented = "café@example.com";
+    let shouted = "CAFÉ@example.com";
+    // The Account Perch adopts is the lower-case spelling; the login it is then
+    // offered is the upper-case one.
+    let host = machine_with_claude_code()
+        .with_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, CREDENTIAL)
+        .with_file(
+            IDENTITY_PATH,
+            leaked(&IDENTITY_FILE.replace(EMAIL, accented)),
+        )
+        .with_login(login_producing(
+            CREDENTIAL,
+            leaked(&IDENTITY_FILE.replace(EMAIL, shouted)),
+        ));
+
+    let (result, _) = run_add(&host, no_group());
+
+    let error = result.expect_err("one Account cannot have two entries");
+    assert_eq!(error.exit_code(), EXIT_CONFLICT);
+    assert!(
+        error.to_string().contains("perch relogin"),
+        "the way back is the repair, not an address that does not exist: {error}"
+    );
+    assert_eq!(registry_of(&host).accounts.len(), 1);
+}
+
 /// Ctrl-C during a login kills Perch without unwinding, and "quit Claude Code
 /// when the login is done" is the documented flow — so a login being abandoned
 /// is expected rather than exceptional. What it leaves behind is a complete,

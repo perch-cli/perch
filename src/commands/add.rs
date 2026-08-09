@@ -174,7 +174,14 @@ fn refuse_an_account_perch_already_holds(
         return Ok(());
     };
 
-    let same_account = existing.email().eq_ignore_ascii_case(&identity.email);
+    // Over the whole of Unicode, because the collision that got us here was
+    // decided over the whole of Unicode: `same_profile` compares slugs, and
+    // `slug` lowercases before it does. Asked in ASCII, `café@example.com` and
+    // `CAFÉ@example.com` were one Profile and two Accounts — so the refusal
+    // withheld `perch relogin` and advised logging in "under an address that
+    // does not flatten to the same name", which no address satisfies. Same
+    // divergence, and same answer, as the one `target` already fixed for names.
+    let same_account = registry::same_name(existing.email(), &identity.email);
     let why = if same_account {
         "two Profiles for one Account would fight over it".to_string()
     } else {

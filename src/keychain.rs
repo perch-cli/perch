@@ -160,8 +160,19 @@ pub fn hex_decode(text: &str) -> Option<Vec<u8>> {
 
 /// `security -w` prints hex when the stored data is not printable, so a reply
 /// that is entirely hex digits is decoded before it is believed.
+///
+/// Exactly one newline is taken off, because exactly one is `security`'s: the
+/// rest are the Credential's. `trim_end_matches` took them all, and a Credential
+/// ending in a newline is ordinary — `~/.claude/.credentials.json` restored from
+/// a backup or touched by an editor has one. The write is `-X`, so the bytes
+/// stored are exact; only the read was lossy, which made `write_and_read_back`
+/// compare a Credential against itself minus a byte and conclude the keychain
+/// could not be written to. It then deleted the item it had just written and
+/// fell back to the plaintext store, saying so in a note that named the wrong
+/// cause — and every later write repeated it, so on macOS that Account's
+/// Credential stayed in a file on disk for good.
 pub fn decode_password_output(stdout: &str) -> String {
-    let trimmed = stdout.trim_end_matches('\n');
+    let trimmed = stdout.strip_suffix('\n').unwrap_or(stdout);
     match hex_decode(trimmed) {
         Some(bytes) => match String::from_utf8(bytes) {
             Ok(text) => text,
@@ -181,6 +192,40 @@ mod tests {
         let hex = hex_encode(secret.as_bytes());
         assert!(hex.bytes().all(|b| b.is_ascii_hexdigit()));
         assert_eq!(hex_decode(&hex).unwrap(), secret.as_bytes());
+    }
+
+    /// One newline is `security`'s and the rest are the Credential's. A
+    /// Credential ending in one is ordinary — a `.credentials.json` restored
+    /// from a backup or touched by an editor has one — and taking it off made
+    /// `write_and_read_back` compare a Credential against itself minus a byte,
+    /// conclude the keychain could not be written to, delete the item it had
+    /// just written, and fall back to storing it in plaintext for good.
+    #[test]
+    fn only_the_newline_security_added_is_taken_off_a_reply() {
+        let credential = "{\"claudeAiOauth\":{}}";
+        assert_eq!(
+            decode_password_output(&format!("{credential}\n")),
+            credential
+        );
+        assert_eq!(
+            decode_password_output(&format!("{credential}\n\n")),
+            format!("{credential}\n"),
+            "a Credential that ends in a newline still does when it is read back"
+        );
+        assert_eq!(
+            decode_password_output(credential),
+            credential,
+            "and a reply with no newline at all is left alone"
+        );
+    }
+
+    /// The same for the hex form, which is what `security -w` answers with when
+    /// the stored bytes are not printable.
+    #[test]
+    fn a_hex_reply_carries_its_trailing_newline_through_the_decode() {
+        let credential = "{\"a\":1}\n";
+        let encoded = hex_encode(credential.as_bytes());
+        assert_eq!(decode_password_output(&format!("{encoded}\n")), credential);
     }
 
     /// The `-i` line for an ordinary write, which every test below is about.

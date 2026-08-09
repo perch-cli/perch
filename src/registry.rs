@@ -410,6 +410,15 @@ impl NameKind {
             NameKind::Group => "Group names",
         }
     }
+
+    /// The singular with its article, for a refusal that names one of them
+    /// rather than stating the rule: "the registry holds an Alias `…`".
+    pub fn article(self) -> &'static str {
+        match self {
+            NameKind::Alias => "an Alias",
+            NameKind::Group => "a Group",
+        }
+    }
 }
 
 /// Whether two names the user chose are the same name.
@@ -851,6 +860,31 @@ pub fn profiles_dir(host: &dyn Host) -> Result<PathBuf> {
     Ok(perch_home(host)?.join("profiles"))
 }
 
+/// The Default Profile, as everything that reads or writes the live Credential
+/// means it: the directory Claude Code falls back to, and never a Profile.
+///
+/// `CLAUDE_CONFIG_DIR` is honoured, because somebody who moved their
+/// configuration directory moved the live Credential along with it — but never
+/// when it names a Profile, and pointing it at one is exactly what a Run does.
+/// The client a Run launches passes that variable on to everything it starts,
+/// so a `perch` typed inside one is told a Profile is the default. It is not.
+///
+/// Here rather than in [`crate::probe`] because the question is which
+/// directories are Perch's own, which is this module's to answer, and one place
+/// because every surface that got this wrong got it wrong the same way. A
+/// Switch taking `CLAUDE_CONFIG_DIR` at its word inside a Run wrote a third
+/// Account's Credential into the running Account's Profile, superseded the copy
+/// it had, and left the registry naming an Account the machine was not on — the
+/// disagreement between Credential and Identity that ADR 0006 exists to keep
+/// impossible, arriving by way of the environment.
+pub fn the_default_profile(host: &dyn Host) -> Result<crate::probe::Store> {
+    let told = crate::probe::default_store(host)?;
+    if told.config_dir.starts_with(profiles_dir(host)?) {
+        return crate::probe::default_profile_store(host);
+    }
+    Ok(told)
+}
+
 /// The Profile directory for an Account. The email is slugged because the path
 /// is hashed into a keychain service name and has to be stable and printable.
 ///
@@ -971,15 +1005,13 @@ pub fn lock_spec(host: &dyn Host) -> Result<LockSpec> {
 /// and the commands that spend it take this afterwards, against a registry read
 /// fresh.
 ///
-/// Perch's home is created here, and privately, because on a fresh machine this
-/// is the first thing to need it: the lock artifact lives inside it, so a
-/// `create_dir_all` on the way to `mkdir` would otherwise be what brings the
-/// directory into being — at whatever the umask happens to be, for a directory
-/// that is about to hold Credentials.
+/// Perch's home comes into being on the way to the lock, and privately, because
+/// on a fresh machine this is the first thing to need it. That is
+/// [`lock::take_all`]'s doing rather than this function's: it creates every
+/// lock's parent privately, and this lock's parent *is* Perch's home. A second
+/// copy here was the same call with the same message, guarding the case the
+/// first one already covers.
 pub fn lock(host: &dyn Host) -> Result<lock::Held<'_>> {
-    let home = perch_home(host)?;
-    host.create_private_dir_all(&home)
-        .map_err(|err| PerchError::Other(format!("could not create {}: {err}", home.display())))?;
     lock::take_all(host, vec![lock_spec(host)?])
 }
 
@@ -1043,16 +1075,30 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
             detail: err.to_string(),
         })?;
 
-    // Group configuration is checked on the way in rather than where it is
-    // read, because the thing that reads it is a loop nobody is watching: a
-    // value that means nothing would otherwise sit in the file until the
-    // watcher next went round and surprise somebody by acting on it.
-    //
-    // Checked here means every command meets it, including `perch config set`
-    // — the one that would otherwise be the repair. So the refusal has to name
-    // the file: a value only a hand edit can produce is a value only a hand
-    // edit can take back out, and a range with nowhere to apply it is a dead
-    // end rather than an instruction.
+    validate(&registry, path)?;
+
+    Ok(Some(with_every_claimed_group_declared(registry)))
+}
+
+/// Everything a registry has to be true of before any command acts on it.
+///
+/// Checked on the way in rather than where each value is read, because the
+/// thing that reads them is a loop nobody is watching: a value that means
+/// nothing would otherwise sit in the file until the watcher next went round
+/// and surprise somebody by acting on it.
+///
+/// Checked here means every command meets it, including `perch config set` —
+/// the one that would otherwise be the repair. So the refusals name the file: a
+/// value only a hand edit can produce is a value only a hand edit can take back
+/// out, and a range with nowhere to apply it is a dead end rather than an
+/// instruction.
+///
+/// Public because an Import writes a registry without reading one first, and
+/// was running a narrower check of its own — so a file `perch import` accepted
+/// could be one every later command refused to read, which leaves a machine
+/// with no working command on it and no `perch purge` either. One function, so
+/// what an Import will accept and what a load will accept cannot differ.
+pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
     for (name, config) in &registry.groups {
         config.validate(name).map_err(|refusal| {
             refusal.with_note(&format!(
@@ -1063,54 +1109,75 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
         })?;
     }
 
-    // The same, for the Group *names* an Account claims, and for the same
-    // reason. `with_every_claimed_group_declared` below repairs a hand-edited
-    // registry by declaring what it finds — and a hand-edited registry is
-    // exactly where a name nothing would have accepted comes from. Declared by
-    // a raw insert, a claim of `none` became a Group `move_account` can never
-    // move an Account into, because `means_no_group` is asked first; a claim of
-    // `my work` became one whose `perch config get` line cannot be typed back
-    // into `perch config set`, which is the round-trip whitespace is refused to
+    // The Group *names* an Account claims, for the same reason.
+    // `with_every_claimed_group_declared` repairs a hand-edited registry by
+    // declaring what it finds — and a hand-edited registry is exactly where a
+    // name nothing would have accepted comes from. Declared by a raw insert, a
+    // claim of `none` became a Group `move_account` can never move an Account
+    // into, because `means_no_group` is asked first; a claim of `my work`
+    // became one whose `perch config get` line cannot be typed back into
+    // `perch config set`, which is the round trip whitespace is refused to
     // protect; and a claim colliding with an Alias planted the namespace
     // collision `refuse_taken_names` exists to make impossible, after which
     // `target::matched` resolves the name to the Alias and the Group is
     // unreachable.
-    for name in registry
+    //
+    // Declared Groups are walked as well as claimed ones, and Aliases with
+    // them. Only claims were checked, which left the two other halves of the
+    // same namespace to be hand-edited freely: a declared Group nobody is in
+    // never reached the loop at all, so `my work` sat in the file printing a
+    // `perch config get` line that cannot be typed back in. And the `aliases`
+    // map was never looked at, so an Alias keyed by an email address resolved
+    // ahead of the Account of that name — the Target with two answers the `@`
+    // rule exists to make impossible.
+    let claimed = registry
         .accounts
         .iter()
-        .filter_map(|account| account.group.as_deref())
-    {
-        refuse_a_claim_nothing_would_have_accepted(&registry, name, path)?;
+        .filter_map(|account| account.group.as_deref());
+    for name in claimed.chain(registry.groups.keys().map(String::as_str)) {
+        refuse_a_name_nothing_would_have_accepted(registry, NameKind::Group, name, path)?;
     }
-
-    Ok(Some(with_every_claimed_group_declared(registry)))
+    for name in registry.aliases.keys() {
+        refuse_a_name_nothing_would_have_accepted(registry, NameKind::Alias, name, path)?;
+    }
+    Ok(())
 }
 
-/// Refuses a Group name an Account claims that `declare_group` would not have
-/// allowed in the first place.
+/// Refuses a name in the registry that `declare_group` or `perch alias` would
+/// not have allowed in the first place.
 ///
 /// Named rather than repaired, for the reason the configuration check above
 /// gives: a value only a hand edit can produce is a value only a hand edit can
 /// take back out, and every command reads this file — including the ones that
 /// would otherwise be the repair.
-fn refuse_a_claim_nothing_would_have_accepted(
+///
+/// One function for both halves of the namespace, because the namespace is
+/// shared and what makes a name unacceptable is the same list either way. Two
+/// copies is how one of them comes to allow what the other refuses, which is
+/// the state this exists to find.
+///
+/// The collision between the two halves is asked from the Group side only. It
+/// is one fact about a pair, and every Group is walked — declared and claimed
+/// alike — so asking again from the Alias side would be a branch nothing could
+/// reach.
+fn refuse_a_name_nothing_would_have_accepted(
     registry: &Registry,
+    kind: NameKind,
     name: &str,
     path: &Path,
 ) -> Result<()> {
-    let refused = if means_no_group(name) {
+    let refused = if kind == NameKind::Group && means_no_group(name) {
         Some(format!(
             "`{name}` means no Group at all, so an Account cannot be in it"
         ))
     } else {
-        validate_name(NameKind::Group, name)
+        validate_name(kind, name)
             .err()
             .map(|refusal| refusal.to_string())
             .or_else(|| {
-                registry
-                    .aliases
-                    .keys()
-                    .find(|alias| same_name(alias, name))
+                (kind == NameKind::Group)
+                    .then(|| registry.aliases.keys().find(|alias| same_name(alias, name)))
+                    .flatten()
                     .map(|alias| {
                         format!(
                             "`{alias}` is already an Alias, and Aliases and Group \
@@ -1123,10 +1190,11 @@ fn refuse_a_claim_nothing_would_have_accepted(
     match refused {
         None => Ok(()),
         Some(why) => Err(PerchError::Invalid(format!(
-            "An Account claims the Group `{name}`, which is not a Group name \
-             Perch would have accepted: {why}.\n\
+            "The registry holds {} `{name}`, which is not a name Perch would \
+             have accepted: {why}.\n\
              It is in {}, and every Perch command reads that file — including \
              the ones that would set it. Edit the value there.",
+            kind.article(),
             path.display(),
         ))),
     }
@@ -1933,6 +2001,47 @@ mod tests {
                 said.contains("registry.json"),
                 "and the refusal names the file, because every command reads it \
                  — including the ones that would set this: {said}"
+            );
+        }
+    }
+
+    /// The other two halves of the same namespace, which only a *claim* being
+    /// walked left unguarded. A declared Group nobody is in was never looked at,
+    /// so `my work` sat in the file printing a `perch config get` line that
+    /// cannot be typed back into `perch config set` — the round trip whitespace
+    /// is refused to protect. And the `aliases` map was never looked at at all,
+    /// so an Alias keyed by an email address resolved ahead of the Account of
+    /// that name: `perch switch someone@example.com` landing on somebody else,
+    /// which is the Target with two answers the `@` rule exists to prevent.
+    #[test]
+    fn a_declared_group_or_an_alias_nothing_would_have_accepted_is_named_too() {
+        let holdings = [
+            (r#""groups":{"my work":{}}"#, "has a space in it"),
+            (r#""groups":{"none":{}}"#, "means no Group"),
+            (
+                r#""aliases":{"someone@example.com":"other@example.com"}"#,
+                "looks like an email address",
+            ),
+            (
+                r#""groups":{"work":{}},"aliases":{"work":"someone@example.com"}"#,
+                "share one namespace",
+            ),
+        ];
+
+        for (held, expected) in holdings {
+            let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+            let path = registry_path(&host).unwrap();
+            host.set_file(&path, &format!(r#"{{"version":1,"accounts":[],{held}}}"#));
+
+            let refused = load(&host).expect_err("that is not a name Perch would have given");
+            let said = refused.to_string();
+            assert!(
+                said.contains(expected),
+                "`{held}` should be refused for `{expected}`: {said}"
+            );
+            assert!(
+                said.contains("registry.json"),
+                "and the refusal names the file to edit: {said}"
             );
         }
     }
