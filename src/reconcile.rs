@@ -182,6 +182,24 @@ fn establish(host: &dyn Host, target: &Path, at: &Path) -> Result<()> {
 /// most likely. It is refused rather than deleted, because deleting the thing
 /// you cannot identify is how somebody loses work, and the refusal names the
 /// path so the fix is one command.
+///
+/// So Windows deletes a file it cannot identify, where every other platform
+/// refuses to — which reads as the exception that should be closed, and cannot
+/// be. The obvious guard is that a hard link is a second name for one file and
+/// therefore shares its modification time, so a file whose mtime is anything
+/// else was not made here. But the file this branch exists to delete is
+/// *precisely* that one: an editor that writes beside the target and renames it
+/// into place leaves the Default Profile holding a new file while the Profile
+/// still names the old one, and repairing that divergence is the whole reason a
+/// share is re-established before every Run. Every stale hard link Perch made
+/// fails the test, so the guard would refuse exactly the case it was added to
+/// protect and leave the divergence in place.
+///
+/// Nothing weaker works either, because nothing about a second name says it is
+/// one. What would work is Perch recording which entries it linked, which is a
+/// file of its own in the Profile with its own ways to be wrong — a record lost
+/// refuses shares Perch did make, and a record kept past a removal deletes a
+/// file somebody put there afterwards. It has not been judged worth that.
 fn in_the_way(host: &dyn Host, target: &Path, at: &Path) -> Result<()> {
     if host.platform() == Platform::Windows && host.is_file(at) && host.is_file(target) {
         host.remove_file(at)
