@@ -347,6 +347,41 @@ pub fn nothing_here(scope: &Scope) -> String {
     }
 }
 
+/// One Account as a script reads it, wherever it is being read.
+///
+/// One shape rather than two. `perch status --json` described its Account under
+/// `active` and `perch list --json` described one under `accounts`, and the two
+/// key sets did not even overlap: `status` carried `account_uuid` and neither
+/// `alias`, `group` nor `enabled`, and the listing carried the reverse. So a
+/// script that asked "which Group is the Account I am on in?" had to run a
+/// second command to find out, and one written against either could not be
+/// pointed at the other.
+///
+/// What each *document* answers still differs, and that is the part that should
+/// — `--group` asks about a set and `perch status` about one Account (see
+/// [`render_json`]). It is the Account itself that has no business being two
+/// things.
+pub fn document(
+    host: &dyn Host,
+    registry: &Registry,
+    account: &Account,
+    now: DateTime<Utc>,
+) -> Result<serde_json::Value> {
+    Ok(json!({
+        "email": account.email(),
+        "account_uuid": account.identity.account_uuid,
+        "alias": registry.alias_of(account.email()),
+        "group": account.group,
+        "enabled": account.enabled,
+        "quarantined": Quarantine::document(account.quarantine),
+        "active": registry.active.as_deref() == Some(account.email()),
+        "organization": account.identity.organization_name,
+        "plan": account.plan,
+        "profile_dir": account.profile_dir(host)?,
+        "utilization": utilization::document(account, now),
+    }))
+}
+
 fn render_json(
     host: &dyn Host,
     out: &mut dyn Write,
@@ -358,20 +393,7 @@ fn render_json(
 ) -> Result<()> {
     let listed: Vec<serde_json::Value> = accounts
         .iter()
-        .map(|account| {
-            Ok(json!({
-                "email": account.email(),
-                "alias": registry.alias_of(account.email()),
-                "group": account.group,
-                "enabled": account.enabled,
-                "quarantined": Quarantine::document(account.quarantine),
-                "active": registry.active.as_deref() == Some(account.email()),
-                "organization": account.identity.organization_name,
-                "plan": account.plan,
-                "profile_dir": account.profile_dir(host)?,
-                "utilization": utilization::document(account, now),
-            }))
-        })
+        .map(|account| document(host, registry, account, now))
         .collect::<Result<_>>()?;
 
     let document = json!({

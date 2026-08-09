@@ -22,7 +22,7 @@ use crate::commands::say_json;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::observe::{self, Report};
-use crate::registry::{self, Account, Quarantine, Registry};
+use crate::registry::{self, Account, Registry};
 use crate::utilization;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -76,7 +76,7 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
                 .account(&active)
                 .expect("the active Account is one Perch holds");
             if args.json {
-                render_json(host, out, account, now, &report)
+                render_json(host, out, &registry, account, now, &report)
             } else {
                 render_human(out, account, now, &report)
             }
@@ -164,22 +164,28 @@ fn render_human(
     utilization::write_figures(out, account, now)
 }
 
+/// What a script reads about the Account you are on.
+///
+/// `active` is the Account object every listing uses ([`list::document`]) rather
+/// than a shape of its own: the two used to carry key sets that did not overlap,
+/// so a script asking which Group the active Account is in had to run a second
+/// command, and one written against `perch list --json` could not be pointed at
+/// this. The Account is the same Account; only the question the document answers
+/// differs, and `active` against `accounts` is what says which was asked.
+///
+/// `utilization` stays at the top level as well as inside `active`, because it
+/// is what this command is *for*: `perch status --json | jq .utilization` is the
+/// line in somebody's shell prompt.
 fn render_json(
     host: &dyn Host,
     out: &mut dyn Write,
+    registry: &Registry,
     account: &Account,
     now: DateTime<Utc>,
     report: &Report,
 ) -> Result<()> {
     let document = json!({
-        "active": {
-            "email": account.email(),
-            "account_uuid": account.identity.account_uuid,
-            "organization": account.identity.organization_name,
-            "plan": account.plan,
-            "profile_dir": account.profile_dir(host)?,
-            "quarantined": Quarantine::document(account.quarantine),
-        },
+        "active": list::document(host, registry, account, now)?,
         "utilization": utilization::document(account, now),
         "refresh": report.document(),
     });

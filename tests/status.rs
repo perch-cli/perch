@@ -125,6 +125,51 @@ fn json_carries_an_observation_time_on_every_utilization_figure() {
     assert_eq!(windows[0]["observed_seconds_ago"], 180);
 }
 
+/// One Account is one shape, whichever command is describing it.
+///
+/// `status --json` described its Account with `account_uuid` and neither
+/// `alias`, `group` nor `enabled`; `list --json` described one with those three
+/// and no `account_uuid`. Two non-overlapping key sets for the same thing, so a
+/// script asking which Group the Account it is on belongs to had to run a second
+/// command, and one written against either could not be pointed at the other.
+///
+/// What each *document* answers still differs — one Account under `active`, a
+/// set under `accounts` — and that is the difference worth having.
+#[test]
+fn the_account_status_describes_has_the_same_keys_the_listing_gives_one() {
+    let host = adopted_machine(OBSERVED_THREE_MINUTES_AGO);
+
+    let (_, from_status) = run_status(&host, true);
+    let (_, from_list) = run_list(&host, true);
+
+    let status: serde_json::Value = serde_json::from_str(&from_status).expect("valid JSON");
+    let list: serde_json::Value = serde_json::from_str(&from_list).expect("valid JSON");
+    let active = &status["active"];
+    let listed = &list["accounts"][0];
+
+    assert_eq!(active["email"], EMAIL, "the same Account: {status}");
+    let keys = |value: &serde_json::Value| -> Vec<String> {
+        let mut named: Vec<String> = value
+            .as_object()
+            .expect("an Account is an object")
+            .keys()
+            .cloned()
+            .collect();
+        named.sort();
+        named
+    };
+    assert_eq!(keys(active), keys(listed), "{status}\n{list}");
+    assert_eq!(active, listed, "and the same answers, key for key");
+    assert_eq!(
+        active["account_uuid"], "account-uuid-1",
+        "with what only `status` used to carry: {active}"
+    );
+    assert_eq!(
+        active["enabled"], true,
+        "and what only the listing used to: {active}"
+    );
+}
+
 #[test]
 fn json_says_a_figure_has_never_been_observed_rather_than_reporting_zero() {
     let host = adopted_machine("");
