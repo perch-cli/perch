@@ -281,10 +281,12 @@ fn says_revoked(body: &str) -> bool {
 
 /// The Quota Windows a usage reply describes.
 ///
-/// Every value in the reply that carries a utilization is one, whatever it is
+/// Every value in the reply that carries a `utilization` is one, whatever it is
 /// called: a five-hour window, a seven-day window and one per model are what
 /// there are today, and a per-model window added tomorrow is recorded without
-/// Perch having to learn its name first.
+/// Perch having to learn its name first. What makes something a window is the
+/// key rather than the type — a field beside them that happens to be an object
+/// is not one, and Perch is not entitled to an opinion about it.
 fn windows_in(document: &Value) -> std::result::Result<QuotaWindows, String> {
     let Some(fields) = document.as_object() else {
         return Ok(QuotaWindows::new());
@@ -301,6 +303,24 @@ fn windows_in(document: &Value) -> std::result::Result<QuotaWindows, String> {
             continue;
         };
 
+        // An object with no `utilization` at all and a name that does not say a
+        // period is not a window either. Read as one, every object-valued field
+        // Anthropic ever adds beside the windows — an `organization` block, a
+        // `limits` block — failed the whole Refresh for every Account in one
+        // pass, with a message calling a thing that is not a window a Quota
+        // Window, and no way round it from this side.
+        //
+        // A name that *does* say a period is a window that has stopped saying
+        // how full it is, which is the drift below rather than a field to pass
+        // over — being generous there would drop the fullest window Perch has
+        // out of the picture silently, which is the one thing this must not do.
+        let Some(claimed) = window.get("utilization") else {
+            if named_by_a_period(name) {
+                return Err(drifted(name));
+            }
+            continue;
+        };
+
         // One that *is* shaped like a window and will not say how full it is is
         // drift, and refusing is the only safe answer. Dropped silently it
         // becomes a window nothing would ever rank on: a reply where the
@@ -309,11 +329,12 @@ fn windows_in(document: &Value) -> std::result::Result<QuotaWindows, String> {
         // five-hour window is 98% full — precisely the "switch you onto an
         // account about to die" ADR 0012 exists to prevent, arriving through a
         // type change rather than a name change.
-        let Some(used_percent) = window.get("utilization").and_then(Value::as_f64) else {
-            return Err(format!(
-                "the usage endpoint named the Quota Window `{name}` without a \
-                 numeric `utilization`, so how full it is could not be read"
-            ));
+        //
+        // A whole-reply rename of `utilization` still degrades safely: every
+        // window drops out here, and the caller refuses an answer describing no
+        // windows at all rather than reading it as an Account with room.
+        let Some(used_percent) = claimed.as_f64() else {
+            return Err(drifted(name));
         };
         windows.push(window_from(name, used_percent, value));
     }
@@ -324,6 +345,25 @@ fn windows_in(document: &Value) -> std::result::Result<QuotaWindows, String> {
             .then_with(|| one.window.cmp(&other.window))
     });
     Ok(windows)
+}
+
+/// Whether a key names a Quota Window by the period it meters, which is how
+/// every one Anthropic has named so far is named: `five_hour`, `seven_day`,
+/// `seven_day_opus`.
+///
+/// Only ever asked of something that carries no `utilization`, and only to
+/// decide whether that is drift or a field beside the windows. A window
+/// Anthropic adds under a period Perch has never seen is still recorded — it
+/// says how full it is, and that is what makes it a window.
+fn named_by_a_period(key: &str) -> bool {
+    matches!(key.split('_').next(), Some("five" | "seven"))
+}
+
+fn drifted(name: &str) -> String {
+    format!(
+        "the usage endpoint named the Quota Window `{name}` without a numeric \
+         `utilization`, so how full it is could not be read"
+    )
 }
 
 fn window_from(name: &str, used_percent: f64, value: &Value) -> WindowUtilization {
@@ -467,6 +507,48 @@ mod tests {
             "it names the window: {refused}"
         );
         assert!(refused.contains("utilization"), "{refused}");
+    }
+
+    /// What makes something a Quota Window is the `utilization` key, not the
+    /// fact that it is an object. A reply that grows an object-valued field
+    /// beside the windows — an `organization` block, a `limits` block — is
+    /// Anthropic adding something Perch is not entitled to an opinion about,
+    /// and reading it as a window failed the whole Refresh for every Account in
+    /// one pass, in a message calling it a Quota Window, with nothing the user
+    /// could do about it.
+    #[test]
+    fn a_field_beside_the_windows_is_not_one_however_object_shaped_it_is() {
+        let document: Value = serde_json::from_str(
+            r#"{
+              "five_hour": {"utilization": 42},
+              "organization": {"uuid": "org-1", "name": "Overflow Ltd"},
+              "session": "not a window"
+            }"#,
+        )
+        .unwrap();
+
+        let windows = windows_in(&document).expect("the one window says how full it is");
+
+        let named: Vec<&str> = windows.iter().map(|w| w.window.as_str()).collect();
+        assert_eq!(named, vec!["5-hour"]);
+    }
+
+    /// The line between the two, which is the name. Something carrying no
+    /// `utilization` is a field to pass over only where its name does not say a
+    /// period — one that does is a window that has stopped saying how full it
+    /// is, and passing over *that* would drop the fullest window Perch has out
+    /// of the picture silently.
+    #[test]
+    fn a_window_that_stopped_saying_anything_at_all_is_still_drift() {
+        let document: Value =
+            serde_json::from_str(r#"{"five_hour": {}, "seven_day": {"utilization": 10}}"#).unwrap();
+
+        let refused = windows_in(&document).expect_err("a window said nothing");
+
+        assert!(
+            refused.contains("five_hour"),
+            "it names the window: {refused}"
+        );
     }
 
     #[test]
