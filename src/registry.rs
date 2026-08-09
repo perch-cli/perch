@@ -1005,15 +1005,13 @@ pub fn lock_spec(host: &dyn Host) -> Result<LockSpec> {
 /// and the commands that spend it take this afterwards, against a registry read
 /// fresh.
 ///
-/// Perch's home is created here, and privately, because on a fresh machine this
-/// is the first thing to need it: the lock artifact lives inside it, so a
-/// `create_dir_all` on the way to `mkdir` would otherwise be what brings the
-/// directory into being — at whatever the umask happens to be, for a directory
-/// that is about to hold Credentials.
+/// Perch's home comes into being on the way to the lock, and privately, because
+/// on a fresh machine this is the first thing to need it. That is
+/// [`lock::take_all`]'s doing rather than this function's: it creates every
+/// lock's parent privately, and this lock's parent *is* Perch's home. A second
+/// copy here was the same call with the same message, guarding the case the
+/// first one already covers.
 pub fn lock(host: &dyn Host) -> Result<lock::Held<'_>> {
-    let home = perch_home(host)?;
-    host.create_private_dir_all(&home)
-        .map_err(|err| PerchError::Other(format!("could not create {}: {err}", home.display())))?;
     lock::take_all(host, vec![lock_spec(host)?])
 }
 

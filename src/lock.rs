@@ -241,13 +241,13 @@ pub fn take_all(host: &dyn Host, locks: Vec<LockSpec>) -> Result<Held<'_>> {
         //
         // Privately, because every parent a lock has is a directory that holds
         // or is about to hold a Credential — a Profile, or Perch's own home.
-        // `registry::lock` says exactly this and creates its own parent to say
-        // it, which left this instance as the one that could still bring a
-        // directory into being at whatever the umask happens to be:
+        // Every lock's parent, which is the whole of it: a Profile for Claude
+        // Code's three, and Perch's own home for the registry's.
         // `observe::renew_under_the_lock` takes a Profile's lock off a purely
-        // derived path, so a `perch status --refresh` was enough to create the
-        // Profile of an Account whose directory had gone, at 0755, ready for
-        // the next `perch relogin` to write a plaintext Credential into.
+        // derived path, so before this a `perch status --refresh` was enough to
+        // create the Profile of an Account whose directory had gone, at 0755,
+        // ready for the next `perch relogin` to write a plaintext Credential
+        // into.
         if let Some(parent) = lock.dir.parent() {
             host.create_private_dir_all(parent).map_err(|err| {
                 PerchError::Other(format!("could not create {}: {err}", parent.display()))
