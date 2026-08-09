@@ -34,7 +34,7 @@ pub const CURRENT_VERSION: u32 = 1;
 
 /// An Export, unsealed: what one `age` file holds before it is encrypted and
 /// after it is decrypted again.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Export {
     pub version: u32,
     /// The whole registry — every Account, its Alias, its Group, whether
@@ -47,7 +47,14 @@ pub struct Export {
     /// to. An Account whose stores held nothing is absent from here and still
     /// present in the registry above — which is exactly how a Quarantined
     /// Account travels, reason and all.
-    #[serde(default)]
+    ///
+    /// Required, unlike the two maps either side of it. An empty map is a
+    /// meaningful Export — every Account Quarantined, which is a thing `gather`
+    /// can honestly write — and a *missing* key is a document that never said
+    /// anything about Credentials at all. Defaulted, it unsealed happily,
+    /// `place` put nothing anywhere, and the Import reported every Account
+    /// "restored without one" and exited 0: the partial restore ADR 0014 exists
+    /// to prevent, wearing a success's clothes.
     pub credentials: BTreeMap<String, String>,
     /// Each Account's own `.claude.json`, by the address of the Account it
     /// belongs to.
@@ -62,6 +69,29 @@ pub struct Export {
     /// one meets the onboarding dialog on every single Run (ADR 0003).
     #[serde(default)]
     pub identity_files: BTreeMap<String, String>,
+}
+
+impl std::fmt::Debug for Export {
+    /// Written by hand for the reason [`crate::probe::Credential`] and
+    /// [`crate::credentials::StoredCredential`] are: a derived one would print
+    /// every field, and this is the one shape in Perch carrying every Credential
+    /// on the machine at once. `Export` derives `PartialEq` too, so a regressed
+    /// `assert_eq!` in the round-trip test would have printed the lot — and a
+    /// formatting specifier is all that stands between any of these values and a
+    /// log.
+    ///
+    /// Counts and addresses, never secrets. Which Accounts an Export holds a
+    /// Credential for is exactly the question somebody debugging one has, and it
+    /// is answerable without rendering a single token.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Export")
+            .field("version", &self.version)
+            .field("registry", &self.registry)
+            .field("credentials for", &self.credentials.keys())
+            .field("identity files for", &self.identity_files.keys())
+            .finish()
+    }
 }
 
 /// Reads everything Perch holds: the registry it was handed, and the Credential
@@ -329,6 +359,61 @@ mod tests {
             "nothing in the file is readable without the passphrase"
         );
         assert_eq!(unseal(&sealed, PASSPHRASE).expect("it opens"), export);
+    }
+
+    /// The one shape in Perch carrying every Credential on the machine at once,
+    /// and it derives `PartialEq` — so the `assert_eq!` above would have printed
+    /// the lot the day it regressed. `Credential` and `StoredCredential` both
+    /// write `Debug` by hand for exactly this reason: a formatting specifier is
+    /// all that stands between any of these values and a log.
+    #[test]
+    fn what_an_export_holds_is_never_rendered_by_debugging_it() {
+        let rendered = format!("{:?}", an_export());
+
+        assert!(
+            !rendered.contains("sk-ant-ort01-test") && !rendered.contains("claudeAiOauth"),
+            "no Credential, and nothing of one: {rendered}"
+        );
+        assert!(
+            rendered.contains("someone@example.com"),
+            "which Accounts it holds one for is the question somebody debugging \
+             an Export actually has: {rendered}"
+        );
+    }
+
+    /// A document that says nothing about Credentials is not an Export of a
+    /// machine whose Accounts were all Quarantined — that one says so, with an
+    /// empty map. Read as the same thing, it unsealed happily, placed nothing,
+    /// and reported every Account restored without a Credential on the way to
+    /// exit 0: the partial restore the file exists to prevent, wearing a
+    /// success's clothes, on the day the machine it would have restored is gone.
+    #[test]
+    fn a_document_that_says_nothing_about_credentials_is_not_an_export() {
+        let mut document = serde_json::to_value(an_export()).expect("it serializes");
+        document
+            .as_object_mut()
+            .expect("an Export is an object")
+            .remove("credentials");
+        let sealed = age::encrypt_and_armor(&recipient(PASSPHRASE), document.to_string().as_bytes())
+            .expect("it seals");
+
+        let refused = unseal(&sealed, PASSPHRASE).expect_err("it holds no Credentials");
+
+        assert!(
+            refused.to_string().contains("credentials"),
+            "and it names what is missing: {refused}"
+        );
+
+        // The neighbouring shape that *is* meaningful, and still opens.
+        let none_kept = Export {
+            credentials: BTreeMap::new(),
+            ..an_export()
+        };
+        let sealed = seal(&none_kept, PASSPHRASE).expect("it seals");
+        assert_eq!(
+            unseal(&sealed, PASSPHRASE).expect("an Export of Quarantined Accounts opens"),
+            none_kept
+        );
     }
 
     /// A forgotten passphrase means the Export is gone, and re-login is the only
