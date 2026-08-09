@@ -116,11 +116,19 @@ impl std::fmt::Debug for Fresh {
 /// Every Quota Window this access token's Account currently has.
 pub fn utilization(host: &dyn Host, access_token: &str) -> Result<QuotaWindows, Refused> {
     let document = read(host, USAGE_URL, access_token)?;
-    let windows = windows_in(&document).map_err(Refused::Unrecognised)?;
+    let mut said = Vec::new();
+    let windows = windows_in(&document, &mut said).map_err(Refused::Unrecognised)?;
     if windows.is_empty() {
         return Err(Refused::Unrecognised(
             "the usage endpoint named no Quota Window".to_string(),
         ));
+    }
+    // After the refusals, so a reply that is not going to be used says the one
+    // thing that is wrong with it rather than two. Said once, which is what
+    // `Host::note` is for: this is a remark about the shape of Anthropic's
+    // replies, and it is the same remark for every Account on the machine.
+    for remark in said {
+        host.note(&remark);
     }
     Ok(windows)
 }
@@ -287,7 +295,13 @@ fn says_revoked(body: &str) -> bool {
 /// Perch having to learn its name first. What makes something a window is the
 /// key rather than the type — a field beside them that happens to be an object
 /// is not one, and Perch is not entitled to an opinion about it.
-fn windows_in(document: &Value) -> std::result::Result<QuotaWindows, String> {
+/// `said` collects what is worth remarking on about a reply that is still
+/// usable — see [`reset_time_in`]. Refusals travel in the return value; these
+/// are the things that degrade rather than fail.
+fn windows_in(
+    document: &Value,
+    said: &mut Vec<String>,
+) -> std::result::Result<QuotaWindows, String> {
     let Some(fields) = document.as_object() else {
         return Ok(QuotaWindows::new());
     };
@@ -336,7 +350,7 @@ fn windows_in(document: &Value) -> std::result::Result<QuotaWindows, String> {
         let Some(used_percent) = claimed.as_f64() else {
             return Err(drifted(name));
         };
-        windows.push(window_from(name, used_percent, value));
+        windows.push(window_from(name, used_percent, value, said));
     }
 
     windows.sort_by(|one, other| {
@@ -366,7 +380,12 @@ fn drifted(name: &str) -> String {
     )
 }
 
-fn window_from(name: &str, used_percent: f64, value: &Value) -> WindowUtilization {
+fn window_from(
+    name: &str,
+    used_percent: f64,
+    value: &Value,
+    said: &mut Vec<String>,
+) -> WindowUtilization {
     WindowUtilization {
         window: window_name(name),
         // How full a window is, and a window cannot be less than empty or more
@@ -374,12 +393,45 @@ fn window_from(name: &str, used_percent: f64, value: &Value) -> WindowUtilizatio
         // rather than a figure, and clamping it here is what stops it becoming
         // "105% headroom" in a sentence somebody is asked to act on.
         used_percent: used_percent.clamp(0.0, 100.0),
-        resets_at: value
-            .get("resets_at")
-            .and_then(Value::as_str)
-            .and_then(|at| DateTime::parse_from_rfc3339(at).ok())
-            .map(|at| at.with_timezone(&Utc)),
+        resets_at: reset_time_in(name, value, said),
     }
+}
+
+/// When a window says it resets, and a remark when it said something and Perch
+/// could not read it.
+///
+/// A window that does not carry `resets_at` at all is ordinary — the per-model
+/// ones routinely do not — and `None` is the honest answer for it. One that
+/// carries a `resets_at` in a form Perch cannot parse is drift, and it used to
+/// become the same `None` in silence.
+///
+/// That is not a figure lost, it is a strategy lost. `Headroom::Room` takes its
+/// reset from the window it was measured by and `Strategy::SoonestReset` ranks
+/// on exactly that, so a date format Anthropic changes turns every
+/// `soonest-reset` Group on the machine into a `most-headroom` one — with the
+/// setting still reading `soonest-reset`, and nothing anywhere saying otherwise.
+/// It is not a refusal: how full the window is came through, which is what the
+/// reading was for and what every other decision rests on.
+fn reset_time_in(name: &str, value: &Value, said: &mut Vec<String>) -> Option<DateTime<Utc>> {
+    // Absent and `null` are the same answer: this window does not say when it
+    // resets, and Anthropic writes both.
+    let carried = value.get("resets_at").filter(|at| !at.is_null())?;
+
+    let parsed = carried
+        .as_str()
+        .and_then(|at| DateTime::parse_from_rfc3339(at).ok())
+        .map(|at| at.with_timezone(&Utc));
+
+    if parsed.is_none() {
+        said.push(format!(
+            "the usage endpoint said when the `{}` window resets in a form Perch \
+             could not read, so that window is ranked as one with no reset time. \
+             A Group set to `soonest-reset` chooses on Headroom alone while this \
+             lasts.",
+            window_name(name),
+        ));
+    }
+    parsed
 }
 
 /// A window's name as the rest of Perch says it: `five_hour` is the `5-hour`
@@ -427,13 +479,19 @@ mod tests {
         )
         .unwrap();
 
-        let windows = super::windows_in(&document).expect("both say how full they are");
+        let windows = windows_of(&document).expect("both say how full they are");
 
         assert_eq!(windows[0].used_percent, 0.0);
         assert_eq!(windows[1].used_percent, 100.0);
     }
 
     use super::*;
+
+    /// The windows a reply describes, with what it remarked on set aside —
+    /// which is what every test here but the one about the remarks is asking.
+    fn windows_of(document: &Value) -> std::result::Result<QuotaWindows, String> {
+        windows_in(document, &mut Vec::new())
+    }
 
     const USAGE: &str = r#"{
       "five_hour": {"utilization": 42, "resets_at": "2026-08-04T14:30:00Z"},
@@ -444,7 +502,7 @@ mod tests {
     }"#;
 
     fn windows() -> QuotaWindows {
-        windows_in(&serde_json::from_str(USAGE).expect("valid JSON"))
+        windows_of(&serde_json::from_str(USAGE).expect("valid JSON"))
             .expect("every window says how full it is")
     }
 
@@ -474,11 +532,45 @@ mod tests {
         );
     }
 
+    /// A window that *says* when it resets in a form Perch cannot read is drift,
+    /// and it used to become the same `None` a window that says nothing gets.
+    ///
+    /// What that loses is a strategy rather than a figure. `Headroom::Room`
+    /// takes its reset from the window it was measured by and
+    /// `Strategy::SoonestReset` ranks on exactly that, so one change to the date
+    /// format turns every `soonest-reset` Group on the machine into a
+    /// `most-headroom` one — with the setting still reading `soonest-reset` and
+    /// nothing anywhere saying otherwise.
+    #[test]
+    fn a_reset_time_perch_cannot_read_is_said_rather_than_read_as_no_reset_time() {
+        let document: Value = serde_json::from_str(
+            r#"{"five_hour": {"utilization": 42, "resets_at": "in about two hours"},
+                "seven_day": {"utilization": 18, "resets_at": null}}"#,
+        )
+        .unwrap();
+        let mut said = Vec::new();
+
+        let windows = windows_in(&document, &mut said).expect("both say how full they are");
+
+        assert_eq!(
+            windows[0].used_percent, 42.0,
+            "the figure still came through"
+        );
+        assert_eq!(windows[0].resets_at, None);
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(said[0].contains("5-hour"), "{said:?}");
+        assert!(said[0].contains("soonest-reset"), "{said:?}");
+        assert!(
+            windows[1].resets_at.is_none(),
+            "a window that says nothing about resetting is ordinary, not drift"
+        );
+    }
+
     #[test]
     fn anything_in_the_reply_that_is_not_a_window_is_not_read_as_one() {
         assert!(!windows().iter().any(|w| w.window == "session"));
         assert!(
-            windows_in(&json!("not an object"))
+            windows_of(&json!("not an object"))
                 .expect("nothing shaped like a window is nothing to refuse")
                 .is_empty()
         );
@@ -500,7 +592,7 @@ mod tests {
         )
         .unwrap();
 
-        let refused = windows_in(&document).expect_err("half a picture is not a picture");
+        let refused = windows_of(&document).expect_err("half a picture is not a picture");
 
         assert!(
             refused.contains("five_hour"),
@@ -527,7 +619,7 @@ mod tests {
         )
         .unwrap();
 
-        let windows = windows_in(&document).expect("the one window says how full it is");
+        let windows = windows_of(&document).expect("the one window says how full it is");
 
         let named: Vec<&str> = windows.iter().map(|w| w.window.as_str()).collect();
         assert_eq!(named, vec!["5-hour"]);
@@ -543,7 +635,7 @@ mod tests {
         let document: Value =
             serde_json::from_str(r#"{"five_hour": {}, "seven_day": {"utilization": 10}}"#).unwrap();
 
-        let refused = windows_in(&document).expect_err("a window said nothing");
+        let refused = windows_of(&document).expect_err("a window said nothing");
 
         assert!(
             refused.contains("five_hour"),
