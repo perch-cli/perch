@@ -125,8 +125,11 @@ pub fn erase(host: &dyn Host, registry: &Registry) -> Result<Purged> {
 /// difference is not exotic. A login abandoned at the browser step leaves a
 /// working Credential in `pending/login-<millis>/` — Ctrl-C there is the
 /// documented flow rather than an accident — and nothing reaps one under thirty
-/// minutes old. A `perch add` whose registry write failed leaves the same thing
-/// in `profiles/<slug>/`. Neither is in `registry.accounts`.
+/// minutes old. A Profile whose Credential Store would not empty is kept where
+/// it is by [`profile::discard`], because the directory is the only thing that
+/// can still name that store. Neither is in `registry.accounts`.
+///
+/// [`profile::discard`]: crate::profile::discard
 ///
 /// What makes that fatal rather than untidy is where a Credential lives. On
 /// macOS it is a keychain item outside Perch's home, and its service name is
