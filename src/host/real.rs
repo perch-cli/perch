@@ -696,6 +696,15 @@ fn read_a_line() -> Result<Option<String>, HostError> {
     Ok(Some(line.trim_end_matches(['\r', '\n']).to_string()))
 }
 
+/// Whether the terminal was echoing before Perch turned it off, and so whether
+/// an interrupted read owes it an `ECHO` back on.
+///
+/// A static because the only thing that can act between turning echo off and
+/// turning it back on is a signal handler, and a handler reaches nothing else.
+/// A terminal somebody had already put in `stty -echo` is left as they left it,
+/// which is why this is the answer rather than an assumption.
+static WAS_ECHOING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// The same, with the terminal not showing what is typed.
 ///
 /// The whole of it is `ECHO` off, one line, `ECHO` back on — a platform
@@ -703,9 +712,44 @@ fn read_a_line() -> Result<Option<String>, HostError> {
 /// decided for the last two of these. The mode is restored whatever the read
 /// did, because a terminal left with its echo off outlives the process that
 /// turned it off and every shell after it types blind.
+///
+/// "Whatever the read did" has to include Ctrl-C, which is not something the
+/// read does. Only `perch watch` takes SIGINT over ([`listen_for_interrupts`]),
+/// so at the one prompt where echo is off the signal otherwise arrives at the
+/// default disposition and kills the process in the window between the two
+/// `tcsetattr` calls — and backing out of a passphrase prompt is a thing people
+/// do, not an accident. So the window is held with a handler that repairs the
+/// terminal and then hands the signal straight back: `tcgetattr`, `tcsetattr`,
+/// `signal` and `raise` are all async-signal-safe, and re-raising rather than
+/// exiting means a parent still sees a process that died of SIGINT.
 #[cfg(unix)]
 fn read_without_echo() -> Result<Option<String>, HostError> {
     use std::os::fd::AsRawFd;
+    use std::sync::atomic::Ordering::Relaxed;
+
+    /// Puts the echo back, then dies of the signal as it would have anyway.
+    unsafe extern "C" fn show_again_and_stop(signal: libc::c_int) {
+        if WAS_ECHOING.load(Relaxed) {
+            // SAFETY: a `termios` owned by this frame and this process's own
+            // standard input, and both calls are async-signal-safe. `TCSANOW`
+            // rather than `TCSAFLUSH`: there is no longer a read for pending
+            // input to confuse, and flushing is work this frame need not do.
+            unsafe {
+                let mut mode: libc::termios = std::mem::zeroed();
+                if libc::tcgetattr(libc::STDIN_FILENO, &mut mode) == 0 {
+                    mode.c_lflag |= libc::ECHO;
+                    libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &mode);
+                }
+            }
+        }
+        // SAFETY: both async-signal-safe. The default disposition is put back
+        // first, so the signal raised next ends the process rather than
+        // arriving here again.
+        unsafe {
+            libc::signal(signal, libc::SIG_DFL);
+            libc::raise(signal);
+        }
+    }
 
     let terminal = std::io::stdin().as_raw_fd();
     let mut showing: libc::termios = unsafe { std::mem::zeroed() };
@@ -715,6 +759,20 @@ fn read_without_echo() -> Result<Option<String>, HostError> {
         return Err(HostError::Io(std::io::Error::last_os_error()));
     }
 
+    WAS_ECHOING.store(showing.c_lflag & libc::ECHO != 0, Relaxed);
+    // Installed before the echo goes off rather than after, so there is no
+    // instant where it is off and nothing would put it back. A signal arriving
+    // early finds a terminal that is already echoing and leaves it that way.
+    // SAFETY: the handler stores to an atomic and calls four async-signal-safe
+    // functions. `signal` hands back the disposition being replaced, which is
+    // put back below.
+    let previously = unsafe {
+        libc::signal(
+            libc::SIGINT,
+            show_again_and_stop as *const () as libc::sighandler_t,
+        )
+    };
+
     let mut hiding = showing;
     hiding.c_lflag &= !libc::ECHO;
     // `TCSAFLUSH` rather than `TCSANOW`: anything typed ahead of the question was
@@ -722,27 +780,64 @@ fn read_without_echo() -> Result<Option<String>, HostError> {
     // the passphrase after having been shown on the way in.
     // SAFETY: both arguments are as above, and `hiding` is the mode just read
     // back with one flag cleared.
-    if unsafe { libc::tcsetattr(terminal, libc::TCSAFLUSH, &hiding) } != 0 {
-        return Err(HostError::Io(std::io::Error::last_os_error()));
-    }
+    let hidden = unsafe { libc::tcsetattr(terminal, libc::TCSAFLUSH, &hiding) } == 0;
 
-    let typed = read_a_line();
-    // SAFETY: as above, restoring exactly the mode `tcgetattr` reported.
-    unsafe { libc::tcsetattr(terminal, libc::TCSAFLUSH, &showing) };
+    let typed = if hidden {
+        read_a_line()
+    } else {
+        Err(HostError::Io(std::io::Error::last_os_error()))
+    };
+
+    // SAFETY: as above, restoring exactly the mode `tcgetattr` reported and the
+    // disposition `signal` reported. Both happen however the read ended, which
+    // is the whole of what this function promises.
+    unsafe {
+        libc::tcsetattr(terminal, libc::TCSAFLUSH, &showing);
+        libc::signal(libc::SIGINT, previously);
+    }
     typed
 }
 
 /// The same on Windows, where the console has one mode word and `ENABLE_ECHO_INPUT`
 /// is the bit in it.
+///
+/// Ctrl-C is guarded for the reason the unix half is, and in the shape
+/// [`listen_for_interrupts`] already uses over there: a console handler, claimed
+/// for the length of the read and given back afterwards. It answers `FALSE`, so
+/// the default handler still ends the process — all this one does is put the
+/// echo back before it does.
 #[cfg(windows)]
 fn read_without_echo() -> Result<Option<String>, HostError> {
-    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use std::sync::atomic::Ordering::Relaxed;
+    use windows_sys::Win32::Foundation::{FALSE, INVALID_HANDLE_VALUE, TRUE};
     use windows_sys::Win32::System::Console::{
-        ENABLE_ECHO_INPUT, GetConsoleMode, GetStdHandle, STD_INPUT_HANDLE, SetConsoleMode,
+        CTRL_BREAK_EVENT, CTRL_C_EVENT, ENABLE_ECHO_INPUT, GetConsoleMode, GetStdHandle,
+        STD_INPUT_HANDLE, SetConsoleCtrlHandler, SetConsoleMode,
     };
 
+    /// Puts the echo back, and claims nothing: `FALSE` leaves the event to the
+    /// default handler, which ends the process as it always did.
+    unsafe extern "system" fn show_again(event: u32) -> windows_sys::core::BOOL {
+        if matches!(event, CTRL_C_EVENT | CTRL_BREAK_EVENT) && WAS_ECHOING.load(Relaxed) {
+            // SAFETY: a handle this process owns and a mode word owned by this
+            // frame, which is the whole of what the calls touch.
+            unsafe {
+                let console = GetStdHandle(STD_INPUT_HANDLE);
+                let mut mode = 0u32;
+                if console != INVALID_HANDLE_VALUE
+                    && !console.is_null()
+                    && GetConsoleMode(console, &mut mode) != 0
+                {
+                    SetConsoleMode(console, mode | ENABLE_ECHO_INPUT);
+                }
+            }
+        }
+        FALSE
+    }
+
     // SAFETY: every call here takes a handle this process owns and a mode word
-    // owned by this frame.
+    // owned by this frame. The handler reads its argument and an atomic, and
+    // stays valid for the life of the process.
     unsafe {
         let console = GetStdHandle(STD_INPUT_HANDLE);
         if console == INVALID_HANDLE_VALUE || console.is_null() {
@@ -753,12 +848,21 @@ fn read_without_echo() -> Result<Option<String>, HostError> {
         if GetConsoleMode(console, &mut showing) == 0 {
             return Err(HostError::Io(std::io::Error::last_os_error()));
         }
-        if SetConsoleMode(console, showing & !ENABLE_ECHO_INPUT) == 0 {
-            return Err(HostError::Io(std::io::Error::last_os_error()));
-        }
 
-        let typed = read_a_line();
+        WAS_ECHOING.store(showing & ENABLE_ECHO_INPUT != 0, Relaxed);
+        // Claimed before the echo goes off, so there is no instant where it is
+        // off and nothing would put it back.
+        SetConsoleCtrlHandler(Some(show_again), TRUE);
+
+        let hidden = SetConsoleMode(console, showing & !ENABLE_ECHO_INPUT) != 0;
+        let typed = if hidden {
+            read_a_line()
+        } else {
+            Err(HostError::Io(std::io::Error::last_os_error()))
+        };
+
         SetConsoleMode(console, showing);
+        SetConsoleCtrlHandler(Some(show_again), FALSE);
         typed
     }
 }
