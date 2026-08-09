@@ -238,8 +238,18 @@ pub fn take_all(host: &dyn Host, locks: Vec<LockSpec>) -> Result<Held<'_>> {
         // creates that directory before locking it, and so does Perch: a lock
         // that cannot be taken because its parent is missing would read as
         // contention, which is a different problem with a different answer.
+        //
+        // Privately, because every parent a lock has is a directory that holds
+        // or is about to hold a Credential — a Profile, or Perch's own home.
+        // `registry::lock` says exactly this and creates its own parent to say
+        // it, which left this instance as the one that could still bring a
+        // directory into being at whatever the umask happens to be:
+        // `observe::renew_under_the_lock` takes a Profile's lock off a purely
+        // derived path, so a `perch status --refresh` was enough to create the
+        // Profile of an Account whose directory had gone, at 0755, ready for
+        // the next `perch relogin` to write a plaintext Credential into.
         if let Some(parent) = lock.dir.parent() {
-            host.create_dir_all(parent).map_err(|err| {
+            host.create_private_dir_all(parent).map_err(|err| {
                 PerchError::Other(format!("could not create {}: {err}", parent.display()))
             })?;
         }
@@ -582,6 +592,30 @@ mod tests {
                 .any(|effect| matches!(effect, Effect::Touched(_))),
             "and the stamp the check rests on is not overwritten: {:?}",
             host.effects()
+        );
+    }
+
+    /// Every parent a lock has is a directory that holds or is about to hold a
+    /// Credential — a Profile, or Perch's own home — so bringing one into being
+    /// at whatever the umask happens to be is not a thing this may do.
+    /// `registry::lock` creates its own parent privately and says exactly this,
+    /// which left the instance here as the one that could still do it: a
+    /// Profile's lock is taken off a derived path by
+    /// `observe::renew_under_the_lock`, so a `perch status --refresh` against an
+    /// Account whose directory had gone was enough to make it, 0755, ready for
+    /// the next `perch relogin` to write a plaintext Credential into.
+    #[test]
+    fn the_directory_a_lock_brings_into_being_is_the_owners_alone() {
+        let host = FakeHost::new();
+        let lock = a_lock("/Users/someone/.config/perch/profiles/some-account/.oauth_refresh.lock");
+
+        let held = take_all(&host, vec![lock.clone()]).expect("the lock is free");
+        drop(held);
+
+        assert_eq!(
+            host.mode_of(lock.dir.parent().expect("a lock has a parent")),
+            Some(crate::host::PRIVATE_DIR_MODE),
+            "the Profile this lock is inside is about to hold a Credential"
         );
     }
 
