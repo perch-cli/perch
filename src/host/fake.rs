@@ -1562,6 +1562,15 @@ impl Host for FakeHost {
         }
     }
 
+    /// Nothing to turn off: a fake never prints a remark, it only keeps them —
+    /// which is why the alternate screen a real `perch tui` was writing them
+    /// onto was invisible from here.
+    fn print_remarks(&self, _aloud: bool) {}
+
+    fn remarks(&self) -> Vec<String> {
+        self.notes()
+    }
+
     fn read_line(&self) -> Result<Option<String>, HostError> {
         self.record(Effect::Asked);
         self.while_they_answer();

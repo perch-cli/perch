@@ -941,6 +941,41 @@ fn enter_switches_to_the_account_under_the_cursor() {
     );
 }
 
+/// What the Switch remarks on is shown in the frame rather than printed.
+///
+/// `Host::note` writes to stderr, which under the picker is the alternate
+/// screen: the line lands in the middle of the display and stays there until
+/// something redraws over it, and then it is gone for good. ADR 0016 settled
+/// this for the Refresh thread, which runs against a Host of its own; the
+/// Switch the picker performs runs against the process's, and was missed.
+///
+/// Invisible from a test until now, because a `FakeHost` never printed a remark
+/// in the first place — it only ever kept them, which is the behaviour the real
+/// one has had to be told to adopt.
+#[test]
+fn what_a_switch_remarked_on_is_shown_in_the_frame_rather_than_printed_over_it() {
+    let host = machine_with_a_group();
+    // A plaintext copy in the Profile the Capture writes into, which the write
+    // supersedes and cannot remove: a remark on the way past rather than
+    // anything that stops the Switch (ADR 0020).
+    let superseded = store_of(&host, EMAIL).credentials_file;
+    let host = host
+        .with_file(&superseded, CREDENTIAL)
+        .with_undeletable_file(&superseded, "Operation not permitted");
+
+    let screen = browse(&host, vec![Some(Signal::Switch), None, Some(Signal::Leave)]);
+
+    let frame = screen.last_frame();
+    assert!(
+        frame.contains("superseded copy"),
+        "the remark is on the screen the user is looking at:\n{frame}"
+    );
+    assert!(
+        frame.contains(&format!("Switched to {SECOND_EMAIL}")),
+        "beside what the command itself said:\n{frame}"
+    );
+}
+
 /// A failed Refresh's notes stand until something else is done, and on a short
 /// terminal there is only room for so many lines — so what a key just did is
 /// said first and the older news is what gets counted rather than shown.
