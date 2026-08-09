@@ -44,7 +44,7 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
     }
 
     Err(PerchError::Conflict(format!(
-        "Perch already holds {accounts} {}, and an Import does not merge: the \
+        "Perch already holds {}, and an Import does not merge: the \
          same Account on both sides one Rotation apart has no answer to which \
          Credential is live, and an Alias can mean different Accounts on two \
          machines.\n\
@@ -289,6 +289,19 @@ mod tests {
             "{refused}"
         );
         assert!(refused.to_string().contains("perch purge"), "{refused}");
+        assert!(
+            refused.to_string().contains("Perch already holds 1 Account,"),
+            "the count is rendered once, by the one function that says it in \
+             words: {refused}"
+        );
+
+        held.upsert(account("another@example.com"));
+        let refused =
+            refuse_a_machine_that_is_not_empty(Some(&held)).expect_err("there are Accounts here");
+        assert!(
+            refused.to_string().contains("Perch already holds 2 Accounts,"),
+            "{refused}"
+        );
     }
 
     /// Being active is a claim about which Credential is in *this* machine's
