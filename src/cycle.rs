@@ -502,9 +502,8 @@ pub fn choose(
         return Err(PerchError::NoCandidate(set_aside.because.clone()));
     }
 
-    // Staying put is the right answer only when Perch can see that it is: an
-    // Account it has never observed is not evidence that moving would gain
-    // nothing, and out of the box no Account has been observed at all.
+    // Which Accounts moving to would actually gain something, against the one
+    // being left.
     //
     // Both orderings, and the second is the one that matters. A Strategy says
     // which of the places worth going is preferred; it does not get to say that
@@ -515,12 +514,36 @@ pub fn choose(
     // Account you are on was being ranked in it. That is the failure ADR 0013
     // sets candidates aside to prevent, reached through the staying-put check
     // instead of through a post-hoc veto.
+    //
+    // Applied to the *choice* and not only to the veto, which is the half that
+    // was missing. Whether to move and where to move were asked of two
+    // different sets: one Account breaking the veto let the Strategy then pick
+    // any other, including one the Account being left beat on both counts. A
+    // `soonest-reset` Group active on 60% headroom resetting in an hour, beside
+    // a 5% Account resetting in two and an unresetting 95% one, moved to the 5%
+    // Account — the 95% one broke the veto, and the Strategy's top was
+    // somewhere else entirely. One rule asked once: the Accounts worth going to
+    // are the ones the veto counts, and the winner is the Strategy's pick from
+    // among those.
+    let worth_going: Vec<&Ranked> = match here {
+        // Staying put is the right answer only when Perch can see that it is: an
+        // Account it has never observed is not evidence that moving would gain
+        // nothing, and out of the box no Account has been observed at all. So a
+        // `here` with no figure rules nothing out.
+        Some(here) if matches!(here.headroom, Headroom::Room { .. }) => elsewhere
+            .iter()
+            .copied()
+            .filter(|other| {
+                other.headroom.ranking(strategy, now) > here.headroom.ranking(strategy, now)
+                    || other.headroom.by_room() > here.headroom.by_room()
+            })
+            .collect(),
+        _ => elsewhere,
+    };
+
     if let Some(here) = here
         && let Headroom::Room { .. } = here.headroom
-        && elsewhere.iter().all(|other| {
-            other.headroom.ranking(strategy, now) <= here.headroom.ranking(strategy, now)
-                && other.headroom.by_room() <= here.headroom.by_room()
-        })
+        && worth_going.is_empty()
     {
         return Err(PerchError::NothingToDo(already_the_best(
             registry, scope, here, strategy, now,
@@ -530,7 +553,7 @@ pub fn choose(
     // Everything else is exhausted and the Account Perch is on is not, which
     // leaves nowhere better to go even though it was never ranked against
     // anything.
-    let Some(best) = elsewhere.first() else {
+    let Some(best) = worth_going.first() else {
         let alone = here.expect("something unexhausted is here or elsewhere");
         return Err(PerchError::NothingToDo(format!(
             "{} is the only Account in {} that is not exhausted, and Perch has \
@@ -1520,6 +1543,42 @@ pub(crate) mod tests {
         assert!(said.contains("has passed"), "{said}");
     }
 
+    /// One Account being worth moving to does not make every Account worth
+    /// moving to.
+    ///
+    /// Whether to move and where to move were asked of two different sets. The
+    /// veto compared each candidate against the Account being left on both
+    /// orderings; the choice that followed took the Strategy's top of *all* the
+    /// candidates. So a single Account breaking the veto — here the roomy one
+    /// with no reset time — let the Strategy hand back one the Account being
+    /// left beat on both counts.
+    #[test]
+    fn one_candidate_worth_moving_to_does_not_let_the_strategy_pick_a_worse_one() {
+        let registry = preferring(
+            holding(vec![
+                // Active: 60% headroom, and the soonest reset of the three.
+                account("here@example.com", vec![resetting("5-hour", 40.0, 1)]),
+                // Ranks below `here` on the Strategy *and* on room, so moving
+                // here would be a move onto less of everything.
+                account("worse@example.com", vec![resetting("5-hour", 95.0, 2)]),
+                // The most room by far, and the only reason not to stay put —
+                // but no reset time, so the Strategy ranks it last.
+                account("roomiest@example.com", vec![window("5-hour", 5.0)]),
+            ]),
+            Strategy::SoonestReset,
+        );
+
+        assert_eq!(
+            cycle(&registry)
+                .expect("there is room to move to")
+                .account
+                .email(),
+            "roomiest@example.com",
+            "the Accounts worth going to are the ones that broke the veto, and \
+             the Strategy picks among those — not among every candidate there is"
+        );
+    }
+
     #[test]
     fn a_figure_with_no_reset_time_is_never_read_as_the_soonest_to_reset() {
         let registry = preferring(
@@ -1857,6 +1916,54 @@ mod properties {
                 leaving.as_deref(),
                 "{}",
                 arrangement.described
+            );
+        }
+    }
+
+    /// Moving is supposed to gain something. An Account the one being left
+    /// beats on the Strategy's ranking *and* on the room it can see is a move
+    /// that made things worse, whatever the Strategy prefers.
+    ///
+    /// Asked with `leaving` set, which is what the two properties above do not
+    /// do: both ask with no Account being left, so the whole comparison against
+    /// `here` — the veto and the choice it gates — went unexercised. This is the
+    /// arrangement that found it: a `soonest-reset` Group active on 60% headroom
+    /// resetting in an hour, beside a 5% Account resetting in two and an
+    /// unresetting 95% one, moved onto the 5%.
+    #[test]
+    fn the_account_chosen_is_never_one_the_account_being_left_beats_outright() {
+        for arrangement in cases() {
+            let Some(leaving) = arrangement.registry.accounts.first() else {
+                continue;
+            };
+            // Only where the Account being left is one the Cycle would have
+            // considered. Leaving a Disabled or Quarantined Account is the case
+            // for moving somewhere worse rather than against it: the figure
+            // beside a broken Credential is not a standard anything has to beat.
+            if !is_a_candidate(leaving) {
+                continue;
+            }
+            let here = headroom_of(leaving);
+            let Headroom::Room { .. } = here else {
+                continue;
+            };
+            let leaving = leaving.email().to_string();
+            let Some(won) = chosen(&arrangement, Some(&leaving)) else {
+                continue;
+            };
+
+            let theirs = headroom_of(&won);
+            assert!(
+                theirs.ranking(arrangement.strategy, now())
+                    > here.ranking(arrangement.strategy, now())
+                    || theirs.by_room() > here.by_room(),
+                "left {leaving} at {:?}/{:?} for {} at {:?}/{:?}, which is worse on both\n{}",
+                here.ranking(arrangement.strategy, now()),
+                here.by_room(),
+                won.email(),
+                theirs.ranking(arrangement.strategy, now()),
+                theirs.by_room(),
+                arrangement.described,
             );
         }
     }
