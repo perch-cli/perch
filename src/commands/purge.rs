@@ -129,7 +129,7 @@ fn refuse_without_a_terminal_or_the_flag(host: &dyn Host, yes: bool) -> Result<(
     if yes || host.is_interactive() {
         return Ok(());
     }
-    Err(PerchError::Other(
+    Err(PerchError::Invalid(
         "There is no terminal to confirm on, and a Purge deletes every Profile, \
          every Credential Perch holds and its own registry.\n\
          Nothing was purged. Pass `--yes` to purge without being asked."

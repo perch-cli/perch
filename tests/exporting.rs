@@ -8,7 +8,7 @@
 mod common;
 
 use common::*;
-use perch::error::{EXIT_CONFLICT, EXIT_GENERAL, EXIT_INVALID, EXIT_NOT_FOUND};
+use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND};
 use perch::export;
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host, PRIVATE_FILE_MODE};
@@ -213,7 +213,12 @@ fn without_a_terminal_the_export_is_refused_and_says_what_is_needed() {
     let (outcome, _printed) = run_export(&host, AT);
 
     let refused = outcome.expect_err("there is nobody to type a passphrase");
-    assert_eq!(refused.exit_code(), EXIT_GENERAL, "{refused}");
+    assert_eq!(
+        refused.exit_code(),
+        EXIT_INVALID,
+        "a request Perch understood and refused on its own terms, which is what \
+         a script has to be able to tell from a disk that filled up: {refused}"
+    );
     assert!(refused.to_string().contains("no terminal"), "{refused}");
     assert!(
         refused.to_string().contains("process table"),

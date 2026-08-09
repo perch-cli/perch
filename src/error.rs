@@ -29,7 +29,7 @@ pub const EXIT_NOT_FOUND: i32 = 12;
 pub const EXIT_CONFLICT: i32 = 13;
 /// Exit code for a request Perch understood and refused on its own terms: a
 /// name it will not accept, a configured value outside the range it means
-/// something in.
+/// something in, a command that needs a terminal run where there is none.
 pub const EXIT_INVALID: i32 = 14;
 /// Exit code for a request that was already true: the Account asked for is the
 /// one that is already active. Distinct from success, so a script can tell a

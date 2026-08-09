@@ -199,7 +199,7 @@ fn agreed(
         return Ok(true);
     }
     if !host.is_interactive() {
-        return Err(PerchError::Other(format!(
+        return Err(PerchError::Invalid(format!(
             "There is no terminal to confirm on, and this removal is one Perch \
              asks about: {}\n\
              Pass `--yes` to remove it without being asked.",

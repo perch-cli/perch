@@ -26,7 +26,7 @@ use crate::tui::terminal::TerminalScreen;
 /// reads, whether it was launched from a command line or from a cursor.
 pub fn run(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     if !host.is_interactive() {
-        return Err(PerchError::Other(
+        return Err(PerchError::Invalid(
             "`perch tui` draws in a terminal, and this is not one. Everything it \
              shows has a plain command form: `perch list` for the Accounts, \
              `perch status` for where you are (ADR 0011)."

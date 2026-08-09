@@ -400,6 +400,12 @@ fn without_a_terminal_and_without_the_flag_a_purge_is_refused_and_names_it() {
     let (outcome, _printed) = run_purge(&host);
 
     let refused = outcome.expect_err("there is nobody to confirm with");
+    assert_eq!(
+        refused.exit_code(),
+        EXIT_INVALID,
+        "a request Perch understood and refused on its own terms, which a \
+         script has to be able to tell from a disk that filled up: {refused}"
+    );
     assert!(refused.to_string().contains("--yes"), "{refused}");
     assert!(
         registry_on(&host).is_some(),

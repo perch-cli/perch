@@ -1067,6 +1067,11 @@ fn perch_tui_is_refused_where_there_is_no_terminal() {
     let refusal =
         perch::commands::tui::run(&host, &mut written).expect_err("there is nothing to draw in");
 
+    assert_eq!(
+        refusal.exit_code(),
+        perch::error::EXIT_INVALID,
+        "a request Perch understood and refused on its own terms: {refusal}"
+    );
     let said = refusal.to_string();
     assert!(said.contains("perch list"), "{said}");
     assert!(said.contains("perch status"), "{said}");

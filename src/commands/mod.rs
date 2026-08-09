@@ -138,7 +138,7 @@ pub fn refuse_without_a_terminal(host: &dyn Host, command: &str) -> Result<()> {
     if host.is_interactive() {
         return Ok(());
     }
-    Err(PerchError::Other(format!(
+    Err(PerchError::Invalid(format!(
         "An Export is encrypted with a passphrase, and there is no terminal to \
          prompt for one on.\n\
          There is no flag that answers ahead of time: a passphrase passed as an \

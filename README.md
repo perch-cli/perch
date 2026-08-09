@@ -1101,7 +1101,7 @@ it took.
 | 11 | the keychain is locked, denied, or unavailable |
 | 12 | there is no such thing — no login, no such Account, no such Group |
 | 13 | it collides with something that is already there — an Account added twice, a name already spoken for, a path an Export would have written over, an Import onto a Perch that already holds an Account |
-| 14 | Perch understood it and will not accept it — an ambiguous name, a value out of range, a Group that has not said the watcher may act on it |
+| 14 | Perch understood it and will not accept it — an ambiguous name, a value out of range, a Group that has not said the watcher may act on it, a command that needs a terminal run where there is none |
 | 15 | there was nothing to do — you are already on that Account, a check found nothing to do now, or Perch is holding nothing on this machine to purge |
 | 16 | refused: a client is running against that Profile, so what is in it is not Perch's to write or to delete |
 | 17 | a Cycle found nowhere to land — every Account in the Group is exhausted, or none is a candidate |

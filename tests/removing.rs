@@ -295,7 +295,8 @@ fn without_a_terminal_the_active_account_goes_only_when_asked_for_outright() {
 
     let (refused, _) = run_remove(&host, EMAIL);
 
-    refused.expect_err("there is nobody to confirm with");
+    let refused = refused.expect_err("there is nobody to confirm with");
+    assert_eq!(refused.exit_code(), EXIT_INVALID, "{refused}");
     assert!(holds(&host, EMAIL));
 
     let (result, printed) = run_remove_with(
