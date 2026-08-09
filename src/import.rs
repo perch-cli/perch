@@ -77,14 +77,13 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
 /// machine last left, on the strength of something that happened somewhere
 /// else. Both are claims about a watcher, and no watcher has run here yet.
 pub fn restored(export: &Export) -> Result<Registry> {
-    if export.registry.version > registry::CURRENT_VERSION {
-        return Err(crate::error::written_by_a_newer_perch(
-            "The registry inside this Export",
-            "registry",
-            export.registry.version,
-            registry::CURRENT_VERSION,
-        ));
-    }
+    // The registry's own version is not checked here. `export::unseal` reads
+    // both versions off a shape that is only the versions, *before* the document
+    // is read as an Export, and it has to: a newer Perch is exactly the thing
+    // that writes a value this build has no variant for, and reading the
+    // document first fails on that with serde's own words. So nothing can reach
+    // this function without having passed the identical check, and a second
+    // spelling of it was two things to keep in step for one guard.
 
     // The same check the registry gets on the way in off disk, for the same
     // reason: a value that means nothing would otherwise sit in the file until
@@ -108,11 +107,6 @@ pub struct Placed {
 }
 
 impl Placed {
-    /// How many Profiles it has made.
-    pub fn profiles_made(&self) -> usize {
-        self.touched.len()
-    }
-
     /// Takes back everything this Import placed, leaving the machine as it was.
     ///
     /// Best-effort, like every other undo in Perch: the interesting failure is
@@ -350,18 +344,6 @@ mod tests {
         );
     }
 
-    /// The Export's envelope carries a version and so does the registry inside
-    /// it. Both are guards against the future: the machine holding two builds,
-    /// where the wrong answer is a file half-read rather than refused.
-    #[test]
-    fn a_registry_from_a_newer_perch_is_refused_rather_than_guessed_at() {
-        let mut export = an_export();
-        export.registry.version = registry::CURRENT_VERSION + 1;
-
-        let refused = restored(&export).expect_err("this build does not understand it");
-        assert!(refused.to_string().contains("Upgrade Perch"), "{refused}");
-    }
-
     /// The same check the registry gets off disk. A value that means nothing
     /// would otherwise sit in the file until the watcher next went round.
     #[test]
@@ -400,9 +382,12 @@ mod tests {
                 .store(&host)
                 .unwrap();
 
-            let placed = place(&host, &export).expect("the one Profile can be made");
+            place(&host, &export).expect("the one Profile can be made");
 
-            assert_eq!(placed.profiles_made(), 1);
+            assert!(
+                host.path_exists(&store.config_dir),
+                "the one Profile the Export holds a Credential for was made"
+            );
             assert_eq!(
                 crate::credentials::read(&host, &store)
                     .unwrap()
