@@ -52,8 +52,16 @@ pub struct Purged {
 /// dismissed is a Profile that may be in use, and the cost of the two mistakes is
 /// not the same: waiting costs a command run again once the client is quit, and
 /// not waiting costs whatever that client had open.
+///
+/// Asked of the same two parents [`forget_what_the_registry_does_not_name`]
+/// empties rather than of the registry alone, for the reason that function
+/// argues at length: the registry is not the whole account of what Perch holds.
+/// A `perch add` sitting at the browser step in another terminal is a client
+/// running against a directory under `pending/`, and it was the one Live Profile
+/// nothing protected — `perch purge --yes` deleted the login out from under it,
+/// and the Anthropic session it had just created went with it.
 pub fn refuse_while_anything_is_running(host: &dyn Host, registry: &Registry) -> Result<()> {
-    let running: Vec<&str> = registry
+    let mut running: Vec<String> = registry
         .accounts
         .iter()
         .filter(|account| {
@@ -61,19 +69,62 @@ pub fn refuse_while_anything_is_running(host: &dyn Host, registry: &Registry) ->
                 .profile_dir(host)
                 .is_ok_and(|dir| probe::anything_running(host, &dir))
         })
-        .map(Account::email)
+        .map(|account| format!("the Profile of {}", account.email()))
         .collect();
+
+    // Named generically, because there is nothing to name them by: a login in
+    // progress has no Account yet, and a Profile the registry does not hold has
+    // no address Perch can put to the user.
+    let recorded: Vec<std::path::PathBuf> = registry
+        .accounts
+        .iter()
+        .filter_map(|account| account.profile_dir(host).ok())
+        .collect();
+    running.extend(
+        everything_perch_holds(host)
+            .into_iter()
+            .filter(|dir| !recorded.contains(dir) && probe::anything_running(host, dir))
+            .map(|dir| format!("{}, which no Account of Perch's names", dir.display())),
+    );
+
     if running.is_empty() {
         return Ok(());
     }
 
     Err(PerchError::ProfileLive(format!(
-        "A client is running against the Profile of {}.\n\
-         Nothing was purged. A Purge deletes those Profiles, and what is in them \
-         belongs to whatever is holding them until it exits — quit it and run \
-         this again.",
+        "A client is running against {}.\n\
+         Nothing was purged. A Purge deletes those directories, and what is in \
+         them belongs to whatever is holding them until it exits — quit it and \
+         run this again.",
         running.join(", "),
     )))
+}
+
+/// Every directory under Perch's home that is or was a Profile: one under
+/// `profiles/`, and one under `pending/` that a login ran in.
+///
+/// One walk, so the refusal above and the deletion below are looking at the same
+/// machine. That they were not is how a login in progress came to be deleted by
+/// a Purge that had just asked whether anything was running.
+///
+/// Silent about a parent that cannot be listed. Absent is the ordinary case for
+/// both — no login has been abandoned here, or every Profile the registry names
+/// is every Profile there is — and a directory that genuinely cannot be read is
+/// answered by the deletion pass, which refuses by name.
+fn everything_perch_holds(host: &dyn Host) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    for parent in [
+        registry::profiles_dir(host),
+        registry::pending_logins_dir(host),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Ok(entries) = host.list_dir(&parent) {
+            found.extend(entries);
+        }
+    }
+    found
 }
 
 /// Deletes every Credential Perch holds, and then everything Perch keeps.
@@ -142,19 +193,7 @@ pub fn erase(host: &dyn Host, registry: &Registry) -> Result<Purged> {
 /// have, and a Purge that announced two more than it was asked about would be
 /// answering a question nobody put.
 fn forget_what_the_registry_does_not_name(host: &dyn Host) -> Result<()> {
-    let mut left_over = Vec::new();
-    for parent in [
-        registry::profiles_dir(host)?,
-        registry::pending_logins_dir(host)?,
-    ] {
-        // Absent is the ordinary case for both: no login has been abandoned
-        // here, or every Profile the registry names is every Profile there is.
-        if let Ok(entries) = host.list_dir(&parent) {
-            left_over.extend(entries);
-        }
-    }
-
-    for dir in left_over {
+    for dir in everything_perch_holds(host) {
         // The same answer `forget_the_credential` gives, and for its reason: a
         // store that cannot even be named is one whose Credential cannot be
         // deleted, and passing over it would report a machine given back while

@@ -432,6 +432,45 @@ fn a_client_running_against_a_profile_stops_the_purge() {
     );
 }
 
+/// The registry is not the whole account of what Perch holds, and the Purge's
+/// own deletion pass says so at length: a login abandoned or in progress lives
+/// under `pending/` and is in no `registry.accounts`. It is still a directory
+/// this command deletes, and it was the one Live Profile nothing protected —
+/// a `perch add` sitting at the browser step in another terminal had the login
+/// deleted out from under it, and the Anthropic session it had just created went
+/// with it.
+#[test]
+fn a_login_in_progress_stops_the_purge_though_no_account_names_it() {
+    let host = a_machine_to_give_back();
+
+    // What another terminal's `perch add` looks like from here: a directory
+    // under `pending/`, with a client running against it.
+    let pending = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    host.set_file(
+        perch::probe::session_marker_at(&pending, 5150),
+        &perch::probe::session_marker(5150, host.now()),
+    );
+    host.set_live_process(5150);
+
+    let (outcome, _printed) = run_purge(&host);
+
+    let refused = outcome.expect_err("something is holding that login");
+    assert_eq!(refused.exit_code(), EXIT_PROFILE_LIVE, "{refused}");
+    assert!(
+        refused.to_string().contains("no Account of Perch's names"),
+        "there is no address to name it by, so it is named by its directory: \
+         {refused}"
+    );
+    assert!(
+        host.path_exists(&pending),
+        "and the login somebody is in the middle of is still there"
+    );
+    assert!(
+        registry_on(&host).is_some(),
+        "along with everything else: a Purge is all or nothing"
+    );
+}
+
 /// The refusal above is checked before the questions and again after them, and
 /// the window in between is however long somebody takes over four prompts. A
 /// client started in there was not running when the first check ran, and its
