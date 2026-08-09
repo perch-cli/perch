@@ -435,26 +435,49 @@ fn renew_under_the_lock(host: &dyn Host, asked: &Asked, version: &str) -> Step<S
             fresh.expires_at,
             version,
         )?;
-        // Anthropic has already retired the old refresh token by now, so a
-        // Credential that cannot be stored is one nothing can recover — which
-        // is worth saying plainly rather than leaving as a keychain error.
-        store_it(host, store, &rotated)?;
+        // Only where Anthropic actually handed a new refresh token over is a
+        // failed write unrecoverable. A Renewal that Rotated nothing leaves the
+        // stored refresh token exactly as live as it was, so the write is worth
+        // trying again rather than worth a Quarantine (ADR 0006 is about the
+        // Rotation, not about the renewal).
+        store_it(host, store, &rotated, fresh.refresh_token.is_some())?;
 
         Ok(fresh.access_token)
     })
 }
 
-/// Puts the Rotated Credential back, and Quarantines the Account when it cannot.
+/// Puts the renewed Credential back, and Quarantines the Account when what
+/// could not be stored is a Rotation.
 ///
-/// Anthropic retired the previous refresh token the moment it handed this one
-/// over, so a Credential that cannot be stored is not a write to try again: the
-/// old one is dead and the new one is gone. This is ADR 0006's crash between two
-/// writes, arriving as a failed write — and the reason ADR 0006 says Quarantine
-/// could not be deferred past v1.
-fn store_it(host: &dyn Host, store: &Store, rotated: &str) -> Step<()> {
-    profile::store_credential(host, store, rotated).map_err(|error| Outcome::Quarantined {
-        why: Quarantine::RotationLost,
-        detail: Some(error.to_string()),
+/// Where Anthropic Rotated, it retired the previous refresh token the moment it
+/// handed the new one over, so a Credential that cannot be stored is not a write
+/// to try again: the old one is dead and the new one is gone. This is ADR 0006's
+/// crash between two writes, arriving as a failed write — and the reason ADR
+/// 0006 says Quarantine could not be deferred past v1.
+///
+/// Where it did not, none of that is true. A Renewal only sometimes Rotates
+/// (ADR 0006), and where it did not the stored refresh token is untouched and
+/// still buys a token; `profile::store_credential` leaves a store that refused
+/// the write holding what it held before. Quarantining there would be Perch
+/// saying an Account is unrecoverable on the strength of a failure that cost it
+/// nothing but a cached access token — and a locked keychain during one
+/// `perch status --group --refresh` would take a whole Group out that way, each
+/// with a reason that is not true.
+fn store_it(host: &dyn Host, store: &Store, rotated: &str, rotated_away: bool) -> Step<()> {
+    profile::store_credential(host, store, rotated).map_err(|error| {
+        if rotated_away {
+            Outcome::Quarantined {
+                why: Quarantine::RotationLost,
+                detail: Some(error.to_string()),
+            }
+        } else {
+            Outcome::Failed(format!(
+                "Anthropic renewed this Account without Rotating its refresh \
+                 token, and the renewed Credential could not be stored: {error}\n\
+                 The Credential Perch holds still works, so this is worth \
+                 trying again rather than a Quarantine."
+            ))
+        }
     })
 }
 
