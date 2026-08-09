@@ -394,8 +394,9 @@ mod tests {
             .as_object_mut()
             .expect("an Export is an object")
             .remove("credentials");
-        let sealed = age::encrypt_and_armor(&recipient(PASSPHRASE), document.to_string().as_bytes())
-            .expect("it seals");
+        let sealed =
+            age::encrypt_and_armor(&recipient(PASSPHRASE), document.to_string().as_bytes())
+                .expect("it seals");
 
         let refused = unseal(&sealed, PASSPHRASE).expect_err("it holds no Credentials");
 
