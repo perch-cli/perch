@@ -774,6 +774,13 @@ impl FakeHost {
         self.notes.borrow().clone()
     }
 
+    /// The same as [`FakeHost::forget_effects`], for remarks: a test running two
+    /// commands and asserting on the second one's should not have to read past
+    /// the first one's.
+    pub fn forget_notes(&self) {
+        self.notes.borrow_mut().clear();
+    }
+
     pub fn keychain_item(&self, service: &str, account: &str) -> Option<String> {
         self.keychain
             .borrow()

@@ -1038,7 +1038,12 @@ fn a_run_the_view_was_left_for_hands_the_terminal_over_and_reports_what_it_said(
             .expect("the client ran");
 
     assert_eq!(ended, 3, "what the client said is what a script reads");
-    let said = String::from_utf8(said).expect("output is UTF-8");
+    assert_eq!(
+        String::from_utf8(said).expect("output is UTF-8"),
+        "",
+        "stdout belongs to the client, here as much as under `perch run`"
+    );
+    let said = host.notes().join("\n");
     assert!(
         said.contains(&format!("Running Claude Code as {SECOND_EMAIL}")),
         "{said}"

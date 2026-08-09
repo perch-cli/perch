@@ -24,12 +24,19 @@
 //! which is what stops another Perch Capturing, Renewing or writing
 //! `.claude.json` into a Profile somebody is working in. Reading out of one is
 //! untouched: a Switch onto the Account a Run is against still lands.
+//!
+//! Everything Perch says about a Run goes to standard error, which every other
+//! remark about the machine already does. The client inherits this process's
+//! standard output, and a Run is meant to stand in a script wherever `claude`
+//! would — so two lines of Perch's own in front of `claude -p … --output-format
+//! json` is a document that no longer parses. What the client says on stdout is
+//! the whole of what a Run says on stdout.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::adopt;
-use crate::commands::{self, say};
+use crate::commands;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::probe::Store;
@@ -70,7 +77,7 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // a process at. Refused here, in the one place every command that acts on
     // exactly one Account refuses it.
     let found = target::resolve_account(&registry, &args.target)?;
-    say(out, &found.matched)?;
+    host.note(&found.matched);
     refuse_a_quarantined_account(&registry, &found.email)?;
 
     // Settled before anything is linked. Where this is the Claude Code the probe
@@ -87,11 +94,11 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // what makes the Profile a directory at all.
     carry::carry(host, &registry, &found.email, &default_profile, &profile);
 
-    say(out, &launching(&registry, &found.email, &launch.said))?;
-    // Flushed before the client is handed the terminal. Everything Perch has to
-    // say about a Run is said in front of it, and a buffer that had not been
-    // emptied would deliver those lines after the output of the thing they were
-    // announcing.
+    host.note(&launching(&registry, &found.email, &launch.said));
+    // Flushed before the client is handed the terminal. Nothing of Perch's own
+    // goes to standard output here, but a command run before this one may have
+    // left something in the buffer, and it would be delivered after the output
+    // of the thing it was announcing.
     out.flush().map_err(commands::write_failed)?;
 
     // After the Carry, which will not write into a Live Profile and would
