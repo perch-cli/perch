@@ -59,8 +59,23 @@ pub enum Refused {
     Throttled,
     /// The Credential was not accepted.
     Rejected,
-    /// The endpoint answered something Perch does not understand.
+    /// The endpoint answered, and the answer is not the shape Perch believes
+    /// in — a body that will not parse, a document missing a field.
+    ///
+    /// Drift, in other words: Anthropic changed something and this build has
+    /// not caught up. Told apart from [`Refused::Failed`] because ADR 0019
+    /// carves out exactly this and nothing wider — "drift in a reply Perch
+    /// reads for reassurance is no reason to stop reading Utilization at all" —
+    /// and folding an HTTP failure in with it turned an outage into permission
+    /// to skip the ownership check.
     Unrecognised(String),
+    /// The endpoint answered with a status Perch has no reading for — a 500, a
+    /// 502, a 404 at a URL that used to work.
+    ///
+    /// Nothing about the Credential and nothing about the Account: an outage,
+    /// or a request that never reached the thing it was for. A caller that
+    /// carries on regardless is carrying on with no answer at all.
+    Failed(u16),
     /// The request never got there.
     Unreachable(String),
 }
@@ -70,6 +85,7 @@ const THROTTLED: &str = "Anthropic is rate-limiting reads of this Account's \
                          does not refill early";
 const REJECTED: &str = "Anthropic did not accept the Credential";
 const UNRECOGNISED: &str = "Anthropic answered something Perch does not understand";
+const FAILED: &str = "Anthropic answered with a failure";
 const UNREACHABLE: &str = "Anthropic could not be reached";
 
 impl std::fmt::Display for Refused {
@@ -78,6 +94,7 @@ impl std::fmt::Display for Refused {
             Refused::Throttled => THROTTLED.to_string(),
             Refused::Rejected => REJECTED.to_string(),
             Refused::Unrecognised(detail) => format!("{UNRECOGNISED}: {detail}"),
+            Refused::Failed(status) => format!("{FAILED} (HTTP {status})"),
             Refused::Unreachable(detail) => format!("{UNREACHABLE}: {detail}"),
         };
         formatter.write_str(&said)
@@ -261,7 +278,7 @@ fn understand(response: HttpResponse, also_rejected: &[u16]) -> Result<Value, Re
             // Not terminal, so it is retried rather than recorded: the next
             // Refresh asks again, and a Credential that was never the problem
             // goes on working.
-            false => Err(Refused::Unrecognised(format!("HTTP {}", response.status))),
+            false => Err(Refused::Failed(response.status)),
         };
     }
     match response.status {
@@ -269,7 +286,7 @@ fn understand(response: HttpResponse, also_rejected: &[u16]) -> Result<Value, Re
             .map_err(|err| Refused::Unrecognised(format!("the reply is not JSON: {err}"))),
         401 | 403 => Err(Refused::Rejected),
         429 => Err(Refused::Throttled),
-        status => Err(Refused::Unrecognised(format!("HTTP {status}"))),
+        status => Err(Refused::Failed(status)),
     }
 }
 
@@ -700,7 +717,7 @@ mod tests {
         );
         assert!(matches!(
             understand(reply(400), &[]),
-            Err(Refused::Unrecognised(_))
+            Err(Refused::Failed(400))
         ));
         assert_eq!(understand(reply(200), &[]), Ok(json!({})));
     }
@@ -731,7 +748,7 @@ mod tests {
             "",
         ] {
             assert!(
-                matches!(refused(body), Err(Refused::Unrecognised(_))),
+                matches!(refused(body), Err(Refused::Failed(400))),
                 "a Quarantine is for ever, and this is not the endpoint asking \
                  for one: {body}"
             );
@@ -762,7 +779,7 @@ mod tests {
 
         for status in REFUSALS.iter().copied() {
             assert!(
-                matches!(refused(status, "{}"), Err(Refused::Unrecognised(_))),
+                matches!(refused(status, "{}"), Err(Refused::Failed(_))),
                 "HTTP {status} alone is not the endpoint asking for a Quarantine"
             );
             assert_eq!(

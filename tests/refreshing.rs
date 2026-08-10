@@ -522,6 +522,66 @@ fn figures_are_not_recorded_against_an_account_the_credential_is_not_for() {
     assert!(cached_windows(&host, EMAIL).is_empty());
 }
 
+/// An outage on the profile endpoint is not permission to skip the question it
+/// answers.
+///
+/// ADR 0019 carves out one thing and one thing only: "drift in a reply Perch
+/// reads for reassurance is no reason to stop reading Utilization at all". A 503
+/// is not drift. It says nothing about who the live Credential belongs to, and
+/// `/api/oauth/usage` going on answering while `/api/oauth/profile` does not is
+/// exactly what an incident looks like.
+///
+/// Folded in with drift, that switched the ownership check off for the duration:
+/// somebody who had logged in as a second Account directly would have had that
+/// Account's figures cached under the one Perch records as active. Figures under
+/// the wrong Account do not look wrong — they look like quota that Account never
+/// spent, which is what a Cycle ranks on. The one kind of wrong answer this
+/// design cannot afford is a plausible one.
+#[test]
+fn an_outage_on_the_profile_endpoint_records_nothing_rather_than_guessing() {
+    let host = machine_with_two_accounts();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
+    let host = host
+        .with_reply_to(PROFILE_URL, FRESH_TOKEN, 503, "upstream unavailable")
+        .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE);
+    host.forget_effects();
+
+    let (result, printed) = run_status_refresh(&host, false);
+
+    result.expect("an endpoint having a bad afternoon is not a failed command");
+    assert!(
+        cached_windows(&host, EMAIL).is_empty(),
+        "nothing is recorded against an Account nothing corroborated: {printed}"
+    );
+    assert!(
+        host.sent_to(USAGE_URL).is_empty(),
+        "and no read is spent on a figure that could not be recorded anywhere"
+    );
+}
+
+/// Drift, on the other hand, genuinely is no evidence either way — and is the
+/// case ADR 0019 wrote the carve-out for. A profile reply whose shape this build
+/// does not recognise must not stop a Utilization read: Anthropic changing a
+/// field name would otherwise take every figure in Perch with it.
+#[test]
+fn a_profile_reply_this_build_does_not_recognise_still_lets_the_figures_be_read() {
+    let host = machine_with_two_accounts();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
+    let host = host
+        .with_reply_to(PROFILE_URL, FRESH_TOKEN, 200, "<html>hello</html>")
+        .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE);
+    host.forget_effects();
+
+    let (result, printed) = run_status_refresh(&host, false);
+
+    result.expect("the command answers");
+    assert!(
+        printed.contains("42%"),
+        "the figures were read all the same: {printed}"
+    );
+    assert!(!cached_windows(&host, EMAIL).is_empty());
+}
+
 /// Whoever was holding Claude Code's lock while Perch waited for it may have
 /// renewed the very Credential Perch was about to renew. So the Credential is
 /// read again once the lock is held, and a Rotation that has already happened

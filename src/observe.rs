@@ -554,7 +554,16 @@ fn confirm(host: &dyn Host, token: &str, account: &Account) -> Step<()> {
         }
         Ok(_) => Ok(()),
         // A profile endpoint Perch no longer recognises is no evidence either
-        // way, and no reason to stop reading Utilization.
+        // way, and no reason to stop reading Utilization. ADR 0019 carves out
+        // exactly this and nothing wider: *drift in a reply*.
+        //
+        // An HTTP failure used to arrive here too, and it is the opposite
+        // thing. `/api/oauth/profile` returning 503 during an incident while
+        // `/api/oauth/usage` keeps answering is nothing about who the token
+        // belongs to, and read as permission it cached one Account's figures
+        // under another's — the plausible wrong answer ADR 0019 says this
+        // design cannot afford, arriving on the day Anthropic has a bad
+        // afternoon.
         Err(Refused::Unrecognised(_)) => Ok(()),
         Err(why) => Err(getting_ready_refused(why)),
     }
