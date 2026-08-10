@@ -3,6 +3,70 @@
 Run Claude Code as whichever Claude account you want, without going through the
 login flow again.
 
+Perch is for one person moving between logins they already hold — their own
+accounts, on their own machine. It creates no accounts and authenticates
+nobody; it only chooses between logins you have already made yourself.
+
+## Installing
+
+Perch is pre-1.0. Every release is real and works, but the command line may
+still change between them, so no channel hands it to you by default — you ask
+for it by name. macOS, Linux and Windows, on both Arm and Intel except Windows,
+which is x64 only. Claude Code has to be installed for Perch to have anything
+to switch between.
+
+**Homebrew**, on macOS or Linux:
+
+```sh
+brew tap mschieller/perch
+brew install perch
+```
+
+**The installer**, on macOS or Linux:
+
+```sh
+curl -fsSL https://mschieller.github.io/perch/install.sh | sh
+```
+
+**The installer**, on Windows:
+
+```powershell
+irm https://mschieller.github.io/perch/install.ps1 | iex
+```
+
+**npm**, anywhere:
+
+```sh
+npm install -g perch-cli@dev
+```
+
+The `@dev` is not optional. There is no `latest` tag until 1.0, so a plain `npm
+install perch-cli` fails rather than quietly handing you something unfinished.
+
+**By hand**, from
+[the releases page](https://github.com/mschieller/perch/releases). Every release
+carries one archive per platform, a `SHA256SUMS`, and signed build provenance.
+The checksums say which bytes; the provenance says which workflow, in which
+repository, at which commit produced them, which is the stronger claim:
+
+```sh
+gh attestation verify perch-v0.1.0-aarch64-apple-darwin.tar.gz --repo mschieller/perch
+```
+
+Both installers check the checksum, and check the provenance too when `gh` is
+installed and logged in — and refuse to install if that check fails.
+
+**On macOS, if you download an archive in a browser**, Gatekeeper marks it as
+quarantined, and the binary inside is unsigned: Perch skips Apple notarization
+before 1.0. macOS will refuse to run it until you clear the mark:
+
+```sh
+xattr -d com.apple.quarantine perch
+```
+
+Homebrew, npm and both installers avoid this entirely — none of them set the
+flag. Building from source does too; see [Building](#building).
+
 ## Status
 
 Early. Perch adopts the login you already have, adds further Accounts without
