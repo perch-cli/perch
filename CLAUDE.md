@@ -17,7 +17,7 @@ past. Reading what an older Perch wrote is not.
 
 ### Issue tracker
 
-Issues and PRDs live as GitHub issues on `mschieller/perch`, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues and PRDs live as GitHub issues on `perch-cli/perch`, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

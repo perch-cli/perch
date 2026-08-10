@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs Perch.
 #
-#   curl -fsSL https://mschieller.github.io/perch/install.sh | sh
+#   curl -fsSL https://perch-cli.github.io/perch/install.sh | sh
 #
 # Environment:
 #   PERCH_VERSION      a tag to install, such as v0.1.0. Default: the latest release.
@@ -13,7 +13,7 @@
 
 set -eu
 
-REPO="mschieller/perch"
+REPO="perch-cli/perch"
 
 # Overridable so the script can be tested against a fabricated release served
 # locally. Nothing in normal use should set these.

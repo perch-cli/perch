@@ -3,11 +3,11 @@
   "version": "0.0.0",
   "description": "Run Claude Code as whichever Claude account you want, without logging in again",
   "keywords": ["claude", "claude-code", "cli", "accounts", "credentials"],
-  "homepage": "https://github.com/mschieller/perch#readme",
-  "bugs": "https://github.com/mschieller/perch/issues",
+  "homepage": "https://github.com/perch-cli/perch#readme",
+  "bugs": "https://github.com/perch-cli/perch/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mschieller/perch.git"
+    "url": "git+https://github.com/perch-cli/perch.git"
   },
   "license": "MIT OR Apache-2.0",
   "author": "Mads Skov Schiellerup",

@@ -67,7 +67,7 @@ npm publish npm-dist/perch-cli --access public --tag dev
 ```
 
 Then, on npmjs.com, for each of the six packages: **Settings → Trusted
-publisher**, pointing at `mschieller/perch` and the workflow `release.yml`.
+publisher**, pointing at `perch-cli/perch` and the workflow `release.yml`.
 Every release after that publishes itself.
 
 Check what `latest` points at once the first publish is done:
@@ -90,13 +90,13 @@ moved to the version it just pushed.
 ### The Homebrew tap
 
 A tap is a repository, and Homebrew hardcodes what it is called: `brew tap
-mschieller/perch` looks for **`mschieller/homebrew-perch`**. The prefix is
+perch-cli/perch` looks for **`perch-cli/homebrew-perch`**. The prefix is
 mandatory and users never type it. Create it public, with a `Formula/`
 directory and `main` as the default branch — `release.yml` writes
 `Formula/perch.rb` into it on every release and nothing else.
 
 Then a repository secret `HOMEBREW_TAP_TOKEN`: a **fine-grained PAT scoped to
-`mschieller/homebrew-perch` only**, with **Contents: read and write**.
+`perch-cli/homebrew-perch` only**, with **Contents: read and write**.
 `GITHUB_TOKEN` is scoped to this repository and cannot reach another one, so
 this is the one place a stored credential is unavoidable.
 
@@ -107,7 +107,7 @@ published — the blast radius is a formula file, not a public registry.
 Installing, once it exists:
 
 ```sh
-brew tap mschieller/perch
+brew tap perch-cli/perch
 brew install perch
 ```
 
@@ -136,7 +136,7 @@ judgement call. Worth revisiting at the same time: Apple notarization, which
 
 ## The installers
 
-`packaging/pages/` is served at <https://mschieller.github.io/perch/> by
+`packaging/pages/` is served at <https://perch-cli.github.io/perch/> by
 `pages.yml`, which deploys on every push to `main` that touches it. The
 installers live on `main` rather than inside a release on purpose: the URL
 somebody pastes into a terminal should not carry a version, and an installer

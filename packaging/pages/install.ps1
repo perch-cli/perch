@@ -1,6 +1,6 @@
 # Installs Perch on Windows.
 #
-#   irm https://mschieller.github.io/perch/install.ps1 | iex
+#   irm https://perch-cli.github.io/perch/install.ps1 | iex
 #
 # Environment:
 #   PERCH_VERSION      a tag to install, such as v0.1.0. Default: the latest release.
@@ -8,7 +8,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$Repo = "mschieller/perch"
+$Repo = "perch-cli/perch"
 
 # Overridable so the script can be tested against a fabricated release served
 # locally. Nothing in normal use should set these.

@@ -12,7 +12,7 @@ that is not ready. `release.yml` asserts this after every publish, because a
 `latest` that has quietly moved looks exactly like one that has not until
 somebody installs it.
 
-**Homebrew**: a Tap. `brew tap mschieller/perch` is already a deliberate act
+**Homebrew**: a Tap. `brew tap perch-cli/perch` is already a deliberate act
 nobody performs by accident, so the Channel is the opt-in and no second formula
 is needed. Homebrew has no channel concept worth fighting for this.
 

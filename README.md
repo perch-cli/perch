@@ -18,20 +18,20 @@ to switch between.
 **Homebrew**, on macOS or Linux:
 
 ```sh
-brew tap mschieller/perch
+brew tap perch-cli/perch
 brew install perch
 ```
 
 **The installer**, on macOS or Linux:
 
 ```sh
-curl -fsSL https://mschieller.github.io/perch/install.sh | sh
+curl -fsSL https://perch-cli.github.io/perch/install.sh | sh
 ```
 
 **The installer**, on Windows:
 
 ```powershell
-irm https://mschieller.github.io/perch/install.ps1 | iex
+irm https://perch-cli.github.io/perch/install.ps1 | iex
 ```
 
 **npm**, anywhere:
@@ -44,13 +44,13 @@ The `@dev` is not optional. There is no `latest` tag until 1.0, so a plain `npm
 install perch-cli` fails rather than quietly handing you something unfinished.
 
 **By hand**, from
-[the releases page](https://github.com/mschieller/perch/releases). Every release
+[the releases page](https://github.com/perch-cli/perch/releases). Every release
 carries one archive per platform, a `SHA256SUMS`, and signed build provenance.
 The checksums say which bytes; the provenance says which workflow, in which
 repository, at which commit produced them, which is the stronger claim:
 
 ```sh
-gh attestation verify perch-v0.1.0-aarch64-apple-darwin.tar.gz --repo mschieller/perch
+gh attestation verify perch-v0.1.0-aarch64-apple-darwin.tar.gz --repo perch-cli/perch
 ```
 
 Both installers check the checksum, and check the provenance too when `gh` is
