@@ -37,11 +37,13 @@ irm https://perch-cli.github.io/perch/install.ps1 | iex
 **npm**, anywhere:
 
 ```sh
-npm install -g perch-cli@dev
+npm install -g perch-cli
 ```
 
-The `@dev` is not optional. There is no `latest` tag until 1.0, so a plain `npm
-install perch-cli` fails rather than quietly handing you something unfinished.
+Perch is pre-1.0 and the version number says so. It is published like anything
+else on npm — `latest` is the newest release — because npm has no way for a
+package to have no `latest`, and pretending otherwise only meant installing an
+older version instead of a newer one.
 
 **By hand**, from
 [the releases page](https://github.com/perch-cli/perch/releases). Every release

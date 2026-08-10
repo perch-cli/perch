@@ -61,9 +61,9 @@ configure. So the first publish of each of the six is manual:
 
 ```sh
 node npm/build.mjs 0.1.0 <binaries> npm-dist   # or take them from a built release
-npm publish ./npm-dist/@perch-cli-darwin-arm64 --access public --tag dev
+npm publish ./npm-dist/@perch-cli-darwin-arm64 --access public
 # ... the other four, then:
-npm publish ./npm-dist/perch-cli --access public --tag dev
+npm publish ./npm-dist/perch-cli --access public
 ```
 
 The `./` is not decoration. npm reads a bare `npm-dist/perch-cli` as GitHub
@@ -81,16 +81,14 @@ Check what `latest` points at once the first publish is done:
 npm dist-tag ls perch-cli
 ```
 
-npm may attach `latest` to a package's first version whatever `--tag` said. It
-should point at nothing until 1.0, so that `npm install perch-cli` fails loudly
-rather than quietly handing somebody a CLI that is not ready:
+It should be the version you just published. `release.yml` asserts the same
+thing after every publish, because `npm publish` succeeding and `latest` moving
+are two different claims and only the second is what anybody installs.
 
-```sh
-npm dist-tag rm perch-cli latest
-```
-
-`release.yml` checks this after every publish and fails the job if `latest` has
-moved to the version it just pushed.
+Do not try to remove `latest`. npm attaches it to a package's first version
+whatever `--tag` said and then refuses to delete it — the request comes back
+`400` after authenticating successfully, and no public package on the registry
+is without one. ADR 0031 covers what that cost.
 
 ### The Homebrew tap
 
@@ -118,18 +116,18 @@ brew install perch
 
 ## Channels, and which of them are opt-in
 
-Perch is pre-1.0, and until it is 1.0 nobody should arrive at it by accident.
-That is carried differently in each place, because each place means something
-different by "default":
+Perch is pre-1.0. Where a Channel has a way of saying so, it says so; where it
+does not, the version number does the work:
 
 | Channel | During 0.x | At 1.0 |
 | ------- | ---------- | ------ |
 | GitHub Releases | published normally — it genuinely is the latest release, and marking it a prerelease would empty the `releases/latest` endpoint the installers ask | unchanged |
-| npm | `--tag dev`; `latest` points at nothing, so `npm install perch-cli` fails | `latest` starts pointing at the release |
+| npm | published normally, `latest` following the newest release — npm does not permit a package without a `latest` (ADR 0031) | unchanged |
 | Homebrew | a tap, which nobody adds by accident | consider homebrew-core |
 
-Graduating to the default channel and tagging `1.0.0` are the same act, so there
-is never a stable-looking version sitting on a dev tag.
+Only one of the three is actually opt-in, which is worth being clear-eyed about:
+the one-liner on GitHub Pages hands a pre-1.0 binary to anyone who pastes it,
+and always did.
 
 ## Cutting 1.0
 

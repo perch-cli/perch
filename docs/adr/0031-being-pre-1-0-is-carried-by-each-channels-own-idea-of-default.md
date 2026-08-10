@@ -4,13 +4,25 @@ Perch is published before it is finished. Every Release is real and installable;
 none of them should be what somebody arrives at without meaning to. There is no
 single switch for that, because each Channel means something different by "the
 default", so it is carried in each Channel's own terms rather than by one
-mechanism bolted across all of them.
+mechanism bolted across all of them — and one of those Channels turns out to
+have no such term at all.
 
-**npm**: published with `--tag dev`. `latest` points at nothing, so
-`npm install perch-cli` fails loudly rather than quietly handing somebody a CLI
-that is not ready. `release.yml` asserts this after every publish, because a
-`latest` that has quietly moved looks exactly like one that has not until
-somebody installs it.
+**npm**: published to `latest`, the default tag, during 0.x as well.
+
+This was `--tag dev` with `latest` pointing at nothing, and that is not a state
+npm allows a package to be in. The registry attaches `latest` to a package's
+first version whatever `--tag` said, and then refuses to remove it — the DELETE
+comes back `400` after authenticating, and no public package on the registry is
+without one. So the choice was never between "`npm install perch-cli` fails" and
+"it works". It was between "it works" and "it silently installs whichever
+version `latest` happened to be stuck on, forever" — which is the same install,
+with a worse version, and a check in `release.yml` reporting success the whole
+time because it only compared `latest` against the version being published.
+
+What is left is honest: `latest` follows the newest Release, and `release.yml`
+asserts that it does. Being pre-1.0 is said where people read — the README, the
+version number itself — rather than carried by making one Channel behave
+unlike every other package on it.
 
 **Homebrew**: a Tap. `brew tap perch-cli/perch` is already a deliberate act
 nobody performs by accident, so the Channel is the opt-in and no second formula
@@ -25,9 +37,9 @@ of truth that lies about which version is newest is worse than an unadorned one.
 
 ## What ends it
 
-Graduating to the default Channel and tagging `1.0.0` are the same act. Two
-decisions would allow a state where a stable-looking version sits on a dev tag,
-or a `1.0.0` nobody can install without opting in; one decision cannot.
+Tagging `1.0.0` is the whole of it. The Homebrew Tap stays a Tap until there is
+a reason to consider homebrew-core; nothing else changes shape, because nothing
+else is holding a version back.
 
 The floor for taking it is the weekly contract suite green on all three
 platforms for four consecutive weeks. Not an arbitrary interval: those tests
