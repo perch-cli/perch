@@ -88,9 +88,16 @@ fn a_credential_anthropic_will_not_renew_quarantines_its_account() {
         "the Account is kept and stays active — a Quarantine is a state, not a \
          removal: {printed}"
     );
+    assert_eq!(
+        printed.matches("perch relogin").count(),
+        1,
+        "the reason and the repair are said where it is found, and said once — \
+         the refresh used to remark on the Quarantine it had just recorded and \
+         then the Account's own line said the whole thing again: {printed}"
+    );
     assert!(
-        printed.contains("Quarantined") && printed.contains("perch relogin"),
-        "the reason and the repair are both said where it is found: {printed}"
+        printed.contains("Anthropic would not renew its Credential"),
+        "{printed}"
     );
 }
 
@@ -292,7 +299,11 @@ fn a_quarantined_account_is_not_asked_again() {
          not refill early (ADR 0015) to be written off again: {:?}",
         host.http_calls()
     );
-    assert!(printed.contains("Quarantined"), "{printed}");
+    assert_eq!(
+        printed.matches("perch relogin").count(),
+        1,
+        "and the Quarantine it was not asked about is still shown, once: {printed}"
+    );
 }
 
 #[test]

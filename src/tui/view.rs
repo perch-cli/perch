@@ -91,8 +91,8 @@ fn render_bar(frame: &mut Frame, model: &Model, area: Rect) {
     // label rather than sharing the row out: a bar reading `Utiliz` against an
     // email address is one nobody can tell the views apart from, and which view
     // this is is the thing the keys act on.
-    let label = match room_for_both(area.width as usize, active.chars().count()) {
-        true => active.chars().count() as u16,
+    let label = match room_for_both(area.width as usize, list::cells(&active)) {
+        true => list::cells(&active) as u16,
         false => 0,
     };
     let [tabs, marked] =
@@ -122,7 +122,7 @@ fn render_bar(frame: &mut Frame, model: &Model, area: Rect) {
 fn room_for_both(width: usize, label: usize) -> bool {
     let tabs: usize = Tab::ALL
         .iter()
-        .map(|tab| tab.title().chars().count() + 2)
+        .map(|tab| list::cells(tab.title()) + 2)
         .sum::<usize>()
         + Tab::ALL.len()
         - 1;
@@ -217,7 +217,7 @@ fn render_utilization(frame: &mut Frame, model: &Model, area: Rect) {
     // for each one at the end of a different-length address.
     let widest = accounts
         .iter()
-        .map(|account| account.email().chars().count())
+        .map(|account| list::cells(account.email()))
         .max()
         .unwrap_or_default();
 
@@ -237,9 +237,9 @@ fn render_utilization(frame: &mut Frame, model: &Model, area: Rect) {
         for index in section.rows.clone() {
             let account = accounts[index];
             let heading = Line::from(format!(
-                "{}{:widest$}   Headroom {}",
+                "{}{}   Headroom {}",
                 markers(model, account, index),
-                account.email(),
+                list::padded(account.email(), widest),
                 cycle::headroom_in_full(account, model.now),
             ));
             lines.push(match index == model.cursor {
@@ -368,7 +368,7 @@ fn row<const N: usize>(cells: &[String; N], widths: &[usize; N]) -> String {
     cells
         .iter()
         .zip(widths)
-        .map(|(cell, width)| format!("{cell:width$}"))
+        .map(|(cell, width)| list::padded(cell, *width))
         .collect::<Vec<String>>()
         .join("  ")
         .trim_end()
@@ -417,7 +417,7 @@ fn broken(note: &str, width: usize) -> Vec<String> {
     for word in note.split_whitespace() {
         if line.is_empty() {
             line = word.to_string();
-        } else if line.chars().count() + 1 + word.chars().count() <= width {
+        } else if list::cells(&line) + 1 + list::cells(word) <= width {
             line.push(' ');
             line.push_str(word);
         } else {
@@ -559,10 +559,7 @@ mod tests {
         let said = as_many_as_fit(vec![repair.to_string()], 40, MOST);
 
         assert!(said.len() > 1, "{said:?}");
-        assert!(
-            said.iter().all(|line| line.chars().count() <= 40),
-            "{said:?}"
-        );
+        assert!(said.iter().all(|line| list::cells(line) <= 40), "{said:?}");
         assert_eq!(
             said.join(" ").split_whitespace().collect::<Vec<&str>>(),
             repair.split_whitespace().collect::<Vec<&str>>(),
@@ -583,7 +580,7 @@ mod tests {
     /// the views apart from.
     #[test]
     fn a_row_with_no_room_for_both_keeps_the_tabs() {
-        let label = "active: someone@example.com ".chars().count();
+        let label = list::cells("active: someone@example.com ");
 
         assert!(room_for_both(80, label));
         assert!(!room_for_both(46, label));

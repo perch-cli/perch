@@ -1,6 +1,6 @@
 //! The Host implementation that actually touches the machine.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -150,8 +150,32 @@ fn run(program: &Path, args: &[&str], stdin: Option<&str>) -> std::io::Result<Ex
     if let Some(input) = stdin {
         use std::io::Write;
         let mut pipe = child.stdin.take().expect("stdin was piped");
-        pipe.write_all(input.as_bytes())?;
+        let written = pipe.write_all(input.as_bytes());
         drop(pipe);
+        // Reaped even when the write failed, and reported in the child's own
+        // words where it has any.
+        //
+        // `Child::drop` neither kills nor waits, so returning straight out of
+        // here left a zombie for the life of the process — and `perch watch` is
+        // a loop that spawns `curl` every round for as long as somebody leaves
+        // it running. The likeliest failure is an `EPIPE` from a child that has
+        // already exited, which is precisely the case where its stderr says what
+        // went wrong and "Broken pipe (os error 32)" does not: the same
+        // information loss the naming above was written to fix for a spawn that
+        // failed.
+        if let Err(err) = written {
+            let said = child
+                .wait_with_output()
+                .map(|output| String::from_utf8_lossy(&output.stderr).trim().to_string())
+                .unwrap_or_default();
+            return Err(match said.is_empty() {
+                true => err,
+                false => std::io::Error::new(
+                    err.kind(),
+                    format!("could not write to {}: {err}: {said}", program.display()),
+                ),
+            });
+        }
     }
     Ok(Execution::from(child.wait_with_output()?))
 }
@@ -237,8 +261,10 @@ pub struct RealHost {
     /// What has already been said, so a remark about the machine is made once
     /// however many Accounts provoke it.
     noted: RefCell<BTreeSet<String>>,
-    /// Whether a remark is printed as it is made, or only kept.
-    aloud: bool,
+    /// Whether a remark is printed as it is made, or only kept. A cell because
+    /// `perch tui` turns it off for as long as it holds the screen and back on
+    /// afterwards, through a `&dyn Host` (see [`Host::print_remarks`]).
+    aloud: Cell<bool>,
 }
 
 impl Default for RealHost {
@@ -251,7 +277,7 @@ impl RealHost {
     pub fn new() -> Self {
         RealHost {
             noted: RefCell::new(BTreeSet::new()),
-            aloud: true,
+            aloud: Cell::new(true),
         }
     }
 
@@ -266,15 +292,9 @@ impl RealHost {
     /// could not do.
     pub fn keeping_its_remarks() -> Self {
         RealHost {
-            aloud: false,
+            aloud: Cell::new(false),
             ..RealHost::new()
         }
-    }
-
-    /// Everything [`Host::note`] was given, in the order a `BTreeSet` keeps and
-    /// each of them once.
-    pub fn remarks(&self) -> Vec<String> {
-        self.noted.borrow().iter().cloned().collect()
     }
 }
 
@@ -650,9 +670,18 @@ impl Host for RealHost {
     /// reading off stdout — unless this is a Host built to keep them, whose
     /// caller has the screen and will say them itself.
     fn note(&self, line: &str) {
-        if self.noted.borrow_mut().insert(line.to_string()) && self.aloud {
+        if self.noted.borrow_mut().insert(line.to_string()) && self.aloud.get() {
             eprintln!("perch: {line}");
         }
+    }
+
+    fn print_remarks(&self, aloud: bool) {
+        self.aloud.set(aloud);
+    }
+
+    /// In the order a `BTreeSet` keeps, and each of them once.
+    fn remarks(&self) -> Vec<String> {
+        self.noted.borrow().iter().cloned().collect()
     }
 
     fn read_line(&self) -> Result<Option<String>, HostError> {

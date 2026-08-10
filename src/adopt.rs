@@ -138,7 +138,11 @@ fn carry_the_identity_block(host: &dyn Host, findings: &Findings, store: &Store)
     };
 
     let kept = store.identity_file.clone();
-    host.write_file(&kept, &probe::fresh_identity_file(block))
+    // The write `login::carry_identity_file` uses, for the reason written there:
+    // a Profile's `.claude.json` is a file Perch is the first to create, and one
+    // Perch creates is created closed rather than at the process umask (ADR
+    // 0020). Adoption is the other way a Profile comes to hold one.
+    crate::host::write_atomically(host, &kept, &probe::fresh_identity_file(block))
         .map_err(|err| PerchError::file_write(kept, err))
 }
 

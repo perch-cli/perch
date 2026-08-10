@@ -515,9 +515,23 @@ pub fn credential_after_rotation(
     if let Some(token) = refresh_token {
         block.insert("refreshToken".into(), token.into());
     }
-    if let Some(at) = expires_at {
-        block.insert("expiresAt".into(), at.into());
-    }
+    // Taken out rather than left alone when the renewal gave no lifetime, which
+    // is the only way `None` means what `anthropic::renew` decided it should.
+    // Four replies yield one — no `expires_in`, a zero, a negative, and one that
+    // overflows — and the reason given for all four is that an `expires_at` in
+    // the past "reads as already expired and renews on every command forever".
+    // Inserting only on `Some` left exactly that value in place: a Credential is
+    // renewed *because* its `expiresAt` had passed, so the stale one survived
+    // the write and the next command renewed again. Under `perch watch` that is
+    // a refresh-token Rotation every round, each one a window in which a failed
+    // write is an unrecoverable Quarantine.
+    //
+    // Removing it says what happened instead: this Credential does not say when
+    // it expires, which `usable_at` already takes at its word.
+    match expires_at {
+        Some(at) => block.insert("expiresAt".into(), at.into()),
+        None => block.remove("expiresAt"),
+    };
 
     serde_json::to_string(&document)
         .map_err(|err| PerchError::Other(format!("could not write the renewed Credential: {err}")))
@@ -1476,6 +1490,35 @@ mod tests {
         let back = understood(&rotated);
         assert_eq!(back.refresh_token.as_deref(), Some("still-good"));
         assert_eq!(back.access_token, "new-access");
+    }
+
+    /// The test above cannot see this: its Credential carries no `expiresAt` at
+    /// all, so there is nothing for a renewal to leave behind. A Credential is
+    /// only ever renewed *because* its `expiresAt` has passed, which makes the
+    /// stale value the case that actually arises.
+    #[test]
+    fn a_renewal_that_hands_back_no_lifetime_does_not_keep_the_expiry_that_had_passed() {
+        let current = understood(&format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"old-access","refreshToken":"still-good","expiresAt":{}}}}}"#,
+            NOON - 3_600_000,
+        ));
+        assert!(
+            !current.usable_at(DateTime::from_timestamp_millis(NOON).expect("a time"),),
+            "the Credential being renewed is one that had already expired",
+        );
+
+        let rotated = credential_after_rotation(&current, "new-access", None, None, "2.1.221")
+            .expect("the block is there to renew");
+
+        let back = understood(&rotated);
+        assert_eq!(back.expires_at, None);
+        assert!(
+            back.usable_at(DateTime::from_timestamp_millis(NOON).expect("a time")),
+            "a renewal that gave no lifetime leaves a Credential that says \
+             nothing about when it expires — not one still carrying the expiry \
+             that caused the renewal, which renews again on every command",
+        );
+        assert!(!rotated.contains("expiresAt"), "{rotated}");
     }
 
     /// A `claude` that is there and will not run at all. The refusal names the

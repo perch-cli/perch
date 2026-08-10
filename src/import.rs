@@ -105,23 +105,59 @@ pub fn restored(export: &Export, path: &std::path::Path) -> Result<Registry> {
     })
 }
 
+/// One Profile an Import has written into, and whether the Import is what
+/// brought it into being.
+#[derive(Debug)]
+struct Touched {
+    store: Store,
+    /// Whether the Profile's directory was already on the machine. An Import
+    /// runs on a machine holding no *Accounts*, which is not the same as a
+    /// machine holding no Profiles: a `perch add` that died at the browser step,
+    /// or a Purge that could not empty a store, leaves a directory the registry
+    /// never named.
+    was_already_there: bool,
+}
+
 /// The Profiles an Import has touched, so they can be taken back out if
 /// anything after them fails.
 #[derive(Debug, Default)]
 pub struct Placed {
-    touched: Vec<Store>,
+    touched: Vec<Touched>,
 }
 
 impl Placed {
-    /// Takes back everything this Import placed, leaving the machine as it was.
+    /// Takes back everything this Import *made*, leaving the machine as it was.
     ///
     /// Best-effort, like every other undo in Perch: the interesting failure is
-    /// the one that got us here, not the tidying up. Safe to be that blunt
-    /// because an Import only ever runs on a machine holding no Accounts, so
-    /// every Profile it removes is one it made moments ago.
+    /// the one that got us here, not the tidying up.
+    ///
+    /// Made, and not merely written into. The reasoning this used to be blunt on
+    /// — "an Import only ever runs on a machine holding no Accounts, so every
+    /// Profile it removes is one it made moments ago" — reads the refusal one
+    /// step wider than it goes: it is the *registry* that has to be empty, and a
+    /// Profile directory nothing names outlives every command that would have
+    /// named it. So an Import that failed at the store of an Account whose
+    /// directory was already there deleted that directory, and on macOS the
+    /// keychain item outside it that only its name could still reach — a live
+    /// refresh token for a login nobody was importing.
+    ///
+    /// What is left instead is a Profile holding the Credential this Import put
+    /// in it, which costs nothing that has not already been paid: the Export
+    /// file still holds every Credential in it, the directory was already
+    /// unnamed before any of this started, and `perch purge` walks it and the
+    /// next `perch add` reaps it.
     pub fn undo(&self, host: &dyn Host) {
-        for store in &self.touched {
-            profile::discard(host, store);
+        for touched in &self.touched {
+            if touched.was_already_there {
+                host.note(&format!(
+                    "{} was already on this machine, so it was left where it is \
+                     rather than removed with the Profiles this Import made. \
+                     The Export still holds every Credential in it.",
+                    touched.store.config_dir.display(),
+                ));
+                continue;
+            }
+            profile::discard(host, &touched.store);
         }
     }
 }
@@ -226,10 +262,16 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
     let mut placed = Placed::default();
     for (email, store, credential, identity_file) in placements {
         // Recorded before it is written rather than after it worked, because
-        // what has to come back out is everything this touched: a Profile
+        // what has to come back out is everything this made: a Profile
         // directory made for a Credential that then would not go into it is
         // exactly the orphan an Import promises not to leave.
-        placed.touched.push(store.clone());
+        //
+        // And asked before the directory is made, which is the only moment the
+        // answer is still knowable — see [`Placed::undo`] for what turns on it.
+        placed.touched.push(Touched {
+            was_already_there: host.path_exists(&store.config_dir),
+            store: store.clone(),
+        });
         if let Err(error) = profile::make_dir(host, &store.config_dir)
             .and_then(|()| profile::store_credential(host, &store, credential))
             .and_then(|()| login::carry_identity_file(host, &identity_file, &store))

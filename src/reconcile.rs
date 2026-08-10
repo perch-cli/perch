@@ -110,21 +110,40 @@ fn crossing(host: &dyn Host, shared: &Path) -> Result<Vec<PathBuf>> {
     }
 }
 
-/// Whether an entry is one of the three that stay behind.
+/// Whether an entry is one of the four that stay behind, or something written
+/// beside one of them.
 ///
 /// Without regard to case, because Windows answers to `.Credentials.json` for
 /// the same file — and the cost of the two answers is not the same: an entry
 /// wrongly held back is one piece of Shared State a person has to notice
 /// missing, and an entry wrongly crossed is a Credential in somebody else's
 /// Profile.
+///
+/// And by prefix, because what is written beside a held-back name is the same
+/// thing under a longer one. `write_atomically` and every private write put a
+/// `.perch-tmp.<pid>` beside their target, holding the *whole* of it — so a Run
+/// starting while a Switch was mid-write would cross a complete copy of
+/// `.credentials.json` into another Account's Profile. `lock::take_over` puts a
+/// `.perch-takeover` beside `.oauth_refresh.lock`, which is an answer about one
+/// configuration directory exactly as the lock is. And Claude Code's own
+/// config-file lock is `.claude.json.lock`.
+///
+/// A name that merely begins the same way and belongs to somebody — a
+/// `sessions.md` — is held back too. That is the side of this to be wrong on:
+/// one file a person notices missing from a Run against the alternative.
 fn held_back(entry: &Path) -> bool {
     entry
         .file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| {
-            HELD_BACK
-                .iter()
-                .any(|stays| name.eq_ignore_ascii_case(stays))
+            // `get` rather than a slice: a name is arbitrary text, and the
+            // prefix length is a byte count that need not land on a character
+            // boundary. `None` there is simply a name that does not begin with
+            // this one.
+            HELD_BACK.iter().any(|stays| {
+                name.get(..stays.len())
+                    .is_some_and(|begins| begins.eq_ignore_ascii_case(stays))
+            })
         })
 }
 
@@ -163,6 +182,24 @@ fn establish(host: &dyn Host, target: &Path, at: &Path) -> Result<()> {
 /// most likely. It is refused rather than deleted, because deleting the thing
 /// you cannot identify is how somebody loses work, and the refusal names the
 /// path so the fix is one command.
+///
+/// So Windows deletes a file it cannot identify, where every other platform
+/// refuses to — which reads as the exception that should be closed, and cannot
+/// be. The obvious guard is that a hard link is a second name for one file and
+/// therefore shares its modification time, so a file whose mtime is anything
+/// else was not made here. But the file this branch exists to delete is
+/// *precisely* that one: an editor that writes beside the target and renames it
+/// into place leaves the Default Profile holding a new file while the Profile
+/// still names the old one, and repairing that divergence is the whole reason a
+/// share is re-established before every Run. Every stale hard link Perch made
+/// fails the test, so the guard would refuse exactly the case it was added to
+/// protect and leave the divergence in place.
+///
+/// Nothing weaker works either, because nothing about a second name says it is
+/// one. What would work is Perch recording which entries it linked, which is a
+/// file of its own in the Profile with its own ways to be wrong — a record lost
+/// refuses shares Perch did make, and a record kept past a removal deletes a
+/// file somebody put there afterwards. It has not been judged worth that.
 fn in_the_way(host: &dyn Host, target: &Path, at: &Path) -> Result<()> {
     if host.platform() == Platform::Windows && host.is_file(at) && host.is_file(target) {
         host.remove_file(at)
@@ -353,6 +390,39 @@ mod tests {
             );
         }
         for crosses in ["plugins", "CLAUDE.md", "plans", "session-env"] {
+            assert!(
+                !held_back(&Path::new("/Users/someone/.claude").join(crosses)),
+                "{crosses} follows the person into a Run"
+            );
+        }
+    }
+
+    /// What is written *beside* a held-back name is the same thing under a
+    /// longer one.
+    ///
+    /// The dangerous one is the temp file: every atomic write in Perch creates
+    /// `<target>.perch-tmp.<pid>` holding the whole of the target and then
+    /// renames it into place, so a Run starting while a Switch was mid-write
+    /// enumerated a complete copy of `.credentials.json` and linked it into
+    /// another Account's Profile. `.oauth_refresh.lock.perch-takeover` is the
+    /// same class as the lock it guards — an answer about one configuration
+    /// directory, meaningless in another — and `.claude.json.lock` is Claude
+    /// Code's own.
+    #[test]
+    fn what_is_written_beside_something_that_stays_behind_stays_behind_too() {
+        for beside in [
+            ".credentials.json.perch-tmp.4242",
+            ".claude.json.perch-tmp.4242",
+            ".claude.json.lock",
+            ".oauth_refresh.lock.perch-takeover",
+            "sessions.perch-tmp.4242",
+        ] {
+            assert!(
+                held_back(&Path::new("/Users/someone/.claude").join(beside)),
+                "{beside} stays behind"
+            );
+        }
+        for crosses in [".credential-notes.md", "claude.json", "session-env"] {
             assert!(
                 !held_back(&Path::new("/Users/someone/.claude").join(crosses)),
                 "{crosses} follows the person into a Run"

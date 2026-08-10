@@ -81,3 +81,13 @@ a thread with a `RealHost` of its own. That Host keeps its remarks rather than
 printing them: `Host::note` goes to stderr, which is exactly where the frames
 are, so a note about the machine would land in the middle of one. The loop
 shows them where it shows everything else a Refresh could not do.
+
+The rule is the Host's rather than that thread's. The Switch the picker performs
+runs against the *process's* Host, so a remark it provoked — a Credential
+written to a store Perch would rather not have used — was printed onto the
+alternate screen and thrown away with it. `Host::print_remarks` is the one thing
+about frames the port does know, and it knows it only as "keep these for now":
+`perch tui` turns printing off for exactly as long as it holds the screen, reads
+what was kept, and shows it in the frame beside what the command said. A fake
+never printed a remark in the first place, which is why nothing here was
+testable until the real Host could be told to behave the same way.

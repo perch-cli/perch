@@ -17,6 +17,8 @@
 //! that summarised it would be a third opinion about what just happened to the
 //! machine, and the Capture is the half of a Switch worth reading.
 
+use std::collections::BTreeSet;
+
 use crate::commands::switch::{self, SwitchArgs};
 use crate::host::Host;
 use crate::registry;
@@ -38,6 +40,11 @@ use crate::tui::model::Model;
 /// bug — and the `else` arm it needed was unreachable, because the model has
 /// already answered `Nothing` when there is no Account under the cursor.
 pub fn switch(host: &dyn Host, model: &mut Model, email: &str) {
+    // What the Host has already remarked on, so what this Switch provokes can
+    // be told from it. A remark is made once per process, so anything not in
+    // here afterwards belongs to this Switch.
+    let before: BTreeSet<String> = host.remarks().into_iter().collect();
+
     let mut written = Vec::new();
     let ended = switch::run(
         host,
@@ -54,6 +61,17 @@ pub fn switch(host: &dyn Host, model: &mut Model, email: &str) {
     if let Err(refused) = ended {
         said.extend(lines_of(&refused.to_string()));
     }
+    // And the remarks, which the command does not write and the Host would have
+    // put on stderr — which under the picker is the alternate screen, where a
+    // line lands in the middle of the display and stays until something redraws
+    // over it. `perch tui` has told the Host to keep them for exactly this
+    // reason, so a Switch that fell back to a store Perch would rather not have
+    // used says so here or nowhere at all.
+    said.extend(
+        host.remarks()
+            .into_iter()
+            .filter(|remark| !before.contains(remark)),
+    );
     model.said = said;
 
     // Re-read rather than patched, because a Switch writes more than which
