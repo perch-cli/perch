@@ -173,12 +173,21 @@ fn the_live_store(
         return Ok(None);
     }
     let live = registry::the_default_profile(host)?;
-    let version = crate::probe::claude_version(host)?;
     // An Identity that is absent, or one that will not be read, is not evidence
     // against — exactly as it is not in a Capture. Only an Identity that names
     // somebody else is.
+    //
+    // A Claude Code that will not say its version is the same thing one step
+    // earlier: without it there is no Identity to read, so there is nothing that
+    // names somebody else. Propagated instead, it refused the whole Export —
+    // after the passphrase had been typed twice — on a machine where Claude Code
+    // had been uninstalled or a global install had been wiped, which is exactly
+    // the machine somebody is decommissioning when they run this. And it takes
+    // `perch purge` with it, because the Export it offers first is one that
+    // stops the Purge when it fails.
     let somebody_else = matches!(
-        crate::probe::read_identity(host, &live, &version),
+        crate::probe::claude_version(host)
+            .and_then(|version| crate::probe::read_identity(host, &live, &version)),
         Ok(Some(identity)) if !registry::same_name(&identity.email, account.email())
     );
     Ok((!somebody_else).then_some(live))
