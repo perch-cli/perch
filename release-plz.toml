@@ -1,0 +1,27 @@
+[workspace]
+# release-plz decides *what version, and why*. It does not decide what a release
+# is made of. `release.yml` owns every file — the binaries, the checksums, the
+# Release page itself — and it cannot upload one until it has built it, which
+# takes minutes. Letting release-plz create the Release too would publish a page
+# with nothing on it and fill it in afterwards, and somebody would download from
+# it in the gap.
+git_release_enable = false
+
+# So the tag is release-plz's last act, and the only thing it hands over. It has
+# to be pushed with a token that is not GITHUB_TOKEN: GitHub refuses to start a
+# workflow from a push its own token made, so a tag pushed with it would sit on
+# main and `release.yml` would never fire. See the comment in release-plz.yml.
+git_tag_enable = true
+git_tag_name = "v{{ version }}"
+
+# Perch has a `[lib]` so the binary and the tests can share code, not because
+# anything downstream links against it — `publish = false` in Cargo.toml settles
+# that. Checking its public API for semver breakage is minutes spent every
+# release on a promise nobody is relying on.
+semver_check = false
+
+# A release should contain the commits that were reviewed, and nothing else. A
+# dependency bump that arrives in the release pull request is a change to the
+# built artifact that no one asked for at the moment they are least likely to
+# read it.
+dependencies_update = false
