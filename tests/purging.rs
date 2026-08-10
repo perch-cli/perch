@@ -676,6 +676,37 @@ fn a_purge_that_found_no_credential_does_not_claim_to_have_deleted_one() {
     assert_eq!(registry_on(&host), None, "and the Purge still finished");
 }
 
+/// The same sentence off macOS, where every word of it used to be false.
+///
+/// There is no keychain and nothing is filed under `$USER`: a Credential lives
+/// in a file inside the Profile (ADR 0020), so the Profile going is the
+/// Credential going. Told the macOS story anyway, somebody is sent looking in a
+/// keychain their machine does not have, by the one sentence that exists to say
+/// where a Credential might still be.
+#[test]
+fn a_purge_off_macos_explains_the_store_that_machine_actually_has() {
+    let host = logged_in_machine_off_macos().with_answers(&["n", "purge"]);
+    run_list(&host, false)
+        .0
+        .expect("the first command adopts the login there already is");
+    // An Account whose Profile holds no credentials file, which is the whole of
+    // what an empty store is where the store is a file.
+    host.remove_file(&store_of(&host, EMAIL).credentials_file)
+        .expect("the Profile's file goes");
+
+    let (outcome, printed) = run_purge(&host);
+    outcome.expect("the word was typed");
+
+    assert!(
+        printed.contains("nothing in either Credential Store"),
+        "the sentence this is about is printed at all:\n{printed}"
+    );
+    assert!(
+        !printed.contains("$USER") && !printed.contains("keychain"),
+        "and a machine with no keychain is not told about one:\n{printed}"
+    );
+}
+
 /// The questions a Purge asks are the one wait in Perch with no bound on them —
 /// somebody may type the word in a second or come back after lunch — and the
 /// registry lock is held across them. A hold this Perch has lost is a registry

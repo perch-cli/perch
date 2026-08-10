@@ -126,7 +126,7 @@ pub fn run(host: &dyn Host, args: PurgeArgs, out: &mut dyn Write) -> Result<()> 
     purge::refuse_while_anything_is_running(host, &registry).map_err(and_the_export)?;
 
     let purged = purge::erase(host, &registry).map_err(and_the_export)?;
-    report(out, &home, &purged)
+    report(host, out, &home, &purged)
 }
 
 /// Adds the whereabouts of an Export this run wrote to a failure that came
@@ -328,7 +328,7 @@ fn agreed(host: &dyn Host, out: &mut dyn Write) -> Result<bool> {
 }
 
 /// What was given back, and what is still the machine's.
-fn report(out: &mut dyn Write, home: &Path, purged: &Purged) -> Result<()> {
+fn report(host: &dyn Host, out: &mut dyn Write, home: &Path, purged: &Purged) -> Result<()> {
     // Said as what happened rather than as a count, because "Purged 0 Accounts"
     // is not a sentence — and holding none is a real state here: it is what a
     // Purge that stopped in its last step leaves for the next one to finish.
@@ -353,10 +353,9 @@ fn report(out: &mut dyn Write, home: &Path, purged: &Purged) -> Result<()> {
         say(
             out,
             &format!(
-                "{} of them had nothing in either Credential Store to delete — on \
-                 macOS a keychain item is filed under `$USER`, so one written \
-                 under a different login name is still there.",
-                purged.accounts - purged.credentials,
+                "{} of them had nothing in either Credential Store to delete — {}.",
+                crate::commands::accounts(purged.accounts - purged.credentials),
+                crate::commands::a_store_that_held_nothing(host),
             ),
         )?;
     }

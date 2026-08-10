@@ -516,6 +516,34 @@ fn a_removal_that_found_no_credential_does_not_claim_to_have_deleted_one() {
     );
 }
 
+/// The same sentence off macOS, where every word of it used to be false.
+///
+/// There is no keychain there and nothing is filed under `$USER` — a Credential
+/// lives in a file inside the Profile (ADR 0020). Told the macOS story anyway,
+/// somebody is sent looking in a keychain their machine does not have, by the
+/// one sentence that exists to say where a Credential might still be.
+#[test]
+fn a_removal_off_macos_explains_the_store_that_machine_actually_has() {
+    let host = logged_in_machine_off_macos().with_answers(&["y"]);
+    run_list(&host, false)
+        .0
+        .expect("the first command adopts the login there already is");
+    host.remove_file(&store_of(&host, EMAIL).credentials_file)
+        .expect("the Profile's file goes");
+
+    let (result, printed) = run_remove(&host, EMAIL);
+
+    result.expect("the Account is still forgotten");
+    assert!(
+        printed.contains("held anything to delete"),
+        "the sentence this is about is printed at all:\n{printed}"
+    );
+    assert!(
+        !printed.contains("$USER") && !printed.contains("keychain"),
+        "and a machine with no keychain is not told about one:\n{printed}"
+    );
+}
+
 /// Removing the last Account while Perch is on nobody used to be confirmed with
 /// a sentence about Claude Code "going on running as" that Account — which is
 /// not true: it is not the active one, and the live store may hold somebody

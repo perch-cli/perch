@@ -174,6 +174,39 @@ pub fn accounts(count: usize) -> String {
     }
 }
 
+/// Why a Credential Store that Perch went to empty turned out to hold nothing,
+/// said about the store this machine actually has.
+///
+/// Both callers said the macOS half unconditionally: "on macOS a keychain item
+/// is filed under `$USER`, so one written under a different login name is still
+/// there." Off macOS there is no keychain and no filing under `$USER` — a
+/// Credential lives in a file inside the Profile (ADR 0020) — so the one
+/// sentence explaining where a Credential might still be pointed at a place
+/// that does not exist, on the two commands whose whole promise is that
+/// something is gone.
+///
+/// One function rather than a copy in each, because the two are answering the
+/// same question and the day a third store is added is the day the copies
+/// disagree.
+pub fn a_store_that_held_nothing(host: &dyn Host) -> &'static str {
+    match host.platform() {
+        // Perch derives the keychain item's account name from `$USER` (ADR
+        // 0008), so a Profile written under one login name keeps its Credential
+        // where a Perch running under another will not look — which is the one
+        // way an empty store here is not the same as an empty Account.
+        crate::host::Platform::MacOs => {
+            "on macOS a keychain item is filed under `$USER`, so one written \
+             under a different login name is still there"
+        }
+        // The store is a file inside the Profile, so the Profile going is the
+        // Credential going, and there is nowhere else for one to be.
+        _ => {
+            "its Credential Store is a file inside its Profile, and there was no \
+             file there"
+        }
+    }
+}
+
 /// Refuses to act on an Account whose Credential no longer works, in the words
 /// of whichever command was asked.
 ///
