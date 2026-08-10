@@ -305,12 +305,18 @@ jobs:
       # `--tag dev` on every one of them. Until Perch is 1.0 the `latest` tag
       # points at nothing, so `npm install perch-cli` fails loudly rather than
       # quietly handing somebody a CLI that is not ready.
+      #
+      # Every path here is written `./…`, and that is load-bearing rather than
+      # tidy. npm reads a bare `npm-dist/perch-cli` as GitHub shorthand for the
+      # repository `npm-dist/perch-cli` and goes looking for it over ssh, which
+      # fails with "Repository not found" rather than with anything mentioning
+      # directories. A leading `./` is what makes it a path.
       - name: Publish
         run: |
-          for package in npm-dist/@perch-cli-*; do
+          for package in ./npm-dist/@perch-cli-*; do
             npm publish "$package" --access public --tag dev --provenance
           done
-          npm publish npm-dist/perch-cli --access public --tag dev --provenance
+          npm publish ./npm-dist/perch-cli --access public --tag dev --provenance
 
       # The promise this release makes is that nobody gets Perch by accident.
       # Checked rather than assumed, because it is one API call and the failure
