@@ -286,3 +286,43 @@ reading out of one is not, so a Switch onto the Account still lands and its
 Utilization is still readable. A marker whose process is gone, or whose pid has
 been taken by something younger, makes nothing Live.
 _Avoid_: active, running, in-use
+
+## Getting Perch onto a machine
+
+**Release**:
+One version of Perch, published: the binaries for every Target, the checksums
+that identify them, and the notes saying what changed. Made from a tag, which
+is made from a version nobody typed — the commits since the last Release decide
+it. A Release is the thing every Channel points at rather than a thing each one
+holds a copy of, so what Homebrew installs and what a browser downloads are the
+same bytes.
+_Avoid_: version, build, drop, publish
+
+**Target**:
+One machine shape Perch is built for — an architecture and an operating system,
+named as the Rust toolchain names it. Five of them, each built on a machine of
+its own architecture. Not a platform: macOS is a platform and has two Targets.
+_Avoid_: platform, arch, triple, variant
+
+**Artifact**:
+One file belonging to a Release: an archive holding a binary and both licences,
+or the checksums, or the signed provenance for either. What an Artifact claims
+about itself is checkable — the checksums say which bytes, and the provenance
+says which workflow, in which repository, at which commit, produced them.
+_Avoid_: asset, file, package, download
+
+**Channel**:
+One route by which somebody installs Perch — Homebrew, npm, an installer
+script, or the Release page itself. Each has its own idea of what "the default"
+means, so being pre-1.0 is carried differently in each: a Tap nobody adds by
+accident, an npm tag that is not `latest`. A Channel distributes a Release; it
+never builds one.
+_Avoid_: registry, source, distribution, repo
+
+**Tap**:
+The repository Homebrew installs Perch from, and Perch's Channel for anyone on
+Homebrew. Separate from Perch's own repository because Homebrew requires it to
+be, and named `homebrew-perch` because Homebrew requires that too — what a
+person types is neither. Adding one is a deliberate act, which is what makes it
+the right place for a Perch that is not finished.
+_Avoid_: formula, bottle, brew repo
