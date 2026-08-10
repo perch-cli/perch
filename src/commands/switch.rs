@@ -298,6 +298,19 @@ fn report(
             out,
             "Perch held no active Account, so there was nothing to Capture.",
         )?,
+        // The repair for a Switch that stopped before it named the Account it
+        // had landed on. Nothing was Captured because nothing had moved on:
+        // saying so keeps the report honest about a Switch that only patched
+        // `.claude.json`.
+        Captured::NothingToSave => say(
+            out,
+            &format!(
+                "{}'s Credential was already the live one, so there was nothing \
+                 to Capture — this finished a Switch that had stopped before \
+                 naming it.",
+                incoming.email(),
+            ),
+        )?,
     }
 
     say(

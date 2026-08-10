@@ -14,8 +14,8 @@ use chrono::{TimeZone, Utc};
 use common::*;
 use perch::commands::add::AddArgs;
 use perch::error::{
-    EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NOT_FOUND, EXIT_NOTHING_TO_DO, EXIT_PROBE_REFUSED,
-    EXIT_PROFILE_LIVE, EXIT_QUARANTINED,
+    EXIT_CONFLICT, EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NOT_FOUND, EXIT_NOTHING_TO_DO,
+    EXIT_PROBE_REFUSED, EXIT_PROFILE_LIVE, EXIT_QUARANTINED,
 };
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
@@ -1693,5 +1693,51 @@ fn a_switch_onto_the_account_already_active_is_recognised_whatever_the_case() {
     assert!(
         error.to_string().contains("already the active Account"),
         "{error}"
+    );
+}
+
+/// The repair for an interrupted Switch must not destroy a Rotation that
+/// happened while the machine was in that half-state.
+///
+/// After a Switch that stopped before patching `.claude.json`, the incoming
+/// Account is live and recorded as active while Claude Code's own file still
+/// names the one it was leaving. So on the re-run that Account is both the
+/// incoming and the outgoing one, and the Identity — which is exactly what is
+/// stale — said the live Credential belonged to somebody else. The Capture was
+/// declined on that reading and the write that followed put the Account's older
+/// Profile copy over its own Rotation: the only good refresh token, gone, on the
+/// command the previous failure told the user to run.
+#[test]
+fn repairing_an_interrupted_switch_never_writes_over_a_rotation_it_declined_to_save() {
+    let host = machine_with_two_accounts().with_unwritable_file(IDENTITY_PATH, "read-only file");
+    run_switch(&host, SECOND_EMAIL)
+        .0
+        .expect_err("the Identity could not be patched");
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(SECOND_EMAIL),
+        "the incoming Account is live, so Perch records it as active"
+    );
+    // The user carries on working, and Claude Code Rotates.
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
+    host.writable_again(IDENTITY_PATH);
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("Perch cannot tell whose that Credential is");
+    assert_eq!(error.exit_code(), EXIT_CONFLICT, "{error}");
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(ROTATED),
+        "the Rotation is still live rather than written over: {printed}"
+    );
+    assert_eq!(
+        credential_of(&host, SECOND_EMAIL).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "and its Profile copy is untouched, so nothing was lost either way"
+    );
+    assert!(
+        error.to_string().contains("perch relogin"),
+        "and it says the way through: {error}"
     );
 }

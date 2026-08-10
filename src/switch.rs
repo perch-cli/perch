@@ -59,6 +59,11 @@ pub enum Captured {
     Unreadable { outgoing: String, why: String },
     /// Perch holds no active Account, so there was nothing to Capture into.
     NoOutgoing,
+    /// The Account being left is the Account being switched to — the repair for
+    /// a Switch interrupted before it patched the Identity — and the live
+    /// Credential is already the one this Switch would write. There is no
+    /// Rotation to save and nothing to copy anywhere.
+    NothingToSave,
 }
 
 /// A Switch that stopped part way, and what the machine is holding now.
@@ -128,7 +133,7 @@ pub fn perform(
         // hold renewed only after the slow steps is a hold that was already
         // lost while they ran.
         held.renew();
-        let captured = capture(host, &prepared, outgoing)
+        let captured = capture(host, &prepared, incoming, outgoing)
             .map_err(|error| error.with_note(&nothing_happened(outgoing)))?;
 
         held.renew();
@@ -334,7 +339,12 @@ fn prepare(
 /// losing a Rotation is the failure this step exists to prevent.
 ///
 /// [`only_off_a_credential_that_is_theirs`]: crate::observe
-fn capture(host: &dyn Host, prepared: &Prepared, outgoing: Option<&Account>) -> Result<Captured> {
+fn capture(
+    host: &dyn Host,
+    prepared: &Prepared,
+    incoming: &Account,
+    outgoing: Option<&Account>,
+) -> Result<Captured> {
     let Some(outgoing) = outgoing else {
         return Ok(Captured::NoOutgoing);
     };
@@ -378,6 +388,35 @@ fn capture(host: &dyn Host, prepared: &Prepared, outgoing: Option<&Account>) -> 
         return Ok(Captured::NothingLive);
     };
 
+    // `incoming` and `outgoing` being one Account is the repair for a Switch that
+    // stopped between step two and step three: this Account's Credential is
+    // already the live one and only `.claude.json` is behind. ADR 0027 expects
+    // the Capture to run here — "X is the outgoing Account there as well as the
+    // incoming one".
+    //
+    // The Identity cannot decide it, because a stale Identity is the whole of
+    // what that state *is*: it names the Account the interrupted Switch was
+    // leaving. Read as evidence of ownership it said the live Credential was
+    // somebody else's, declined the Capture, and let the write below put this
+    // Account's older Profile copy over its own Rotation — the only good refresh
+    // token, gone, which is the one loss ADR 0006 exists to prevent.
+    //
+    // So the two are told apart by the bytes instead. Identical to what is about
+    // to be written, the repair has nothing to save and the write is a no-op.
+    // Different, there are two readings — this Account Rotated while it was live,
+    // or somebody logged in outside Perch since — and nothing on the machine
+    // tells them apart, so neither is acted on. Nothing has been written yet, and
+    // a Switch that has to be run again is recoverable where a lost refresh token
+    // is not.
+    if registry::same_name(incoming.email(), outgoing.email()) {
+        if live.as_str() == prepared.credential.as_str() {
+            return Ok(Captured::NothingToSave);
+        }
+        return Err(PerchError::Conflict(
+            the_live_credential_is_unaccounted_for(incoming),
+        ));
+    }
+
     // Over the whole of Unicode, as every other comparison of two addresses is.
     // `.claude.json` is Claude Code's file and nothing makes it agree with the
     // registry about the case of a letter outside ASCII, so under ASCII folding
@@ -398,6 +437,29 @@ fn capture(host: &dyn Host, prepared: &Prepared, outgoing: Option<&Account>) -> 
     Ok(Captured::Copied {
         from: outgoing.email().to_string(),
     })
+}
+
+/// What Perch cannot establish, when the repair for an interrupted Switch finds a
+/// live Credential that is not the one it holds.
+///
+/// Both readings named, because the remedies are different and the user is the
+/// only one who knows which happened. `perch relogin` is the way through either
+/// way: it replaces whatever is live with a fresh login for this Account, which
+/// costs nothing if the live Credential was this Account's own.
+fn the_live_credential_is_unaccounted_for(account: &Account) -> String {
+    let email = account.email();
+    format!(
+        "{email} is the Account Perch is on and the Account asked for, so this is \
+         the repair for a Switch that stopped before it finished — but the live \
+         Credential is not the one Perch holds for {email}, and Perch cannot tell \
+         which of two things that is.\n\
+         It may be {email}'s own, Rotated since: writing over it would destroy \
+         the only good copy, so nothing was changed.\n\
+         It may be a login somebody made outside Perch: `perch add` holds that \
+         one as an Account of its own before anything replaces it.\n\
+         Either way, `perch relogin {email}` finishes the repair — it replaces \
+         whatever is live with a fresh login for {email}."
+    )
 }
 
 /// Step three: `.claude.json` comes to name the Account whose Credential is now
