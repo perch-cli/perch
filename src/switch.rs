@@ -239,7 +239,7 @@ pub fn already_landed(host: &dyn Host, account: &Account) -> Result<bool> {
     let version = probe::claude_version(host)?;
     let store = registry::the_default_profile(host)?;
     let named = probe::read_identity(host, &store, &version)?
-        .is_some_and(|identity| identity.email.eq_ignore_ascii_case(account.email()));
+        .is_some_and(|identity| registry::same_name(&identity.email, account.email()));
 
     // A live store holding bytes that are not a Credential has not landed
     // anywhere: Claude Code cannot use them, and the Switch this would turn
@@ -378,8 +378,14 @@ fn capture(host: &dyn Host, prepared: &Prepared, outgoing: Option<&Account>) -> 
         return Ok(Captured::NothingLive);
     };
 
+    // Over the whole of Unicode, as every other comparison of two addresses is.
+    // `.claude.json` is Claude Code's file and nothing makes it agree with the
+    // registry about the case of a letter outside ASCII, so under ASCII folding
+    // this read `CAFÉ@example.com` and `café@example.com` as two different
+    // people, declined the Capture, and let the write below destroy the
+    // Rotation it had just declined to save.
     if let Ok(Some(identity)) = probe::read_identity(host, &prepared.store, &prepared.version)
-        && !identity.email.eq_ignore_ascii_case(outgoing.email())
+        && !registry::same_name(&identity.email, outgoing.email())
     {
         return Ok(Captured::NotTheirs {
             outgoing: outgoing.email().to_string(),

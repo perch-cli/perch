@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{TimeZone, Utc};
 use common::*;
+use perch::commands::add::AddArgs;
 use perch::error::{
     EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NOT_FOUND, EXIT_NOTHING_TO_DO, EXIT_PROBE_REFUSED,
     EXIT_PROFILE_LIVE, EXIT_QUARANTINED,
@@ -1601,5 +1602,96 @@ fn a_configuration_directory_that_is_not_a_profile_is_where_a_switch_lands() {
             .as_deref(),
         Some(SECOND_CREDENTIAL),
         "the directory they moved their configuration to is the Default Profile"
+    );
+}
+
+/// An address with a non-ASCII letter in it, and the same address spelled with
+/// that letter in the other case. `É` and `é` are one letter over the whole of
+/// Unicode and two unrelated bytes under ASCII folding.
+const ACCENTED: &str = "café@example.com";
+const ACCENTED_UPPER: &str = "CAFÉ@example.com";
+
+fn accented_identity(email: &str) -> String {
+    format!(
+        r#"{{
+  "numStartups": 3,
+  "oauthAccount": {{
+    "accountUuid": "account-uuid-accented",
+    "emailAddress": "{email}",
+    "organizationUuid": "organization-uuid-accented",
+    "organizationName": "Café",
+    "organizationRole": "admin"
+  }},
+  "projects": {{}}
+}}"#
+    )
+}
+
+/// A machine adopted as an Account whose address carries a non-ASCII letter,
+/// holding a second Account to switch to.
+fn a_machine_on_an_accented_account() -> FakeHost {
+    let host = machine_with_claude_code()
+        .with_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, CREDENTIAL)
+        .with_file(IDENTITY_PATH, &accented_identity(ACCENTED))
+        .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE));
+    run_add(
+        &host,
+        AddArgs {
+            no_group: true,
+            ..AddArgs::default()
+        },
+    )
+    .0
+    .expect("the second Account is added");
+    host
+}
+
+/// Whose Credential the live store holds is decided over the whole of Unicode,
+/// not over the ASCII letters of an address.
+///
+/// Claude Code writes `.claude.json` itself, and nothing makes it agree with the
+/// registry about the case of a letter outside ASCII. Compared with ASCII
+/// folding, `CAFÉ@example.com` and `café@example.com` are two different people:
+/// the Capture decided the live Credential was somebody else's and skipped it,
+/// so every Switch away from that Account silently destroyed whatever Rotation
+/// had happened while it was active — the poisoning ADR 0006 exists to prevent,
+/// on the one Account whose address is not plain ASCII.
+#[test]
+fn a_rotation_is_captured_however_the_identity_file_cases_a_non_ascii_address() {
+    let host = a_machine_on_an_accented_account();
+    assert_eq!(registry_of(&host).active.as_deref(), Some(ACCENTED));
+    // Claude Code renewed, Rotated, and rewrote its own file with the other
+    // spelling of the same address.
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
+    host.set_file(IDENTITY_PATH, &accented_identity(ACCENTED_UPPER));
+
+    let (outcome, printed) = run_switch(&host, SECOND_EMAIL);
+
+    outcome.expect("the Switch lands");
+    assert_eq!(
+        credential_of(&host, ACCENTED).as_deref(),
+        Some(ROTATED),
+        "the Rotation went back into its own Profile rather than being \
+         thrown away as somebody else's: {printed}"
+    );
+    assert_eq!(live_credential(&host).as_deref(), Some(SECOND_CREDENTIAL));
+}
+
+/// The mirror: a Switch onto the Account the machine is already acting as is
+/// recognised as having landed, however the identity file cases the address. It
+/// was not, so `perch switch café@example.com` re-ran the whole Switch — with
+/// the Capture above declining, which is the destructive half.
+#[test]
+fn a_switch_onto_the_account_already_active_is_recognised_whatever_the_case() {
+    let host = a_machine_on_an_accented_account();
+    host.set_file(IDENTITY_PATH, &accented_identity(ACCENTED_UPPER));
+
+    let (outcome, _printed) = run_switch(&host, ACCENTED);
+
+    let error = outcome.expect_err("there is nothing to do");
+    assert_eq!(error.exit_code(), EXIT_NOTHING_TO_DO);
+    assert!(
+        error.to_string().contains("already the active Account"),
+        "{error}"
     );
 }
