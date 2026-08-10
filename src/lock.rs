@@ -184,9 +184,29 @@ impl<'a> Held<'a> {
     fn release(&mut self) {
         let host = self.host;
         for taken in self.taken.drain(..).rev() {
-            // `still_ours` is already `false` for a hold Perch has established
-            // it no longer has, which is what a `stamp` of `None` means.
-            if still_ours(&taken, host.modified_at(&taken.lock.dir).ok()) {
+            // The same three answers [`renew`] tells apart, for the same reason
+            // they are worth telling apart. A stamp that disagrees, and an
+            // artifact that is not there, are somebody else's lock: leaving it
+            // is the whole point. Anything *else* the filesystem says is Perch's
+            // own I/O faltering and is evidence of nothing — and folded in with
+            // a takeover it cost the artifact its removal, so Perch's own lock
+            // sat there until it went stale. The next command then waited out
+            // its attempts and reported the lock as held by Claude Code, with
+            // advice — quit it and run this again — that cannot work.
+            //
+            // Removed on no evidence, then, because it is Perch's until
+            // something says otherwise, and this is the last chance to give it
+            // back. `still_ours` is already `false` for a hold Perch has
+            // established it no longer has, which is what a `stamp` of `None`
+            // means, and that arm is not reached from here.
+            //
+            // [`renew`]: Held::renew
+            let ours = match host.modified_at(&taken.lock.dir) {
+                Ok(seen) => still_ours(&taken, Some(seen)),
+                Err(HostError::NotFound { .. }) => false,
+                Err(_) => taken.stamp.is_some(),
+            };
+            if ours {
                 let _ = host.remove_dir_all(&taken.lock.dir);
             }
         }
@@ -669,6 +689,64 @@ mod tests {
                 .any(|effect| matches!(effect, Effect::Touched(_))),
             "and the stamp the check rests on is not overwritten: {:?}",
             host.effects()
+        );
+    }
+
+    /// The same evidence, at the moment the lock is given back rather than
+    /// while it is held.
+    ///
+    /// `release` asked one question — "does the artifact still say what Perch
+    /// left it saying?" — and read "the filesystem would not answer" as a yes to
+    /// somebody else having taken it. So a hold Perch never lost was left
+    /// behind, silently, for the whole staleness window: the next command spends
+    /// its attempts waiting and then reports the lock as held by Claude Code,
+    /// with advice — quit it and run this again — that cannot possibly work.
+    ///
+    /// Nothing has said otherwise, so the artifact is still Perch's, and this is
+    /// the last chance to give it back.
+    #[test]
+    fn a_lock_perch_still_holds_is_given_back_even_when_the_artifact_will_not_be_read() {
+        let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
+        let host = FakeHost::new();
+
+        let ran: Result<()> = under(&host, vec![lock.clone()], |_held| {
+            // Unreadable from here to the end, so the read `release` makes is
+            // the one that fails — a `chmod` on the parent, an EIO, the handle
+            // contention Windows shows for a directory something else is in.
+            host.set_unreadable(&lock.dir, "Permission denied");
+            Ok(())
+        });
+        ran.expect("the work finishes");
+
+        host.forget_unreadable(&lock.dir);
+        assert!(
+            !host.path_exists(Path::new(&lock.dir)),
+            "an unreadable artifact is Perch's own I/O faltering, not evidence \
+             that somebody else took the lock"
+        );
+    }
+
+    /// The other half of the same rule, and the reason the one above cannot
+    /// simply remove whatever is at the path: an artifact carrying a stamp Perch
+    /// did not leave is somebody else's lock, and giving back a lock that is not
+    /// yours leaves two processes believing they hold it.
+    #[test]
+    fn a_lock_somebody_else_has_taken_over_is_left_where_it_is() {
+        let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
+        let host = FakeHost::new();
+
+        let ran: Result<()> = under(&host, vec![lock.clone()], |_held| {
+            // Whoever took it over cleared the stale artifact and made their
+            // own, which carries their timestamp rather than Perch's.
+            host.sleep(90_000);
+            host.touch(Path::new(&lock.dir)).expect("they take it");
+            Ok(())
+        });
+        ran.expect("the work finishes");
+
+        assert!(
+            host.path_exists(Path::new(&lock.dir)),
+            "the new holder keeps their lock"
         );
     }
 
