@@ -1182,3 +1182,26 @@ touch only a temporary directory of their own.
 ## Design
 
 `CONTEXT.md` for the vocabulary, `docs/adr/` for the decisions.
+
+## Licence
+
+Two of them, at your option, which is the Rust ecosystem's convention and not an
+accident. MIT is the shorter and better-known of the pair but says nothing at all
+about patents; Apache-2.0 grants them expressly, and cannot be combined with
+GPLv2. Offering both leaves that choice where it belongs, with whoever is
+downstream.
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or
+  <http://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or
+  <http://opensource.org/licenses/MIT>)
+
+at your option.
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
+dual licensed as above, without any additional terms or conditions.
