@@ -130,8 +130,20 @@ fn what_the_login_left(
 
 /// Keeps the `.claude.json` a login wrote in the Profile the Account settles
 /// into. The Identity travels with the Credential it describes.
+///
+/// Through the same write `switch` patches the Default Profile's copy with,
+/// which is where the rule about this file's mode is written down: `.claude.json`
+/// holds MCP configuration, an MCP server entry routinely carries an API key in
+/// its `env` block, and a file Perch is the first to create is created closed
+/// rather than open (ADR 0020). A plain `write_file` creates at the process
+/// umask, so every Profile `perch add`, `perch relogin` and an Import made held
+/// that file at 0644 — and because the rule for a file that already exists is to
+/// *carry its mode across*, it stayed 0644 for the life of the Profile while a
+/// Carry wrote the person's `projects` entry into it on every Run. On unix the
+/// 0700 Profile directory contained the damage; on Windows nothing narrows
+/// either the directory or the file.
 pub fn carry_identity_file(host: &dyn Host, contents: &str, store: &probe::Store) -> Result<()> {
-    host.write_file(&store.identity_file, contents)
+    crate::host::write_atomically(host, &store.identity_file, contents)
         .map_err(|err| PerchError::file_write(store.identity_file.clone(), err))
 }
 
