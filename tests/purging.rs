@@ -254,6 +254,36 @@ fn the_export_it_offers_is_written_before_anything_is_destroyed() {
     );
 }
 
+/// The path typed at this prompt is the one path in Perch that no shell has
+/// been over.
+///
+/// `perch export ~/perch-backup.age` works because the shell expanded the tilde
+/// before Perch saw it. The same characters read from standard input are a
+/// directory called `~` — and `~/perch-backup.age` is the likeliest thing
+/// anybody types here. Refused, it stopped the whole Purge, and every question
+/// before it had to be answered again, over a refusal that reads as a bug
+/// rather than as an instruction.
+#[test]
+fn a_tilde_typed_at_the_export_prompt_means_home_because_no_shell_will_say_so() {
+    let host = a_machine_to_give_back()
+        .with_answers(&["y", "~/perch-backup.age", "purge"])
+        .with_secrets(&[PASSPHRASE, PASSPHRASE]);
+
+    let (outcome, printed) = run_purge(&host);
+
+    outcome.expect("the word was typed");
+    let sealed = host
+        .file(AT)
+        .unwrap_or_else(|| panic!("the Export is written under home: {printed}"));
+    assert_eq!(
+        export::unseal(&sealed, PASSPHRASE)
+            .expect("it opens")
+            .accounts(),
+        3,
+        "and it is the whole Export rather than an empty file at a strange path"
+    );
+}
+
 /// The Export is offered before the word is asked for, so a Purge can be
 /// declined *after* one has been written. That leaves a file holding a working
 /// Credential for every Account at a path the user is about to stop thinking
