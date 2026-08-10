@@ -58,6 +58,17 @@ pub enum Outcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Attempt {
     pub email: String,
+    /// The Account as the user names it — by its Alias where it has one — for
+    /// the notes below.
+    ///
+    /// Carried rather than derived, because an `Attempt` has no registry and
+    /// the surfaces that render one are the surfaces that show no Accounts:
+    /// `perch watch` prints a decision line and nothing else, and the TUI's
+    /// State column says an Account is Quarantined without saying why. So this
+    /// was the only sentence about that Account on the screen, and it was the
+    /// one place in Perch naming an Account by raw address while every other
+    /// surface called it ``someone@example.com (as `work`)``.
+    pub named: String,
     pub outcome: Outcome,
 }
 
@@ -92,12 +103,15 @@ impl Attempt {
             Outcome::Observed => None,
             Outcome::Throttled => Some(format!(
                 "{}: {}. The cached figure is what you see.",
-                self.email,
+                self.named,
                 Refused::Throttled
             )),
-            Outcome::Failed(why) => Some(format!("{}: {why}", self.email)),
+            Outcome::Failed(why) => Some(format!("{}: {why}", self.named)),
+            // The Account as the user names it, and the raw address as the
+            // Target to type: `perch relogin someone@example.com (as `work`)`
+            // is not a command, and an Alias is not what an Account always has.
             Outcome::Quarantined { why, detail } => {
-                Some(why.said_of(&self.email, &self.email, detail.as_deref()))
+                Some(why.said_of(&self.named, &self.email, detail.as_deref()))
             }
         }
     }
@@ -117,7 +131,7 @@ impl Attempt {
         match &self.outcome {
             Outcome::Quarantined { detail, .. } => detail
                 .as_ref()
-                .map(|detail| format!("{}: {detail}", self.email)),
+                .map(|detail| format!("{}: {detail}", self.named)),
             _ => self.note(),
         }
     }
@@ -222,6 +236,7 @@ pub fn refresh(
             anything_to_keep |= registry.quarantine(email, *why);
         }
         report.attempts.push(Attempt {
+            named: registry.named_for_the_user(email),
             email: email.clone(),
             outcome,
         });
@@ -596,6 +611,7 @@ mod tests {
     fn attempt(email: &str, outcome: Outcome) -> Attempt {
         Attempt {
             email: email.to_string(),
+            named: email.to_string(),
             outcome,
         }
     }

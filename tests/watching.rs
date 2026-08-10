@@ -774,6 +774,35 @@ fn an_account_the_watcher_finds_broken_is_recorded_rather_than_rediscovered() {
     );
 }
 
+/// And it names the Account the way the user does.
+///
+/// `perch watch` prints a decision line and no Accounts at all, so the
+/// Quarantine note is the only sentence on the screen about the candidate that
+/// was passed over — and it was the one place in Perch naming an Account by raw
+/// address while `perch list`, `perch status` and every refusal called it
+/// ``someone@example.com (as `spare`)``. An Alias is what somebody gave the
+/// Account so they would never have to read its address.
+#[test]
+fn a_quarantine_the_watcher_reports_names_the_account_the_way_the_user_does() {
+    let host = watching(&[86.0, 88.0], 5.0);
+    set_alias(&host, "spare", SECOND_EMAIL)
+        .0
+        .expect("the name is free");
+    host.forget_keychain_item(&store_of(&host, SECOND_EMAIL).keychain_service, LOGIN_NAME);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("an Account that turns out to be broken does not end the watch");
+    assert!(
+        printed.contains("(as `spare`)"),
+        "the Alias is how the user would say it:\n{printed}"
+    );
+    assert!(
+        printed.contains(&format!("perch relogin {SECOND_EMAIL}")),
+        "and the repair is still a Target that can be typed:\n{printed}"
+    );
+}
+
 /// Ctrl-C stops it and leaves nothing behind. That is a property of the loop
 /// holding nothing across a wait, not of the handler: the registry lock is
 /// taken and given back inside each round.
