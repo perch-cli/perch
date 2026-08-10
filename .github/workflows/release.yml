@@ -237,3 +237,91 @@ jobs:
             "${notes[@]}" \
             dist/*
           gh release edit "$GITHUB_REF_NAME" --draft=false
+
+  # The six npm packages, from the same archives the Release page is holding —
+  # not a fresh build — so what npm serves and what a browser downloads are the
+  # same bytes. See docs/releasing.md for the one-time setup this needs.
+  npm:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The gate. A tag alone cannot put Perch on a public registry: this
+    # environment carries a required reviewer, so the last step before the
+    # widest channel is a person saying yes.
+    environment: release
+    permissions:
+      contents: read
+      # npm's trusted publishing runs on this. There is no npm token anywhere in
+      # this repository — the registry checks the workflow's own OIDC identity
+      # instead, so there is nothing here for anyone to steal.
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm 11.5.1 or newer. Node 24 ships something
+      # later, but the runner's bundled npm is not a promise anyone made.
+      - name: npm can publish without a token
+        run: |
+          have=$(npm --version)
+          want=11.5.1
+          if [ "$(printf '%s\n%s\n' "$want" "$have" | sort --version-sort | head -n1)" != "$want" ]; then
+            echo "::error::npm $have cannot use trusted publishing; $want or newer is needed"
+            exit 1
+          fi
+          echo "npm $have"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: archive-*
+          merge-multiple: true
+          path: dist
+
+      - name: Unpack the released archives
+        run: |
+          for target in aarch64-apple-darwin x86_64-apple-darwin \
+                        aarch64-unknown-linux-musl x86_64-unknown-linux-musl; do
+            mkdir -p "bins/$target"
+            tar -xzf "dist/perch-${GITHUB_REF_NAME}-${target}.tar.gz" -C "bins/$target" perch
+          done
+
+          mkdir -p bins/x86_64-pc-windows-msvc
+          unzip -j "dist/perch-${GITHUB_REF_NAME}-x86_64-pc-windows-msvc.zip" \
+            perch.exe -d bins/x86_64-pc-windows-msvc
+
+      - name: Assemble the packages
+        run: node npm/build.mjs "${GITHUB_REF_NAME#v}" bins npm-dist
+
+      # Platform packages first: the wrapper depends on each of them by exact
+      # version, so publishing it first would leave a window where installing it
+      # resolves to nothing that can run.
+      #
+      # `--tag dev` on every one of them. Until Perch is 1.0 the `latest` tag
+      # points at nothing, so `npm install perch-cli` fails loudly rather than
+      # quietly handing somebody a CLI that is not ready.
+      - name: Publish
+        run: |
+          for package in npm-dist/@perch-cli-*; do
+            npm publish "$package" --access public --tag dev --provenance
+          done
+          npm publish npm-dist/perch-cli --access public --tag dev --provenance
+
+      # The promise this release makes is that nobody gets Perch by accident.
+      # Checked rather than assumed, because it is one API call and the failure
+      # is silent — a `latest` that quietly moved looks exactly like one that
+      # did not until somebody installs it.
+      - name: Nothing became latest
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          latest=$(npm view perch-cli@latest version 2>/dev/null || echo "")
+          if [ "$latest" = "$version" ]; then
+            echo "::error::perch-cli@latest now points at $version. It should point at nothing until 1.0. Run: npm dist-tag rm perch-cli latest"
+            exit 1
+          fi
+          echo "latest points at: ${latest:-nothing}"
