@@ -6,7 +6,7 @@
 //! against the future and not a migration story: nobody is running Perch yet,
 //! so there is no past format to read.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -577,8 +577,8 @@ impl Registry {
 
     /// Every Group name in use. A Group an Account claims is always declared
     /// too — [`load`] sees to that — so this is the declared set.
-    pub fn group_names(&self) -> BTreeSet<&str> {
-        self.groups.keys().map(String::as_str).collect()
+    pub fn group_names(&self) -> impl Iterator<Item = &str> {
+        self.groups.keys().map(String::as_str)
     }
 
     pub fn group(&self, name: &str) -> Option<&GroupConfig> {
@@ -1153,6 +1153,7 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
     // pointer has never had this problem, because `active_account` resolves
     // through `and_then(account)` and its callers turn `None` into a refusal;
     // the Alias half had no equivalent.
+    let mut named: Vec<(&str, &str)> = Vec::new();
     for (alias, email) in &registry.aliases {
         if registry.account(email).is_none() {
             return Err(PerchError::Invalid(format!(
@@ -1163,6 +1164,79 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
                 path.display(),
             )));
         }
+        // One Account, one Alias. `set_alias` enforces it by dropping the old key
+        // — "a name the user has moved on from should not go on reaching the
+        // Account behind their back" — and nothing was asking it of a file.
+        //
+        // With two, `alias_of` returns whichever the map yields first, so `perch
+        // list` and every sentence Perch writes show one of them while `perch
+        // switch` answers to both, and `perch alias <the other> --unset` reports
+        // a name freed that was never the one being shown. That is the same "which
+        // one a Target finds is not decided by anything" harm as two names that
+        // differ only in case, one map value away.
+        if let Some((already, _)) = named.iter().find(|(_, held)| same_name(held, email)) {
+            return Err(PerchError::Invalid(format!(
+                "The registry gives {email} both the Alias `{already}` and the \
+                 Alias `{alias}`, and an Account answers to one Alias at a time \
+                 — so which of them Perch shows it under is not decided by \
+                 anything.\n\
+                 It is in {}, and every Perch command reads that file — including \
+                 the ones that would set it. Edit the value there.",
+                path.display(),
+            )));
+        }
+        named.push((alias, email));
+    }
+
+    // The third member of the namespace, which nothing was checking. A Target is
+    // an Alias, a Group name or an Account's address, and `validate_name` keeps
+    // the first two tellable from the third by refusing an `@` in them —
+    // "because a Target that could be either has no single answer". The mirror
+    // rule, that an address actually looks like one, was never stated anywhere:
+    // `probe::read_identity` asks only for one alphanumeric character, and
+    // `refuse_taken_names` consults the Aliases and the Groups but never the
+    // Accounts.
+    //
+    // So an Account called `work` beside a Group called `work` resolved to the
+    // Account, leaving the Group reachable from `perch group list` and `perch
+    // config set` and unreachable from `perch switch` and `perch run`; beside an
+    // *Alias* called `work` it left the Account reachable by no Target at all.
+    // Refused here, one rule is what makes `refuse_taken_names`' two-way check
+    // correct without it needing a third lookup.
+    for account in &registry.accounts {
+        if !account.email().contains('@') {
+            return Err(PerchError::Invalid(format!(
+                "The registry holds an Account called `{}`, which is not an \
+                 address an Alias or a Group name could be told from — and a \
+                 Target that could be either has no single answer.\n\
+                 It is in {}, and every Perch command reads that file — including \
+                 the ones that would set it. Edit the value there.",
+                account.email(),
+                path.display(),
+            )));
+        }
+    }
+
+    // One entry per Account, for the same reason and with a worse ending.
+    // `upsert` is what every command writes an Account through and it replaces
+    // the matching entry, so two entries for one address are something only a
+    // hand edit produces — after which `account` and `account_mut` silently act
+    // on the first of them, `perch list` renders one Account as two rows, and a
+    // Cycle counts it twice when it ranks the Group.
+    let mut held: Vec<&str> = Vec::new();
+    for account in &registry.accounts {
+        if let Some(already) = held.iter().find(|seen| same_name(seen, account.email())) {
+            return Err(PerchError::Invalid(format!(
+                "The registry holds two Accounts spelled `{already}` and `{}`, \
+                 which are one Account — so which entry a command reads, and \
+                 which one it writes, is not decided by anything.\n\
+                 It is in {}, and every Perch command reads that file — including \
+                 the ones that would set it. Edit the value there.",
+                account.email(),
+                path.display(),
+            )));
+        }
+        held.push(account.email());
     }
 
     // Two names in the *same* half of the namespace that differ only in case.
@@ -1240,7 +1314,7 @@ fn refuse_a_name_nothing_would_have_accepted(
             .map(|refusal| refusal.to_string())
             .or_else(|| {
                 (kind == NameKind::Group)
-                    .then(|| registry.aliases.keys().find(|alias| same_name(alias, name)))
+                    .then(|| registry.declared_alias(name).map(|(held, _)| held))
                     .flatten()
                     .map(|alias| {
                         format!(
@@ -1975,10 +2049,10 @@ mod tests {
 
         let registry = load(&host).expect("it reads").expect("it is there");
 
+        let declared: Vec<&str> = registry.group_names().collect();
         assert!(
-            registry.group_names().contains("work"),
-            "the Group the Account claims is in the declared set: {:?}",
-            registry.group_names()
+            declared.contains(&"work"),
+            "the Group the Account claims is in the declared set: {declared:?}"
         );
         assert_eq!(
             registry.group("work"),
@@ -2006,12 +2080,8 @@ mod tests {
 
         let registry = load(&host).expect("it reads").expect("it is there");
 
-        assert_eq!(
-            registry.group_names().len(),
-            1,
-            "one Group, not two: {:?}",
-            registry.group_names()
-        );
+        let declared: Vec<&str> = registry.group_names().collect();
+        assert_eq!(declared.len(), 1, "one Group, not two: {declared:?}");
         assert_eq!(
             registry.accounts_in("work").len(),
             1,
@@ -2157,7 +2227,9 @@ mod tests {
     fn two_names_in_one_half_of_the_namespace_that_differ_only_in_case_are_refused() {
         let holdings = [
             r#""groups":{"work":{},"Work":{}}"#,
-            r#""aliases":{"work":"someone@example.com","Work":"someone@example.com"}"#,
+            // Two Accounts, one Alias each: giving both names to one Account is a
+            // different refusal, and this one is about the pair of names.
+            r#""aliases":{"work":"someone@example.com","Work":"other@example.com"}"#,
         ];
 
         for held in holdings {
@@ -2166,13 +2238,96 @@ mod tests {
             host.set_file(
                 &path,
                 &format!(
-                    r#"{{"version":1,"accounts":[{{"identity":{{"email":"someone@example.com"}},"enabled":true}}],{held}}}"#
+                    r#"{{"version":1,"accounts":[{{"identity":{{"email":"someone@example.com"}},"enabled":true}},{{"identity":{{"email":"other@example.com"}},"enabled":true}}],{held}}}"#
                 ),
             );
 
             let refused = load(&host).expect_err("which of the two a Target finds is undecided");
             let said = refused.to_string();
             assert!(said.contains("differ only in case"), "`{held}`: {said}");
+            assert!(
+                said.contains("registry.json"),
+                "and the file to edit: {said}"
+            );
+        }
+    }
+
+    /// The namespace has three members and only two of them were guarded.
+    ///
+    /// `validate_name` refuses an `@` in an Alias or a Group name so that a
+    /// Target is never ambiguous; nothing said that an Account's address has to
+    /// look like one. An Account called `work` beside a Group called `work`
+    /// resolved to the Account, so `perch group list` and `perch config set` went
+    /// on showing and editing a Group that `perch switch` and `perch run` could
+    /// no longer reach — and beside an *Alias* of that name it was the Account
+    /// that became reachable by no Target at all.
+    #[test]
+    fn an_account_address_a_name_could_be_confused_with_is_refused() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let path = registry_path(&host).unwrap();
+        host.set_file(
+            &path,
+            r#"{"version":1,"accounts":[{"identity":{"email":"work"},"enabled":true},{"identity":{"email":"real@example.com"},"enabled":true}],"groups":{"work":{}}}"#,
+        );
+
+        let refused = load(&host).expect_err("that Target has two answers");
+        let said = refused.to_string();
+        assert!(said.contains("Account called `work`"), "{said}");
+        assert!(
+            said.contains("could be told from"),
+            "it says what is wrong with it: {said}"
+        );
+        assert!(
+            said.contains("registry.json"),
+            "and the file to edit: {said}"
+        );
+    }
+
+    /// One entry per Account and one Alias per Account, asked of a file.
+    ///
+    /// `upsert` and `set_alias` both enforce these — `set_alias` drops the old key
+    /// so "a name the user has moved on from should not go on reaching the Account
+    /// behind their back", and `upsert` replaces the matching entry rather than
+    /// adding a second. Nothing was asking either of a registry somebody edited,
+    /// and both land in the same place as two names that differ only in case:
+    /// which one a command reads is whichever a `BTreeMap` or a `Vec` happens to
+    /// yield first.
+    ///
+    /// Two Aliases showed one of them in `perch list` while `perch switch`
+    /// answered to both, and freeing either reported a name freed that was not the
+    /// one being shown. Two entries had `perch list` render one Account as two
+    /// rows and a Cycle count it twice when ranking the Group.
+    #[test]
+    fn one_account_reached_twice_over_is_refused() {
+        let cases = [
+            (
+                r#""aliases":{"spare":"someone@example.com","work":"someone@example.com"}"#,
+                "one Alias at a time",
+            ),
+            (
+                r#""aliases":{}"#,
+                // Two entries for one address, spelled differently, which is what
+                // `same_name` decides over the whole of Unicode.
+                "which are one Account",
+            ),
+        ];
+
+        for (index, (held, expected)) in cases.iter().enumerate() {
+            let accounts = if index == 0 {
+                r#"[{"identity":{"email":"someone@example.com"},"enabled":true}]"#
+            } else {
+                r#"[{"identity":{"email":"someone@example.com"},"enabled":true},{"identity":{"email":"SOMEONE@example.com"},"enabled":true}]"#
+            };
+            let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+            let path = registry_path(&host).unwrap();
+            host.set_file(
+                &path,
+                &format!(r#"{{"version":1,"accounts":{accounts},{held}}}"#),
+            );
+
+            let refused = load(&host).expect_err("one Account reached twice over");
+            let said = refused.to_string();
+            assert!(said.contains(expected), "`{held}`: {said}");
             assert!(
                 said.contains("registry.json"),
                 "and the file to edit: {said}"

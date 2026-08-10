@@ -525,20 +525,13 @@ pub fn choose(
     // somewhere else entirely. One rule asked once: the Accounts worth going to
     // are the ones the veto counts, and the winner is the Strategy's pick from
     // among those.
-    let worth_going: Vec<&Ranked> = match here {
-        // Staying put is the right answer only when Perch can see that it is: an
-        // Account it has never observed is not evidence that moving would gain
-        // nothing, and out of the box no Account has been observed at all. So a
-        // `here` with no figure rules nothing out.
-        Some(here) if matches!(here.headroom, Headroom::Room { .. }) => elsewhere
+    let worth_going: Vec<&Ranked> = match measured_against(here.map(|here| &here.headroom)) {
+        Some(here) => elsewhere
             .iter()
             .copied()
-            .filter(|other| {
-                other.headroom.ranking(strategy, now) > here.headroom.ranking(strategy, now)
-                    || other.headroom.by_room() > here.headroom.by_room()
-            })
+            .filter(|other| worth_leaving_for(&other.headroom, here, strategy, now))
             .collect(),
-        _ => elsewhere,
+        None => elsewhere,
     };
 
     if let Some(here) = here
@@ -570,6 +563,40 @@ pub fn choose(
     })
 }
 
+/// The Headroom a move is judged against, when there is one worth judging
+/// against at all.
+///
+/// Staying put is the right answer only when Perch can see that it is: an
+/// Account it has never observed is not evidence that moving would gain nothing,
+/// and out of the box no Account has been observed at all. So a `here` with no
+/// figure rules nothing out.
+fn measured_against(here: Option<&Headroom>) -> Option<&Headroom> {
+    here.filter(|here| matches!(here, Headroom::Room { .. }))
+}
+
+/// Whether moving from `here` to `other` would gain anything.
+///
+/// Both orderings, and the second is the one that matters. A Strategy says which
+/// of the places worth going is preferred; it does not get to say that nowhere is
+/// worth going. Asked on the Strategy's ranking alone, a `soonest-reset` Group
+/// whose active Account resets in an hour stayed on it at 95% full while an empty
+/// Account sat behind it resetting in four — because tier three sorts on the
+/// reset time and nothing else, and the Account you are on was being ranked in
+/// it. That is the failure ADR 0013 sets candidates aside to prevent, reached
+/// through the staying-put check instead of through a post-hoc veto.
+///
+/// One predicate, because [`choose`] and [`ranked`] both need it and two
+/// spellings of it are two orders — the listing that puts one Account at the top
+/// and the `perch switch` that lands on another.
+fn worth_leaving_for(
+    other: &Headroom,
+    here: &Headroom,
+    strategy: Strategy,
+    now: DateTime<Utc>,
+) -> bool {
+    other.ranking(strategy, now) > here.ranking(strategy, now) || other.by_room() > here.by_room()
+}
+
 /// Every Account in a scope, in the order a Cycle ranks them: the ones it could
 /// land on first, best first, and the ones it would never choose after them.
 ///
@@ -587,11 +614,27 @@ pub fn choose(
 pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> Vec<&'a Account> {
     let strategy = scope.strategy(registry);
     let mut accounts = scope.accounts(registry);
+    // The Account a Cycle would be leaving, measured exactly as [`choose`]
+    // measures it — the same `leaving` every caller passes it, and only when it
+    // is a candidate carrying a figure.
+    //
+    // Without it, the two orders disagreed. `choose` gained the staying-put veto
+    // and this did not, so under `soonest-reset` the top row of the listing was
+    // an Account a bare `perch switch` would not land on, and the one it does
+    // land on could be the bottom row. The picker exists to make the ranking
+    // visible; showing a different one is worse than showing none.
+    let here = registry
+        .active
+        .as_deref()
+        .and_then(|active| accounts.iter().find(|account| account.email() == active))
+        .filter(|account| is_a_candidate(account))
+        .map(|account| headroom_of(account));
+    let here = measured_against(here.as_ref());
     // Stable, so Accounts that rank identically stay in the order they were
     // added — the same tie-break the choice itself has.
     accounts.sort_by(|left, right| {
-        let (theirs, them) = place(right, strategy, now);
-        let (ours, us) = place(left, strategy, now);
+        let (theirs, them) = place(right, here, strategy, now);
+        let (ours, us) = place(left, here, strategy, now);
         theirs.cmp(&ours).then(them.total_cmp(&us))
     });
     accounts
@@ -604,10 +647,23 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
 /// still one a Cycle would consider tomorrow; a Disabled or Quarantined one is
 /// not one it would consider at all, and sorting it by its headroom would put a
 /// full-looking Account nobody can use above one they can.
-fn place(account: &Account, strategy: Strategy, now: DateTime<Utc>) -> ((u8, u8), f64) {
+///
+/// Then whether moving there would gain anything at all, which outranks the
+/// figures for the same reason candidacy does: an Account the Cycle has ruled out
+/// is not one to show at the top however good its number looks. It is what makes
+/// the highest row a Cycle would land on the highest row full stop — the Account
+/// being left included, since moving to where you already are gains nothing.
+fn place(
+    account: &Account,
+    here: Option<&Headroom>,
+    strategy: Strategy,
+    now: DateTime<Utc>,
+) -> ((u8, u8, u8), f64) {
     let candidate = u8::from(is_a_candidate(account));
-    let (tier, figure) = headroom_of(account).ranking(strategy, now);
-    ((candidate, tier), figure)
+    let headroom = headroom_of(account);
+    let worth = u8::from(here.is_none_or(|here| worth_leaving_for(&headroom, here, strategy, now)));
+    let (tier, figure) = headroom.ranking(strategy, now);
+    ((candidate, worth, tier), figure)
 }
 
 /// Whether a Cycle could land on this Account at all — which is a different
@@ -1576,6 +1632,71 @@ pub(crate) mod tests {
             "roomiest@example.com",
             "the Accounts worth going to are the ones that broke the veto, and \
              the Strategy picks among those — not among every candidate there is"
+        );
+    }
+
+    /// And the listing says the same thing, over the fixture that pulls the two
+    /// apart.
+    ///
+    /// `the_order_is_the_one_the_choice_would_make` cannot see this: it uses
+    /// `most-headroom` with no reset times, where the Strategy's ranking and the
+    /// room ranking are the same ordering and the veto collapses to the identity.
+    /// Under `soonest-reset` they differ, and the veto only lived in `choose` —
+    /// so the picker showed `worse@` at the top of the Accounts to land on while
+    /// a bare `perch switch` landed on `roomiest@`, the bottom row.
+    #[test]
+    fn the_top_of_the_listing_is_where_the_cycle_goes_under_either_strategy() {
+        let accounts = || {
+            vec![
+                account("here@example.com", vec![resetting("5-hour", 40.0, 1)]),
+                account("worse@example.com", vec![resetting("5-hour", 95.0, 2)]),
+                account("roomiest@example.com", vec![window("5-hour", 5.0)]),
+            ]
+        };
+
+        for strategy in [Strategy::SoonestReset, Strategy::MostHeadroom] {
+            let registry = preferring(holding(accounts()), strategy);
+            let chosen = cycle(&registry).expect("there is room to move to");
+
+            let listed = ranked_emails(&registry);
+            let top = listed
+                .iter()
+                .find(|email| **email != "here@example.com")
+                .expect("somebody other than the Account being left is listed");
+
+            assert_eq!(
+                *top,
+                chosen.account.email(),
+                "{strategy:?}: the highest Account the listing offers to land on \
+                 has to be the one a bare `perch switch` lands on, or the \
+                 ranking the picker exists to make visible is not the one Perch \
+                 uses — listed {listed:?}"
+            );
+        }
+    }
+
+    /// The Account being left sits above every Account a Cycle has ruled out, and
+    /// below every Account worth moving to. It is not "the best Account" that
+    /// puts it there — it is that moving to where you already are gains nothing,
+    /// which is the same rule applied to itself.
+    #[test]
+    fn the_account_being_left_sorts_below_the_ones_worth_moving_to() {
+        let registry = preferring(
+            holding(vec![
+                account("here@example.com", vec![resetting("5-hour", 40.0, 1)]),
+                account("worse@example.com", vec![resetting("5-hour", 95.0, 2)]),
+                account("roomiest@example.com", vec![window("5-hour", 5.0)]),
+            ]),
+            Strategy::SoonestReset,
+        );
+
+        assert_eq!(
+            ranked_emails(&registry),
+            [
+                "roomiest@example.com",
+                "here@example.com",
+                "worse@example.com"
+            ],
         );
     }
 

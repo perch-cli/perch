@@ -1,5 +1,33 @@
 # Security Policy
 
+## What Perch is for
+
+One person moving between Claude logins they already hold — their own accounts,
+on their own machine. Perch creates no accounts, authenticates nobody, and
+carries no credential it was not handed by a login the person made themselves.
+It is not a way to share one subscription between people, and nothing in it is
+built for that.
+
+## Verifying what you installed
+
+Every release is built by a public workflow in this repository, and every
+archive carries signed build provenance. If you have `gh`:
+
+```sh
+gh attestation verify perch-v0.1.0-<target>.tar.gz --repo mschieller/perch
+```
+
+That says which workflow, in which repository, at which commit produced the
+exact file you are holding. The `SHA256SUMS` on the release says which bytes,
+which is a weaker claim — it is fetched from the same place as the archive, so
+it proves only that the two agree. Both installers check the checksum always
+and the provenance whenever `gh` is installed and logged in, and refuse to
+install when that check fails.
+
+Perch is unsigned on macOS and Windows before 1.0: no Apple notarization, no
+Authenticode. The provenance above is what stands in for it, and notarization
+is on the list for 1.0.
+
 ## Reporting a vulnerability
 
 Report privately through GitHub's
