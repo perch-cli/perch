@@ -110,23 +110,46 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     if !repairing_the_account_you_are_on {
         return Ok(());
     }
-    if let Err(error) = make_it_live(host, &account) {
-        return Err(no_longer_on_anybody(
+    let landed = switch::make_live(host, &account);
+    // Whether the fresh Credential became the live one, whatever else failed.
+    // `make_live` writes the Credential and then patches the Identity, and a
+    // failure between the two has still made this Account's repaired Credential
+    // the live one — the distinction `NotLanded` carries and `perch remove`
+    // already reads.
+    //
+    // Read here because both things said below are only true on one side of it.
+    // Ignored, the Identity patch failing took the branch for a repair that
+    // never went live: Perch stopped recording anybody as active, and told the
+    // user Claude Code was still on the Credential that stopped working. Both
+    // were false, and `active = None` is the more expensive of the two — with
+    // nothing active there is nothing to Capture into, so the Rotation this
+    // now-working session goes on to make is destroyed by the next Switch. That
+    // is the hazard `no_longer_on_anybody` exists to prevent, caused by it.
+    match landed {
+        Ok(()) => say(
+            out,
+            &format!(
+                "Its fresh Credential is the live one, so {} is working again \
+                 everywhere without a Switch.",
+                account.email()
+            ),
+        ),
+        Err(stopped) if stopped.is_live => Err(stopped.error.with_note(&format!(
+            "The repair stands and {} is working again: its fresh Credential is \
+             the live one. What is behind is Claude Code's own record of which \
+             Account that Credential belongs to, so it may display the wrong \
+             one until `perch relogin {}` has finished the job.",
+            account.email(),
+            account.email(),
+        ))),
+        Err(stopped) => Err(no_longer_on_anybody(
             host,
             &mut perch,
             &mut registry,
             &account,
-            error,
-        ));
+            not_made_live(&account, stopped.error),
+        )),
     }
-    say(
-        out,
-        &format!(
-            "Its fresh Credential is the live one, so {} is working again \
-             everywhere without a Switch.",
-            account.email()
-        ),
-    )
 }
 
 /// The Profiles this repair writes into, refused while a client is holding one.
@@ -228,22 +251,21 @@ fn record(registry: &mut Registry, account: &Account, fresh: Produced) -> bool {
     was_quarantined
 }
 
-/// Makes the repaired Credential the live one, for the Account that is already
-/// the active one.
+/// What is on the machine when the repaired Credential did not become the live
+/// one at all.
 ///
-/// Never a Capture: what is live is the very Credential the login replaced, and
-/// Capturing it would write the broken copy over the fresh one (ADR 0006).
-fn make_it_live(host: &dyn Host, account: &Account) -> Result<()> {
-    switch::make_live(host, account).map_err(|stopped| {
-        stopped.error.with_note(&format!(
-            "The repair itself stands: {} has a working Credential in its own \
-             Profile and is no longer Quarantined. It is the live Credential \
-             that was not replaced, so Claude Code goes on using the one that \
-             stopped working. Run `perch relogin {}` again to finish the job.",
-            account.email(),
-            account.email(),
-        ))
-    })
+/// Only for that side of [`switch::NotLanded::is_live`]: the live store still
+/// holds the Credential that stopped working, so this is the one case where
+/// Claude Code really does go on using it.
+fn not_made_live(account: &Account, error: PerchError) -> PerchError {
+    error.with_note(&format!(
+        "The repair itself stands: {} has a working Credential in its own \
+         Profile and is no longer Quarantined. It is the live Credential that \
+         was not replaced, so Claude Code goes on using the one that stopped \
+         working. Run `perch relogin {}` again to finish the job.",
+        account.email(),
+        account.email(),
+    ))
 }
 
 /// Says what is on the machine after a repair that worked and could not be

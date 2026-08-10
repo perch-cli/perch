@@ -16,6 +16,7 @@
 mod common;
 
 use common::*;
+use perch::commands::add::AddArgs;
 use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROFILE_LIVE};
 use perch::host::fake::{Effect, THIS_PROCESS};
 use perch::host::{FakeHost, Host};
@@ -597,18 +598,75 @@ fn a_group_named_where_one_account_is_meant_is_refused_as_a_group() {
     assert!(error.to_string().contains("Group"), "{error}");
 }
 
-/// Repairing the Account you are on lands the fresh Credential in the Default
-/// Profile last, and that step can fail on its own. What is left is a fresh
-/// Credential in the Account's own Profile and the broken one it replaced still
-/// live — so `active` must stop naming that Account: the very next `perch
-/// switch`, which is at least as natural a thing to reach for as running the
-/// repair again, would Capture the broken copy over the fresh one and undo the
-/// whole browser round trip (ADR 0006).
+/// Making the repaired Credential live is two writes, and the second one
+/// failing does not undo the first. Here the Credential *is* live — only Claude
+/// Code's own note of whose it is is behind — so Perch has to record what is
+/// true.
+///
+/// Recording nobody as active here is the expensive mistake, not the cautious
+/// one: with nothing active there is nothing for a Switch to Capture into, so
+/// the Rotation this now-working session goes on to make is destroyed by the
+/// next one — which is the very hazard stopping to name nobody exists to
+/// prevent. `observe::holding` also stops reading the Default Profile for the
+/// active Account once `active` is wrong, so a Renewal can log that client out.
 #[test]
-fn a_repair_that_could_not_be_made_live_leaves_nothing_to_capture_into() {
+fn a_repair_whose_identity_patch_failed_is_live_and_still_recorded_as_active() {
     let host = machine_with_two_accounts().with_login(login_producing(REPAIRED, IDENTITY_FILE));
     quarantine(&host, EMAIL);
     let host = host.with_unwritable_file(IDENTITY_PATH, "read-only file");
+
+    let (result, _) = run_relogin(&host, EMAIL);
+
+    let error = result.expect_err("the Identity could not be patched");
+    assert!(
+        error
+            .to_string()
+            .contains("its fresh Credential is the live one"),
+        "it says the repair stands rather than the opposite: {error}"
+    );
+    assert!(
+        !error.to_string().contains("no active Account"),
+        "and does not claim to have stopped recording anybody: {error}"
+    );
+    assert_eq!(
+        host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
+        Some(REPAIRED),
+        "the fresh Credential really is the live one"
+    );
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(EMAIL),
+        "so Perch goes on recording the Account it is really on, and a Switch \
+         away from it Captures whatever this session Rotates"
+    );
+    assert_eq!(quarantine_of(&host, EMAIL), None);
+}
+
+/// The other side of it: the Credential never became live at all, so the broken
+/// one it replaced still is. Now `active` must stop naming that Account — the
+/// very next `perch switch`, which is at least as natural a thing to reach for
+/// as running the repair again, would Capture the broken copy over the fresh one
+/// and undo the whole browser round trip (ADR 0006).
+///
+/// Off macOS, where the plaintext file is the store written first (ADR 0020), so
+/// making it unwritable is what stops the Credential reaching the live store at
+/// all rather than only stopping the Identity patch after it.
+#[test]
+fn a_repair_that_could_not_be_made_live_leaves_nothing_to_capture_into() {
+    let host = logged_in_machine_off_macos()
+        .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE));
+    run_add(
+        &host,
+        AddArgs {
+            no_group: true,
+            ..AddArgs::default()
+        },
+    )
+    .0
+    .expect("the second Account is added");
+    let host = host.with_login(login_producing(REPAIRED, IDENTITY_FILE));
+    quarantine(&host, EMAIL);
+    let host = host.with_unwritable_file(CREDENTIALS_PATH, "read-only file");
 
     let (result, _) = run_relogin(&host, EMAIL);
 
@@ -616,6 +674,12 @@ fn a_repair_that_could_not_be_made_live_leaves_nothing_to_capture_into() {
     assert!(
         error.to_string().contains("no active Account"),
         "it says what it did about it: {error}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("goes on using the one that stopped working"),
+        "and that the live Credential really is still the broken one: {error}"
     );
     assert_eq!(
         credential_of(&host, EMAIL).as_deref(),
@@ -630,7 +694,7 @@ fn a_repair_that_could_not_be_made_live_leaves_nothing_to_capture_into() {
 
     // The command a user would reach for next, which used to be the one that
     // destroyed the repair.
-    host.writable_again(IDENTITY_PATH);
+    host.writable_again(CREDENTIALS_PATH);
     run_switch(&host, SECOND_EMAIL)
         .0
         .expect("a Switch still works");
