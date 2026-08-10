@@ -14,7 +14,7 @@ Every release is built by a public workflow in this repository, and every
 archive carries signed build provenance. If you have `gh`:
 
 ```sh
-gh attestation verify perch-v0.1.0-<target>.tar.gz --repo mschieller/perch
+gh attestation verify perch-v0.1.0-<target>.tar.gz --repo perch-cli/perch
 ```
 
 That says which workflow, in which repository, at which commit produced the
@@ -31,7 +31,7 @@ is on the list for 1.0.
 ## Reporting a vulnerability
 
 Report privately through GitHub's
-[private vulnerability reporting](https://github.com/mschieller/perch/security/advisories/new).
+[private vulnerability reporting](https://github.com/perch-cli/perch/security/advisories/new).
 Please do not open a public issue for a security problem.
 
 Expect an acknowledgement within a week. Perch is maintained by one person, so

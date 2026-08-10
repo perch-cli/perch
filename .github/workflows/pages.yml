@@ -1,6 +1,6 @@
 name: Pages
 
-# Serves the installers at https://mschieller.github.io/perch/. They live on
+# Serves the installers at https://perch-cli.github.io/perch/. They live on
 # main rather than in a release, deliberately: the URL somebody pastes into a
 # terminal should not carry a version, and an installer that has to be released
 # to be fixed is one that stays broken until the next release.

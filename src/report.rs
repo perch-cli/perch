@@ -10,7 +10,7 @@
 //! pasting: what version, on what platform, where to send it, and how to get
 //! the backtrace if the first run did not carry one.
 
-const ISSUES: &str = "https://github.com/mschieller/perch/issues";
+const ISSUES: &str = "https://github.com/perch-cli/perch/issues";
 
 /// Adds Perch's own section to whatever the runtime already prints for a panic.
 ///
