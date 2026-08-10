@@ -59,10 +59,15 @@ pub enum Captured {
     Unreadable { outgoing: String, why: String },
     /// Perch holds no active Account, so there was nothing to Capture into.
     NoOutgoing,
-    /// The Account being left is the Account being switched to — the repair for
-    /// a Switch interrupted before it patched the Identity — and the live
-    /// Credential is already the one this Switch would write. There is no
-    /// Rotation to save and nothing to copy anywhere.
+    /// The live Credential is already byte-for-byte the one this Switch would
+    /// write — the repair for a Switch interrupted after it made the incoming
+    /// Credential live but before it finished saying so. There is no Rotation to
+    /// save and nothing to copy anywhere.
+    ///
+    /// Whether the Account being left is the Account being switched to makes no
+    /// difference: a Switch that stopped before it recorded who was active
+    /// leaves Perch naming the *previous* Account as outgoing, and the live
+    /// Credential is no more that Account's for it.
     NothingToSave,
 }
 
@@ -359,6 +364,13 @@ fn prepare(
 /// absent or cannot be read is *not* evidence against, and still Captures —
 /// losing a Rotation is the failure this step exists to prevent.
 ///
+/// The Identity is only ever asked about a Credential that could be somebody's
+/// to lose. One identical to the Credential this Switch is about to write is the
+/// incoming Account's by construction, and is declined before the Identity gets
+/// a say — an Identity left behind by an interrupted Switch names the wrong
+/// Account, and believing it there is how the Capture would destroy the outgoing
+/// Account's Credential rather than save one.
+///
 /// [`only_off_a_credential_that_is_theirs`]: crate::observe
 fn capture(
     host: &dyn Host,
@@ -409,30 +421,36 @@ fn capture(
         return Ok(Captured::NothingLive);
     };
 
+    // The live Credential being byte-for-byte the one this Switch is about to
+    // write is the trace of a Switch that stopped after step two: the incoming
+    // Account's Credential is already live, and what is behind is `.claude.json`,
+    // Perch's record of who is active, or both. There is no Rotation in it to
+    // save, and it is not the outgoing Account's whoever the Identity names.
+    //
+    // Ahead of the Identity, because a stale Identity is the whole of what that
+    // state *is*: it names the Account the interrupted Switch was leaving. Read
+    // as evidence of ownership it says the live Credential is the outgoing
+    // Account's, and the write below then files the *incoming* Account's
+    // Credential into the outgoing Account's Profile — over the only copy of a
+    // refresh token that Account had, which is the one loss ADR 0006 exists to
+    // prevent. Running the same `perch switch` again after it failed to record
+    // itself is enough to reach it.
+    if live.as_str() == prepared.credential.as_str() {
+        return Ok(Captured::NothingToSave);
+    }
+
     // `incoming` and `outgoing` being one Account is the repair for a Switch that
-    // stopped between step two and step three: this Account's Credential is
-    // already the live one and only `.claude.json` is behind. ADR 0027 expects
-    // the Capture to run here — "X is the outgoing Account there as well as the
-    // incoming one".
+    // stopped between step two and step three, and the check above has already
+    // taken the case where it has nothing to do. ADR 0027 expects the Capture to
+    // run here — "X is the outgoing Account there as well as the incoming one".
     //
-    // The Identity cannot decide it, because a stale Identity is the whole of
-    // what that state *is*: it names the Account the interrupted Switch was
-    // leaving. Read as evidence of ownership it said the live Credential was
-    // somebody else's, declined the Capture, and let the write below put this
-    // Account's older Profile copy over its own Rotation — the only good refresh
-    // token, gone, which is the one loss ADR 0006 exists to prevent.
-    //
-    // So the two are told apart by the bytes instead. Identical to what is about
-    // to be written, the repair has nothing to save and the write is a no-op.
-    // Different, there are two readings — this Account Rotated while it was live,
-    // or somebody logged in outside Perch since — and nothing on the machine
+    // What is left is a live Credential that is this Account's Profile copy
+    // neither, and there are two readings — this Account Rotated while it was
+    // live, or somebody logged in outside Perch since. Nothing on the machine
     // tells them apart, so neither is acted on. Nothing has been written yet, and
     // a Switch that has to be run again is recoverable where a lost refresh token
     // is not.
     if registry::same_name(incoming.email(), outgoing.email()) {
-        if live.as_str() == prepared.credential.as_str() {
-            return Ok(Captured::NothingToSave);
-        }
         return Err(PerchError::Conflict(
             the_live_credential_is_unaccounted_for(incoming),
         ));
