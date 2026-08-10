@@ -17,9 +17,17 @@
 //! and leaving a TUI open when the connection goes is the ordinary way to lose
 //! one; `SIGTERM` is what every process supervisor and `kill` sends. Neither
 //! runs `Drop` and neither is a panic, so before this the terminal that came
-//! back was reused by the next shell in raw mode with no cursor. Ctrl-C is not
-//! among them: crossterm's raw mode turns `ISIG` off, so it arrives as a
-//! keystroke the loop reads rather than as a signal.
+//! back was reused by the next shell in raw mode with no cursor.
+//!
+//! `SIGINT` and `SIGQUIT` are handled alongside them, and the reason they were
+//! once left out is the reason they are easy to miss. Raw mode turns `ISIG`
+//! off, so Ctrl-C and Ctrl-\ typed *at this terminal* arrive as keystrokes the
+//! loop reads rather than as signals — which says nothing about the same signals
+//! arriving any other way. `kill -INT`, `timeout --signal=INT`, a supervisor
+//! that interrupts before it terminates, or a shell signalling the whole process
+//! group all deliver a real `SIGINT`, and its default disposition ends the
+//! process without unwinding exactly as `SIGTERM`'s does. Handling them costs a
+//! typed Ctrl-C nothing, because a typed Ctrl-C never becomes a signal.
 
 use std::io::{Stdout, stdout};
 use std::sync::{Mutex, Once, PoisonError};
@@ -58,11 +66,23 @@ impl TerminalScreen {
         // outcome these exist to prevent, on the first `enter` of a process.
         //
         // Safe this early because absence is not what gates them: they are
-        // installed once for the life of the process and ask `OURS`, which is
-        // still false here, so a signal arriving now correctly does nothing.
+        // installed once for the life of the process and ask `OURS`.
         signals::restore_before_a_signal_ends_this();
-        terminal::enable_raw_mode().map_err(the_terminal_refused)?;
+
+        // Before raw mode too, and this is the last piece of the same window:
+        // installed handlers that ask `OURS` do nothing while `OURS` is false,
+        // so setting it after `enable_raw_mode` returned left the very gap the
+        // two lines above close. Claiming it first costs nothing — a signal
+        // arriving now finds a terminal already in the mode the handler would
+        // restore, and writes two escape sequences to a screen that is not the
+        // alternate one, which is what "put it back" means when nothing was
+        // taken. A failure below gives the claim up again.
         held_by(Some(std::thread::current().id()));
+
+        if let Err(err) = terminal::enable_raw_mode() {
+            held_by(None);
+            return Err(the_terminal_refused(err));
+        }
         // Raw mode is on, so from here a failure has something to give back.
         if let Err(err) = stdout().execute(EnterAlternateScreen) {
             let _ = give_it_back();
@@ -333,7 +353,11 @@ mod signals {
     pub(super) fn restore_before_a_signal_ends_this() {
         static INSTALLED: std::sync::Once = std::sync::Once::new();
         INSTALLED.call_once(|| {
-            for signal in [libc::SIGTERM, libc::SIGHUP] {
+            // `SIGINT` and `SIGQUIT` among them, for the reason the module doc
+            // gives: `ISIG` being off says what a *typed* Ctrl-C does, and
+            // nothing at all about one delivered by `kill`, by `timeout
+            // --signal=INT`, or by a shell signalling the process group.
+            for signal in [libc::SIGTERM, libc::SIGHUP, libc::SIGINT, libc::SIGQUIT] {
                 // SAFETY: the handler stores nothing, reads two atomics and a
                 // static written before this call, and calls four
                 // async-signal-safe functions.
