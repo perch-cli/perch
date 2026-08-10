@@ -17,6 +17,12 @@ itself, and the file holding `oauthAccount`.
 > the answer for every Profile at once. The example below stands as it was
 > written; the denylist is now three entries rather than two.
 
+> **Amended again.** The refresh lock — `.oauth_refresh.lock` — is held back
+> too, and for the same reason as `sessions`: it answers a question about *this*
+> configuration directory, so shared it would have two of them contending for one
+> lock and each reading the other's mtime as its own. The denylist is four
+> entries, and the last two are one rule.
+
 The alternative is an allowlist naming what is shared. It is more precise and
 it goes stale on Claude Code's release schedule rather than Perch's. When this
 was written the glossary named four pieces of Shared State — memory, settings,

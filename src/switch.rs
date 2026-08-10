@@ -45,10 +45,17 @@ pub enum Captured {
         /// Who the Identity beside the live Credential names instead.
         live: String,
     },
-    /// Something was live and it is not a Credential Perch can make sense of,
-    /// so it was left where it was: bytes nothing understands are not a
-    /// Rotation to lose, and filing them under an Account's Profile would
-    /// overwrite the Credential that Account does have with rubbish.
+    /// Something was live, the store handed it over, and it is not a Credential
+    /// Perch can make sense of — so it was left where it was: bytes nothing
+    /// understands are not a Rotation to lose, and filing them under an
+    /// Account's Profile would overwrite the Credential that Account does have
+    /// with rubbish.
+    ///
+    /// Only where the store *answered*. One that would not is not this: it says
+    /// nothing about what it holds, so declining there would be skipping the
+    /// Capture of a Credential nobody established was bad, and the Switch
+    /// writing over it a moment later would be the loss ADR 0006 exists to
+    /// prevent. That is a refusal, in [`capture`].
     Unreadable { outgoing: String, why: String },
     /// Perch holds no active Account, so there was nothing to Capture into.
     NoOutgoing,
@@ -156,6 +163,11 @@ pub fn perform(
 /// The Credential written is the one in the Account's own Profile, read back
 /// out of it rather than passed in, so the same store that a `perch switch`
 /// tomorrow will read is the store this proves works today.
+///
+/// It asks the liveness question under the locks, as [`perform`] does. The
+/// caller has asked it too, before the browser round trip and again after — but
+/// both of those are minutes and a lock wait away from the write, and this is
+/// the last moment at which the answer cannot change.
 pub fn make_live(host: &dyn Host, account: &Account) -> std::result::Result<(), NotLanded> {
     let (version, store) = ground(host).map_err(|error| NotLanded {
         error,
@@ -164,6 +176,25 @@ pub fn make_live(host: &dyn Host, account: &Account) -> std::result::Result<(), 
 
     let mut is_live = false;
     let landed = lock::under(host, probe::locks_for(&store), |held| {
+        // Under the locks, for the reason [`Prepared`] gives and `perch
+        // relogin` had no equivalent of: the caller asked this question minutes
+        // ago, across a browser round trip, and taking these locks can take
+        // seconds more. A `claude` started in that gap is one no earlier answer
+        // saw, and what happens next replaces the very Credential it is holding
+        // — the mid-task logout ADR 0005 exists to prevent, reached by the one
+        // path that writes the Default Profile without Capturing first.
+        //
+        // The Default Profile alone. The Account's own Profile is only read
+        // here, and reading a Credential takes nothing away from the session
+        // using it (ADR 0027).
+        refuse_if_live_in(
+            host,
+            &store.config_dir,
+            "the Default Profile, which is where this Account's repaired \
+             Credential has to land",
+            &version,
+        )?;
+
         let prepared = prepare(host, account, None, version, store)?;
 
         held.renew();
@@ -309,18 +340,38 @@ fn capture(host: &dyn Host, prepared: &Prepared, outgoing: Option<&Account>) -> 
     };
 
     // Bytes that are not a Credential are not a Rotation, and the point of a
-    // Capture is not losing a Rotation. So an unreadable live store is declined
-    // rather than propagated: filing it under the outgoing Account would
-    // overwrite the Credential that Account does have with rubbish, and failing
-    // here would stop every Switch on the machine — including the one that
-    // repairs it by writing a good Credential over the bad one.
+    // Capture is not losing a Rotation. So a live store holding rubbish is
+    // declined rather than propagated: filing it under the outgoing Account
+    // would overwrite the Credential that Account does have with rubbish, and
+    // failing here would stop every Switch on the machine — including the one
+    // that repairs it by writing a good Credential over the bad one.
+    //
+    // A store that *would not answer* is the other thing entirely, and folding
+    // the two together is how a Capture came to be skipped over a Credential
+    // that was never established to be bad. A `.credentials.json` left owned by
+    // root by a `sudo claude`, or a keychain that will not open, refuses the
+    // read and says nothing about what it holds — which is very likely the
+    // outgoing Account's own Credential, several Rotations newer than the copy
+    // in its Profile. Declined there, the Switch went straight on to write the
+    // incoming Credential over it, and the only good copy was gone. So it is
+    // refused: nothing has been written yet, and a Switch that has to be run
+    // again after a `chmod` is recoverable where a lost refresh token is not.
     let live = match probe::read_credential(host, &prepared.store, &prepared.version) {
         Ok(live) => live,
-        Err(why) => {
+        Err(why @ PerchError::ProbeRefused { .. }) => {
             return Ok(Captured::Unreadable {
                 outgoing: outgoing.email().to_string(),
                 why: why.to_string(),
             });
+        }
+        Err(would_not_answer) => {
+            return Err(would_not_answer.with_note(&format!(
+                "The live Credential could not be read, so it could not be \
+                 Captured into {}'s Profile — and it may be that Account's own, \
+                 newer than the copy Perch holds. Nothing was changed. Make that \
+                 store readable and run this again.",
+                outgoing.email(),
+            )));
         }
     };
     let Some(live) = live else {

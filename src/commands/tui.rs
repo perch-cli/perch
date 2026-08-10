@@ -43,6 +43,14 @@ pub fn run(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     out.flush().map_err(write_failed)?;
 
     let mut refresher = InAThread::new();
+    // For exactly as long as the screen is Perch's, and given back with it. A
+    // remark goes to stderr, which is where the frames are: one printed while
+    // the picker holds the terminal lands in the middle of the display and
+    // stays until something redraws over it. ADR 0016 settled this for the
+    // Refresh thread, which runs against a Host of its own; the Switch the
+    // picker performs runs against this one, and [`crate::tui::act`] shows what
+    // it kept in the frame beside everything else the Switch said.
+    host.print_remarks(false);
     let browsed = {
         // The terminal goes back when this is dropped, which happens whether
         // the loop returns or fails — and before anything below writes a line,
@@ -51,6 +59,9 @@ pub fn run(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         let mut screen = TerminalScreen::enter()?;
         crate::tui::browse(host, registry, &mut screen, &mut refresher)
     };
+    // Back on before `hand_over`, which may launch a Run: what that provokes
+    // has an ordinary terminal to be printed onto.
+    host.print_remarks(true);
 
     // Whichever failed, the loop's failure is the one worth reporting: it is
     // what the user was doing, and the other is a line that could not be

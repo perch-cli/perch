@@ -51,6 +51,28 @@ fn a_file_holding_a_credential_is_created_for_its_owner_alone() {
     );
 }
 
+/// The file beside it, which is not a Credential and is not nothing either.
+///
+/// `.claude.json` holds MCP configuration, and an MCP server entry routinely
+/// carries an API key in its `env` block — which is the rule `switch` already
+/// writes the Default Profile's copy under. A Profile's own copy was created by
+/// a plain write, so it arrived at the process umask; and because the rule for a
+/// file that already exists is to carry its mode across, it then stayed there
+/// for the life of the Profile while a Carry wrote into it on every Run.
+#[test]
+fn the_identity_file_in_a_profile_is_created_for_its_owner_alone_too() {
+    let host = logged_in_machine_off_macos();
+
+    run_status(&host, false).0.expect("the login is adopted");
+
+    let store = store_of(&host, EMAIL);
+    assert_eq!(
+        host.mode_of(&store.identity_file),
+        Some(0o600),
+        "a file Perch is the first to create is created closed, not at the umask"
+    );
+}
+
 #[test]
 fn a_credential_file_others_could_read_is_tightened_and_reported_rather_than_refused() {
     let host = logged_in_machine_off_macos().with_file_mode(CREDENTIALS_PATH, 0o644);

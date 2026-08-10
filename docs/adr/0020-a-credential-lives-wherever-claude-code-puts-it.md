@@ -79,8 +79,9 @@ will not notice.
 Because a Credential Store is derived rather than recorded, `registry.json` stops
 carrying `keychain_service` and `keychain_account` — and, by the same argument,
 `dir`, which is `perch_home/profiles/slug(email)`. `Profile` collapses into
-values the registry already keys on. The format goes to version 2, migrating by
-dropping the fields on read. The cost of deriving rather than recording is that
+values the registry already keys on. The fields are simply dropped: nobody is
+running Perch, so there is no registry an older one wrote to migrate and the
+format stays at version 1. The cost of deriving rather than recording is that
 a future change to Claude Code's derivation would send Perch looking in an empty
 namespace instead of at a remembered one; ADR 0007's answer to drift is to refuse
 loudly rather than to guess, and `short_hash` is pinned by test so the derivation
