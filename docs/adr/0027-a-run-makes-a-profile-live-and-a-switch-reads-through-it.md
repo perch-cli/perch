@@ -91,7 +91,9 @@ answer is every Profile's — a single `claude` in another terminal would make
 every Account on the machine Live and every Switch refuse, and a Run's own
 marker would land in the Default Profile rather than in the Profile it is about.
 So the denylist ADR 0026 wrote as two entries is three, and the third is a
-different kind of thing from the other two.
+different kind of thing from the other two. It is now four: the refresh lock is
+held back on the same rule, an entry that answers a question about *this*
+directory meaning nothing in another one.
 
 Nothing is lost. `sessions` holds live-client markers; the transcripts and plans
 a person would miss are `projects`, `history.jsonl` and `plans`, and all of
