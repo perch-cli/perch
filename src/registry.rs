@@ -1188,6 +1188,35 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
         named.push((alias, email));
     }
 
+    // The third member of the namespace, which nothing was checking. A Target is
+    // an Alias, a Group name or an Account's address, and `validate_name` keeps
+    // the first two tellable from the third by refusing an `@` in them —
+    // "because a Target that could be either has no single answer". The mirror
+    // rule, that an address actually looks like one, was never stated anywhere:
+    // `probe::read_identity` asks only for one alphanumeric character, and
+    // `refuse_taken_names` consults the Aliases and the Groups but never the
+    // Accounts.
+    //
+    // So an Account called `work` beside a Group called `work` resolved to the
+    // Account, leaving the Group reachable from `perch group list` and `perch
+    // config set` and unreachable from `perch switch` and `perch run`; beside an
+    // *Alias* called `work` it left the Account reachable by no Target at all.
+    // Refused here, one rule is what makes `refuse_taken_names`' two-way check
+    // correct without it needing a third lookup.
+    for account in &registry.accounts {
+        if !account.email().contains('@') {
+            return Err(PerchError::Invalid(format!(
+                "The registry holds an Account called `{}`, which is not an \
+                 address an Alias or a Group name could be told from — and a \
+                 Target that could be either has no single answer.\n\
+                 It is in {}, and every Perch command reads that file — including \
+                 the ones that would set it. Edit the value there.",
+                account.email(),
+                path.display(),
+            )));
+        }
+    }
+
     // One entry per Account, for the same reason and with a worse ending.
     // `upsert` is what every command writes an Account through and it replaces
     // the matching entry, so two entries for one address are something only a
@@ -2225,6 +2254,37 @@ mod tests {
                 "and the file to edit: {said}"
             );
         }
+    }
+
+    /// The namespace has three members and only two of them were guarded.
+    ///
+    /// `validate_name` refuses an `@` in an Alias or a Group name so that a
+    /// Target is never ambiguous; nothing said that an Account's address has to
+    /// look like one. An Account called `work` beside a Group called `work`
+    /// resolved to the Account, so `perch group list` and `perch config set` went
+    /// on showing and editing a Group that `perch switch` and `perch run` could
+    /// no longer reach — and beside an *Alias* of that name it was the Account
+    /// that became reachable by no Target at all.
+    #[test]
+    fn an_account_address_a_name_could_be_confused_with_is_refused() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let path = registry_path(&host).unwrap();
+        host.set_file(
+            &path,
+            r#"{"version":1,"accounts":[{"identity":{"email":"work"},"enabled":true},{"identity":{"email":"real@example.com"},"enabled":true}],"groups":{"work":{}}}"#,
+        );
+
+        let refused = load(&host).expect_err("that Target has two answers");
+        let said = refused.to_string();
+        assert!(said.contains("Account called `work`"), "{said}");
+        assert!(
+            said.contains("could be told from"),
+            "it says what is wrong with it: {said}"
+        );
+        assert!(
+            said.contains("registry.json"),
+            "and the file to edit: {said}"
+        );
     }
 
     /// One entry per Account and one Alias per Account, asked of a file.

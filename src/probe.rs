@@ -612,6 +612,24 @@ pub fn read_identity(host: &dyn Host, store: &Store, version: &str) -> Result<Op
         ));
     }
 
+    // And an address is also a Target, which is why `registry::validate_name`
+    // refuses an `@` in an Alias or a Group name: a Target that could be either
+    // has no single answer. That rule only holds if the other half of it does, so
+    // it is asked here too — an Account called `work` beside a Group called
+    // `work` made the Group unreachable from `perch switch` while `perch group
+    // list` went on showing it.
+    if !email.contains('@') {
+        return Err(refusal(
+            assumption::IDENTITY_BLOCK,
+            &format!(
+                "{} names the account `{email}`, which is not an address an \
+                 Alias or a Group name could be told from",
+                store.identity_file.display()
+            ),
+            version,
+        ));
+    }
+
     Ok(Some(Identity {
         email,
         account_uuid: account.account_uuid,
@@ -1373,6 +1391,36 @@ mod tests {
             block.contains(r#""emailAddress": "someone@example.com""#),
             "{block}"
         );
+    }
+
+    /// An address is a Profile path, a keychain namespace and a Target, and it is
+    /// refused where it enters rather than somewhere downstream that has already
+    /// derived one of those from it.
+    ///
+    /// Both halves of what makes it usable, in one place. Nothing nameable in it
+    /// and there is no Profile to put it in; no `@` in it and it is a Target an
+    /// Alias or a Group name could not be told from, which is exactly what
+    /// `registry::validate_name` refuses those two for.
+    #[test]
+    fn an_address_perch_could_not_key_anything_on_is_refused_where_it_enters() {
+        for (email, expected) in [
+            ("...", "no character Perch can name a Profile after"),
+            ("work", "could be told from"),
+        ] {
+            let host = FakeHost::new()
+                .with_env("HOME", "/Users/someone")
+                .with_env("USER", "someone")
+                .with_file(
+                    "/Users/someone/.claude.json",
+                    &format!(r#"{{"oauthAccount":{{"emailAddress":"{email}"}}}}"#),
+                );
+            let store = default_store(&host).expect("the store is derivable");
+
+            let refused = read_identity(&host, &store, "2.1.221")
+                .expect_err("Perch cannot key anything on that");
+
+            assert!(refused.to_string().contains(expected), "{refused}");
+        }
     }
 
     #[test]
