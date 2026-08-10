@@ -133,3 +133,23 @@ consecutive weeks — that is the check that catches Claude Code drift, which is
 the failure that cannot be tested for in advance. Beyond the floor it is a
 judgement call. Worth revisiting at the same time: Apple notarization, which
 0.x deliberately skips.
+
+## The installers
+
+`packaging/pages/` is served at <https://mschieller.github.io/perch/> by
+`pages.yml`, which deploys on every push to `main` that touches it. The
+installers live on `main` rather than inside a release on purpose: the URL
+somebody pastes into a terminal should not carry a version, and an installer
+that has to be released to be fixed stays broken until the next release.
+
+Enable it once, under **Settings → Pages → Source: GitHub Actions**.
+
+Both installers verify the archive against the release's `SHA256SUMS`, and
+then, only if `gh` is installed *and logged in*, against the signed build
+provenance — and that second check is binding. The download has already
+succeeded by then, so a provenance failure is saying something about the file
+rather than about the network, and an installer that shrugs at that is doing
+the check for decoration.
+
+`PERCH_API_BASE` and `PERCH_DOWNLOAD_BASE` exist so the scripts can be run
+against a fabricated release served locally. Nothing in normal use sets them.
