@@ -1055,9 +1055,10 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     // This is the order the guard needs to be any use. A newer Perch is exactly
     // the thing that writes a value this build has no variant for — a Strategy
     // it added, a Quarantine reason — and reading the document first fails on
-    // that with serde's own words. The user is then told `registry.json` is not
-    // valid JSON, about a file that is perfectly valid JSON, which is precisely
-    // the misdiagnosis the version field exists to prevent.
+    // that with serde's own words: "unknown variant `least-recently-used`",
+    // about a file that is perfectly well-formed, with nothing in the sentence
+    // saying the build in front of them is simply too old. That is the
+    // misdiagnosis the version field exists to prevent.
     if let Some(version) = version_of(&contents)
         && version > CURRENT_VERSION
     {
@@ -2225,6 +2226,41 @@ mod tests {
             assert!(
                 said.contains("registry.json"),
                 "and the refusal names the file to edit: {said}"
+            );
+        }
+    }
+
+    /// A registry this build cannot read is never reported as one that is not
+    /// JSON, because most of the time it *is* JSON.
+    ///
+    /// The version guard above closes this for a document claiming a version
+    /// from the future, which is one of the ways a build meets a value it has no
+    /// variant for. It is not the only one: a hand edit picks the same wrong
+    /// spelling, and every other way serde declines a well-formed document —
+    /// a missing `version`, a number that will not fit — arrives the same way.
+    /// Told "not valid JSON", somebody goes looking for a syntax error that is
+    /// not there, past the half of the sentence that says what is wrong.
+    #[test]
+    fn a_registry_that_is_json_and_still_unreadable_is_not_called_bad_json() {
+        let files = [
+            r#"{"version":1,"accounts":[],"groups":{"work":{"strategy":"round-robin"}}}"#,
+            r#"{"accounts":[],"groups":{}}"#,
+        ];
+
+        for contents in files {
+            let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+            let path = registry_path(&host).unwrap();
+            host.set_file(&path, contents);
+
+            let refused = load(&host).expect_err("this build cannot read it");
+            let said = refused.to_string();
+            assert!(
+                !said.contains("not valid JSON"),
+                "the file parses as JSON perfectly well: {said}"
+            );
+            assert!(
+                said.contains("registry.json"),
+                "and the refusal still names it: {said}"
             );
         }
     }

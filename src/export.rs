@@ -309,8 +309,8 @@ pub fn unseal(sealed: &str, passphrase: &str) -> Result<Export> {
     // be any use at all: a newer Perch is exactly the thing that writes a value
     // this build has no variant for — a Strategy it added, a Quarantine reason —
     // and reading the document first fails on that with serde's own words. The
-    // user is then told their *backup file is corrupt*, about a file that is
-    // perfectly valid JSON, on the day the machine it would have restored is
+    // user is then told their *backup file is unreadable*, about a file that is
+    // perfectly well-formed, on the day the machine it would have restored is
     // gone. `registry::load` gets this right and says so; this did not, so both
     // version fields were dead in the only case they were written for.
     refuse_a_newer_perch(&plain)?;
