@@ -3,7 +3,18 @@ name: CI
 on:
   push:
     branches: [main]
+  # `edited` on top of the three types this fires on by default, for the `title`
+  # job below. A title is the one thing a check here asks the author to change,
+  # and without this the check does not run again when they change it: the
+  # verdict stays red on the old title until an unrelated push happens to
+  # refresh the event payload, so the only ways out were a junk commit or
+  # closing and reopening the pull request.
+  #
+  # The cost is the matrix re-running when a description is edited too, since
+  # types are the workflow's and not the job's. That is minutes of runner time
+  # against a check that could not otherwise be satisfied by doing what it asks.
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   # The contract suite exists to find Claude Code drift before a user does, and
   # Claude Code updates continuously while this repository may not change for a
   # week. A weekly run is what turns "we would have noticed" into "we did".
