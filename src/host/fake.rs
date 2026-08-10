@@ -180,6 +180,8 @@ pub struct FakeHost {
     keychain_keeps: RefCell<Option<usize>>,
     /// Files that come back different from how they were written.
     corrupting: RefCell<BTreeSet<PathBuf>>,
+    /// Files whose write dies partway, leaving what fitted behind.
+    filling: RefCell<BTreeSet<PathBuf>>,
     executions: RefCell<BTreeMap<String, Execution>>,
     login: RefCell<Option<Login>>,
     /// What happens the first time Perch waits, and then does not happen again.
@@ -256,6 +258,7 @@ impl FakeHost {
             keychain_everywhere: RefCell::new(false),
             keychain_keeps: RefCell::new(None),
             corrupting: RefCell::new(BTreeSet::new()),
+            filling: RefCell::new(BTreeSet::new()),
             executions: RefCell::new(BTreeMap::new()),
             login: RefCell::new(None),
             while_waiting: RefCell::new(None),
@@ -519,6 +522,25 @@ impl FakeHost {
     /// hazard on the plaintext store, which the same guard covers.
     pub fn with_file_corrupting_writes(self, path: impl AsRef<Path>) -> Self {
         self.corrupting
+            .borrow_mut()
+            .insert(path.as_ref().to_path_buf());
+        self
+    }
+
+    /// A disk that fills partway through the write rather than before it: the
+    /// bytes that fitted are on disk, and the call fails.
+    ///
+    /// Distinct from [`with_unwritable_file`], which models the write never
+    /// starting. The real host opens the file, then `write_all`s, then
+    /// `sync_all`s, so an `ENOSPC` or an `EIO` between the first and the last
+    /// leaves a partially-written file behind — and a fake that could only fail
+    /// before creating anything let `replace_via_tmp` claim a cleanup it did not
+    /// have. Two tests asserted that nothing is left beside the target across a
+    /// failed write, and neither could reach the arrangement that leaves one.
+    ///
+    /// [`with_unwritable_file`]: Self::with_unwritable_file
+    pub fn with_a_disk_that_fills_writing(self, path: impl AsRef<Path>) -> Self {
+        self.filling
             .borrow_mut()
             .insert(path.as_ref().to_path_buf());
         self
@@ -1079,6 +1101,20 @@ impl Host for FakeHost {
             return Err(HostError::Other(detail.clone()));
         }
         self.note_directories_of(path);
+        // A disk that fills partway leaves what fitted behind and then fails,
+        // which is the order the real host does it in: open, `write_all`,
+        // `sync_all`. A fake that could only refuse before creating anything
+        // could not model it, so the cleanup on this path went untested.
+        if self.filling.borrow().contains(&intended) {
+            let mut fitted = contents.to_string();
+            fitted.truncate(contents.len() / 2);
+            self.files.borrow_mut().insert(path.to_path_buf(), fitted);
+            self.modes.borrow_mut().insert(path.to_path_buf(), mode);
+            self.mark_written(path);
+            return Err(HostError::Other(
+                "No space left on device (os error 28)".to_string(),
+            ));
+        }
         self.files
             .borrow_mut()
             .insert(path.to_path_buf(), self.as_stored(&intended, contents));

@@ -182,6 +182,55 @@ fn a_login_that_was_abandoned_changes_nothing_at_all() {
     );
 }
 
+fn leaked(text: &str) -> &'static str {
+    Box::leak(text.to_string().into_boxed_str())
+}
+
+/// The other direction of the same rule: a login under a differently
+/// capitalised spelling is the Account being repaired, not somebody else.
+///
+/// Asked in ASCII, this was the one comparison disagreeing with `add` and
+/// `target`, and it disagreed on the path `add` sends people down. Told that
+/// Perch already holds `café@example.com`, `add` refuses a second login — it
+/// decides both the Profile collision and whether it is one Account over the
+/// whole of Unicode — and names `perch relogin` as the way to repair it
+/// instead. Resolution then succeeded, the browser round trip was spent, and
+/// `é` against `É` under an ASCII fold made them different people. Neither
+/// command could hold the login, and the Account stayed Quarantined for good.
+#[test]
+fn a_login_under_an_accented_spelling_repairs_the_account_rather_than_being_a_stranger() {
+    let accented = "café@example.com";
+    let shouted = "CAFÉ@example.com";
+    let host = machine_with_claude_code()
+        .with_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, CREDENTIAL)
+        .with_file(
+            IDENTITY_PATH,
+            leaked(&IDENTITY_FILE.replace(EMAIL, accented)),
+        )
+        .with_login(login_producing(
+            REPAIRED,
+            leaked(&IDENTITY_FILE.replace(EMAIL, shouted)),
+        ));
+    // The first command adopts the existing login, which is the Account this
+    // repairs (ADR 0009).
+    run_list(&host, false).0.expect("the machine is adopted");
+    quarantine(&host, accented);
+
+    let (result, _) = run_relogin(&host, accented);
+
+    result.expect("the same Account, spelled the other way");
+    assert_eq!(
+        quarantine_of(&host, accented),
+        None,
+        "the Quarantine is over rather than the login being turned away"
+    );
+    assert_eq!(
+        credential_of(&host, accented).as_deref(),
+        Some(REPAIRED),
+        "and the fresh Credential is in the Account's own Profile"
+    );
+}
+
 #[test]
 fn a_login_as_a_different_account_is_refused_and_takes_nothing_over() {
     let host =
@@ -462,6 +511,45 @@ fn repairing_the_account_you_are_on_is_refused_while_a_client_holds_the_default_
     );
 }
 
+/// One step earlier than the test below, and the more dangerous of the two: the
+/// repair happened and could not be *recorded*.
+///
+/// The registry still says Quarantined and still names this Account as the one
+/// you are on, while the broken Credential is still the live one and the fresh
+/// one sits in the Account's own Profile. That is exactly the state
+/// `no_longer_on_anybody` defends against by clearing `active` — and clearing
+/// `active` is a registry write, which is what just failed. So the only defence
+/// left is saying what not to do, and a bare `?` said only that a file could not
+/// be written.
+#[test]
+fn a_repair_that_could_not_be_recorded_says_the_login_worked_and_not_to_switch() {
+    let host = logged_in_machine_off_macos().with_login(login_producing(REPAIRED, IDENTITY_FILE));
+    run_list(&host, false)
+        .0
+        .expect("the first command adopts the login");
+    quarantine(&host, EMAIL);
+
+    let host = host.with_unwritable_file(REGISTRY_PATH, "read-only file system");
+
+    let (result, _) = run_relogin(&host, EMAIL);
+
+    let error = result.expect_err("the repair could not be recorded");
+    let said = error.to_string();
+    assert!(
+        said.contains("The login itself worked"),
+        "the browser round trip is not repeated for nothing: {said}"
+    );
+    assert!(
+        said.contains("Do not run `perch switch`"),
+        "and the Capture that would destroy the repair is named: {said}"
+    );
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(REPAIRED),
+        "the fresh Credential really is in the Account's own Profile"
+    );
+}
+
 #[test]
 fn a_repair_that_could_not_be_made_live_still_stands_and_says_what_is_left() {
     // Off macOS, so the Default Profile's Credential is the file below and the
@@ -562,11 +650,13 @@ fn a_repair_that_could_not_be_made_live_leaves_nothing_to_capture_into() {
 fn an_account_removed_while_its_login_was_open_says_the_login_still_worked() {
     let host = broken_second_account().with_login(|host, dir| {
         // Somebody in another terminal gives the Account up while the browser
-        // is still open.
+        // is still open. Through `forget`, which is what `perch remove` calls:
+        // dropping the entry by hand left the Alias it answered to pointing at
+        // an Account nothing held, which is a registry `load` now refuses
+        // outright — so the fixture was arranging a state no `perch remove`
+        // produces and the refusal under test was never reached.
         let mut registry = registry_of(host);
-        registry
-            .accounts
-            .retain(|account| account.email() != SECOND_EMAIL);
+        registry.forget(SECOND_EMAIL);
         save_registry(host, &registry);
 
         login_producing(SECOND_REPAIRED, SECOND_IDENTITY_FILE)(host, dir)

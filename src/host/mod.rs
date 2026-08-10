@@ -604,13 +604,22 @@ pub fn replace_via_tmp(
     mode: u32,
 ) -> Result<(), HostError> {
     let beside = temp_beside(host, path);
-    host.create_file_with_mode(&beside, contents, mode)?;
-    match host.rename(&beside, path) {
+    // Nothing has replaced the original, so whatever is at `beside` is just
+    // litter — and litter beside a file Claude Code reads, or one holding a
+    // Credential, is worth clearing even on the way out.
+    //
+    // Both failures, not only the rename. A write is `create_new`, then
+    // `write_all`, then `sync_all`, and a disk that fills between the first and
+    // the last leaves a real, partially-written file at `<target>.perch-tmp.<pid>`
+    // that nothing removed: a truncated `.credentials.json` holding a fragment
+    // of a refresh token, a truncated `.claude.json`, or a truncated Export
+    // holding some of every Credential on the machine. None of them is ever
+    // mentioned, and nothing looks at that path again — `perch export` refuses
+    // an occupied path by looking at the target alone.
+    let written = host.create_file_with_mode(&beside, contents, mode);
+    match written.and_then(|()| host.rename(&beside, path)) {
         Ok(()) => Ok(()),
         Err(err) => {
-            // Nothing has replaced the original, so the half-written copy is
-            // just litter — and litter beside a file Claude Code reads, or one
-            // holding a Credential, is worth clearing even on the way out.
             let _ = host.remove_file(&beside);
             Err(err)
         }
@@ -708,6 +717,39 @@ mod tests {
         assert_eq!(host.file(PATH).as_deref(), Some("{\"a\":1}"));
         assert_eq!(host.mode_of(PATH), Some(PRIVATE_FILE_MODE));
         assert_eq!(host.file(&beside), None, "and nothing is left beside it");
+    }
+
+    /// The write dying partway, rather than never starting.
+    ///
+    /// The cleanup only ran on a failed *rename*, so a disk that filled between
+    /// the open and the `sync_all` left a real, partially-written file at
+    /// `<target>.perch-tmp.<pid>` that nothing removed and nothing mentions —
+    /// a fragment of a refresh token beside `.credentials.json`, or some of
+    /// every Credential on the machine beside the path an Export names. The
+    /// original is untouched either way, which is what makes the leftover
+    /// litter rather than a half-applied write.
+    #[test]
+    fn a_write_that_dies_partway_leaves_nothing_beside_the_file_either() {
+        let host = FakeHost::new()
+            .with_file(PATH, "{}")
+            .with_a_disk_that_fills_writing(PATH);
+        let beside = temp_beside(&host, Path::new(PATH));
+
+        let failed = host
+            .write_private_file(Path::new(PATH), "{\"a\":1}")
+            .expect_err("the disk fills partway through");
+
+        assert!(failed.to_string().contains("No space left"), "{failed}");
+        assert_eq!(
+            host.file(&beside),
+            None,
+            "the bytes that fitted are cleared rather than left beside the file"
+        );
+        assert_eq!(
+            host.file(PATH).as_deref(),
+            Some("{}"),
+            "and the original is exactly as it was"
+        );
     }
 
     /// A relative target is resolved the way the operating system resolves it:
