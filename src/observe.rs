@@ -524,9 +524,13 @@ fn store_it(host: &dyn Host, store: &Store, rotated: &str, rotated_away: bool) -
         } else {
             Outcome::Failed(format!(
                 "Anthropic renewed this Account without Rotating its refresh \
-                 token, and the renewed Credential could not be stored: {error}\n\
-                 The Credential Perch holds still works, so this is worth \
-                 trying again rather than a Quarantine."
+                 token, so no refresh token was retired and this is not a \
+                 Quarantine: {error}\n\
+                 A store that refused the write is still holding what it held \
+                 before, and there this is worth trying again. A store that \
+                 took the write and read it back as something else is said \
+                 above — that copy was removed rather than left for Claude Code \
+                 to find, and there a `perch relogin` is the way back."
             ))
         }
     })
