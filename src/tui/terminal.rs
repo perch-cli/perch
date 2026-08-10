@@ -50,9 +50,19 @@ impl TerminalScreen {
         restore_before_a_panic_is_printed();
         // Before raw mode, because what it remembers is the mode to put back.
         signals::remember_the_mode_to_put_back();
+        // Also before raw mode, and for the mirror of that reason: a handler
+        // installed afterwards is a handler that was not there yet. Between
+        // enabling raw mode and installing them, `SIGTERM` and `SIGHUP` still
+        // had their default disposition, so a signal arriving in that window
+        // killed the process with raw mode on and left the shell in it — the
+        // outcome these exist to prevent, on the first `enter` of a process.
+        //
+        // Safe this early because absence is not what gates them: they are
+        // installed once for the life of the process and ask `OURS`, which is
+        // still false here, so a signal arriving now correctly does nothing.
+        signals::restore_before_a_signal_ends_this();
         terminal::enable_raw_mode().map_err(the_terminal_refused)?;
         held_by(Some(std::thread::current().id()));
-        signals::restore_before_a_signal_ends_this();
         // Raw mode is on, so from here a failure has something to give back.
         if let Err(err) = stdout().execute(EnterAlternateScreen) {
             let _ = give_it_back();
