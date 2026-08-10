@@ -325,3 +325,60 @@ jobs:
             exit 1
           fi
           echo "latest points at: ${latest:-nothing}"
+
+  # Regenerates the tap's formula and pushes it. Not behind the `release`
+  # environment that gates npm: a tap is opt-in, nobody adds one by accident,
+  # and the formula can only point at assets whose checksums this release
+  # published. The blast radius is a formula file, not a public registry.
+  homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The checksums the release published, rather than a recomputation, so
+      # the formula can only ever point at bytes that are on the Release page.
+      - name: The published checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release download "$GITHUB_REF_NAME" --pattern SHA256SUMS --dir .
+
+      - name: Formula
+        run: |
+          packaging/homebrew/formula.sh "${GITHUB_REF_NAME#v}" SHA256SUMS > perch.rb
+          cat perch.rb
+
+      # GITHUB_TOKEN is scoped to this repository and cannot reach the tap, so
+      # this is the one place a stored credential is unavoidable:
+      # HOMEBREW_TAP_TOKEN is a fine-grained PAT with Contents: read and write
+      # on mschieller/homebrew-perch and nothing else.
+      #
+      # Cloned anonymously — the tap is public — and the token is given only to
+      # the push, so it never lands in .git/config on the runner.
+      - name: Push to the tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          git clone --depth 1 https://github.com/mschieller/homebrew-perch.git tap
+          mkdir -p tap/Formula
+          cp perch.rb tap/Formula/perch.rb
+
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/perch.rb
+
+          # A re-run of a release that already pushed its formula should be a
+          # no-op rather than an empty commit or a failure.
+          if git diff --cached --quiet; then
+            echo "the tap already has this formula"
+            exit 0
+          fi
+
+          git commit -m "perch ${GITHUB_REF_NAME#v}"
+          git push "https://x-access-token:${TAP_TOKEN}@github.com/mschieller/homebrew-perch.git" HEAD:main
