@@ -732,6 +732,16 @@ fn a_switch_the_machine_turned_away_is_said_and_the_loop_carries_on() {
         Some(ACTIVE),
         "least of all the Profile the client is holding"
     );
+    assert_eq!(
+        asked_by(&host),
+        vec![ACTIVE_TOKEN; 2],
+        "and no candidate was read: a `perch run` held open in another terminal \
+         keeps that Profile Live for as long as somebody is working in it, so \
+         reading every candidate each round spends an allowance that does not \
+         refill early (ADR 0015) on a Switch that cannot happen — and throttles \
+         the `perch status --refresh` the user types, at the moment the watcher \
+         matters most"
+    );
 }
 
 /// A Switch the watcher discovers is impossible for good records why, the same

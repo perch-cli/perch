@@ -543,10 +543,13 @@ fn identity_block_for(host: &dyn Host, incoming: &Account) -> Result<String> {
 
 /// Refuses to touch a Profile something else is holding (ADR 0005).
 ///
-/// Public because `perch relogin` asks it before it spends a login rather than
-/// after: a Profile Perch may not write to is a Profile no browser round trip
-/// was ever going to repair.
-fn refuse_if_live(host: &dyn Host, account: &Account, version: &str) -> Result<()> {
+/// Public because two callers ask it *before* they spend something rather than
+/// after. `perch relogin` asks before a browser round trip — a Profile Perch
+/// may not write to is one no login was ever going to repair — and `perch
+/// watch` asks before it reads every candidate's Utilization, because a Switch
+/// that is going to be refused is a Switch whose candidates never needed
+/// ranking.
+pub fn refuse_if_live(host: &dyn Host, account: &Account, version: &str) -> Result<()> {
     refuse_if_live_in(
         host,
         &account.profile_dir(host)?,
