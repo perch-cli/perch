@@ -221,12 +221,16 @@ impl Row {
 }
 
 fn rows(registry: &Registry, accounts: &[&Account], now: DateTime<Utc>) -> Vec<Row> {
+    // Measured once, across every Account in the table. Every Account's rows go
+    // into one `Utilization` column here, so a width measured per Account put
+    // the same window's percentage in a different place on each of them.
+    let width = utilization::window_width_across(accounts.iter().copied());
     accounts
         .iter()
         .map(|account| Row {
             active: registry.active.as_deref() == Some(account.email()),
             cells: columns(registry, account),
-            figures: utilization::lines(account, now),
+            figures: utilization::lines(account, now, width),
         })
         .collect()
 }

@@ -52,6 +52,23 @@ pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Pr
     host.create_private_dir_all(&dir)
         .map_err(|err| PerchError::Other(format!("could not create {}: {err}", dir.display())))?;
 
+    // And Perch says so itself, before the browser opens. `reap_abandoned`
+    // protects a login somebody is in the middle of by asking whether anything is
+    // running against the directory — which reads a session marker, and the only
+    // thing that writes one is `perch run`. Nothing wrote one here, so the
+    // protection its comment describes did not exist: a `perch watch --once` from
+    // cron, firing while somebody hunted for their second factor, deleted the
+    // Credential the login had just written and left the `perch add` driving it
+    // reporting that the login did not complete.
+    //
+    // Perch's own pid, because Perch is waiting on this login exactly as a Run
+    // waits on its client — so ADR 0027's argument that a Run may corroborate its
+    // own Profile holds here word for word. A `claude` sitting on an OAuth prompt
+    // in a directory it has never had a session in is the least likely thing to
+    // have written a marker of its own, which is why depending on it was the
+    // wrong way round. `profile::discard` takes it with the directory.
+    mark_live(host, &dir);
+
     // From here every way out has to take the directory back out again, which
     // is what the doc above promises and what `?` in the middle of this would
     // quietly stop doing. A pending login nobody reaps is only a directory —
@@ -61,6 +78,24 @@ pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Pr
     let produced = run_the_login(host, out, purpose, &claude, &dir, &store, &version);
     profile::discard(host, &store);
     produced
+}
+
+/// Says that Perch is driving a login in this directory, so nothing reaps it.
+///
+/// Best effort, unlike the same write in a Run. A Run refuses when it cannot mark
+/// its Profile, because what it is protecting is a Credential a client is about to
+/// hold for hours; here the directory holds nothing yet, the window is thirty
+/// minutes, and refusing a login over it would turn a tidying-up detail into a
+/// reason somebody cannot add an Account at all. What is lost without it is the
+/// protection alone, which is where this started.
+fn mark_live(host: &dyn Host, dir: &std::path::Path) {
+    let pid = host.process_id();
+    if host.create_dir_all(&probe::sessions_dir(dir)).is_ok() {
+        let _ = host.write_file(
+            &probe::session_marker_at(dir, pid),
+            &probe::session_marker(pid, host.now()),
+        );
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

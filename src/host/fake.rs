@@ -186,6 +186,10 @@ pub struct FakeHost {
     login: RefCell<Option<Login>>,
     /// What happens the first time Perch waits, and then does not happen again.
     while_waiting: RefCell<Option<WhileWaiting>>,
+    /// How long a keychain write takes to come back — a permission dialog
+    /// somebody has to answer, which is the one step in a Switch that can stall
+    /// for minutes without warning.
+    keychain_set_takes_millis: RefCell<u64>,
     /// The running processes, each with when it began — or `None` for one whose
     /// start the operating system will not say.
     live_processes: RefCell<BTreeMap<u32, Option<DateTime<Utc>>>>,
@@ -262,6 +266,7 @@ impl FakeHost {
             executions: RefCell::new(BTreeMap::new()),
             login: RefCell::new(None),
             while_waiting: RefCell::new(None),
+            keychain_set_takes_millis: RefCell::new(0),
             // This Perch, running since before any session a fixture records,
             // so a marker a Run writes for itself corroborates the way a real
             // one does. Nothing like the pids the fixtures arrange for other
@@ -569,6 +574,17 @@ impl FakeHost {
     /// arriving.
     pub fn once_while_waiting(self, happens: impl Fn(&FakeHost) + 'static) -> Self {
         *self.while_waiting.borrow_mut() = Some(Box::new(happens));
+        self
+    }
+
+    /// A keychain that stops to ask the user for permission, and how long they
+    /// take to answer it.
+    ///
+    /// The stall a Switch documents as unbounded: `store_credential` is one
+    /// keychain write, and on macOS it can put a dialog in front of somebody who
+    /// then walks away. Everything Perch is holding has to survive it.
+    pub fn with_a_keychain_that_asks_first(self, takes_millis: u64) -> Self {
+        *self.keychain_set_takes_millis.borrow_mut() = takes_millis;
         self
     }
 
@@ -1536,6 +1552,20 @@ impl Host for FakeHost {
             service: service.to_string(),
             account: account.to_string(),
         });
+        let asked = *self.keychain_set_takes_millis.borrow();
+        if asked > 0 {
+            let answered = *self.now.borrow() + chrono::Duration::milliseconds(asked as i64);
+            *self.now.borrow_mut() = answered;
+
+            // A wait like any other, so what the test said happens while Perch
+            // waits happens here too — another `perch` arriving is the whole
+            // point of a stall this long. Taken out before it runs, so it can
+            // reach back into the fake without meeting a borrow this call holds.
+            let happens = self.while_waiting.borrow_mut().take();
+            if let Some(happens) = happens {
+                happens(self);
+            }
+        }
         if let Some(error) = self.lock_error() {
             return Err(error);
         }

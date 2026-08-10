@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 
 use crate::credentials;
 use crate::error::{PerchError, Result};
-use crate::host::{Host, HostError};
+use crate::host::{Host, HostError, Platform};
 use crate::json;
 
 /// Named assumptions. A refusal quotes one of these, so the failure a user
@@ -400,21 +400,35 @@ pub fn identity_file_in(config_dir: &Path) -> PathBuf {
     config_dir.join(IDENTITY_FILE)
 }
 
+/// What stands in for the login name where there is no keychain to store
+/// anything under. Never looked up — it exists so that a `Store` off macOS can
+/// be derived at all, and it is spelled to be recognisable in a diagnostic.
+const NO_LOGIN_NAME: &str = "(no keychain)";
+
 /// The login name a keychain item is stored under. `USERNAME` is Windows'
 /// spelling of `USER`; off macOS the name is carried in the Store but never
 /// looked up, since the keychain there is a store that holds nothing
 /// (ADR 0020).
+///
+/// So it is only *required* on macOS. Refused everywhere, an unset `USER` — a
+/// container, or the systemd timer that ADR 0013 says is where an unattended
+/// watcher belongs — made every Perch command on the machine fail over a value
+/// nothing on that machine would ever read, naming a keychain the platform does
+/// not have. Every `Store` is derived through here, so that was `perch status`,
+/// `perch list` and `perch watch --once` alike.
 fn keychain_account_name(host: &dyn Host) -> Result<String> {
-    host.env_var("USER")
-        .or_else(|| host.env_var("USERNAME"))
-        .ok_or_else(|| {
-            refusal(
-                assumption::ACCOUNT_NAME,
-                "neither USER nor USERNAME is set, so the keychain account name \
-                 cannot be derived",
-                "unknown",
-            )
-        })
+    if let Some(name) = host.env_var("USER").or_else(|| host.env_var("USERNAME")) {
+        return Ok(name);
+    }
+    if host.platform() != Platform::MacOs {
+        return Ok(NO_LOGIN_NAME.to_string());
+    }
+    Err(refusal(
+        assumption::ACCOUNT_NAME,
+        "neither USER nor USERNAME is set, so the keychain account name \
+         cannot be derived",
+        "unknown",
+    ))
 }
 
 /// Reads and understands the Credential a config directory holds, from
@@ -592,6 +606,24 @@ pub fn read_identity(host: &dyn Host, store: &Store, version: &str) -> Result<Op
             &format!(
                 "{} names the account `{email}`, which has no character Perch \
                  can name a Profile after",
+                store.identity_file.display()
+            ),
+            version,
+        ));
+    }
+
+    // And an address is also a Target, which is why `registry::validate_name`
+    // refuses an `@` in an Alias or a Group name: a Target that could be either
+    // has no single answer. That rule only holds if the other half of it does, so
+    // it is asked here too — an Account called `work` beside a Group called
+    // `work` made the Group unreachable from `perch switch` while `perch group
+    // list` went on showing it.
+    if !email.contains('@') {
+        return Err(refusal(
+            assumption::IDENTITY_BLOCK,
+            &format!(
+                "{} names the account `{email}`, which is not an address an \
+                 Alias or a Group name could be told from",
                 store.identity_file.display()
             ),
             version,
@@ -1133,6 +1165,24 @@ mod tests {
         );
     }
 
+    /// The name is only load-bearing where there is a keychain to store an item
+    /// in. Off macOS every `Store` still has to be derivable without it, or a
+    /// container with no `USER` cannot run a single Perch command — including
+    /// the `perch watch --once` a systemd timer fires, which is where ADR 0013
+    /// says an unattended watcher belongs.
+    #[test]
+    fn a_machine_with_no_keychain_needs_no_login_name() {
+        for platform in [Platform::Other, Platform::Windows] {
+            let bare = FakeHost::new().without_env("USER").with_platform(platform);
+            assert_eq!(
+                keychain_account_name(&bare).expect("nothing here reads the name"),
+                NO_LOGIN_NAME,
+                "{platform:?}"
+            );
+            default_store(&bare).expect("a Store is still derivable");
+        }
+    }
+
     #[test]
     fn no_claude_anywhere_is_a_refusal_naming_the_assumption() {
         let host = FakeHost::new().with_env("PATH", "/usr/bin");
@@ -1341,6 +1391,36 @@ mod tests {
             block.contains(r#""emailAddress": "someone@example.com""#),
             "{block}"
         );
+    }
+
+    /// An address is a Profile path, a keychain namespace and a Target, and it is
+    /// refused where it enters rather than somewhere downstream that has already
+    /// derived one of those from it.
+    ///
+    /// Both halves of what makes it usable, in one place. Nothing nameable in it
+    /// and there is no Profile to put it in; no `@` in it and it is a Target an
+    /// Alias or a Group name could not be told from, which is exactly what
+    /// `registry::validate_name` refuses those two for.
+    #[test]
+    fn an_address_perch_could_not_key_anything_on_is_refused_where_it_enters() {
+        for (email, expected) in [
+            ("...", "no character Perch can name a Profile after"),
+            ("work", "could be told from"),
+        ] {
+            let host = FakeHost::new()
+                .with_env("HOME", "/Users/someone")
+                .with_env("USER", "someone")
+                .with_file(
+                    "/Users/someone/.claude.json",
+                    &format!(r#"{{"oauthAccount":{{"emailAddress":"{email}"}}}}"#),
+                );
+            let store = default_store(&host).expect("the store is derivable");
+
+            let refused = read_identity(&host, &store, "2.1.221")
+                .expect_err("Perch cannot key anything on that");
+
+            assert!(refused.to_string().contains(expected), "{refused}");
+        }
     }
 
     #[test]

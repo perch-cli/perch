@@ -359,9 +359,13 @@ fn takeover_claim(lock: &LockSpec) -> PathBuf {
     PathBuf::from(claim)
 }
 
-/// The suffix that names one. Public to [`crate::reconcile`], which has to
-/// recognise it without knowing what it is for.
-pub const TAKEOVER_SUFFIX: &str = ".perch-takeover";
+/// The suffix that names one.
+///
+/// Private, though the coupling it used to be public for is real: `reconcile`
+/// does have to keep a claim from crossing into a Profile, and it does so by
+/// matching the *prefix* `probe::REFRESH_LOCK` rather than this suffix — so the
+/// `pub` pointed at a mechanism nothing used it for.
+const TAKEOVER_SUFFIX: &str = ".perch-takeover";
 
 /// Clears an abandoned lock, but only for the one process that gets to.
 ///

@@ -220,6 +220,10 @@ fn render_utilization(frame: &mut Frame, model: &Model, area: Rect) {
         .map(|account| list::cells(account.email()))
         .max()
         .unwrap_or_default();
+    // The same reason, one level in: the Quota Window rows inside each Account's
+    // block are read down the view as one column too, so their names are laid out
+    // across every Account on screen rather than per Account.
+    let windows = utilization::window_width_across(accounts.iter().copied());
 
     let mut lines = Vec::new();
     let mut cursor_line = 0;
@@ -251,7 +255,7 @@ fn render_utilization(frame: &mut Frame, model: &Model, area: Rect) {
             // again reads as a Quota Window called "never observed".
             if account.observed_utilization().is_some() {
                 lines.extend(
-                    utilization::lines_with_resets(account, model.now)
+                    utilization::lines_with_resets(account, model.now, windows)
                         .into_iter()
                         .map(|figure| Line::from(format!("      {figure}"))),
                 );

@@ -307,7 +307,7 @@ fn names(host: &dyn Host, store: &Store, account: &Account, version: &str) -> bo
     probe::read_identity(host, store, version)
         .ok()
         .flatten()
-        .is_some_and(|identity| identity.email.eq_ignore_ascii_case(account.email()))
+        .is_some_and(|identity| registry::same_name(&identity.email, account.email()))
 }
 
 /// The store an Account is asked about with, and whose it is.
@@ -530,7 +530,7 @@ const RATE_LIMITED: &str = "Anthropic is rate-limiting Perch, so nothing about \
 /// having spent quota it never spent, which is the evidence a Cycle ranks on.
 fn confirm(host: &dyn Host, token: &str, account: &Account) -> Step<()> {
     match anthropic::whose(host, token) {
-        Ok(Some(email)) if !email.eq_ignore_ascii_case(account.email()) => {
+        Ok(Some(email)) if !registry::same_name(&email, account.email()) => {
             Err(Outcome::Failed(format!(
                 "the Credential Perch would ask with belongs to {email} rather \
                  than to {}, so no figure was recorded against it.",
