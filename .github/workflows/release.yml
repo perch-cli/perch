@@ -1,0 +1,239 @@
+name: Release
+
+# The tag release-plz pushed when its release pull request was merged. Nothing
+# else starts this: no manual dispatch, no branch push. A release is a tag, and
+# a tag is a thing release-plz made from a version somebody reviewed.
+on:
+  push:
+    tags: ["v*"]
+
+# Read by default. The one job that writes says so for itself, so a compromised
+# build step cannot reach the Release page.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Two things have to be true before anything is built, and both of them are
+  # cheap to check and expensive to discover afterwards.
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A tag that disagrees with the manifest ships a binary reporting a
+      # version nobody released, and it is invisible until somebody files a bug
+      # against a version that does not exist.
+      - name: Tag matches the manifest
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          manifest=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          if [ "$tag" != "$manifest" ]; then
+            echo "::error::tag $GITHUB_REF_NAME says $tag, Cargo.toml says $manifest"
+            exit 1
+          fi
+          echo "both say $manifest"
+
+      # A release builds rather than tests, because CI already tested this exact
+      # commit on all three platforms — but only if it finished, and only if it
+      # passed. release-plz tags the moment the release pull request merges,
+      # which is usually before CI on main has finished, so this waits rather
+      # than assuming. `success` is the aggregate job CI already exposes for
+      # branch protection, so this asks the same question the same way.
+      - name: CI passed on this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          deadline=$(( $(date +%s) + 45 * 60 ))
+          while :; do
+            verdict=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs" \
+              --jq '.check_runs[] | select(.name == "success") | "\(.status) \(.conclusion)"' | head -n1)
+
+            case "$verdict" in
+              "completed success")
+                echo "CI passed on $GITHUB_SHA"
+                exit 0
+                ;;
+              "completed "*)
+                echo "::error::CI on $GITHUB_SHA concluded: ${verdict#completed }"
+                exit 1
+                ;;
+              "")
+                echo "no CI run on $GITHUB_SHA yet; waiting"
+                ;;
+              *)
+                echo "CI on $GITHUB_SHA is ${verdict% *}; waiting"
+                ;;
+            esac
+
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::gave up waiting for CI on $GITHUB_SHA"
+              exit 1
+            fi
+            sleep 20
+          done
+
+  # One target per runner of its own architecture. The only cross-compile is
+  # x86_64 macOS from an arm64 runner, which Apple's toolchain does without
+  # being asked twice; everything else builds where it will run.
+  build:
+    needs: guard
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-24.04
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # No build cache here, deliberately. Caching saves minutes on a job that
+      # runs once per release, and it does it by reusing artifacts from an
+      # earlier run in the binary people are about to install.
+      - name: Toolchain
+        run: |
+          rustup show active-toolchain
+          rustup target add ${{ matrix.target }}
+
+      # musl's C toolchain, for the linker driver. Perch's dependencies are
+      # pure Rust, so this is belt and braces rather than a requirement — and
+      # it is the cheap half of the pair.
+      - name: musl
+        if: endsWith(matrix.target, '-musl')
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends musl-tools
+
+      - name: Build
+        run: cargo build --locked --release --target ${{ matrix.target }}
+
+      # Flat archives — the binary and both licences, no wrapping directory —
+      # because everything that reads them extracts into a directory of its own
+      # first. `.zip` on Windows because a Windows without tar in the shell is
+      # still a machine people have.
+      - name: Archive
+        if: runner.os != 'Windows'
+        run: |
+          staging="perch-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir -p dist "$staging"
+          cp "target/${{ matrix.target }}/release/perch" LICENSE-MIT LICENSE-APACHE "$staging/"
+          # Short flags and named members: GNU tar on the Linux runners and
+          # bsdtar on the macOS ones agree on these and not on much else.
+          tar -czf "dist/$staging.tar.gz" -C "$staging" perch LICENSE-MIT LICENSE-APACHE
+          ls -l dist
+
+      - name: Archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $staging = "perch-$env:GITHUB_REF_NAME-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path dist, $staging | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/perch.exe", LICENSE-MIT, LICENSE-APACHE $staging
+          Compress-Archive -Path "$staging/*" -DestinationPath "dist/$staging.zip"
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: archive-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Everything a release consists of, assembled in one place and published in
+  # one act. The Release is created as a draft and only made visible once the
+  # binaries, the checksums and the attestations are all on it — there is never
+  # a moment when the page exists and the files do not.
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      # What signs the provenance. Sigstore's certificate is issued against this
+      # workflow's OIDC identity, which is what makes `gh attestation verify`
+      # able to say which workflow, in which repository, at which commit, built
+      # the binary somebody is holding.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: archive-*
+          merge-multiple: true
+          path: dist
+
+      # One file for the whole release rather than a sidecar per asset: an
+      # installer fetches it once and greps, and a person verifies everything
+      # they downloaded in a single command.
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum perch-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/perch-*
+
+      # release-plz already wrote the notes for this version into CHANGELOG.md
+      # when it opened the release pull request, and those are the notes that
+      # were reviewed. Falling back to GitHub's generated list rather than
+      # failing, because an empty release body is worse than a machine-written
+      # one and neither is worth stopping a release over.
+      - name: Release notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            /^## / { if (found) exit; if (index($0, "[" v "]") || index($0, " " v " ")) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > notes.md || true
+
+          if [ -s notes.md ]; then
+            cat notes.md
+          else
+            echo "::warning::no CHANGELOG.md section for $version; GitHub will generate the notes instead"
+          fi
+
+      # Not marked as a prerelease, even during 0.x. It genuinely is the latest
+      # release, and marking it otherwise would empty the `releases/latest`
+      # endpoint that the installers ask. Being opt-in is carried where it can
+      # be carried honestly: npm's `dev` dist-tag, and a Homebrew tap nobody
+      # adds by accident.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -s notes.md ]; then
+            notes=(--notes-file notes.md)
+          else
+            notes=(--generate-notes)
+          fi
+
+          gh release create "$GITHUB_REF_NAME" \
+            --draft \
+            --title "$GITHUB_REF_NAME" \
+            "${notes[@]}" \
+            dist/*
+          gh release edit "$GITHUB_REF_NAME" --draft=false
