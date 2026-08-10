@@ -12,9 +12,10 @@ use std::path::{Path, PathBuf};
 
 use chrono::{TimeZone, Utc};
 use common::*;
+use perch::commands::add::AddArgs;
 use perch::error::{
-    EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NOT_FOUND, EXIT_NOTHING_TO_DO, EXIT_PROBE_REFUSED,
-    EXIT_PROFILE_LIVE, EXIT_QUARANTINED,
+    EXIT_CONFLICT, EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NOT_FOUND, EXIT_NOTHING_TO_DO,
+    EXIT_PROBE_REFUSED, EXIT_PROFILE_LIVE, EXIT_QUARANTINED,
 };
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
@@ -1601,5 +1602,182 @@ fn a_configuration_directory_that_is_not_a_profile_is_where_a_switch_lands() {
             .as_deref(),
         Some(SECOND_CREDENTIAL),
         "the directory they moved their configuration to is the Default Profile"
+    );
+}
+
+/// An address with a non-ASCII letter in it, and the same address spelled with
+/// that letter in the other case. `É` and `é` are one letter over the whole of
+/// Unicode and two unrelated bytes under ASCII folding.
+const ACCENTED: &str = "café@example.com";
+const ACCENTED_UPPER: &str = "CAFÉ@example.com";
+
+fn accented_identity(email: &str) -> String {
+    format!(
+        r#"{{
+  "numStartups": 3,
+  "oauthAccount": {{
+    "accountUuid": "account-uuid-accented",
+    "emailAddress": "{email}",
+    "organizationUuid": "organization-uuid-accented",
+    "organizationName": "Café",
+    "organizationRole": "admin"
+  }},
+  "projects": {{}}
+}}"#
+    )
+}
+
+/// A machine adopted as an Account whose address carries a non-ASCII letter,
+/// holding a second Account to switch to.
+fn a_machine_on_an_accented_account() -> FakeHost {
+    let host = machine_with_claude_code()
+        .with_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, CREDENTIAL)
+        .with_file(IDENTITY_PATH, &accented_identity(ACCENTED))
+        .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE));
+    run_add(
+        &host,
+        AddArgs {
+            no_group: true,
+            ..AddArgs::default()
+        },
+    )
+    .0
+    .expect("the second Account is added");
+    host
+}
+
+/// Whose Credential the live store holds is decided over the whole of Unicode,
+/// not over the ASCII letters of an address.
+///
+/// Claude Code writes `.claude.json` itself, and nothing makes it agree with the
+/// registry about the case of a letter outside ASCII. Compared with ASCII
+/// folding, `CAFÉ@example.com` and `café@example.com` are two different people:
+/// the Capture decided the live Credential was somebody else's and skipped it,
+/// so every Switch away from that Account silently destroyed whatever Rotation
+/// had happened while it was active — the poisoning ADR 0006 exists to prevent,
+/// on the one Account whose address is not plain ASCII.
+#[test]
+fn a_rotation_is_captured_however_the_identity_file_cases_a_non_ascii_address() {
+    let host = a_machine_on_an_accented_account();
+    assert_eq!(registry_of(&host).active.as_deref(), Some(ACCENTED));
+    // Claude Code renewed, Rotated, and rewrote its own file with the other
+    // spelling of the same address.
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
+    host.set_file(IDENTITY_PATH, &accented_identity(ACCENTED_UPPER));
+
+    let (outcome, printed) = run_switch(&host, SECOND_EMAIL);
+
+    outcome.expect("the Switch lands");
+    assert_eq!(
+        credential_of(&host, ACCENTED).as_deref(),
+        Some(ROTATED),
+        "the Rotation went back into its own Profile rather than being \
+         thrown away as somebody else's: {printed}"
+    );
+    assert_eq!(live_credential(&host).as_deref(), Some(SECOND_CREDENTIAL));
+}
+
+/// The mirror: a Switch onto the Account the machine is already acting as is
+/// recognised as having landed, however the identity file cases the address. It
+/// was not, so `perch switch café@example.com` re-ran the whole Switch — with
+/// the Capture above declining, which is the destructive half.
+#[test]
+fn a_switch_onto_the_account_already_active_is_recognised_whatever_the_case() {
+    let host = a_machine_on_an_accented_account();
+    host.set_file(IDENTITY_PATH, &accented_identity(ACCENTED_UPPER));
+
+    let (outcome, _printed) = run_switch(&host, ACCENTED);
+
+    let error = outcome.expect_err("there is nothing to do");
+    assert_eq!(error.exit_code(), EXIT_NOTHING_TO_DO);
+    assert!(
+        error.to_string().contains("already the active Account"),
+        "{error}"
+    );
+}
+
+/// The repair for an interrupted Switch must not destroy a Rotation that
+/// happened while the machine was in that half-state.
+///
+/// After a Switch that stopped before patching `.claude.json`, the incoming
+/// Account is live and recorded as active while Claude Code's own file still
+/// names the one it was leaving. So on the re-run that Account is both the
+/// incoming and the outgoing one, and the Identity — which is exactly what is
+/// stale — said the live Credential belonged to somebody else. The Capture was
+/// declined on that reading and the write that followed put the Account's older
+/// Profile copy over its own Rotation: the only good refresh token, gone, on the
+/// command the previous failure told the user to run.
+#[test]
+fn repairing_an_interrupted_switch_never_writes_over_a_rotation_it_declined_to_save() {
+    let host = machine_with_two_accounts().with_unwritable_file(IDENTITY_PATH, "read-only file");
+    run_switch(&host, SECOND_EMAIL)
+        .0
+        .expect_err("the Identity could not be patched");
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(SECOND_EMAIL),
+        "the incoming Account is live, so Perch records it as active"
+    );
+    // The user carries on working, and Claude Code Rotates.
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
+    host.writable_again(IDENTITY_PATH);
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("Perch cannot tell whose that Credential is");
+    assert_eq!(error.exit_code(), EXIT_CONFLICT, "{error}");
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(ROTATED),
+        "the Rotation is still live rather than written over: {printed}"
+    );
+    assert_eq!(
+        credential_of(&host, SECOND_EMAIL).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "and its Profile copy is untouched, so nothing was lost either way"
+    );
+    assert!(
+        error.to_string().contains("perch relogin"),
+        "and it says the way through: {error}"
+    );
+}
+
+/// Everything Perch is holding has to survive the slow steps of a Switch, not
+/// only Claude Code's locks.
+///
+/// `perform` renews those between each of its three steps and says why — "a
+/// keychain that stops to ask the user for permission stretches either without
+/// warning". All three ran under Perch's own registry hold, which was not touched
+/// until the `registry::save` afterwards and goes stale in ninety seconds. Let
+/// run out, it is `record_active` that refuses: the live Credential belongs to the
+/// incoming Account while the registry still names the outgoing one, which sends
+/// the *next* Switch to Capture the live Credential into the outgoing Account's
+/// Profile and destroy its only copy (ADR 0006). Re-running the Switch does not
+/// repair it — `already_there` answers before `record_active` is reached.
+///
+/// What renewing buys is the accumulation: several steps each comfortably inside
+/// the window that together run past it. A single write that outlasts the whole
+/// ninety seconds on its own is not something anything at this layer can hold
+/// through, so what is asserted is that the hold is kept up as the Switch goes.
+#[test]
+fn a_keychain_dialog_somebody_walked_away_from_does_not_cost_perch_its_registry_hold() {
+    let host = machine_with_two_accounts().with_a_keychain_that_asks_first(20_000);
+    host.forget_effects();
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect("the Switch lands");
+    let touched = host
+        .effects()
+        .iter()
+        .filter(|effect| {
+            matches!(effect, Effect::Touched(path) if path.starts_with("/Users/someone/.config/perch/.registry.lock"))
+        })
+        .count();
+    assert!(
+        touched > 1,
+        "the registry hold is renewed as the Switch goes rather than only at the \
+         save afterwards, so the slow steps do not run it out: touched {touched} \
+         time(s)\n{printed}"
     );
 }

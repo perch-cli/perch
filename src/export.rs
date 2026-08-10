@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::registry::{Account, Registry};
+use crate::registry::{self, Account, Registry};
 
 /// The version this build writes, and the only one there has ever been.
 ///
@@ -110,7 +110,7 @@ pub fn gather(host: &dyn Host, registry: &Registry) -> Result<Export> {
     let mut credentials = BTreeMap::new();
     let mut identity_files = BTreeMap::new();
     for account in &registry.accounts {
-        if let Some(credential) = read_the_credential(host, account)? {
+        if let Some(credential) = read_the_credential(host, registry, account)? {
             credentials.insert(account.email().to_string(), credential);
         }
         // Unlike the Credential, an identity file that will not be read does not
@@ -130,9 +130,66 @@ pub fn gather(host: &dyn Host, registry: &Registry) -> Result<Export> {
     })
 }
 
-fn read_the_credential(host: &dyn Host, account: &Account) -> Result<Option<String>> {
-    let store = account.store(host)?;
-    let held = credentials::read(host, &store).map_err(|error| {
+/// The Credential to write for one Account: the live one where that is what the
+/// Account's Credential *is*, and the copy in its own Profile otherwise.
+///
+/// For the active Account the live Credential is in the Default Profile, and it
+/// is ahead of the copy in its own Profile — which only catches up when a Switch
+/// away Captures it (ADR 0006). A Renewal Rotates the live copy and Anthropic
+/// retires the refresh token it replaced, so reading the Profile copy for the
+/// one Account the user is actually working in wrote the single token in the
+/// file most likely to be dead already. `perch watch` Renews that Account every
+/// few minutes, which makes it the ordinary case rather than the unlucky one,
+/// and the user would find out on the day they needed it.
+///
+/// The live copy is only taken on the evidence [`crate::switch::capture`]
+/// requires before it copies that same Credential anywhere: the Default
+/// Profile's Identity naming this Account, or naming nobody. A live Credential
+/// that belongs to somebody else is not this Account's to export.
+fn read_the_credential(
+    host: &dyn Host,
+    registry: &Registry,
+    account: &Account,
+) -> Result<Option<String>> {
+    // The live store first, and its own Profile as the fallback rather than the
+    // answer: `claude /logout` empties the live store and leaves the Account
+    // active, and an Export that read nothing there and stopped would drop a
+    // Credential Perch is still holding perfectly well.
+    if let Some(live) = the_live_store(host, registry, account)?
+        && let Some(credential) = read_from(host, &live, account)?
+    {
+        return Ok(Some(credential));
+    }
+    read_from(host, &account.store(host)?, account)
+}
+
+/// The Default Profile, when what is live in it is this Account's Credential.
+fn the_live_store(
+    host: &dyn Host,
+    registry: &Registry,
+    account: &Account,
+) -> Result<Option<crate::probe::Store>> {
+    if registry.active.as_deref() != Some(account.email()) {
+        return Ok(None);
+    }
+    let live = registry::the_default_profile(host)?;
+    let version = crate::probe::claude_version(host)?;
+    // An Identity that is absent, or one that will not be read, is not evidence
+    // against — exactly as it is not in a Capture. Only an Identity that names
+    // somebody else is.
+    let somebody_else = matches!(
+        crate::probe::read_identity(host, &live, &version),
+        Ok(Some(identity)) if !registry::same_name(&identity.email, account.email())
+    );
+    Ok((!somebody_else).then_some(live))
+}
+
+fn read_from(
+    host: &dyn Host,
+    store: &crate::probe::Store,
+    account: &Account,
+) -> Result<Option<String>> {
+    let held = credentials::read(host, store).map_err(|error| {
         error.with_note(&format!(
             "Nothing was written. An Export that left {} out would be a partial \
              restore, which is the whole of what this file exists to prevent.",

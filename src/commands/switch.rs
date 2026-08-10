@@ -51,7 +51,7 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
         return Err(nothing_to_do);
     }
 
-    match switch::perform(host, &incoming, outgoing.as_ref()) {
+    match switch::perform(host, &mut perch, &incoming, outgoing.as_ref()) {
         Ok(captured) => {
             record_active(host, &mut perch, &mut registry, &incoming)?;
             report(out, &registry, &incoming, &captured, host.now())?;
@@ -297,6 +297,19 @@ fn report(
         Captured::NoOutgoing => say(
             out,
             "Perch held no active Account, so there was nothing to Capture.",
+        )?,
+        // The repair for a Switch that stopped before it named the Account it
+        // had landed on. Nothing was Captured because nothing had moved on:
+        // saying so keeps the report honest about a Switch that only patched
+        // `.claude.json`.
+        Captured::NothingToSave => say(
+            out,
+            &format!(
+                "{}'s Credential was already the live one, so there was nothing \
+                 to Capture — this finished a Switch that had stopped before \
+                 naming it.",
+                incoming.email(),
+            ),
         )?,
     }
 

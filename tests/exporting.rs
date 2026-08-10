@@ -567,3 +567,66 @@ fn an_export_says_accounts_in_the_plural_when_several_have_no_credential() {
     );
     assert!(printed.contains("perch relogin"), "{printed}");
 }
+
+/// A Credential that Anthropic Rotated while the Account was active, so the live
+/// copy is ahead of the one in that Account's own Profile.
+const ROTATED: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-rotated","refreshToken":"sk-ant-ort01-rotated","expiresAt":1790000000000,"subscriptionType":"pro"}}"#;
+
+/// The active Account's Credential lives in the Default Profile, and a Renewal
+/// Rotates it there — the copy in its own Profile only catches up when a Switch
+/// away Captures it (ADR 0006). Read from the Profile, the one Account the user
+/// is actually working in travels as a refresh token Anthropic has already
+/// retired, and `perch watch` Renews that Account every few minutes. A restore
+/// would then bring back every Account but the one they used most, and they
+/// would find out on the day they needed it.
+#[test]
+fn the_active_accounts_credential_is_the_live_one_rather_than_the_copy_in_its_profile() {
+    let host = machine_with_three_accounts();
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(EMAIL),
+        "the fixture's premise"
+    );
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
+    let host = typing_the_passphrase(host);
+
+    run_export(&host, AT).0.expect("the export is written");
+
+    let export = opened(&host, AT);
+    assert_eq!(
+        export.credentials.get(EMAIL).map(String::as_str),
+        Some(ROTATED),
+        "the Rotation the active Account is living on has to be what travels"
+    );
+    assert_eq!(
+        export.credentials.get(SECOND_EMAIL).map(String::as_str),
+        Some(SECOND_CREDENTIAL),
+        "and every other Account still travels as its own Profile holds it"
+    );
+}
+
+/// The live Credential is only the active Account's where the Default Profile
+/// says it is theirs. A login made outside Perch leaves `.claude.json` naming
+/// somebody Perch does not hold, and exporting those bytes under the active
+/// Account's address would restore a machine where one Account answers as
+/// another — the same evidence a Capture demands before it copies that
+/// Credential anywhere.
+#[test]
+fn a_live_credential_belonging_to_somebody_else_is_not_exported_as_the_active_accounts() {
+    let host = machine_with_three_accounts();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
+    host.write_file(
+        std::path::Path::new(IDENTITY_PATH),
+        &SECOND_IDENTITY_FILE.replace(SECOND_EMAIL, "stranger@example.com"),
+    )
+    .expect("the identity file is written");
+    let host = typing_the_passphrase(host);
+
+    run_export(&host, AT).0.expect("the export is written");
+
+    assert_eq!(
+        opened(&host, AT).credentials.get(EMAIL).map(String::as_str),
+        Some(CREDENTIAL),
+        "the copy in its own Profile is the honest answer for it"
+    );
+}

@@ -59,6 +59,11 @@ pub enum Captured {
     Unreadable { outgoing: String, why: String },
     /// Perch holds no active Account, so there was nothing to Capture into.
     NoOutgoing,
+    /// The Account being left is the Account being switched to — the repair for
+    /// a Switch interrupted before it patched the Identity — and the live
+    /// Credential is already the one this Switch would write. There is no
+    /// Rotation to save and nothing to copy anywhere.
+    NothingToSave,
 }
 
 /// A Switch that stopped part way, and what the machine is holding now.
@@ -110,8 +115,20 @@ struct Prepared {
 }
 
 /// Makes `incoming` the active Account, Capturing `outgoing` on the way out.
+///
+/// `perch` is the caller's hold on the registry, renewed alongside Claude Code's
+/// locks for the same reason and against the same hazard. It is held from before
+/// the load to after the save, so every slow step below runs under it — and it
+/// goes stale in ninety seconds. A keychain that stopped to ask the user for
+/// permission ran that out, another Perch cleared the artifact and worked under
+/// it, and the `record_active` that follows this then refused: the live
+/// Credential belongs to `incoming` while the registry still names `outgoing`,
+/// so the *next* Switch Captures the live Credential into `outgoing`'s Profile
+/// and destroys its only copy (ADR 0006). Re-running the Switch does not repair
+/// that, because `already_there` answers before `record_active` is reached.
 pub fn perform(
     host: &dyn Host,
+    perch: &mut lock::Held<'_>,
     incoming: &Account,
     outgoing: Option<&Account>,
 ) -> std::result::Result<Captured, Interrupted> {
@@ -128,15 +145,18 @@ pub fn perform(
         // hold renewed only after the slow steps is a hold that was already
         // lost while they ran.
         held.renew();
-        let captured = capture(host, &prepared, outgoing)
+        perch.renew();
+        let captured = capture(host, &prepared, incoming, outgoing)
             .map_err(|error| error.with_note(&nothing_happened(outgoing)))?;
 
         held.renew();
+        perch.renew();
         profile::store_credential(host, &prepared.store, prepared.credential.as_str())
             .map_err(|error| error.with_note(&only_captured(&captured, outgoing, incoming)))?;
         incoming_is_live = true;
 
         held.renew();
+        perch.renew();
         patch_identity(host, &prepared)
             .map_err(|error| error.with_note(&live_but_unnamed(&prepared, outgoing, incoming)))?;
 
@@ -168,7 +188,11 @@ pub fn perform(
 /// caller has asked it too, before the browser round trip and again after — but
 /// both of those are minutes and a lock wait away from the write, and this is
 /// the last moment at which the answer cannot change.
-pub fn make_live(host: &dyn Host, account: &Account) -> std::result::Result<(), NotLanded> {
+pub fn make_live(
+    host: &dyn Host,
+    perch: &mut lock::Held<'_>,
+    account: &Account,
+) -> std::result::Result<(), NotLanded> {
     let (version, store) = ground(host).map_err(|error| NotLanded {
         error,
         is_live: false,
@@ -198,9 +222,11 @@ pub fn make_live(host: &dyn Host, account: &Account) -> std::result::Result<(), 
         let prepared = prepare(host, account, None, version, store)?;
 
         held.renew();
+        perch.renew();
         profile::store_credential(host, &prepared.store, prepared.credential.as_str())?;
         is_live = true;
         held.renew();
+        perch.renew();
         patch_identity(host, &prepared)
     });
 
@@ -239,7 +265,7 @@ pub fn already_landed(host: &dyn Host, account: &Account) -> Result<bool> {
     let version = probe::claude_version(host)?;
     let store = registry::the_default_profile(host)?;
     let named = probe::read_identity(host, &store, &version)?
-        .is_some_and(|identity| identity.email.eq_ignore_ascii_case(account.email()));
+        .is_some_and(|identity| registry::same_name(&identity.email, account.email()));
 
     // A live store holding bytes that are not a Credential has not landed
     // anywhere: Claude Code cannot use them, and the Switch this would turn
@@ -334,7 +360,12 @@ fn prepare(
 /// losing a Rotation is the failure this step exists to prevent.
 ///
 /// [`only_off_a_credential_that_is_theirs`]: crate::observe
-fn capture(host: &dyn Host, prepared: &Prepared, outgoing: Option<&Account>) -> Result<Captured> {
+fn capture(
+    host: &dyn Host,
+    prepared: &Prepared,
+    incoming: &Account,
+    outgoing: Option<&Account>,
+) -> Result<Captured> {
     let Some(outgoing) = outgoing else {
         return Ok(Captured::NoOutgoing);
     };
@@ -378,8 +409,43 @@ fn capture(host: &dyn Host, prepared: &Prepared, outgoing: Option<&Account>) -> 
         return Ok(Captured::NothingLive);
     };
 
+    // `incoming` and `outgoing` being one Account is the repair for a Switch that
+    // stopped between step two and step three: this Account's Credential is
+    // already the live one and only `.claude.json` is behind. ADR 0027 expects
+    // the Capture to run here — "X is the outgoing Account there as well as the
+    // incoming one".
+    //
+    // The Identity cannot decide it, because a stale Identity is the whole of
+    // what that state *is*: it names the Account the interrupted Switch was
+    // leaving. Read as evidence of ownership it said the live Credential was
+    // somebody else's, declined the Capture, and let the write below put this
+    // Account's older Profile copy over its own Rotation — the only good refresh
+    // token, gone, which is the one loss ADR 0006 exists to prevent.
+    //
+    // So the two are told apart by the bytes instead. Identical to what is about
+    // to be written, the repair has nothing to save and the write is a no-op.
+    // Different, there are two readings — this Account Rotated while it was live,
+    // or somebody logged in outside Perch since — and nothing on the machine
+    // tells them apart, so neither is acted on. Nothing has been written yet, and
+    // a Switch that has to be run again is recoverable where a lost refresh token
+    // is not.
+    if registry::same_name(incoming.email(), outgoing.email()) {
+        if live.as_str() == prepared.credential.as_str() {
+            return Ok(Captured::NothingToSave);
+        }
+        return Err(PerchError::Conflict(
+            the_live_credential_is_unaccounted_for(incoming),
+        ));
+    }
+
+    // Over the whole of Unicode, as every other comparison of two addresses is.
+    // `.claude.json` is Claude Code's file and nothing makes it agree with the
+    // registry about the case of a letter outside ASCII, so under ASCII folding
+    // this read `CAFÉ@example.com` and `café@example.com` as two different
+    // people, declined the Capture, and let the write below destroy the
+    // Rotation it had just declined to save.
     if let Ok(Some(identity)) = probe::read_identity(host, &prepared.store, &prepared.version)
-        && !identity.email.eq_ignore_ascii_case(outgoing.email())
+        && !registry::same_name(&identity.email, outgoing.email())
     {
         return Ok(Captured::NotTheirs {
             outgoing: outgoing.email().to_string(),
@@ -392,6 +458,29 @@ fn capture(host: &dyn Host, prepared: &Prepared, outgoing: Option<&Account>) -> 
     Ok(Captured::Copied {
         from: outgoing.email().to_string(),
     })
+}
+
+/// What Perch cannot establish, when the repair for an interrupted Switch finds a
+/// live Credential that is not the one it holds.
+///
+/// Both readings named, because the remedies are different and the user is the
+/// only one who knows which happened. `perch relogin` is the way through either
+/// way: it replaces whatever is live with a fresh login for this Account, which
+/// costs nothing if the live Credential was this Account's own.
+fn the_live_credential_is_unaccounted_for(account: &Account) -> String {
+    let email = account.email();
+    format!(
+        "{email} is the Account Perch is on and the Account asked for, so this is \
+         the repair for a Switch that stopped before it finished — but the live \
+         Credential is not the one Perch holds for {email}, and Perch cannot tell \
+         which of two things that is.\n\
+         It may be {email}'s own, Rotated since: writing over it would destroy \
+         the only good copy, so nothing was changed.\n\
+         It may be a login somebody made outside Perch: `perch add` holds that \
+         one as an Account of its own before anything replaces it.\n\
+         Either way, `perch relogin {email}` finishes the repair — it replaces \
+         whatever is live with a fresh login for {email}."
+    )
 }
 
 /// Step three: `.claude.json` comes to name the Account whose Credential is now
@@ -439,7 +528,7 @@ fn identity_block_for(host: &dyn Host, incoming: &Account) -> Result<String> {
 /// Public because `perch relogin` asks it before it spends a login rather than
 /// after: a Profile Perch may not write to is a Profile no browser round trip
 /// was ever going to repair.
-pub fn refuse_if_live(host: &dyn Host, account: &Account, version: &str) -> Result<()> {
+fn refuse_if_live(host: &dyn Host, account: &Account, version: &str) -> Result<()> {
     refuse_if_live_in(
         host,
         &account.profile_dir(host)?,
@@ -451,12 +540,7 @@ pub fn refuse_if_live(host: &dyn Host, account: &Account, version: &str) -> Resu
 /// The same, of a config directory named rather than derived — the Default
 /// Profile, which belongs to no one Account and is where a repair of the Account
 /// you are on has to land.
-pub fn refuse_if_live_in(
-    host: &dyn Host,
-    config_dir: &Path,
-    whose: &str,
-    version: &str,
-) -> Result<()> {
+fn refuse_if_live_in(host: &dyn Host, config_dir: &Path, whose: &str, version: &str) -> Result<()> {
     let running = probe::live_clients(host, config_dir, version)?;
     if running.is_empty() {
         return Ok(());

@@ -313,7 +313,20 @@ fn windows_in(
         // about those — every object-valued key is read as a window, which is
         // what lets a window Anthropic adds be recorded without Perch having to
         // learn its name first.
+        //
+        // Unless the name says a period, which is the same distinction the
+        // `utilization` checks below draw and for the same reason. `"five_hour":
+        // 98` — the reply flattened one level, a plausible simplification — and
+        // `"five_hour": null` both passed over silently here, leaving the weekly
+        // window as the fullest Perch could see: an Account reading 90% headroom
+        // whose five-hour window is 98% full, ranked top of its Group, switched
+        // onto and dead on arrival. That is exactly what ADR 0012 refuses, and
+        // the two branches below already refuse it when the shape changes one
+        // level down instead of here.
         let Some(window) = value.as_object() else {
+            if named_by_a_period(name) {
+                return Err(drifted(name));
+            }
             continue;
         };
 
@@ -599,6 +612,30 @@ mod tests {
             "it names the window: {refused}"
         );
         assert!(refused.contains("utilization"), "{refused}");
+    }
+
+    /// The same rule one level up. A window that stops being an object at all —
+    /// the reply flattened to `"five_hour": 98`, or the field nulled out during
+    /// an outage — is the identical loss with the identical consequence, and
+    /// passing over it silently was how the ADR 0012 failure got back in: the
+    /// weekly window at 10% becomes the fullest Perch can see, and the Account
+    /// whose five-hour window is 98% full ranks top of its Group.
+    #[test]
+    fn a_window_that_stops_being_an_object_is_drift_too() {
+        for flattened in [
+            r#"{"five_hour": 98, "seven_day": {"utilization": 10}}"#,
+            r#"{"five_hour": null, "seven_day": {"utilization": 10}}"#,
+        ] {
+            let document: Value = serde_json::from_str(flattened).unwrap();
+
+            let refused =
+                windows_of(&document).expect_err("half a picture is not a picture: {flattened}");
+
+            assert!(
+                refused.contains("five_hour"),
+                "it names the window: {refused}"
+            );
+        }
     }
 
     /// What makes something a Quota Window is the `utilization` key, not the
