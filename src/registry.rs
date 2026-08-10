@@ -1353,26 +1353,28 @@ fn refuse_a_name_nothing_would_have_accepted(
     name: &str,
     path: &Path,
 ) -> Result<()> {
-    let refused = if kind == NameKind::Group && means_no_group(name) {
-        Some(format!(
-            "`{name}` means no Group at all, so an Account cannot be in it"
-        ))
-    } else {
-        validate_name(kind, name)
-            .err()
-            .map(|refusal| refusal.to_string())
-            .or_else(|| {
-                (kind == NameKind::Group)
-                    .then(|| registry.declared_alias(name).map(|(held, _)| held))
-                    .flatten()
-                    .map(|alias| {
-                        format!(
-                            "`{alias}` is already an Alias, and Aliases and Group \
-                             names share one namespace"
-                        )
-                    })
-            })
-    };
+    // `none` is not a case of its own here. `validate_name` already refuses it,
+    // for both kinds, in words true of a claim and a declaration alike — "means
+    // no Group at all on `perch group move`, so it cannot also name one" —
+    // whereas the sentence this used to carry said "an Account cannot be in
+    // it", which is a statement about Accounts and this loop walks *declared*
+    // Groups too. A registry of no Accounts and a Group called `none` was
+    // refused with a claim about the Accounts it does not hold, and two
+    // sentences for one rule is how the two come to disagree about it.
+    let refused = validate_name(kind, name)
+        .err()
+        .map(|refusal| refusal.to_string())
+        .or_else(|| {
+            (kind == NameKind::Group)
+                .then(|| registry.declared_alias(name).map(|(held, _)| held))
+                .flatten()
+                .map(|alias| {
+                    format!(
+                        "`{alias}` is already an Alias, and Aliases and Group \
+                         names share one namespace"
+                    )
+                })
+        });
 
     match refused {
         None => Ok(()),
@@ -2222,6 +2224,15 @@ mod tests {
             assert!(
                 said.contains(expected),
                 "`{held}` should be refused for `{expected}`: {said}"
+            );
+            // These registries hold no Accounts at all, so a refusal that
+            // explains itself in terms of what an Account can be in is a
+            // statement about nothing. `validate_name`'s own wording is true of
+            // a declaration and a claim alike, which is why there is one of it.
+            assert!(
+                !said.contains("an Account cannot be in it"),
+                "a declared Group is refused in words about the name rather \
+                 than about Accounts this registry does not hold: {said}"
             );
             assert!(
                 said.contains("registry.json"),
