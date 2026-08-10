@@ -89,8 +89,10 @@ rather than quietly handing somebody a CLI that is not ready:
 npm dist-tag rm perch-cli latest
 ```
 
-`release.yml` checks this after every publish and fails the job if `latest` has
-moved to the version it just pushed.
+`release.yml` checks this after every publish, and before 1.0 what it insists on
+is that `latest` points at nothing at all — not merely that it did not move to
+the version just pushed. One release leaking the tag would otherwise go
+unnoticed for every release after it.
 
 ### The Homebrew tap
 
