@@ -171,12 +171,39 @@ jobs:
       - name: Contract tests
         run: cargo test --locked --features contract --test contract --test contract_credentials --test contract_sessions --test contract_links -- --nocapture
 
+  # release-plz reads commit subjects to decide the next version, and this
+  # repository squash-merges, so the pull request title *is* the commit it
+  # reads. A title that says nothing about the change does not break anything
+  # visibly — it silently produces the wrong version number, which is precisely
+  # the failure the tool was adopted to prevent. Checked here so it fails
+  # loudly instead, in the one place someone is already looking.
+  title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Conventional Commits
+        # Through the environment rather than `${{ }}` inside the script. A
+        # pull request title is text a stranger chooses, and interpolating it
+        # into a shell would run whatever a `$(...)` in it said, with this
+        # workflow's token.
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if printf '%s' "$TITLE" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: .+'; then
+            echo "ok: $TITLE"
+            exit 0
+          fi
+          echo "got: $TITLE"
+          echo "::error::A pull request title is the commit message, and release-plz reads it to pick the version. Write it as a Conventional Commit: 'feat: run a client against a Group', 'fix(tui): ...', or 'feat!: ...' for a breaking change."
+          exit 1
+
   # The one name branch protection listens to, however the matrix above grows
   # or renames its legs. `if: always()` with an explicit verdict, because a
   # plain `needs:` job is skipped when a leg fails — and a skipped required
   # check satisfies branch protection, which would wave the failure through.
   success:
-    needs: check
+    needs: [check, title]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -187,3 +214,14 @@ jobs:
             echo "check concluded: ${{ needs.check.result }}"
             exit 1
           fi
+          # `title` asks about a pull request title, so on a push to main there
+          # is nothing for it to ask about and it skips. Skipped is a pass here
+          # and only here — for `check` above it would be the failure this job
+          # exists to catch.
+          case "${{ needs.title.result }}" in
+            success | skipped) ;;
+            *)
+              echo "title concluded: ${{ needs.title.result }}"
+              exit 1
+              ;;
+          esac

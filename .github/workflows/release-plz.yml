@@ -1,0 +1,82 @@
+name: Release PR
+
+# Every push to main, so the standing release pull request is always showing the
+# version the merged commits add up to and the changelog they produce. Nothing
+# is published by this workflow — merging that pull request is what tags, and
+# the tag is what `release.yml` builds.
+on:
+  push:
+    branches: [main]
+
+# Nothing here uses GITHUB_TOKEN, so it gets nothing. release-plz authenticates
+# with RELEASE_PLZ_TOKEN, and the reason is not permissions: GitHub deliberately
+# refuses to start a workflow from a push GITHUB_TOKEN made, to stop workflows
+# triggering each other forever. A tag pushed with it would therefore sit on
+# main with nothing watching, and a pull request opened with it would never run
+# CI — which `release.yml` insists on having seen go green before it builds.
+#
+# RELEASE_PLZ_TOKEN is a fine-grained personal access token on this repository
+# alone, with Contents: read and write (to push the release branch and the tag)
+# and Pull requests: read and write (to open the release pull request).
+permissions:
+  contents: read
+
+# Two pushes to main in quick succession would otherwise put two release-plz
+# runs on the same release branch at the same time. Not cancel-in-progress: a
+# half-finished tag is worse than a queued one.
+concurrency:
+  group: release-plz
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Does nothing at all unless this push *was* the release pull request being
+  # merged, in which case it bumps nothing further and simply tags what is
+  # already there. Runs before the job below so that, on that push, the release
+  # pull request job sees a repository with no unreleased commits left in it
+  # rather than immediately proposing the next release.
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Pinned to a commit SHA, not a tag: a tag is mutable and can be
+      # repointed at new code by whoever owns the action. The trailing comment
+      # is the tag the SHA stood for when it was pinned.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # release-plz reads every commit back to the previous tag to decide
+          # the bump and write the changelog. The default shallow clone has
+          # none of them.
+          fetch-depth: 0
+          # release-plz authenticates from the environment, so it does not need
+          # a credential in .git/config — and it runs cargo, which runs build.rs
+          # from every dependency, so it should not have one.
+          persist-credentials: false
+
+      - uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+
+  # Opens — and on every subsequent push, updates — the standing release pull
+  # request. Its title is the version, its diff is the version bump and the
+  # changelog entry, and it accumulates as work merges, so cutting a release is
+  # reading it and clicking merge.
+  release-pr:
+    needs: tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
