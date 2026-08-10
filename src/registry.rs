@@ -1366,12 +1366,13 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) ->
 /// gap. A `~/.config/perch` that already exists keeps the mode it has, as `mkdir -p`
 /// does everywhere else in Perch, but the file is replaced on every save and so
 /// comes back narrow from the first one.
+/// The directory above it is not made here. `write_private_file` is documented
+/// as creating a file "and any directory above it" with that mode, and both
+/// Hosts do exactly that — so the call this used to make first was the same call
+/// against the same path with the same mode. That is the duplicate
+/// [`lock`] records having already been removed once; this was the copy that
+/// survived it.
 fn write(host: &dyn Host, path: &Path, contents: &str) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        host.create_private_dir_all(parent).map_err(|err| {
-            PerchError::Other(format!("could not create {}: {err}", parent.display()))
-        })?;
-    }
     host.write_private_file(path, contents)
         .map_err(|err| PerchError::file_write(path, err))
 }
