@@ -61,10 +61,15 @@ configure. So the first publish of each of the six is manual:
 
 ```sh
 node npm/build.mjs 0.1.0 <binaries> npm-dist   # or take them from a built release
-npm publish npm-dist/@perch-cli-darwin-arm64 --access public --tag dev
+npm publish ./npm-dist/@perch-cli-darwin-arm64 --access public --tag dev
 # ... the other four, then:
-npm publish npm-dist/perch-cli --access public --tag dev
+npm publish ./npm-dist/perch-cli --access public --tag dev
 ```
+
+The `./` is not decoration. npm reads a bare `npm-dist/perch-cli` as GitHub
+shorthand for a repository of that name and tries to clone it over ssh; the
+leading `./` is what makes it a path. No `--provenance` on these, either — that
+is signed against the workflow's OIDC identity and a laptop does not have one.
 
 Then, on npmjs.com, for each of the six packages: **Settings → Trusted
 publisher**, pointing at `perch-cli/perch` and the workflow `release.yml`.
