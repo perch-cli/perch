@@ -102,6 +102,26 @@ impl Attempt {
         }
     }
 
+    /// The same, for a surface that is about to print the Quarantine itself.
+    ///
+    /// `perch status` and `perch list` show every Account they refreshed, and a
+    /// Quarantined one carries the reason and the repair on its own line — so
+    /// the note above put the identical sentence, `perch relogin` and all, twice
+    /// on one screen. Reached by `perch status --refresh` on any Quarantined
+    /// Account, which is not a rare shape: that command is what somebody runs
+    /// when an Account has stopped working.
+    ///
+    /// What is left is the part the Account's own line cannot carry — whatever
+    /// the failure underneath said, where there was one worth keeping.
+    fn note_beside_the_account(&self) -> Option<String> {
+        match &self.outcome {
+            Outcome::Quarantined { detail, .. } => detail
+                .as_ref()
+                .map(|detail| format!("{}: {detail}", self.email)),
+            _ => self.note(),
+        }
+    }
+
     fn document(&self) -> serde_json::Value {
         let (outcome, detail) = match &self.outcome {
             Outcome::Observed => ("observed", None),
@@ -121,22 +141,38 @@ impl Report {
 
     /// The lines a person is told, which are the ones about figures they are
     /// not getting.
+    ///
+    /// Whole, including the Quarantines. For the surfaces that show the
+    /// Accounts themselves that is one sentence too many — see
+    /// [`write_notes_beside_the_accounts`] — but `perch watch` prints a decision
+    /// line and no Accounts at all, and there the Quarantine is the only thing
+    /// saying why a candidate was passed over. The TUI is the same: its State
+    /// column says an Account is Quarantined and nothing there says why.
+    ///
+    /// [`write_notes_beside_the_accounts`]: Report::write_notes_beside_the_accounts
     pub fn notes(&self) -> Vec<String> {
-        let mut said: Vec<String> = self.attempts.iter().filter_map(Attempt::note).collect();
+        self.said(Attempt::note)
+    }
+
+    /// Says them, before whatever figures they explain — for a surface that goes
+    /// on to show each Account with its Quarantine beside it, which is both of
+    /// the ones that write here.
+    ///
+    /// Every surface that renders Utilization has the same thing to say first,
+    /// so it is said in one place.
+    pub fn write_notes_beside_the_accounts(&self, out: &mut dyn Write) -> Result<()> {
+        for note in self.said(Attempt::note_beside_the_account) {
+            say(out, &note)?;
+        }
+        Ok(())
+    }
+
+    fn said(&self, of: impl Fn(&Attempt) -> Option<String>) -> Vec<String> {
+        let mut said: Vec<String> = self.attempts.iter().filter_map(of).collect();
         if let Some(not_kept) = &self.not_kept {
             said.push(not_kept.clone());
         }
         said
-    }
-
-    /// Says them, before whatever figures they explain. Every surface that
-    /// renders Utilization has the same thing to say first, so it is said in
-    /// one place.
-    pub fn write_notes(&self, out: &mut dyn Write) -> Result<()> {
-        for note in self.notes() {
-            say(out, &note)?;
-        }
-        Ok(())
     }
 
     /// The same as a script reads it, and `null` when no refresh was asked for

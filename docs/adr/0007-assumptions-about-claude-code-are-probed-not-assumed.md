@@ -1,7 +1,7 @@
 # Assumptions about Claude Code are probed at runtime, and Perch refuses when they fail
 
 Every decision recorded so far rests on reverse-engineered internals: the
-keychain service-name hash, the two-lock refresh protocol, the shape of
+keychain service-name hash, the three-lock refresh protocol, the shape of
 `sessions/*.json`, symlink handling in the atomic writer, the layout of
 `.claude.json`, and three undocumented endpoints. None is a public contract, and
 the drift is continuous — the lock protocol was established by reading bundle

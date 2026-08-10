@@ -113,8 +113,8 @@ _Avoid_: common config, global config
 The pass Perch makes before a Run, making every piece of Shared State reachable
 from the Profile it is launching by linking it there, and repairing links that
 have broken or gone stale. What crosses is everything the Default Profile holds
-except the Credential, the file naming the Account and the directory of session
-markers, read at Run time rather than from a list, so an entry Perch has never
+except the Credential, the file naming the Account, the directory of session
+markers and the refresh lock, read at Run time rather than from a list, so an entry Perch has never
 heard of still follows you. Never by copying: a copy diverges the moment it is
 edited, which is the opposite of what Shared State promises — so where no link
 can be made the Run is refused rather than served one. A Switch needs no such

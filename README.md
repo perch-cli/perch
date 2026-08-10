@@ -179,7 +179,7 @@ you@example.com frees up soonest, at 2026-08-04 15:00 UTC (in 3h).   # exit 17
 
 $ perch switch
 Cycling within Group `work`.
-you@example.com is already the best Account in Group `work`, with 90% headroom, which is true of every one of its Quota Windows — 5-hour is its fullest, as of 4m ago. Nothing was changed.   # exit 15
+you@example.com is already the best Account in Group `work`, with 90% headroom, which is true of every one of its Quota Windows — 5-hour is its fullest, as of 4m ago. Nothing was changed — `perch status --group --refresh` reads current figures.   # exit 15
 
 $ perch switch
 you@example.com is in no Group, so nothing has declared which Accounts it is interchangeable with. Nothing was changed.
@@ -275,7 +275,7 @@ decided a round:
 
 ```
 2026-08-04T12:02:30Z  nowhere   you@example.com 86% used, fullest 5-hour; threshold 80% — over it, and nowhere to go: Nothing in Group `work` is worth Switching to yet — overflow@example.com is at 74% used and nothing over 70% is worth moving to. Nothing was changed.
-2026-08-04T12:05:00Z  cooling   you@example.com 86% used, fullest 5-hour; threshold 80% — over it, and too soon to move again: the last Switch was 2 minutes ago and this Group leaves at least 15 minutes between two, so nothing moves for another 12 minutes.
+2026-08-04T12:05:00Z  cooling   you@example.com 86% used, fullest 5-hour; threshold 80% — over it, and too soon to move again: the last Switch was 2 minutes ago and this Group's cooldown leaves at least 15 minutes between two, so nothing moves for another 12 minutes.
 ```
 
 An Account Perch has never read a figure for is set aside the same way. A
@@ -403,8 +403,8 @@ storage, it is the one path that has to **Reconcile** first, every time: your
 memory, settings, plugins, past work and plans are linked into the Profile it is
 about to launch, and links that have broken or gone stale are repaired (ADR
 0026). What crosses is everything the Default Profile holds except the
-Credential, the file naming the Account and the directory of session markers,
-read at Run time — so a directory a new Claude Code release invents follows you
+Credential, the file naming the Account, the directory of session markers and
+the refresh lock, read at Run time — so a directory a new Claude Code release invents follows you
 without waiting for a Perch release. Never by copying, because a copy diverges
 the moment it is edited: where no link can be made, the Run is refused rather
 than served one, naming the entry and what to do about it.
@@ -803,7 +803,9 @@ not, so a script asking whether it is set reads the same answer it always did
 and now gets the reason with it. `--group` changes the question, so
 it changes the document: `perch status --json` answers about one Account under
 `active`, while the listings answer about a set under `accounts`, with the
-active one named under `active_account`.
+active one named under `active_account`. An Account itself is described the same
+way in both — the same keys, the same answers — so a script written against one
+can be pointed at the other.
 
 ## Choosing by eye
 
