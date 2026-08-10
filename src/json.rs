@@ -455,6 +455,30 @@ mod tests {
         serde_json::from_str::<serde_json::Value>(&written).expect("still JSON");
     }
 
+    /// A document written on one line, which is what a hand edit or anything
+    /// that minified it leaves — the one object shape between the two the tests
+    /// above cover, and the one nothing asked about.
+    ///
+    /// The member goes in as the first one and everything that was there
+    /// afterwards stays exactly as it was, byte for byte, which is the contract
+    /// this module keeps with a file it does not own. That leaves the member it
+    /// displaced sharing a line with it, and that is the honest consequence of
+    /// the contract rather than a shortcoming of it: reflowing the tail would
+    /// mean rewriting bytes outside the value, which is the one thing this is
+    /// written not to do.
+    #[test]
+    fn a_key_written_into_a_document_on_one_line_leaves_the_rest_of_it_alone() {
+        let written = set_value_at(r#"{"numStartups": 4}"#, "hasSeenTasksHint", "true").unwrap();
+
+        assert_eq!(
+            written,
+            "{\n  \"hasSeenTasksHint\": true,\"numStartups\": 4}"
+        );
+        let back: serde_json::Value = serde_json::from_str(&written).expect("still JSON");
+        assert_eq!(back["hasSeenTasksHint"], true);
+        assert_eq!(back["numStartups"], 4, "and nothing else moved");
+    }
+
     /// One entry of `projects`, read out of one document and written into
     /// another: the same pair of calls twice, and the whole of how a nested key
     /// is reached.

@@ -2241,6 +2241,44 @@ mod tests {
         }
     }
 
+    /// What `perch add` may offer as a Group name, and — the part that had no
+    /// test at all — what it must decline to offer.
+    ///
+    /// The offer is made from an organization name, which is whatever Anthropic
+    /// holds rather than anything anybody chose. `add` picks a different
+    /// question depending on whether there is an offer, so a `None` that
+    /// stopped being a `None` would put a name in front of somebody that
+    /// `validate_name` refuses one keystroke later — at the one moment the
+    /// browser round trip has already been spent, which is the cost the code
+    /// there is written around. A personal-plan organization rendered from an
+    /// email address is the likeliest of these, and it is exactly the shape the
+    /// `@` rule exists to refuse.
+    #[test]
+    fn a_group_name_is_offered_only_where_it_is_one_perch_would_accept() {
+        assert_eq!(
+            offerable_name("Overflow Ltd").as_deref(),
+            Some("Overflow-Ltd"),
+            "the spaces are what is wrong with it, and nothing else is touched \
+             — Group names are compared case-insensitively, so there is nothing \
+             to gain by rewriting how somebody's organization spells itself"
+        );
+        assert_eq!(
+            offerable_name("  Overflow   Ltd  ").as_deref(),
+            Some("Overflow-Ltd"),
+            "whitespace is what is being fixed, wherever it is"
+        );
+        assert_eq!(offerable_name("Acme").as_deref(), Some("Acme"));
+
+        for refused in ["none", "None", "NONE", "someone@example.com", "   ", ""] {
+            assert_eq!(
+                offerable_name(refused),
+                None,
+                "`{refused}` is not a name Perch would accept, so it is not one \
+                 to offer either"
+            );
+        }
+    }
+
     /// A registry this build cannot read is never reported as one that is not
     /// JSON, because most of the time it *is* JSON.
     ///
