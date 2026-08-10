@@ -188,6 +188,18 @@ impl Model {
         &self.registry
     }
 
+    /// Whether Perch holds no Account at all.
+    ///
+    /// A question of its own because both callers were answering it by building
+    /// the whole listing and throwing it away: `render` allocated a `Vec` of
+    /// every Account to ask `.is_empty()` and then built it again to draw it,
+    /// and `ask_for_a_refresh` allocated a `Vec<String>` of every address to
+    /// ask the same thing. Four times a second, for as long as the picker is
+    /// open.
+    pub fn is_empty(&self) -> bool {
+        self.order.is_empty()
+    }
+
     /// Every Account Perch holds, in the order the listing shows them — which
     /// is the order a Cycle ranks them ([`ranked`]).
     pub fn accounts(&self) -> Vec<&Account> {
@@ -362,7 +374,7 @@ impl Model {
     /// and could block on another `perch` for as long as that one held the
     /// lock, to read nought Accounts.
     fn ask_for_a_refresh(&mut self) -> Asked {
-        if self.refreshing == Refreshing::Waiting || self.accounts_on_show().is_empty() {
+        if self.refreshing == Refreshing::Waiting || self.is_empty() {
             return Asked::Nothing;
         }
         self.refreshing = Refreshing::Waiting;

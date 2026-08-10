@@ -58,9 +58,14 @@ pub use refresh::{Refreshed, Refresher};
 /// How long the loop waits for a keystroke before drawing again.
 ///
 /// It is also how sharply the display notices what nobody pressed a key for: a
-/// Refresh coming back, and the age on every figure growing. Short enough that
-/// neither lags behind what is true, long enough that a terminal left open
-/// overnight is not redrawing four times a second.
+/// Refresh coming back, and the age on every figure growing. A Refresh landing
+/// wants sub-second notice, which is what sets the ceiling.
+///
+/// The floor is what an idle picker costs, and it is small: the loop rebuilds
+/// the model's view of the listing and hands ratatui a frame four times a
+/// second, and ratatui diffs — an unchanged frame writes nothing to the
+/// terminal at all. So what a picker left open overnight spends is a buffer
+/// comparison and a clock read, not a redraw.
 pub const FRAME_MILLIS: u64 = 250;
 
 /// What the person at the terminal did, in Perch's own words rather than
