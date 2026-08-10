@@ -374,3 +374,49 @@ fn the_json_of_a_first_run_is_a_document_and_nothing_else() {
             .unwrap_or_else(|err| panic!("stdout has to parse whole: {err}\n{printed}"));
     }
 }
+
+/// Every Account's Quota Windows go into one `Utilization` column, so the
+/// percentages line up down it however unalike the Accounts are.
+///
+/// The width of the window-name column was measured per Account, and an
+/// Opus-eligible Account carries `7-day-opus` where a `pro` Account does not — so
+/// the same `5-hour` percentage sat five columns further right on one Account
+/// than on the one above it, in the one place the eye is running down a column.
+#[test]
+fn the_utilization_figures_line_up_down_the_column_across_unalike_accounts() {
+    let mut registry = Registry::default();
+
+    let mut plain = account(EMAIL, "Acme");
+    plain.utilization = Some(observed(at(11, 57), &[("5-hour", 42.0), ("7-day", 18.0)]));
+    registry.upsert(plain);
+
+    let mut per_model = account(SECOND_EMAIL, "Overflow Ltd");
+    per_model.utilization = Some(observed(
+        at(11, 57),
+        &[("5-hour", 7.0), ("7-day", 3.0), ("7-day-opus", 1.0)],
+    ));
+    registry.upsert(per_model);
+
+    registry.active = Some(EMAIL.to_string());
+    let host = machine_holding(&registry);
+
+    let (result, printed) = run_list(&host, false);
+
+    result.unwrap();
+    let columns: Vec<usize> = printed
+        .lines()
+        .filter_map(|line| {
+            let at = line.find("5-hour")?;
+            Some(at + line[at..].find('%')?)
+        })
+        .collect();
+    assert_eq!(
+        columns.len(),
+        2,
+        "both Accounts show a 5-hour row: {printed}"
+    );
+    assert_eq!(
+        columns[0], columns[1],
+        "the same window's percentage is in the same column on both: {printed}"
+    );
+}

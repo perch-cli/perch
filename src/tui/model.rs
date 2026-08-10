@@ -456,7 +456,6 @@ fn listed<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> Vec<
 fn scopes(registry: &Registry) -> Vec<Scope> {
     let mut every: Vec<Scope> = registry
         .group_names()
-        .into_iter()
         .map(|name| Scope::Group(name.to_string()))
         .collect();
     every.push(Scope::Ungrouped);

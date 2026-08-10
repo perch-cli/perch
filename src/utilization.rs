@@ -47,6 +47,25 @@ pub fn window_width<'a>(windows: impl Iterator<Item = &'a str>) -> usize {
         .expect("the floor is always among them")
 }
 
+/// The width to lay Quota Window names out in, measured across every Account
+/// whose figures are going to be shown together.
+///
+/// Across the set rather than per Account, because the point of the width is that
+/// the figures line up down a column — and a surface that stacks one Account's
+/// rows under the next one's has one column, not one per Account. Measured per
+/// Account, an Opus-eligible Account carrying `7-day-opus` beside a `pro` Account
+/// that does not put the two percentages five columns apart under one
+/// `Utilization` heading: the exact failure this width exists to prevent,
+/// arriving between Accounts instead of between windows.
+pub fn window_width_across<'a>(accounts: impl IntoIterator<Item = &'a Account>) -> usize {
+    window_width(
+        accounts
+            .into_iter()
+            .filter_map(Account::observed_utilization)
+            .flat_map(|cached| cached.windows.iter().map(|window| window.window.as_str())),
+    )
+}
+
 /// Writes a label and a value in that column, for the surfaces that render an
 /// Account as labelled lines.
 pub fn write_labelled(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {
@@ -56,7 +75,10 @@ pub fn write_labelled(out: &mut dyn Write, label: &str, value: &str) -> Result<(
 /// Writes the cached Utilization under one `Utilization` label, however many
 /// Quota Windows there turn out to be.
 pub fn write_figures(out: &mut dyn Write, account: &Account, now: DateTime<Utc>) -> Result<()> {
-    for (index, figure) in lines(account, now).iter().enumerate() {
+    // One Account's block, so the set to lay the names out across is that
+    // Account alone.
+    let width = window_width_across([account]);
+    for (index, figure) in lines(account, now, width).iter().enumerate() {
         let label = if index == 0 { "Utilization" } else { "" };
         write_labelled(out, label, figure)?;
     }
@@ -68,8 +90,8 @@ pub fn write_figures(out: &mut dyn Write, account: &Account, now: DateTime<Utc>)
 ///
 /// An Account with no observation is never rendered as zero: "no figure" and
 /// "plenty of room" are opposite pieces of advice.
-pub fn lines(account: &Account, now: DateTime<Utc>) -> Vec<String> {
-    rows(account, now, |window, width| {
+pub fn lines(account: &Account, now: DateTime<Utc>, width: usize) -> Vec<String> {
+    rows(account, now, width, |window, width| {
         format!(
             "{:<width$} {:>3}%",
             window.window,
@@ -89,8 +111,8 @@ pub fn lines(account: &Account, now: DateTime<Utc>) -> Vec<String> {
 /// a clock time there would push the table past the width of a terminal — the
 /// two surfaces differ in the room they have, which is exactly what this splits
 /// on.
-pub fn lines_with_resets(account: &Account, now: DateTime<Utc>) -> Vec<String> {
-    rows(account, now, |window, width| {
+pub fn lines_with_resets(account: &Account, now: DateTime<Utc>, width: usize) -> Vec<String> {
+    rows(account, now, width, |window, width| {
         format!(
             // "used", because this row sits under a Headroom figure saying how
             // much is *left*: two percentages of the same window an inch apart,
@@ -114,13 +136,14 @@ pub fn lines_with_resets(account: &Account, now: DateTime<Utc>) -> Vec<String> {
 fn rows(
     account: &Account,
     now: DateTime<Utc>,
+    // The caller's, not this Account's: see [`window_width_across`].
+    width: usize,
     said: impl Fn(&crate::registry::WindowUtilization, usize) -> String,
 ) -> Vec<String> {
     match account.observed_utilization() {
         None => vec!["never observed".to_string()],
         Some(cached) => {
             let age = age_phrase(cached.observed_at, now);
-            let width = window_width(cached.windows.iter().map(|window| window.window.as_str()));
             cached
                 .windows
                 .iter()
@@ -210,10 +233,32 @@ pub fn percentage(value: f64) -> String {
 /// into a claim about a boundary it has not reached.
 pub fn percentage_against(value: f64, boundary: u8) -> String {
     let rounded = percentage(value);
-    if rounded == boundary.to_string() && value != f64::from(boundary) {
-        return format!("{value:.1}");
+    if rounded != boundary.to_string() || value == f64::from(boundary) {
+        return rounded;
     }
-    rounded
+
+    // Widened until the figure actually differs from the boundary, rather than
+    // one place and a hope. One decimal is not a guarantee — it is a second
+    // chance to round onto the same number — and 79.96 came back as "80.0"
+    // beside "threshold 80% — under it", which is the flat self-contradiction
+    // this function exists to prevent, one decimal place further along.
+    for places in 1..=3 {
+        let said = format!("{value:.places$}");
+        if said.parse::<f64>() != Ok(f64::from(boundary)) {
+            return said;
+        }
+    }
+
+    // Three places and it still reads as the boundary, so no figure will say
+    // which side of it this is. The words do, which is all the line needed.
+    format!(
+        "just {} {boundary}",
+        if value < f64::from(boundary) {
+            "under"
+        } else {
+            "over"
+        }
+    )
 }
 
 /// "just now", "3m ago", "2h ago", "4d ago".
@@ -328,7 +373,7 @@ mod tests {
             })
             .collect();
 
-        let rows = lines(&account, at(12, 0));
+        let rows = lines(&account, at(12, 0), window_width_across([&account]));
         let percentage_at = |row: &str| row.find('%').expect("every row prints one");
         assert_eq!(
             percentage_at(&rows[0]),
@@ -345,9 +390,10 @@ mod tests {
             .windows
             .pop();
         assert!(
-            lines(&account, at(12, 0))[0].starts_with("5-hour   7%"),
+            lines(&account, at(12, 0), window_width_across([&account]))[0]
+                .starts_with("5-hour   7%"),
             "{:?}",
-            lines(&account, at(12, 0))
+            lines(&account, at(12, 0), window_width_across([&account]))
         );
     }
 
@@ -406,6 +452,18 @@ mod tests {
             "70.4",
             "the ceiling a candidate is set aside by is the same rule"
         );
+
+        // Two decimal places, where one was not enough: both of these came back
+        // as "80.0", which reads as the boundary beside a line saying it has not
+        // been reached — the contradiction one place further along.
+        assert_eq!(percentage_against(79.96, 80), "79.96");
+        assert_eq!(percentage_against(80.04, 80), "80.04");
+        assert_eq!(
+            percentage_against(79.999_999, 80),
+            "just under 80",
+            "and where no figure will say which side of it this is, the words do"
+        );
+        assert_eq!(percentage_against(80.000_001, 80), "just over 80");
     }
 
     /// The same rule for the other direction: an age that never falls as the
@@ -472,11 +530,11 @@ mod tests {
     fn the_rows_that_print_a_percentage_print_it_the_way_every_surface_does() {
         let account = observed_at_the_edges();
 
-        let rows = lines(&account, at(12, 0));
+        let rows = lines(&account, at(12, 0), window_width_across([&account]));
         assert!(rows[0].starts_with("5-hour >99%"), "{rows:?}");
         assert!(rows[1].starts_with("7-day   <1%"), "{rows:?}");
 
-        let rows = lines_with_resets(&account, at(12, 0));
+        let rows = lines_with_resets(&account, at(12, 0), window_width_across([&account]));
         assert!(rows[0].starts_with("5-hour >99% used"), "{rows:?}");
         assert!(rows[1].starts_with("7-day   <1% used"), "{rows:?}");
     }
@@ -494,9 +552,10 @@ mod tests {
             }];
 
         assert!(
-            lines_with_resets(&account, at(12, 0))[0].starts_with("5-hour   7% used"),
+            lines_with_resets(&account, at(12, 0), window_width_across([&account]))[0]
+                .starts_with("5-hour   7% used"),
             "{:?}",
-            lines_with_resets(&account, at(12, 0))
+            lines_with_resets(&account, at(12, 0), window_width_across([&account]))
         );
     }
 

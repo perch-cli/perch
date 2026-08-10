@@ -993,3 +993,52 @@ fn a_name_that_is_not_usable_is_refused_as_that_rather_than_as_a_collision() {
     assert_eq!(refusal.exit_code(), EXIT_INVALID);
     assert!(refusal.to_string().contains("cannot be empty"), "{refusal}");
 }
+
+/// The protection above has to exist without anybody arranging it.
+///
+/// `reap_abandoned` asks whether anything is running against the pending
+/// directory, and the answer is a session marker — which only `perch run` ever
+/// wrote. So nothing marked a login Perch was driving, and the comment promising
+/// that "a login somebody is in the middle of is a Live Profile" described
+/// something that was not happening: a `perch watch --once` from cron, or any
+/// command in another terminal, deleted the Credential the login had just written
+/// and left this `perch add` reporting that the login did not complete.
+///
+/// Perch writes the marker itself now, before the browser opens — it is waiting on
+/// this login exactly as a Run waits on its client (ADR 0027). Depending on Claude
+/// Code to have written one was the wrong way round: a `claude` sitting on an OAuth
+/// prompt in a directory it has never had a session in is the least likely thing
+/// to have left a marker.
+#[test]
+fn a_login_perch_is_driving_survives_a_command_run_in_another_terminal() {
+    let host = logged_in_machine();
+    run_list(&host, false)
+        .0
+        .expect("the first Account is adopted");
+
+    let writes_what_claude_code_would = login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE);
+    let host = host.with_login(move |host, dir| {
+        let ended = writes_what_claude_code_would(host, dir);
+        // Somebody hunting for their second factor, and a scheduled command
+        // firing past the window while they do.
+        host.set_now(host.now() + chrono::Duration::minutes(31));
+        run_list(host, false)
+            .0
+            .expect("a listing in another terminal");
+        ended
+    });
+
+    let (result, printed) = run_add(
+        &host,
+        AddArgs {
+            no_group: true,
+            ..AddArgs::default()
+        },
+    );
+
+    result.expect("the login completes rather than being reaped mid-flight");
+    assert!(
+        registry_of(&host).account(SECOND_EMAIL).is_some(),
+        "and the Account it produced is held: {printed}"
+    );
+}
