@@ -1,0 +1,28 @@
+{
+  "name": "perch-cli",
+  "version": "0.0.0",
+  "description": "Run Claude Code as whichever Claude account you want, without logging in again",
+  "keywords": ["claude", "claude-code", "cli", "accounts", "credentials"],
+  "homepage": "https://github.com/mschieller/perch#readme",
+  "bugs": "https://github.com/mschieller/perch/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mschieller/perch.git"
+  },
+  "license": "MIT OR Apache-2.0",
+  "author": "Mads Skov Schiellerup",
+  "bin": {
+    "perch": "bin/perch.js"
+  },
+  "files": ["bin/perch.js", "README.md"],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@perch-cli/darwin-arm64": "0.0.0",
+    "@perch-cli/darwin-x64": "0.0.0",
+    "@perch-cli/linux-arm64": "0.0.0",
+    "@perch-cli/linux-x64": "0.0.0",
+    "@perch-cli/win32-x64": "0.0.0"
+  }
+}
