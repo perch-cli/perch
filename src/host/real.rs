@@ -606,7 +606,16 @@ impl Host for RealHost {
         for (key, value) in env {
             command.env(key, value);
         }
-        let status = command.status()?;
+        // Named here for the reason `run` names it: `Command::status`'s error
+        // carries no path, so a `claude` that had been uninstalled between
+        // Perch finding it and launching it failed a login with "could not
+        // launch a login: No such file or directory (os error 2)" — nothing
+        // about what was missing or where Perch looked. `commands::run` adds
+        // the name back for its own launch; the login path had no equivalent.
+        // The kind is kept, so anything matching on `NotFound` still does.
+        let status = command.status().map_err(|err| {
+            std::io::Error::new(err.kind(), format!("could not run {program}: {err}"))
+        })?;
         Ok(ended_as(status))
     }
 
@@ -1460,7 +1469,14 @@ fn process_alive(pid: u32) -> bool {
 /// `File::set_times` cannot be relied on to.
 #[cfg(unix)]
 fn touch_now(path: &Path) -> Result<(), HostError> {
-    let raw = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
+    // `OsStrExt::as_bytes` rather than `as_encoded_bytes`: this is the call
+    // whose result is documented to be the bytes the operating system will
+    // receive, which is exactly what a `CString` for `utimes` has to hold. The
+    // encoding behind `as_encoded_bytes` is deliberately unspecified, and it
+    // happening to be the same thing on unix today is not the promise this
+    // needs.
+    use std::os::unix::ffi::OsStrExt;
+    let raw = std::ffi::CString::new(path.as_os_str().as_bytes())
         .map_err(|err| HostError::Other(format!("{} is not a path: {err}", path.display())))?;
     let outcome = unsafe { libc::utimes(raw.as_ptr(), std::ptr::null()) };
     if outcome == 0 {

@@ -20,8 +20,13 @@ license = "MIT OR Apache-2.0"
 # release pull request, no error. See the comment on `publish` there.
 
 # Local `cargo clippy` and CI agree, rather than CI being the only place that
-# says no. `unsafe_op_in_unsafe_fn` because there are five `unsafe` blocks in
-# host/real.rs and every one of them should have to be written as such.
+# says no. `unsafe_op_in_unsafe_fn` because host/real.rs and tui/terminal.rs
+# between them carry every platform primitive ADR 0021 chose to link rather
+# than shell out to — process liveness, file times, terminal modes, signal
+# handlers — and every one of those operations should have to be written as
+# `unsafe` rather than inherited from the signature around it. The count is
+# deliberately not written down here: it moves, and a number in a comment that
+# moves is a comment that is wrong.
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 
