@@ -218,9 +218,8 @@ jobs:
 
       # Not marked as a prerelease, even during 0.x. It genuinely is the latest
       # release, and marking it otherwise would empty the `releases/latest`
-      # endpoint that the installers ask. Being opt-in is carried where it can
-      # be carried honestly: npm's `dev` dist-tag, and a Homebrew tap nobody
-      # adds by accident.
+      # endpoint that the installers ask. Being pre-1.0 is said in the README
+      # and in `perch --version`, not carried by making a Channel awkward.
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -302,9 +301,11 @@ jobs:
       # version, so publishing it first would leave a window where installing it
       # resolves to nothing that can run.
       #
-      # `--tag dev` on every one of them. Until Perch is 1.0 the `latest` tag
-      # points at nothing, so `npm install perch-cli` fails loudly rather than
-      # quietly handing somebody a CLI that is not ready.
+      # Published to `latest`, the default tag, during 0.x as well. npm does not
+      # allow a published package to have no `latest` — the registry refuses to
+      # delete it — so the alternative was never "npm install perch-cli fails",
+      # it was "npm install perch-cli quietly installs whichever version latest
+      # was stuck on". ADR 0031.
       #
       # Every path here is written `./…`, and that is load-bearing rather than
       # tidy. npm reads a bare `npm-dist/perch-cli` as GitHub shorthand for the
@@ -314,23 +315,23 @@ jobs:
       - name: Publish
         run: |
           for package in ./npm-dist/@perch-cli-*; do
-            npm publish "$package" --access public --tag dev --provenance
+            npm publish "$package" --access public --provenance
           done
-          npm publish ./npm-dist/perch-cli --access public --tag dev --provenance
+          npm publish ./npm-dist/perch-cli --access public --provenance
 
-      # The promise this release makes is that nobody gets Perch by accident.
-      # Checked rather than assumed, because it is one API call and the failure
-      # is silent — a `latest` that quietly moved looks exactly like one that
-      # did not until somebody installs it.
-      - name: Nothing became latest
+      # What the previous step promised, read back from the registry. `npm
+      # publish` reporting success and `latest` pointing at what it published
+      # are two different claims, and only the second is the one anybody
+      # installs.
+      - name: latest points at this release
         run: |
           version="${GITHUB_REF_NAME#v}"
           latest=$(npm view perch-cli@latest version 2>/dev/null || echo "")
-          if [ "$latest" = "$version" ]; then
-            echo "::error::perch-cli@latest now points at $version. It should point at nothing until 1.0. Run: npm dist-tag rm perch-cli latest"
+          if [ "$latest" != "$version" ]; then
+            echo "::error::published $version, but perch-cli@latest points at ${latest:-nothing}"
             exit 1
           fi
-          echo "latest points at: ${latest:-nothing}"
+          echo "latest points at $version"
 
   # Regenerates the tap's formula and pushes it. Not behind the `release`
   # environment that gates npm: a tap is opt-in, nobody adds one by accident,

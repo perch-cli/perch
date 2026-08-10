@@ -314,9 +314,9 @@ _Avoid_: asset, file, package, download
 **Channel**:
 One route by which somebody installs Perch — Homebrew, npm, an installer
 script, or the Release page itself. Each has its own idea of what "the default"
-means, so being pre-1.0 is carried differently in each: a Tap nobody adds by
-accident, an npm tag that is not `latest`. A Channel distributes a Release; it
-never builds one.
+means, and only some of them can be asked to withhold it: Homebrew's is a Tap
+nobody adds by accident, npm's cannot be withheld at all (ADR 0031). A Channel
+distributes a Release; it never builds one.
 _Avoid_: registry, source, distribution, repo
 
 **Tap**:
