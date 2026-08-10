@@ -1252,7 +1252,55 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
     // list` and resolves `perch switch work` to the other, and freeing `work`
     // frees neither reliably.
     refuse_two_names_that_differ_only_in_case(NameKind::Group, registry.groups.keys(), path)?;
-    refuse_two_names_that_differ_only_in_case(NameKind::Alias, registry.aliases.keys(), path)
+    refuse_two_names_that_differ_only_in_case(NameKind::Alias, registry.aliases.keys(), path)?;
+
+    // The percentages a Cycle ranks on, checked the way a Group's are and for
+    // the reason `GroupConfig::validate` states: the thing that reads them is a
+    // loop nobody is watching. `watcher_threshold_percent` was range-checked
+    // here and `used_percent` — the figure that loop compares *against* the
+    // threshold — was not, though `anthropic::understand` clamps it to 0–100 on
+    // the way in, so the invariant is real and was simply enforced in one of the
+    // two places a figure can enter the registry.
+    //
+    // The other place is a hand edit or a restored Export, which is what every
+    // check above is written against. `"used_percent": -50` gives
+    // `cycle::headroom_of` 150% of headroom, so the Account outranks a genuinely
+    // untouched one and the watcher's `used_percent >= threshold` never fires:
+    // an Account that can never be moved off, and cannot be seen to be wrong
+    // from `perch list` either, which renders it as nothing but an odd
+    // percentage. `150` is the mirror: negative headroom, so an Account with
+    // room to spare is ranked below one that has none.
+    //
+    // A range and not a finiteness check as well: serde_json refuses a literal
+    // it cannot hold in an `f64` — `1e400` is "number out of range" before this
+    // is reached — and JSON has no way to spell a NaN. The range is the whole of
+    // what is left to ask, and it answers `false` for either anyway.
+    for account in &registry.accounts {
+        for window in account
+            .utilization
+            .iter()
+            .flat_map(|cached| &cached.windows)
+        {
+            if !(0.0..=100.0).contains(&window.used_percent) {
+                return Err(PerchError::Invalid(format!(
+                    "The registry says {} is {}% through its {} window, and a \
+                     window is between 0 and 100 percent full — so what a Cycle \
+                     would rank it on, and what the watcher would compare \
+                     against a threshold, is not a figure at all.\n\
+                     It is in {}, and every Perch command reads that file — \
+                     including the ones that would set it. Edit the value there, \
+                     or delete the Account's `utilization` and let a `perch \
+                     status --refresh` read it again.",
+                    account.email(),
+                    window.used_percent,
+                    window.window,
+                    path.display(),
+                )));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Refuses a pair of names in one half of the namespace that only case tells
@@ -2179,6 +2227,59 @@ mod tests {
                 "and the refusal names the file to edit: {said}"
             );
         }
+    }
+
+    /// The figure a Cycle ranks on, checked the way a Group's thresholds are.
+    ///
+    /// `GroupConfig::validate` refuses a `watcher-threshold-percent` outside
+    /// 0–100 because "the thing that reads them is a loop nobody is watching".
+    /// `used_percent` is the number that same loop compares *against* that
+    /// threshold, and it went unchecked — clamped on the way in by
+    /// `anthropic::understand` and by nothing at all on the way a hand edit or a
+    /// restored Export takes.
+    ///
+    /// Both of these are silent rather than loud. A negative figure gives
+    /// `cycle::headroom_of` more than 100% of headroom, so the Account outranks
+    /// one that has genuinely never been touched and the watcher's `>=
+    /// threshold` never fires — an Account nothing will move off, showing in
+    /// `perch list` as an odd percentage and nothing more. An overflowing
+    /// literal deserializes to infinity, and makes an Account no Cycle will ever
+    /// choose.
+    #[test]
+    fn a_percentage_that_is_not_one_is_refused_rather_than_ranked_on() {
+        for figure in ["-50", "150"] {
+            let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+            let path = registry_path(&host).unwrap();
+            host.set_file(
+                &path,
+                &format!(
+                    r#"{{"version":1,"accounts":[{{"identity":{{"email":"someone@example.com"}},"enabled":true,"utilization":{{"observed_at":"2025-01-01T00:00:00Z","windows":[{{"window":"5-hour","used_percent":{figure}}}]}}}}],"groups":{{}}}}"#
+                ),
+            );
+
+            let refused = load(&host).expect_err("that is not a percentage");
+            assert_eq!(refused.exit_code(), crate::error::EXIT_INVALID);
+            let said = refused.to_string();
+            assert!(
+                said.contains("5-hour") && said.contains("someone@example.com"),
+                "`{figure}` should be refused naming the window and the Account: \
+                 {said}"
+            );
+            assert!(
+                said.contains("registry.json"),
+                "and the file to edit: {said}"
+            );
+        }
+
+        // And the ends of the range are figures, not refusals: a window that has
+        // just reset and one that is completely spent are both ordinary.
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let path = registry_path(&host).unwrap();
+        host.set_file(
+            &path,
+            r#"{"version":1,"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true,"utilization":{"observed_at":"2025-01-01T00:00:00Z","windows":[{"window":"5-hour","used_percent":0},{"window":"7-day","used_percent":100}]}}],"groups":{}}"#,
+        );
+        load(&host).expect("0 and 100 are both percentages");
     }
 
     /// What an Alias points at, which walking the keys never asked.
