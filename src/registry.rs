@@ -6,7 +6,7 @@
 //! against the future and not a migration story: nobody is running Perch yet,
 //! so there is no past format to read.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -577,8 +577,8 @@ impl Registry {
 
     /// Every Group name in use. A Group an Account claims is always declared
     /// too — [`load`] sees to that — so this is the declared set.
-    pub fn group_names(&self) -> BTreeSet<&str> {
-        self.groups.keys().map(String::as_str).collect()
+    pub fn group_names(&self) -> impl Iterator<Item = &str> {
+        self.groups.keys().map(String::as_str)
     }
 
     pub fn group(&self, name: &str) -> Option<&GroupConfig> {
@@ -1314,7 +1314,7 @@ fn refuse_a_name_nothing_would_have_accepted(
             .map(|refusal| refusal.to_string())
             .or_else(|| {
                 (kind == NameKind::Group)
-                    .then(|| registry.aliases.keys().find(|alias| same_name(alias, name)))
+                    .then(|| registry.declared_alias(name).map(|(held, _)| held))
                     .flatten()
                     .map(|alias| {
                         format!(
@@ -2049,10 +2049,10 @@ mod tests {
 
         let registry = load(&host).expect("it reads").expect("it is there");
 
+        let declared: Vec<&str> = registry.group_names().collect();
         assert!(
-            registry.group_names().contains("work"),
-            "the Group the Account claims is in the declared set: {:?}",
-            registry.group_names()
+            declared.contains(&"work"),
+            "the Group the Account claims is in the declared set: {declared:?}"
         );
         assert_eq!(
             registry.group("work"),
@@ -2080,12 +2080,8 @@ mod tests {
 
         let registry = load(&host).expect("it reads").expect("it is there");
 
-        assert_eq!(
-            registry.group_names().len(),
-            1,
-            "one Group, not two: {:?}",
-            registry.group_names()
-        );
+        let declared: Vec<&str> = registry.group_names().collect();
+        assert_eq!(declared.len(), 1, "one Group, not two: {declared:?}");
         assert_eq!(
             registry.accounts_in("work").len(),
             1,

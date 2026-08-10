@@ -528,7 +528,7 @@ fn identity_block_for(host: &dyn Host, incoming: &Account) -> Result<String> {
 /// Public because `perch relogin` asks it before it spends a login rather than
 /// after: a Profile Perch may not write to is a Profile no browser round trip
 /// was ever going to repair.
-pub fn refuse_if_live(host: &dyn Host, account: &Account, version: &str) -> Result<()> {
+fn refuse_if_live(host: &dyn Host, account: &Account, version: &str) -> Result<()> {
     refuse_if_live_in(
         host,
         &account.profile_dir(host)?,
@@ -540,12 +540,7 @@ pub fn refuse_if_live(host: &dyn Host, account: &Account, version: &str) -> Resu
 /// The same, of a config directory named rather than derived — the Default
 /// Profile, which belongs to no one Account and is where a repair of the Account
 /// you are on has to land.
-pub fn refuse_if_live_in(
-    host: &dyn Host,
-    config_dir: &Path,
-    whose: &str,
-    version: &str,
-) -> Result<()> {
+fn refuse_if_live_in(host: &dyn Host, config_dir: &Path, whose: &str, version: &str) -> Result<()> {
     let running = probe::live_clients(host, config_dir, version)?;
     if running.is_empty() {
         return Ok(());

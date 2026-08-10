@@ -233,10 +233,32 @@ pub fn percentage(value: f64) -> String {
 /// into a claim about a boundary it has not reached.
 pub fn percentage_against(value: f64, boundary: u8) -> String {
     let rounded = percentage(value);
-    if rounded == boundary.to_string() && value != f64::from(boundary) {
-        return format!("{value:.1}");
+    if rounded != boundary.to_string() || value == f64::from(boundary) {
+        return rounded;
     }
-    rounded
+
+    // Widened until the figure actually differs from the boundary, rather than
+    // one place and a hope. One decimal is not a guarantee — it is a second
+    // chance to round onto the same number — and 79.96 came back as "80.0"
+    // beside "threshold 80% — under it", which is the flat self-contradiction
+    // this function exists to prevent, one decimal place further along.
+    for places in 1..=3 {
+        let said = format!("{value:.places$}");
+        if said.parse::<f64>() != Ok(f64::from(boundary)) {
+            return said;
+        }
+    }
+
+    // Three places and it still reads as the boundary, so no figure will say
+    // which side of it this is. The words do, which is all the line needed.
+    format!(
+        "just {} {boundary}",
+        if value < f64::from(boundary) {
+            "under"
+        } else {
+            "over"
+        }
+    )
 }
 
 /// "just now", "3m ago", "2h ago", "4d ago".
@@ -430,6 +452,18 @@ mod tests {
             "70.4",
             "the ceiling a candidate is set aside by is the same rule"
         );
+
+        // Two decimal places, where one was not enough: both of these came back
+        // as "80.0", which reads as the boundary beside a line saying it has not
+        // been reached — the contradiction one place further along.
+        assert_eq!(percentage_against(79.96, 80), "79.96");
+        assert_eq!(percentage_against(80.04, 80), "80.04");
+        assert_eq!(
+            percentage_against(79.999_999, 80),
+            "just under 80",
+            "and where no figure will say which side of it this is, the words do"
+        );
+        assert_eq!(percentage_against(80.000_001, 80), "just over 80");
     }
 
     /// The same rule for the other direction: an age that never falls as the
