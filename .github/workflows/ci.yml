@@ -217,12 +217,50 @@ jobs:
           echo "::error::A pull request title is the commit message, and release-plz reads it to pick the version. Write it as a Conventional Commit: 'feat: run a client against a Group', 'fix(tui): ...', or 'feat!: ...' for a breaking change."
           exit 1
 
+  # The installers are the one part of Perch that is not Rust, so nothing else
+  # in this file would notice a mistake in them — and they are the copy people
+  # pipe into a shell without reading. shellcheck and the PowerShell parser are
+  # both already on the runners, so this costs a minute.
+  installers:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # `-s sh` rather than bash: install.sh is piped into whatever `sh` is on
+      # the machine, which on Debian is dash, and bashisms would work here and
+      # fail there.
+      - name: shellcheck
+        if: runner.os == 'Linux'
+        run: |
+          shellcheck --shell=sh packaging/pages/install.sh
+          shellcheck --shell=sh packaging/homebrew/formula.sh
+
+      - name: PowerShell parses
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path packaging/pages/install.ps1), [ref]$null, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Output "::error::$_" }
+            exit 1
+          }
+          Write-Output "install.ps1 parses cleanly"
+
   # The one name branch protection listens to, however the matrix above grows
   # or renames its legs. `if: always()` with an explicit verdict, because a
   # plain `needs:` job is skipped when a leg fails — and a skipped required
   # check satisfies branch protection, which would wave the failure through.
   success:
-    needs: [check, title]
+    needs: [check, installers, title]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -231,6 +269,10 @@ jobs:
         run: |
           if [ "${{ needs.check.result }}" != "success" ]; then
             echo "check concluded: ${{ needs.check.result }}"
+            exit 1
+          fi
+          if [ "${{ needs.installers.result }}" != "success" ]; then
+            echo "installers concluded: ${{ needs.installers.result }}"
             exit 1
           fi
           # `title` asks about a pull request title, so on a push to main there
