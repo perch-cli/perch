@@ -323,15 +323,39 @@ jobs:
       # publish` reporting success and `latest` pointing at what it published
       # are two different claims, and only the second is the one anybody
       # installs.
+      #
+      # Polled rather than read once, because the write and the read do not go
+      # to the same place. `npm publish` returns as soon as the registry has
+      # accepted it; `npm view` is served from a CDN that can be minutes behind
+      # — new packages published here took several minutes to become readable
+      # at all. Asking immediately is asking the wrong replica, and the answer
+      # it gives is the previous release, which reads exactly like a release
+      # that failed to move the tag.
+      #
+      # --prefer-online because npm would otherwise happily answer from the
+      # cache it filled on the first attempt, and the loop would ask the same
+      # stale copy fifteen times.
       - name: latest points at this release
         run: |
           version="${GITHUB_REF_NAME#v}"
-          latest=$(npm view perch-cli@latest version 2>/dev/null || echo "")
-          if [ "$latest" != "$version" ]; then
-            echo "::error::published $version, but perch-cli@latest points at ${latest:-nothing}"
-            exit 1
-          fi
-          echo "latest points at $version"
+          deadline=$(( $(date +%s) + 5 * 60 ))
+
+          while :; do
+            latest=$(npm view --prefer-online perch-cli@latest version 2>/dev/null || echo "")
+
+            if [ "$latest" = "$version" ]; then
+              echo "latest points at $version"
+              exit 0
+            fi
+
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::published $version, but perch-cli@latest still points at ${latest:-nothing} five minutes later"
+              exit 1
+            fi
+
+            echo "latest is ${latest:-nothing}; the registry has not caught up yet"
+            sleep 15
+          done
 
   # Regenerates the tap's formula and pushes it. Not behind the `release`
   # environment that gates npm: a tap is opt-in, nobody adds one by accident,
