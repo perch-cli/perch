@@ -630,3 +630,36 @@ fn a_live_credential_belonging_to_somebody_else_is_not_exported_as_the_active_ac
         "the copy in its own Profile is the honest answer for it"
     );
 }
+
+/// An Export is the command you run on a machine you are giving up, and one of
+/// the things people give up on such a machine is Claude Code.
+///
+/// Nothing in an Export needs it. Every Credential is already in a store whose
+/// path Perch derives on its own, and the one place a version was asked for is
+/// reading the Default Profile's Identity — which is not evidence against the
+/// active Account when it is absent or unreadable, and is no more so when there
+/// is no Claude Code to ask. Propagated, it refused the whole command after the
+/// passphrase had been typed twice, and took `perch purge` with it, because the
+/// Export that offers to save you first is one that stops the Purge when it
+/// fails.
+#[test]
+fn an_export_is_written_by_a_machine_that_no_longer_has_claude_code_on_it() {
+    let host = machine_with_three_accounts();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
+    host.remove_file(std::path::Path::new(CLAUDE_BIN))
+        .expect("Claude Code is uninstalled");
+    let host = typing_the_passphrase(host);
+
+    let (outcome, printed) = run_export(&host, AT);
+
+    outcome.expect("an Export needs no Claude Code");
+    let export = opened(&host, AT);
+    assert_eq!(export.accounts(), 3, "{printed}");
+    assert_eq!(
+        export.credentials.get(EMAIL).map(String::as_str),
+        Some(ROTATED),
+        "and the active Account still travels as the live Credential it is on: \
+         no Identity could be read, and an Identity nothing can read has never \
+         been evidence against"
+    );
+}

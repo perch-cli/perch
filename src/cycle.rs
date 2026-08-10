@@ -613,7 +613,7 @@ fn worth_leaving_for(
 /// spanning several is those rankings one after another.
 pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> Vec<&'a Account> {
     let strategy = scope.strategy(registry);
-    let mut accounts = scope.accounts(registry);
+    let accounts = scope.accounts(registry);
     // The Account a Cycle would be leaving, measured exactly as [`choose`]
     // measures it — the same `leaving` every caller passes it, and only when it
     // is a candidate carrying a figure.
@@ -630,14 +630,22 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
         .filter(|account| is_a_candidate(account))
         .map(|account| headroom_of(account));
     let here = measured_against(here.as_ref());
+    // Measured once each rather than inside the comparator, which is the shape
+    // [`choose`] already uses. `place` computes two `Headroom`s — each of which
+    // clones the fullest window's name — and asks `is_a_candidate` and
+    // `worth_leaving_for`, and a comparator runs O(n log n) times: `perch tui`
+    // calls this on every frame, four times a second, for as long as the picker
+    // is open.
+    //
     // Stable, so Accounts that rank identically stay in the order they were
     // added — the same tie-break the choice itself has.
-    accounts.sort_by(|left, right| {
-        let (theirs, them) = place(right, here, strategy, now);
-        let (ours, us) = place(left, here, strategy, now);
-        theirs.cmp(&ours).then(them.total_cmp(&us))
-    });
-    accounts
+    let mut placed: Vec<(&Account, Place)> = accounts
+        .into_iter()
+        .map(|account| (account, place(account, here, strategy, now)))
+        .collect();
+    placed
+        .sort_by(|(_, (theirs, them)), (_, (ours, us))| ours.cmp(theirs).then(us.total_cmp(them)));
+    placed.into_iter().map(|(account, _)| account).collect()
 }
 
 /// Where one Account sorts, higher being better: whether a Cycle could land on
@@ -653,12 +661,14 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
 /// is not one to show at the top however good its number looks. It is what makes
 /// the highest row a Cycle would land on the highest row full stop — the Account
 /// being left included, since moving to where you already are gains nothing.
+type Place = ((u8, u8, u8), f64);
+
 fn place(
     account: &Account,
     here: Option<&Headroom>,
     strategy: Strategy,
     now: DateTime<Utc>,
-) -> ((u8, u8, u8), f64) {
+) -> Place {
     let candidate = u8::from(is_a_candidate(account));
     let headroom = headroom_of(account);
     let worth = u8::from(here.is_none_or(|here| worth_leaving_for(&headroom, here, strategy, now)));

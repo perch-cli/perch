@@ -793,6 +793,31 @@ fn a_marker_that_cannot_be_read_at_all_holds_the_profile_of_a_running_client() {
     );
 }
 
+/// A `sessions` that is a file rather than a directory is doubt, not emptiness.
+///
+/// `clients_in` reads exactly two answers out of `list_dir`: `NotFound` means
+/// no client has ever run here, so nothing is running and a Switch may replace
+/// the live Credential, and everything else is doubt it refuses on. A regular
+/// file of that name — a botched restore, a name crossed by a hard link — is
+/// `ENOTDIR` on a real filesystem, which is the second answer. `FakeHost`
+/// answered `NotFound` for it, so this read as an idle Profile in every
+/// behaviour test and as a refusal on the machine: the two states this whole
+/// probe exists to keep apart, swapped, in the direction that logs somebody out
+/// mid-task.
+#[test]
+fn a_sessions_that_is_a_file_is_doubt_rather_than_an_idle_profile() {
+    let host = machine_with_two_accounts().with_file(format!("{FIRST_PROFILE}/sessions"), "");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("nothing about that Profile has been established");
+    assert_eq!(error.exit_code(), EXIT_PROBE_REFUSED);
+    assert!(
+        error.to_string().contains("sessions"),
+        "and it names the directory to go and look at: {error}"
+    );
+}
+
 /// The same file with nothing running under it is litter, not doubt. A marker
 /// nobody can read beside a process that is not there must not refuse every
 /// Switch against this Profile for ever.
@@ -1693,6 +1718,57 @@ fn a_switch_onto_the_account_already_active_is_recognised_whatever_the_case() {
     assert!(
         error.to_string().contains("already the active Account"),
         "{error}"
+    );
+}
+
+/// A Switch that could not record itself must not send the next one to file the
+/// Credential it just made live into somebody else's Profile.
+///
+/// The half-state is the one `perform`'s own doc names: the incoming Credential
+/// is live while Perch still records the outgoing Account as active and
+/// `.claude.json` still names it too. Re-running the same `perch switch` — the
+/// obvious thing to do, and what the failure asks for — then reads that stale
+/// Identity as evidence that the live Credential belongs to the outgoing
+/// Account, and Captures it into that Account's Profile: the incoming Account's
+/// Credential written over the outgoing Account's only copy, which is the one
+/// loss ADR 0006 exists to prevent.
+///
+/// What settles it is the bytes, ahead of the Identity. A live Credential
+/// identical to the one the Switch is about to write is the incoming Account's
+/// by construction, so there is nothing in it for any Capture to save.
+#[test]
+fn a_switch_that_could_not_record_itself_does_not_cost_the_outgoing_account_its_credential() {
+    let host = machine_with_two_accounts()
+        .with_unwritable_file(IDENTITY_PATH, "read-only file")
+        .with_unwritable_file(REGISTRY_PATH, "read-only file");
+
+    run_switch(&host, SECOND_EMAIL)
+        .0
+        .expect_err("neither the Identity nor the registry could be written");
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "the incoming Credential is live all the same"
+    );
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(EMAIL),
+        "while Perch is still recording the Account it was leaving"
+    );
+
+    // The user does what the failure told them to: the same command again.
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect_err("the Identity is still read-only");
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(CREDENTIAL),
+        "the outgoing Account keeps its own Credential: {printed}"
+    );
+    assert_eq!(
+        credential_of(&host, SECOND_EMAIL).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "and nothing was moved anywhere else either"
     );
 }
 

@@ -126,7 +126,7 @@ pub fn run(host: &dyn Host, args: PurgeArgs, out: &mut dyn Write) -> Result<()> 
     purge::refuse_while_anything_is_running(host, &registry).map_err(and_the_export)?;
 
     let purged = purge::erase(host, &registry).map_err(and_the_export)?;
-    report(out, &home, &purged)
+    report(host, out, &home, &purged)
 }
 
 /// Adds the whereabouts of an Export this run wrote to a failure that came
@@ -240,7 +240,7 @@ fn offer_an_export(
     }
 
     let Some(path) = ask(host, out, "Where to write it: ")?
-        .map(|typed| PathBuf::from(typed.trim()))
+        .map(|typed| expanded(host, typed.trim()))
         .filter(|path| !path.as_os_str().is_empty())
     else {
         // Not read as a change of mind. Somebody who has just asked for an
@@ -259,6 +259,35 @@ fn offer_an_export(
 
     export::write_the_export(host, perch, registry, &path, out)?;
     Ok(Some(path))
+}
+
+/// A path typed at a prompt, with a leading `~/` meaning what everybody who
+/// types it means.
+///
+/// This is the one path in Perch that arrives without a shell having been over
+/// it first. `perch export ~/x.age` works because the shell expanded the tilde
+/// before Perch ever saw it; the same characters read from standard input are
+/// just a directory called `~`. Left alone, the likeliest answer to "Where to
+/// write it:" was refused with "`~` is not a directory that exists", the whole
+/// Purge stopped, and every question before it had to be answered again — a
+/// refusal that reads as a bug rather than as an instruction.
+///
+/// Only a leading `~/`, and only against this machine's home. `~someone/` is
+/// another user's home, which is a lookup Perch has no way to do and nothing to
+/// gain from; a `~` anywhere else in a path is an ordinary character, and a
+/// bare `~` is a directory nobody means to write a file to.
+fn expanded(host: &dyn Host, typed: &str) -> PathBuf {
+    let Some(rest) = typed.strip_prefix("~/") else {
+        return PathBuf::from(typed);
+    };
+    match host.home_dir() {
+        Ok(home) => home.join(rest),
+        // A machine that cannot say where home is has already refused this
+        // command at `perch_home`, so this is unreachable rather than a
+        // fallback. Verbatim is the honest answer for it either way: the
+        // refusal that follows names the `~` the user typed.
+        Err(_) => PathBuf::from(typed),
+    }
 }
 
 /// Refuses to write the Export inside the directory this Purge is about to
@@ -299,7 +328,7 @@ fn agreed(host: &dyn Host, out: &mut dyn Write) -> Result<bool> {
 }
 
 /// What was given back, and what is still the machine's.
-fn report(out: &mut dyn Write, home: &Path, purged: &Purged) -> Result<()> {
+fn report(host: &dyn Host, out: &mut dyn Write, home: &Path, purged: &Purged) -> Result<()> {
     // Said as what happened rather than as a count, because "Purged 0 Accounts"
     // is not a sentence — and holding none is a real state here: it is what a
     // Purge that stopped in its last step leaves for the next one to finish.
@@ -324,10 +353,9 @@ fn report(out: &mut dyn Write, home: &Path, purged: &Purged) -> Result<()> {
         say(
             out,
             &format!(
-                "{} of them had nothing in either Credential Store to delete — on \
-                 macOS a keychain item is filed under `$USER`, so one written \
-                 under a different login name is still there.",
-                purged.accounts - purged.credentials,
+                "{} of them had nothing in either Credential Store to delete — {}.",
+                crate::commands::accounts(purged.accounts - purged.credentials),
+                crate::commands::a_store_that_held_nothing(host),
             ),
         )?;
     }

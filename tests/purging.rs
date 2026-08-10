@@ -254,6 +254,36 @@ fn the_export_it_offers_is_written_before_anything_is_destroyed() {
     );
 }
 
+/// The path typed at this prompt is the one path in Perch that no shell has
+/// been over.
+///
+/// `perch export ~/perch-backup.age` works because the shell expanded the tilde
+/// before Perch saw it. The same characters read from standard input are a
+/// directory called `~` — and `~/perch-backup.age` is the likeliest thing
+/// anybody types here. Refused, it stopped the whole Purge, and every question
+/// before it had to be answered again, over a refusal that reads as a bug
+/// rather than as an instruction.
+#[test]
+fn a_tilde_typed_at_the_export_prompt_means_home_because_no_shell_will_say_so() {
+    let host = a_machine_to_give_back()
+        .with_answers(&["y", "~/perch-backup.age", "purge"])
+        .with_secrets(&[PASSPHRASE, PASSPHRASE]);
+
+    let (outcome, printed) = run_purge(&host);
+
+    outcome.expect("the word was typed");
+    let sealed = host
+        .file(AT)
+        .unwrap_or_else(|| panic!("the Export is written under home: {printed}"));
+    assert_eq!(
+        export::unseal(&sealed, PASSPHRASE)
+            .expect("it opens")
+            .accounts(),
+        3,
+        "and it is the whole Export rather than an empty file at a strange path"
+    );
+}
+
 /// The Export is offered before the word is asked for, so a Purge can be
 /// declined *after* one has been written. That leaves a file holding a working
 /// Credential for every Account at a path the user is about to stop thinking
@@ -644,6 +674,37 @@ fn a_purge_that_found_no_credential_does_not_claim_to_have_deleted_one() {
 
     assert!(printed.contains("$USER"), "{printed}");
     assert_eq!(registry_on(&host), None, "and the Purge still finished");
+}
+
+/// The same sentence off macOS, where every word of it used to be false.
+///
+/// There is no keychain and nothing is filed under `$USER`: a Credential lives
+/// in a file inside the Profile (ADR 0020), so the Profile going is the
+/// Credential going. Told the macOS story anyway, somebody is sent looking in a
+/// keychain their machine does not have, by the one sentence that exists to say
+/// where a Credential might still be.
+#[test]
+fn a_purge_off_macos_explains_the_store_that_machine_actually_has() {
+    let host = logged_in_machine_off_macos().with_answers(&["n", "purge"]);
+    run_list(&host, false)
+        .0
+        .expect("the first command adopts the login there already is");
+    // An Account whose Profile holds no credentials file, which is the whole of
+    // what an empty store is where the store is a file.
+    host.remove_file(&store_of(&host, EMAIL).credentials_file)
+        .expect("the Profile's file goes");
+
+    let (outcome, printed) = run_purge(&host);
+    outcome.expect("the word was typed");
+
+    assert!(
+        printed.contains("nothing in either Credential Store"),
+        "the sentence this is about is printed at all:\n{printed}"
+    );
+    assert!(
+        !printed.contains("$USER") && !printed.contains("keychain"),
+        "and a machine with no keychain is not told about one:\n{printed}"
+    );
 }
 
 /// The questions a Purge asks are the one wait in Perch with no bound on them —

@@ -151,7 +151,20 @@ pub enum PerchError {
         source: std::io::Error,
     },
 
-    #[error("{path} is not valid JSON: {detail}")]
+    /// A file Perch could not make sense of. Says which file and what stopped
+    /// it, and deliberately does not say *which kind* of nonsense it was.
+    ///
+    /// It used to say "is not valid JSON", which is the misdiagnosis
+    /// `registry::load`'s version guard was added to prevent — and the guard
+    /// only closes it for a document claiming a version this build does not
+    /// know. Every other way serde declines a perfectly well-formed document
+    /// still arrives here: `unknown variant \`round-robin\``, `missing field
+    /// \`version\``, `number out of range`. Each sent somebody looking for a
+    /// syntax error that is not there, past the half of the sentence that says
+    /// what is actually wrong. `import` reaches it for something that is not a
+    /// parse at all — a Credential belonging to no Account — where the claim
+    /// was simply untrue.
+    #[error("Perch could not read {path}: {detail}")]
     Malformed { path: String, detail: String },
 
     #[error("{0}")]

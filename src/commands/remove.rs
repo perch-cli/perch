@@ -118,7 +118,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
         ))
     })?;
 
-    report(out, &named, alias.as_deref(), &consequence, &deleted)
+    report(host, out, &named, alias.as_deref(), &consequence, &deleted)
 }
 
 /// The two Profiles this removal writes into, refused while a client is holding
@@ -419,6 +419,7 @@ fn delete_the_credential_and_its_profile(
 
 /// What was given up, and what the user is standing on now.
 fn report(
+    host: &dyn Host,
     out: &mut dyn Write,
     named: &str,
     alias: Option<&str>,
@@ -429,10 +430,11 @@ fn report(
         Deleted::Credential => "The Credential Perch held for it is deleted, and nothing lists it \
              or Cycles to it now."
             .to_string(),
-        Deleted::NothingWasThere => "Nothing lists it or Cycles to it now. Neither of its \
-             Credential Stores held anything to delete — on macOS a keychain item is filed under \
-             `$USER`, so one written under a different login name is still there."
-            .to_string(),
+        Deleted::NothingWasThere => format!(
+            "Nothing lists it or Cycles to it now. Neither of its Credential \
+             Stores held anything to delete — {}.",
+            crate::commands::a_store_that_held_nothing(host),
+        ),
         Deleted::NothingSharedWith(sharer) => format!(
             "Nothing lists it or Cycles to it now. The Credential Perch held for \
              it is still there, because {sharer} keeps its own in the same \

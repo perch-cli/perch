@@ -1374,6 +1374,21 @@ impl Host for FakeHost {
             Some(mode) => self.modes.borrow_mut().insert(to.to_path_buf(), mode),
             None => self.modes.borrow_mut().remove(to),
         };
+        // And it replaces whatever was at the target, a link included:
+        // `rename(2)` does not follow the last component, so a symlink there is
+        // unlinked rather than written through. Left behind, the fake reported
+        // one path as both a regular file and a link — `read_file` answering
+        // with the new contents while `link_target` went on naming somewhere
+        // else — and that is precisely the state `replace_via_tmp` exists to
+        // produce: a private write onto a planted link is the *security*
+        // property, and a test asserting it would have asserted the opposite of
+        // what the machine does and still passed.
+        self.links.borrow_mut().remove(to);
+        // The directories a rename's target sits in are there by the time it
+        // lands, because the write that made the temporary file beside it made
+        // them. Recorded here too, so a `rename` reached any other way leaves
+        // the fake describing a filesystem that could exist.
+        self.note_directories_of(to);
         self.mark_written(to);
         Ok(())
     }
@@ -1486,10 +1501,25 @@ impl Host for FakeHost {
     /// therefore answers with that Profile's markers, which is the whole of the
     /// hazard ADR 0027 names.
     fn list_dir(&self, asked: &Path) -> Result<Vec<PathBuf>, HostError> {
-        let Some(path) = self
-            .resolved(asked)
+        let resolved = self.resolved(asked);
+        let Some(path) = resolved
+            .clone()
             .filter(|at| self.dirs.borrow().contains(at))
         else {
+            // Something of that name that is not a directory is `ENOTDIR`, not
+            // `ENOENT`, and the two are opposite answers to the caller that
+            // matters: `probe::clients_in` reads `NotFound` as "no client has
+            // ever run here, so nothing is running" and lets a Switch replace
+            // the live Credential, and anything else as doubt it refuses on. So
+            // a `<profile>/sessions` that is a regular file — a botched restore,
+            // a name crossed by a hard link — read as idle in every behaviour
+            // test and as a refusal on the machine.
+            if resolved.is_some() {
+                return Err(HostError::Other(format!(
+                    "{} is not a directory",
+                    asked.display()
+                )));
+            }
             return Err(HostError::NotFound {
                 path: asked.to_path_buf(),
             });
@@ -1816,6 +1846,42 @@ mod tests {
                 Err(HostError::AlreadyExists { .. })
             ),
             "a link in the way is in the way, as it is to a real `mkdir`"
+        );
+    }
+
+    /// `rename(2)` does not follow the last component either: a symlink at the
+    /// target is unlinked and replaced, not written through. That is the whole
+    /// of why `replace_via_tmp` is the write a Credential goes through — a link
+    /// planted at `.credentials.json` is *replaced* rather than followed to
+    /// wherever whoever planted it wanted the secret to land.
+    ///
+    /// The fake moved the file and left the link entry behind, so afterwards it
+    /// answered as both: `read_file` with the new contents, `link_target` with
+    /// somewhere else entirely. A test asserting the security property would
+    /// have read the link that is not there any more and concluded the opposite
+    /// of what the machine does — and passed.
+    #[test]
+    fn a_private_write_over_a_planted_link_replaces_it_rather_than_following_it() {
+        let planted = Path::new("/Users/someone/.config/perch/profiles/a/.credentials.json");
+        let elsewhere = Path::new("/tmp/somewhere-a-stranger-can-read");
+        let host = FakeHost::new().with_link(Link::Symbolic, elsewhere, planted);
+
+        host.write_private_file(planted, "a refresh token")
+            .expect("the write lands");
+
+        assert_eq!(
+            host.link_target(planted).expect("the path answers"),
+            None,
+            "the link is gone, because a rename replaced it"
+        );
+        assert_eq!(
+            host.read_file(planted).ok().as_deref(),
+            Some("a refresh token"),
+            "and the Credential is at the path Perch chose"
+        );
+        assert!(
+            !host.path_exists(elsewhere),
+            "rather than at the one the link named"
         );
     }
 }

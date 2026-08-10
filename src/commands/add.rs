@@ -238,7 +238,9 @@ fn resolve_group(
     // would go on to refuse is no help as a default. An organization name is
     // whatever Anthropic holds rather than something chosen to be typed, so its
     // spaces become the separator the names people pick already use — `Overflow
-    // Ltd` is offered as `overflow-ltd` rather than not offered at all.
+    // Ltd` is offered as `Overflow-Ltd` rather than not offered at all. Only
+    // the spaces: Group names are compared case-insensitively, so rewriting how
+    // somebody's organization spells itself would buy nothing.
     let offered = identity
         .organization_name
         .as_deref()

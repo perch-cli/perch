@@ -62,7 +62,7 @@ pub fn render(frame: &mut Frame, model: &Model) {
     // Asked once rather than at the head of each tab: holding no Accounts is a
     // fact about the machine, not about which view is showing, and both tabs
     // answered it with the same three lines.
-    match (model.accounts().is_empty(), model.tab) {
+    match (model.is_empty(), model.tab) {
         (true, _) => render_nothing_held(frame, body),
         (false, Tab::Accounts) => render_accounts(frame, model, body),
         (false, Tab::Utilization) => render_utilization(frame, model, body),

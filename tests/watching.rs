@@ -732,6 +732,16 @@ fn a_switch_the_machine_turned_away_is_said_and_the_loop_carries_on() {
         Some(ACTIVE),
         "least of all the Profile the client is holding"
     );
+    assert_eq!(
+        asked_by(&host),
+        vec![ACTIVE_TOKEN; 2],
+        "and no candidate was read: a `perch run` held open in another terminal \
+         keeps that Profile Live for as long as somebody is working in it, so \
+         reading every candidate each round spends an allowance that does not \
+         refill early (ADR 0015) on a Switch that cannot happen — and throttles \
+         the `perch status --refresh` the user types, at the moment the watcher \
+         matters most"
+    );
 }
 
 /// A Switch the watcher discovers is impossible for good records why, the same
@@ -771,6 +781,35 @@ fn an_account_the_watcher_finds_broken_is_recorded_rather_than_rediscovered() {
         decisions[1].contains("nowhere"),
         "the round after knows better than to try again: {}",
         decisions[1]
+    );
+}
+
+/// And it names the Account the way the user does.
+///
+/// `perch watch` prints a decision line and no Accounts at all, so the
+/// Quarantine note is the only sentence on the screen about the candidate that
+/// was passed over — and it was the one place in Perch naming an Account by raw
+/// address while `perch list`, `perch status` and every refusal called it
+/// ``someone@example.com (as `spare`)``. An Alias is what somebody gave the
+/// Account so they would never have to read its address.
+#[test]
+fn a_quarantine_the_watcher_reports_names_the_account_the_way_the_user_does() {
+    let host = watching(&[86.0, 88.0], 5.0);
+    set_alias(&host, "spare", SECOND_EMAIL)
+        .0
+        .expect("the name is free");
+    host.forget_keychain_item(&store_of(&host, SECOND_EMAIL).keychain_service, LOGIN_NAME);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("an Account that turns out to be broken does not end the watch");
+    assert!(
+        printed.contains("(as `spare`)"),
+        "the Alias is how the user would say it:\n{printed}"
+    );
+    assert!(
+        printed.contains(&format!("perch relogin {SECOND_EMAIL}")),
+        "and the repair is still a Target that can be typed:\n{printed}"
     );
 }
 

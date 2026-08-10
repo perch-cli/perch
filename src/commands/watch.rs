@@ -57,6 +57,7 @@ use crate::cycle::{self, Scope};
 use crate::error::{EXIT_OK, PerchError, Result};
 use crate::host::{Host, Waited};
 use crate::observe::{self, Attempt};
+use crate::probe;
 use crate::registry::{Account, Registry};
 use crate::switch::{self, Interrupted};
 use crate::watch::{self, Backoff, Considered, Fullest, Outcome, Policy, Recently, Round};
@@ -461,6 +462,33 @@ fn act(
 ) -> Result<Outcome> {
     let scope = Scope::Group(watching.group.clone());
     let outgoing = watching.account.clone();
+
+    // Asked before the candidates are read rather than only by the Switch
+    // below, which is the same bargain `perch purge` makes about its questions:
+    // the first ask is what stops the command spending something on a caller it
+    // was always going to refuse.
+    //
+    // What is spent here is an hourly allowance that does not refill early (ADR
+    // 0015), one read per candidate, and the state it was being spent on is not
+    // a momentary one: a `perch run` held open in another terminal keeps the
+    // outgoing Profile Live for as long as somebody is working in it, and the
+    // watcher came round every two and a half minutes and read every candidate
+    // again. A Group of three burned about twenty-four reads an hour on each of
+    // them, indefinitely, and throttled the `perch status --refresh` the user
+    // types — arriving at exactly the moment the watcher matters most. ADR 0013
+    // rules this out in as many words: candidates are ranked at the moment a
+    // decision is taken, not kept warm.
+    //
+    // Reported as the Switch would have reported it, because it is the same
+    // refusal about the same Profile — the Switch simply no longer gets to be
+    // the one to notice.
+    if let Err(refused @ PerchError::ProfileLive(_)) =
+        switch::refuse_if_live(host, &outgoing, &probe::claude_version(host)?)
+    {
+        return Ok(Outcome::Refused {
+            why: refused.to_string(),
+        });
+    }
 
     // The Account this watcher just came off is not read and not landed on
     // (ADR 0013). Coming straight back is the second half of a ping-pong, and
