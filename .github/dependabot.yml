@@ -1,3 +1,16 @@
+# A prefix here is not cosmetic. Squash merges make a pull request title the
+# commit message, release-plz reads those to decide the next version, and CI
+# refuses titles that are not Conventional Commits — so a prefix that is not one
+# of the types in that vocabulary produces a pull request nobody can merge
+# without renaming it by hand every week.
+#
+# `include: scope` is what adds the `(deps)`, and `(deps-dev)` for a development
+# dependency, so the title says which kind it was without anyone writing it.
+#
+# Neither type bumps the version, which is the intent: a dependency update rides
+# along with the next release rather than cutting one of its own. When a bump is
+# a security fix that should reach people on its own, rename that one pull
+# request to `fix(deps): …` and it becomes a patch release.
 version: 2
 
 updates:
@@ -10,6 +23,7 @@ updates:
       interval: weekly
     commit-message:
       prefix: ci
+      include: scope
     labels:
       - ready-for-human
 
@@ -18,7 +32,12 @@ updates:
     schedule:
       interval: weekly
     commit-message:
-      prefix: deps
+      # `build` rather than `deps`: Conventional Commits reserves this type for
+      # changes to the build system and external dependencies, which is exactly
+      # what a crate bump is. `deps` reads better and is not in the vocabulary,
+      # which is why every one of these failed CI.
+      prefix: build
+      include: scope
     labels:
       - ready-for-human
     # One PR per batch rather than per crate: the lockfile is the unit that
