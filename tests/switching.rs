@@ -793,6 +793,31 @@ fn a_marker_that_cannot_be_read_at_all_holds_the_profile_of_a_running_client() {
     );
 }
 
+/// A `sessions` that is a file rather than a directory is doubt, not emptiness.
+///
+/// `clients_in` reads exactly two answers out of `list_dir`: `NotFound` means
+/// no client has ever run here, so nothing is running and a Switch may replace
+/// the live Credential, and everything else is doubt it refuses on. A regular
+/// file of that name — a botched restore, a name crossed by a hard link — is
+/// `ENOTDIR` on a real filesystem, which is the second answer. `FakeHost`
+/// answered `NotFound` for it, so this read as an idle Profile in every
+/// behaviour test and as a refusal on the machine: the two states this whole
+/// probe exists to keep apart, swapped, in the direction that logs somebody out
+/// mid-task.
+#[test]
+fn a_sessions_that_is_a_file_is_doubt_rather_than_an_idle_profile() {
+    let host = machine_with_two_accounts().with_file(format!("{FIRST_PROFILE}/sessions"), "");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("nothing about that Profile has been established");
+    assert_eq!(error.exit_code(), EXIT_PROBE_REFUSED);
+    assert!(
+        error.to_string().contains("sessions"),
+        "and it names the directory to go and look at: {error}"
+    );
+}
+
 /// The same file with nothing running under it is litter, not doubt. A marker
 /// nobody can read beside a process that is not there must not refuse every
 /// Switch against this Profile for ever.

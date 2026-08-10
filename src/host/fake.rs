@@ -1501,10 +1501,25 @@ impl Host for FakeHost {
     /// therefore answers with that Profile's markers, which is the whole of the
     /// hazard ADR 0027 names.
     fn list_dir(&self, asked: &Path) -> Result<Vec<PathBuf>, HostError> {
-        let Some(path) = self
-            .resolved(asked)
+        let resolved = self.resolved(asked);
+        let Some(path) = resolved
+            .clone()
             .filter(|at| self.dirs.borrow().contains(at))
         else {
+            // Something of that name that is not a directory is `ENOTDIR`, not
+            // `ENOENT`, and the two are opposite answers to the caller that
+            // matters: `probe::clients_in` reads `NotFound` as "no client has
+            // ever run here, so nothing is running" and lets a Switch replace
+            // the live Credential, and anything else as doubt it refuses on. So
+            // a `<profile>/sessions` that is a regular file — a botched restore,
+            // a name crossed by a hard link — read as idle in every behaviour
+            // test and as a refusal on the machine.
+            if resolved.is_some() {
+                return Err(HostError::Other(format!(
+                    "{} is not a directory",
+                    asked.display()
+                )));
+            }
             return Err(HostError::NotFound {
                 path: asked.to_path_buf(),
             });
