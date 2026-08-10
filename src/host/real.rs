@@ -702,15 +702,38 @@ impl Host for RealHost {
             )));
         }
 
-        let (body, code) = execution
-            .stdout
-            .rsplit_once('\n')
-            .ok_or_else(|| HostError::Other("curl produced no status code".into()))?;
-        Ok(HttpResponse {
-            status: code.trim().parse().unwrap_or(0),
-            body: body.to_string(),
-        })
+        split_reply(&execution.stdout)
     }
+}
+
+/// The body and the status code out of what `curl` wrote, which is the body
+/// followed by `--write-out '\n%{http_code}'`.
+///
+/// Apart from the caller so it can be asserted on. Nothing else can reach it —
+/// `FakeHost::http` answers with a `HttpResponse` already built — so the one
+/// piece of parsing on the path every Renewal and every Utilization read goes
+/// through had no test at all.
+///
+/// A status code that will not parse is said rather than swallowed. It was
+/// `unwrap_or(0)`, which turned "curl printed something Perch does not
+/// understand" into an HTTP status of zero: `anthropic::understand` has no arm
+/// for it, so the user was told their Credential was refused with `HTTP 0` —
+/// a number no server ever sends, about a request that may never have been
+/// made.
+fn split_reply(stdout: &str) -> Result<HttpResponse, HostError> {
+    let (body, code) = stdout
+        .rsplit_once('\n')
+        .ok_or_else(|| HostError::Other("curl produced no status code".into()))?;
+    let status = code.trim().parse().map_err(|_| {
+        HostError::Other(format!(
+            "curl reported `{}` where a status code was expected",
+            code.trim()
+        ))
+    })?;
+    Ok(HttpResponse {
+        status,
+        body: body.to_string(),
+    })
 }
 
 /// One line from standard input, or `None` at end of it.
@@ -1491,6 +1514,40 @@ fn touch_now(path: &Path) -> Result<(), HostError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The one piece of parsing on the path every Renewal and every Utilization
+    /// read goes through, and nothing could reach it: `FakeHost::http` answers
+    /// with a response already built, so no behaviour test ever splits a reply.
+    #[test]
+    fn a_reply_is_split_into_a_body_and_a_status_and_says_so_when_it_cannot_be() {
+        let reply = split_reply("{\"five_hour\":{}}\n200").expect("that is a reply");
+        assert_eq!(reply.status, 200);
+        assert_eq!(reply.body, "{\"five_hour\":{}}");
+
+        // A body with newlines in it: the split is the *last* one, because the
+        // status is what curl appends.
+        let reply = split_reply("first\nsecond\n429").expect("that is a reply too");
+        assert_eq!(reply.status, 429);
+        assert_eq!(reply.body, "first\nsecond");
+
+        // An empty body still carries a status, which is what a 204 looks like.
+        assert_eq!(split_reply("\n204").expect("a bodyless reply").status, 204);
+
+        // And what curl did not write is said as itself. `unwrap_or(0)` turned
+        // this into an HTTP status of zero, which `anthropic::understand` has no
+        // arm for — so somebody was told their Credential was refused with
+        // `HTTP 0`, a number no server sends, about a request that may never
+        // have been made.
+        let refused = split_reply("something went wrong\nnot a number")
+            .expect_err("that is not a status code");
+        assert!(
+            refused.to_string().contains("not a number"),
+            "and it quotes what curl actually printed: {refused}"
+        );
+
+        let refused = split_reply("no newline at all").expect_err("that is not a reply");
+        assert!(refused.to_string().contains("no status code"), "{refused}");
+    }
 
     #[test]
     fn the_access_token_travels_on_stdin_rather_than_in_argv() {
