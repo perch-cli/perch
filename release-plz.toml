@@ -14,10 +14,20 @@ git_release_enable = false
 git_tag_enable = true
 git_tag_name = "v{{ version }}"
 
+# What keeps Perch off crates.io (ADR 0030). It has to live here rather than in
+# Cargo.toml, and the difference is not cosmetic: `publish = false` in Cargo.toml
+# reads to release-plz as "this package is not one of mine", so it skips the
+# package outright — no version decision, no changelog, no release pull request,
+# and no error saying so. The job goes green and nothing happens.
+#
+# Here it means what it says. release-plz still decides the version, writes the
+# changelog and pushes the tag; it just does not run `cargo publish`. It calls
+# that mode "git-only".
+publish = false
+
 # Perch has a `[lib]` so the binary and the tests can share code, not because
-# anything downstream links against it — `publish = false` in Cargo.toml settles
-# that. Checking its public API for semver breakage is minutes spent every
-# release on a promise nobody is relying on.
+# anything downstream links against it. Checking its public API for semver
+# breakage is minutes spent every release on a promise nobody is relying on.
 semver_check = false
 
 # A release should contain the commits that were reviewed, and nothing else. A

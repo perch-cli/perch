@@ -13,11 +13,11 @@ description = "Run Claude Code as whichever Claude account you want, without log
 # their problem, and costs the project nothing but a second file.
 license = "MIT OR Apache-2.0"
 
-# crates.io is not one of Perch's channels: `perch` there is a live Mastodon
-# client, and Perch is an application rather than a library, so nothing depends
-# on it as a crate. This is what stops `cargo publish` — and release-plz, which
-# would otherwise run it — from trying anyway.
-publish = false
+# crates.io is not one of Perch's channels (ADR 0030), but that is settled in
+# release-plz.toml rather than here. `publish = false` in this file does not
+# mean "do not publish this package" to release-plz — it means "this package is
+# not mine", and release-plz skips it silently: no version, no changelog, no
+# release pull request, no error. See the comment on `publish` there.
 
 # Local `cargo clippy` and CI agree, rather than CI being the only place that
 # says no. `unsafe_op_in_unsafe_fn` because there are five `unsafe` blocks in
