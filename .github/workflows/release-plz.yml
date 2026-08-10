@@ -32,12 +32,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Does nothing at all unless this push *was* the release pull request being
-  # merged, in which case it bumps nothing further and simply tags what is
-  # already there. Runs before the job below so that, on that push, the release
-  # pull request job sees a repository with no unreleased commits left in it
-  # rather than immediately proposing the next release.
-  tag:
+  release-plz:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -50,33 +45,72 @@ jobs:
           # the bump and write the changelog. The default shallow clone has
           # none of them.
           fetch-depth: 0
-          # release-plz authenticates from the environment, so it does not need
-          # a credential in .git/config — and it runs cargo, which runs build.rs
-          # from every dependency, so it should not have one.
+          # release-plz is given the token on its command line, so it does not
+          # need a credential in .git/config.
           persist-credentials: false
 
-      - uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
-        with:
-          command: release
+      # The binary rather than release-plz/action, for two reasons that point
+      # the same way.
+      #
+      # This repository's Actions policy allows GitHub's own actions, verified
+      # creators, and one named pattern. release-plz/action is none of those, so
+      # it fails the workflow before a single job starts — and allowing it would
+      # mean allowing the three further third-party actions it pulls in behind
+      # it, which is a lot of surface to admit for a step that downloads one
+      # executable.
+      #
+      # Pinned by version and by checksum, the same bargain CI already makes
+      # with Claude Code's installer. To move to a newer release-plz, bump both:
+      # a version bumped without its checksum fails here rather than running
+      # something nobody looked at.
+      - name: release-plz
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          RELEASE_PLZ_VERSION: 0.3.160
+          RELEASE_PLZ_SHA: 47a7ced8ce2870b767f47232adbfd5c561784af7cd0dbe1a83456977fe786d4a
+        run: |
+          archive="$RUNNER_TEMP/release-plz.tar.gz"
+          curl -fsSL -o "$archive" \
+            "https://github.com/release-plz/release-plz/releases/download/release-plz-v${RELEASE_PLZ_VERSION}/release-plz-x86_64-unknown-linux-musl.tar.gz"
+          echo "$RELEASE_PLZ_SHA  $archive" | sha256sum -c -
 
-  # Opens — and on every subsequent push, updates — the standing release pull
-  # request. Its title is the version, its diff is the version bump and the
-  # changelog entry, and it accumulates as work merges, so cutting a release is
-  # reading it and clicking merge.
-  release-pr:
-    needs: tag
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/bin" release-plz
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
-      - uses: release-plz/action@2eb1d8bcb770b4c48ccfaad919734b38b51958c9 # v0.5.131
-        with:
-          command: release-pr
+      # release-plz commits the version bump and the changelog, so git needs
+      # somebody to attribute them to. The bot rather than a person: nobody
+      # wrote these, and a changelog entry signed by a human who did not write
+      # it is a small lie that compounds.
+      - name: Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: release-plz --version
+        run: release-plz --version
+
+      # Does nothing at all unless this push *was* the release pull request
+      # being merged, in which case it tags what is already there. First, so
+      # that on that push the step below sees a repository with no unreleased
+      # commits left in it rather than immediately proposing the next release.
+      #
+      # The tag is the whole output: `git_release_enable = false` in
+      # release-plz.toml keeps the GitHub Release itself out of release-plz's
+      # hands, because release.yml owns every file a release is made of and
+      # cannot upload one until it has built it.
+      - name: Tag
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+        run: release-plz release --git-token "$TOKEN"
+
+      # Opens — and on every subsequent push, updates — the standing release
+      # pull request. Its title is the version, its diff is the version bump and
+      # the changelog entry, and it accumulates as work merges, so cutting a
+      # release is reading it and clicking merge.
+      - name: Release pull request
+        env:
+          TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+        run: |
+          release-plz release-pr \
+            --git-token "$TOKEN" \
+            --repo-url "https://github.com/$GITHUB_REPOSITORY"
