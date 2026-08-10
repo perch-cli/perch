@@ -87,6 +87,30 @@ npm dist-tag rm perch-cli latest
 `release.yml` checks this after every publish and fails the job if `latest` has
 moved to the version it just pushed.
 
+### The Homebrew tap
+
+A tap is a repository, and Homebrew hardcodes what it is called: `brew tap
+mschieller/perch` looks for **`mschieller/homebrew-perch`**. The prefix is
+mandatory and users never type it. Create it public, with a `Formula/`
+directory and `main` as the default branch — `release.yml` writes
+`Formula/perch.rb` into it on every release and nothing else.
+
+Then a repository secret `HOMEBREW_TAP_TOKEN`: a **fine-grained PAT scoped to
+`mschieller/homebrew-perch` only**, with **Contents: read and write**.
+`GITHUB_TOKEN` is scoped to this repository and cannot reach another one, so
+this is the one place a stored credential is unavoidable.
+
+It is not behind the `release` environment. A tap is opt-in, nobody adds one by
+accident, and the formula can only point at assets whose checksums this release
+published — the blast radius is a formula file, not a public registry.
+
+Installing, once it exists:
+
+```sh
+brew tap mschieller/perch
+brew install perch
+```
+
 ## Channels, and which of them are opt-in
 
 Perch is pre-1.0, and until it is 1.0 nobody should arrive at it by accident.
