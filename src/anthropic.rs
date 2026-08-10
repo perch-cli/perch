@@ -325,60 +325,29 @@ fn windows_in(
 
     let mut windows = QuotaWindows::new();
     for (name, value) in fields {
-        // A key whose value is not an object is not a window. The reply carries
-        // fields beside the windows and Perch is not entitled to an opinion
-        // about those — every object-valued key is read as a window, which is
-        // what lets a window Anthropic adds be recorded without Perch having to
-        // learn its name first.
+        // A block that answers to `utilization` without metering a period is
+        // not a window whatever it says, so it is settled before the reading is
+        // even attempted — see [`never_a_window`].
+        if never_a_window(name) {
+            continue;
+        }
+
+        // How full the key says it is, when it reads as a window at all. What
+        // makes something a window is that it says how full it is: the reply
+        // carries fields beside the windows and Perch is not entitled to an
+        // opinion about those, which is what lets a window Anthropic adds be
+        // recorded without Perch having to learn its name first.
         //
-        // Unless the name says a period, which is the same distinction the
-        // `utilization` checks below draw and for the same reason. `"five_hour":
-        // 98` — the reply flattened one level, a plausible simplification — and
-        // `"five_hour": null` both passed over silently here, leaving the weekly
-        // window as the fullest Perch could see: an Account reading 90% headroom
-        // whose five-hour window is 98% full, ranked top of its Group, switched
-        // onto and dead on arrival. That is exactly what ADR 0012 refuses, and
-        // the two branches below already refuse it when the shape changes one
-        // level down instead of here.
-        let Some(window) = value.as_object() else {
-            if named_by_a_period(name) {
+        // Everything that could not be read that way goes to [`is_drift`],
+        // which is the single place that decides whether it is a field to pass
+        // over or a window that has stopped answering. Three arms used to
+        // decide it separately and one of them did not ask, which is what took
+        // every Account on the machine to "never observed" (#105).
+        let Some(used_percent) = how_full_it_says_it_is(value) else {
+            if is_drift(name, value) {
                 return Err(drifted(name));
             }
             continue;
-        };
-
-        // An object with no `utilization` at all and a name that does not say a
-        // period is not a window either. Read as one, every object-valued field
-        // Anthropic ever adds beside the windows — an `organization` block, a
-        // `limits` block — failed the whole Refresh for every Account in one
-        // pass, with a message calling a thing that is not a window a Quota
-        // Window, and no way round it from this side.
-        //
-        // A name that *does* say a period is a window that has stopped saying
-        // how full it is, which is the drift below rather than a field to pass
-        // over — being generous there would drop the fullest window Perch has
-        // out of the picture silently, which is the one thing this must not do.
-        let Some(claimed) = window.get("utilization") else {
-            if named_by_a_period(name) {
-                return Err(drifted(name));
-            }
-            continue;
-        };
-
-        // One that *is* shaped like a window and will not say how full it is is
-        // drift, and refusing is the only safe answer. Dropped silently it
-        // becomes a window nothing would ever rank on: a reply where the
-        // five-hour window stops being a number leaves the weekly one as the
-        // fullest Perch can see, so an Account reading 90% headroom is one whose
-        // five-hour window is 98% full — precisely the "switch you onto an
-        // account about to die" ADR 0012 exists to prevent, arriving through a
-        // type change rather than a name change.
-        //
-        // A whole-reply rename of `utilization` still degrades safely: every
-        // window drops out here, and the caller refuses an answer describing no
-        // windows at all rather than reading it as an Account with room.
-        let Some(used_percent) = claimed.as_f64() else {
-            return Err(drifted(name));
         };
         windows.push(window_from(name, used_percent, value, said));
     }
@@ -395,12 +364,94 @@ fn windows_in(
 /// every one Anthropic has named so far is named: `five_hour`, `seven_day`,
 /// `seven_day_opus`.
 ///
-/// Only ever asked of something that carries no `utilization`, and only to
+/// Only ever asked of something Perch could not read as a window, and only to
 /// decide whether that is drift or a field beside the windows. A window
 /// Anthropic adds under a period Perch has never seen is still recorded — it
 /// says how full it is, and that is what makes it a window.
 fn named_by_a_period(key: &str) -> bool {
     matches!(key.split('_').next(), Some("five" | "seven"))
+}
+
+/// How full a key says it is, when it reads as a Quota Window at all.
+///
+/// An object carrying a numeric `utilization`, and nothing else. Every other
+/// shape — a bare number, a `null`, an object with no `utilization`, an
+/// `organization` block, the `limits` array — is not a reading, and what to do
+/// about that is [`is_drift`]'s to decide rather than this one's.
+fn how_full_it_says_it_is(value: &Value) -> Option<f64> {
+    value.as_object()?.get("utilization")?.as_f64()
+}
+
+/// Whether something Perch could not read as a Quota Window is drift to refuse,
+/// or a field beside the windows to pass over.
+///
+/// The single place that draws the line, because it used to be drawn in three
+/// and one of them drew it differently (#105).
+///
+/// Drift is refused rather than dropped. Dropped silently, a window becomes one
+/// nothing would ever rank on: a reply where the five-hour window stops being a
+/// number — flattened to `"five_hour": 98`, emptied to `"five_hour": {}`, or
+/// quoted as `"98"` — leaves the weekly window at 10% as the fullest Perch can
+/// see, so an Account reporting 90% Headroom is one whose five-hour window is
+/// 98% full, ranked top of its Group, switched onto and dead on arrival. That
+/// is precisely what ADR 0012 exists to refuse.
+///
+/// The name is what tells the two apart. A name that says a period is a window;
+/// one that does not is a field Perch is not entitled to an opinion about, and
+/// reading those as windows failed the whole Refresh for every Account in one
+/// pass, in a message calling a thing that is not a window a Quota Window.
+///
+/// Except where the reply is saying the Account has no such window, which is
+/// `null` under a name beyond the two every Account has. The endpoint nulls out
+/// every per-model window the Account has no window for, which is most models
+/// for most Accounts, and reading that as drift refused the whole reply (#105).
+/// Nothing is lost by passing it over: a window that is not there meters
+/// nothing, so it can never be the fullest one.
+///
+/// The two every Account has are held back from that generosity, because they
+/// are the ones always there to be read — so a `null` in their place is the
+/// field going missing rather than the Account not having it, and passing that
+/// over is the ADR 0012 failure above arriving as a `null` instead of as a `98`.
+/// Refusing the reply is the loud failure and dropping the window is the quiet
+/// one, and this is the one place in Perch that prefers the loud one.
+fn is_drift(name: &str, value: &Value) -> bool {
+    named_by_a_period(name) && !says_the_account_has_no_such_window(name, value)
+}
+
+/// Whether a reply is saying the Account has no such Quota Window, rather than
+/// declining to say how full one it does have is.
+fn says_the_account_has_no_such_window(name: &str, value: &Value) -> bool {
+    value.is_null() && !every_account_has(name)
+}
+
+/// A block the reply carries that answers to `utilization` without being a
+/// Quota Window, whatever it answers.
+///
+/// `extra_usage` is the paid-credit allowance: `null` until credits are turned
+/// on, and a figure once they are. Passing it over only while it was `null` —
+/// which is all #105 needed — left it becoming a window the moment somebody
+/// bought credits, and a window is what Headroom takes its most constrained of.
+/// That reads an allowance *beyond* the plan as a constraint *on* it, so an
+/// Account with nine tenths of its credits spent would rank as one with no room
+/// left, which is backwards: extra usage is what an Account draws on after its
+/// Quota Windows are full, never a thing that fills.
+fn never_a_window(name: &str) -> bool {
+    name == EXTRA_USAGE
+}
+
+/// The paid-credit allowance, which is [`never_a_window`].
+const EXTRA_USAGE: &str = "extra_usage";
+
+/// The Quota Windows every Account has, in the order they run out. The only
+/// two, and named here once because [`rank`] shows them first and [`is_drift`]
+/// holds them back from being read as absent for the same reason: they are the
+/// ones always there to be read.
+const EVERY_ACCOUNT_HAS: [&str; 2] = ["five_hour", "seven_day"];
+
+/// Whether a key names one of [`EVERY_ACCOUNT_HAS`], as the endpoint spells it
+/// rather than as Perch shows it — `five_hour`, never `5-hour`.
+fn every_account_has(name: &str) -> bool {
+    EVERY_ACCOUNT_HAS.contains(&name)
 }
 
 fn drifted(name: &str) -> String {
@@ -479,12 +530,15 @@ fn window_name(key: &str) -> String {
 
 /// Where a window sits when the figures are shown together: the two every
 /// Account has, in the order they run out, and then the per-model ones by name.
+///
+/// Asked of a window as Perch shows it, and answered from
+/// [`EVERY_ACCOUNT_HAS`], which is spelled as the endpoint spells it — so the
+/// two orders cannot drift apart as they did when each held its own copy.
 fn rank(window: &str) -> u8 {
-    match window {
-        "5-hour" => 0,
-        "7-day" => 1,
-        _ => 2,
-    }
+    EVERY_ACCOUNT_HAS
+        .iter()
+        .position(|key| window_name(key) == window)
+        .map_or(EVERY_ACCOUNT_HAS.len() as u8, |at| at as u8)
 }
 
 /// The email address a profile reply names, if it names one.
@@ -637,6 +691,10 @@ mod tests {
     /// passing over it silently was how the ADR 0012 failure got back in: the
     /// weekly window at 10% becomes the fullest Perch can see, and the Account
     /// whose five-hour window is 98% full ranks top of its Group.
+    ///
+    /// Said of the two windows every Account has, which is what makes a `null`
+    /// there drift rather than the absence it is under a per-model name — see
+    /// [`a_per_model_window_the_account_does_not_have_is_absent_rather_than_drift`].
     #[test]
     fn a_window_that_stops_being_an_object_is_drift_too() {
         for flattened in [
@@ -653,6 +711,107 @@ mod tests {
                 "it names the window: {refused}"
             );
         }
+    }
+
+    /// A per-model window is `null` for every model the Account has no window
+    /// for, which is most of them, and that is the endpoint saying there is no
+    /// such window rather than a window declining to say how full it is.
+    ///
+    /// Read as drift it refused the whole reply, and every Account on the
+    /// machine read "never observed" — no ranking, no Headroom, no Reserve, no
+    /// Watcher and an empty Utilization tab (#105). Nothing is lost by passing
+    /// it over: a window the Account does not have is metering nothing, so it
+    /// cannot be the one that is 98% full.
+    #[test]
+    fn a_per_model_window_the_account_does_not_have_is_absent_rather_than_drift() {
+        let document: Value = serde_json::from_str(
+            r#"{
+              "five_hour": {"utilization": 74},
+              "seven_day": {"utilization": 77},
+              "seven_day_opus": null,
+              "seven_day_sonnet": null
+            }"#,
+        )
+        .unwrap();
+
+        let windows = windows_of(&document).expect("the two windows the Account has are readable");
+
+        let named: Vec<&str> = windows.iter().map(|w| w.window.as_str()).collect();
+        assert_eq!(named, vec!["5-hour", "7-day"]);
+        assert_eq!(windows[0].used_percent, 74.0);
+    }
+
+    /// The `extra_usage` block Anthropic sends is not a window and never was,
+    /// but it carries a `utilization` of its own — `null` until paid credits are
+    /// turned on — and that reached the one drift branch that did not first ask
+    /// whether the name said a period at all (#105).
+    ///
+    /// It sorts before every `seven_day_*`, so this is the refusal that actually
+    /// fired, and the one behind it stayed hidden until it was fixed.
+    #[test]
+    fn a_field_beside_the_windows_is_not_drift_for_carrying_a_null_utilization() {
+        let document: Value = serde_json::from_str(
+            r#"{
+              "five_hour": {"utilization": 74},
+              "seven_day": {"utilization": 77},
+              "extra_usage": {"is_enabled": false, "monthly_limit": null, "utilization": null}
+            }"#,
+        )
+        .unwrap();
+
+        let windows = windows_of(&document).expect("neither window is `extra_usage`'s business");
+
+        let named: Vec<&str> = windows.iter().map(|w| w.window.as_str()).collect();
+        assert_eq!(named, vec!["5-hour", "7-day"]);
+    }
+
+    /// And still not a window once paid credits are turned on and it carries a
+    /// figure. Passing it over only while it was `null` was enough to stop the
+    /// refusal, and left it becoming a Quota Window the moment somebody bought
+    /// credits — feeding Headroom, Reserve and every ranking.
+    ///
+    /// Backwards in the dangerous direction: extra usage is what an Account
+    /// draws on *after* its Quota Windows are full, so an allowance nine tenths
+    /// spent would read as an Account with a tenth of its room left and drop
+    /// down the Group it should be leading.
+    #[test]
+    fn the_paid_credit_allowance_is_not_a_window_once_it_carries_a_figure() {
+        let document: Value = serde_json::from_str(
+            r#"{
+              "five_hour": {"utilization": 12},
+              "extra_usage": {"is_enabled": true, "utilization": 90.0, "monthly_limit": 200}
+            }"#,
+        )
+        .unwrap();
+
+        let windows = windows_of(&document).expect("the one window says how full it is");
+
+        let named: Vec<&str> = windows.iter().map(|w| w.window.as_str()).collect();
+        assert_eq!(
+            named,
+            vec!["5-hour"],
+            "an allowance beyond the plan is not a constraint on it"
+        );
+    }
+
+    /// A window that is there and will not say how full it is is still drift,
+    /// per-model name or not. `null` under a per-model name is the endpoint
+    /// saying there is no such window; a window that is present and carries a
+    /// `utilization` of `null` is one that has stopped answering, which is the
+    /// shape Perch has never seen and must not read as room.
+    #[test]
+    fn a_per_model_window_that_is_there_and_says_nothing_is_still_drift() {
+        let document: Value = serde_json::from_str(
+            r#"{"five_hour": {"utilization": 74}, "seven_day_opus": {"utilization": null}}"#,
+        )
+        .unwrap();
+
+        let refused = windows_of(&document).expect_err("a window that is there said nothing");
+
+        assert!(
+            refused.contains("seven_day_opus"),
+            "it names the window: {refused}"
+        );
     }
 
     /// What makes something a Quota Window is the `utilization` key, not the
