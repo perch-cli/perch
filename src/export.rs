@@ -32,6 +32,23 @@ use crate::registry::{self, Account, Registry};
 /// question about its own shape; this one is about the envelope around it.
 pub const CURRENT_VERSION: u32 = 1;
 
+/// The most scrypt work [`unseal`] will spend opening one file, as `log2(N)`.
+///
+/// A fixed number rather than one this machine measures, which is the whole
+/// point of it. `age`'s own default ceiling is "about a second of work here,
+/// plus four doublings", and its default *work factor* is about a second of
+/// work on whatever wrote the file — so with both left alone, whether an Export
+/// opens is a question about the pair of machines it travelled between. An
+/// Export written on a desktop and carried to a laptop, or opened inside a
+/// container with less CPU than the one that wrote it, was refused on that
+/// alone. ADR 0014 wants this file to outlive the machine that wrote it, and it
+/// cannot do that while what opens it depends on the machine that opens it.
+///
+/// 22 is where `age`'s own guidance tops out, and is comfortably above what
+/// calibration picks on any machine that can run Perch — roughly 17 to 19,
+/// since 2^22 scrypt rounds want four gigabytes to themselves.
+const MAX_WORK_FACTOR: u8 = 22;
+
 /// An Export, unsealed: what one `age` file holds before it is encrypted and
 /// after it is decrypted again.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -267,17 +284,25 @@ pub fn seal(export: &Export, passphrase: &str) -> Result<String> {
 ///
 /// A wrong passphrase is told apart from a file that is not an Export at all,
 /// because the two have different answers — one is worth typing again and the
-/// other is not.
+/// other is not. Two more answers are worth as much and are told apart for the
+/// same reason: an `age` file that was never a passphrase one, and one this
+/// machine will not spend the work to open.
 pub fn unseal(sealed: &str, passphrase: &str) -> Result<Export> {
-    let identity = age::scrypt::Identity::new(secret(passphrase));
-    let plain = age::decrypt(&identity, sealed.as_bytes()).map_err(|err| match err {
-        age::DecryptError::NoMatchingKeys | age::DecryptError::DecryptionFailed => {
-            PerchError::Invalid(
-                "That is not the passphrase this file was written with.".to_string(),
-            )
-        }
-        other => PerchError::Invalid(format!("This is not an `age` file Perch can read: {other}")),
-    })?;
+    let mut identity = age::scrypt::Identity::new(secret(passphrase));
+
+    // The bound `age` picks on its own is measured on the machine doing the
+    // *decryption* — about a second of work here, plus four doublings — while
+    // `seal` picks its work factor by the same measurement on the machine doing
+    // the encryption. So an Export written on a fast desktop and opened on a
+    // slow laptop, or inside a CPU-limited container, is refused for no reason
+    // but the pair of machines it travelled between. That is the one property
+    // ADR 0014 is about: this file is meant to outlive the machine that wrote
+    // it, so what will open it cannot be a function of the machine that opens
+    // it. 22 is where `age`'s own guidance tops out, and is above anything
+    // `seal` will ever choose.
+    identity.set_max_work_factor(MAX_WORK_FACTOR);
+
+    let plain = age::decrypt(&identity, sealed.as_bytes()).map_err(would_not_open)?;
 
     // Both versions first, off a shape that is only the versions, and before
     // the document is read as an Export. This is the order the guards need to
@@ -294,6 +319,45 @@ pub fn unseal(sealed: &str, passphrase: &str) -> Result<Export> {
         path: "the Export".to_string(),
         detail: err.to_string(),
     })
+}
+
+/// Why `age` would not open the file, said as something the reader can act on.
+///
+/// Four answers rather than two, because they ask for four different next
+/// moves: type it again, stop typing because no passphrase will ever open this
+/// one, find a machine with more to spend, and this is not an Export.
+///
+/// Apart from [`unseal`] so it can be asserted on directly. Two of these arrive
+/// only from files that cost seconds of scrypt to manufacture, and a refusal
+/// nothing can afford to test is a refusal that quietly stops being true.
+fn would_not_open(err: age::DecryptError) -> PerchError {
+    match err {
+        // The only answer that genuinely means "that was the wrong passphrase".
+        age::DecryptError::DecryptionFailed => PerchError::Invalid(
+            "That is not the passphrase this file was written with.".to_string(),
+        ),
+        // An `age` file, but one encrypted to a key rather than to a passphrase
+        // — `age -r ...` rather than `age -p`. Said as itself, because told as a
+        // wrong passphrase it invites somebody to retype forever one that was
+        // never involved.
+        age::DecryptError::NoMatchingKeys => PerchError::Invalid(
+            "This is an `age` file, but it was not written with a passphrase, so \
+             no passphrase will open it. An Export always is."
+                .to_string(),
+        ),
+        // The file is intact and the passphrase may well be right. Nothing here
+        // is worth typing again, and everything here is worth trying on a
+        // machine with more to spend — which is the point of a format something
+        // other than Perch maintains.
+        age::DecryptError::ExcessiveWork { required, .. } => PerchError::Invalid(format!(
+            "This file was sealed with more work than Perch will spend opening \
+             one (2^{required} scrypt rounds, against a ceiling of \
+             2^{MAX_WORK_FACTOR}). Nothing is wrong with the file and the \
+             passphrase is not in question — `age -d` opens it where this will \
+             not."
+        )),
+        other => PerchError::Invalid(format!("This is not an `age` file Perch can read: {other}")),
+    }
 }
 
 /// The two versions an Export carries, read on their own.
@@ -495,6 +559,44 @@ mod tests {
 
         let refused = unseal("not an age file at all", PASSPHRASE).expect_err("nor does this");
         assert!(refused.to_string().contains("`age` file"), "{refused}");
+    }
+
+    /// The two refusals that arrive at the worst possible moment — the day the
+    /// machine the Export would have restored is gone — and both of which used
+    /// to be reported as something they are not.
+    ///
+    /// Asserted against the mapping rather than against a sealed file, because
+    /// manufacturing either one costs seconds of scrypt: an Export encrypted to
+    /// an X25519 recipient, and one sealed at a work factor above the ceiling.
+    #[test]
+    fn a_file_that_is_intact_is_never_reported_as_a_wrong_passphrase() {
+        let no_passphrase = would_not_open(age::DecryptError::NoMatchingKeys);
+        assert!(
+            !no_passphrase.to_string().contains("not the passphrase"),
+            "an `age` file written to a key is not a passphrase to retype: \
+             {no_passphrase}"
+        );
+        assert!(
+            no_passphrase
+                .to_string()
+                .contains("passphrase will open it"),
+            "{no_passphrase}"
+        );
+
+        let too_much_work = would_not_open(age::DecryptError::ExcessiveWork {
+            required: MAX_WORK_FACTOR + 1,
+            target: MAX_WORK_FACTOR - 4,
+        });
+        let said = too_much_work.to_string();
+        assert!(
+            !said.contains("not an `age` file") && !said.contains("not the passphrase"),
+            "an intact Export this machine will not spend the work on is neither \
+             of those: {said}"
+        );
+        assert!(
+            said.contains("age -d"),
+            "and it says what will open it: {said}"
+        );
     }
 
     /// The Alias, the Group, whether Cycling may choose it and the reason it is
