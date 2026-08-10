@@ -508,7 +508,7 @@ fn act(
         Err(error) => return Err(error),
     };
 
-    let landed = switch::perform(host, &choice.account, Some(&outgoing));
+    let landed = switch::perform(host, perch, &choice.account, Some(&outgoing));
     match landed {
         Ok(_captured) => {
             // Only a Switch that happened starts a cooldown. A round that was

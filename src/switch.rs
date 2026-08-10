@@ -115,8 +115,20 @@ struct Prepared {
 }
 
 /// Makes `incoming` the active Account, Capturing `outgoing` on the way out.
+///
+/// `perch` is the caller's hold on the registry, renewed alongside Claude Code's
+/// locks for the same reason and against the same hazard. It is held from before
+/// the load to after the save, so every slow step below runs under it — and it
+/// goes stale in ninety seconds. A keychain that stopped to ask the user for
+/// permission ran that out, another Perch cleared the artifact and worked under
+/// it, and the `record_active` that follows this then refused: the live
+/// Credential belongs to `incoming` while the registry still names `outgoing`,
+/// so the *next* Switch Captures the live Credential into `outgoing`'s Profile
+/// and destroys its only copy (ADR 0006). Re-running the Switch does not repair
+/// that, because `already_there` answers before `record_active` is reached.
 pub fn perform(
     host: &dyn Host,
+    perch: &mut lock::Held<'_>,
     incoming: &Account,
     outgoing: Option<&Account>,
 ) -> std::result::Result<Captured, Interrupted> {
@@ -133,15 +145,18 @@ pub fn perform(
         // hold renewed only after the slow steps is a hold that was already
         // lost while they ran.
         held.renew();
+        perch.renew();
         let captured = capture(host, &prepared, incoming, outgoing)
             .map_err(|error| error.with_note(&nothing_happened(outgoing)))?;
 
         held.renew();
+        perch.renew();
         profile::store_credential(host, &prepared.store, prepared.credential.as_str())
             .map_err(|error| error.with_note(&only_captured(&captured, outgoing, incoming)))?;
         incoming_is_live = true;
 
         held.renew();
+        perch.renew();
         patch_identity(host, &prepared)
             .map_err(|error| error.with_note(&live_but_unnamed(&prepared, outgoing, incoming)))?;
 
@@ -173,7 +188,11 @@ pub fn perform(
 /// caller has asked it too, before the browser round trip and again after — but
 /// both of those are minutes and a lock wait away from the write, and this is
 /// the last moment at which the answer cannot change.
-pub fn make_live(host: &dyn Host, account: &Account) -> std::result::Result<(), NotLanded> {
+pub fn make_live(
+    host: &dyn Host,
+    perch: &mut lock::Held<'_>,
+    account: &Account,
+) -> std::result::Result<(), NotLanded> {
     let (version, store) = ground(host).map_err(|error| NotLanded {
         error,
         is_live: false,
@@ -203,9 +222,11 @@ pub fn make_live(host: &dyn Host, account: &Account) -> std::result::Result<(), 
         let prepared = prepare(host, account, None, version, store)?;
 
         held.renew();
+        perch.renew();
         profile::store_credential(host, &prepared.store, prepared.credential.as_str())?;
         is_live = true;
         held.renew();
+        perch.renew();
         patch_identity(host, &prepared)
     });
 

@@ -51,7 +51,7 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
         return Err(nothing_to_do);
     }
 
-    match switch::perform(host, &incoming, outgoing.as_ref()) {
+    match switch::perform(host, &mut perch, &incoming, outgoing.as_ref()) {
         Ok(captured) => {
             record_active(host, &mut perch, &mut registry, &incoming)?;
             report(out, &registry, &incoming, &captured, host.now())?;

@@ -1741,3 +1741,43 @@ fn repairing_an_interrupted_switch_never_writes_over_a_rotation_it_declined_to_s
         "and it says the way through: {error}"
     );
 }
+
+/// Everything Perch is holding has to survive the slow steps of a Switch, not
+/// only Claude Code's locks.
+///
+/// `perform` renews those between each of its three steps and says why — "a
+/// keychain that stops to ask the user for permission stretches either without
+/// warning". All three ran under Perch's own registry hold, which was not touched
+/// until the `registry::save` afterwards and goes stale in ninety seconds. Let
+/// run out, it is `record_active` that refuses: the live Credential belongs to the
+/// incoming Account while the registry still names the outgoing one, which sends
+/// the *next* Switch to Capture the live Credential into the outgoing Account's
+/// Profile and destroy its only copy (ADR 0006). Re-running the Switch does not
+/// repair it — `already_there` answers before `record_active` is reached.
+///
+/// What renewing buys is the accumulation: several steps each comfortably inside
+/// the window that together run past it. A single write that outlasts the whole
+/// ninety seconds on its own is not something anything at this layer can hold
+/// through, so what is asserted is that the hold is kept up as the Switch goes.
+#[test]
+fn a_keychain_dialog_somebody_walked_away_from_does_not_cost_perch_its_registry_hold() {
+    let host = machine_with_two_accounts().with_a_keychain_that_asks_first(20_000);
+    host.forget_effects();
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect("the Switch lands");
+    let touched = host
+        .effects()
+        .iter()
+        .filter(|effect| {
+            matches!(effect, Effect::Touched(path) if path.starts_with("/Users/someone/.config/perch/.registry.lock"))
+        })
+        .count();
+    assert!(
+        touched > 1,
+        "the registry hold is renewed as the Switch goes rather than only at the \
+         save afterwards, so the slow steps do not run it out: touched {touched} \
+         time(s)\n{printed}"
+    );
+}
