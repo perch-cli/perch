@@ -1678,6 +1678,16 @@ impl Host for FakeHost {
     }
 
     fn process_alive(&self, pid: u32) -> bool {
+        // The identifiers the real host refuses before it asks, refused here
+        // too. `kill` reads `0` as the caller's whole process group and `-1` as
+        // every process it may signal, so neither is a question about one
+        // process — and `clients_in` parses a pid out of any filename in a
+        // sessions directory, which is not a name Perch wrote. A fake that
+        // answered "alive" where the real one says "dead" is a fake a test
+        // could prove the wrong behaviour against.
+        if pid == 0 || pid == u32::MAX {
+            return false;
+        }
         self.live_processes.borrow().contains_key(&pid)
     }
 
@@ -1882,6 +1892,29 @@ mod tests {
         assert!(
             !host.path_exists(elsewhere),
             "rather than at the one the link named"
+        );
+    }
+    /// The mirror of `real.rs`'s
+    /// `a_process_id_that_is_not_one_is_dead_rather_than_a_process_group`.
+    ///
+    /// `clients_in` parses a pid out of any filename it finds in a sessions
+    /// directory, and those are not names Perch wrote — so `0.json` is
+    /// reachable. Unguarded, the fake called that process alive where the real
+    /// host calls it dead, which is a fake a test could prove the wrong
+    /// behaviour against.
+    #[test]
+    fn the_process_ids_that_are_not_one_are_dead_here_too() {
+        let host = FakeHost::new()
+            .with_live_process(0)
+            .with_live_process(u32::MAX);
+
+        assert!(
+            !host.process_alive(0),
+            "0 is a process group, not a process"
+        );
+        assert!(
+            !host.process_alive(u32::MAX),
+            "4294967295 narrows to -1, which is every process the caller may signal"
         );
     }
 }
