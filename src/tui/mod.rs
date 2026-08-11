@@ -7,11 +7,12 @@
 //!
 //! It **acts, and the line is reversibility** (ADR 0034): the TUI may write
 //! what it can unwrite. A Switch, a Run, every Setting, an Alias, whether
-//! Cycling may choose an Account, which Group it is in, and declaring a Group.
-//! Out stay `add`, `remove`, `relogin`, `purge`, `export` and `import`, and so
-//! does deleting a Group — the Accounts survive it and become Ungrouped, but
-//! that Group's Overrides do not, and a value nobody can get back is exactly
-//! the loss this rule refuses.
+//! Cycling may choose an Account, which Group it is in, declaring a Group and
+//! renaming one — a rename keeps everything the Group carries, so renaming it
+//! back restores exactly what was there. Out stay `add`, `remove`, `relogin`,
+//! `purge`, `export` and `import`, and so does deleting a Group — the Accounts
+//! survive it and become Ungrouped, but that Group's Overrides do not, and a
+//! value nobody can get back is exactly the loss this rule refuses.
 //!
 //! Every one of those has a plain command form, which is what keeps ADR 0011's
 //! constraint honest — nothing here is only here — and every write *is* the

@@ -266,6 +266,38 @@ that Accounts are interchangeable, not a weaker form of one. So bare `perch
 switch` Cycles among ungrouped Accounts only when a global setting says it may,
 and that setting is off until you turn it on.
 
+### Managing Groups
+
+`perch group add <name>` declares one, `perch group move <target> <group>` puts
+an Account in it — `none` as the Group takes it out of every one — and `perch
+group list` shows every Group with its Accounts and the rules in force for it.
+`perch group remove <name>` forgets one, and is refused while it still holds
+Accounts rather than quietly orphaning them.
+
+`perch group rename <old> <new>` changes what a Group is called and **keeps
+everything it carries**: its Overrides, the Accounts in it, and the cooldown the
+watcher is pacing it by. Doing it by hand would be an add, a move per Account
+and a remove — and a freshly declared Group declares nothing, so every rule you
+had set on the old one would have to be typed again.
+
+```
+$ perch group rename work day-job
+Renamed the Group `work` to `day-job`, which still holds 3 Accounts.
+  Strategy     soonest-reset
+  Watcher      off (would act at 55%, onto 45% or better, at most every 15m)
+  Overrides    strategy, watcher-threshold-percent
+```
+
+The `Overrides` line is the point: those two Settings were said about this Group,
+and they are still said about it afterwards. A rename by hand would have left
+them behind on a Group that no longer exists.
+
+A name that an Alias or another Group already answers to is refused before
+anything is written, because Aliases and Group names share one namespace.
+Changing only how a Group is capitalised is a rename rather than a collision
+with itself, the same way naming an Account by the name it already answers to
+is.
+
 ## Watching
 
 `perch watch` does the Cycling for you. It is a loop in this terminal that
@@ -1060,6 +1092,15 @@ place the panel takes typed input: a name is the only value with no natural
 step, and a collision with an existing Alias or Group is refused as you confirm
 it, before anything is written.
 
+`n` names three things and nothing else: a new Group on the last row of the
+sidebar, the Group the sidebar is on — the field opens with its current name in
+it, so correcting four characters is four keystrokes — and the selected Account
+on its `alias` row. On `Global` and on `Ungrouped` it says neither is a Group
+somebody named, because Global is what applies where nothing narrower is said
+and being Ungrouped is the absence of a declaration rather than one (ADR 0017).
+A rename here is `perch group rename`, so it keeps what the Group carries and is
+refused in the same words the command would have used.
+
 **There is no save button.** A change is written when it is made. Stepped values
 are debounced — the write follows the last keystroke rather than each one,
 because holding an arrow from 0 to 80 is otherwise sixteen writes and sixteen
@@ -1069,9 +1110,11 @@ to be remembered, and walking away loses nothing.
 ### It writes what it can unwrite
 
 Settings, Aliases, whether Cycling may choose an Account, which Group it is in,
-declaring a Group, `Enter` to Switch and `x` to Run. That is the whole of what
-the view does, and the line is **reversibility** (ADR 0034): the TUI may write
-what it can unwrite.
+declaring a Group, renaming one, `Enter` to Switch and `x` to Run. That is the
+whole of what the view does, and the line is **reversibility** (ADR 0034): the
+TUI may write what it can unwrite. Renaming a Group is on the right side of that
+line because a rename keeps everything the Group carries — renaming it back
+restores exactly what was there.
 
 `add`, `remove`, `relogin`, `purge`, `export` and `import` stay out, and so does
 deleting a Group — the Accounts survive it and become Ungrouped, but that
@@ -1079,7 +1122,8 @@ Group's Overrides do not, and a value nobody can get back is exactly the loss
 this rule refuses. `perch group remove` still does it.
 
 Every write **is** the command: a Setting written here is written by
-`perch config`, an Alias by `perch alias`, a Group move by `perch group`. So the
+`perch config`, an Alias by `perch alias`, a Group move or a rename by
+`perch group`. So the
 refusals, the ranges and the locking are theirs rather than a second copy kept
 in step by hand — and what the command printed is what appears above the keys.
 

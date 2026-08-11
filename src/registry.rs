@@ -852,17 +852,74 @@ impl Registry {
     /// Declares a Group, refusing a name that is not usable or already means
     /// something else.
     pub fn declare_group(&mut self, name: &str) -> Result<()> {
-        validate_name(NameKind::Group, name)?;
-        if let Some(declared) = self.declared_group(name) {
-            return Err(PerchError::Conflict(format!(
-                "There is already a Group called `{declared}`."
-            )));
-        }
-        self.refuse_taken_names(None, Some(name))?;
+        self.refuse_a_name_no_group_may_answer_to(name, None)?;
         // Holding nothing, which is a Group that Inherits every Setting there
         // is. A freshly declared Group tracks Global rather than copying it, so
         // a threshold set at Global afterwards reaches it too.
         self.groups.insert(name.to_string(), Overrides::default());
+        Ok(())
+    }
+
+    /// Refuses a name no Group may answer to: one that is not usable at all,
+    /// one another Group already answers to, or one an Alias holds.
+    ///
+    /// Declaring a Group and renaming one both ask this, so a rename cannot
+    /// reach a state a declaration could not.
+    ///
+    /// `renaming` is the name the Group already answers to, where there is one.
+    /// A Group renaming itself does not collide with itself, and that includes
+    /// recapitalising it — the rule `perch alias` states for an Account, which
+    /// this must not disagree with. Nothing else is waived by it: the shared
+    /// namespace is still checked, so a recapitalisation cannot walk into an
+    /// Alias either.
+    fn refuse_a_name_no_group_may_answer_to(
+        &self,
+        name: &str,
+        renaming: Option<&str>,
+    ) -> Result<()> {
+        validate_name(NameKind::Group, name)?;
+        let renaming_itself = renaming.is_some_and(|held| same_name(held, name));
+        if !renaming_itself && let Some(declared) = self.declared_group(name) {
+            return Err(PerchError::Conflict(format!(
+                "There is already a Group called `{declared}`."
+            )));
+        }
+        self.refuse_taken_names(None, Some(name))
+    }
+
+    /// Renames a Group, keeping everything it carries.
+    ///
+    /// `held` is the name as this registry holds it — what
+    /// [`declared_group`](Self::declared_group) answered, rather than what
+    /// somebody typed. The caller establishes there is a Group under it, because
+    /// what to say about a name nothing holds is the caller's: a typed one gets
+    /// the sentence every mistyped Group name gets, and this is not the place
+    /// that knows it.
+    ///
+    /// Three things move with the name, and they are the whole of the change:
+    /// the Overrides the Group declares, the Accounts that claim it, and what
+    /// the last scheduled Check left behind. That last one is the difference
+    /// between this and a remove and an add — [`forget_group`](Self::forget_group)
+    /// drops the Check record because a Group declared under the same name later
+    /// would be a different Group, while a rename is the *same* Group, so a
+    /// rename that dropped it would be a way to make the watcher Switch again at
+    /// once.
+    pub fn rename_group(&mut self, held: &str, to: &str) -> Result<()> {
+        self.refuse_a_name_no_group_may_answer_to(to, Some(held))?;
+
+        let overrides = self
+            .groups
+            .remove(held)
+            .expect("the caller established the Group is declared");
+        self.groups.insert(to.to_string(), overrides);
+        for account in &mut self.accounts {
+            if account.group.as_deref() == Some(held) {
+                account.group = Some(to.to_string());
+            }
+        }
+        if let Some(checked) = self.checks.remove(held) {
+            self.checks.insert(to.to_string(), checked);
+        }
         Ok(())
     }
 

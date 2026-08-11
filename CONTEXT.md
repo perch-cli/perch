@@ -98,6 +98,15 @@ subscriptions belonging to the same person. Perch only ever Cycles within a
 Group, and a Group carries the settings that govern when it may do so unasked.
 _Avoid_: flock, team, org, pool
 
+**Rename**:
+Changing what a Group is called and nothing else about it: its Overrides, the
+Accounts in it and the Cooldown pacing its next Check all come with the name. The
+same Group under another name, which is what separates it from declaring one and
+forgetting another — that loses every Override the first held. Only a Group is
+Renamed: Global and the Ungrouped Accounts are not Groups, and the name an
+Account answers to is its Alias.
+_Avoid_: move, retitle, relabel, re-declare
+
 ## What belongs to whom
 
 **Shared State**:
