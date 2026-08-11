@@ -193,10 +193,18 @@ pub fn perform(
 /// caller has asked it too, before the browser round trip and again after — but
 /// both of those are minutes and a lock wait away from the write, and this is
 /// the last moment at which the answer cannot change.
+///
+/// `whose` is the sentence saying why the Default Profile is the wrong thing to
+/// overwrite, and is the caller's for the reason [`refuse_if_live_anywhere`]
+/// gives about its own: what makes it wrong is different for a repair and for a
+/// removal, and the refusal is read by somebody deciding which client to quit.
+/// Written in here, it told a `perch remove` about "this Account's repaired
+/// Credential" — nothing was being repaired, and what lands is the successor's.
 pub fn make_live(
     host: &dyn Host,
     perch: &mut lock::Held<'_>,
     account: &Account,
+    whose: &str,
 ) -> std::result::Result<(), NotLanded> {
     let (version, store) = ground(host).map_err(|error| NotLanded {
         error,
@@ -216,13 +224,7 @@ pub fn make_live(
         // The Default Profile alone. The Account's own Profile is only read
         // here, and reading a Credential takes nothing away from the session
         // using it (ADR 0027).
-        refuse_if_live_in(
-            host,
-            &store.config_dir,
-            "the Default Profile, which is where this Account's repaired \
-             Credential has to land",
-            &version,
-        )?;
+        refuse_if_live_in(host, &store.config_dir, whose, &version)?;
 
         let prepared = prepare(host, account, None, version, store)?;
 

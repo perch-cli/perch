@@ -295,7 +295,13 @@ fn land_on(
     successor: &Account,
     leaving: &Account,
 ) -> Result<()> {
-    let landed = switch::make_live(host, perch, successor);
+    let landed = switch::make_live(
+        host,
+        perch,
+        successor,
+        "the Default Profile, which is where the Account Perch would land on has \
+         to be written",
+    );
     let is_live = landed.as_ref().err().is_none_or(|stopped| stopped.is_live);
 
     if is_live {

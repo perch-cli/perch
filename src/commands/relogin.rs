@@ -110,7 +110,13 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     if !repairing_the_account_you_are_on {
         return Ok(());
     }
-    let landed = switch::make_live(host, &mut perch, &account);
+    let landed = switch::make_live(
+        host,
+        &mut perch,
+        &account,
+        "the Default Profile, which is where this Account's repaired Credential \
+         has to land",
+    );
     // Whether the fresh Credential became the live one, whatever else failed.
     // `make_live` writes the Credential and then patches the Identity, and a
     // failure between the two has still made this Account's repaired Credential
