@@ -1969,6 +1969,104 @@ fn the_new_group_row_is_not_a_dead_end() {
     );
 }
 
+/// Stepping an Account out of the Scope whose page you are on must not leave
+/// the cursor on a Setting.
+///
+/// The `group` row moves the Account out of the Group, which takes the five
+/// per-Account rows off the page with it. The content cursor was clamped by row
+/// *number* while the other three cursors followed what they were on, so it
+/// landed on the last Setting — and because the write and the redraw are the
+/// same iteration, the highlight never appeared to jump. The next repeat of a
+/// held arrow then wrote an Override on a Setting nobody had touched.
+#[test]
+fn stepping_an_account_out_of_a_scope_does_not_leave_the_cursor_on_a_setting() {
+    let host = machine_with_figures();
+    declare_group(&host, "work");
+    move_to_group(&host, EMAIL, "work").0.expect("it moves");
+    host.forget_effects();
+
+    let to_the_group_row = [
+        over(2, Signal::Down),     // sidebar: Global, Ungrouped, work
+        vec![Some(Signal::Right)], // into the Accounts column
+        vec![Some(Signal::Right)], // into the content column
+        over(8, Signal::Down),     // six Settings, then alias, cycling, group
+    ]
+    .concat();
+
+    browse(
+        &host,
+        at_the_config(
+            to_the_group_row
+                .into_iter()
+                // The first steps the Account out of the Group. The second is
+                // the repeat a held key sends.
+                .chain([Some(Signal::Left), Some(Signal::Left), Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    let registry = registry_of(&host);
+    assert_eq!(
+        registry.account(EMAIL).and_then(|held| held.group.clone()),
+        None,
+        "the first press moved the Account out, which is what it is for"
+    );
+    assert_eq!(
+        registry
+            .group("work")
+            .expect("the Group is still declared")
+            .watcher_no_return,
+        None,
+        "and the second press did not write an Override on a Setting the \
+         cursor was moved onto"
+    );
+}
+
+/// Holding an arrow on a per-Account row is one write, like every other row.
+///
+/// These three wrote at once rather than waiting for the keys to stop, so a
+/// held key was one registry write and one lock taken and given back per repeat
+/// the terminal sent — "holding an arrow from 0 to 80 is otherwise eighty
+/// writes and eighty lock acquisitions, some of which will lose the race and
+/// leave a half-set value" (ADR 0034), which was the reason for the debounce
+/// these rows did not use.
+#[test]
+fn holding_an_arrow_on_an_account_row_is_one_write_once_the_keys_stop() {
+    let host = machine_with_a_group();
+
+    let to_the_cycling_row = [
+        over(2, Signal::Down),
+        vec![Some(Signal::Right), Some(Signal::Right)],
+        over(7, Signal::Down), // six Settings, then alias, then cycling
+    ]
+    .concat();
+
+    browse(
+        &host,
+        at_the_config(
+            to_the_cycling_row
+                .into_iter()
+                .chain(over(6, Signal::Left))
+                .chain(while_nobody_presses_anything())
+                .chain([Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    assert_eq!(
+        registry_writes(&host),
+        1,
+        "six repeats of one key is one change somebody made"
+    );
+    assert!(
+        !registry_of(&host)
+            .account(EMAIL)
+            .expect("the Account is held")
+            .enabled,
+        "and it is the change they made: `←` is the low end"
+    );
+}
+
 /// Naming an Account is done where the rest of the decisions about it are.
 #[test]
 fn an_account_is_given_an_alias_from_the_panel() {
