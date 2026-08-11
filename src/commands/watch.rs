@@ -503,12 +503,26 @@ fn act(
     // Reported as the Switch would have reported it, because it is the same
     // refusal about the same Profile — the Switch simply no longer gets to be
     // the one to notice.
-    if let Err(refused @ PerchError::ProfileLive(_)) =
-        switch::refuse_if_live(host, &outgoing, &probe::claude_version(host)?)
-    {
-        return Ok(Outcome::Refused {
-            why: refused.to_string(),
-        });
+    // Every way this can fail is answered, because an `if let` over one variant
+    // drops the rest on the floor. `refuse_if_live` refuses with `ProfileLive`,
+    // but it also fails with `ProbeRefused` for a `sessions` directory that is
+    // there and will not be read — the root-owned one a `sudo claude` leaves —
+    // and with `Invalid` for an address no Profile can be named after. Discarded,
+    // those became a round that carried on to spend a Renewal on every candidate
+    // and then met the same failure in the Switch below, which is the one thing
+    // the ask above exists to prevent: the allowance is gone by the time the
+    // round finds out it was never going to move.
+    match switch::refuse_if_live(host, &outgoing, &probe::claude_version(host)?) {
+        Ok(()) => {}
+        Err(refused @ PerchError::ProfileLive(_)) => {
+            return Ok(Outcome::Refused {
+                why: refused.to_string(),
+            });
+        }
+        // The same ending the Switch below gives them, which is where they were
+        // being met before: the loop stops rather than deciding what to do next
+        // about a machine nobody has looked at.
+        Err(other) => return Err(other),
     }
 
     // The Account this watcher just came off is not read and not landed on
