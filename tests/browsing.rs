@@ -10,6 +10,8 @@ mod common;
 use common::*;
 
 use chrono::Duration;
+use perch::commands::list;
+use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
 use perch::registry::Registry;
 use perch::tui::fake::{FakeRefresher, FakeScreen};
@@ -52,6 +54,44 @@ fn browse_holding(host: &FakeHost, registry: Registry, doing: Vec<Option<Signal>
     )
     .expect("the TUI leaves cleanly");
     screen
+}
+
+/// A frame read as one run of words, for the assertions about a sentence rather
+/// than about a line.
+///
+/// The Overview breaks what it says between words at whatever the terminal is
+/// — a figure that lost `(as of 4m ago)` to the right-hand edge would be a
+/// figure with no age on it (ADR 0015) — so where a whole sentence is what is
+/// under test, the line breaks the terminal put in are not.
+fn said(frame: &str) -> String {
+    frame.split_whitespace().collect::<Vec<&str>>().join(" ")
+}
+
+/// The `Status` tab opens on the Overview, with the keys on the sidebar. One
+/// `Down` reaches the `Accounts` row and one `Right` steps into the table,
+/// which is where the two acting keys mean anything — so every test about
+/// choosing an Account starts with both.
+fn at_the_accounts(doing: Vec<Option<Signal>>) -> Vec<Option<Signal>> {
+    [Some(Signal::Down), Some(Signal::Right)]
+        .into_iter()
+        .chain(doing)
+        .collect()
+}
+
+/// And the `Config` row of the same sidebar, which is read rather than stepped
+/// into.
+fn at_what_governs_me(doing: Vec<Option<Signal>>) -> Vec<Option<Signal>> {
+    [Some(Signal::Down), Some(Signal::Down)]
+        .into_iter()
+        .chain(doing)
+        .collect()
+}
+
+/// And the `Config` tab is one `Tab` away, with the sidebar on Global.
+fn at_the_config(doing: Vec<Option<Signal>>) -> Vec<Option<Signal>> {
+    std::iter::once(Some(Signal::NextTab))
+        .chain(doing)
+        .collect()
 }
 
 /// A machine with two Accounts, both with figures four minutes old. Neither is
@@ -123,11 +163,11 @@ fn both_views_are_named_on_screen_and_the_keys_are_said() {
     let screen = browse(&host, vec![Some(Signal::Leave)]);
 
     let frame = screen.last_frame();
-    assert!(frame.contains("Accounts"), "{frame}");
-    assert!(frame.contains("Utilization"), "{frame}");
-    assert!(frame.contains("q  quit"), "{frame}");
-    assert!(frame.contains("Tab  view"), "{frame}");
-    assert!(frame.contains("r  refresh"), "{frame}");
+    assert!(frame.contains("Status"), "{frame}");
+    assert!(frame.contains("Config"), "{frame}");
+    assert!(frame.contains("q quit"), "{frame}");
+    assert!(frame.contains("Tab view"), "{frame}");
+    assert!(frame.contains("r refresh"), "{frame}");
 }
 
 #[test]
@@ -140,7 +180,7 @@ fn the_accounts_are_listed_with_their_alias_group_and_state() {
         .0
         .expect("it is spared");
 
-    let screen = browse(&host, vec![Some(Signal::Leave)]);
+    let screen = browse(&host, at_the_accounts(vec![Some(Signal::Leave)]));
 
     let frame = screen.last_frame();
     assert!(frame.contains("Account"), "{frame}");
@@ -152,7 +192,7 @@ fn the_accounts_are_listed_with_their_alias_group_and_state() {
     assert!(
         frame
             .lines()
-            .any(|line| line.starts_with(">* ") && line.contains(EMAIL)),
+            .any(|line| line.contains(">* ") && line.contains(EMAIL)),
         "{frame}"
     );
 }
@@ -160,21 +200,89 @@ fn the_accounts_are_listed_with_their_alias_group_and_state() {
 /// ADR 0015: every figure is shown with its age, so a stale number is visibly
 /// stale rather than quietly wrong.
 #[test]
-fn the_age_of_every_figure_is_on_the_utilization_view() {
+fn the_age_of_every_figure_is_on_the_overview() {
     let host = machine_with_figures();
 
-    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
 
     let frame = screen.last_frame();
-    for said in [EMAIL, SECOND_EMAIL, "5-hour", "42%", "7%", "(as of 4m ago)"] {
+    for said in [EMAIL, "5-hour", "42%", "(as of 4m ago)"] {
         assert!(frame.contains(said), "{said} is missing from\n{frame}");
     }
     assert_eq!(
         frame.matches("as of").count(),
-        4,
-        "each Account's Headroom and each of its Quota Windows carries its own \
-         age\n{frame}"
+        2,
+        "the Headroom and each Quota Window carries its own age\n{frame}"
     );
+}
+
+/// The summary answers "where am I": the Account, the name it was given, and
+/// what a bare Switch would Cycle within.
+#[test]
+fn the_overview_says_who_is_active_by_the_name_they_were_given_and_what_governs_them() {
+    let host = machine_with_figures();
+    set_alias(&host, "main", EMAIL).0.expect("it is named");
+    declare_group(&host, "work");
+    move_to_group(&host, EMAIL, "work").0.expect("it moves");
+
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
+
+    let frame = screen.last_frame();
+    assert!(frame.contains("Alias"), "{frame}");
+    assert!(frame.contains("main"), "{frame}");
+    assert!(
+        frame.contains("work — a bare Switch Cycles within it"),
+        "{frame}"
+    );
+    assert!(frame.contains("Headroom"), "{frame}");
+}
+
+/// And where somebody is in no Group it says so plainly, with the reason
+/// Cycling behaves differently for them (ADR 0017).
+#[test]
+fn the_overview_says_plainly_when_the_active_account_is_in_no_group() {
+    let host = machine_with_figures();
+
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
+
+    let frame = screen.last_frame();
+    assert!(frame.contains("in no Group"), "{frame}");
+    assert!(frame.contains("cycle-ungrouped"), "{frame}");
+}
+
+/// A Quarantined Account's figures describe quota it cannot spend, so the
+/// reason goes where the Headroom would be — and the repair goes with it,
+/// because that is the next thing somebody reading it needs.
+#[test]
+fn a_quarantined_active_account_shows_why_and_what_ends_it() {
+    let host = machine_with_figures();
+    quarantine(&host, EMAIL);
+
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
+
+    let frame = screen.last_frame();
+    let said = frame.split_whitespace().collect::<Vec<&str>>().join(" ");
+    assert!(said.contains("Quarantine"), "{frame}");
+    assert!(said.contains("would not renew its Credential"), "{frame}");
+    assert!(
+        said.contains(&format!("`perch relogin {EMAIL}`")),
+        "{frame}"
+    );
+}
+
+/// A machine Perch has been left on nobody gets one line saying so and pointing
+/// at the page that has something to do about it, rather than an empty frame.
+#[test]
+fn a_machine_with_no_active_account_gets_one_line_and_a_way_out_of_it() {
+    let host = machine_with_figures();
+    let mut nobody = registry_of(&host);
+    nobody.active = None;
+
+    let screen = browse_holding(&host, nobody, vec![Some(Signal::Leave)]);
+
+    let frame = screen.last_frame();
+    assert!(frame.contains("no active Account"), "{frame}");
+    assert!(frame.contains("Accounts page"), "{frame}");
 }
 
 /// An Account has several Quota Windows at once and is limited by whichever
@@ -193,7 +301,7 @@ fn every_quota_window_gets_a_row_with_its_fill_and_when_it_resets() {
         ],
     );
 
-    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
 
     let frame = screen.last_frame();
     let row = |window: &str| -> String {
@@ -208,16 +316,18 @@ fn every_quota_window_gets_a_row_with_its_fill_and_when_it_resets() {
     assert!(row("5-hour").contains("(in 3h)"), "{frame}");
     assert!(row("7-day").contains("88%"), "{frame}");
     assert!(row("7-day").contains("(in 2d)"), "{frame}");
-    for row in [row("5-hour"), row("7-day")] {
-        assert!(row.contains("(as of 4m ago)"), "{row}");
-    }
+    assert_eq!(
+        said(frame).matches("as of 4m ago").count(),
+        3,
+        "the Headroom and both windows carry their own age\n{frame}"
+    );
 }
 
 /// ADR 0012: an Account is only ever as free as its fullest window, so the one
 /// figure it is compared on comes from that window — and names it, so the claim
 /// can be checked against the rows underneath rather than taken on trust.
 #[test]
-fn each_account_shows_the_headroom_its_most_constrained_window_leaves() {
+fn the_overview_shows_the_headroom_the_most_constrained_window_leaves() {
     let host = machine_with_figures();
     observed(
         &host,
@@ -225,15 +335,14 @@ fn each_account_shows_the_headroom_its_most_constrained_window_leaves() {
         vec![window("5-hour", 4.0), window("7-day", 95.0)],
     );
 
-    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
 
     let frame = screen.last_frame();
-    // Its own block's heading, and not the tab bar's "active:" label.
     let heading = frame
         .lines()
-        .find(|line| line.contains(EMAIL) && !line.contains("active:"))
-        .unwrap_or_else(|| panic!("{EMAIL} heads its own block in\n{frame}"));
-    assert!(heading.contains("Headroom 5%"), "{heading}");
+        .find(|line| line.contains("Headroom"))
+        .unwrap_or_else(|| panic!("the Headroom is on the Overview in\n{frame}"));
+    assert!(heading.contains("5%"), "{heading}");
     assert!(
         heading.contains("7-day is its fullest"),
         "the generous window never hides the exhausted one: {heading}"
@@ -248,12 +357,13 @@ fn each_account_shows_the_headroom_its_most_constrained_window_leaves() {
 fn a_group_says_how_many_accounts_still_have_headroom_and_how_much_the_best_has() {
     let host = machine_with_a_group();
 
-    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
 
     let frame = screen.last_frame();
     assert!(frame.contains("Group `work`"), "{frame}");
     assert!(
-        frame.contains("Reserve: 2 of 2 Accounts have Headroom, the best 93% left (as of 4m ago)"),
+        said(frame)
+            .contains("Reserve: 2 of 2 Accounts have Headroom, the best 93% left (as of 4m ago)"),
         "{frame}"
     );
 }
@@ -265,7 +375,7 @@ fn a_group_says_how_many_accounts_still_have_headroom_and_how_much_the_best_has(
 fn no_figure_on_the_tab_is_one_no_account_reported() {
     let host = machine_with_a_group();
 
-    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
 
     // The two Accounts are 42% and 7% full, so the only honest percentages on
     // screen are those, the Headroom each leaves, and nothing else.
@@ -305,16 +415,16 @@ fn a_groups_per_window_rows_are_one_per_quota_window_kind() {
         vec![window("5-hour", 96.0), window("7-day", 12.0)],
     );
 
-    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
 
-    let frame = screen.last_frame();
+    let said = said(screen.last_frame());
     assert!(
-        frame.contains("5-hour emptiest  96% used across 2 Accounts (as of 4m ago)"),
-        "the Group is nearly out on its five-hour window\n{frame}"
+        said.contains("5-hour emptiest 96% used across 2 Accounts (as of 4m ago)"),
+        "the Group is nearly out on its five-hour window\n{said}"
     );
     assert!(
-        frame.contains("7-day  emptiest  12% used across 2 Accounts (as of 4m ago)"),
-        "and fine on its seven-day one\n{frame}"
+        said.contains("7-day emptiest 12% used across 2 Accounts (as of 4m ago)"),
+        "and fine on its seven-day one\n{said}"
     );
 }
 
@@ -325,24 +435,23 @@ fn a_groups_per_window_rows_are_one_per_quota_window_kind() {
 fn the_accounts_in_no_group_get_no_reserve_until_cycling_may_choose_them() {
     let host = machine_with_figures();
 
-    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
 
     let frame = screen.last_frame();
-    assert!(frame.contains("In no Group"), "{frame}");
+    assert!(frame.contains("in no Group"), "{frame}");
     assert!(!frame.contains("Reserve"), "{frame}");
     assert!(
-        frame.contains("only moves between these when you say it may"),
+        said(frame).contains("only moves between these when you say it may"),
         "and it says what would have to change\n{frame}"
     );
 
     config_set(&host, &["cycle-ungrouped", "true"])
         .0
         .expect("they are declared interchangeable");
-    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
 
     assert!(
-        screen
-            .last_frame()
+        said(screen.last_frame())
             .contains("Reserve: 2 of 2 Accounts have Headroom, the best 93% left"),
         "{}",
         screen.last_frame()
@@ -359,20 +468,24 @@ fn what_a_cycle_may_not_choose_is_not_counted_as_something_the_group_has() {
         .0
         .expect("it is spared");
 
-    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
 
     let frame = screen.last_frame();
     assert!(
-        frame.contains("Reserve: 1 of 1 Account has Headroom, the best 58% left"),
+        said(frame).contains("Reserve: 1 of 1 Account has Headroom, the best 58% left"),
         "{frame}"
     );
     assert!(
-        frame.contains("1 disabled, so nothing Cycles to it."),
+        said(frame).contains("1 disabled, so nothing Cycles to it."),
         "{frame}"
     );
+
+    // And it is still listed, with its own figures, on the page that lists them.
+    let screen = browse(&host, at_the_accounts(vec![Some(Signal::Leave)]));
     assert!(
-        frame.contains(SECOND_EMAIL),
-        "and it is still listed with its own figures\n{frame}"
+        screen.last_frame().contains(SECOND_EMAIL),
+        "{}",
+        screen.last_frame()
     );
 }
 
@@ -400,27 +513,22 @@ fn a_refresh_moves_the_groups_figures_and_a_failed_one_leaves_them_standing() {
         },
         1,
     );
-    let mut screen = FakeScreen::scripted(vec![
-        Some(Signal::NextTab),
-        Some(Signal::Refresh),
-        None,
-        Some(Signal::Leave),
-    ]);
+    let mut screen = FakeScreen::scripted(vec![Some(Signal::Refresh), None, Some(Signal::Leave)]);
 
     browse_with(&host, &mut screen, &mut refresher);
 
     assert!(
-        screen.frames()[1].contains("the best 93% left (as of 4m ago)"),
+        said(&screen.frames()[0]).contains("the best 93% left (as of 4m ago)"),
         "the Reserve before the Refresh\n{}",
-        screen.frames()[1]
+        screen.frames()[0]
     );
     let frame = screen.last_frame();
     assert!(
-        frame.contains("the best 97% left (as of just now)"),
+        said(frame).contains("the best 97% left (as of just now)"),
         "the Reserve moved with the figures it is made of\n{frame}"
     );
     assert!(
-        frame.contains("5-hour emptiest   3% used across 2 Accounts (as of just now)"),
+        said(frame).contains("5-hour emptiest 3% used across 2 Accounts (as of just now)"),
         "{frame}"
     );
 
@@ -430,18 +538,14 @@ fn a_refresh_moves_the_groups_figures_and_a_failed_one_leaves_them_standing() {
         Refreshed::nothing_read(vec!["overflow@example.com: no answer".to_string()]),
         0,
     );
-    let mut screen = FakeScreen::scripted(vec![
-        Some(Signal::NextTab),
-        Some(Signal::Refresh),
-        Some(Signal::Leave),
-    ]);
+    let mut screen = FakeScreen::scripted(vec![Some(Signal::Refresh), Some(Signal::Leave)]);
 
     browse_with(&host, &mut screen, &mut failed);
 
     let frame = screen.last_frame();
     assert!(frame.contains("no answer"), "{frame}");
     assert!(
-        frame.contains("the best 93% left (as of 4m ago)"),
+        said(frame).contains("the best 93% left (as of 4m ago)"),
         "the Reserve is still there, with its age\n{frame}"
     );
 }
@@ -454,21 +558,18 @@ fn a_group_with_no_room_left_says_what_is_in_the_way_and_how_old_that_is() {
     observed(&host, EMAIL, vec![window("5-hour", 100.0)]);
     observed(&host, SECOND_EMAIL, vec![window("5-hour", 100.0)]);
 
-    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
 
-    let frame = screen.last_frame();
+    let said = said(screen.last_frame());
     assert!(
-        frame.contains("Reserve: none of 2 Accounts have Headroom (2 exhausted)"),
-        "{frame}"
+        said.contains("Reserve: none of 2 Accounts have Headroom (2 exhausted)"),
+        "{said}"
     );
     assert!(
-        frame.contains("Read 4m ago at the oldest."),
-        "a count read from cache says how old the readings behind it are\n{frame}"
+        said.contains("Read 4m ago at the oldest."),
+        "a count read from cache says how old the readings behind it are\n{said}"
     );
-    assert!(
-        frame.contains("Headroom exhausted  (as of 4m ago)"),
-        "{frame}"
-    );
+    assert!(said.contains("Headroom exhausted (as of 4m ago)"), "{said}");
 }
 
 /// Fill and room are both percentages, and two of them an inch apart are told
@@ -477,14 +578,14 @@ fn a_group_with_no_room_left_says_what_is_in_the_way_and_how_old_that_is() {
 fn a_figure_says_whether_it_is_room_left_or_quota_used() {
     let host = machine_with_a_group();
 
-    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
 
-    let frame = screen.last_frame();
-    assert!(frame.contains("the best 93% left"), "{frame}");
-    assert!(frame.contains("emptiest   7% used"), "{frame}");
+    let said = said(screen.last_frame());
+    assert!(said.contains("the best 93% left"), "{said}");
+    assert!(said.contains("emptiest 7% used"), "{said}");
     assert!(
-        frame.contains("5-hour   7% used  no reset time cached"),
-        "and the Account's own row says it too\n{frame}"
+        said.contains("5-hour 42% used no reset time cached"),
+        "and the active Account's own row says it too\n{said}"
     );
 }
 
@@ -493,7 +594,7 @@ fn a_figure_says_whether_it_is_room_left_or_quota_used() {
 fn an_account_never_observed_says_so_rather_than_showing_zero() {
     let host = machine_with_two_accounts();
 
-    let screen = browse(&host, vec![Some(Signal::NextTab), Some(Signal::Leave)]);
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
 
     assert!(
         screen.last_frame().contains("never observed"),
@@ -517,12 +618,12 @@ fn the_views_are_reached_by_key_and_come_back() {
 
     let frames = screen.frames();
     assert!(
-        frames[1].contains("as of"),
-        "the second view\n{}",
+        frames[1].contains("Ungrouped"),
+        "the second view is the Config panel\n{}",
         frames[1]
     );
     assert!(
-        !frames[2].contains("as of"),
+        !frames[2].contains("Ungrouped"),
         "and back to the first\n{}",
         frames[2]
     );
@@ -558,7 +659,7 @@ fn a_resize_is_redrawn_at_the_new_size() {
 #[test]
 fn a_narrow_terminal_keeps_the_views_legible_and_drops_the_label() {
     let host = machine_with_figures();
-    let mut screen = FakeScreen::sized(46, 10, vec![Some(Signal::Leave)]);
+    let mut screen = FakeScreen::sized(40, 10, vec![Some(Signal::Leave)]);
 
     browse_with(&host, &mut screen, &mut FakeRefresher::out_for_ever());
 
@@ -568,8 +669,8 @@ fn a_narrow_terminal_keeps_the_views_legible_and_drops_the_label() {
         .next()
         .expect("a frame")
         .to_string();
-    assert!(bar.contains("Accounts"), "{bar}");
-    assert!(bar.contains("Utilization"), "{bar}");
+    assert!(bar.contains("Status"), "{bar}");
+    assert!(bar.contains("Config"), "{bar}");
     assert!(!bar.contains("active:"), "there is no room for it: {bar}");
 }
 
@@ -654,7 +755,7 @@ fn the_display_keeps_answering_while_a_refresh_is_out() {
     assert_eq!(screen.frames().len(), 4, "it drew all the way through");
     assert!(screen.ever_said("Refreshing"), "{:?}", screen.frames());
     assert!(
-        screen.last_frame().contains("as of"),
+        screen.last_frame().contains("Ungrouped"),
         "the key that changes view still worked\n{}",
         screen.last_frame()
     );
@@ -683,19 +784,14 @@ fn a_refresh_that_lands_replaces_the_figures_and_their_age() {
         },
         1,
     );
-    let mut screen = FakeScreen::scripted(vec![
-        Some(Signal::NextTab),
-        Some(Signal::Refresh),
-        None,
-        Some(Signal::Leave),
-    ]);
+    let mut screen = FakeScreen::scripted(vec![Some(Signal::Refresh), None, Some(Signal::Leave)]);
 
     browse_with(&host, &mut screen, &mut refresher);
 
     assert!(
-        screen.frames()[1].contains("42% used  no reset time cached  (as of 4m ago)"),
+        said(&screen.frames()[0]).contains("42% used no reset time cached (as of 4m ago)"),
         "the figure before the Refresh\n{}",
-        screen.frames()[1]
+        screen.frames()[0]
     );
     let frame = screen.last_frame();
     assert!(frame.contains("3%"), "{frame}");
@@ -756,11 +852,7 @@ fn a_refresh_that_failed_leaves_the_figures_standing_and_says_so() {
         ]),
         0,
     );
-    let mut screen = FakeScreen::scripted(vec![
-        Some(Signal::NextTab),
-        Some(Signal::Refresh),
-        Some(Signal::Leave),
-    ]);
+    let mut screen = FakeScreen::scripted(vec![Some(Signal::Refresh), Some(Signal::Leave)]);
 
     browse_with(&host, &mut screen, &mut refresher);
 
@@ -848,7 +940,7 @@ fn leaving_with_nothing_out_waits_for_nothing_and_says_nothing() {
 fn the_accounts_are_listed_in_the_order_a_switch_would_rank_them() {
     let host = machine_with_a_group();
 
-    let screen = browse(&host, vec![Some(Signal::Leave)]);
+    let screen = browse(&host, at_the_accounts(vec![Some(Signal::Leave)]));
 
     let frame = screen.last_frame();
     assert!(frame.contains("Headroom"), "{frame}");
@@ -881,7 +973,7 @@ fn disabled_and_quarantined_are_distinguishable_at_a_glance() {
         .expect("it is spared");
     quarantine(&host, THIRD_EMAIL);
 
-    let screen = browse(&host, vec![Some(Signal::Leave)]);
+    let screen = browse(&host, at_the_accounts(vec![Some(Signal::Leave)]));
 
     let frame = screen.last_frame();
     let row = |email: &str| -> String {
@@ -912,7 +1004,10 @@ fn enter_switches_to_the_account_under_the_cursor() {
     let was_live = credential_of(&host, EMAIL);
 
     // The cursor starts on the emptiest Account, which is the second one.
-    let screen = browse(&host, vec![Some(Signal::Switch), None, Some(Signal::Leave)]);
+    let screen = browse(
+        &host,
+        at_the_accounts(vec![Some(Signal::Switch), None, Some(Signal::Leave)]),
+    );
 
     assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
     assert_eq!(
@@ -936,7 +1031,7 @@ fn enter_switches_to_the_account_under_the_cursor() {
     assert!(
         frame
             .lines()
-            .any(|line| line.starts_with(">* ") && line.contains(SECOND_EMAIL)),
+            .any(|line| line.contains(">* ") && line.contains(SECOND_EMAIL)),
         "the marker moved with it\n{frame}"
     );
 }
@@ -963,7 +1058,10 @@ fn what_a_switch_remarked_on_is_shown_in_the_frame_rather_than_printed_over_it()
         .with_file(&superseded, CREDENTIAL)
         .with_undeletable_file(&superseded, "Operation not permitted");
 
-    let screen = browse(&host, vec![Some(Signal::Switch), None, Some(Signal::Leave)]);
+    let screen = browse(
+        &host,
+        at_the_accounts(vec![Some(Signal::Switch), None, Some(Signal::Leave)]),
+    );
 
     let frame = screen.last_frame();
     assert!(
@@ -989,11 +1087,11 @@ fn what_a_switch_said_is_not_pushed_off_the_screen_by_an_older_refresh() {
     let mut screen = FakeScreen::sized(
         80,
         12,
-        vec![
+        at_the_accounts(vec![
             Some(Signal::Refresh),
             Some(Signal::Switch),
             Some(Signal::Leave),
-        ],
+        ]),
     );
 
     browse_with(&host, &mut screen, &mut refresher);
@@ -1019,11 +1117,11 @@ fn switching_to_the_account_that_is_already_active_says_there_is_nothing_to_do()
     // Down onto the active Account, which the ranking put second.
     let screen = browse(
         &host,
-        vec![
+        at_the_accounts(vec![
             Some(Signal::Down),
             Some(Signal::Switch),
             Some(Signal::Leave),
-        ],
+        ]),
     );
 
     let frame = screen.last_frame();
@@ -1045,7 +1143,7 @@ fn choosing_a_quarantined_account_names_perch_relogin() {
     for key in [Signal::Switch, Signal::Run] {
         let screen = browse(
             &host,
-            vec![Some(Signal::Down), Some(key), Some(Signal::Leave)],
+            at_the_accounts(vec![Some(Signal::Down), Some(key), Some(Signal::Leave)]),
         );
 
         let frame = screen.last_frame();
@@ -1074,7 +1172,10 @@ fn the_run_key_leaves_the_view_naming_the_account_to_launch() {
     let host = machine_with_a_group();
 
     assert_eq!(
-        left_after(&host, vec![Some(Signal::Down), Some(Signal::Run)]),
+        left_after(
+            &host,
+            at_the_accounts(vec![Some(Signal::Down), Some(Signal::Run)])
+        ),
         Left::ToRun(EMAIL.to_string()),
     );
     assert_eq!(
@@ -1180,10 +1281,12 @@ fn a_listing_that_scrolls_keeps_the_row_that_says_what_the_columns_are() {
 
     let mut screen = FakeScreen::sized(
         80,
-        6,
-        std::iter::repeat_n(Some(Signal::Down), 9)
-            .chain([Some(Signal::Leave)])
-            .collect(),
+        8,
+        at_the_accounts(
+            std::iter::repeat_n(Some(Signal::Down), 9)
+                .chain([Some(Signal::Leave)])
+                .collect(),
+        ),
     );
     perch::tui::browse(
         &host,
@@ -1205,39 +1308,798 @@ fn a_listing_that_scrolls_keeps_the_row_that_says_what_the_columns_are() {
     );
 }
 
-/// Selecting an Account below the fold shows its figures, not just its name.
-///
-/// The scroll brings one named line into view with what is around it. On the
-/// Accounts tab that line is the row, which is the whole of the content. On the
-/// Utilization tab each Account's Quota Window rows come *after* its heading, so
-/// naming the heading put every figure below the bottom edge: the selected
-/// Account rendered as a bare name with its Utilization scrolled off, on the one
-/// tab whose whole purpose is the figures. The last row of the block is what is
-/// named instead, which keeps the block together.
-#[test]
-fn moving_down_the_utilization_view_keeps_the_selected_accounts_figures_on_screen() {
-    let host = machine_with_figures();
-    // Short enough that the second Account's block cannot share the screen with
-    // the first, so the view has to scroll to reach it at all.
-    let mut screen = FakeScreen::sized(
-        80,
-        7,
-        vec![
-            Some(Signal::NextTab),
-            Some(Signal::Down),
-            Some(Signal::Leave),
-        ],
-    );
+// ---- What governs you, and changing it ----
 
-    browse_with(&host, &mut screen, &mut FakeRefresher::out_for_ever());
+/// Some keystrokes, for the navigation that gets to a row.
+fn over(times: usize, signal: Signal) -> Vec<Option<Signal>> {
+    std::iter::repeat_n(Some(signal), times).collect()
+}
+
+/// The frames a stepped value waits before it is written, and one more for the
+/// write itself. Counted in frames rather than in milliseconds, so the fake
+/// screen's "a wait nobody pressed anything in" is the whole of what drives it
+/// — a debounce in milliseconds would mean giving the model a clock and every
+/// test a way to advance it.
+fn while_nobody_presses_anything() -> Vec<Option<Signal>> {
+    vec![None, None, None]
+}
+
+/// The Settings in force for the active Account's Scope, each with where it
+/// came from — written out rather than shown only as a style, so it survives a
+/// pipe and a colour-blind palette.
+#[test]
+fn the_status_tab_says_what_governs_you_and_where_each_rule_came_from() {
+    let host = machine_with_a_group();
+    config_set(&host, &["work", "watcher-threshold-percent", "55"])
+        .0
+        .expect("the Group Overrides one Setting");
+
+    let screen = browse(&host, at_what_governs_me(vec![Some(Signal::Leave)]));
+
+    let said = said(screen.last_frame());
+    assert!(said.contains("In force for Group `work`"), "{said}");
+    assert!(
+        said.contains("watcher-threshold-percent 55 set on `work`"),
+        "the Override says which Scope holds it, in words rather than only as a \
+         style — so it survives a pipe and a colour-blind palette: {said}"
+    );
+    assert!(
+        said.contains("watcher-no-return true from Global"),
+        "and an Inheritance says it came from Global — and shows Global's value \
+         rather than a blank: {said}"
+    );
+}
+
+/// Only what governs *them*. A Setting belonging to a Group somebody is not in
+/// is not a rule about them.
+#[test]
+fn the_status_tab_shows_no_scope_the_active_account_is_not_in() {
+    let host = machine_with_a_group();
+    declare_group(&host, "personal");
+    config_set(&host, &["personal", "strategy", "soonest-reset"])
+        .0
+        .expect("another Group Overrides something");
+
+    let screen = browse(&host, at_what_governs_me(vec![Some(Signal::Leave)]));
+
+    let said = said(screen.last_frame());
+    assert!(said.contains("In force for Group `work`"), "{said}");
+    assert!(
+        !said.contains("personal"),
+        "a Group they are not in is not a rule about them: {said}"
+    );
+}
+
+/// And where somebody is in no Group, that page has an answer for them too —
+/// including the Setting that decides whether they are Cycled among at all.
+#[test]
+fn the_status_tab_answers_for_somebody_in_no_group() {
+    let host = machine_with_figures();
+
+    let screen = browse(&host, at_what_governs_me(vec![Some(Signal::Leave)]));
+
+    let said = said(screen.last_frame());
+    assert!(said.contains("In force for The Ungrouped Scope"), "{said}");
+    assert!(said.contains("cycle-ungrouped false"), "{said}");
+    assert!(
+        said.contains("strategy most-headroom from Global"),
+        "{said}"
+    );
+}
+
+#[test]
+fn the_config_tab_lists_global_then_ungrouped_then_every_group() {
+    let host = machine_with_a_group();
+    declare_group(&host, "personal");
+
+    let screen = browse(&host, at_the_config(vec![Some(Signal::Leave)]));
 
     let frame = screen.last_frame();
+    // The sidebar is the left-hand column of every row, which is as wide as its
+    // widest label and no wider.
+    let sidebar: Vec<String> = frame
+        .lines()
+        .skip(1)
+        .map(|line| {
+            line.chars()
+                .take(list::cells("+ new Group") + 3)
+                .collect::<String>()
+                .trim()
+                .trim_start_matches("> ")
+                .to_string()
+        })
+        .collect();
+    for expected in ["Global", "Ungrouped", "personal", "work"] {
+        assert!(
+            sidebar.iter().any(|row| row == expected),
+            "{expected} is a row of the sidebar: {sidebar:?}\n{frame}"
+        );
+    }
+}
+
+/// A change is written when it is made. There is no save button, and the write
+/// is `perch config`'s own.
+#[test]
+fn one_key_flips_a_setting_and_it_is_written_at_once() {
+    let host = machine_with_figures();
+
+    browse(
+        &host,
+        at_the_config(
+            [vec![Some(Signal::Right)], over(2, Signal::Down)]
+                .concat()
+                .into_iter()
+                .chain([Some(Signal::Flip), Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
     assert!(
-        frame.contains(SECOND_EMAIL),
-        "the selected Account is on screen:\n{frame}"
+        registry_of(&host).global.settings.watcher_may_act,
+        "the third row of Global's page is `watcher-may-act`"
+    );
+}
+
+/// How many times the registry was written, which is what a write costs: one
+/// lock taken and given back per one of these.
+fn registry_writes(host: &FakeHost) -> usize {
+    host.effects()
+        .iter()
+        .filter(|effect| {
+            matches!(effect, Effect::WrotePrivateFile(path) | Effect::WroteFile(path)
+                if path.to_string_lossy().ends_with("registry.json"))
+        })
+        .count()
+}
+
+/// Holding an arrow key down is one write when it stops rather than one per
+/// step, so a long adjustment is not a long queue of lock acquisitions.
+#[test]
+fn a_run_of_steps_is_one_write_once_the_keys_stop() {
+    let host = machine_with_figures();
+    host.forget_effects();
+
+    browse(
+        &host,
+        at_the_config(
+            [vec![Some(Signal::Right)], over(3, Signal::Down)]
+                .concat()
+                .into_iter()
+                .chain(over(4, Signal::Right))
+                .chain(while_nobody_presses_anything())
+                .chain([Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    assert_eq!(
+        registry_of(&host).global.settings.watcher_threshold_percent,
+        100,
+        "four steps of five from 80"
+    );
+    assert_eq!(
+        registry_writes(&host),
+        1,
+        "written once, when the keys stopped — not once per step: {:?}",
+        host.effects()
+    );
+}
+
+/// A Strategy steps between the readings there are, and a number's range has
+/// its ends one keystroke away — the two kinds of stepping the percentage test
+/// above does not cover.
+#[test]
+fn a_strategy_steps_between_its_readings_and_a_number_jumps_to_the_ends_of_its_range() {
+    let host = machine_with_figures();
+
+    browse(
+        &host,
+        at_the_config(
+            [vec![Some(Signal::Right)], over(1, Signal::Down)]
+                .concat()
+                .into_iter()
+                // The `strategy` row, then the cooldown, then its far end.
+                .chain([Some(Signal::Right)])
+                .chain(while_nobody_presses_anything())
+                .chain(over(3, Signal::Down))
+                .chain([Some(Signal::Most)])
+                .chain(while_nobody_presses_anything())
+                .chain([Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    let settings = registry_of(&host).global.settings;
+    assert_eq!(settings.strategy, perch::registry::Strategy::SoonestReset);
+    assert_eq!(
+        settings.watcher_cooldown_minutes, 10080,
+        "`End` is the far end of the range the Setting itself states, so the \
+         panel cannot offer a value `perch config set` would refuse"
+    );
+}
+
+/// A second edit inside the debounce is a second change somebody made, not a
+/// correction of the first — so displacing the deferred write writes it rather
+/// than dropping it.
+#[test]
+fn stepping_another_row_before_the_first_settles_writes_both() {
+    let host = machine_with_figures();
+
+    browse(
+        &host,
+        at_the_config(
+            [vec![Some(Signal::Right)], over(3, Signal::Down)]
+                .concat()
+                .into_iter()
+                // The threshold, then straight down to the margin with no wait
+                // in between.
+                .chain([Some(Signal::Right), Some(Signal::Down), Some(Signal::Down)])
+                .chain([Some(Signal::Right)])
+                .chain(while_nobody_presses_anything())
+                .chain([Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    let settings = registry_of(&host).global.settings;
+    assert_eq!(
+        settings.watcher_threshold_percent, 85,
+        "the first change was not lost to the second"
+    );
+    assert_eq!(settings.watcher_margin_percent, 15);
+}
+
+/// And walking away mid-adjustment writes it anyway: a deferred write is not a
+/// save button, and nothing has to be remembered.
+#[test]
+fn leaving_mid_adjustment_writes_what_the_keys_had_not_got_round_to() {
+    let host = machine_with_figures();
+
+    browse(
+        &host,
+        at_the_config(
+            [vec![Some(Signal::Right)], over(3, Signal::Down)]
+                .concat()
+                .into_iter()
+                .chain([Some(Signal::Right), Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    assert_eq!(
+        registry_of(&host).global.settings.watcher_threshold_percent,
+        85
+    );
+}
+
+/// A Group's page shows the value in force even where the Group declares
+/// nothing, so nobody has to go to Global to find out what is running.
+#[test]
+fn a_group_page_shows_an_inherited_value_rather_than_a_blank() {
+    let host = machine_with_a_group();
+    config_set(&host, &["watcher-cooldown-minutes", "45"])
+        .0
+        .expect("Global carries every Setting");
+
+    let screen = browse(
+        &host,
+        at_the_config(
+            over(2, Signal::Down)
+                .into_iter()
+                .chain([Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    let said = said(screen.last_frame());
+    assert!(said.contains("Group `work`"), "{said}");
+    assert!(
+        said.contains("Inherits every Setting from Global"),
+        "and says so, so the dimming has a sentence to be read against: {said}"
     );
     assert!(
-        frame.contains("7% used"),
-        "and so is the figure that is the whole reason for this view:\n{frame}"
+        said.contains("watcher-cooldown-minutes 45"),
+        "with Global's value on the row rather than a blank: {said}"
+    );
+}
+
+/// One key clears an Override back to Inherit, so nobody is left guessing what
+/// Global's value was — and the Scope tracks Global from then on.
+#[test]
+fn the_clear_key_drops_an_override_and_the_group_follows_global_again() {
+    let host = machine_with_a_group();
+    config_set(&host, &["work", "watcher-threshold-percent", "55"])
+        .0
+        .expect("the Group Overrides it");
+
+    browse(
+        &host,
+        at_the_config(
+            [
+                over(2, Signal::Down),
+                vec![Some(Signal::Right), Some(Signal::Right)],
+            ]
+            .concat()
+            .into_iter()
+            .chain(over(2, Signal::Down))
+            .chain([Some(Signal::Clear), Some(Signal::Leave)])
+            .collect(),
+        ),
+    );
+
+    let registry = registry_of(&host);
+    assert_eq!(
+        registry
+            .group("work")
+            .expect("a Group Perch holds")
+            .watcher_threshold_percent,
+        None,
+        "the Override is gone rather than copied"
+    );
+    assert_eq!(
+        registry
+            .in_force(&perch::registry::Scope::Group("work".to_string()))
+            .watcher_threshold_percent,
+        80,
+        "and Global's value is what is in force"
+    );
+}
+
+/// At Global the same key does nothing and says why, rather than leaving
+/// somebody wondering whether it silently did something.
+#[test]
+fn the_clear_key_at_global_does_nothing_and_says_why() {
+    let host = machine_with_figures();
+
+    let screen = browse(
+        &host,
+        at_the_config(
+            [vec![Some(Signal::Right)], over(3, Signal::Down)]
+                .concat()
+                .into_iter()
+                .chain([Some(Signal::Clear), Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    let said = said(screen.last_frame());
+    assert!(said.contains("nothing to clear back to"), "{said}");
+    assert_eq!(
+        registry_of(&host).global.settings.watcher_threshold_percent,
+        80,
+        "and nothing was written"
+    );
+}
+
+/// The one place the panel takes typed input, because a name is the only value
+/// with no natural step (ADR 0034).
+#[test]
+fn a_group_is_declared_by_typing_its_name() {
+    let host = machine_with_figures();
+    let sidebar_rows = 3; // Global, Ungrouped, and the row that declares one.
+
+    browse(
+        &host,
+        at_the_config(
+            over(sidebar_rows, Signal::Down)
+                .into_iter()
+                .chain([Some(Signal::Name)])
+                .chain("spare".chars().map(|letter| Some(Signal::Typed(letter))))
+                .chain([Some(Signal::Switch), Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    assert!(
+        registry_of(&host).declared_group("spare").is_some(),
+        "the Group was declared"
+    );
+}
+
+/// A name that collides with an existing Alias or Group is refused as it is
+/// confirmed, so it is found out before anything is written.
+#[test]
+fn a_name_that_collides_is_refused_at_the_prompt_before_anything_is_written() {
+    let host = machine_with_figures();
+    set_alias(&host, "main", EMAIL).0.expect("the Alias is set");
+
+    let screen = browse(
+        &host,
+        at_the_config(
+            over(3, Signal::Down)
+                .into_iter()
+                .chain([Some(Signal::Name)])
+                .chain("main".chars().map(|letter| Some(Signal::Typed(letter))))
+                // The field stays open on a refusal with what was typed still
+                // in it, so leaving takes an Esc and then the key that leaves.
+                .chain([
+                    Some(Signal::Switch),
+                    Some(Signal::Clear),
+                    Some(Signal::Leave),
+                ])
+                .collect(),
+        ),
+    );
+
+    let said = said(screen.last_frame());
+    assert!(said.contains("already an Alias"), "{said}");
+    assert!(
+        registry_of(&host).declared_group("main").is_none(),
+        "and nothing was written"
+    );
+}
+
+/// Naming an Account is done where the rest of the decisions about it are.
+#[test]
+fn an_account_is_given_an_alias_from_the_panel() {
+    let host = machine_with_figures();
+
+    browse(
+        &host,
+        at_the_config(
+            [
+                vec![Some(Signal::Down)],
+                vec![Some(Signal::Right), Some(Signal::Right)],
+                over(7, Signal::Down),
+            ]
+            .concat()
+            .into_iter()
+            .chain([Some(Signal::Name)])
+            .chain("main".chars().map(|letter| Some(Signal::Typed(letter))))
+            .chain([Some(Signal::Switch), Some(Signal::Leave)])
+            .collect(),
+        ),
+    );
+
+    assert_eq!(
+        registry_of(&host).alias_of(EMAIL),
+        Some("main"),
+        "the `alias` row is the seventh on the Ungrouped page"
+    );
+}
+
+/// Taking an Account out of Cycling is the one reversible per-Account decision,
+/// and it is where the rest of the decisions are.
+#[test]
+fn an_account_is_taken_out_of_cycling_from_the_panel() {
+    let host = machine_with_figures();
+
+    browse(
+        &host,
+        at_the_config(
+            [
+                vec![Some(Signal::Down)],
+                vec![Some(Signal::Right), Some(Signal::Right)],
+                over(8, Signal::Down),
+            ]
+            .concat()
+            .into_iter()
+            .chain([Some(Signal::Flip), Some(Signal::Leave)])
+            .collect(),
+        ),
+    );
+
+    assert!(
+        !registry_of(&host)
+            .account(EMAIL)
+            .expect("an Account Perch holds")
+            .enabled,
+        "the `cycling-may-choose` row is the eighth on the Ungrouped page"
+    );
+}
+
+/// Declaring two Accounts interchangeable is a keystroke rather than a command.
+#[test]
+fn an_account_is_moved_into_another_group_from_the_panel() {
+    let host = machine_with_figures();
+    declare_group(&host, "work");
+
+    browse(
+        &host,
+        at_the_config(
+            [
+                vec![Some(Signal::Down)],
+                vec![Some(Signal::Right), Some(Signal::Right)],
+                over(9, Signal::Down),
+            ]
+            .concat()
+            .into_iter()
+            .chain([Some(Signal::Right), Some(Signal::Leave)])
+            .collect(),
+        ),
+    );
+
+    assert_eq!(
+        registry_of(&host)
+            .account(EMAIL)
+            .expect("an Account Perch holds")
+            .group
+            .as_deref(),
+        Some("work"),
+    );
+}
+
+/// An edit that cannot take the lock is refused, said where a failed Refresh is
+/// said, and the row goes back to what was actually written — because a value
+/// that was never written is not one anybody should be reading.
+#[test]
+fn an_edit_another_perch_holds_the_lock_against_is_refused_and_the_row_reverts() {
+    let host = machine_with_figures();
+    let held = perch::registry::lock(&host).expect("the other `perch` has it");
+
+    let screen = browse(
+        &host,
+        at_the_config(
+            [vec![Some(Signal::Right)], over(3, Signal::Down)]
+                .concat()
+                .into_iter()
+                .chain([Some(Signal::Right)])
+                .chain(while_nobody_presses_anything())
+                .chain([Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    let said = said(screen.last_frame());
+    assert!(said.contains("the Perch registry lock"), "{said}");
+    assert!(
+        said.contains("watcher-threshold-percent 80"),
+        "the row is back to what is on disk rather than showing 85, which \
+         nobody wrote: {said}"
+    );
+    drop(held);
+}
+
+/// An edit is refused while a Refresh is out, in the same words a Switch is
+/// refused in — one rule explains both, because it is one lock.
+#[test]
+fn an_edit_is_refused_while_a_refresh_is_out_in_the_words_a_switch_is_refused_in() {
+    let host = machine_with_figures();
+    let mut refresher = FakeRefresher::out_for_ever();
+    let mut screen = FakeScreen::scripted(
+        [
+            Some(Signal::Refresh),
+            Some(Signal::NextTab),
+            Some(Signal::Right),
+        ]
+        .into_iter()
+        .chain(over(2, Signal::Down))
+        .chain([Some(Signal::Flip), Some(Signal::Leave)])
+        .collect(),
+    );
+
+    browse_with(&host, &mut screen, &mut refresher);
+
+    let said = said(screen.last_frame());
+    assert!(
+        said.contains("The Refresh you asked for is still out"),
+        "{said}"
+    );
+    assert!(said.contains("holds Perch's own lock"), "{said}");
+    assert!(
+        !registry_of(&host).global.settings.watcher_may_act,
+        "and nothing was written"
+    );
+}
+
+/// A value the model refuses is refused in the words the command would have
+/// used, because it *is* the command.
+#[test]
+fn the_ungrouped_page_carries_the_setting_that_gates_it() {
+    let host = machine_with_figures();
+
+    let screen = browse(
+        &host,
+        at_the_config(
+            [Some(Signal::Down), Some(Signal::Right), Some(Signal::Right)]
+                .into_iter()
+                .chain([Some(Signal::Flip), Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    let said = said(screen.last_frame());
+    assert!(said.contains("cycle-ungrouped"), "{said}");
+    assert!(
+        registry_of(&host).global.cycle_ungrouped,
+        "the first row of the Ungrouped page is the Setting that decides whether \
+         those Accounts are Cycled among at all (ADR 0017)"
+    );
+    assert!(
+        said.contains("now Cycles among the other ungrouped Accounts"),
+        "in the words `perch config set` would have used: {said}"
+    );
+}
+
+/// The one place the layering is deliberately not uniform, said where somebody
+/// would otherwise read the watcher's Settings and believe something is running
+/// that is not (ADR 0017).
+#[test]
+fn the_ungrouped_page_says_the_watcher_settings_are_not_in_force_until_the_gate_is_open() {
+    let host = machine_with_figures();
+
+    let screen = browse(
+        &host,
+        at_the_config(vec![Some(Signal::Down), Some(Signal::Leave)]),
+    );
+
+    let shut = said(screen.last_frame());
+    assert!(
+        shut.contains("The watcher Settings are not in force here"),
+        "{shut}"
+    );
+    assert!(shut.contains("`cycle-ungrouped` is off"), "{shut}");
+
+    config_set(&host, &["cycle-ungrouped", "true"])
+        .0
+        .expect("the gate opens");
+    let screen = browse(
+        &host,
+        at_the_config(vec![Some(Signal::Down), Some(Signal::Leave)]),
+    );
+
+    assert!(
+        !said(screen.last_frame()).contains("not in force"),
+        "{}",
+        screen.last_frame()
+    );
+}
+
+/// The Scope's Accounts are a column of their own, so who is affected by these
+/// Settings is on the page beside them.
+#[test]
+fn a_scopes_page_lists_the_accounts_that_scope_governs() {
+    let host = machine_with_figures();
+    declare_group(&host, "work");
+    move_to_group(&host, EMAIL, "work").0.expect("it moves");
+
+    // The Ungrouped page: the Account left in no Group, and not the other.
+    let screen = browse(
+        &host,
+        at_the_config(vec![Some(Signal::Down), Some(Signal::Leave)]),
+    );
+    let frame = screen.last_frame();
+    assert!(frame.contains(SECOND_EMAIL), "{frame}");
+    assert!(
+        !frame.lines().skip(1).any(|line| line.contains(EMAIL)),
+        "the Account in a Group is not governed by this Scope\n{frame}"
+    );
+
+    // And the Group's page: the other way round.
+    let screen = browse(
+        &host,
+        at_the_config(
+            over(2, Signal::Down)
+                .into_iter()
+                .chain([Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+    let frame = screen.last_frame();
+    assert!(frame.contains(EMAIL), "{frame}");
+    assert!(
+        !frame
+            .lines()
+            .skip(1)
+            .any(|line| line.contains(SECOND_EMAIL)),
+        "{frame}"
+    );
+}
+
+/// An Account selected in that column shows its facts, which is what says what
+/// you are looking at before you change any of them.
+#[test]
+fn an_account_selected_in_that_column_shows_its_facts() {
+    let host = machine_with_figures();
+    set_alias(&host, "main", EMAIL).0.expect("it is named");
+    quarantine(&host, EMAIL);
+
+    // Wide enough that the values are read rather than cut: what is under test
+    // is which facts are on the page, not how a narrow terminal wraps them.
+    let mut screen = FakeScreen::sized(
+        100,
+        24,
+        at_the_config(vec![
+            Some(Signal::Down),
+            Some(Signal::Right),
+            Some(Signal::Right),
+            Some(Signal::Leave),
+        ]),
+    );
+    browse_with(&host, &mut screen, &mut FakeRefresher::out_for_ever());
+
+    let said = said(screen.last_frame());
+    assert!(said.contains("alias main"), "{said}");
+    assert!(said.contains("cycling-may-choose true"), "{said}");
+    assert!(said.contains("group none"), "{said}");
+    assert!(said.contains("quarantine renewal-rejected"), "{said}");
+}
+
+/// The three questions the `Status` tab answers are on screen as the rows they
+/// are, so the tab can be navigated by eye.
+#[test]
+fn the_status_sidebar_names_the_three_questions_it_answers() {
+    let host = machine_with_figures();
+
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
+
+    let frame = screen.last_frame();
+    for row in ["Overview", "Accounts", "Config"] {
+        assert!(
+            frame
+                .lines()
+                .any(|line| line.trim_start_matches("> ").trim_start().starts_with(row)),
+            "{row} is a row of the sidebar\n{frame}"
+        );
+    }
+}
+
+/// A Setting a Scope Overrides reads as that Scope's own, and one it Inherits
+/// reads as Global's, on the page where a cursor is the way round.
+#[test]
+fn a_group_page_says_how_many_settings_it_declares_of_its_own() {
+    let host = machine_with_a_group();
+    config_set(&host, &["work", "strategy", "soonest-reset"])
+        .0
+        .expect("one Override");
+    config_set(&host, &["work", "watcher-no-return", "false"])
+        .0
+        .expect("and a second");
+
+    let screen = browse(
+        &host,
+        at_the_config(
+            over(2, Signal::Down)
+                .into_iter()
+                .chain([Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    let said = said(screen.last_frame());
+    assert!(said.contains("Overrides 2 Settings"), "{said}");
+    assert!(said.contains("strategy soonest-reset"), "{said}");
+    assert!(
+        said.contains("watcher-threshold-percent 80"),
+        "and the Inherited ones show Global's value: {said}"
+    );
+}
+
+/// A deferred write is held rather than taken while a Refresh is out — that
+/// Refresh holds Perch's own lock, and a write on the frame loop would sit
+/// waiting on it with the screen frozen — and it is held rather than dropped,
+/// so leaving still writes it.
+#[test]
+fn a_deferred_write_waits_out_a_refresh_and_is_not_lost_to_it() {
+    let host = machine_with_figures();
+    let mut refresher = FakeRefresher::out_for_ever();
+    let doing = at_the_config(
+        [vec![Some(Signal::Right)], over(3, Signal::Down)]
+            .concat()
+            .into_iter()
+            .chain([Some(Signal::Right), Some(Signal::Refresh)])
+            .chain(while_nobody_presses_anything())
+            .chain([Some(Signal::Leave)])
+            .collect(),
+    );
+    let scripted = doing.len();
+    let mut screen = FakeScreen::scripted(doing);
+
+    browse_with(&host, &mut screen, &mut refresher);
+
+    assert_eq!(
+        screen.frames().len(),
+        scripted,
+        "the loop went on drawing rather than blocking on the lock the Refresh \
+         is holding"
+    );
+    assert_eq!(
+        registry_of(&host).global.settings.watcher_threshold_percent,
+        85,
+        "and the edit was held rather than dropped, so leaving wrote it"
+    );
+    assert!(
+        refresher.was_waited_for(),
+        "behind the Refresh rather than racing it"
     );
 }

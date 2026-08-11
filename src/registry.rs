@@ -249,21 +249,22 @@ pub fn a_cooldown() -> String {
     format!("a whole number of minutes between 0 and {MAX_WATCHER_COOLDOWN_MINUTES} (seven days)")
 }
 
-/// What a Group carries besides its Accounts: the rules that govern Cycling
-/// within it (ADR 0002), asked and unasked.
+/// Every Setting there is, all of them set: what Global holds, and what any
+/// narrower Scope resolves to once its Overrides have been laid over it
+/// (ADR 0002, amended).
 ///
-/// Four of these are the watcher's policy, and they are a Group's rather than
-/// constants because they are preferences rather than arithmetic: how full is
-/// too full, how often is too often, how much emptier is worth the move, and
+/// Four of these are the watcher's policy, and they are configuration rather
+/// than constants because they are preferences rather than arithmetic: how full
+/// is too full, how often is too often, how much emptier is worth the move, and
 /// whether coming straight back is allowed (ADR 0013). The interval the loop
 /// Refreshes at is not among them — that one is derived from Anthropic's
 /// allowance rather than from anyone's taste, and lives in
 /// [`crate::watch::REFRESH_INTERVAL_MILLIS`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct GroupConfig {
+pub struct Settings {
     pub strategy: Strategy,
-    /// Whether the watcher may Switch within this Group unattended. Off unless
+    /// Whether the watcher may Switch within this Scope unattended. Off unless
     /// the user says otherwise: nothing changes underneath someone because they
     /// did not say it could (ADR 0002).
     pub watcher_may_act: bool,
@@ -279,9 +280,9 @@ pub struct GroupConfig {
     pub watcher_no_return: bool,
 }
 
-impl Default for GroupConfig {
+impl Default for Settings {
     fn default() -> Self {
-        GroupConfig {
+        Settings {
             strategy: Strategy::default(),
             watcher_may_act: false,
             watcher_threshold_percent: DEFAULT_WATCHER_THRESHOLD_PERCENT,
@@ -292,7 +293,7 @@ impl Default for GroupConfig {
     }
 }
 
-impl GroupConfig {
+impl Settings {
     /// Refuses configuration that cannot mean what it says. Serde already
     /// refuses a strategy Perch does not implement, and a `true`/`false` that
     /// is neither; what is left is the ranges the numbers have to be in.
@@ -300,28 +301,114 @@ impl GroupConfig {
     /// Every refusal names the numbers that would have been accepted, because
     /// the script that mistyped one is the reader, and being told only that it
     /// was wrong leaves it to guess twice.
-    pub fn validate(&self, group: &str) -> Result<()> {
-        if self.watcher_threshold_percent > 100 {
+    pub fn validate(&self, scope: &Scope) -> Result<()> {
+        Overrides::from(self.clone()).validate(scope)
+    }
+}
+
+/// What one narrower Scope declares for itself: an Override per Setting it
+/// wants different, and nothing at all for the ones it Inherits.
+///
+/// Absent is Inherit, and Inherit is a state rather than an absence — a Scope
+/// holding no Override tracks Global as Global changes, which is what
+/// distinguishes it from an Override that happens to equal Global's value
+/// today. The two look identical until the display says which, so every field
+/// here is an `Option` rather than a value with a flag beside it: there is no
+/// way to spell "Overridden, but with nothing in it".
+///
+/// Exactly one layer deep. An Account carries none of these, because every
+/// Setting there is describes how Perch chooses *between* Accounts and a rule
+/// for choosing has nothing to say to a set of one.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Overrides {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy: Option<Strategy>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watcher_may_act: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watcher_threshold_percent: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watcher_cooldown_minutes: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watcher_margin_percent: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watcher_no_return: Option<bool>,
+}
+
+impl From<Settings> for Overrides {
+    /// Every Setting Overridden at once, for the one caller that has values
+    /// rather than choices: checking Global's own numbers against the same
+    /// ranges a Scope's Overrides are checked against.
+    fn from(settings: Settings) -> Overrides {
+        Overrides {
+            strategy: Some(settings.strategy),
+            watcher_may_act: Some(settings.watcher_may_act),
+            watcher_threshold_percent: Some(settings.watcher_threshold_percent),
+            watcher_cooldown_minutes: Some(settings.watcher_cooldown_minutes),
+            watcher_margin_percent: Some(settings.watcher_margin_percent),
+            watcher_no_return: Some(settings.watcher_no_return),
+        }
+    }
+}
+
+impl Overrides {
+    /// Whether this Scope declares nothing of its own — Inheriting every
+    /// Setting there is.
+    pub fn is_empty(&self) -> bool {
+        *self == Overrides::default()
+    }
+
+    /// Global's values with this Scope's Overrides laid over them: the Settings
+    /// actually in force.
+    pub fn over(&self, global: &Settings) -> Settings {
+        Settings {
+            strategy: self.strategy.unwrap_or(global.strategy),
+            watcher_may_act: self.watcher_may_act.unwrap_or(global.watcher_may_act),
+            watcher_threshold_percent: self
+                .watcher_threshold_percent
+                .unwrap_or(global.watcher_threshold_percent),
+            watcher_cooldown_minutes: self
+                .watcher_cooldown_minutes
+                .unwrap_or(global.watcher_cooldown_minutes),
+            watcher_margin_percent: self
+                .watcher_margin_percent
+                .unwrap_or(global.watcher_margin_percent),
+            watcher_no_return: self.watcher_no_return.unwrap_or(global.watcher_no_return),
+        }
+    }
+
+    /// The same ranges [`Settings::validate`] states, asked of the values this
+    /// Scope actually declares. A Setting it Inherits is Global's to be right
+    /// about, and is checked there.
+    pub fn validate(&self, scope: &Scope) -> Result<()> {
+        if self
+            .watcher_threshold_percent
+            .is_some_and(|held| held > 100)
+        {
             return Err(out_of_range(
-                group,
+                scope,
                 "watcher-threshold-percent",
-                self.watcher_threshold_percent,
+                self.watcher_threshold_percent.expect("just read"),
                 A_PERCENTAGE,
             ));
         }
-        if self.watcher_margin_percent > 100 {
+        if self.watcher_margin_percent.is_some_and(|held| held > 100) {
             return Err(out_of_range(
-                group,
+                scope,
                 "watcher-margin-percent",
-                self.watcher_margin_percent,
+                self.watcher_margin_percent.expect("just read"),
                 A_PERCENTAGE,
             ));
         }
-        if self.watcher_cooldown_minutes > MAX_WATCHER_COOLDOWN_MINUTES {
+        if self
+            .watcher_cooldown_minutes
+            .is_some_and(|held| held > MAX_WATCHER_COOLDOWN_MINUTES)
+        {
             return Err(out_of_range(
-                group,
+                scope,
                 "watcher-cooldown-minutes",
-                self.watcher_cooldown_minutes,
+                self.watcher_cooldown_minutes.expect("just read"),
                 &a_cooldown(),
             ));
         }
@@ -331,14 +418,89 @@ impl GroupConfig {
 
 /// A number a setting cannot hold, refused with the ones it can.
 fn out_of_range(
-    group: &str,
+    scope: &Scope,
     key: &str,
     held: impl std::fmt::Display,
     accepted: &str,
 ) -> PerchError {
     PerchError::Invalid(format!(
-        "Group `{group}` has a `{key}` of {held}, and it takes {accepted}."
+        "{} has a `{key}` of {held}, and it takes {accepted}.",
+        scope.described(),
     ))
+}
+
+/// The set of Accounts a Setting governs: Global, the Ungrouped Accounts, or
+/// one Group.
+///
+/// The only levels at which a Setting means anything. Deliberately not
+/// [`crate::cycle::Scope`], which is the narrower idea a Cycle is taken within
+/// and must never be handed a "every Account there is" — sharing the type would
+/// put Global within reach of the ranking, which is the one thing ADR 0002 is
+/// about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Scope {
+    /// Every Account there is, and the Config every other Scope falls back to.
+    Global,
+    /// The Accounts in no Group, taken as one Scope (ADR 0017, amended). Not a
+    /// Group and never one: a Group is a declaration somebody made, and this is
+    /// the absence of one.
+    Ungrouped,
+    /// One Group, named as it was declared.
+    Group(String),
+}
+
+impl Scope {
+    /// What the Scope is called on screen and in a refusal — the words
+    /// `CONTEXT.md` gives them.
+    pub fn title(&self) -> &str {
+        match self {
+            Scope::Global => "Global",
+            Scope::Ungrouped => "Ungrouped",
+            Scope::Group(name) => name,
+        }
+    }
+
+    /// The word that addresses this Scope on a command line, or `None` for
+    /// Global — which is addressed by naming no Scope at all, because that is
+    /// what makes the number of words the layer a value belongs to.
+    pub fn word(&self) -> Option<&str> {
+        match self {
+            Scope::Global => None,
+            Scope::Ungrouped => Some(UNGROUPED),
+            Scope::Group(name) => Some(name),
+        }
+    }
+
+    /// The Scope as an adverbial phrase: "a Cycle {} prefers…", "Nothing {} is
+    /// worth Switching to". Said once here rather than per surface, because
+    /// three spellings of "among the Accounts in no Group" is how two of them
+    /// come to name the same set differently.
+    pub fn within(&self) -> String {
+        match self {
+            Scope::Global => "in any Scope that Inherits this".to_string(),
+            Scope::Ungrouped => "among the Accounts in no Group".to_string(),
+            Scope::Group(name) => format!("within Group `{name}`"),
+        }
+    }
+
+    /// The Scope as the subject of a sentence about what it holds.
+    pub fn described(&self) -> String {
+        match self {
+            Scope::Global => "Global".to_string(),
+            Scope::Ungrouped => "The Ungrouped Scope".to_string(),
+            Scope::Group(name) => format!("Group `{name}`"),
+        }
+    }
+}
+
+/// The word that addresses the Accounts in no Group as a Scope, on `perch
+/// config`. A Group cannot be called this, because then the Scope would be
+/// unreachable — the same rule [`NO_GROUP`] carries for `perch group move`.
+pub const UNGROUPED: &str = "ungrouped";
+
+/// Whether a name is the one that means the Ungrouped Scope.
+pub fn means_ungrouped(name: &str) -> bool {
+    same_name(name, UNGROUPED)
 }
 
 /// The Switch a scheduled Check made within a Group, kept so the next one can
@@ -362,14 +524,13 @@ pub struct Checked {
     pub switched_off: String,
 }
 
-/// The configuration that belongs to no Group, because there is no Group for
-/// it to belong to (ADR 0017).
+/// What Global holds: every Setting, as the value that applies until something
+/// narrower is said, and the one Setting that has no narrower form.
 ///
-/// An ungrouped Account has nothing carrying its settings, and modelling the
-/// Accounts in no Group as a Group with a reserved name would make a Group mean
-/// two contradictory things — a declaration the user made, and one Perch made
-/// for them. So the one setting about those Accounts is global.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Global's own values are always set. There is nothing above Global to Inherit
+/// from, so clearing here is not a state that exists — which is why this is
+/// [`Settings`] rather than [`Overrides`].
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GlobalConfig {
     /// Whether bare `perch switch` may Cycle among the Accounts in no Group.
@@ -379,7 +540,12 @@ pub struct GlobalConfig {
     /// weaker form of one. Cycling freely here would move someone from their
     /// work subscription onto their personal one without their ever having said
     /// the two were substitutable.
+    ///
+    /// Global's alone, with no per-Scope form, because the Accounts it governs
+    /// have no Group to carry one (ADR 0017).
     pub cycle_ungrouped: bool,
+    /// The defaults every other Scope falls back to.
+    pub settings: Settings,
 }
 
 /// The word that addresses "no Group at all" on `perch group move`, and the
@@ -480,6 +646,15 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
             "`{name}` means no Group at all on `perch group move`, so it cannot also name one."
         )));
     }
+    // The other word that already addresses something. `perch config` reads
+    // which Scope is meant off the words that were typed, so a Group called
+    // `ungrouped` would be a Group no `perch config set` could reach — the
+    // Ungrouped Scope would answer to the name first.
+    if means_ungrouped(name) {
+        return Err(PerchError::Invalid(format!(
+            "`{name}` addresses the Accounts in no Group on `perch config`, so it cannot also name a Group."
+        )));
+    }
     if name.contains('@') {
         return Err(PerchError::Invalid(format!(
             "`{name}` looks like an email address. {} have to be tellable from one, because a Target that could be either has no single answer.",
@@ -500,12 +675,18 @@ pub struct Registry {
     /// Alias to Account email. Empty until aliases land.
     #[serde(default)]
     pub aliases: BTreeMap<String, String>,
-    /// The Groups the user has declared, with what each one carries. A Group
-    /// exists here even when it holds no Accounts: it is a statement the user
-    /// made, not a summary of where the Accounts happen to be.
+    /// The Groups the user has declared, with the Overrides each one holds. A
+    /// Group exists here even when it holds no Accounts: it is a statement the
+    /// user made, not a summary of where the Accounts happen to be — and it
+    /// exists here holding nothing, which is a Group that Inherits everything.
     #[serde(default)]
-    pub groups: BTreeMap<String, GroupConfig>,
-    /// The configuration that hangs off no Group.
+    pub groups: BTreeMap<String, Overrides>,
+    /// What the Accounts in no Group declare for themselves, taken as one Scope
+    /// (ADR 0017, amended). Not a Group and never one; it is here rather than
+    /// under a reserved key in `groups` so that nothing can walk it as one.
+    #[serde(default, skip_serializing_if = "Overrides::is_empty")]
+    pub ungrouped: Overrides,
+    /// The Config every other Scope falls back to.
     #[serde(default)]
     pub global: GlobalConfig,
     /// What the last scheduled Check did in each Group. Written by
@@ -523,6 +704,7 @@ impl Default for Registry {
             accounts: Vec::new(),
             aliases: BTreeMap::new(),
             groups: BTreeMap::new(),
+            ungrouped: Overrides::default(),
             global: GlobalConfig::default(),
             checks: BTreeMap::new(),
         }
@@ -581,8 +763,62 @@ impl Registry {
         self.groups.keys().map(String::as_str)
     }
 
-    pub fn group(&self, name: &str) -> Option<&GroupConfig> {
+    pub fn group(&self, name: &str) -> Option<&Overrides> {
         self.groups.get(name)
+    }
+
+    /// Every Scope a Setting can be said at, in the order they are offered:
+    /// Global first because it is what the rest fall back to, then the
+    /// Ungrouped Accounts, then each Group as it was declared.
+    pub fn scopes(&self) -> Vec<Scope> {
+        let mut every = vec![Scope::Global, Scope::Ungrouped];
+        every.extend(
+            self.group_names()
+                .map(|name| Scope::Group(name.to_string())),
+        );
+        every
+    }
+
+    /// What a Scope declares for itself, or `None` for Global — which declares
+    /// nothing, because it holds values rather than Overrides, and for a Group
+    /// Perch does not hold.
+    pub fn overrides(&self, scope: &Scope) -> Option<&Overrides> {
+        match scope {
+            Scope::Global => None,
+            Scope::Ungrouped => Some(&self.ungrouped),
+            Scope::Group(name) => self.groups.get(name),
+        }
+    }
+
+    /// The same, to write through. A Group Perch does not hold has nothing to
+    /// write to: declaring one is `declare_group`'s.
+    pub fn overrides_mut(&mut self, scope: &Scope) -> Option<&mut Overrides> {
+        match scope {
+            Scope::Global => None,
+            Scope::Ungrouped => Some(&mut self.ungrouped),
+            Scope::Group(name) => self.groups.get_mut(name),
+        }
+    }
+
+    /// The Settings actually in force for a Scope: Global's, with whatever that
+    /// Scope Overrides laid over them (ADR 0002, amended).
+    ///
+    /// Exactly two layers deep, so this is one lookup and one lay-over rather
+    /// than a walk up a chain — there is no chain.
+    pub fn in_force(&self, scope: &Scope) -> Settings {
+        match self.overrides(scope) {
+            Some(overrides) => overrides.over(&self.global.settings),
+            None => self.global.settings.clone(),
+        }
+    }
+
+    /// The Scope an Account's Settings come from: its Group, or the Ungrouped
+    /// Accounts.
+    pub fn scope_of(&self, account: &Account) -> Scope {
+        match &account.group {
+            Some(name) => Scope::Group(name.clone()),
+            None => Scope::Ungrouped,
+        }
     }
 
     /// The Accounts in a Group, in the order they were added.
@@ -623,7 +859,10 @@ impl Registry {
             )));
         }
         self.refuse_taken_names(None, Some(name))?;
-        self.groups.insert(name.to_string(), GroupConfig::default());
+        // Holding nothing, which is a Group that Inherits every Setting there
+        // is. A freshly declared Group tracks Global rather than copying it, so
+        // a threshold set at Global afterwards reaches it too.
+        self.groups.insert(name.to_string(), Overrides::default());
         Ok(())
     }
 
@@ -1100,8 +1339,26 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
 /// with no working command on it and no `perch purge` either. One function, so
 /// what an Import will accept and what a load will accept cannot differ.
 pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
-    for (name, config) in &registry.groups {
-        config.validate(name).map_err(|refusal| {
+    // Global's own values as well as every Scope's Overrides. Global is where a
+    // Setting nobody has Overridden is read from, so a range it breaks is one
+    // every Scope in the registry inherits — the widest way in, and the one
+    // that was not being checked at all while Global held a single bool.
+    let declared = std::iter::once((
+        Scope::Global,
+        Overrides::from(registry.global.settings.clone()),
+    ))
+    .chain(std::iter::once((
+        Scope::Ungrouped,
+        registry.ungrouped.clone(),
+    )))
+    .chain(
+        registry
+            .groups
+            .iter()
+            .map(|(name, held)| (Scope::Group(name.clone()), held.clone())),
+    );
+    for (scope, held) in declared {
+        held.validate(&scope).map_err(|refusal| {
             refusal.with_note(&format!(
                 "It is in {}, and every Perch command reads that file — including \
                  the one that would set it. Edit the value there.",
@@ -1427,7 +1684,7 @@ fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
             }
             Some(_) => {}
             None => {
-                registry.groups.insert(name, GroupConfig::default());
+                registry.groups.insert(name, Overrides::default());
             }
         }
     }
@@ -1824,7 +2081,7 @@ mod tests {
     fn a_group_carries_its_configuration_through_json() {
         let mut registry = Registry::default();
         registry.declare_group("work").unwrap();
-        registry.groups.get_mut("work").unwrap().strategy = Strategy::SoonestReset;
+        registry.groups.get_mut("work").unwrap().strategy = Some(Strategy::SoonestReset);
 
         let json = serde_json::to_string(&registry).unwrap();
         assert!(json.contains("soonest-reset"), "{json}");
@@ -1844,13 +2101,58 @@ mod tests {
         );
     }
 
+    /// A freshly declared Group declares nothing of its own, and what it
+    /// resolves to is Global's — which is what makes a threshold set once at
+    /// Global reach it too (ADR 0002, amended).
     #[test]
-    fn a_new_group_leaves_the_watcher_alone_until_asked() {
-        let config = GroupConfig::default();
-        assert!(!config.watcher_may_act);
-        assert_eq!(config.strategy, Strategy::MostHeadroom);
+    fn a_new_group_inherits_everything_and_leaves_the_watcher_alone() {
+        let mut registry = Registry::default();
+        registry.declare_group("work").unwrap();
+        let work = Scope::Group("work".to_string());
+
+        assert!(registry.group("work").expect("declared").is_empty());
+
+        let settings = registry.in_force(&work);
+        assert!(!settings.watcher_may_act);
+        assert_eq!(settings.strategy, Strategy::MostHeadroom);
         assert_eq!(
-            config.watcher_threshold_percent,
+            settings.watcher_threshold_percent,
+            DEFAULT_WATCHER_THRESHOLD_PERCENT
+        );
+
+        registry.global.settings.watcher_threshold_percent = 55;
+        assert_eq!(
+            registry.in_force(&work).watcher_threshold_percent,
+            55,
+            "Inherit is a state and not an absence: it follows Global as Global \
+             changes"
+        );
+        assert_eq!(
+            registry
+                .in_force(&Scope::Ungrouped)
+                .watcher_threshold_percent,
+            55,
+            "and the Accounts in no Group are a Scope that follows it too"
+        );
+    }
+
+    /// An Override that happens to equal Global's value is not an Inheritance:
+    /// one tracks and the other does not, and the display says which.
+    #[test]
+    fn an_override_equal_to_globals_value_still_stops_following_it() {
+        let mut registry = Registry::default();
+        registry.declare_group("work").unwrap();
+        let work = Scope::Group("work".to_string());
+        registry
+            .groups
+            .get_mut("work")
+            .unwrap()
+            .watcher_threshold_percent = Some(DEFAULT_WATCHER_THRESHOLD_PERCENT);
+
+        registry.global.settings.watcher_threshold_percent = 55;
+
+        assert_eq!(
+            registry.in_force(&work).watcher_threshold_percent,
             DEFAULT_WATCHER_THRESHOLD_PERCENT
         );
     }
@@ -1860,7 +2162,7 @@ mod tests {
     /// README and a test that reads the constant back cannot notice it change.
     #[test]
     fn the_watchers_policy_has_the_defaults_it_is_documented_with() {
-        let config = GroupConfig::default();
+        let config = Settings::default();
         assert_eq!(config.watcher_threshold_percent, 80);
         assert_eq!(config.watcher_cooldown_minutes, 15);
         assert_eq!(config.watcher_margin_percent, 10);
@@ -1876,35 +2178,36 @@ mod tests {
     /// readers have the same next question.
     #[test]
     fn a_number_out_of_range_is_refused_with_the_range() {
-        let cases: [(GroupConfig, &str, &str); 3] = [
+        let cases: [(Overrides, &str, &str); 3] = [
             (
-                GroupConfig {
-                    watcher_threshold_percent: 101,
-                    ..GroupConfig::default()
+                Overrides {
+                    watcher_threshold_percent: Some(101),
+                    ..Overrides::default()
                 },
                 "watcher-threshold-percent",
                 "100",
             ),
             (
-                GroupConfig {
-                    watcher_margin_percent: 101,
-                    ..GroupConfig::default()
+                Overrides {
+                    watcher_margin_percent: Some(101),
+                    ..Overrides::default()
                 },
                 "watcher-margin-percent",
                 "100",
             ),
             (
-                GroupConfig {
-                    watcher_cooldown_minutes: MAX_WATCHER_COOLDOWN_MINUTES + 1,
-                    ..GroupConfig::default()
+                Overrides {
+                    watcher_cooldown_minutes: Some(MAX_WATCHER_COOLDOWN_MINUTES + 1),
+                    ..Overrides::default()
                 },
                 "watcher-cooldown-minutes",
                 "10080",
             ),
         ];
 
+        let work = Scope::Group("work".to_string());
         for (config, key, accepted) in cases {
-            let refusal = config.validate("work").expect_err("out of range");
+            let refusal = config.validate(&work).expect_err("out of range");
             let message = refusal.to_string();
             assert_eq!(refusal.exit_code(), crate::error::EXIT_INVALID, "{message}");
             assert!(message.contains("work"), "{message}");
@@ -1916,7 +2219,8 @@ mod tests {
             );
         }
 
-        assert!(GroupConfig::default().validate("work").is_ok());
+        assert!(Overrides::default().validate(&work).is_ok());
+        assert!(Settings::default().validate(&Scope::Global).is_ok());
     }
 
     /// A margin at or over the threshold is not out of range — it is a Group
@@ -1925,12 +2229,12 @@ mod tests {
     /// order two `set`s are typed in matter.
     #[test]
     fn a_margin_larger_than_the_threshold_is_a_strict_policy_rather_than_a_refusal() {
-        let config = GroupConfig {
-            watcher_threshold_percent: 50,
-            watcher_margin_percent: 90,
-            ..GroupConfig::default()
+        let config = Overrides {
+            watcher_threshold_percent: Some(50),
+            watcher_margin_percent: Some(90),
+            ..Overrides::default()
         };
-        assert!(config.validate("work").is_ok());
+        assert!(config.validate(&Scope::Group("work".to_string())).is_ok());
     }
 
     #[test]
@@ -2107,7 +2411,7 @@ mod tests {
         );
         assert_eq!(
             registry.group("work"),
-            Some(&GroupConfig::default()),
+            Some(&Overrides::default()),
             "carrying what a freshly declared Group carries"
         );
         assert_eq!(registry.accounts_in("work").len(), 1);
@@ -2140,7 +2444,7 @@ mod tests {
         );
         assert_eq!(
             registry.group("work").unwrap().watcher_threshold_percent,
-            65,
+            Some(65),
             "the declared Group keeps the policy it was declared with"
         );
     }

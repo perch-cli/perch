@@ -191,32 +191,147 @@ fn a_check_on_a_quarantined_account_holds_and_names_the_repair() {
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
 }
 
-/// The permission the watcher needs is a Group's to give, and an ungrouped
-/// Account has no Group to give it. A check behaves exactly as the loop does,
-/// including saying both ways to fix it.
+/// Nothing has said the ungrouped Accounts are interchangeable at all, so there
+/// is nowhere for the watcher to Switch to and it exits eighteen — naming both
+/// declarations, and the narrower statement a Group would be.
 #[test]
-fn a_check_on_an_ungrouped_account_exits_eighteen_and_names_both_fixes() {
+fn a_check_on_an_ungrouped_account_exits_eighteen_and_names_both_declarations() {
     let host = checked(&[40.0], &[5.0]);
     move_to_group(&host, EMAIL, "none")
         .0
         .expect("the Account leaves the Group");
+
+    let (result, _) = run_watch_once(&host);
+
+    let refusal = result.expect_err("there is nowhere here it may act");
+    assert_eq!(refusal.exit_code(), EXIT_NOT_INTERCHANGEABLE);
+    let said = refusal.to_string();
+    assert!(said.contains("cycle-ungrouped"), "{said}");
+    assert!(said.contains("watcher-may-act"), "{said}");
+    assert!(said.contains("perch group move"), "{said}");
+    assert!(
+        host.sent_to(USAGE_URL).is_empty(),
+        "and it read nothing on the way to deciding it may do nothing"
+    );
+}
+
+/// **ADR 0017, amended, in executable form.** `watcher-may-act` deliberately
+/// does not Inherit into the Ungrouped Scope. Somebody turning the watcher on
+/// at Global means "yes, Cycle my work Groups unattended", and Inheriting that
+/// straight through would authorise moving them off a work Account onto their
+/// personal subscription — precisely the failure Groups exist to prevent,
+/// arriving by a route nobody typed.
+///
+/// This is the case most likely to be "fixed" by somebody tidying the layering
+/// into uniformity, which is why it names the ADR.
+#[test]
+fn the_watcher_turned_on_at_global_leaves_ungrouped_accounts_alone() {
+    let host = checked(&[99.0], &[1.0]);
+    move_to_group(&host, EMAIL, "none")
+        .0
+        .expect("the Account leaves the Group");
+    move_to_group(&host, SECOND_EMAIL, "none")
+        .0
+        .expect("and so does the other");
+    config_set(&host, &["watcher-may-act", "true"])
+        .0
+        .expect("a statement about the Groups this person runs");
+
+    let (result, _) = run_watch_once(&host);
+
+    let refusal = result.expect_err("that yes was not about these Accounts");
+    assert_eq!(refusal.exit_code(), EXIT_NOT_INTERCHANGEABLE);
+    assert!(
+        refusal.to_string().contains("cycle-ungrouped"),
+        "the second yes is named: {refusal}"
+    );
+    assert_eq!(
+        active(&host).as_deref(),
+        Some(EMAIL),
+        "and nothing moved underneath them, at 99% used and an empty Account \
+         beside it (ADR 0017)"
+    );
+    assert!(host.sent_to(USAGE_URL).is_empty());
+}
+
+/// The first yes on its own is not enough either. Two independent declarations
+/// before anything moves unasked: one saying these Accounts are interchangeable
+/// at all, one saying something may act on them.
+#[test]
+fn a_check_on_ungrouped_accounts_declared_interchangeable_still_needs_the_watcher_let_in() {
+    let host = checked(&[99.0], &[1.0]);
+    for email in [EMAIL, SECOND_EMAIL] {
+        move_to_group(&host, email, "none").0.expect("it leaves");
+    }
     config_set(&host, &["cycle-ungrouped", "true"])
         .0
         .expect("ungrouped Accounts are interchangeable");
 
     let (result, _) = run_watch_once(&host);
 
-    let refusal = result.expect_err("there is nothing here it may act on");
-    assert_eq!(refusal.exit_code(), EXIT_NOT_INTERCHANGEABLE);
+    let refusal = result.expect_err("nothing has let the watcher in");
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
     assert!(
-        refusal.to_string().contains("perch group move"),
-        "{refusal}"
+        refusal
+            .to_string()
+            .contains("perch config set ungrouped watcher-may-act true"),
+        "and the Scope is addressed the way every other one is: {refusal}"
     );
-    assert!(refusal.to_string().contains("watcher-may-act"), "{refusal}");
-    assert!(
-        host.sent_to(USAGE_URL).is_empty(),
-        "and it read nothing on the way to deciding it may do nothing"
+    assert_eq!(active(&host).as_deref(), Some(EMAIL));
+}
+
+/// And with both, the Ungrouped Scope is served like any other — which is the
+/// point of its being a Scope rather than a fallthrough.
+#[test]
+fn a_check_switches_among_ungrouped_accounts_once_both_declarations_are_made() {
+    let host = checked(&[99.0], &[1.0]);
+    for email in [EMAIL, SECOND_EMAIL] {
+        move_to_group(&host, email, "none").0.expect("it leaves");
+    }
+    config_set(&host, &["cycle-ungrouped", "true"])
+        .0
+        .expect("they are interchangeable");
+    config_set(&host, &["ungrouped", "watcher-may-act", "true"])
+        .0
+        .expect("and the watcher may act on them");
+
+    let (result, printed) = run_watch_once(&host);
+
+    assert_eq!(
+        result.expect("a check that switched is not a failure"),
+        EXIT_OK
     );
+    assert!(decision(&printed).contains("switched"), "{printed}");
+    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
+}
+
+/// The cooldown a check leaves behind is kept per Scope, so the Ungrouped
+/// Scope paces itself the way a Group does — and a Group cannot be named
+/// `ungrouped`, so the two can never pace each other.
+#[test]
+fn a_check_among_ungrouped_accounts_paces_the_next_one() {
+    // The Account being watched fills up, the check moves off it, and the one
+    // it moved to fills up in turn — the trace that would ping-pong if nothing
+    // paced it across invocations.
+    let host = checked(&[99.0, 20.0], &[1.0, 90.0]);
+    for email in [EMAIL, SECOND_EMAIL] {
+        move_to_group(&host, email, "none").0.expect("it leaves");
+    }
+    config_set(&host, &["cycle-ungrouped", "true"]).0.unwrap();
+    config_set(&host, &["ungrouped", "watcher-may-act", "true"])
+        .0
+        .unwrap();
+
+    run_watch_once(&host).0.expect("the first one switches");
+    host.set_now(host.now() + Duration::minutes(5));
+    let (result, printed) = run_watch_once(&host);
+
+    assert_eq!(
+        result.expect("cooling is a decision rather than a failure"),
+        EXIT_NOTHING_TO_DO
+    );
+    assert!(decision(&printed).contains("cooling"), "{printed}");
+    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
 }
 
 /// The other half of the same rule: a Group that has not said the watcher may

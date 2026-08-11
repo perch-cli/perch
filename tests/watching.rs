@@ -881,9 +881,9 @@ fn the_decision_log_is_standard_output_and_no_file_is_written() {
 }
 
 /// `cycle-ungrouped` lets a bare `perch switch` Cycle among the Accounts in no
-/// Group. It grants the watcher nothing: permission to Switch when you ask and
-/// permission to Switch while nobody is looking are different grants, and the
-/// second has no owner when there is no Group to carry it.
+/// Group. It grants the watcher nothing on its own: permission to Switch when
+/// you ask and permission to Switch while nobody is looking are different
+/// grants, and the second one has to be given here too.
 #[test]
 fn an_account_in_no_group_is_not_watched_however_freely_it_may_be_cycled() {
     let host = watching(&[40.0], 5.0);
@@ -897,15 +897,82 @@ fn an_account_in_no_group_is_not_watched_however_freely_it_may_be_cycled() {
     let (result, _) = run_watch(&host);
 
     let refusal = result.expect_err("there is nothing here it may act on");
-    assert_eq!(refusal.exit_code(), EXIT_NOT_INTERCHANGEABLE);
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
     assert!(
-        refusal.to_string().contains("perch group move"),
-        "{refusal}"
+        refusal
+            .to_string()
+            .contains("perch config set ungrouped watcher-may-act true"),
+        "the Scope is addressed the way every other one is: {refusal}"
     );
-    assert!(refusal.to_string().contains("watcher-may-act"), "{refusal}");
     assert!(
         host.sent_to(USAGE_URL).is_empty(),
         "and it exits rather than idling forever having decided nothing"
+    );
+}
+
+/// **ADR 0017, amended.** `watcher-may-act` deliberately does not Inherit into
+/// the Ungrouped Scope: it is gated behind `cycle-ungrouped`, so the watcher
+/// acts on ungrouped Accounts only where both are on.
+///
+/// A Global "yes" is somebody saying "Cycle my work Groups unattended", and
+/// Inheriting it straight through would authorise moving them onto their
+/// personal subscription — the failure Groups exist to prevent, arriving by a
+/// route nobody typed. This is the case most likely to be "fixed" by somebody
+/// tidying the layering into uniformity, which is why it names the ADR.
+#[test]
+fn a_watcher_turned_on_at_global_leaves_ungrouped_accounts_alone() {
+    let host = watching(&[99.0], 1.0);
+    for email in [EMAIL, SECOND_EMAIL] {
+        move_to_group(&host, email, "none")
+            .0
+            .expect("the Account leaves the Group");
+    }
+    config_set(&host, &["watcher-may-act", "true"])
+        .0
+        .expect("a statement about the Groups this person runs");
+
+    let (result, _) = run_watch(&host);
+
+    let refusal = result.expect_err("that yes was not about these Accounts");
+    assert_eq!(refusal.exit_code(), EXIT_NOT_INTERCHANGEABLE);
+    assert!(
+        refusal.to_string().contains("cycle-ungrouped"),
+        "the declaration that is still missing is named: {refusal}"
+    );
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(EMAIL),
+        "and nothing moved underneath them, at 99% used with an empty Account \
+         beside it (ADR 0017)"
+    );
+    assert!(host.sent_to(USAGE_URL).is_empty());
+}
+
+/// With both declarations made, the Ungrouped Scope is watched like any other —
+/// which is the point of its being a Scope rather than a fallthrough.
+#[test]
+fn a_watcher_acts_among_ungrouped_accounts_once_both_declarations_are_made() {
+    let host = watching(&[99.0], 1.0);
+    for email in [EMAIL, SECOND_EMAIL] {
+        move_to_group(&host, email, "none")
+            .0
+            .expect("the Account leaves the Group");
+    }
+    config_set(&host, &["cycle-ungrouped", "true"])
+        .0
+        .expect("they are interchangeable");
+    config_set(&host, &["ungrouped", "watcher-may-act", "true"])
+        .0
+        .expect("and the watcher may act on them");
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a watcher that switched is not a failure");
+    assert!(printed.contains("switched"), "{printed}");
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(SECOND_EMAIL),
+        "{printed}"
     );
 }
 

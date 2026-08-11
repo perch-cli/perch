@@ -116,7 +116,7 @@ fn an_import_restores_every_account_credential_alias_group_and_rule() {
     );
     assert_eq!(
         registry.group("work").unwrap().watcher_threshold_percent,
-        65,
+        Some(65),
         "a Group carries its policy, so a restore does not arrive with the defaults"
     );
 

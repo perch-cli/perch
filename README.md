@@ -374,17 +374,20 @@ would be nothing for it to do:
 
 ```
 $ perch watch
-you@example.com is in no Group, so nothing carries permission for the watcher to act on it. Nothing is being watched.
-Put it in a Group with `perch group move you@example.com <group>`, then let the watcher act on that Group with `perch config set <group> watcher-may-act true`.   # exit 18
+you@example.com is in no Group, and nothing has said the Accounts in no Group are interchangeable at all — so there is nowhere for the watcher to Switch it to. Nothing is being watched.
+`perch config set cycle-ungrouped true` says they are, and `perch config set ungrouped watcher-may-act true` then says the watcher may act on them. [...]   # exit 18
 
 $ perch watch
-Group `work` has not been told the watcher may act on it, so nothing is being watched. A Group only ever changes underneath you because you said it could.
+Group `work` has not been told the watcher may act on it, so nothing is being watched. Nothing only ever changes underneath you because you said it could.
 `perch config set work watcher-may-act true` says it may.   # exit 14
 ```
 
-`cycle-ungrouped` grants the watcher nothing. Permission to Switch **when you
-ask** and permission to Switch **while nobody is looking** are different grants,
-and the second has no owner when there is no Group to carry it.
+`cycle-ungrouped` grants the watcher nothing on its own, and neither does a
+`watcher-may-act` set at Global. Permission to Switch **when you ask** and
+permission to Switch **while nobody is looking** are different grants, and among
+the Accounts in no Group both have to be given: a Global "yes" is a statement
+about your Groups, and Inheriting it there would authorise moving you off a work
+Account onto your personal subscription (ADR 0017).
 
 Both permissions are read every round rather than only at the first, because
 either can be taken back while the watcher is sleeping. A `perch switch` in
@@ -883,152 +886,220 @@ can be pointed at the other.
 
 ## Choosing by eye
 
-`perch tui` opens the interactive view: the Accounts and their Utilization, in
-two tabs.
+`perch tui` opens the interactive view: two tabs, one for where you are and one
+for what governs you.
+
+`Status` answers **where am I** — the Account Claude Code is about to run as, the
+Accounts you could go to, and the Settings in force for you. `Config` answers
+**what does each Scope declare, and let me change it**.
+
+`Tab` moves between the tabs, the up and down arrows move down a sidebar, the
+right arrow steps into the page beside it and the left arrow comes back, `q` and
+Ctrl-C leave, and `r` reads current Utilization. `>` is the row the keys act on
+and `*` is the active Account — characters rather than colours, so the view reads
+the same over SSH on a terminal that has none.
+
+### Status
+
+`Overview` is the summary: who you are running as, by the name you gave them,
+what a bare Switch would Cycle within, and how much is left.
 
 ```
 $ perch tui
- Accounts | Utilization                             active: someone@example.com
-   Account               Alias     Group  State     Headroom
->  overflow@example.com  overflow  work   enabled   93%
- * someone@example.com   -         work   enabled   58%
-   spare@example.com     -         none   disabled  never observed
+ Status | Config                                    active: someone@example.com
+> Overview
+  Accounts   Account       someone@example.com
+  Config     Plan          pro
+             Group         work — a bare Switch Cycles within it
+             Headroom      18% (7-day is its fullest, as of 4m ago)
 
-q  quit   Tab  view   Up/Down  move   Enter  switch   x  run   r  refresh
+             5-hour 42% used resets 2026-08-04 15:00 UTC (in 3h) (as of 4m ago)
+             7-day 82% used resets 2026-08-06 14:00 UTC (in 2d) (as of 4m ago)
+
+             Across Group `work`:
+             Reserve: 2 of 2 Accounts have Headroom, the best 39% left (as of 4m
+               ago)
+             5-hour emptiest 7% used across 2 Accounts (as of 4m ago)
+             7-day emptiest 61% used across 2 Accounts (as of 4m ago)
+
+q quit  Tab view  arrows move  Enter switch  x run  r refresh
 ```
 
-`Tab` and the left and right arrows move between the views, the up and down
-arrows move the cursor, `q` and Ctrl-C leave, and `r` reads current Utilization.
-`>` is the row the keys act on and `*` is the active Account — characters rather
-than colours, so the view reads the same over SSH on a terminal that has none.
+Every figure carries its age (ADR 0015). Each Quota Window gets a row of its
+own, because an Account has several at once and is limited by whichever fills
+first — 90% that resets in twenty minutes and 90% that resets in four hours are
+the same number and opposite advice. An Account nobody has ever read a figure
+for says so rather than showing a zero.
 
-The Accounts are listed in the order `perch switch` would rank them, with the
-Headroom they were ranked on beside them, so the ranking is visible rather than
-hidden. Cycling never leaves the Group it started in (ADR 0002), so the listing
-is one ranking per Group, with the Group the active Account is in first. A
-Disabled or Quarantined Account is listed like any other and sorts below every
-Account a Cycle would choose — they are shown, and shown as out of the running.
-The Account at the top of a Group is the one a Cycle within it prefers, which is
-where a bare `perch switch` lands unless you are already on it — landing where
-you already are is the one thing a Cycle will not do.
+**Headroom** is how much is left to spend, taken from the most constrained
+window and naming which, so an Account is only ever as free as its fullest
+window and a generous-looking figure never hides an exhausted one (ADR 0012).
 
-The Accounts in no Group come last, and are listed in the order they were added
-rather than ranked. Being ungrouped is the absence of a declaration that
-Accounts are interchangeable rather than a weaker form of one, so `perch switch`
-refuses to Cycle among them until `perch config set cycle-ungrouped true` says
-it may (ADR 0017) — and a ranking of Accounts Perch would not choose between is
-exactly the hidden claim this listing exists not to make. Their Headroom is
-still shown; it is a figure rather than a running order. Set `cycle-ungrouped`
-and they rank like any Group.
-
-The Utilization view is the same Accounts in the same order, with their figures
-at the two levels there are honest figures for. The order is shared because the
-cursor is: two orders would make `Tab` move what `Enter` acts on.
-
-```
- Accounts | Utilization                             active: someone@example.com
-Group `work`
-  Reserve: 2 of 2 Accounts have Headroom, the best 39% left (as of 4m ago)
-  5-hour   emptiest   7% used across 2 Accounts (as of 4m ago)
-  7-day    emptiest  61% used across 2 Accounts (as of 4m ago)
-
->  overflow@example.com   Headroom 39%  (7-day is its fullest, as of 4m ago)
-      5-hour     7% used  resets 2026-08-04 14:00 UTC (in 2h)  (as of 4m ago)
-      7-day     61% used  resets 2026-08-08 12:00 UTC (in 4d)  (as of 4m ago)
-
- * someone@example.com    Headroom 18%  (7-day is its fullest, as of 4m ago)
-      5-hour    42% used  resets 2026-08-04 15:00 UTC (in 3h)  (as of 4m ago)
-      7-day     82% used  resets 2026-08-06 14:00 UTC (in 2d)  (as of 4m ago)
-
-In no Group
-  Cycling only moves between these when you say it may.
-
-   spare@example.com      Headroom never observed
-
-q  quit   Tab  view   Up/Down  move   Enter  switch   x  run   r  refresh
-```
-
-Each Account gets a block rather than a line, because it has several Quota
-Windows at once and is limited by whichever fills first: one line per Account
-would have to pick one of them, and the one it picked would be the one hiding
-the other. Each window says its fill, when it comes back and how old the reading
-is — 90% that resets in twenty minutes and 90% that resets in four hours are the
-same number and opposite advice. An Account nobody has ever read a figure for
-says so rather than showing a zero; "no figure" and "plenty of room" are
-opposite pieces of advice.
-
-Beside each Account's name is its **Headroom**: how much is left to spend, taken
-from its most constrained window and naming which, so an Account is only ever as
-free as its fullest window and a generous-looking figure never hides an
-exhausted one (ADR 0012). It is the figure the ranking on the Accounts view was
-made on, and the rows underneath are what it can be checked against.
-
-Above each Group is its **Reserve**: what the Group has left to draw on, said as
-how many of its Accounts still have Headroom and how much the best of them has.
-A Disabled or Quarantined Account is not part of it — a Credential that does not
-work is quota nothing can spend — and where a Group holds one it says so on a
-line of its own rather than dropping it from a count that would then not add up
-to the Accounts on screen. Under the Reserve, one row per Quota Window kind: the
-emptiest Account in that window, which is the best the Group can currently offer
-there. Fill and room are both percentages and are never left to be told apart by
-context: a Reserve says how much is *left* and a window row says how much is
-*used*, and the row says the word. That is what answers "fine on the weekly window, empty on the five-hour
-one", which is the case a single figure per Account hides.
+**Across** the Scope is its **Reserve**: what the Group has left to draw on,
+said as how many of its Accounts still have Headroom and how much the best of
+them has, then one row per Quota Window kind — the emptiest Account in that
+window, which is the best the Group can currently offer there. A Disabled or
+Quarantined Account is not part of it: a Credential that does not work is quota
+nothing can spend.
 
 **There is no total, anywhere.** Never one pooled figure across Accounts.
 Accounts sit on different plans and Perch only ever sees percentages — a `pro`
 Account at 50% and a `max` Account at 50% do not have the same quota left, and
 Perch never sees the allowance behind either. Summing or averaging them produces
 a number that looks quantitative, isn't, and is exactly the kind of number
-people plan around. So every percentage on this view is one an Account actually
+people plan around. So every percentage here is one an Account actually
 reported, and the per-window rows are the only figure drawn across a Group's
 Accounts at all, because within one window kind the comparison at least means
-something.
+something. Being ungrouped is the absence of a declaration that Accounts are
+interchangeable (ADR 0017), so those Accounts get no Reserve until
+`perch config set cycle-ungrouped true` says a Cycle may move between them.
 
-The Accounts in no Group get a heading and no Reserve. Being ungrouped is the
-absence of a declaration that Accounts are interchangeable (ADR 0017), and a
-figure for what a set has left to draw on is a figure about a set — so it
-appears once `perch config set cycle-ungrouped true` says a Cycle may move
-between them, and not before.
+Where a Quarantine is what is in the way, the reason goes where the Headroom
+would be, with the command that ends it. On a machine Perch has been left on
+nobody, one line says so and points at the page that has something to do about
+it.
 
-### It acts, and acts on exactly two things
+`Accounts` is the full table, on a row of its own so that "where am I" and
+"where could I go" are not competing for one page.
 
-`Enter` Switches to the Account under the cursor and `x` Runs it. That is the
-whole of what the view does, and it is deliberate: ADR 0011's justification for
-an interactive view at all is making a choice, and both of those have plain
-command forms, so nothing becomes TUI-only.
+```
+ Status | Config                                    active: someone@example.com
+  Overview    Account               Alias     Group  State    Headroom
+> Accounts >  overflow@example.com  overflow  work   enabled  39%
+  Config    * someone@example.com   -         work   enabled  18%
 
-`add`, `remove`, `purge` and `config` stay out. A keystroke away from an
-irreversible act is the wrong ergonomics for the one surface being navigated by
-arrow key, so nothing destructive is reachable here at all.
+q quit  Tab view  arrows move  Enter switch  x run  r refresh
+```
+
+They are listed in the order `perch switch` would rank them, with the Headroom
+they were ranked on beside them, so the ranking is visible rather than hidden.
+Cycling never leaves the Scope it started in (ADR 0002), so the listing is one
+ranking per Scope, with the Scope the active Account is in first. A Disabled or
+Quarantined Account is listed like any other and sorts below every Account a
+Cycle would choose. The Accounts in no Group are listed in the order they were
+added rather than ranked until `cycle-ungrouped` says a Cycle may move between
+them — a ranking of Accounts Perch would not choose between is exactly the
+hidden claim this listing exists not to make.
+
+`Config` is what governs *you*: every Setting in force for the active Account's
+Scope, with where each one came from.
+
+```
+ Status | Config                                    active: someone@example.com
+  Overview
+  Accounts   In force for Group `work`:
+> Config
+             strategy                   most-headroom  from Global
+             watcher-may-act            false          from Global
+             watcher-threshold-percent  55             set on `work`
+             watcher-cooldown-minutes   15             from Global
+             watcher-margin-percent     10             from Global
+             watcher-no-return          true           from Global
+
+q quit  Tab view  arrows move  Enter switch  x run  r refresh
+```
+
+Only what governs you: a Setting belonging to a Group you are not in is not a
+rule about you, and does not appear. Where a value came from is **written out**
+rather than shown only as a style, because this page is read once and has to
+survive a pipe and a colour-blind palette.
+
+### Config
+
+The sidebar is `Global`, then `Ungrouped`, then every Group, then the row that
+declares another. Each page shows that Scope's Settings as editable rows, with
+the Accounts it governs beside them.
+
+```
+ Status | Config                                    active: someone@example.com
+> Global        Global
+  Ungrouped     What applies where nothing narrower is said.
+  work          cycle-ungrouped            false
+  + new Group   strategy                   most-headroom
+                watcher-may-act            false
+                watcher-threshold-percent  80
+                watcher-cooldown-minutes   15
+                watcher-margin-percent     10
+                watcher-no-return          true
+
+q quit  Tab view  arrows move/step  Spc flip  Esc inherit  n name
+```
+
+```
+ Status | Config                                    active: someone@example.com
+  Global      > someone@example.com   Group `work`
+  Ungrouped     overflow              Overrides 1 Setting; the dimmed rows are
+> work                                  Global's.
+  + new Group                         strategy                   most-headroom
+                                      watcher-may-act            false
+                                      watcher-threshold-percent  55
+                                      watcher-cooldown-minutes   15
+                                      watcher-margin-percent     10
+                                      watcher-no-return          true
+                                      alias                      (none)
+                                      cycling-may-choose         true
+                                      group                      work
+                                      plan                       pro
+                                      quarantine                 none
+
+q quit  Tab view  arrows move/step  Spc flip  Esc inherit  n name
+```
+
+An **Inherited** value is shown dimmed, with Global's value on the row rather
+than a blank: what is in force is what you need to know, and a blank would send
+you to Global to find out. The dimming is what says this Scope declares nothing
+of its own — on a page navigated with a cursor, where a dimmed value reads as
+"not set here".
+
+`Space` flips a true/false Setting. The left and right arrows step a Strategy
+between the readings there are and a percentage in fives; `Home` and `End` take
+a number to the ends of its range. `Esc` clears an Override so the Scope
+Inherits Global again — and at Global it does nothing and says why, because
+Global has nothing above it to Inherit from. `n` types a name, which is the one
+place the panel takes typed input: a name is the only value with no natural
+step, and a collision with an existing Alias or Group is refused as you confirm
+it, before anything is written.
+
+**There is no save button.** A change is written when it is made. Stepped values
+are debounced — the write follows the last keystroke rather than each one,
+because holding an arrow from 0 to 80 is otherwise sixteen writes and sixteen
+lock acquisitions. That is a deferred write and not a save button: nothing has
+to be remembered, and walking away loses nothing.
+
+### It writes what it can unwrite
+
+Settings, Aliases, whether Cycling may choose an Account, which Group it is in,
+declaring a Group, `Enter` to Switch and `x` to Run. That is the whole of what
+the view does, and the line is **reversibility** (ADR 0034): the TUI may write
+what it can unwrite.
+
+`add`, `remove`, `relogin`, `purge`, `export` and `import` stay out, and so does
+deleting a Group — the Accounts survive it and become Ungrouped, but that
+Group's Overrides do not, and a value nobody can get back is exactly the loss
+this rule refuses. `perch group remove` still does it.
+
+Every write **is** the command: a Setting written here is written by
+`perch config`, an Alias by `perch alias`, a Group move by `perch group`. So the
+refusals, the ranges and the locking are theirs rather than a second copy kept
+in step by hand — and what the command printed is what appears above the keys.
+
+The exclusive lock is taken per edit and given straight back, never held for the
+life of the screen: holding it would make an open TUI a denial of service
+against `perch watch`, which takes the same lock every round. The cost is that
+an edit can be refused — by another `perch` holding the lock, or while a Refresh
+is out — and a refusal is shown where a failed Refresh is shown, with the row
+back to what was actually written rather than showing a value that never was.
 
 A Switch from the view is the same Switch as everywhere — the outgoing
 Credential Captured first, Claude Code's locks taken, the Identity patched — and
-what `perch switch` would have printed is what appears above the keys. Switching
-to the Account that is already active says there is nothing to do rather than
-rewriting Credentials for nothing.
-
-A Run hands the terminal over: the view ends, the terminal goes back, and Claude
-Code starts against that Account's Profile with the active Account untouched. It
-returns when the client exits, with the status the client exited with — the same
-as `perch run`, because it is `perch run`.
+switching to the Account that is already active says there is nothing to do
+rather than rewriting Credentials for nothing. A Run hands the terminal over:
+the view ends, the terminal goes back, and Claude Code starts against that
+Account's Profile with the active Account untouched, returning with the status
+the client exited with — the same as `perch run`, because it is `perch run`.
 
 Selecting a Quarantined Account names `perch relogin` rather than failing
 obscurely, whichever of the two keys was pressed, and nothing is changed.
-
-```
- Accounts | Utilization                             active: someone@example.com
-   Account               Alias     Group  State                 Headroom
- * someone@example.com   -         work   enabled               58%
->  overflow@example.com  overflow  work   enabled, quarantined  93%
-
-overflow@example.com is Quarantined: Anthropic would not renew its Credential.
-Nothing was changed — switching to it would make a Credential live that no
-longer works, and cost you the Account you are on. `perch relogin
-overflow@example.com` logs it in again in place, keeping its Alias, its Group
-and whether Cycling may choose it.
-q  quit   Tab  view   Up/Down  move   Enter  switch   x  run   r  refresh
-```
 
 The first frame is drawn from cache and never waits on the network (ADR 0015),
 which is why it appears at once and why every figure on it says how old it is. A
@@ -1036,11 +1107,10 @@ picker that hangs before showing anything is worse than one showing numbers a
 few minutes old and saying so.
 
 `r` is the only thing here that reads from Anthropic, and it is taken off the
-frame loop: the
-display goes on redrawing, goes on answering the keys and goes on leaving on
-Ctrl-C while Anthropic is being waited on. It reads the Accounts on screen and
-no others, like every other Refresh. One that fails leaves every figure standing
-with the age it had and says what could not be read (ADR 0018).
+frame loop: the display goes on redrawing, goes on answering the keys and goes
+on leaving on Ctrl-C while Anthropic is being waited on. It reads the Accounts
+on screen and no others, like every other Refresh. One that fails leaves every
+figure standing with the age it had and says what could not be read (ADR 0018).
 
 Nothing here is only here. The interactive view is one command among several
 rather than the primary surface (ADR 0011), so everything it shows and
@@ -1051,91 +1121,84 @@ draw in, `perch tui` refuses and names them rather than trying.
 The terminal is given back however the view ends: on `q`, on an error, and on a
 panic. A TUI that dies in raw mode is one you have to `reset` your way out of.
 
-## Names
-
-An Alias is a short name for an Account, so no command ever needs an email
-address.
-
-```
-$ perch alias overflow overflow@example.com
-`overflow@example.com` is an Account.
-`overflow` now names overflow@example.com.
-
-$ perch alias overflow --unset
-`overflow` no longer names overflow@example.com.
-```
-
-Aliases and Group names share one namespace: neither can take a name the other
-already has, and two names that differ only in case are one name. So the one
-Target every command takes is never ambiguous. An Account answers to one Alias
-at a time — naming an Account that already has a name replaces it, and says
-which name it gave up.
-
-A Target resolves as Alias, then Account email, then Group, and the command
-says which one matched before it acts. A Target that matches nothing is refused
-with exit code 12 and the names it nearly matched.
-
-## Groups
-
-A Group is your statement that a set of Accounts is interchangeable — another
-work subscription, never your personal Account. Cycling will only ever move
-between Accounts in one Group (ADR 0002).
-
-```
-$ perch group add work
-$ perch group move overflow@example.com work
-$ perch group list
-work
-  Accounts     overflow@example.com (as `overflow`)
-  Strategy     most-headroom
-  Watcher      off (would act at 80%, onto 70% or better, at most every 15m)
-
-In no Group
-  Accounts     you@example.com
-  Cycling      only moves between these when you say it may
-```
-
-`perch group move <target> none` takes an Account out of every Group, and
-`perch group remove <name>` gives up the Group itself — refused while it still
-holds Accounts, so the Accounts in it are never quietly left somewhere they
-cannot Cycle from.
-
 ## Configuration
 
-`perch config` changes how a Group behaves, and asks nothing: every capability
-Perch has is reachable from a script, because it has to be complete over SSH
-and in CI (ADR 0011).
+`perch config` changes the rules Perch chooses Accounts by, and asks nothing:
+every capability Perch has is reachable from a script, because it has to be
+complete over SSH and in CI (ADR 0011).
+
+Config is **two layers deep** (ADR 0002). Every Setting exists at **Global**,
+where it is the value that applies until something narrower is said. A **Scope**
+— a Group, or the Accounts in no Group taken together — holds an **Override**
+for a Setting it wants different and **Inherits** the rest. Nothing is three
+layers deep, and an Account carries nothing at all: every Setting there is
+describes how Perch chooses *between* Accounts, and a rule for choosing has
+nothing to say to a set of one.
+
+Which layer is meant is read off how many words you said. Three name a Scope
+and set an Override; two set Global's default. `unset` is the same vocabulary
+one word shorter.
 
 ```
+$ perch config set watcher-threshold-percent 70
+`watcher-threshold-percent` at Global is now 70.
+The Ungrouped Scope, Group `personal` and Group `work` Inherit it, and go on following Global as it changes.
+...
+
 $ perch config set work strategy soonest-reset
 `strategy` on Group `work` is now soonest-reset.
-A Cycle within `work` prefers the Account whose fullest Quota Window resets soonest, so perishable quota is spent rather than wasted. Headroom is still measured by the worst window (ADR 0012), so an exhausted Account is still never chosen however soon it comes back.
+A Cycle within Group `work` prefers the Account whose fullest Quota Window resets soonest, so perishable quota is spent rather than wasted. Headroom is still measured by the worst window (ADR 0012), so an exhausted Account is still never chosen however soon it comes back.
 
 $ perch config get
 cycle-ungrouped true
+strategy most-headroom
+watcher-may-act false
+watcher-threshold-percent 70
+watcher-cooldown-minutes 15
+watcher-margin-percent 10
+watcher-no-return true
 work strategy soonest-reset
-work watcher-may-act false
-work watcher-threshold-percent 80
-work watcher-cooldown-minutes 15
-work watcher-margin-percent 10
-work watcher-no-return true
+
+$ perch config unset work strategy
+`strategy` on Group `work` is Inherited from Global again, which says most-headroom. It follows Global from now on rather than holding a value of its own.
 ```
 
-Three words name a Group; two do not. Most configuration belongs to a Group,
-because a Group is what carries the rules governing Cycling within it (ADR
-0002) — but whether bare `perch switch` may Cycle among the Accounts in **no**
-Group is about Accounts with no Group to carry it, so it is global and is
-addressed by naming none (ADR 0017).
+`perch config get` on its own prints Global's Config and then every Override
+there is. `perch config get <scope>` prints every Setting in force for one
+Scope, each as the tail of the `set` that would restore it — so **the layer a
+value came from is the number of words that would set it again**. A Setting a
+Group Inherits reads back as `watcher-no-return true`; one it Overrides reads
+back as `work watcher-no-return false`.
 
-| Key | Belongs to | Values | Default |
-| --- | ---------- | ------ | ------- |
-| `strategy` | a Group | `most-headroom`, `soonest-reset` | `most-headroom` |
-| `watcher-may-act` | a Group | `true`, `false` | `false` |
-| `watcher-threshold-percent` | a Group | 0–100 | `80` |
-| `watcher-cooldown-minutes` | a Group | 0–10080 | `15` |
-| `watcher-margin-percent` | a Group | 0–100 | `10` |
-| `watcher-no-return` | a Group | `true`, `false` | `true` |
-| `cycle-ungrouped` | no Group | `true`, `false` | `false` |
+Inherit is a state and not an absence. A Scope that Inherits tracks Global as
+Global changes; a Scope holding an Override that happens to equal Global's does
+not. So a threshold set once at Global reaches every Group that has not said
+otherwise, and changing your mind is one edit rather than four.
+
+| Key | Said at | Values | Default |
+| --- | ------- | ------ | ------- |
+| `strategy` | Global, any Scope | `most-headroom`, `soonest-reset` | `most-headroom` |
+| `watcher-may-act` | Global, any Scope | `true`, `false` | `false` |
+| `watcher-threshold-percent` | Global, any Scope | 0–100 | `80` |
+| `watcher-cooldown-minutes` | Global, any Scope | 0–10080 | `15` |
+| `watcher-margin-percent` | Global, any Scope | 0–100 | `10` |
+| `watcher-no-return` | Global, any Scope | `true`, `false` | `true` |
+| `cycle-ungrouped` | Global only | `true`, `false` | `false` |
+
+A Scope is a Group by name, or `ungrouped` for the Accounts in no Group — which
+are a Scope so that there is somewhere to say how they are Cycled, and never a
+Group: a Group is a declaration somebody made, and this is the absence of one
+(ADR 0017). No Group can be called `ungrouped`, or the Scope would answer to the
+name first.
+
+`cycle-ungrouped` is Global's alone, because the Accounts it governs have no
+Group to carry it. It is also the one place the layering is deliberately not
+uniform: **`watcher-may-act` does not Inherit into the Ungrouped Scope.** It is
+gated behind `cycle-ungrouped`, so the watcher acts on ungrouped Accounts only
+where both are on. A Global "yes" is a statement about your work Groups, and
+Inheriting it straight through would authorise moving you onto your personal
+subscription — the failure Groups exist to prevent, arriving by a route nobody
+typed.
 
 The **strategy** is which Account a Cycle prefers when more than one would
 serve. `most-headroom` takes the one with the most room left; `soonest-reset`
@@ -1172,12 +1235,13 @@ move onto an Account with nothing used at all. Refusing it would make the order
 you type two `perch config set`s in matter.
 
 Every line `perch config get` prints is the tail of the `perch config set` that
-would restore it, so reading the configuration and writing it back are the same
-vocabulary. Naming one setting prints its value alone, for a script to read
-without parsing prose; naming a Group prints what that Group carries. An unknown
-key or a value that means nothing is refused with exit code 14 and the ones that
-do mean something, so a script that mistyped a setting does not go on believing
-it took.
+would restore it, so reading the Config and writing it back are the same
+vocabulary and a script needs no parser. Naming a Scope and a key prints that
+one line, which is both the value and where it came from. An unknown key or a
+value that means nothing is refused with exit code 14 and the ones that do mean
+something, so a script that mistyped a Setting does not go on believing it took.
+`perch config unset` at Global is refused too: Global's values are always set,
+so there is nothing above them to Inherit from.
 
 ## Exit codes
 

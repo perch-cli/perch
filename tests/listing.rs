@@ -9,7 +9,7 @@ use common::*;
 use perch::host::FakeHost;
 use perch::probe::Identity;
 use perch::registry::{
-    Account, CachedUtilization, GroupConfig, Quarantine, Registry, WindowUtilization,
+    Account, CachedUtilization, Overrides, Quarantine, Registry, WindowUtilization,
 };
 
 fn at(hour: u32, minute: u32) -> DateTime<Utc> {
@@ -69,7 +69,7 @@ fn machine_holding_three_accounts() -> FakeHost {
     registry.active = Some(EMAIL.to_string());
     registry
         .groups
-        .insert("work".to_string(), GroupConfig::default());
+        .insert("work".to_string(), Overrides::default());
     registry.set_alias("overflow", SECOND_EMAIL);
 
     machine_holding(&registry)
@@ -265,7 +265,7 @@ fn status_group_from_an_ungrouped_account_shows_every_ungrouped_account() {
     registry.upsert(account(THIRD_EMAIL, "Spare Ltd"));
     registry
         .groups
-        .insert("work".to_string(), GroupConfig::default());
+        .insert("work".to_string(), Overrides::default());
     registry.active = Some(EMAIL.to_string());
     let host = machine_holding(&registry);
 

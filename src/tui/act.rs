@@ -1,10 +1,9 @@
-//! The one thing the picker does that is not drawing: a Switch, taken from the
-//! frame loop.
+//! The things the picker does that are not drawing: a Switch and a write, both
+//! taken from the frame loop.
 //!
-//! It acts on exactly two things, and this is the one of them that happens
-//! while the view is still up (ADR 0011). A Run is the other, and it is not
-//! here: it hands the terminal to a client for as long as somebody's session
-//! lasts, so the loop ends with it rather than taking it ([`super::Left`]).
+//! A Run is neither, and it is not here: it hands the terminal to a client for
+//! as long as somebody's session lasts, so the loop ends with it rather than
+//! taking it ([`super::Left`]).
 //!
 //! The Switch is `perch switch`'s own, called as the command — the Capture
 //! first, Claude Code's locks, the Identity patched, the refusal to rewrite
@@ -16,14 +15,20 @@
 //! What the command printed is what the frame shows, line for line. A picker
 //! that summarised it would be a third opinion about what just happened to the
 //! machine, and the Capture is the half of a Switch worth reading.
+//!
+//! [`write`] is the same bargain for everything the panel may change (ADR
+//! 0034), and for the same reason: `perch config`, `perch alias`, `perch
+//! enable` and `perch group` are what run, so the refusals, the ranges and the
+//! locking are theirs rather than a second copy kept in step by hand.
 
 use std::collections::BTreeSet;
 
 use crate::commands::switch::{self, SwitchArgs};
+use crate::commands::{alias, config, enable, group};
 use crate::host::Host;
 use crate::registry;
 use crate::tui::lines_of;
-use crate::tui::model::Model;
+use crate::tui::model::{Edit, Model};
 
 /// Switches to the Account under the cursor and puts what the command said on
 /// the next frame.
@@ -81,5 +86,119 @@ pub fn switch(host: &dyn Host, model: &mut Model, email: &str) {
     // Switch's own words are the news, and they have already been kept.
     if let Ok(Some(registry)) = registry::load(host) {
         model.now_holds(registry);
+    }
+}
+
+/// Writes one change and puts what the command said on the next frame.
+///
+/// The change is **the command**, not a change the panel assembles out of the
+/// same parts: a Setting written here is written by `perch config`, an Alias by
+/// `perch alias`, and so on. The panel names a Scope by cursor and a value by
+/// arrow key, and differs from a typed command in nothing else — so a write
+/// reimplemented here would be a second copy of every refusal to keep in step
+/// with the first (ADR 0034).
+///
+/// That also settles the locking. Each of those commands takes Perch's
+/// exclusive lock and gives it straight back, so the panel holds it per edit
+/// and never for the life of the screen: an open TUI is not a denial of service
+/// against `perch watch`, which takes the same lock every round. The cost is
+/// that an edit can be refused — by another `perch` holding the lock, or by
+/// `registry::save` refusing to write against a hold that was lost — and the
+/// refusal is surfaced rather than swallowed.
+pub fn write(host: &dyn Host, model: &mut Model, edit: Edit) {
+    let before: BTreeSet<String> = host.remarks().into_iter().collect();
+
+    let mut written = Vec::new();
+    let ended = run_it(host, &edit, &mut written);
+
+    let mut said = lines_of(&String::from_utf8_lossy(&written));
+    if let Err(refused) = ended {
+        said.extend(lines_of(&refused.to_string()));
+    }
+    said.extend(
+        host.remarks()
+            .into_iter()
+            .filter(|remark| !before.contains(remark)),
+    );
+
+    // Re-read rather than patched. A command writes more than the one field the
+    // panel named — declaring a Group adds a row to the sidebar, moving an
+    // Account empties a column — and where it could not be read, what is on
+    // screen stands: the command's own words are the news, and they have
+    // already been kept.
+    let now_holds = match registry::load(host) {
+        Ok(Some(registry)) => Some(registry),
+        _ => None,
+    };
+    model.wrote(said, now_holds);
+}
+
+/// The command each change is.
+fn run_it(host: &dyn Host, edit: &Edit, out: &mut dyn std::io::Write) -> crate::error::Result<()> {
+    match edit {
+        // The word count is what says which layer is meant, and it is the same
+        // count a person would type: three for a Scope's Override, two for
+        // Global's default (`commands::config`).
+        Edit::Setting {
+            scope,
+            key,
+            value: Some(value),
+        } => {
+            let mut words = Vec::new();
+            words.extend(scope.word().map(str::to_string));
+            words.push(key.as_str().to_string());
+            words.push(value.clone());
+            config::run(host, config::ConfigCommand::Set { words }, out)
+        }
+        Edit::Setting {
+            scope,
+            key,
+            value: None,
+        } => {
+            let mut words = Vec::new();
+            words.extend(scope.word().map(str::to_string));
+            words.push(key.as_str().to_string());
+            config::run(host, config::ConfigCommand::Unset { words }, out)
+        }
+        Edit::CycleUngrouped(on) => config::run(
+            host,
+            config::ConfigCommand::Set {
+                words: vec!["cycle-ungrouped".to_string(), on.to_string()],
+            },
+            out,
+        ),
+        Edit::Alias { email, name } => alias::run(
+            host,
+            alias::AliasCommand::Set {
+                name: name.clone(),
+                target: email.clone(),
+            },
+            out,
+        ),
+        Edit::Cycling { email, enabled } => enable::run(
+            host,
+            match enabled {
+                true => enable::EnableCommand::Enable {
+                    target: email.clone(),
+                },
+                false => enable::EnableCommand::Disable {
+                    target: email.clone(),
+                },
+            },
+            out,
+        ),
+        Edit::Group { email, group } => group::run(
+            host,
+            group::GroupCommand::Move {
+                target: email.clone(),
+                group: group
+                    .clone()
+                    .unwrap_or_else(|| registry::NO_GROUP.to_string()),
+            },
+            out,
+        ),
+        Edit::DeclareGroup(name) => {
+            group::run(host, group::GroupCommand::Add { name: name.clone() }, out)
+        }
     }
 }

@@ -12,7 +12,6 @@ use perch::commands::add::AddArgs;
 use perch::commands::group::GroupCommand;
 use perch::error::{EXIT_CONFLICT, EXIT_GENERAL, EXIT_INVALID, EXIT_NOT_FOUND};
 use perch::host::FakeHost;
-use perch::registry::Strategy;
 
 fn remove_group(host: &FakeHost, name: &str) -> (perch::Result<()>, String) {
     run_group(
@@ -40,9 +39,19 @@ fn a_declared_group_survives_a_restart() {
         .group("work")
         .expect("the Group is written down, not derived from the Accounts in it")
         .clone();
-    assert_eq!(config.strategy, Strategy::MostHeadroom);
+    assert_eq!(
+        config.strategy, None,
+        "a fresh Group Inherits every Setting"
+    );
     assert!(
-        !config.watcher_may_act,
+        config.is_empty(),
+        "a fresh Group declares nothing of its own and Inherits Global — so a \
+         threshold set at Global afterwards reaches it too (ADR 0002, amended)"
+    );
+    assert!(
+        !registry_of(&host)
+            .in_force(&perch::registry::Scope::Group("work".to_string()))
+            .watcher_may_act,
         "unattended switching is off until the user says otherwise (ADR 0002)"
     );
 }

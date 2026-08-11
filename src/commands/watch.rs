@@ -58,7 +58,7 @@ use crate::error::{EXIT_OK, PerchError, Result};
 use crate::host::{Host, Waited};
 use crate::observe::{self, Attempt};
 use crate::probe;
-use crate::registry::{Account, Registry};
+use crate::registry::{Account, Registry, UNGROUPED};
 use crate::switch::{self, Interrupted};
 use crate::watch::{self, Backoff, Considered, Fullest, Outcome, Policy, Recently, Round};
 
@@ -173,12 +173,12 @@ fn opening(host: &dyn Host) -> Result<String> {
     let registry = adopt::ensure_adopted(host)?;
     let watching = permitted(&registry)?;
     Ok(format!(
-        "Watching {} in Group `{}`. Reading how full it is every {}, and \
-         Switching within the Group when its fullest Quota Window reaches {}% \
-         — to an Account at {}% or under, and never twice inside {} minutes. \
-         Ctrl-C stops.",
+        "Watching {} {}. Reading how full it is every {}, and Switching \
+         within that Scope when its fullest Quota Window reaches {}% — to an \
+         Account at {}% or under, and never twice inside {} minutes. Ctrl-C \
+         stops.",
         registry.named_for_the_user(watching.account.email()),
-        watching.group,
+        watching.scope.within(),
         watch::how_often(),
         watching.policy.threshold,
         watching.policy.ceiling(),
@@ -222,10 +222,10 @@ impl Watcher {
     /// record — read under the lock, so the cooldown a round is held by is the
     /// one that was on record when it decided. The loop's is already in the
     /// caller's hands, where it has been since the loop started.
-    fn pacing(self, carried: &mut Recently, registry: &Registry, group: &str) {
+    fn pacing(self, carried: &mut Recently, registry: &Registry, scope: &Scope) {
         match self {
             Watcher::Loop => {}
-            Watcher::Check => *carried = Recently::recorded(registry.checked(group)),
+            Watcher::Check => *carried = Recently::recorded(registry.checked(&scope.key())),
         }
     }
 
@@ -238,19 +238,24 @@ impl Watcher {
     /// one move straight back. The loop's memory is the
     /// [`Recently`](crate::watch::Recently) it is holding, which the round has
     /// already told.
-    fn remember(self, registry: &mut Registry, group: &str, off: &str, at: DateTime<Utc>) {
+    fn remember(self, registry: &mut Registry, scope: &Scope, off: &str, at: DateTime<Utc>) {
         match self {
             Watcher::Loop => {}
-            Watcher::Check => registry.record_check(group, off, at),
+            Watcher::Check => registry.record_check(&scope.key(), off, at),
         }
     }
 }
 
-/// The Account being watched, the Group that said it may be, and the rules it
+/// The Account being watched, the Scope that said it may be, and the rules it
 /// is watched under.
 struct Watching {
     account: Account,
-    group: String,
+    /// The Scope a Switch would be taken within — a Group, or the Accounts in
+    /// no Group (ADR 0017, amended). Written as a Scope rather than a Group
+    /// name so that serving the second is real work rather than a fallthrough:
+    /// this is a code path that can Switch somebody's Account without being
+    /// asked, and that is the correct amount of friction for it.
+    scope: Scope,
     policy: Policy,
 }
 
@@ -271,36 +276,52 @@ fn permitted(registry: &Registry) -> Result<Watching> {
         )
     })?;
 
-    // `cycle-ungrouped` (ADR 0017) grants the watcher nothing, and is not
-    // consulted here. Permission to Switch when you ask and permission to
-    // Switch while nobody is looking are different grants, and the second has
-    // no owner when there is no Group to carry it.
-    let Some(group) = account.group.clone() else {
+    let scope = match account.group.clone() {
+        Some(group) => Scope::Group(group),
+        None => Scope::Ungrouped,
+    };
+
+    // The one place the layering is deliberately not uniform:
+    // `watcher-may-act` does not reach the Accounts in no Group by
+    // Inheritance, and is gated behind `cycle-ungrouped` instead. The reason is
+    // the whole of ADR 0017 (amended), and is not repeated here.
+    //
+    // Asked before `watcher-may-act` so that somebody who has said neither is
+    // told about the declaration rather than about the permission — the
+    // declaration is the one that has to come first.
+    if scope == Scope::Ungrouped && !registry.global.cycle_ungrouped {
         return Err(PerchError::NotInterchangeable(format!(
-            "{} is in no Group, so nothing carries permission for the watcher \
-             to act on it. Nothing is being watched.\n\
-             Put it in a Group with `perch group move {} <group>`, then let the \
-             watcher act on that Group with `perch config set <group> \
-             watcher-may-act true`.",
+            "{} is in no Group, and nothing has said the Accounts in no Group \
+             are interchangeable at all — so there is nowhere for the watcher \
+             to Switch it to. Nothing is being watched.\n\
+             `perch config set cycle-ungrouped true` says they are, and \
+             `perch config set {UNGROUPED} watcher-may-act true` then says the \
+             watcher may act on them. Both, because a `watcher-may-act` set at \
+             Global is about your Groups and must not authorise moving you onto \
+             a personal subscription (ADR 0017).\n\
+             Putting it in a Group with `perch group move {} <group>` is the \
+             narrower statement, and is what Groups are for.",
             registry.named_for_the_user(account.email()),
             account.email(),
         )));
-    };
+    }
 
-    let config = registry.group(&group).cloned().unwrap_or_default();
-    if !config.watcher_may_act {
+    let settings = registry.in_force(&scope.config());
+    if !settings.watcher_may_act {
         return Err(PerchError::Invalid(format!(
-            "Group `{group}` has not been told the watcher may act on it, so \
-             nothing is being watched. A Group only ever changes underneath you \
-             because you said it could.\n\
-             `perch config set {group} watcher-may-act true` says it may."
+            "{} has not been told the watcher may act on it, so nothing is \
+             being watched. Nothing only ever changes underneath you because \
+             you said it could.\n\
+             `perch config set {} watcher-may-act true` says it may.",
+            scope.config().described(),
+            scope.key(),
         )));
     }
 
     Ok(Watching {
         account,
-        group,
-        policy: Policy::of(&config),
+        scope,
+        policy: Policy::of(&settings),
     })
 }
 
@@ -320,7 +341,7 @@ fn one_round(
     let watching = permitted(&registry)?;
     let email = watching.account.email().to_string();
 
-    watcher.pacing(recently, &registry, &watching.group);
+    watcher.pacing(recently, &registry, &watching.scope);
 
     // The one Account Refreshed, and nearly all of the network this loop
     // spends (ADR 0013).
@@ -460,7 +481,7 @@ fn act(
     watcher: Watcher,
     recently: &mut Recently,
 ) -> Result<Outcome> {
-    let scope = Scope::Group(watching.group.clone());
+    let scope = watching.scope.clone();
     let outgoing = watching.account.clone();
 
     // Asked before the candidates are read rather than only by the Switch
@@ -512,7 +533,7 @@ fn act(
     // are not empty enough — or not legible enough — to be worth the move.
     let set_aside = watch::set_aside(
         &watching.policy,
-        &watching.group,
+        &watching.scope,
         &considered(registry, watching),
         barred.as_deref(),
     );
@@ -543,7 +564,7 @@ fn act(
             // refused or found nowhere to go has changed nothing, and making it
             // wait would be pacing the watcher on its failures.
             recently.switched(outgoing.email(), host.now());
-            watcher.remember(registry, &watching.group, outgoing.email(), host.now());
+            watcher.remember(registry, &watching.scope, outgoing.email(), host.now());
             switch_command::record_active(host, perch, registry, &choice.account)?;
             Ok(Outcome::Switched {
                 because: also(choice.because, &unread),
@@ -603,7 +624,7 @@ fn act(
             // the next scheduled one was free to move straight back: exactly
             // the "cooldown that did not survive the process" ADR 0013 names.
             recently.switched(outgoing.email(), host.now());
-            watcher.remember(registry, &watching.group, outgoing.email(), host.now());
+            watcher.remember(registry, &watching.scope, outgoing.email(), host.now());
 
             // Which Account is active is a fact about which Credential is in
             // the Default Profile, so it is recorded before the failure is
@@ -633,8 +654,9 @@ fn act(
 /// step, and an Account in one and not the other is one the watcher never reads
 /// and lands on anyway.
 fn considered(registry: &Registry, watching: &Watching) -> Vec<Considered> {
-    registry
-        .accounts_in(&watching.group)
+    watching
+        .scope
+        .accounts(registry)
         .iter()
         .filter(|account| {
             account.email() != watching.account.email() && account.enabled && !account.quarantined()

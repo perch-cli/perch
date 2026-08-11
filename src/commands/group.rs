@@ -13,10 +13,10 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::{CYCLING_AMONG_UNGROUPED, IN_NO_GROUP, say, write_failed};
+use crate::commands::{CYCLING_AMONG_UNGROUPED, IN_NO_GROUP, config, say, write_failed};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::registry::{self, GroupConfig, NO_GROUP, Registry};
+use crate::registry::{self, NO_GROUP, Registry, Scope};
 use crate::target::{self, AccountTarget};
 
 /// What was asked of `perch group`. The help each of these is described by
@@ -63,7 +63,7 @@ pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Resul
             registry.declare_group(&name)?;
             registry::save(host, &mut perch, &registry)?;
             say(out, &format!("Declared the Group `{name}`."))?;
-            describe_configuration(out, registry.group(&name).expect("just declared"))
+            describe_configuration(out, &registry, &Scope::Group(name.clone()))
         }
         GroupCommand::Remove { name } => {
             let removed = remove(&mut registry, &name)?;
@@ -170,9 +170,9 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
         )?;
     }
 
-    for (name, config) in &registry.groups {
-        say(out, name)?;
-        let members = registry.accounts_in(name);
+    for name in registry.groups.keys().cloned().collect::<Vec<String>>() {
+        say(out, &name)?;
+        let members = registry.accounts_in(&name);
         if members.is_empty() {
             write_line(out, "Accounts", "none yet")?;
         } else {
@@ -181,7 +181,7 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
                 write_line(out, label, &registry.named_for_the_user(account.email()))?;
             }
         }
-        describe_configuration(out, config)?;
+        describe_configuration(out, registry, &Scope::Group(name.clone()))?;
         say(out, "")?;
     }
 
@@ -195,28 +195,52 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
             write_line(out, label, &registry.named_for_the_user(account.email()))?;
         }
         write_line(out, "Cycling", CYCLING_AMONG_UNGROUPED)?;
+        // The Accounts in no Group are a Scope (ADR 0017, amended), so what
+        // governs Cycling among them is a thing with an answer rather than a
+        // constant compiled into Perch. It is shown here for the same reason a
+        // Group's is: the rules Cycling will follow should be readable without
+        // opening the registry.
+        describe_configuration(out, registry, &Scope::Ungrouped)?;
     }
 
     Ok(())
 }
 
-fn describe_configuration(out: &mut dyn Write, config: &GroupConfig) -> Result<()> {
-    write_line(out, "Strategy", config.strategy.as_str())?;
+/// The Settings in force for a Scope, and which of them it declares itself.
+///
+/// The values are the resolved ones — what Cycling would actually follow — with
+/// a line naming what this Scope Overrides, because an Override and an
+/// Inheritance that happens to hold the same value are different things: one
+/// tracks Global as Global changes and the other does not (ADR 0002, amended).
+fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scope) -> Result<()> {
+    let settings = registry.in_force(scope);
+    write_line(out, "Strategy", settings.strategy.as_str())?;
     // The whole policy rather than the threshold alone: a summary that named
     // only when the watcher acts would read as the whole of what it does, and
     // the margin is what decides where it lands (ADR 0013).
-    let policy = crate::watch::Policy::of(config);
+    let policy = crate::watch::Policy::of(&settings);
     let acting = format!(
         "at {}%, onto {}% or better, at most every {}m",
         policy.threshold,
         policy.ceiling(),
         policy.cooldown_minutes,
     );
-    let watcher = match config.watcher_may_act {
+    let watcher = match settings.watcher_may_act {
         true => format!("may switch unattended {acting}"),
         false => format!("off (would act {acting})"),
     };
-    write_line(out, "Watcher", &watcher)
+    write_line(out, "Watcher", &watcher)?;
+
+    let declared: Vec<&str> = config::SETTINGS
+        .iter()
+        .filter(|setting| setting.overridden_at(registry, scope))
+        .map(|setting| setting.as_str())
+        .collect();
+    let overrides = match declared.is_empty() {
+        true => "none — every Setting Inherited from Global".to_string(),
+        false => declared.join(", "),
+    };
+    write_line(out, "Overrides", &overrides)
 }
 
 fn write_line(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {
