@@ -57,8 +57,8 @@ rather than handing out a second export, because on that machine the guard was
 false at login and is the right answer now.
 
 **Windows writes, with consent.** It prompts when `[Environment]::UserInteractive`
-and prints the command otherwise, so a scripted install stays inert. The README
-carries the one line that takes the entry back, because this is the first thing
+and prints the command otherwise, so a scripted install stays inert. The install
+guide carries the one line that takes the entry back, because this is the first thing
 Perch writes that outlives its own binary and leaving no documented way back is
 the outcome least worth having.
 
