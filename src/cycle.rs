@@ -127,16 +127,6 @@ impl Scope {
             Scope::Ungrouped => "no Group".to_string(),
         }
     }
-
-    /// The scope over the Accounts in it, in the words `perch list` heads the
-    /// same set of Accounts with — because it is the same set, and a listing
-    /// that named it two ways would read as two different things.
-    pub fn heading(&self) -> String {
-        match self {
-            Scope::Group(name) => crate::commands::list::group_heading(name),
-            Scope::Ungrouped => crate::commands::IN_NO_GROUP.to_string(),
-        }
-    }
 }
 
 /// Where a bare `perch switch` may look, given the Account it would be leaving.
