@@ -35,10 +35,12 @@ Purge. Only a fresh login brings the Account back, and as a new one.
 _Avoid_: delete, drop, unregister
 
 **Purge**:
-Giving the machine back the state it had before Perch: every Profile, every
-Credential Perch holds, and Perch's own registry, gone in one act. Takes no
-Target, because it is never about one Account — that is a Remove — and offers
-to write an Export first, which is the only thing that makes it survivable.
+Giving the machine back every piece of state Perch holds: every Profile, every
+Credential Perch holds, and Perch's own registry, gone in one act. What Perch
+holds rather than what a Channel left — the binary stays, and taking that back
+belongs to the Installation it came from. Takes no Target, because it is never
+about one Account — that is a Remove — and offers to write an Export first,
+which is the only thing that makes it survivable.
 _Avoid_: uninstall, reset, wipe, remove
 
 **Export**:
@@ -326,3 +328,10 @@ be, and named `homebrew-perch` because Homebrew requires that too — what a
 person types is neither. Adding one is a deliberate act, which is what makes it
 the right place for a Perch that is not finished.
 _Avoid_: formula, bottle, brew repo
+
+**Installation**:
+What a Channel left on this machine: the binary, and on Windows the PATH entry
+that makes it runnable. The counterpart to what Perch *holds* — an Installation
+outlives a Purge, and taking one back belongs to the Channel that made it
+rather than to any Perch command (ADR 0033).
+_Avoid_: install, setup, deployment, footprint
