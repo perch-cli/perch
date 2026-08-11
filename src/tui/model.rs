@@ -160,6 +160,20 @@ impl Row {
     fn is_a_setting(&self) -> bool {
         matches!(self, Row::Setting(_))
     }
+
+    /// Whether the row holds a value with an order the arrows can walk.
+    ///
+    /// What `←` asks before it decides whether it is stepping a value or
+    /// walking back out of the column, which is what `Signal::Left` has always
+    /// meant: step where there is something to step, and otherwise one column
+    /// left. A name is typed and a plan is a fact, so neither steps — and `→`,
+    /// which has nowhere further right to go, is the key that says so.
+    fn has_steps(&self) -> bool {
+        match self {
+            Row::Setting(_) | Row::CycleUngrouped | Row::Cycling | Row::Group => true,
+            Row::Alias | Row::Plan | Row::Quarantine => false,
+        }
+    }
 }
 
 /// Where the last Refresh got to — the whole of what the TUI says about the
@@ -744,11 +758,25 @@ impl Model {
     /// Left: step the value down where the cursor is on something with a
     /// natural order, and otherwise move out to the column on the left.
     fn leftwards(&mut self) -> Asked {
-        if self.tab == Tab::Config && self.column == Column::Content {
+        // Stepping was returned unconditionally, which made the arm below
+        // unreachable: `←` never left the content column at all, and the only
+        // way back to the sidebar was `Tab`, which resets the column as a side
+        // effect of changing view. On the `+ new Group` row it was worse —
+        // there are no rows to step there, so `←` moved nothing and said
+        // nothing, which is the silent key this panel's own rule refuses.
+        if self.tab == Tab::Config
+            && self.column == Column::Content
+            && self.content().is_some_and(|row| row.has_steps())
+        {
             return self.stepped(-1);
         }
         self.column = match self.column {
-            Column::Content if self.tab == Tab::Config => Column::Accounts,
+            // Past the middle column only where there is one. Global governs
+            // every Account and lists none of its own, and `rightwards` skips
+            // it on the way in for the same reason.
+            Column::Content if self.tab == Tab::Config && !self.scope_accounts().is_empty() => {
+                Column::Accounts
+            }
             _ => Column::Scopes,
         };
         Asked::Nothing

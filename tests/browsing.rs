@@ -1873,6 +1873,42 @@ fn neither_global_nor_the_ungrouped_scope_is_a_group_to_rename() {
     );
 }
 
+/// The `+ new Group` row is not a dead end.
+///
+/// `←` stepped unconditionally on the Config tab's content column, which made
+/// the arm that moves out unreachable. On every other row there is a value to
+/// step, so the key at least did something; on this one the content column is
+/// empty, so `←`, `↑`, `↓` and `Esc` all moved nothing and said nothing — the
+/// silent key this panel's own rule refuses.
+#[test]
+fn the_new_group_row_is_not_a_dead_end() {
+    let host = machine_with_a_group();
+    let to_the_last_row = over(3, Signal::Down);
+
+    let screen = browse(
+        &host,
+        at_the_config(
+            to_the_last_row
+                .into_iter()
+                .chain([
+                    Some(Signal::Right),
+                    Some(Signal::Left),
+                    Some(Signal::Up),
+                    Some(Signal::Leave),
+                ])
+                .collect(),
+        ),
+    );
+
+    // `↑` off the last row reaches `work`, whose page names it. Reached only
+    // from the sidebar, so seeing it is the proof `←` got the cursor out.
+    let frame = screen.last_frame();
+    assert!(
+        frame.contains("Group `work`"),
+        "`←` left the cursor stranded in an empty column:\n{frame}"
+    );
+}
+
 /// Naming an Account is done where the rest of the decisions about it are.
 #[test]
 fn an_account_is_given_an_alias_from_the_panel() {
