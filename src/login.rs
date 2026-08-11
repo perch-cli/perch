@@ -91,7 +91,10 @@ pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Pr
 fn mark_live(host: &dyn Host, dir: &std::path::Path) {
     let pid = host.process_id();
     if host.create_dir_all(&probe::sessions_dir(dir)).is_ok() {
-        let _ = host.write_file(
+        // Atomically, for the reason `commands::run::mark_live` gives: a
+        // half-written marker is one a reader settles as "nothing is running".
+        let _ = crate::host::write_atomically(
+            host,
             &probe::session_marker_at(dir, pid),
             &probe::session_marker(pid, host.now()),
         );
