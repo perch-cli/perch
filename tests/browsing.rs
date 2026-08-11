@@ -1466,6 +1466,66 @@ fn one_key_flips_a_setting_and_it_is_written_at_once() {
     );
 }
 
+/// An arrow on a bool means the direction it points, not "the other one".
+///
+/// Both arrows read the value and inverted it, so `←` and `→` did the same
+/// thing and a held key oscillated: where the Setting ended up was the parity
+/// of how many repeats the terminal happened to send. A direction that means
+/// one settles on an answer however long the key is held, which is the property
+/// the Setting having two states and the arrows having two directions was
+/// always going to give.
+#[test]
+fn holding_an_arrow_on_a_bool_settles_rather_than_oscillating() {
+    for (signal, expected) in [(Signal::Right, true), (Signal::Left, false)] {
+        let host = machine_with_figures();
+
+        browse(
+            &host,
+            at_the_config(
+                [vec![Some(Signal::Right)], over(2, Signal::Down)]
+                    .concat()
+                    .into_iter()
+                    // An odd number, so a toggle and a direction disagree.
+                    .chain(over(3, signal))
+                    .chain([Some(Signal::Leave)])
+                    .collect(),
+            ),
+        );
+
+        assert_eq!(
+            registry_of(&host).global.settings.watcher_may_act,
+            expected,
+            "three {signal:?}s on `watcher-may-act` should mean {expected}"
+        );
+    }
+}
+
+/// And the key named for meaning "the other one" still does, which is the half
+/// a direction could have taken with it.
+#[test]
+fn the_flip_key_still_means_the_other_one() {
+    let host = machine_with_figures();
+    config_set(&host, &["watcher-may-act", "true"])
+        .0
+        .expect("it starts on");
+
+    browse(
+        &host,
+        at_the_config(
+            [vec![Some(Signal::Right)], over(2, Signal::Down)]
+                .concat()
+                .into_iter()
+                .chain([Some(Signal::Flip), Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    assert!(
+        !registry_of(&host).global.settings.watcher_may_act,
+        "Space flips what is there rather than setting a fixed value"
+    );
+}
+
 /// How many times the registry was written, which is what a write costs: one
 /// lock taken and given back per one of these.
 fn registry_writes(host: &FakeHost) -> usize {

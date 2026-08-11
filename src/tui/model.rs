@@ -823,14 +823,16 @@ impl Model {
                     None => Asked::Nothing,
                 }
             }
-            Row::CycleUngrouped => {
-                self.write(Edit::CycleUngrouped(!self.registry.global.cycle_ungrouped))
-            }
+            // The direction, for the reason `next_value` gives about the other
+            // bools: these two read the value and inverted it whichever arrow
+            // was pressed, so `←` and `→` did the same thing and holding either
+            // one landed wherever the repeat count's parity left it.
+            Row::CycleUngrouped => self.write(Edit::CycleUngrouped(by > 0)),
             Row::Cycling => match self.scope_account() {
                 Some(account) => {
                     let edit = Edit::Cycling {
                         email: account.email().to_string(),
-                        enabled: !account.enabled,
+                        enabled: by > 0,
                     };
                     self.write(edit)
                 }
@@ -886,8 +888,19 @@ impl Model {
                 let (value, _) = self.value_of(&scope, key);
                 match key.shape() {
                     Shape::YesOrNo | Shape::OneOf(_) => {
-                        let Some(next) = next_value(&key.shape(), &value, 1) else {
-                            return Asked::Nothing;
+                        // The other one, which is what this key is named for.
+                        // Asked of `next_value` with a fixed direction it would
+                        // set the same value every time, now that a direction
+                        // means one — so the flip is spelled out here and the
+                        // arrows are left to mean what they point at.
+                        let next = match key.shape() {
+                            Shape::YesOrNo => (value != "true").to_string(),
+                            _ => {
+                                let Some(next) = next_value(&key.shape(), &value, 1) else {
+                                    return Asked::Nothing;
+                                };
+                                next
+                            }
                         };
                         self.write(Edit::Setting {
                             scope,
@@ -901,6 +914,22 @@ impl Model {
                     }
                 }
             }
+            // The other two bools on the page, flipped rather than stepped for
+            // the same reason: `stepped` now takes its answer from the
+            // direction, and this key has no direction to take one from.
+            Row::CycleUngrouped => {
+                self.write(Edit::CycleUngrouped(!self.registry.global.cycle_ungrouped))
+            }
+            Row::Cycling => match self.scope_account() {
+                Some(account) => {
+                    let edit = Edit::Cycling {
+                        email: account.email().to_string(),
+                        enabled: !account.enabled,
+                    };
+                    self.write(edit)
+                }
+                None => Asked::Nothing,
+            },
             _ => self.stepped(1),
         }
     }
@@ -1323,7 +1352,13 @@ fn step(at: usize, by: i32, len: usize) -> usize {
 /// panel cannot offer a value `perch config set` would refuse.
 fn next_value(shape: &Shape, from: &str, by: i32) -> Option<String> {
     match shape {
-        Shape::YesOrNo => Some((from != "true").to_string()),
+        // The direction, not the opposite of what is there. A bool has two
+        // states and the arrows have two directions, so `←` is the low one and
+        // `→` the high one — and holding a key settles on an answer instead of
+        // oscillating between them, which is what a toggle did: where the value
+        // ended up was the parity of how many repeats the terminal sent.
+        // `Signal::Flip` is the key that means "the other one", and does.
+        Shape::YesOrNo => Some((by > 0).to_string()),
         Shape::OneOf(readings) => {
             let at = readings.iter().position(|reading| reading == from)?;
             let next = (at as i64 + by as i64).rem_euclid(readings.len() as i64) as usize;
