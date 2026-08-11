@@ -1731,6 +1731,50 @@ fn the_clear_key_drops_an_override_and_the_group_follows_global_again() {
     );
 }
 
+/// The same key pressed while a stepped value is still waiting to be written.
+///
+/// A stepped value is deferred for a few frames so that holding an arrow is one
+/// write rather than twenty, and a key that writes at once — Esc here, Space on
+/// a flag — went straight out without saying anything about the edit already
+/// waiting. It landed, and then the deferred one settled on top of it: the
+/// Override was cleared and immediately put back, from a keystroke nobody
+/// pressed twice. On screen that reads as Esc being ignored.
+#[test]
+fn clearing_an_override_that_was_just_stepped_leaves_it_cleared() {
+    let host = machine_with_a_group();
+    config_set(&host, &["work", "watcher-threshold-percent", "55"])
+        .0
+        .expect("the Group Overrides it");
+
+    browse(
+        &host,
+        at_the_config(
+            [
+                over(2, Signal::Down),
+                vec![Some(Signal::Right), Some(Signal::Right)],
+            ]
+            .concat()
+            .into_iter()
+            .chain(over(2, Signal::Down))
+            // Stepped, and then cleared before the step has settled.
+            .chain([Some(Signal::Right), Some(Signal::Clear)])
+            .chain(while_nobody_presses_anything())
+            .chain([Some(Signal::Leave)])
+            .collect(),
+        ),
+    );
+
+    assert_eq!(
+        registry_of(&host)
+            .group("work")
+            .expect("a Group Perch holds")
+            .watcher_threshold_percent,
+        None,
+        "the Override the user cleared stays cleared: a deferred step that \
+         settles afterwards is a write they did not ask for last"
+    );
+}
+
 /// At Global the same key does nothing and says why, rather than leaving
 /// somebody wondering whether it silently did something.
 #[test]

@@ -1144,10 +1144,32 @@ impl Model {
     }
 
     /// A change to write at once, unless something is in the way.
+    ///
+    /// A write taken now supersedes a deferred one about the same row, and has
+    /// to say so: the deferred edit is still sitting in `pending`, and
+    /// [`Model::settled`] would write it a couple of frames later — after this
+    /// one has already landed. Last write wins, and the later write is the one
+    /// the user asked for first.
+    ///
+    /// So Esc on a threshold stepped a moment ago cleared the Override and then
+    /// put it straight back, and Space on a flag stepped a moment ago flipped it
+    /// and then unflipped it. Both read as the keystroke being ignored, and
+    /// neither left anything on screen to say why.
+    ///
+    /// Only the same row. A deferred edit about a *different* one is not in
+    /// conflict with this write and settles on its own, which is the whole point
+    /// of the rule `defer_edit` keeps.
     fn write(&mut self, edit: Edit) -> Asked {
         if let Some(refused) = self.in_the_way() {
             self.said = vec![refused];
             return Asked::Nothing;
+        }
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| about_one_row(&pending.edit, &edit))
+        {
+            self.pending = None;
         }
         Asked::ToWrite(edit)
     }
