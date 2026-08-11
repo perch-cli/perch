@@ -163,6 +163,14 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
             if Key::parse_quietly(key).is_err()
                 && let Ok(scope) = addressed(registry, key)
             {
+                // The second word is where a key goes, so say what is wrong with
+                // it rather than asserting it is one. Told that the *value* was
+                // missing, somebody who mistyped the key adds a value, runs it
+                // again, and only then learns what the mistake actually was —
+                // and the first message pointed away from it. The sibling guard
+                // in `unset` gets this right by making no claim about a second
+                // word, because it has none to make.
+                Key::parse(value)?;
                 return Err(PerchError::Invalid(format!(
                     "`perch config set {key} {value}` names {} and a key, but nothing \
                      to set it to. `perch config set <scope> <key> <value>` sets one.",
@@ -412,9 +420,18 @@ fn inheriting(registry: &Registry, setting: Setting) -> Option<String> {
         .filter(|scope| *scope != Scope::Global && !setting.overridden_at(registry, scope))
         .map(|scope| scope.described())
         .collect();
-    match following.is_empty() {
-        true => None,
-        false => Some(format!(
+    // The verb agrees with the subject, because `listed_scopes` renders one
+    // Scope as a bare singular and a machine with one Group is the ordinary
+    // case rather than the edge one. "Group `work` Inherit it" is the kind of
+    // thing that ships and stays shipped, which is what `commands::accounts`
+    // exists to prevent from the other side.
+    match following.as_slice() {
+        [] => None,
+        [_] => Some(format!(
+            "{} Inherits it, and goes on following Global as it changes.",
+            listed_scopes(&following),
+        )),
+        _ => Some(format!(
             "{} Inherit it, and go on following Global as it changes.",
             listed_scopes(&following),
         )),

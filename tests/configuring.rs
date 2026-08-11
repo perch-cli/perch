@@ -656,6 +656,55 @@ fn a_set_naming_a_group_and_a_key_says_the_value_is_what_is_missing() {
     );
 }
 
+/// The same shape with a second word that is not a key at all.
+///
+/// The guard establishes that the *first* word is a Scope and then asserted the
+/// second was a key without ever asking. So a mistyped key was answered with
+/// "nothing to set it to" — pointing at a value the user had not got to yet, and
+/// away from the mistake they had actually made. They add a value, run it again,
+/// and only then find out.
+#[test]
+fn a_set_naming_a_group_and_a_word_that_is_no_key_says_what_is_wrong_with_the_word() {
+    let host = three_accounts_in_one_group();
+
+    let (result, _) = config_set(&host, &["work", "stratgy"]);
+
+    let refusal = result.expect_err("`stratgy` is not a Setting");
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    let said = refusal.to_string();
+    assert!(
+        said.contains("`stratgy` is not a Setting"),
+        "the word that is wrong is the one named: {said}"
+    );
+    assert!(
+        !said.contains("nothing to set it to"),
+        "and it does not claim the value is what is missing: {said}"
+    );
+}
+
+/// One Scope inheriting is one subject, and the verb has to agree with it.
+///
+/// `listed_scopes` renders a single Scope as a bare singular, and a machine with
+/// one Group is the ordinary case rather than the edge one — so the plural verb
+/// was what most people saw: "Group `work` Inherit it".
+#[test]
+fn one_scope_inheriting_is_said_in_the_singular() {
+    let host = three_accounts_in_one_group();
+    // The Ungrouped Scope is always one of them, so it takes an Override of its
+    // own to leave exactly one Scope following Global.
+    config_set(&host, &["ungrouped", "watcher-threshold-percent", "70"])
+        .0
+        .expect("the Ungrouped Scope Overrides it");
+
+    let (result, printed) = config_set(&host, &["watcher-threshold-percent", "60"]);
+
+    result.expect("Global carries every Setting");
+    assert!(
+        printed.contains("Group `work` Inherits it, and goes on following Global"),
+        "one Scope, one verb to agree with it: {printed}"
+    );
+}
+
 /// `perch config get` writes nothing, so it does not wait on a writer.
 ///
 /// The same rule `perch status` states for itself and `perch list` follows.
