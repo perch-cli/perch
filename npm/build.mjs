@@ -80,6 +80,11 @@ for (const { target, pkg, os, cpu } of TARGETS) {
 const dir = join(outDir, "perch-cli");
 mkdirSync(join(dir, "bin"), { recursive: true });
 copyFileSync(join(HERE, "perch-cli", "bin", "perch.js"), join(dir, "bin", "perch.js"));
+// The same reasoning as the platform binaries above, and the one file it was
+// not applied to: `copyFileSync` preserves the 644 this file has in git, so the
+// wrapper's own `bin` entry went into the tarball non-executable. npm's
+// `bin-links` chmods it on install today, which is the only reason it works.
+chmodSync(join(dir, "bin", "perch.js"), 0o755);
 // npm renders this on the package page, and a page with nothing on it is a
 // poor advertisement for a tool asking to hold your credentials.
 copyFileSync(join(HERE, "..", "README.md"), join(dir, "README.md"));

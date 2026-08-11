@@ -81,7 +81,15 @@ say "installing $version for $target"
 # ------------------------------------------------------------------- download
 
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT INT TERM
+# `staged` is the half-installed binary below, named here so the trap can reach
+# it. It is inside $INSTALL_DIR rather than $tmp — that is what makes replacing a
+# running perch atomic — so removing $tmp alone leaves it behind: a mode-600
+# dotfile in the install directory that nothing cleans up and `ls` does not show.
+# Reachable whenever the chmod or the second mv fails, which is a read-only
+# $INSTALL_DIR, a `perch` that is a directory, or an interrupt landing between
+# the two moves.
+staged=""
+trap 'rm -rf "$tmp" ${staged:+"$staged"}' EXIT INT TERM
 
 curl -fsSL "$DOWNLOADS/$version/$archive" -o "$tmp/$archive" ||
     die "could not download $archive — is $version a release?"
@@ -134,9 +142,11 @@ if [ -d "$INSTALL_DIR" ]; then dir_existed=yes; else dir_existed=no; fi
 mkdir -p "$INSTALL_DIR"
 # To a temporary name in the same directory and then moved, so a perch that is
 # running right now is replaced rather than written through.
-mv "$tmp/perch" "$INSTALL_DIR/.perch.$$"
-chmod 755 "$INSTALL_DIR/.perch.$$"
-mv "$INSTALL_DIR/.perch.$$" "$INSTALL_DIR/perch"
+staged="$INSTALL_DIR/.perch.$$"
+mv "$tmp/perch" "$staged"
+chmod 755 "$staged"
+mv "$staged" "$INSTALL_DIR/perch"
+staged=""
 
 say "installed to $INSTALL_DIR/perch"
 
