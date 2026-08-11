@@ -32,7 +32,7 @@
 use chrono::{DateTime, Utc};
 
 use crate::error::{PerchError, Result};
-use crate::registry::{Account, CachedUtilization, Registry, Strategy, WindowUtilization};
+use crate::registry::{self, Account, CachedUtilization, Registry, Strategy, WindowUtilization};
 use crate::utilization;
 
 /// Where a Cycle may look for a landing place.
@@ -69,17 +69,48 @@ impl Scope {
         }
     }
 
+    /// The Scope this one is at the Config layer: the same set of Accounts,
+    /// said at the level a Setting means something (ADR 0002, amended).
+    pub fn config(&self) -> registry::Scope {
+        match self {
+            Scope::Group(name) => registry::Scope::Group(name.clone()),
+            Scope::Ungrouped => registry::Scope::Ungrouped,
+        }
+    }
+
+    /// The word that names this scope wherever a Setting belonging to it is
+    /// recorded against it — what the last scheduled Check did, for one.
+    ///
+    /// A Group cannot be called `ungrouped` ([`registry::validate_name`]), so
+    /// the two never collide.
+    pub fn key(&self) -> String {
+        match self {
+            Scope::Group(name) => name.clone(),
+            Scope::Ungrouped => registry::UNGROUPED.to_string(),
+        }
+    }
+
     /// Which Account this scope prefers when more than one would serve.
     ///
-    /// A Strategy is a Group's to carry (ADR 0002), and the Accounts in no
-    /// Group are not a Group (ADR 0017) — nothing holds a Strategy for them,
-    /// so they Cycle the default way.
+    /// Read from the Config in force for the scope: the Scope's own Override
+    /// where it holds one, and Global's otherwise (ADR 0002, amended). The
+    /// Accounts in no Group are still not a Group — they hold no Strategy of
+    /// their own until somebody sets one — but they are a Scope now, so what
+    /// they Cycle by is finally something a person can say rather than a
+    /// constant compiled into Perch (ADR 0017, amended).
     fn strategy(&self, registry: &Registry) -> Strategy {
+        registry.in_force(&self.config()).strategy
+    }
+
+    /// The scope as an adverbial phrase: "Nothing {} is worth Switching to".
+    ///
+    /// Its own phrasing rather than [`Scope::described`], which is the middle
+    /// of "every Account in {}" and reads as "in no Group" — true there and
+    /// ungrammatical the moment anything else is said around it.
+    pub fn within(&self) -> String {
         match self {
-            Scope::Group(name) => registry
-                .group(name)
-                .map_or_else(Strategy::default, |config| config.strategy),
-            Scope::Ungrouped => Strategy::default(),
+            Scope::Group(name) => format!("within {}", crate::commands::list::group_heading(name)),
+            Scope::Ungrouped => "among the Accounts in no Group".to_string(),
         }
     }
 
@@ -92,7 +123,7 @@ impl Scope {
     }
 
     /// The scope as the middle of a sentence: "every Account in {}".
-    fn described(&self) -> String {
+    pub fn described(&self) -> String {
         match self {
             Scope::Group(name) => crate::commands::list::group_heading(name),
             Scope::Ungrouped => "no Group".to_string(),
@@ -1035,7 +1066,7 @@ pub(crate) mod tests {
         mut registry: Registry,
         strategy: crate::registry::Strategy,
     ) -> Registry {
-        registry.groups.get_mut("work").expect("declared").strategy = strategy;
+        registry.groups.get_mut("work").expect("declared").strategy = Some(strategy);
         registry
     }
 

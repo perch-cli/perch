@@ -572,3 +572,84 @@ fn credentials_written(host: &FakeHost) -> usize {
         .filter(|effect| matches!(effect, Effect::KeychainSet { .. }))
         .count()
 }
+
+/// ADR 0017, amended: the Accounts in no Group are a Scope, so Cycling among
+/// them reads a Strategy somebody can set.
+///
+/// Before this there was no key, no Group and no command that could change it —
+/// the code read `Strategy::default()` because there was nothing to ask. It is
+/// the only behaviour in Perch a person could not configure, and this is the
+/// test that it has stopped being one.
+#[test]
+fn cycling_among_ungrouped_accounts_reads_the_strategy_global_carries() {
+    let host = machine_with_three_accounts();
+    ungrouped_declared_interchangeable(&host);
+    // Where the two Strategies disagree: the emptiest Account is not the one
+    // whose quota is about to be thrown away.
+    observed(&host, EMAIL, vec![window("5-hour", 96.0)]);
+    observed(
+        &host,
+        SECOND_EMAIL,
+        vec![resetting(
+            "5-hour",
+            70.0,
+            host.now() + Duration::minutes(20),
+        )],
+    );
+    observed(
+        &host,
+        THIRD_EMAIL,
+        vec![resetting("5-hour", 10.0, host.now() + Duration::hours(4))],
+    );
+
+    let (result, printed) = run_cycle(&host);
+    result.expect("there is somewhere to go");
+    assert_eq!(
+        active(&host).as_deref(),
+        Some(THIRD_EMAIL),
+        "Global's default is still the most room left: {printed}"
+    );
+
+    config_set(&host, &["strategy", "soonest-reset"])
+        .0
+        .expect("every Setting exists at Global");
+    run_switch(&host, EMAIL).0.expect("back to the full one");
+
+    let (result, printed) = run_cycle(&host);
+    result.expect("there is somewhere to go");
+    assert_eq!(
+        active(&host).as_deref(),
+        Some(SECOND_EMAIL),
+        "and the Accounts in no Group follow it: {printed}"
+    );
+}
+
+/// And the Scope may say otherwise, like any other.
+#[test]
+fn the_ungrouped_scope_may_override_the_strategy_it_cycles_by() {
+    let host = machine_with_three_accounts();
+    ungrouped_declared_interchangeable(&host);
+    observed(&host, EMAIL, vec![window("5-hour", 96.0)]);
+    observed(
+        &host,
+        SECOND_EMAIL,
+        vec![resetting(
+            "5-hour",
+            70.0,
+            host.now() + Duration::minutes(20),
+        )],
+    );
+    observed(
+        &host,
+        THIRD_EMAIL,
+        vec![resetting("5-hour", 10.0, host.now() + Duration::hours(4))],
+    );
+    config_set(&host, &["ungrouped", "strategy", "soonest-reset"])
+        .0
+        .expect("`ungrouped` addresses the Scope");
+
+    let (result, printed) = run_cycle(&host);
+
+    result.expect("there is somewhere to go");
+    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL), "{printed}");
+}

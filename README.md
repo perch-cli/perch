@@ -374,17 +374,20 @@ would be nothing for it to do:
 
 ```
 $ perch watch
-you@example.com is in no Group, so nothing carries permission for the watcher to act on it. Nothing is being watched.
-Put it in a Group with `perch group move you@example.com <group>`, then let the watcher act on that Group with `perch config set <group> watcher-may-act true`.   # exit 18
+you@example.com is in no Group, and nothing has said the Accounts in no Group are interchangeable at all — so there is nowhere for the watcher to Switch it to. Nothing is being watched.
+`perch config set cycle-ungrouped true` says they are, and `perch config set ungrouped watcher-may-act true` then says the watcher may act on them. [...]   # exit 18
 
 $ perch watch
-Group `work` has not been told the watcher may act on it, so nothing is being watched. A Group only ever changes underneath you because you said it could.
+Group `work` has not been told the watcher may act on it, so nothing is being watched. Nothing only ever changes underneath you because you said it could.
 `perch config set work watcher-may-act true` says it may.   # exit 14
 ```
 
-`cycle-ungrouped` grants the watcher nothing. Permission to Switch **when you
-ask** and permission to Switch **while nobody is looking** are different grants,
-and the second has no owner when there is no Group to carry it.
+`cycle-ungrouped` grants the watcher nothing on its own, and neither does a
+`watcher-may-act` set at Global. Permission to Switch **when you ask** and
+permission to Switch **while nobody is looking** are different grants, and among
+the Accounts in no Group both have to be given: a Global "yes" is a statement
+about your Groups, and Inheriting it there would authorise moving you off a work
+Account onto your personal subscription (ADR 0017).
 
 Both permissions are read every round rather than only at the first, because
 either can be taken back while the watcher is sleeping. A `perch switch` in
@@ -1102,40 +1105,82 @@ cannot Cycle from.
 
 ## Configuration
 
-`perch config` changes how a Group behaves, and asks nothing: every capability
-Perch has is reachable from a script, because it has to be complete over SSH
-and in CI (ADR 0011).
+`perch config` changes the rules Perch chooses Accounts by, and asks nothing:
+every capability Perch has is reachable from a script, because it has to be
+complete over SSH and in CI (ADR 0011).
+
+Config is **two layers deep** (ADR 0002). Every Setting exists at **Global**,
+where it is the value that applies until something narrower is said. A **Scope**
+— a Group, or the Accounts in no Group taken together — holds an **Override**
+for a Setting it wants different and **Inherits** the rest. Nothing is three
+layers deep, and an Account carries nothing at all: every Setting there is
+describes how Perch chooses *between* Accounts, and a rule for choosing has
+nothing to say to a set of one.
+
+Which layer is meant is read off how many words you said. Three name a Scope
+and set an Override; two set Global's default. `unset` is the same vocabulary
+one word shorter.
 
 ```
+$ perch config set watcher-threshold-percent 70
+`watcher-threshold-percent` at Global is now 70.
+The Ungrouped Scope, Group `personal` and Group `work` Inherit it, and go on following Global as it changes.
+...
+
 $ perch config set work strategy soonest-reset
 `strategy` on Group `work` is now soonest-reset.
-A Cycle within `work` prefers the Account whose fullest Quota Window resets soonest, so perishable quota is spent rather than wasted. Headroom is still measured by the worst window (ADR 0012), so an exhausted Account is still never chosen however soon it comes back.
+A Cycle within Group `work` prefers the Account whose fullest Quota Window resets soonest, so perishable quota is spent rather than wasted. Headroom is still measured by the worst window (ADR 0012), so an exhausted Account is still never chosen however soon it comes back.
 
 $ perch config get
 cycle-ungrouped true
+strategy most-headroom
+watcher-may-act false
+watcher-threshold-percent 70
+watcher-cooldown-minutes 15
+watcher-margin-percent 10
+watcher-no-return true
 work strategy soonest-reset
-work watcher-may-act false
-work watcher-threshold-percent 80
-work watcher-cooldown-minutes 15
-work watcher-margin-percent 10
-work watcher-no-return true
+
+$ perch config unset work strategy
+`strategy` on Group `work` is Inherited from Global again, which says most-headroom. It follows Global from now on rather than holding a value of its own.
 ```
 
-Three words name a Group; two do not. Most configuration belongs to a Group,
-because a Group is what carries the rules governing Cycling within it (ADR
-0002) — but whether bare `perch switch` may Cycle among the Accounts in **no**
-Group is about Accounts with no Group to carry it, so it is global and is
-addressed by naming none (ADR 0017).
+`perch config get` on its own prints Global's Config and then every Override
+there is. `perch config get <scope>` prints every Setting in force for one
+Scope, each as the tail of the `set` that would restore it — so **the layer a
+value came from is the number of words that would set it again**. A Setting a
+Group Inherits reads back as `watcher-no-return true`; one it Overrides reads
+back as `work watcher-no-return false`.
 
-| Key | Belongs to | Values | Default |
-| --- | ---------- | ------ | ------- |
-| `strategy` | a Group | `most-headroom`, `soonest-reset` | `most-headroom` |
-| `watcher-may-act` | a Group | `true`, `false` | `false` |
-| `watcher-threshold-percent` | a Group | 0–100 | `80` |
-| `watcher-cooldown-minutes` | a Group | 0–10080 | `15` |
-| `watcher-margin-percent` | a Group | 0–100 | `10` |
-| `watcher-no-return` | a Group | `true`, `false` | `true` |
-| `cycle-ungrouped` | no Group | `true`, `false` | `false` |
+Inherit is a state and not an absence. A Scope that Inherits tracks Global as
+Global changes; a Scope holding an Override that happens to equal Global's does
+not. So a threshold set once at Global reaches every Group that has not said
+otherwise, and changing your mind is one edit rather than four.
+
+| Key | Said at | Values | Default |
+| --- | ------- | ------ | ------- |
+| `strategy` | Global, any Scope | `most-headroom`, `soonest-reset` | `most-headroom` |
+| `watcher-may-act` | Global, any Scope | `true`, `false` | `false` |
+| `watcher-threshold-percent` | Global, any Scope | 0–100 | `80` |
+| `watcher-cooldown-minutes` | Global, any Scope | 0–10080 | `15` |
+| `watcher-margin-percent` | Global, any Scope | 0–100 | `10` |
+| `watcher-no-return` | Global, any Scope | `true`, `false` | `true` |
+| `cycle-ungrouped` | Global only | `true`, `false` | `false` |
+
+A Scope is a Group by name, or `ungrouped` for the Accounts in no Group — which
+are a Scope so that there is somewhere to say how they are Cycled, and never a
+Group: a Group is a declaration somebody made, and this is the absence of one
+(ADR 0017). No Group can be called `ungrouped`, or the Scope would answer to the
+name first.
+
+`cycle-ungrouped` is Global's alone, because the Accounts it governs have no
+Group to carry it. It is also the one place the layering is deliberately not
+uniform: **`watcher-may-act` does not Inherit into the Ungrouped Scope.** It is
+gated behind `cycle-ungrouped`, so the watcher acts on ungrouped Accounts only
+where both are on. A Global "yes" is a statement about your work Groups, and
+Inheriting it straight through would authorise moving you onto your personal
+subscription — the failure Groups exist to prevent, arriving by a route nobody
+typed.
 
 The **strategy** is which Account a Cycle prefers when more than one would
 serve. `most-headroom` takes the one with the most room left; `soonest-reset`
@@ -1172,12 +1217,13 @@ move onto an Account with nothing used at all. Refusing it would make the order
 you type two `perch config set`s in matter.
 
 Every line `perch config get` prints is the tail of the `perch config set` that
-would restore it, so reading the configuration and writing it back are the same
-vocabulary. Naming one setting prints its value alone, for a script to read
-without parsing prose; naming a Group prints what that Group carries. An unknown
-key or a value that means nothing is refused with exit code 14 and the ones that
-do mean something, so a script that mistyped a setting does not go on believing
-it took.
+would restore it, so reading the Config and writing it back are the same
+vocabulary and a script needs no parser. Naming a Scope and a key prints that
+one line, which is both the value and where it came from. An unknown key or a
+value that means nothing is refused with exit code 14 and the ones that do mean
+something, so a script that mistyped a Setting does not go on believing it took.
+`perch config unset` at Global is refused too: Global's values are always set,
+so there is nothing above them to Inherit from.
 
 ## Exit codes
 

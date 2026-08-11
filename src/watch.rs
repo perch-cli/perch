@@ -20,7 +20,7 @@
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 
 use crate::error::{EXIT_HELD, EXIT_NO_CANDIDATE, EXIT_NOTHING_TO_DO, EXIT_OK};
-use crate::registry::{Account, Checked, GroupConfig};
+use crate::registry::{Account, Checked, Settings};
 
 /// How long the watcher waits between Refreshing the Account it is on.
 ///
@@ -153,7 +153,7 @@ pub struct Policy {
 }
 
 impl Policy {
-    pub fn of(config: &GroupConfig) -> Policy {
+    pub fn of(config: &Settings) -> Policy {
         Policy {
             threshold: config.watcher_threshold_percent,
             cooldown_minutes: config.watcher_cooldown_minutes,
@@ -408,7 +408,7 @@ pub struct Considered {
 /// on the decision line instead.
 pub fn set_aside(
     policy: &Policy,
-    group: &str,
+    scope: &crate::cycle::Scope,
     considered: &[Considered],
     barred: Option<&str>,
 ) -> crate::cycle::SetAside {
@@ -448,8 +448,9 @@ pub fn set_aside(
     }
     crate::cycle::SetAside {
         because: format!(
-            "Nothing in Group `{group}` is worth Switching to yet — {}. Nothing \
+            "Nothing {} is worth Switching to yet — {}. Nothing \
              was changed.",
+            scope.within(),
             clauses.join("; "),
         ),
         emails,
@@ -1059,7 +1060,11 @@ mod tests {
     }
 
     fn policy() -> Policy {
-        Policy::of(&GroupConfig::default())
+        Policy::of(&Settings::default())
+    }
+
+    fn work() -> crate::cycle::Scope {
+        crate::cycle::Scope::Group("work".to_string())
     }
 
     /// The Group's defaults, read as the watcher reads them.
@@ -1192,7 +1197,7 @@ mod tests {
     fn a_candidate_that_is_barely_emptier_than_the_threshold_is_set_aside() {
         let set_aside = set_aside(
             &policy(),
-            "work",
+            &work(),
             &[
                 considered("just-under", Some(74.0)),
                 considered("at-the-bar", Some(70.0)),
@@ -1216,7 +1221,7 @@ mod tests {
     /// evidence of room.
     #[test]
     fn a_candidate_no_figure_was_ever_read_of_is_set_aside_rather_than_read_as_empty() {
-        let set_aside = set_aside(&policy(), "work", &[considered("unseen", None)], None);
+        let set_aside = set_aside(&policy(), &work(), &[considered("unseen", None)], None);
 
         assert_eq!(set_aside.emails, vec!["unseen@example.com".to_string()]);
         assert!(
@@ -1232,7 +1237,7 @@ mod tests {
     fn the_barred_account_is_set_aside_however_empty_it_looks() {
         let set_aside = set_aside(
             &policy(),
-            "work",
+            &work(),
             &[considered("left", Some(2.0))],
             Some("left@example.com"),
         );

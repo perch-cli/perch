@@ -48,11 +48,12 @@ fn active(host: &FakeHost) -> Option<String> {
     registry_of(host).active
 }
 
-fn group_config(host: &FakeHost, name: &str) -> perch::registry::GroupConfig {
-    registry_of(host)
-        .group(name)
-        .expect("a Group Perch holds")
-        .clone()
+/// The Settings actually in force for a Group: Global's, with whatever that
+/// Group Overrides laid over them (ADR 0002, amended). What a Cycle would
+/// follow, which is what these tests are about — `overrides_of` is for the ones
+/// about the layering itself.
+fn group_config(host: &FakeHost, name: &str) -> perch::registry::Settings {
+    registry_of(host).in_force(&perch::registry::Scope::Group(name.to_string()))
 }
 
 #[test]
@@ -70,9 +71,10 @@ fn a_groups_setting_is_set_from_a_script_and_read_back() {
     result.expect("what was set can be read");
     assert_eq!(
         printed.trim(),
-        "soonest-reset",
-        "a value read back on its own is the value and nothing else, so a \
-         script can use it without parsing prose"
+        "work strategy soonest-reset",
+        "a value read back is the tail of the `set` that would restore it, so \
+         reading and writing are one vocabulary — and the word count is what \
+         says the value is this Group's Override rather than Global's default"
     );
 }
 
@@ -88,7 +90,7 @@ fn a_global_setting_is_set_and_read_back_without_naming_a_group() {
     let (result, printed) = config_get(&host, &["cycle-ungrouped"]);
 
     result.expect("what was set can be read");
-    assert_eq!(printed.trim(), "true");
+    assert_eq!(printed.trim(), "cycle-ungrouped true");
 }
 
 #[test]
@@ -106,12 +108,19 @@ fn every_setting_reads_back_in_the_form_that_would_set_it_again() {
         "the setting that belongs to no Group is shown too: {printed}"
     );
     assert!(
-        printed.contains("work strategy most-headroom"),
-        "and every key a Group carries, set or not: {printed}"
+        printed.contains("strategy most-headroom"),
+        "and every Setting at Global, which is where a Scope that says nothing \
+         reads it from: {printed}"
     );
     assert!(
         printed.contains("work watcher-threshold-percent 90"),
-        "{printed}"
+        "and every Override there is, named by the Scope holding it: {printed}"
+    );
+    assert!(
+        !printed.contains("work strategy"),
+        "and nothing else of that Group's, because it Overrides nothing else — \
+         a three-word line for an Inheritance would assert an Override that is \
+         not there, and replaying this output would plant it: {printed}"
     );
     for line in printed.lines().filter(|line| !line.trim().is_empty()) {
         let words: Vec<&str> = line.split_whitespace().collect();
@@ -254,7 +263,7 @@ fn cycling_among_ungrouped_accounts_is_off_until_it_is_turned_on() {
     result.expect("a setting nobody has touched still reads back");
     assert_eq!(
         printed.trim(),
-        "false",
+        "cycle-ungrouped false",
         "being ungrouped is the absence of a declaration that Accounts are \
          interchangeable, not a weaker form of one (ADR 0017)"
     );
@@ -305,9 +314,10 @@ fn the_watchers_may_act_field_is_off_until_it_is_asked_for() {
     result.expect("a field nobody has touched still reads back");
     assert_eq!(
         printed.trim(),
-        "false",
+        "watcher-may-act false",
         "a Group only ever changes underneath someone because they said it \
-         could (ADR 0002)"
+         could (ADR 0002) — and the two words say the `false` is Global's \
+         default rather than something this Group declared"
     );
 }
 
@@ -349,7 +359,11 @@ fn the_watchers_cooldown_margin_and_no_return_are_the_groups_to_set() {
     ] {
         let (result, printed) = config_get(&host, &["work", key]);
         result.expect("what was set can be read");
-        assert_eq!(printed.trim(), value, "reading `{key}` back");
+        assert_eq!(
+            printed.trim(),
+            format!("work {key} {value}"),
+            "reading `{key}` back"
+        );
     }
 }
 
@@ -361,15 +375,20 @@ fn a_group_starts_with_the_watcher_policy_the_adr_names() {
 
     let (result, printed) = config_get(&host, &["work"]);
 
-    result.expect("naming a Group asks about everything it carries");
+    result.expect("naming a Group asks about everything in force for it");
     for expected in [
-        "work watcher-threshold-percent 80",
-        "work watcher-cooldown-minutes 15",
-        "work watcher-margin-percent 10",
-        "work watcher-no-return true",
+        "watcher-threshold-percent 80",
+        "watcher-cooldown-minutes 15",
+        "watcher-margin-percent 10",
+        "watcher-no-return true",
     ] {
         assert!(printed.contains(expected), "{expected} — got: {printed}");
     }
+    assert!(
+        !printed.contains("work watcher"),
+        "and every one of them Inherited from Global, said by the line being \
+         the two-word `set` that would restore it: {printed}"
+    );
 }
 
 /// A number the policy cannot hold is refused with the numbers it can, so the
@@ -525,8 +544,8 @@ fn a_key_named_with_no_value_is_refused_with_both_forms_of_the_command() {
     assert_eq!(error.exit_code(), EXIT_INVALID);
     let message = error.to_string();
     assert!(
-        message.contains("perch config set <group> <key> <value>"),
-        "the form that addresses a Group is named: {message}"
+        message.contains("perch config set <scope> <key> <value>"),
+        "the form that addresses a Scope is named: {message}"
     );
     assert!(
         message.contains("perch config set <key> <value>"),
@@ -548,10 +567,7 @@ fn a_get_of_one_word_that_is_neither_a_key_nor_a_group_answers_with_both_vocabul
     assert_eq!(refusal.exit_code(), EXIT_NOT_FOUND);
     let said = refusal.to_string();
     assert!(said.contains("`stratergy` is neither"), "{said}");
-    assert!(
-        said.contains("Settings belonging to no Group:"),
-        "it names the keys: {said}"
-    );
+    assert!(said.contains("Settings:"), "it names the keys: {said}");
     assert!(
         said.contains("Groups Perch holds: work."),
         "and the Groups: {said}"
@@ -588,9 +604,9 @@ fn a_get_of_too_many_words_is_answered_with_the_forms_get_takes() {
     assert_eq!(refusal.exit_code(), EXIT_INVALID);
     let said = refusal.to_string();
     assert!(said.contains("was given 3 words"), "{said}");
-    assert!(said.contains("perch config get <group> <key>"), "{said}");
+    assert!(said.contains("perch config get <scope> <key>"), "{said}");
     assert!(
-        said.contains("reads every setting there is"),
+        said.contains("reads Global and every Override there is"),
         "it names the bare form too: {said}"
     );
     assert!(
@@ -626,11 +642,11 @@ fn a_set_naming_a_group_and_a_key_says_the_value_is_what_is_missing() {
     assert_eq!(refusal.exit_code(), EXIT_INVALID);
     let said = refusal.to_string();
     assert!(
-        said.contains("names the Group `work` and a key, but nothing to set it to"),
+        said.contains("names Group `work` and a key, but nothing to set it to"),
         "{said}"
     );
     assert!(
-        said.contains("perch config set <group> <key> <value>"),
+        said.contains("perch config set <scope> <key> <value>"),
         "{said}"
     );
     assert_eq!(
@@ -656,7 +672,7 @@ fn getting_a_setting_reads_alongside_another_perch_rather_than_waiting_on_it() {
     let (result, printed) = config_get(&host, &["work", "strategy"]);
 
     result.expect("a read does not wait on a writer");
-    assert_eq!(printed.trim(), "most-headroom", "{printed}");
+    assert_eq!(printed.trim(), "strategy most-headroom", "{printed}");
     drop(held);
 }
 
@@ -703,4 +719,257 @@ fn a_group_name_with_a_space_in_it_is_refused_rather_than_breaking_the_round_tri
         registry_of(&host).groups.is_empty(),
         "and no Group was declared"
     );
+}
+
+/// Global carries the defaults and a Group Overrides them (ADR 0002, amended).
+///
+/// The whole point of the layer: somebody running several Groups sets a
+/// threshold once rather than once per Group, and changing their mind changes
+/// it once.
+#[test]
+fn a_setting_at_global_reaches_every_group_that_has_not_said_otherwise() {
+    let host = three_accounts_in_one_group();
+    declare_group(&host, "personal");
+
+    let (result, printed) = config_set(&host, &["watcher-threshold-percent", "60"]);
+
+    result.expect("every Setting exists at Global now");
+    assert_eq!(group_config(&host, "work").watcher_threshold_percent, 60);
+    assert_eq!(
+        group_config(&host, "personal").watcher_threshold_percent,
+        60
+    );
+    assert!(
+        printed.contains("Inherit it"),
+        "and the Scopes it reached are named, because that is the thing that \\
+         was bought: {printed}"
+    );
+}
+
+/// An Override beats Global, and nothing beats an Override.
+#[test]
+fn a_group_overrides_the_one_setting_it_wants_different_and_inherits_the_rest() {
+    let host = three_accounts_in_one_group();
+    declare_group(&host, "personal");
+    config_set(&host, &["work", "watcher-threshold-percent", "95"])
+        .0
+        .expect("a Group may Override what it wants different");
+
+    config_set(&host, &["watcher-threshold-percent", "60"])
+        .0
+        .expect("and Global still moves");
+
+    assert_eq!(
+        group_config(&host, "work").watcher_threshold_percent,
+        95,
+        "the Scope that said otherwise goes on saying it"
+    );
+    assert_eq!(
+        group_config(&host, "personal").watcher_threshold_percent,
+        60
+    );
+    assert_eq!(
+        group_config(&host, "work").watcher_cooldown_minutes,
+        15,
+        "and everything it did not Override still comes from Global"
+    );
+}
+
+/// Inherit is a state and not an absence: a cleared Override goes back to
+/// following Global rather than copying whatever Global happened to say.
+#[test]
+fn clearing_an_override_makes_the_group_track_global_from_then_on() {
+    let host = three_accounts_in_one_group();
+    config_set(&host, &["work", "watcher-threshold-percent", "95"])
+        .0
+        .expect("it takes");
+
+    let (result, printed) = config_unset(&host, &["work", "watcher-threshold-percent"]);
+
+    result.expect("`unset` clears an Override");
+    assert!(printed.contains("Inherited from Global"), "{printed}");
+    assert_eq!(group_config(&host, "work").watcher_threshold_percent, 80);
+
+    config_set(&host, &["watcher-threshold-percent", "60"])
+        .0
+        .expect("and Global moves");
+    assert_eq!(
+        group_config(&host, "work").watcher_threshold_percent,
+        60,
+        "Inheriting is following rather than copying once"
+    );
+}
+
+/// Global's values are always set — there is nothing above Global to Inherit
+/// from — so clearing there is not a state that exists, and is refused rather
+/// than silently accepted.
+#[test]
+fn unset_at_global_is_refused_and_names_what_it_would_have_meant() {
+    let host = three_accounts_in_one_group();
+
+    let (result, _) = config_unset(&host, &["watcher-threshold-percent"]);
+
+    let refusal = result.expect_err("Global has nothing above it");
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    let said = refusal.to_string();
+    assert!(said.contains("cannot be unset at Global"), "{said}");
+    assert!(
+        said.contains("perch config set watcher-threshold-percent <value>"),
+        "the thing that does change it is named: {said}"
+    );
+    assert!(
+        said.contains("perch config unset <scope> watcher-threshold-percent"),
+        "and so is the form that does exist: {said}"
+    );
+    assert_eq!(
+        registry_of(&host).global.settings.watcher_threshold_percent,
+        80,
+        "and nothing was written"
+    );
+}
+
+/// A script can tell an Override from an Inheritance without diffing against
+/// Global: the layer a value came from is the number of words that would set it
+/// again.
+#[test]
+fn reading_a_setting_back_says_which_scope_the_value_came_from() {
+    let host = three_accounts_in_one_group();
+    config_set(&host, &["work", "strategy", "soonest-reset"])
+        .0
+        .expect("it takes");
+
+    let (_, overridden) = config_get(&host, &["work", "strategy"]);
+    let (_, inherited) = config_get(&host, &["work", "watcher-no-return"]);
+
+    assert_eq!(overridden.trim(), "work strategy soonest-reset");
+    assert_eq!(inherited.trim(), "watcher-no-return true");
+    assert_eq!(
+        overridden.split_whitespace().count(),
+        3,
+        "three words is `perch config set work strategy soonest-reset`, which \\
+         is what would restore it — so it is this Group's own"
+    );
+    assert_eq!(
+        inherited.split_whitespace().count(),
+        2,
+        "and two is `perch config set watcher-no-return true`, which is Global's"
+    );
+}
+
+/// An Override holding the value Global happens to hold is still an Override:
+/// one tracks Global as it changes and the other does not, and the output says
+/// which.
+#[test]
+fn an_override_equal_to_globals_value_still_reads_as_an_override() {
+    let host = three_accounts_in_one_group();
+
+    let (result, printed) = config_set(&host, &["work", "watcher-no-return", "true"]);
+
+    result.expect("setting a Setting to what it already resolved to is not a failure");
+    assert!(
+        printed.contains("Override rather than Inherited"),
+        "the difference is the whole of what changed, so it is said: {printed}"
+    );
+    let (_, read_back) = config_get(&host, &["work", "watcher-no-return"]);
+    assert_eq!(read_back.trim(), "work watcher-no-return true");
+}
+
+/// The Accounts in no Group are a Scope now (ADR 0017, amended), so Cycling
+/// among them reads a Strategy somebody can set rather than one compiled into
+/// Perch — and the Scope is addressed the way every other one is.
+#[test]
+fn the_ungrouped_accounts_are_a_scope_that_can_be_addressed_and_overridden() {
+    let host = machine_with_two_accounts();
+
+    let (result, printed) = config_set(&host, &["ungrouped", "strategy", "soonest-reset"]);
+
+    result.expect("`ungrouped` addresses the Accounts in no Group");
+    assert!(printed.contains("soonest-reset"), "{printed}");
+    assert_eq!(
+        registry_of(&host)
+            .in_force(&perch::registry::Scope::Ungrouped)
+            .strategy,
+        Strategy::SoonestReset,
+    );
+
+    let (_, read_back) = config_get(&host, &["ungrouped", "strategy"]);
+    assert_eq!(read_back.trim(), "ungrouped strategy soonest-reset");
+}
+
+/// And where it Overrides nothing, it reads Global — which is what closes the
+/// hole this Scope exists to close: before, that Strategy was settable by no
+/// key, no Group and no command.
+#[test]
+fn the_ungrouped_scope_reads_globals_strategy_where_it_says_nothing() {
+    let host = machine_with_two_accounts();
+
+    config_set(&host, &["strategy", "soonest-reset"])
+        .0
+        .expect("Global carries every Setting now");
+
+    assert_eq!(
+        registry_of(&host)
+            .in_force(&perch::registry::Scope::Ungrouped)
+            .strategy,
+        Strategy::SoonestReset,
+    );
+    let (_, read_back) = config_get(&host, &["ungrouped", "strategy"]);
+    assert_eq!(
+        read_back.trim(),
+        "strategy soonest-reset",
+        "two words, because Global is what would set it again"
+    );
+}
+
+/// A Group cannot be called `ungrouped`, because the Scope answers to that name
+/// first and the Group would be one no `perch config set` could reach.
+#[test]
+fn a_group_cannot_take_the_name_that_addresses_the_ungrouped_scope() {
+    let host = machine_with_two_accounts();
+
+    let (result, _) = run_group(
+        &host,
+        perch::commands::group::GroupCommand::Add {
+            name: "Ungrouped".to_string(),
+        },
+    );
+
+    let refusal = result.expect_err("that name is taken by a Scope");
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    assert!(
+        refusal.to_string().contains("perch config"),
+        "and it says what already answers to it: {refusal}"
+    );
+}
+
+/// The Ungrouped Scope's Overrides survive a round trip through `get`, like
+/// every other Scope's.
+#[test]
+fn the_ungrouped_scopes_overrides_read_back_in_the_form_that_would_set_them() {
+    let host = machine_with_two_accounts();
+    config_set(&host, &["ungrouped", "watcher-cooldown-minutes", "45"])
+        .0
+        .expect("it takes");
+
+    let (result, printed) = config_get(&host, &[]);
+
+    result.expect("naming nothing asks about everything");
+    assert!(
+        printed.contains("ungrouped watcher-cooldown-minutes 45"),
+        "{printed}"
+    );
+}
+
+/// `perch config get <scope>` on the Ungrouped Scope shows the Setting that
+/// governs whether it is Cycled within at all, because that is where it takes
+/// effect even though it lives at Global (ADR 0017).
+#[test]
+fn the_ungrouped_page_shows_the_setting_that_gates_it() {
+    let host = machine_with_two_accounts();
+
+    let (result, printed) = config_get(&host, &["ungrouped"]);
+
+    result.expect("`ungrouped` is a Scope");
+    assert!(printed.contains("cycle-ungrouped false"), "{printed}");
+    assert!(printed.contains("strategy most-headroom"), "{printed}");
 }

@@ -76,7 +76,7 @@ fn an_export_holds_every_account_every_credential_and_everything_said_about_them
     );
     assert_eq!(
         registry.group("work").unwrap().watcher_threshold_percent,
-        65,
+        Some(65),
         "a Group carries its policy, so a restore does not arrive with the defaults"
     );
 
