@@ -291,8 +291,10 @@ enum Command {
     ///
     /// A loop in this terminal rather than a daemon (ADR 0013): it runs until
     /// you stop it with Ctrl-C, and leaves nothing behind when you do. Only the
-    /// active Account is read, and only within a Group that has been told the
-    /// watcher may act on it — `perch config set <group> watcher-may-act true`.
+    /// active Account is read, and only within a Scope that has been told the
+    /// watcher may act on it — `perch config set <group> watcher-may-act true`
+    /// for a Group, or the same for `ungrouped` where `cycle-ungrouped` is on
+    /// as well, because being interchangeable at all is its own yes (ADR 0017).
     ///
     /// Every decision is printed as it is made, including the ones where
     /// nothing happens, which are most of them. They go to standard output, so
