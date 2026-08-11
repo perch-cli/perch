@@ -12,7 +12,7 @@
 // that holds credentials, "npm has the bytes, with provenance" is a better
 // answer than "npm ran a script that fetched something".
 
-const { spawnSync } = require("node:child_process");
+const { spawn } = require("node:child_process");
 const path = require("node:path");
 
 const PACKAGES = {
@@ -58,27 +58,39 @@ try {
   );
 }
 
-// The terminal delivers SIGINT to every process in the foreground group, so
-// both this process and perch get it. Left alone, Node's default action would
-// kill this one immediately — while perch is still putting the terminal back
-// out of raw mode. Ignoring them here leaves perch as the only thing that acts
-// on them, and it is the one holding the screen.
-for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
-  process.on(signal, () => {});
+const child = spawn(binary, process.argv.slice(2), { stdio: "inherit" });
+
+// A terminal delivers SIGINT to every process in the foreground group, so both
+// this process and perch already have it. Left alone, Node's default action
+// would kill this one immediately — while perch is still putting the terminal
+// back out of raw mode. Ignoring it here leaves perch as the only thing acting
+// on it, and it is the one holding the screen.
+//
+// A *directed* signal is the other case, and it reaches this pid alone: perch is
+// a separate process, not a separate group, so nothing delivers it there. That
+// is `timeout 30 npx perch watch`, a CI runner cancelling a job, and a terminal
+// closing on a detached shell. Ignored rather than forwarded, the pair ran until
+// perch decided to stop on its own and `timeout` was defeated — so those are
+// passed on. Async `spawn` rather than `spawnSync` for the same reason: a
+// blocked event loop cannot forward anything, so the handlers could not have run
+// even in principle.
+process.on("SIGINT", () => {});
+for (const signal of ["SIGTERM", "SIGHUP"]) {
+  process.on(signal, () => child.kill(signal));
 }
 
-const result = spawnSync(binary, process.argv.slice(2), { stdio: "inherit" });
-
-if (result.error) {
-  fail(`could not run ${binary}: ${result.error.message}`);
-}
+child.on("error", (error) => {
+  fail(`could not run ${binary}: ${error.message}`);
+});
 
 // `perch run` exits with whatever the client it launched exited with, so a
 // script wrapping perch reads the program's own code. That only stays true if
 // this passes the number through untouched — including the shell's convention
 // for a process a signal killed.
-if (result.signal) {
-  const number = require("node:os").constants.signals[result.signal];
-  process.exit(number ? 128 + number : 1);
-}
-process.exit(result.status === null ? 1 : result.status);
+child.on("close", (status, signal) => {
+  if (signal) {
+    const number = require("node:os").constants.signals[signal];
+    process.exit(number ? 128 + number : 1);
+  }
+  process.exit(status === null ? 1 : status);
+});

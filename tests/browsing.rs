@@ -1731,6 +1731,50 @@ fn the_clear_key_drops_an_override_and_the_group_follows_global_again() {
     );
 }
 
+/// The same key pressed while a stepped value is still waiting to be written.
+///
+/// A stepped value is deferred for a few frames so that holding an arrow is one
+/// write rather than twenty, and a key that writes at once — Esc here, Space on
+/// a flag — went straight out without saying anything about the edit already
+/// waiting. It landed, and then the deferred one settled on top of it: the
+/// Override was cleared and immediately put back, from a keystroke nobody
+/// pressed twice. On screen that reads as Esc being ignored.
+#[test]
+fn clearing_an_override_that_was_just_stepped_leaves_it_cleared() {
+    let host = machine_with_a_group();
+    config_set(&host, &["work", "watcher-threshold-percent", "55"])
+        .0
+        .expect("the Group Overrides it");
+
+    browse(
+        &host,
+        at_the_config(
+            [
+                over(2, Signal::Down),
+                vec![Some(Signal::Right), Some(Signal::Right)],
+            ]
+            .concat()
+            .into_iter()
+            .chain(over(2, Signal::Down))
+            // Stepped, and then cleared before the step has settled.
+            .chain([Some(Signal::Right), Some(Signal::Clear)])
+            .chain(while_nobody_presses_anything())
+            .chain([Some(Signal::Leave)])
+            .collect(),
+        ),
+    );
+
+    assert_eq!(
+        registry_of(&host)
+            .group("work")
+            .expect("a Group Perch holds")
+            .watcher_threshold_percent,
+        None,
+        "the Override the user cleared stays cleared: a deferred step that \
+         settles afterwards is a write they did not ask for last"
+    );
+}
+
 /// At Global the same key does nothing and says why, rather than leaving
 /// somebody wondering whether it silently did something.
 #[test]
@@ -1812,6 +1856,39 @@ fn a_name_that_collides_is_refused_at_the_prompt_before_anything_is_written() {
     assert!(
         registry_of(&host).declared_group("main").is_none(),
         "and nothing was written"
+    );
+}
+
+/// Ctrl-C leaves from inside the field too.
+///
+/// Raw mode is what makes Ctrl-C a keystroke rather than a signal, so nothing
+/// else in Perch catches it — and the field dropped every key it did not
+/// recognise, this one included. That left the view with no way out at all: the
+/// only escape was Esc and then `q`, and a screen that does not leave when
+/// Ctrl-C is pressed is the one thing the frame loop is written not to be.
+///
+/// The script ends at the Ctrl-C, so the fake screen fails the test if the loop
+/// asks for another keystroke rather than leaving.
+#[test]
+fn ctrl_c_leaves_the_view_while_a_name_is_being_typed() {
+    let host = machine_with_figures();
+
+    let left = left_after(
+        &host,
+        at_the_config(
+            over(3, Signal::Down)
+                .into_iter()
+                .chain([Some(Signal::Name)])
+                .chain("spare".chars().map(|letter| Some(Signal::Typed(letter))))
+                .chain([Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    assert_eq!(left, Left::Alone, "and it is left for nothing else");
+    assert!(
+        registry_of(&host).declared_group("spare").is_none(),
+        "a name abandoned rather than confirmed is not written"
     );
 }
 

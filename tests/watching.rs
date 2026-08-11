@@ -744,6 +744,37 @@ fn a_switch_the_machine_turned_away_is_said_and_the_loop_carries_on() {
     );
 }
 
+/// The other way the same question fails, which was going unanswered.
+///
+/// `refuse_if_live` refuses a Live Profile with `ProfileLive`, but it *fails*
+/// with `ProbeRefused` when the `sessions` directory is there and will not be
+/// read — the root-owned one a `sudo claude` leaves. The round asked it inside
+/// an `if let Err(ProfileLive)`, and a pattern that does not match drops the
+/// `Err` on the floor: no branch, no warning. So the round carried on to spend a
+/// Renewal on every candidate, ranked them, and met the identical refusal in the
+/// Switch — having spent exactly the allowance the early ask exists to save.
+#[test]
+fn a_profile_whose_sessions_will_not_be_read_stops_the_round_before_it_spends_anything() {
+    let host = watching(&[86.0], 5.0);
+    // A `sessions` that is a regular file is `ENOTDIR` on a real filesystem:
+    // doubt about what is running, rather than the absence that means nothing is.
+    host.set_file(
+        format!("{}/sessions", store_of(&host, EMAIL).config_dir.display()),
+        "",
+    );
+
+    let (result, _) = run_watch_once(&host);
+
+    let error = result.expect_err("nothing about that Profile has been established");
+    assert_eq!(error.exit_code(), perch::error::EXIT_PROBE_REFUSED);
+    assert_eq!(
+        asked_by(&host),
+        vec![ACTIVE_TOKEN],
+        "and the candidates were never read: the round that cannot move must not \
+         spend a Renewal apiece finding out"
+    );
+}
+
 /// A Switch the watcher discovers is impossible for good records why, the same
 /// as the command would.
 ///
