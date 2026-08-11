@@ -1,8 +1,9 @@
 # Perch guide
 
-The [README](../../README.md) is enough to install Perch and get moving between
-Accounts. These pages are the whole of what each command does, and why it does
-it that way.
+The [front page](https://perch-cli.github.io/perch/), or the
+[README](https://github.com/perch-cli/perch/blob/main/README.md) it says the same
+thing as, is enough to install Perch and get moving between Accounts. These pages
+are the whole of what each command does, and why it does it that way.
 
 | Guide | What it covers |
 | ----- | -------------- |
@@ -19,5 +20,6 @@ it that way.
 
 For the vocabulary these pages use — Account, Profile, Credential, Group, Scope,
 Quota Window, Capture, Rotation, Live Profile — see
-[`CONTEXT.md`](../../CONTEXT.md). For the decisions behind them, the numbered
-ADRs in [`docs/adr/`](../adr/).
+[`CONTEXT.md`](https://github.com/perch-cli/perch/blob/main/CONTEXT.md). For the
+decisions behind them, the numbered ADRs in
+[`docs/adr/`](https://github.com/perch-cli/perch/tree/main/docs/adr).

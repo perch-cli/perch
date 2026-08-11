@@ -1,15 +1,26 @@
 name: Pages
 
-# Serves the installers at https://perch-cli.github.io/perch/. They live on
-# main rather than in a release, deliberately: the URL somebody pastes into a
-# terminal should not carry a version, and an installer that has to be released
-# to be fixed is one that stays broken until the next release.
+# Builds and serves https://perch-cli.github.io/perch/ — the landing page, the
+# installers, and the guide (ADR 0035).
+#
+# Two sources, one deployment. `packaging/pages/` is copied to the root, so the
+# URL somebody pastes into a terminal does not carry a version and an installer
+# that has to be released to be fixed does not stay broken until the next
+# release. `docs/guide/` is rendered by mdBook into /guide/, from the same
+# markdown GitHub shows — nothing is written twice.
+#
+# It deploys from main rather than from a release for the same reason it always
+# did: everything here is fixed by a merge.
 on:
   push:
     branches: [main]
     paths:
       - "packaging/pages/**"
+      - "docs/guide/**"
+      - "docs/book.toml"
+      - "docs/theme/**"
       - ".github/workflows/pages.yml"
+      - ".github/actions/mdbook/**"
   workflow_dispatch:
 
 permissions:
@@ -40,9 +51,35 @@ jobs:
 
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
+      - uses: ./.github/actions/mdbook
+
+      # The landing page and the installers, at the root. install-test.sh is
+      # excluded: it runs against a fabricated release from a checkout, and is
+      # no part of what anybody downloads.
+      - name: Assemble the site
+        run: |
+          set -eu
+          mkdir -p _site
+          cp packaging/pages/index.html packaging/pages/install.sh packaging/pages/install.ps1 _site/
+
+      # `--dest-dir` is resolved against the working directory rather than
+      # against the book, so this is `_site/guide` at the root of the checkout.
+      - name: Render the guide
+        run: mdbook build docs --dest-dir _site/guide
+
+      # What the deployment is for, asserted before it becomes the live one.
+      - name: The installers are where they are pasted from
+        run: |
+          set -eu
+          test -s _site/install.sh
+          test -s _site/install.ps1
+          test -s _site/index.html
+          test -s _site/guide/index.html
+          test -s _site/guide/reference.html
+
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: packaging/pages
+          path: _site
 
       - id: deploy
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

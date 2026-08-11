@@ -232,6 +232,29 @@ jobs:
           }
           Write-Output "install.ps1 parses cleanly"
 
+  # The guide is rendered on every pull request, for the same reason the
+  # installers are checked on one: `pages.yml` deploys from main, so main is the
+  # first place a book that will not build would otherwise be found — and the
+  # deployment it breaks is the one serving the installers.
+  #
+  # `create-missing = false` in docs/book.toml is what gives this teeth: a
+  # chapter pointing at a file nobody wrote fails here rather than being
+  # invented as an empty page. The rest of what could go quietly wrong — a page
+  # missing from SUMMARY.md, a link to a heading that has been reworded — is
+  # `tests/publishing.rs`, which runs with the other suites.
+  guide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/mdbook
+
+      - name: The guide renders
+        run: mdbook build docs --dest-dir _site/guide
+
   # Which lines the suites reach, reported to Codecov and shown as the README's
   # badge. One platform rather than three: coverage is a property of the code
   # rather than of the runner, so a matrix would upload three near-identical
@@ -308,7 +331,7 @@ jobs:
   # alternative was letting a description edit skip this matrix and report
   # green on a commit whose real verdict was red.
   success:
-    needs: [check, installers]
+    needs: [check, installers, guide]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -321,5 +344,9 @@ jobs:
           fi
           if [ "${{ needs.installers.result }}" != "success" ]; then
             echo "installers concluded: ${{ needs.installers.result }}"
+            exit 1
+          fi
+          if [ "${{ needs.guide.result }}" != "success" ]; then
+            echo "guide concluded: ${{ needs.guide.result }}"
             exit 1
           fi

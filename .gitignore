@@ -2,3 +2,8 @@
 
 # The deep-review report this branch works through. Kept locally, not shipped.
 perch-review.html
+
+# What renders the guide leaves behind: `mdbook serve docs` writes here, and
+# `mdbook build docs --dest-dir _site/guide` is what the Pages workflow does.
+/docs/book
+/_site

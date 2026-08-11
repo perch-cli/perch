@@ -150,15 +150,30 @@ the failure that cannot be tested for in advance. Beyond the floor it is a
 judgement call. Worth revisiting at the same time: Apple notarization, which
 0.x deliberately skips.
 
-## The installers
+## The site, and the installers on it
 
-`packaging/pages/` is served at <https://perch-cli.github.io/perch/> by
-`pages.yml`, which deploys on every push to `main` that touches it. The
-installers live on `main` rather than inside a release on purpose: the URL
+<https://perch-cli.github.io/perch/> is built by `pages.yml` on every push to
+`main` that touches what it is made of, out of two sources (ADR 0035):
+`packaging/pages/` is copied to the root, and `docs/guide/` is rendered by
+mdBook into `/guide/`. Nothing on the site is written twice — the guide the
+site serves is the markdown GitHub shows.
+
+The installers live on `main` rather than inside a release on purpose: the URL
 somebody pastes into a terminal should not carry a version, and an installer
-that has to be released to be fixed stays broken until the next release.
+that has to be released to be fixed stays broken until the next release. They
+sit at the root of the deployment for the same reason — `install.sh` and
+`install.ps1` have already been pasted into terminals at those paths, so
+whatever else the site grows, those two do not move.
 
 Enable it once, under **Settings → Pages → Source: GitHub Actions**.
+
+mdBook is pinned by version and by hash in `.github/actions/mdbook`, which both
+`pages.yml` and CI use, so the renderer a pull request is checked with is the
+one the site is built with. To render it locally:
+
+```sh
+mdbook serve docs --open
+```
 
 Both installers verify the archive against the release's `SHA256SUMS`, and
 then, only if `gh` is installed *and logged in*, against the signed build
