@@ -2225,8 +2225,8 @@ mod tests {
     }
 
     /// The three the watcher's policy grew (ADR 0013). Asserted as the numbers
-    /// rather than as the constants, because a default is a promise made in a
-    /// README and a test that reads the constant back cannot notice it change.
+    /// rather than as the constants, because a default is a promise made in the
+    /// docs and a test that reads the constant back cannot notice it change.
     #[test]
     fn the_watchers_policy_has_the_defaults_it_is_documented_with() {
         let config = Settings::default();

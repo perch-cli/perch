@@ -170,7 +170,8 @@ if (-not (Test-OnPath $InstallDir)) {
             # Windows resolves a command against the PATH of the process that
             # started it, and the console being typed at started before now.
             Say "added $InstallDir to your user PATH — reopen your terminal to pick it up."
-            Say "The README says how to take it back out."
+            Say "Perch's install guide says how to take it back out:"
+            Say "    https://github.com/perch-cli/perch/blob/main/docs/guide/installing.md"
         }
     }
     else {

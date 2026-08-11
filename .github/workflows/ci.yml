@@ -232,6 +232,71 @@ jobs:
           }
           Write-Output "install.ps1 parses cleanly"
 
+  # Which lines the suites reach, reported to Codecov and shown as the README's
+  # badge. One platform rather than three: coverage is a property of the code
+  # rather than of the runner, so a matrix would upload three near-identical
+  # reports for Codecov to merge at three times the minutes.
+  #
+  # A job of its own rather than a step in `check`, because instrumented tests
+  # run slower than plain ones and the three-platform matrix is what gates a
+  # pull request. Coverage informs; it does not gate.
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Not in rust-toolchain.toml's `components`, for the reason its comment
+      # gives about `targets`: this is wanted by one CI job and by nobody
+      # building Perch, and listing it there would make every contributor
+      # download it to compile a binary that does not need it.
+      - name: Toolchain
+        run: rustup component add llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # `cargo install` rather than a tool-installer action, which is how
+      # cargo-machete and cargo-audit already arrive: one fewer third-party
+      # action to pin, review and trust.
+      - name: cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked --version 0.8.7
+
+      # The default feature set, deliberately. The contract suite is held back
+      # by `required-features` because it asserts beliefs against an installed
+      # Claude Code and a real keychain, and instrumenting it here would count
+      # the lines it covers on a runner where it is compiled out — a figure that
+      # moved with the runner rather than with the tests.
+      - name: Coverage
+        run: cargo llvm-cov --locked --lcov --output-path lcov.info
+
+      # The upload is conditional because the token is a repository secret, and
+      # a pull request from a fork is not given one. Without this the job would
+      # fail on every outside contribution, which is the opposite of what a
+      # coverage report is for. `secrets` is not readable from an `if:`, so the
+      # answer is computed here where it is.
+      - name: Is there a token to upload with
+        id: token
+        run: echo "present=${{ secrets.CODECOV_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to Codecov
+        if: steps.token.outputs.present == 'true'
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          # An upload that failed silently is a badge that goes stale without
+          # saying so, which is worse than no badge.
+          fail_ci_if_error: true
+
+      # Said out loud rather than skipped quietly: a coverage job that ran, did
+      # the work and uploaded nothing looks identical to one that worked.
+      - name: No token, no upload
+        if: steps.token.outputs.present != 'true'
+        run: |
+          echo "::warning::CODECOV_TOKEN is not set, so the report was measured but not uploaded. The README's coverage badge stays unknown until it is."
+
   # The name branch protection listens to for this file, however the matrix
   # above grows or renames its legs. `if: always()` with an explicit verdict,
   # because a plain `needs:` job is skipped when a leg fails — and a skipped
