@@ -5,11 +5,25 @@
 //! is the choice made by eye: the Accounts, their Groups, and how full they are,
 //! side by side.
 //!
-//! It **acts, and acts on exactly two things**: a Switch and a Run ([`act`]).
-//! Both have plain command forms, which is what keeps ADR 0011's constraint
-//! honest — nothing here is only here. `add`, `remove`, `purge` and `config`
-//! stay out, because a keystroke away from an irreversible act is the wrong
-//! ergonomics for the one surface being navigated by arrow key.
+//! It **acts, and the line is reversibility** (ADR 0034): the TUI may write
+//! what it can unwrite. A Switch, a Run, every Setting, an Alias, whether
+//! Cycling may choose an Account, which Group it is in, and declaring a Group.
+//! Out stay `add`, `remove`, `relogin`, `purge`, `export` and `import`, and so
+//! does deleting a Group — the Accounts survive it and become Ungrouped, but
+//! that Group's Overrides do not, and a value nobody can get back is exactly
+//! the loss this rule refuses.
+//!
+//! Every one of those has a plain command form, which is what keeps ADR 0011's
+//! constraint honest — nothing here is only here — and every write *is* the
+//! command ([`act`]), so a Setting written by the panel is written the way
+//! `perch config` writes it rather than reassembled.
+//!
+//! There is **no save button**: a change is written when it is made. The
+//! exclusive lock is taken per edit and given straight back, never held for the
+//! life of the screen — holding it would make an open TUI a denial of service
+//! against `perch watch`, which takes the same lock every round. The cost is
+//! that an edit can be refused, so a refusal is shown where a failed Refresh is
+//! shown and the row goes back to what was actually written.
 //!
 //! Three rules shape the loop.
 //!
@@ -52,7 +66,7 @@ use crate::error::Result;
 use crate::host::Host;
 use crate::registry::Registry;
 
-pub use model::{Asked, Left, Model, Refreshing, Tab};
+pub use model::{Asked, Column, Edit, Left, Model, Refreshing, Row, ScopeRow, StatusRow, Tab};
 pub use refresh::{Refreshed, Refresher};
 
 /// How long the loop waits for a keystroke before drawing again.
@@ -73,7 +87,14 @@ pub const FRAME_MILLIS: u64 = 250;
 ///
 /// Its own type so the frame loop and the model are driven by a test that names
 /// what somebody pressed rather than by fabricated key events — and so which
-/// keys mean what is decided in exactly one place ([`Signal::of`]).
+/// keys mean what is decided in exactly one place ([`Signal::of`] and
+/// [`Signal::meant_by`]).
+///
+/// A letter arrives as [`Signal::Typed`] and stays one. What it *means* is a
+/// second question, because it has two answers: with a name being typed into it
+/// is the letter, and otherwise it is whatever [`Signal::meant_by`] says. That
+/// split is why `work` can be typed as a Group name at all — `r` and `k` are
+/// the Refresh and the arrow key everywhere else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Signal {
     /// Give the terminal back and go.
@@ -81,13 +102,34 @@ pub enum Signal {
     /// The next view, and the one before it.
     NextTab,
     PreviousTab,
-    /// Down and up the listing.
+    /// Down and up the listing, or the column the keys are acting on.
     Down,
     Up,
+    /// One step down or up a value, and — where the cursor is on something with
+    /// no natural order — one column left or right. The two cannot collide:
+    /// stepping only means anything on a row that has steps.
+    Left,
+    Right,
+    /// Flip the simplest Setting there is, in one keystroke.
+    Toggle,
+    /// Clear a Scope's Override, so it Inherits Global again. Also what closes
+    /// a name being typed without writing it.
+    Clear,
+    /// The ends of a range, so crossing one is not sixteen keystrokes.
+    Least,
+    Most,
+    /// Type a name — the one value with no natural step (ADR 0034).
+    Name,
+    /// A letter of a name being typed, and the key that takes one back. Neither
+    /// means anything unless a name is being typed.
+    Typed(char),
+    Backspace,
     /// Read Utilization from Anthropic — the only thing here that touches the
     /// network, and only ever because somebody asked (ADR 0015).
     Refresh,
-    /// Make the Account under the cursor the active one.
+    /// Make the Account under the cursor the active one, move into the column
+    /// on the right, or confirm the name being typed — Enter, whose meaning is
+    /// "yes, that one" everywhere it is offered.
     Switch,
     /// Launch a client as the Account under the cursor, in this terminal alone.
     Run,
@@ -134,18 +176,47 @@ impl Signal {
             return None;
         }
         match key.code {
-            KeyCode::Char('q') => Some(Signal::Leave),
-            KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => Some(Signal::NextTab),
-            KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => Some(Signal::PreviousTab),
-            KeyCode::Down | KeyCode::Char('j') => Some(Signal::Down),
-            KeyCode::Up | KeyCode::Char('k') => Some(Signal::Up),
-            KeyCode::Char('r') => Some(Signal::Refresh),
+            // The tab bar moved off the arrow keys when the panel gained
+            // values to step: `←`/`→` on a percentage has to be the percentage,
+            // so `Tab` is the only thing that changes view.
+            KeyCode::Tab => Some(Signal::NextTab),
+            KeyCode::BackTab => Some(Signal::PreviousTab),
+            KeyCode::Down => Some(Signal::Down),
+            KeyCode::Up => Some(Signal::Up),
+            KeyCode::Left => Some(Signal::Left),
+            KeyCode::Right => Some(Signal::Right),
+            KeyCode::Esc => Some(Signal::Clear),
+            KeyCode::Home => Some(Signal::Least),
+            KeyCode::End => Some(Signal::Most),
+            KeyCode::Backspace => Some(Signal::Backspace),
             KeyCode::Enter => Some(Signal::Switch),
+            // Every printable key is a letter here and nothing else. What it
+            // means is `meant_by`'s, because it depends on whether a name is
+            // being typed — and a decoder that answered before knowing would
+            // make `work` an untypeable Group name.
+            KeyCode::Char(letter) => Some(Signal::Typed(letter)),
+            _ => None,
+        }
+    }
+
+    /// What a letter means where nothing is being typed into.
+    ///
+    /// `None` is a letter Perch has no meaning for, which is most of them.
+    pub fn meant_by(letter: char) -> Option<Signal> {
+        match letter {
+            'q' => Some(Signal::Leave),
+            'r' => Some(Signal::Refresh),
+            'n' => Some(Signal::Name),
             // `x` rather than `R`, which would sit one shift away from the key
             // that Refreshes. A mistyped Refresh costs a round trip; a mistyped
             // Run hands the terminal to a client, and the two should not be
             // neighbours.
-            KeyCode::Char('x') => Some(Signal::Run),
+            'x' => Some(Signal::Run),
+            ' ' => Some(Signal::Toggle),
+            'j' => Some(Signal::Down),
+            'k' => Some(Signal::Up),
+            'h' => Some(Signal::Left),
+            'l' => Some(Signal::Right),
             _ => None,
         }
     }
@@ -188,11 +259,20 @@ pub fn browse(
     loop {
         screen.draw(&model)?;
 
-        if let Some(signal) = screen.next(FRAME_MILLIS)? {
-            match model.act_on(signal) {
+        match screen.next(FRAME_MILLIS)? {
+            Some(signal) => match model.act_on(signal) {
                 Asked::Nothing => {}
                 Asked::ForARefresh => refresher.ask(model.accounts_on_show()),
                 Asked::ForASwitch(email) => act::switch(host, &mut model, &email),
+                Asked::ToWrite(edit) => act::write(host, &mut model, edit),
+            },
+            // A wait in which nobody pressed anything, which is what the
+            // debounce on a stepped value is counted in. Frames rather than
+            // milliseconds, so the model needs no clock (`tui::model`).
+            None => {
+                if let Some(edit) = model.settled() {
+                    act::write(host, &mut model, edit);
+                }
             }
         }
 
@@ -208,8 +288,13 @@ pub fn browse(
         // whatever it said when it was first drawn.
         model.now = host.now();
 
-        if let Some(left) = &model.leaving {
-            return Ok(left.clone());
+        if let Some(left) = model.leaving.clone() {
+            // Walking away mid-adjustment loses nothing: a deferred write is a
+            // deferred write and not a save button.
+            if let Some(edit) = model.take_pending() {
+                act::write(host, &mut model, edit);
+            }
+            return Ok(left);
         }
     }
 }
@@ -261,7 +346,7 @@ mod tests {
 
     #[test]
     fn q_and_ctrl_c_both_leave() {
-        assert_eq!(Signal::of(&key(KeyCode::Char('q'))), Some(Signal::Leave));
+        assert_eq!(Signal::meant_by('q'), Some(Signal::Leave));
         assert_eq!(
             Signal::of(&Event::Key(KeyEvent::new(
                 KeyCode::Char('c'),
@@ -271,11 +356,17 @@ mod tests {
         );
     }
 
-    /// A plain `c` is not Ctrl-C, and Ctrl-anything-else is not a key Perch has
-    /// a meaning for — a terminal sends a great many of those.
+    /// A plain `c` is not Ctrl-C — it is a letter, which means something only
+    /// where a name is being typed — and Ctrl-anything-else is not a key Perch
+    /// has a meaning for at all: a terminal sends a great many of those.
     #[test]
     fn a_modifier_is_part_of_which_key_was_pressed() {
-        assert_eq!(Signal::of(&key(KeyCode::Char('c'))), None);
+        assert_eq!(Signal::meant_by('c'), None);
+        assert_eq!(
+            Signal::of(&key(KeyCode::Char('c'))),
+            Some(Signal::Typed('c')),
+            "it is still a letter, which is what a name is made of"
+        );
         assert_eq!(
             Signal::of(&Event::Key(KeyEvent::new(
                 KeyCode::Char('r'),
@@ -300,15 +391,18 @@ mod tests {
         }
     }
 
+    /// Tab and nothing else changes view. The arrow keys used to as well, and
+    /// could not go on doing so once the panel gained values to step: `←` on a
+    /// percentage has to be the percentage.
     #[test]
-    fn the_views_move_by_tab_and_by_arrow() {
+    fn the_views_move_by_tab_alone_and_the_arrows_move_within_one() {
         assert_eq!(Signal::of(&key(KeyCode::Tab)), Some(Signal::NextTab));
-        assert_eq!(Signal::of(&key(KeyCode::Right)), Some(Signal::NextTab));
         assert_eq!(
             Signal::of(&key(KeyCode::BackTab)),
             Some(Signal::PreviousTab)
         );
-        assert_eq!(Signal::of(&key(KeyCode::Left)), Some(Signal::PreviousTab));
+        assert_eq!(Signal::of(&key(KeyCode::Right)), Some(Signal::Right));
+        assert_eq!(Signal::of(&key(KeyCode::Left)), Some(Signal::Left));
     }
 
     /// Windows reports a press and a release for one keystroke. Acting on both
@@ -318,32 +412,58 @@ mod tests {
         let mut released = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
         released.kind = KeyEventKind::Release;
 
-        assert_eq!(Signal::of(&key(KeyCode::Char('j'))), Some(Signal::Down));
+        assert_eq!(
+            Signal::of(&key(KeyCode::Char('j'))),
+            Some(Signal::Typed('j'))
+        );
         assert_eq!(Signal::of(&Event::Key(released)), None);
     }
 
     #[test]
     fn the_two_acting_keys_are_enter_and_x() {
         assert_eq!(Signal::of(&key(KeyCode::Enter)), Some(Signal::Switch));
-        assert_eq!(Signal::of(&key(KeyCode::Char('x'))), Some(Signal::Run));
+        assert_eq!(Signal::meant_by('x'), Some(Signal::Run));
     }
 
-    /// The picker acts on exactly two things (ADR 0011), and nothing
-    /// destructive is a keystroke away: `add`, `remove`, `purge` and `config`
-    /// have no key here and are reached by typing their names.
+    /// A letter is a letter, whatever else it means. Every one of them reaches
+    /// the model as itself, which is what lets `work` be typed as a Group name
+    /// — `r` and `k` are the Refresh and the arrow key everywhere else.
+    #[test]
+    fn every_printable_key_arrives_as_the_letter_it_is() {
+        for letter in ['q', 'r', 'n', 'x', 'j', 'k', 'h', 'l', ' ', 'z'] {
+            assert_eq!(
+                Signal::of(&key(KeyCode::Char(letter))),
+                Some(Signal::Typed(letter)),
+                "{letter:?}"
+            );
+        }
+    }
+
+    /// The panel writes what it can unwrite (ADR 0034), and nothing
+    /// irreversible is a keystroke away: `add`, `remove`, `relogin`, `purge`,
+    /// `export`, `import` and deleting a Group have no key here and are
+    /// reached by typing their names.
     ///
     /// Written as the whole vocabulary rather than as a list of keys that do
     /// nothing, because the vocabulary is the thing being constrained: a
     /// keystroke that removed an Account would have to add a Signal, and that
     /// is what this fails on rather than on somebody having thought to try `d`.
     #[test]
-    fn no_key_reaches_anything_but_looking_switching_and_running() {
+    fn no_key_reaches_anything_the_panel_could_not_unwrite() {
         let allowed = [
             Signal::Leave,
             Signal::NextTab,
             Signal::PreviousTab,
             Signal::Down,
             Signal::Up,
+            Signal::Left,
+            Signal::Right,
+            Signal::Toggle,
+            Signal::Clear,
+            Signal::Least,
+            Signal::Most,
+            Signal::Name,
+            Signal::Backspace,
             Signal::Refresh,
             Signal::Switch,
             Signal::Run,
@@ -371,8 +491,18 @@ mod tests {
             ]);
 
         for code in typed {
-            if let Some(signal) = Signal::of(&key(code)) {
-                assert!(allowed.contains(&signal), "{code:?} means {signal:?}");
+            match Signal::of(&key(code)) {
+                // A letter is a letter until something asks what it means,
+                // which is the second half of the vocabulary and is asked here
+                // too — a keystroke that removed an Account would have to be in
+                // one of the two.
+                Some(Signal::Typed(letter)) => {
+                    if let Some(signal) = Signal::meant_by(letter) {
+                        assert!(allowed.contains(&signal), "{letter:?} means {signal:?}");
+                    }
+                }
+                Some(signal) => assert!(allowed.contains(&signal), "{code:?} means {signal:?}"),
+                None => {}
             }
         }
     }

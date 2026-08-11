@@ -21,8 +21,8 @@ use crate::tui::terminal::TerminalScreen;
 /// Opens the view, and hands over to whatever the person chose in it.
 ///
 /// The status comes back rather than being folded into success or failure,
-/// because one of the two things the picker acts on is a Run — and a Run is a
-/// way of launching a program (ADR 0010). What the client said is what a script
+/// because one of the things the picker acts on is a Run — and a Run is a way
+/// of launching a program (ADR 0010). What the client said is what a script
 /// reads, whether it was launched from a command line or from a cursor.
 pub fn run(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     if !host.is_interactive() {

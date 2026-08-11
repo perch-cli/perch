@@ -268,10 +268,16 @@ enum Command {
     /// here is only here — every capability has a plain command form, because
     /// Perch has to be complete over SSH and in scripts (ADR 0011).
     ///
-    /// The Accounts are listed in the order `perch switch` would rank them, so
-    /// the ranking is visible rather than hidden. Enter Switches to the one
-    /// under the cursor and `x` Runs it, and those are the only two things it
-    /// acts on: nothing here reaches `add`, `remove`, `purge` or `config`.
+    /// Two tabs. `Status` answers "where am I and what governs me" — the active
+    /// Account, the table of Accounts in the order `perch switch` would rank
+    /// them, and the Settings in force for the Scope you are in. `Config`
+    /// answers "what does each Scope declare" and lets you change it.
+    ///
+    /// It writes what it can unwrite (ADR 0034): Settings, Aliases, whether
+    /// Cycling may choose an Account, which Group it is in, declaring a Group,
+    /// Enter to Switch and `x` to Run. `add`, `remove`, `relogin`, `purge`,
+    /// `export`, `import` and deleting a Group have no key here. There is no
+    /// save button — a change is written when it is made.
     ///
     /// The first frame is drawn from cache and never waits on the network, with
     /// the age of every figure on it; `r` Refreshes, and the display keeps

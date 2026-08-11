@@ -1,42 +1,50 @@
 //! What the TUI is showing, and what a keystroke does to it.
 //!
-//! Everything the frame loop knows lives here, and nothing here draws or reads:
-//! a keystroke goes in and a different [`Model`] comes out, so what the two tabs
-//! do about `Tab`, `j` and `r` is tested without a terminal and without a clock.
+//! Everything the frame loop knows lives here, and nothing here draws, reads or
+//! writes: a keystroke goes in and a different [`Model`] comes out, so what the
+//! two tabs do about `Tab`, `j` and `r` is tested without a terminal and without
+//! a clock. Where a keystroke has to reach the disk, this says so by returning
+//! an [`Asked`] — the loop is the only thing that can act on it, and a `#[must_use]`
+//! is what stops it forgetting.
+//!
+//! Two tabs, because there are two questions. `Status` answers "where am I and
+//! what governs me"; `Config` answers "what does each Scope declare, and let me
+//! change it".
 
 use chrono::{DateTime, Utc};
 
+use crate::commands::config::{SETTINGS, Setting, Shape};
 use crate::commands::{run, switch};
-use crate::cycle::{self, Scope};
-use crate::registry::{Account, Registry};
+use crate::cycle;
+use crate::registry::{self, Account, Registry, Scope};
 use crate::tui::refresh::Refreshed;
 use crate::tui::{Signal, lines_of};
 
 /// The two views, in the order they are offered.
 ///
-/// One command's worth of surface split by what is being asked: "which Account
-/// do I want" is a different question from "how much is left where", and a
-/// single list answering both answers neither well.
+/// One command's worth of surface split by what is being asked: "where am I"
+/// is a different question from "what may I change", and a single page
+/// answering both answers neither well.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
-    /// The Accounts, as things to choose between.
-    Accounts,
-    /// The figures, as evidence.
-    Utilization,
+    /// Where you are: the active Account, the Accounts you could go to, and
+    /// the Settings governing you.
+    Status,
+    /// What each Scope declares, and the keys that change it.
+    Config,
 }
 
 impl Tab {
     /// Every view, in the order they are shown. The tab bar and the key that
     /// moves between them read this same array, so a view added here appears in
     /// both without either being told about it.
-    pub const ALL: [Tab; 2] = [Tab::Accounts, Tab::Utilization];
+    pub const ALL: [Tab; 2] = [Tab::Status, Tab::Config];
 
-    /// What the tab bar calls it, which is also the word the issue and the
-    /// README use for it.
+    /// What the tab bar calls it, which is also the word `CONTEXT.md` uses.
     pub fn title(self) -> &'static str {
         match self {
-            Tab::Accounts => "Accounts",
-            Tab::Utilization => "Utilization",
+            Tab::Status => "Status",
+            Tab::Config => "Config",
         }
     }
 
@@ -56,6 +64,104 @@ impl Tab {
     }
 }
 
+/// The rows of the `Status` tab's sidebar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusRow {
+    /// The active Account, summarised.
+    Overview,
+    /// The full table, as things to choose between.
+    Accounts,
+    /// The Settings in force for the active Account's Scope, read-only, each
+    /// with where it came from written out.
+    Config,
+}
+
+impl StatusRow {
+    pub const ALL: [StatusRow; 3] = [StatusRow::Overview, StatusRow::Accounts, StatusRow::Config];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            StatusRow::Overview => "Overview",
+            StatusRow::Accounts => "Accounts",
+            StatusRow::Config => "Config",
+        }
+    }
+}
+
+/// Which column the keys are acting on.
+///
+/// Both tabs have a sidebar and something beside it, so both need to say which
+/// one `↓` moves — otherwise the page with a table in it swallows the key that
+/// reaches the other rows, and the sidebar becomes unreachable once you are on
+/// it. `Status` uses two of these; `Config` uses all three, and its middle one
+/// is not always there: Global governs every Account there is, so a column of
+/// "the Accounts in Global" would be the whole registry listed under a Scope
+/// nobody is *in*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Column {
+    /// Global, Ungrouped, each Group, and the row that declares a new one.
+    Scopes,
+    /// The Accounts in the Scope the sidebar is on.
+    Accounts,
+    /// The Scope's Settings, and the facts of the Account beside them.
+    Content,
+}
+
+/// One row of the sidebar on the `Config` tab.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScopeRow {
+    Scope(Scope),
+    /// Declaring a Group is the one creation the panel offers, because it is
+    /// the one that takes nothing away. Deleting one stays out: the Accounts
+    /// survive it and become Ungrouped, but that Group's Overrides do not, and
+    /// a value nobody can get back is the loss ADR 0034's rule refuses.
+    NewGroup,
+}
+
+/// One row of the `Config` tab's content pane.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Row {
+    /// A Setting, at the Scope the sidebar is on. Editable.
+    Setting(Setting),
+    /// `cycle-ungrouped`, which is Global's alone and has no per-Scope form —
+    /// shown on Global's page because that is where it lives, and on the
+    /// Ungrouped page because that is where it takes effect (ADR 0017).
+    CycleUngrouped,
+    /// The selected Account's Alias. Typed, because a name is the only value
+    /// with no natural step.
+    Alias,
+    /// Whether Cycling may choose the selected Account — the one reversible
+    /// per-Account decision, put where the rest of the decisions are.
+    Cycling,
+    /// Which Group the selected Account is in.
+    Group,
+    /// Read-only facts about the selected Account.
+    Plan,
+    Quarantine,
+}
+
+impl Row {
+    /// What the row is called down the left of the pane.
+    pub fn label(&self) -> &str {
+        match self {
+            Row::Setting(setting) => setting.as_str(),
+            Row::CycleUngrouped => "cycle-ungrouped",
+            Row::Alias => "alias",
+            Row::Cycling => "cycling-may-choose",
+            Row::Group => "group",
+            Row::Plan => "plan",
+            Row::Quarantine => "quarantine",
+        }
+    }
+
+    /// Whether this row is one of the Scope's Settings, as opposed to a fact
+    /// about an Account. The two are laid out together and edited by the same
+    /// keys, but only the first has an Override to clear.
+    fn is_a_setting(&self) -> bool {
+        matches!(self, Row::Setting(_))
+    }
+}
+
 /// Where the last Refresh got to — the whole of what the TUI says about the
 /// network.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +175,104 @@ pub enum Refreshing {
     /// Back, carrying whatever could not be read. Empty when everything was:
     /// the figures then say "just now" themselves, which is the news.
     Back(Vec<String>),
+}
+
+/// One change to the registry, as the command that would make it.
+///
+/// Carried rather than applied, because the model neither reads nor writes.
+/// Every one of these is reversible, which is the line ADR 0034 draws: the TUI
+/// may write what it can unwrite.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Edit {
+    /// A Setting at a Scope. `None` clears the Override so the Scope Inherits
+    /// Global again — which is not a state Global itself has.
+    Setting {
+        scope: Scope,
+        key: Setting,
+        value: Option<String>,
+    },
+    /// The one key that is Global's alone.
+    CycleUngrouped(bool),
+    Alias {
+        email: String,
+        name: String,
+    },
+    Cycling {
+        email: String,
+        enabled: bool,
+    },
+    /// `None` is out of every Group.
+    Group {
+        email: String,
+        group: Option<String>,
+    },
+    DeclareGroup(String),
+}
+
+/// A change made and not yet written, with how many quiet frames are left
+/// before it is.
+///
+/// **Counted in frames rather than in milliseconds**, so the debounce needs no
+/// clock and the fake screen — which already scripts "a wait nobody pressed
+/// anything in" — drives it unchanged. A model given a clock would be a model
+/// every test had to advance.
+///
+/// This is a deferred write and not a save button. Nothing has to be
+/// remembered and walking away loses nothing: the frames go by on their own,
+/// and leaving flushes whatever is left.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Pending {
+    edit: Edit,
+    frames_left: usize,
+}
+
+/// How many frames with nobody pressing anything a stepped value waits before
+/// it is written.
+///
+/// Holding `→` from 0 to 80 is otherwise sixteen writes and sixteen lock
+/// acquisitions, some of which lose the race and leave a half-set value.
+const SETTLES_AFTER: usize = 2;
+
+/// A stepped value as it stands on screen before it has been written.
+///
+/// Held so the row shows what the arrow keys have done to it rather than what
+/// is still on disk. Cleared when the write lands — or when it is refused, at
+/// which point the row goes back to what was actually written, because a value
+/// that was never written is not one anybody should be reading.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Draft {
+    scope: Scope,
+    key: Setting,
+    value: String,
+}
+
+/// A name being typed, and what it is for.
+///
+/// The only place the panel accepts typed input, because a name is the only
+/// value with no natural step: a bool has two states, a Strategy has the ones
+/// Perch implements, and a percentage has arrows (ADR 0034).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Prompt {
+    pub what: Naming,
+    pub typed: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Naming {
+    /// A Group to declare.
+    NewGroup,
+    /// An Alias for this Account.
+    Alias(String),
+}
+
+impl Naming {
+    /// What is being asked for, above the line being typed into.
+    pub fn asks(&self) -> String {
+        match self {
+            Naming::NewGroup => "Name the new Group:".to_string(),
+            Naming::Alias(email) => format!("Name {email}:"),
+        }
+    }
 }
 
 /// What the frame loop has to do about a keystroke, where drawing the next
@@ -92,6 +296,11 @@ pub enum Asked {
     /// is: the model has just had it in hand to check, so carrying it here saves
     /// the caller a second lookup and the possibility of the two disagreeing.
     ForASwitch(String),
+    /// A change to write, as the command that would write it
+    /// ([`crate::tui::act::write`]). There is no save button: a change is
+    /// written when it is made, and the lock is taken per edit and given
+    /// straight back (ADR 0034).
+    ToWrite(Edit),
 }
 
 /// How the view ended, which is not always "it ended".
@@ -120,7 +329,7 @@ pub enum Left {
 /// change between deciding it and drawing it.
 #[derive(Debug, Clone)]
 pub struct Section {
-    pub scope: Scope,
+    pub scope: cycle::Scope,
     /// Where its Accounts sit in the listing — positions in
     /// [`Model::accounts`], not in the registry.
     pub rows: std::ops::Range<usize>,
@@ -129,7 +338,8 @@ pub struct Section {
 /// Everything the TUI is showing.
 pub struct Model {
     /// The Accounts as Perch last held them: read before the terminal was
-    /// entered, and replaced wholesale by a Refresh or a Switch that lands.
+    /// entered, and replaced wholesale by a Refresh, a Switch or an edit that
+    /// lands.
     ///
     /// Private, and behind [`Model::now_holds`], because `order` below is
     /// positions into it: the two are one fact in two pieces, and a registry
@@ -149,12 +359,26 @@ pub struct Model {
     /// frame loop rather than read here.
     pub now: DateTime<Utc>,
     pub tab: Tab,
+    /// Which row of the `Status` sidebar is showing.
+    pub status_row: usize,
     /// Which Account the cursor is on, as a position in the listing.
     ///
     /// A position rather than an email address, because it is a place on the
     /// screen and an arrow key moves it. What it points *at* survives the
     /// listing being reordered — see [`Model::now_holds`].
     pub cursor: usize,
+    /// Which Scope the `Config` sidebar is on, as a position in [`Model::scope_rows`].
+    pub scope_row: usize,
+    /// Which of that Scope's Accounts the middle column is on.
+    pub account_row: usize,
+    /// Which row of the content pane the cursor is on.
+    pub content_row: usize,
+    /// Which column the keys are acting on.
+    pub column: Column,
+    /// A name being typed, where one is.
+    pub prompt: Option<Prompt>,
+    pending: Option<Pending>,
+    draft: Option<Draft>,
     pub refreshing: Refreshing,
     /// What the last act said, in the words the command said it in. Cleared
     /// when the cursor moves, because a report standing beside a different
@@ -175,8 +399,16 @@ impl Model {
             sections,
             registry,
             now,
-            tab: Tab::Accounts,
+            tab: Tab::Status,
+            status_row: 0,
             cursor: 0,
+            scope_row: 0,
+            account_row: 0,
+            content_row: 0,
+            column: Column::Scopes,
+            prompt: None,
+            pending: None,
+            draft: None,
             refreshing: Refreshing::Unasked,
             said: Vec::new(),
             leaving: None,
@@ -189,13 +421,6 @@ impl Model {
     }
 
     /// Whether Perch holds no Account at all.
-    ///
-    /// A question of its own because both callers were answering it by building
-    /// the whole listing and throwing it away: `render` allocated a `Vec` of
-    /// every Account to ask `.is_empty()` and then built it again to draw it,
-    /// and `ask_for_a_refresh` allocated a `Vec<String>` of every address to
-    /// ask the same thing. Four times a second, for as long as the picker is
-    /// open.
     pub fn is_empty(&self) -> bool {
         self.order.is_empty()
     }
@@ -217,55 +442,137 @@ impl Model {
         &self.sections
     }
 
-    /// The Account under the cursor, or `None` when Perch holds none.
+    /// The Account under the cursor on the `Status` tab, or `None` when Perch
+    /// holds none.
     pub fn selected(&self) -> Option<&Account> {
         self.order
             .get(self.cursor)
             .map(|at| &self.registry.accounts[*at])
     }
 
-    /// Takes a registry that has moved on — a Refresh that landed, a Switch
-    /// that did — and keeps the cursor on the Account it was on.
-    ///
-    /// The listing is ranked, so a figure that came back can reorder it: the
-    /// row under the cursor before is not the row under it after. What the two
-    /// acting keys act on is the Account rather than the row number, so it
-    /// follows the Account — otherwise pressing `r` and then Enter would Switch
-    /// to something nobody chose.
-    pub fn now_holds(&mut self, registry: Registry) {
-        let was_on = self.selected().map(|account| account.email().to_string());
-        self.registry = registry;
-        (self.order, self.sections) = ranked(&self.registry, self.now);
-
-        let found = was_on.and_then(|email| self.row_of(&email));
-        if found.is_none() {
-            // The Account the cursor was on is gone — another `perch remove`
-            // while this was open, say. The cursor keeps its row number, so it
-            // is on a different Account now, and a report left standing beside
-            // it would be a report about the wrong one. That is the rule
-            // `move_to` exists for; this is the other way the cursor comes to
-            // point somewhere new.
-            self.said.clear();
-        }
-        self.cursor = found.unwrap_or(self.cursor).min(self.last_row());
+    /// Which row of the `Status` sidebar is showing.
+    pub fn status(&self) -> StatusRow {
+        StatusRow::ALL[self.status_row.min(StatusRow::ALL.len() - 1)]
     }
 
-    /// Where an Account sits in the listing now, or `None` if it is no longer
-    /// held at all.
-    fn row_of(&self, email: &str) -> Option<usize> {
-        // Over `order` rather than over `accounts()`, which allocates the whole
-        // listing to find one position — and this runs on every landed Refresh
-        // and every Switch.
-        self.order
-            .iter()
-            .position(|at| self.registry.accounts[*at].email() == email)
+    /// The `Config` sidebar, in the order it is offered: Global, the Accounts
+    /// in no Group, each Group as it was declared, and the row that declares
+    /// another.
+    pub fn scope_rows(&self) -> Vec<ScopeRow> {
+        let mut rows: Vec<ScopeRow> = self
+            .registry
+            .scopes()
+            .into_iter()
+            .map(ScopeRow::Scope)
+            .collect();
+        rows.push(ScopeRow::NewGroup);
+        rows
+    }
+
+    /// The sidebar row the `Config` tab is on.
+    pub fn scope_row(&self) -> ScopeRow {
+        let rows = self.scope_rows();
+        rows[self.scope_row.min(rows.len() - 1)].clone()
+    }
+
+    /// The Scope the `Config` tab is showing, or `None` on the row that
+    /// declares a new Group — which is not a Scope until it exists.
+    pub fn scope(&self) -> Option<Scope> {
+        match self.scope_row() {
+            ScopeRow::Scope(scope) => Some(scope),
+            ScopeRow::NewGroup => None,
+        }
+    }
+
+    /// The Accounts in the Scope the sidebar is on — the middle column.
+    ///
+    /// Empty for Global, which governs every Account there is: a column listing
+    /// all of them under a Scope nobody is *in* would be the registry wearing a
+    /// heading it does not have.
+    pub fn scope_accounts(&self) -> Vec<&Account> {
+        match self.scope() {
+            Some(Scope::Ungrouped) => self.registry.ungrouped_accounts(),
+            Some(Scope::Group(name)) => self.registry.accounts_in(&name),
+            Some(Scope::Global) | None => Vec::new(),
+        }
+    }
+
+    /// The Account the middle column is on, where there is one.
+    pub fn scope_account(&self) -> Option<&Account> {
+        let accounts = self.scope_accounts();
+        accounts
+            .get(self.account_row.min(accounts.len().saturating_sub(1)))
+            .copied()
+    }
+
+    /// The rows of the content pane: the Scope's Settings, and then the facts
+    /// of the Account the middle column is on.
+    pub fn content_rows(&self) -> Vec<Row> {
+        let Some(scope) = self.scope() else {
+            return Vec::new();
+        };
+        let mut rows = Vec::new();
+        // Where it lives, and where it takes effect. Nowhere else: a Group's
+        // page showing it would be a Setting about Accounts that page is not
+        // about.
+        if scope == Scope::Global || scope == Scope::Ungrouped {
+            rows.push(Row::CycleUngrouped);
+        }
+        rows.extend(SETTINGS.iter().map(|setting| Row::Setting(*setting)));
+        if self.scope_account().is_some() {
+            rows.extend([
+                Row::Alias,
+                Row::Cycling,
+                Row::Group,
+                Row::Plan,
+                Row::Quarantine,
+            ]);
+        }
+        rows
+    }
+
+    /// The content row the cursor is on.
+    pub fn content(&self) -> Option<Row> {
+        let rows = self.content_rows();
+        rows.get(self.content_row.min(rows.len().saturating_sub(1)))
+            .cloned()
+    }
+
+    /// The Scope whose Settings govern the active Account — what the `Status`
+    /// tab's `Config` row shows, and only that: rules belonging to Scopes
+    /// somebody is not in are not rules about them.
+    pub fn governing_scope(&self) -> Scope {
+        match self.registry.active_account() {
+            Some(account) => self.registry.scope_of(account),
+            None => Scope::Global,
+        }
+    }
+
+    /// A Setting as it stands for a Scope: the value on screen, and the Scope
+    /// it came from.
+    ///
+    /// The value is the draft where one is being stepped, so the row shows what
+    /// the arrow keys have done rather than what is still on disk. An unwritten
+    /// draft is shown as coming from the Scope being edited, because that is
+    /// what it will be the moment it lands.
+    pub fn value_of(&self, scope: &Scope, key: Setting) -> (String, Scope) {
+        if let Some(draft) = &self.draft
+            && draft.scope == *scope
+            && draft.key == key
+        {
+            return (draft.value.clone(), scope.clone());
+        }
+        (
+            key.of(&self.registry.in_force(scope)),
+            key.source(&self.registry, scope),
+        )
     }
 
     /// Which Accounts a Refresh covers: the ones on screen, and no others.
     ///
     /// Every read spends from an hourly budget that does not refill early (ADR
     /// 0015), so this is the same rule `perch status --refresh` follows —
-    /// exactly the Accounts about to be shown. Both tabs show all of them.
+    /// exactly the Accounts about to be shown.
     pub fn accounts_on_show(&self) -> Vec<String> {
         self.accounts()
             .iter()
@@ -275,25 +582,471 @@ impl Model {
 
     /// What one keystroke does.
     pub fn act_on(&mut self, signal: Signal) -> Asked {
+        // A name being typed swallows the keyboard, because every letter on it
+        // is part of the name rather than a command.
+        if self.prompt.is_some() {
+            return self.typing(signal);
+        }
+        // And with nothing being typed into, a letter is whatever the key
+        // vocabulary says it is ([`Signal::meant_by`]) — or nothing, which is
+        // most of them.
+        let signal = match signal {
+            Signal::Typed(letter) => match Signal::meant_by(letter) {
+                Some(signal) => signal,
+                None => return Asked::Nothing,
+            },
+            other => other,
+        };
         match signal {
             Signal::Leave => self.leaving = Some(Left::Alone),
-            Signal::NextTab => self.tab = self.tab.stepped(1),
-            Signal::PreviousTab => self.tab = self.tab.stepped(Tab::ALL.len() - 1),
-            Signal::Down => self.move_to((self.cursor + 1).min(self.last_row())),
-            Signal::Up => self.move_to(self.cursor.saturating_sub(1)),
+            Signal::NextTab => self.moved_to_tab(self.tab.stepped(1)),
+            Signal::PreviousTab => self.moved_to_tab(self.tab.stepped(Tab::ALL.len() - 1)),
+            Signal::Down => self.moved(1),
+            Signal::Up => self.moved(-1),
+            Signal::Left => return self.leftwards(),
+            Signal::Right => return self.rightwards(),
+            Signal::Toggle => return self.toggled(),
+            Signal::Clear => return self.cleared(),
+            Signal::Least => return self.jumped_to_an_end(false),
+            Signal::Most => return self.jumped_to_an_end(true),
+            Signal::Name => self.asked_for_a_name(),
             // The size is the screen's business rather than the model's: the
             // next frame is drawn against whatever the terminal now is.
             Signal::Resized(_, _) => {}
             Signal::Refresh => return self.ask_for_a_refresh(),
             Signal::Switch => return self.ask_for_a_switch(),
             Signal::Run => self.ask_for_a_run(),
+            // Typed only ever means something with a prompt open.
+            Signal::Typed(_) | Signal::Backspace => {}
         }
         Asked::Nothing
     }
 
+    /// One frame in which nobody pressed anything, which is what the debounce
+    /// is counted in.
+    ///
+    /// Returns the deferred write when it has settled. A run of these between
+    /// two steps is what makes one write rather than several.
+    pub fn settled(&mut self) -> Option<Edit> {
+        let pending = self.pending.as_mut()?;
+        if pending.frames_left > 0 {
+            pending.frames_left -= 1;
+            return None;
+        }
+        self.pending.take().map(|pending| pending.edit)
+    }
+
+    /// Whatever has not been written yet, for the way out: walking away from a
+    /// half-made adjustment loses nothing.
+    pub fn take_pending(&mut self) -> Option<Edit> {
+        self.pending.take().map(|pending| pending.edit)
+    }
+
+    /// What a command the panel ran said, and the registry it left behind.
+    ///
+    /// The draft goes either way. Where the write landed it is now on disk and
+    /// showing it a second time would be showing it twice; where it was refused
+    /// the row goes back to what was actually written, because a value nobody
+    /// wrote is not one anybody should be reading.
+    pub fn wrote(&mut self, said: Vec<String>, registry: Option<Registry>) {
+        self.draft = None;
+        self.said = said;
+        if let Some(registry) = registry {
+            self.now_holds(registry);
+        }
+    }
+
+    /// Moves between tabs, and takes what was said with it: a report about the
+    /// Account under a cursor on another tab is not about anything here.
+    ///
+    /// The keys land on the sidebar, which is where a tab opens: arriving
+    /// already inside a column would make the row you are on depend on which
+    /// tab you came from.
+    fn moved_to_tab(&mut self, tab: Tab) {
+        if tab != self.tab {
+            self.said.clear();
+            self.column = Column::Scopes;
+        }
+        self.tab = tab;
+    }
+
+    /// Down or up, in whichever column the keys are acting on.
+    fn moved(&mut self, by: i32) {
+        match self.tab {
+            Tab::Status => match self.column {
+                Column::Content => self.move_the_cursor_to(step(self.cursor, by, self.order.len())),
+                _ => {
+                    let was = self.status_row;
+                    self.status_row = step(self.status_row, by, StatusRow::ALL.len());
+                    if self.status_row != was {
+                        self.said.clear();
+                    }
+                }
+            },
+            Tab::Config => match self.column {
+                Column::Scopes => {
+                    let was = self.scope_row;
+                    self.scope_row = step(self.scope_row, by, self.scope_rows().len());
+                    if self.scope_row != was {
+                        // A different Scope is a different set of Accounts and
+                        // a different set of rows, so neither cursor below
+                        // means what it did.
+                        self.account_row = 0;
+                        self.content_row = 0;
+                        self.said.clear();
+                    }
+                }
+                Column::Accounts => {
+                    let was = self.account_row;
+                    self.account_row = step(self.account_row, by, self.scope_accounts().len());
+                    if self.account_row != was {
+                        self.said.clear();
+                    }
+                }
+                Column::Content => {
+                    let was = self.content_row;
+                    self.content_row = step(self.content_row, by, self.content_rows().len());
+                    if self.content_row != was {
+                        self.said.clear();
+                    }
+                }
+            },
+        }
+    }
+
+    /// Left: step the value down where the cursor is on something with a
+    /// natural order, and otherwise move out to the column on the left.
+    fn leftwards(&mut self) -> Asked {
+        if self.tab == Tab::Config && self.column == Column::Content {
+            return self.stepped(-1);
+        }
+        self.column = match self.column {
+            Column::Content if self.tab == Tab::Config => Column::Accounts,
+            _ => Column::Scopes,
+        };
+        Asked::Nothing
+    }
+
+    /// Right: step the value up, or move into the column on the right.
+    fn rightwards(&mut self) -> Asked {
+        if self.tab == Tab::Config && self.column == Column::Content {
+            return self.stepped(1);
+        }
+        self.column = match (self.tab, self.column) {
+            // `Status` has no middle column, so one step in is the page itself.
+            (Tab::Status, _) => Column::Content,
+            (Tab::Config, Column::Scopes) if self.scope_accounts().is_empty() => Column::Content,
+            (Tab::Config, Column::Scopes) => Column::Accounts,
+            (Tab::Config, _) => Column::Content,
+        };
+        Asked::Nothing
+    }
+
+    /// One step of whatever the cursor is on, deferred rather than written.
+    fn stepped(&mut self, by: i32) -> Asked {
+        let Some(scope) = self.scope() else {
+            return Asked::Nothing;
+        };
+        let Some(row) = self.content() else {
+            return Asked::Nothing;
+        };
+        match row {
+            Row::Setting(key) => {
+                let (value, _) = self.value_of(&scope, key);
+                let Some(next) = next_value(&key.shape(), &value, by) else {
+                    return Asked::Nothing;
+                };
+                self.defer(Draft {
+                    scope: scope.clone(),
+                    key,
+                    value: next.clone(),
+                });
+                Asked::Nothing
+            }
+            Row::CycleUngrouped => {
+                self.write(Edit::CycleUngrouped(!self.registry.global.cycle_ungrouped))
+            }
+            Row::Cycling => match self.scope_account() {
+                Some(account) => {
+                    let edit = Edit::Cycling {
+                        email: account.email().to_string(),
+                        enabled: !account.enabled,
+                    };
+                    self.write(edit)
+                }
+                None => Asked::Nothing,
+            },
+            Row::Group => self.step_group(by),
+            Row::Alias => {
+                self.said = vec![A_NAME_IS_TYPED.to_string()];
+                Asked::Nothing
+            }
+            Row::Plan | Row::Quarantine => {
+                self.said = vec![A_FACT_RATHER_THAN_A_SETTING.to_string()];
+                Asked::Nothing
+            }
+        }
+    }
+
+    /// Moves the selected Account between Groups, which is a value with a
+    /// natural order: out of every Group, then each Group as it was declared.
+    fn step_group(&mut self, by: i32) -> Asked {
+        let Some(account) = self.scope_account() else {
+            return Asked::Nothing;
+        };
+        let email = account.email().to_string();
+        let mut places: Vec<Option<String>> = vec![None];
+        places.extend(
+            self.registry
+                .group_names()
+                .map(|name| Some(name.to_string())),
+        );
+        let at = places
+            .iter()
+            .position(|place| place.as_deref() == account.group.as_deref())
+            .unwrap_or(0);
+        let group = places[step(at, by, places.len())].clone();
+        if group == account.group {
+            return Asked::Nothing;
+        }
+        self.write(Edit::Group { email, group })
+    }
+
+    /// Space: flip the simplest Setting there is, at once.
+    ///
+    /// Not deferred, because a bool has two states — there is no run of
+    /// keystrokes to collapse, and a flip that took half a second to appear
+    /// would read as a key that did nothing.
+    fn toggled(&mut self) -> Asked {
+        let Some(scope) = self.scope() else {
+            return Asked::Nothing;
+        };
+        if self.tab != Tab::Config || self.column != Column::Content {
+            return Asked::Nothing;
+        }
+        match self.content() {
+            Some(Row::Setting(key)) => {
+                let (value, _) = self.value_of(&scope, key);
+                match key.shape() {
+                    Shape::YesOrNo | Shape::OneOf(_) => {
+                        let Some(next) = next_value(&key.shape(), &value, 1) else {
+                            return Asked::Nothing;
+                        };
+                        self.write(Edit::Setting {
+                            scope,
+                            key,
+                            value: Some(next),
+                        })
+                    }
+                    Shape::Range { .. } => {
+                        self.said = vec![A_NUMBER_IS_STEPPED.to_string()];
+                        Asked::Nothing
+                    }
+                }
+            }
+            Some(_) => self.stepped(1),
+            None => Asked::Nothing,
+        }
+    }
+
+    /// The key that clears an Override, so the Scope Inherits Global again.
+    ///
+    /// At Global it does nothing and says why. Global is the value that applies
+    /// where nothing narrower is said, so it has nothing above it to Inherit
+    /// from — and a key that silently did nothing would leave somebody
+    /// wondering whether it had.
+    fn cleared(&mut self) -> Asked {
+        if self.tab != Tab::Config || self.column != Column::Content {
+            return Asked::Nothing;
+        }
+        let Some(scope) = self.scope() else {
+            return Asked::Nothing;
+        };
+        let Some(row) = self.content() else {
+            return Asked::Nothing;
+        };
+        if !row.is_a_setting() {
+            self.said = vec![ONLY_A_SETTING_IS_INHERITED.to_string()];
+            return Asked::Nothing;
+        }
+        if scope == Scope::Global {
+            self.said = lines_of(NOTHING_ABOVE_GLOBAL);
+            return Asked::Nothing;
+        }
+        let Row::Setting(key) = row else {
+            return Asked::Nothing;
+        };
+        self.write(Edit::Setting {
+            scope,
+            key,
+            value: None,
+        })
+    }
+
+    /// Home and End: the ends of a range, one keystroke away.
+    fn jumped_to_an_end(&mut self, most: bool) -> Asked {
+        let Some(scope) = self.scope() else {
+            return Asked::Nothing;
+        };
+        if self.tab != Tab::Config || self.column != Column::Content {
+            return Asked::Nothing;
+        }
+        let Some(Row::Setting(key)) = self.content() else {
+            return Asked::Nothing;
+        };
+        let Shape::Range {
+            least, most: top, ..
+        } = key.shape()
+        else {
+            return Asked::Nothing;
+        };
+        let value = match most {
+            true => top,
+            false => least,
+        }
+        .to_string();
+        self.defer(Draft { scope, key, value });
+        Asked::Nothing
+    }
+
+    /// The key that opens the one text field there is.
+    fn asked_for_a_name(&mut self) {
+        if self.tab != Tab::Config {
+            return;
+        }
+        match (self.scope_row(), self.content(), self.column) {
+            (ScopeRow::NewGroup, _, _) => {
+                self.prompt = Some(Prompt {
+                    what: Naming::NewGroup,
+                    typed: String::new(),
+                })
+            }
+            (_, Some(Row::Alias), Column::Content) => {
+                if let Some(account) = self.scope_account() {
+                    self.prompt = Some(Prompt {
+                        what: Naming::Alias(account.email().to_string()),
+                        typed: String::new(),
+                    })
+                }
+            }
+            _ => self.said = vec![NOTHING_HERE_IS_NAMED.to_string()],
+        }
+    }
+
+    /// What a keystroke does while a name is being typed.
+    fn typing(&mut self, signal: Signal) -> Asked {
+        let Some(prompt) = self.prompt.as_mut() else {
+            return Asked::Nothing;
+        };
+        match signal {
+            Signal::Typed(letter) => {
+                prompt.typed.push(letter);
+                Asked::Nothing
+            }
+            Signal::Backspace => {
+                prompt.typed.pop();
+                Asked::Nothing
+            }
+            // Esc: the way out of the field, which writes nothing. The key
+            // that leaves the whole view is not offered here, because with a
+            // field open `q` is the letter.
+            Signal::Clear => {
+                self.prompt = None;
+                Asked::Nothing
+            }
+            Signal::Switch => self.confirmed(),
+            _ => Asked::Nothing,
+        }
+    }
+
+    /// Enter, on a name being typed.
+    ///
+    /// The name is checked against the shared Alias/Group namespace here rather
+    /// than left to the command, so a collision is refused before anything is
+    /// written and the field stays open with what was typed still in it. The
+    /// command checks it again, because the registry is the boundary and this
+    /// is only a screen.
+    fn confirmed(&mut self) -> Asked {
+        let Some(prompt) = self.prompt.clone() else {
+            return Asked::Nothing;
+        };
+        let name = prompt.typed.trim().to_string();
+        let kind = match prompt.what {
+            Naming::NewGroup => registry::NameKind::Group,
+            Naming::Alias(_) => registry::NameKind::Alias,
+        };
+        if let Err(refused) = registry::validate_name(kind, &name) {
+            self.said = lines_of(&refused.to_string());
+            return Asked::Nothing;
+        }
+        let taken = match &prompt.what {
+            // Asked of a copy, which is exactly the checks `perch group add`
+            // will make of the real one a moment later — so the panel cannot
+            // come to accept a name the command refuses, or refuse one it would
+            // have taken.
+            Naming::NewGroup => self.registry.clone().declare_group(&name),
+            Naming::Alias(email) => match self.registry.alias_of(email) {
+                // Renaming an Account by the name it already answers to is not
+                // a collision with itself, which is the rule `perch alias`
+                // states and this must not disagree with.
+                Some(held) if registry::same_name(held, &name) => Ok(()),
+                _ => self.registry.refuse_taken_names(Some(&name), None),
+            },
+        };
+        if let Err(refused) = taken {
+            self.said = lines_of(&refused.to_string());
+            return Asked::Nothing;
+        }
+
+        self.prompt = None;
+        match prompt.what {
+            Naming::NewGroup => self.write(Edit::DeclareGroup(name)),
+            Naming::Alias(email) => self.write(Edit::Alias { email, name }),
+        }
+    }
+
+    /// A change to write at once, unless something is in the way.
+    fn write(&mut self, edit: Edit) -> Asked {
+        if let Some(refused) = self.in_the_way() {
+            self.said = vec![refused];
+            return Asked::Nothing;
+        }
+        Asked::ToWrite(edit)
+    }
+
+    /// A change to write once the arrow keys have stopped.
+    ///
+    /// Kept on screen while it waits, so the row shows what has been done to it
+    /// rather than what is still on disk.
+    fn defer(&mut self, draft: Draft) {
+        if let Some(refused) = self.in_the_way() {
+            self.said = vec![refused];
+            return;
+        }
+        self.pending = Some(Pending {
+            edit: Edit::Setting {
+                scope: draft.scope.clone(),
+                key: draft.key,
+                value: Some(draft.value.clone()),
+            },
+            frames_left: SETTLES_AFTER,
+        });
+        self.draft = Some(draft);
+    }
+
+    /// Why an edit cannot be taken now, where it cannot.
+    ///
+    /// One reason, and it is the Refresh: it holds Perch's own lock while it
+    /// writes what it read, and an edit started underneath it would sit waiting
+    /// on that lock with the screen frozen. The same rule a Switch follows, in
+    /// the same words, because it is the same lock and the same wait.
+    fn in_the_way(&self) -> Option<String> {
+        (self.refreshing == Refreshing::Waiting).then(|| WAITING_ON_A_REFRESH.to_string())
+    }
+
     /// Moves the cursor, and drops whatever the last act said: the report was
     /// about the Account it was on.
-    fn move_to(&mut self, row: usize) {
+    fn move_the_cursor_to(&mut self, row: usize) {
         if row != self.cursor {
             self.said.clear();
         }
@@ -313,6 +1066,17 @@ impl Model {
     /// screen frozen, which is the one thing the whole design of this loop is
     /// for avoiding.
     fn ask_for_a_switch(&mut self) -> Asked {
+        // Enter is how you move into the column on the right wherever the keys
+        // are still on a sidebar — which is what "yes, that one" means there.
+        // On the Config tab it is only ever that: nothing on it is a Switch, and
+        // a Switch a keystroke away from an edit would be a Credential moved by
+        // somebody adjusting a percentage.
+        if self.tab == Tab::Config || self.column != Column::Content {
+            return self.rightwards();
+        }
+        if self.status() != StatusRow::Accounts {
+            return Asked::Nothing;
+        }
         let Some(account) = self.selected() else {
             return Asked::Nothing;
         };
@@ -321,8 +1085,8 @@ impl Model {
         if self.refuses(usable) {
             return Asked::Nothing;
         }
-        if self.refreshing == Refreshing::Waiting {
-            self.said = vec![WAITING_ON_A_REFRESH.to_string()];
+        if let Some(refused) = self.in_the_way() {
+            self.said = vec![refused];
             return Asked::Nothing;
         }
         Asked::ForASwitch(email)
@@ -336,6 +1100,9 @@ impl Model {
     /// refusal arriving after that is one the user reads with the view they
     /// were choosing in already gone.
     fn ask_for_a_run(&mut self) {
+        if self.tab != Tab::Status || self.status() != StatusRow::Accounts {
+            return;
+        }
         let Some(email) = self.selected().map(|account| account.email().to_string()) else {
             return;
         };
@@ -368,6 +1135,7 @@ impl Model {
     /// though it is that too — it is that a Refresh writes the registry under
     /// Perch's own lock, and the second would sit waiting on the first for as
     /// long as the first took.
+    ///
     /// Nothing to read is also nothing to ask for. A Refresh over no Accounts
     /// still takes Perch's own lock exclusively and still has to be waited out
     /// on the way `q` — so on a machine holding nothing, `r` said "Refreshing"
@@ -393,6 +1161,67 @@ impl Model {
         self.refreshing = Refreshing::Back(refreshed.notes);
     }
 
+    /// Takes a registry that has moved on — a Refresh that landed, a Switch
+    /// that did, an edit that was written — and keeps every cursor on what it
+    /// was on.
+    ///
+    /// The listing is ranked, so a figure that came back can reorder it: the
+    /// row under the cursor before is not the row under it after. What the two
+    /// acting keys act on is the Account rather than the row number, so it
+    /// follows the Account — otherwise pressing `r` and then Enter would Switch
+    /// to something nobody chose.
+    pub fn now_holds(&mut self, registry: Registry) {
+        let was_on = self.selected().map(|account| account.email().to_string());
+        // The Config tab's cursors are followed the same way and for the same
+        // reason: an edit can move an Account into another Group, which takes it
+        // out of the column it was selected in.
+        let scope_was = self.scope_row();
+        let account_was = self
+            .scope_account()
+            .map(|account| account.email().to_string());
+
+        self.registry = registry;
+        (self.order, self.sections) = ranked(&self.registry, self.now);
+
+        let found = was_on.and_then(|email| self.row_of(&email));
+        if found.is_none() {
+            // The Account the cursor was on is gone — another `perch remove`
+            // while this was open, say. The cursor keeps its row number, so it
+            // is on a different Account now, and a report left standing beside
+            // it would be a report about the wrong one. That is the rule
+            // `move_the_cursor_to` exists for; this is the other way the cursor
+            // comes to point somewhere new.
+            self.said.clear();
+        }
+        self.cursor = found.unwrap_or(self.cursor).min(self.last_row());
+
+        let rows = self.scope_rows();
+        self.scope_row = rows
+            .iter()
+            .position(|row| *row == scope_was)
+            .unwrap_or(self.scope_row)
+            .min(rows.len() - 1);
+        let accounts = self.scope_accounts();
+        self.account_row = account_was
+            .and_then(|email| accounts.iter().position(|account| account.email() == email))
+            .unwrap_or(self.account_row)
+            .min(accounts.len().saturating_sub(1));
+        self.content_row = self
+            .content_row
+            .min(self.content_rows().len().saturating_sub(1));
+    }
+
+    /// Where an Account sits in the listing now, or `None` if it is no longer
+    /// held at all.
+    fn row_of(&self, email: &str) -> Option<usize> {
+        // Over `order` rather than over `accounts()`, which allocates the whole
+        // listing to find one position — and this runs on every landed Refresh
+        // and every Switch.
+        self.order
+            .iter()
+            .position(|at| self.registry.accounts[*at].email() == email)
+    }
+
     /// The furthest row the cursor may sit on. Zero with no Accounts at all,
     /// which is where it already is.
     fn last_row(&self) -> usize {
@@ -400,10 +1229,61 @@ impl Model {
     }
 }
 
-/// Why a Switch was not taken while a Refresh is out.
+/// One position up or down a list, stopping at both ends.
+fn step(at: usize, by: i32, len: usize) -> usize {
+    let last = len.saturating_sub(1);
+    match by {
+        by if by < 0 => at.saturating_sub(by.unsigned_abs() as usize),
+        by => (at + by as usize).min(last),
+    }
+}
+
+/// The value one step along from this one, or `None` where there is nowhere to
+/// step to.
+///
+/// The steps are the Setting's own ([`Shape`]) rather than the view's, so the
+/// panel cannot offer a value `perch config set` would refuse.
+fn next_value(shape: &Shape, from: &str, by: i32) -> Option<String> {
+    match shape {
+        Shape::YesOrNo => Some((from != "true").to_string()),
+        Shape::OneOf(readings) => {
+            let at = readings.iter().position(|reading| reading == from)?;
+            let next = (at as i64 + by as i64).rem_euclid(readings.len() as i64) as usize;
+            Some(readings[next].clone())
+        }
+        Shape::Range { least, most, step } => {
+            let held: i64 = from.parse().ok()?;
+            let moved = held + i64::from(by) * i64::from(*step);
+            Some(moved.clamp(i64::from(*least), i64::from(*most)).to_string())
+        }
+    }
+}
+
+/// Why a Switch or an edit was not taken while a Refresh is out.
 const WAITING_ON_A_REFRESH: &str = "The Refresh you asked for is still out, and it holds Perch's \
-                                    own lock while it writes what it read. Press Enter again once \
-                                    it is back.";
+                                    own lock while it writes what it read. Press the key again \
+                                    once it is back.";
+
+/// Why the clear key did nothing at Global.
+const NOTHING_ABOVE_GLOBAL: &str = "Global is the value that applies where nothing narrower is \
+                                    said, so it has nothing above it to Inherit from and nothing \
+                                    to clear back to.\n\
+                                    Clearing works on a Group's page and on the Ungrouped page, \
+                                    where it drops that Scope's Override.";
+
+const ONLY_A_SETTING_IS_INHERITED: &str = "That is a fact about the Account rather than a Setting, \
+                                           so there is no Override on it to clear.";
+
+const A_NAME_IS_TYPED: &str = "A name has no natural order to step through. Press `n` to type one.";
+
+const A_NUMBER_IS_STEPPED: &str = "That one is a number rather than a yes or a no. The arrow keys step it, and Home and End \
+     take it to the ends of its range.";
+
+const A_FACT_RATHER_THAN_A_SETTING: &str = "That is something Anthropic says about the Account rather than something Perch was told, so \
+     there is nothing here to change.";
+
+const NOTHING_HERE_IS_NAMED: &str = "Nothing on this row is named. `n` names a Group on the last row of the sidebar, and names \
+     the selected Account on its `alias` row.";
 
 /// The Accounts in the order `perch switch` would rank them.
 ///
@@ -416,10 +1296,6 @@ const WAITING_ON_A_REFRESH: &str = "The Refresh you asked for is still out, and 
 ///
 /// The scope the active Account is in comes first, because it is where you are
 /// and, wherever a Cycle happens at all, the one a bare `perch switch` looks in.
-///
-/// Both tabs are drawn from this one order, because the cursor is shared
-/// between them: two orders would be a `Tab` that moved what the acting keys
-/// act on.
 fn ranked(registry: &Registry, now: DateTime<Utc>) -> (Vec<usize>, Vec<Section>) {
     let mut order = Vec::with_capacity(registry.accounts.len());
     let mut sections = Vec::new();
@@ -453,7 +1329,11 @@ fn ranked(registry: &Registry, now: DateTime<Utc>) -> (Vec<usize>, Vec<Section>)
 /// would not make — the one thing this listing exists not to do — so they are
 /// left as `perch list` shows them, with the Headroom still beside each of them
 /// as the figure it is.
-fn listed<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> Vec<&'a Account> {
+fn listed<'a>(
+    registry: &'a Registry,
+    scope: &cycle::Scope,
+    now: DateTime<Utc>,
+) -> Vec<&'a Account> {
     match cycle::may_cycle_within(registry, scope) {
         true => cycle::ranked(registry, scope, now),
         false => scope.accounts(registry),
@@ -465,19 +1345,19 @@ fn listed<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> Vec<
 /// Every Group and the Accounts in no Group, so an Account is in exactly one of
 /// them and the listing holds all of them: an Account that fell out of the
 /// order would be one the picker could not reach with the arrow keys.
-fn scopes(registry: &Registry) -> Vec<Scope> {
-    let mut every: Vec<Scope> = registry
+fn scopes(registry: &Registry) -> Vec<cycle::Scope> {
+    let mut every: Vec<cycle::Scope> = registry
         .group_names()
-        .map(|name| Scope::Group(name.to_string()))
+        .map(|name| cycle::Scope::Group(name.to_string()))
         .collect();
-    every.push(Scope::Ungrouped);
+    every.push(cycle::Scope::Ungrouped);
 
     let Some(active) = registry.active_account() else {
         return every;
     };
     let here = match &active.group {
-        Some(name) => Scope::Group(name.clone()),
-        None => Scope::Ungrouped,
+        Some(name) => cycle::Scope::Group(name.clone()),
+        None => cycle::Scope::Ungrouped,
     };
     let mut ordered = vec![here.clone()];
     ordered.extend(every.into_iter().filter(|scope| *scope != here));
@@ -488,7 +1368,7 @@ fn scopes(registry: &Registry) -> Vec<Scope> {
 mod tests {
     use super::*;
     use crate::probe::Identity;
-    use crate::registry::{CachedUtilization, Quarantine, Registry, WindowUtilization};
+    use crate::registry::{CachedUtilization, Quarantine, Registry, Strategy, WindowUtilization};
     use chrono::TimeZone;
 
     fn at(hour: u32) -> DateTime<Utc> {
@@ -552,23 +1432,60 @@ mod tests {
         model.accounts().into_iter().map(Account::email).collect()
     }
 
+    /// Moves the Status tab onto its Accounts row and into the table, which is
+    /// where the two acting keys mean anything.
+    fn on_the_accounts(model: &mut Model) {
+        model.status_row = 1;
+        model.column = Column::Content;
+        assert_eq!(model.status(), StatusRow::Accounts);
+    }
+
     #[test]
     fn the_views_are_a_ring_in_both_directions() {
         let mut model = model_of(&[]);
-        assert_eq!(model.tab, Tab::Accounts);
+        assert_eq!(model.tab, Tab::Status);
 
         assert_eq!(model.act_on(Signal::NextTab), Asked::Nothing);
-        assert_eq!(model.tab, Tab::Utilization);
+        assert_eq!(model.tab, Tab::Config);
         assert_eq!(model.act_on(Signal::NextTab), Asked::Nothing);
-        assert_eq!(model.tab, Tab::Accounts);
+        assert_eq!(model.tab, Tab::Status);
 
         assert_eq!(model.act_on(Signal::PreviousTab), Asked::Nothing);
-        assert_eq!(model.tab, Tab::Utilization);
+        assert_eq!(model.tab, Tab::Config);
+    }
+
+    /// The sidebar is walked with the arrow keys, and stays walkable: `→`
+    /// steps into the page and `←` comes back, so the table of Accounts does
+    /// not swallow the key that reaches the other rows.
+    #[test]
+    fn the_status_sidebar_is_walked_with_the_arrow_keys_and_stays_reachable() {
+        let mut model = model_of(&["one@example.com", "two@example.com"]);
+        assert_eq!(model.status(), StatusRow::Overview);
+
+        let _ = model.act_on(Signal::Down);
+        assert_eq!(model.status(), StatusRow::Accounts);
+        let _ = model.act_on(Signal::Down);
+        assert_eq!(model.status(), StatusRow::Config);
+
+        let _ = model.act_on(Signal::Up);
+        let _ = model.act_on(Signal::Right);
+        let _ = model.act_on(Signal::Down);
+        assert_eq!(model.cursor, 1, "inside, the same key moves the table");
+        assert_eq!(model.status(), StatusRow::Accounts);
+
+        let _ = model.act_on(Signal::Left);
+        let _ = model.act_on(Signal::Down);
+        assert_eq!(
+            model.status(),
+            StatusRow::Config,
+            "and `←` gives the key back to the sidebar"
+        );
     }
 
     #[test]
     fn the_cursor_stops_at_both_ends_of_the_listing() {
         let mut model = model_of(&["one@example.com", "two@example.com"]);
+        on_the_accounts(&mut model);
 
         let _ = model.act_on(Signal::Up);
         assert_eq!(model.cursor, 0, "there is nothing above the first Account");
@@ -583,6 +1500,7 @@ mod tests {
     #[test]
     fn a_cursor_with_no_accounts_points_at_none_of_them() {
         let mut model = model_of(&[]);
+        on_the_accounts(&mut model);
         let _ = model.act_on(Signal::Down);
         assert_eq!(model.cursor, 0);
         assert!(model.selected().is_none());
@@ -692,6 +1610,7 @@ mod tests {
             in_group(used(account("first@example.com"), 10.0), "work"),
             in_group(used(account("second@example.com"), 50.0), "work"),
         ]);
+        on_the_accounts(&mut model);
         let _ = model.act_on(Signal::Down);
         assert_eq!(
             model.selected().map(Account::email),
@@ -715,18 +1634,13 @@ mod tests {
     }
 
     /// And where it cannot follow, it drops what was said about where it was.
-    ///
-    /// An Account can go while the picker is open — another `perch remove` in
-    /// a second terminal — and then there is nothing to follow. The cursor
-    /// keeps its row number, which is a different Account, so a report left
-    /// standing beside it is a report about the wrong one: the rule `move_to`
-    /// exists for, reached the other way.
     #[test]
     fn a_report_does_not_outlive_the_account_it_was_about() {
         let mut model = model_holding(vec![
             in_group(used(account("first@example.com"), 10.0), "work"),
             in_group(used(account("second@example.com"), 50.0), "work"),
         ]);
+        on_the_accounts(&mut model);
         let _ = model.act_on(Signal::Down);
         model.said = vec!["Switched to second@example.com.".to_string()];
 
@@ -760,6 +1674,7 @@ mod tests {
             in_group(used(account("second@example.com"), 50.0), "work"),
             in_group(used(account("third@example.com"), 90.0), "work"),
         ]);
+        on_the_accounts(&mut model);
         let _ = model.act_on(Signal::Down);
         let _ = model.act_on(Signal::Down);
         assert_eq!(model.cursor, 2);
@@ -786,6 +1701,7 @@ mod tests {
 
         for key in [Signal::Switch, Signal::Run] {
             let mut model = model_holding(vec![broken.clone()]);
+            on_the_accounts(&mut model);
 
             assert_eq!(model.act_on(key), Asked::Nothing, "{key:?}");
 
@@ -805,6 +1721,7 @@ mod tests {
     #[test]
     fn a_switch_waits_for_the_refresh_that_is_holding_perchs_lock() {
         let mut model = model_of(&["one@example.com"]);
+        on_the_accounts(&mut model);
         assert_eq!(model.act_on(Signal::Refresh), Asked::ForARefresh);
 
         assert_eq!(model.act_on(Signal::Switch), Asked::Nothing);
@@ -818,12 +1735,26 @@ mod tests {
         );
     }
 
+    /// And an edit is refused in the same words, for the same reason and in the
+    /// same place — one rule explains both.
+    #[test]
+    fn an_edit_waits_for_the_refresh_in_the_words_a_switch_waits_in() {
+        let mut model = model_of(&["one@example.com"]);
+        let _ = model.act_on(Signal::Refresh);
+        on_the_config_setting(&mut model, Setting::WatcherMayAct);
+
+        assert_eq!(model.act_on(Signal::Toggle), Asked::Nothing);
+
+        assert_eq!(model.said, vec![WAITING_ON_A_REFRESH.to_string()]);
+    }
+
     /// A Run lasts as long as somebody's session, so it is not something the
     /// loop takes and comes back from: the view ends with the Account to launch
     /// as, and the terminal is given back before anything is launched into it.
     #[test]
     fn the_run_key_ends_the_view_naming_the_account_to_launch() {
         let mut model = model_of(&["one@example.com", "two@example.com"]);
+        on_the_accounts(&mut model);
         let _ = model.act_on(Signal::Down);
 
         assert_eq!(model.act_on(Signal::Run), Asked::Nothing);
@@ -839,6 +1770,7 @@ mod tests {
     #[test]
     fn moving_the_cursor_drops_what_the_last_act_said() {
         let mut model = model_of(&["one@example.com", "two@example.com"]);
+        on_the_accounts(&mut model);
         model.said = vec!["Switched to one@example.com.".to_string()];
 
         let _ = model.act_on(Signal::Up);
@@ -852,6 +1784,7 @@ mod tests {
     #[test]
     fn neither_acting_key_does_anything_with_no_accounts_at_all() {
         let mut model = model_of(&[]);
+        on_the_accounts(&mut model);
 
         assert_eq!(model.act_on(Signal::Switch), Asked::Nothing);
         assert_eq!(model.act_on(Signal::Run), Asked::Nothing);
@@ -885,5 +1818,325 @@ mod tests {
             ["fresh@example.com", "tired@example.com"],
             "and ranked once something says a Cycle may move between them",
         );
+    }
+
+    // ---- The Config tab ----
+
+    /// Puts the cursor on one Setting of Global's page.
+    fn on_the_config_setting(model: &mut Model, setting: Setting) {
+        model.tab = Tab::Config;
+        model.column = Column::Content;
+        model.scope_row = 0;
+        model.content_row = model
+            .content_rows()
+            .iter()
+            .position(|row| *row == Row::Setting(setting))
+            .expect("the Setting is on the page");
+    }
+
+    #[test]
+    fn the_config_sidebar_is_global_then_ungrouped_then_every_group() {
+        let model = model_holding(vec![
+            in_group(account("one@example.com"), "work"),
+            account("two@example.com"),
+        ]);
+
+        assert_eq!(
+            model.scope_rows(),
+            vec![
+                ScopeRow::Scope(Scope::Global),
+                ScopeRow::Scope(Scope::Ungrouped),
+                ScopeRow::Scope(Scope::Group("work".to_string())),
+                ScopeRow::NewGroup,
+            ]
+        );
+    }
+
+    /// Global has no middle column: it governs every Account there is, so a
+    /// column of "the Accounts in Global" would be the whole registry under a
+    /// Scope nobody is in.
+    #[test]
+    fn only_the_scopes_accounts_are_in_that_scopes_column() {
+        let mut model = model_holding(vec![
+            in_group(account("one@example.com"), "work"),
+            account("two@example.com"),
+        ]);
+        model.tab = Tab::Config;
+
+        assert!(model.scope_accounts().is_empty(), "Global");
+
+        model.scope_row = 1;
+        assert_eq!(
+            model
+                .scope_accounts()
+                .iter()
+                .map(|a| a.email())
+                .collect::<Vec<_>>(),
+            ["two@example.com"],
+        );
+
+        model.scope_row = 2;
+        assert_eq!(
+            model
+                .scope_accounts()
+                .iter()
+                .map(|a| a.email())
+                .collect::<Vec<_>>(),
+            ["one@example.com"],
+        );
+    }
+
+    /// A bool flips on one key, and the write is the command's own.
+    #[test]
+    fn one_key_flips_the_simplest_setting_there_is() {
+        let mut model = model_of(&["one@example.com"]);
+        on_the_config_setting(&mut model, Setting::WatcherMayAct);
+
+        assert_eq!(
+            model.act_on(Signal::Toggle),
+            Asked::ToWrite(Edit::Setting {
+                scope: Scope::Global,
+                key: Setting::WatcherMayAct,
+                value: Some("true".to_string()),
+            })
+        );
+    }
+
+    /// A percentage steps in fives, and the ends of the range are one keystroke
+    /// away.
+    #[test]
+    fn a_percentage_steps_in_fives_and_the_ends_are_one_keystroke_away() {
+        let mut model = model_of(&["one@example.com"]);
+        on_the_config_setting(&mut model, Setting::WatcherThresholdPercent);
+
+        let _ = model.act_on(Signal::Right);
+        assert_eq!(
+            model
+                .value_of(&Scope::Global, Setting::WatcherThresholdPercent)
+                .0,
+            "85"
+        );
+        let _ = model.act_on(Signal::Left);
+        let _ = model.act_on(Signal::Left);
+        assert_eq!(
+            model
+                .value_of(&Scope::Global, Setting::WatcherThresholdPercent)
+                .0,
+            "75"
+        );
+
+        let _ = model.act_on(Signal::Most);
+        assert_eq!(
+            model
+                .value_of(&Scope::Global, Setting::WatcherThresholdPercent)
+                .0,
+            "100"
+        );
+        let _ = model.act_on(Signal::Least);
+        assert_eq!(
+            model
+                .value_of(&Scope::Global, Setting::WatcherThresholdPercent)
+                .0,
+            "0"
+        );
+    }
+
+    /// Holding an arrow down is one write when it stops rather than one per
+    /// step — counted in frames, so the fake screen's "a wait nobody pressed
+    /// anything in" is what drives it.
+    #[test]
+    fn a_run_of_steps_is_one_write_when_the_keys_stop() {
+        let mut model = model_of(&["one@example.com"]);
+        on_the_config_setting(&mut model, Setting::WatcherThresholdPercent);
+
+        for _ in 0..4 {
+            assert_eq!(model.act_on(Signal::Right), Asked::Nothing);
+            assert_eq!(model.settled(), None, "nothing while the keys are moving");
+        }
+
+        // The frames nobody pressed anything in.
+        assert_eq!(model.settled(), None);
+        assert_eq!(
+            model.settled(),
+            Some(Edit::Setting {
+                scope: Scope::Global,
+                key: Setting::WatcherThresholdPercent,
+                value: Some("100".to_string()),
+            }),
+            "one write, of where the stepping got to"
+        );
+        assert_eq!(model.settled(), None, "and not a second one");
+    }
+
+    /// Walking away mid-adjustment loses nothing: the way out flushes whatever
+    /// has not been written.
+    #[test]
+    fn leaving_writes_what_the_arrow_keys_had_not_got_round_to() {
+        let mut model = model_of(&["one@example.com"]);
+        on_the_config_setting(&mut model, Setting::WatcherMarginPercent);
+        let _ = model.act_on(Signal::Right);
+
+        let _ = model.act_on(Signal::Leave);
+
+        assert_eq!(
+            model.take_pending(),
+            Some(Edit::Setting {
+                scope: Scope::Global,
+                key: Setting::WatcherMarginPercent,
+                value: Some("15".to_string()),
+            })
+        );
+    }
+
+    /// A Strategy steps between the readings there are, and cannot be stepped
+    /// to one that does not exist.
+    #[test]
+    fn a_strategy_steps_between_the_readings_perch_implements() {
+        let mut model = model_of(&["one@example.com"]);
+        on_the_config_setting(&mut model, Setting::Strategy);
+
+        let _ = model.act_on(Signal::Right);
+
+        assert_eq!(
+            model.value_of(&Scope::Global, Setting::Strategy).0,
+            Strategy::SoonestReset.as_str()
+        );
+    }
+
+    /// Clearing an Override is one key, and at Global it does nothing and says
+    /// why rather than leaving somebody wondering whether it did.
+    #[test]
+    fn the_clear_key_drops_an_override_and_says_why_it_cannot_at_global() {
+        let mut registry = registry_of(vec![in_group(account("one@example.com"), "work")]);
+        registry
+            .groups
+            .get_mut("work")
+            .unwrap()
+            .watcher_threshold_percent = Some(55);
+        let mut model = Model::new(registry, at(12));
+        model.tab = Tab::Config;
+        model.column = Column::Content;
+        model.scope_row = 2;
+        model.content_row = model
+            .content_rows()
+            .iter()
+            .position(|row| *row == Row::Setting(Setting::WatcherThresholdPercent))
+            .expect("it is on the page");
+
+        assert_eq!(
+            model.act_on(Signal::Clear),
+            Asked::ToWrite(Edit::Setting {
+                scope: Scope::Group("work".to_string()),
+                key: Setting::WatcherThresholdPercent,
+                value: None,
+            })
+        );
+
+        on_the_config_setting(&mut model, Setting::WatcherThresholdPercent);
+        assert_eq!(model.act_on(Signal::Clear), Asked::Nothing);
+        assert!(
+            model.said.join(" ").contains("nothing to clear back to"),
+            "{:?}",
+            model.said
+        );
+    }
+
+    /// Where a value came from is shown, and an Inherited one shows Global's
+    /// value rather than a blank.
+    #[test]
+    fn an_inherited_setting_shows_globals_value_and_says_where_it_came_from() {
+        let mut registry = registry_of(vec![in_group(account("one@example.com"), "work")]);
+        registry.global.settings.watcher_threshold_percent = 55;
+        let model = Model::new(registry, at(12));
+        let work = Scope::Group("work".to_string());
+
+        assert_eq!(
+            model.value_of(&work, Setting::WatcherThresholdPercent),
+            ("55".to_string(), Scope::Global),
+        );
+    }
+
+    /// A name is the one value with no natural step, so it is the one place the
+    /// panel accepts typed input — and a collision is refused as it is
+    /// confirmed, before anything is written.
+    #[test]
+    fn a_group_name_that_collides_is_refused_at_the_prompt() {
+        let mut model = model_holding(vec![in_group(account("one@example.com"), "work")]);
+        model.tab = Tab::Config;
+        model.scope_row = model.scope_rows().len() - 1;
+
+        let _ = model.act_on(Signal::Name);
+        for letter in "work".chars() {
+            let _ = model.act_on(Signal::Typed(letter));
+        }
+        assert_eq!(model.act_on(Signal::Switch), Asked::Nothing);
+
+        assert!(model.prompt.is_some(), "the field stays open");
+        assert!(
+            model.said.join(" ").contains("already a Group"),
+            "{:?}",
+            model.said
+        );
+    }
+
+    #[test]
+    fn a_name_that_is_free_declares_the_group() {
+        let mut model = model_of(&["one@example.com"]);
+        model.tab = Tab::Config;
+        model.scope_row = model.scope_rows().len() - 1;
+
+        let _ = model.act_on(Signal::Name);
+        for letter in "spare".chars() {
+            let _ = model.act_on(Signal::Typed(letter));
+        }
+
+        assert_eq!(
+            model.act_on(Signal::Switch),
+            Asked::ToWrite(Edit::DeclareGroup("spare".to_string()))
+        );
+        assert!(model.prompt.is_none());
+    }
+
+    /// Every letter belongs to the name while a field is open, including the
+    /// one that would otherwise leave.
+    #[test]
+    fn a_letter_typed_into_a_name_is_not_a_command() {
+        let mut model = model_of(&["one@example.com"]);
+        model.tab = Tab::Config;
+        model.scope_row = model.scope_rows().len() - 1;
+        let _ = model.act_on(Signal::Name);
+
+        let _ = model.act_on(Signal::Typed('q'));
+        let _ = model.act_on(Signal::Typed('r'));
+
+        assert_eq!(model.leaving, None, "`q` was a letter");
+        assert_eq!(model.refreshing, Refreshing::Unasked, "and so was `r`");
+        assert_eq!(model.prompt.as_ref().map(|p| p.typed.as_str()), Some("qr"));
+    }
+
+    /// A refused write puts the row back to what was actually written: a value
+    /// nobody wrote is not one anybody should be reading.
+    #[test]
+    fn a_refused_write_puts_the_row_back_to_what_is_on_disk() {
+        let mut model = model_of(&["one@example.com"]);
+        on_the_config_setting(&mut model, Setting::WatcherThresholdPercent);
+        let _ = model.act_on(Signal::Right);
+        assert_eq!(
+            model
+                .value_of(&Scope::Global, Setting::WatcherThresholdPercent)
+                .0,
+            "85"
+        );
+
+        model.wrote(vec!["another `perch` holds it".to_string()], None);
+
+        assert_eq!(
+            model
+                .value_of(&Scope::Global, Setting::WatcherThresholdPercent)
+                .0,
+            "80",
+            "what is on disk, rather than what was never written"
+        );
+        assert_eq!(model.said, vec!["another `perch` holds it".to_string()]);
     }
 }
