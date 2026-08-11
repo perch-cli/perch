@@ -368,6 +368,32 @@ fn a_group_says_how_many_accounts_still_have_headroom_and_how_much_the_best_has(
     );
 }
 
+/// The same Reserve on a terminal narrow enough to wrap it.
+///
+/// `wrapped` indents what runs over by four and the Overview budgeted for two,
+/// so every line that wrapped was two cells wider than the area it was drawn in
+/// and ratatui cut the tail off it. The tail of this one is its age: the line
+/// read `Reserve: ... the best 93% left (as of ago)`, which is a figure with no
+/// age on it — the one thing ADR 0015 will not have, and the thing the comment
+/// over that arithmetic says it is there to prevent.
+///
+/// Asserted through `said`, which puts the line back together across the breaks
+/// the terminal made: where the words went is the terminal's business, and
+/// whether they are all still there is not.
+#[test]
+fn a_reserve_keeps_its_age_on_a_terminal_that_wraps_it() {
+    let host = machine_with_a_group();
+
+    let mut screen = FakeScreen::sized(50, 40, vec![Some(Signal::Leave)]);
+    browse_with(&host, &mut screen, &mut FakeRefresher::out_for_ever());
+
+    let frame = screen.last_frame();
+    assert!(
+        said(frame).contains("the best 93% left (as of 4m ago)"),
+        "a figure that lost its age to the right-hand edge:\n{frame}"
+    );
+}
+
 /// Summing or averaging percentages across Accounts produces a number that
 /// looks quantitative, is not, and is exactly the kind of number people plan
 /// around. So every figure a Group's rows quote is one an Account reported.
