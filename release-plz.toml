@@ -21,9 +21,28 @@ git_tag_name = "v{{ version }}"
 # and no error saying so. The job goes green and nothing happens.
 #
 # Here it means what it says. release-plz still decides the version, writes the
-# changelog and pushes the tag; it just does not run `cargo publish`. It calls
-# that mode "git-only".
+# changelog and pushes the tag; it just does not run `cargo publish`.
 publish = false
+
+# And this is the half of that decision `publish = false` does not make. On its
+# own it stops the upload and nothing else: release-plz still asks crates.io
+# what the last released version of a crate named `perch` was, because that is
+# how it decides which commits are new.
+#
+# There is a crate named `perch` on crates.io. It is a Bluesky and Mastodon
+# client, it is at 0.3.4, and it has nothing to do with this repository. Without
+# this line release-plz downloads it on every push to main and diffs Perch
+# against it — which means, concretely, that at v0.1.1 with nothing merged since,
+# it proposes 0.1.2 with a changelog entry reading "update Cargo.toml
+# dependencies". Their dependencies differ from ours, so of course they do.
+# (`dependencies_update = false` below does not stop that: it governs whether
+# release-plz *updates* Cargo.lock, not whether it counts the difference.)
+#
+# `git_only` says the previous version is the newest `git_tag_name` tag, which
+# for a project that is never published is the only place it was ever recorded.
+# It costs a `cargo package` against a worktree at that tag — around twenty
+# seconds — and it does not touch the network.
+git_only = true
 
 # Perch has a `[lib]` so the binary and the tests can share code, not because
 # anything downstream links against it. Checking its public API for semver
