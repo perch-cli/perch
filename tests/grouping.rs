@@ -10,7 +10,9 @@ mod common;
 use common::*;
 use perch::commands::add::AddArgs;
 use perch::commands::group::GroupCommand;
-use perch::error::{EXIT_CONFLICT, EXIT_GENERAL, EXIT_INVALID, EXIT_NOT_FOUND};
+use perch::error::{
+    EXIT_CONFLICT, EXIT_GENERAL, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_NOT_INTERCHANGEABLE,
+};
 use perch::host::{FakeHost, Host};
 
 fn remove_group(host: &FakeHost, name: &str) -> (perch::Result<()>, String) {
@@ -392,6 +394,54 @@ fn group_list_shows_every_group_with_its_accounts_and_its_configuration() {
     assert!(
         printed.contains(EMAIL),
         "an Account in no Group should still be accounted for:\n{printed}"
+    );
+}
+
+/// What the summary says about the ungrouped Accounts and what the watcher does
+/// about them, asserted together so the two cannot drift apart again.
+///
+/// `watcher-may-act` is not the whole of whether the watcher acts there:
+/// `cycle-ungrouped` is a separate declaration that those Accounts are
+/// interchangeable at all (ADR 0017). Read from the permission alone, the
+/// summary announced "may switch unattended at 80%" about a Scope `perch watch`
+/// refuses outright — and it printed the same Cycling line whichever way the
+/// gate was set, so neither direction was falsifiable.
+#[test]
+fn what_group_list_says_about_ungrouped_cycling_is_what_the_watcher_does() {
+    let host = machine_with_two_accounts();
+    config_set(&host, &["ungrouped", "watcher-may-act", "true"])
+        .0
+        .expect("the permission is given");
+
+    let (result, printed) = run_group(&host, GroupCommand::List);
+    result.expect("the listing is shown");
+
+    assert!(
+        !printed.contains("may switch unattended"),
+        "nothing may claim unattended switching the watcher declines:\n{printed}"
+    );
+    assert!(
+        printed.contains("cycle-ungrouped"),
+        "and the one Setting gating the whole Scope is readable:\n{printed}"
+    );
+
+    let (outcome, said) = run_watch_once(&host);
+    assert_eq!(
+        outcome
+            .expect_err("there is nowhere to Switch to")
+            .exit_code(),
+        EXIT_NOT_INTERCHANGEABLE,
+        "which is what the watcher itself says:\n{said}"
+    );
+
+    // And the other way, so the line is falsifiable in both directions.
+    config_set(&host, &["cycle-ungrouped", "true"])
+        .0
+        .expect("they are declared interchangeable");
+    let (_, now) = run_group(&host, GroupCommand::List);
+    assert!(
+        now.contains("may switch unattended"),
+        "with both yeses given, the watcher may act:\n{now}"
     );
 }
 

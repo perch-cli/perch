@@ -134,7 +134,14 @@ fn refuse_while_anything_is_running(
     account: &Account,
     consequence: &Consequence,
 ) -> Result<()> {
-    let version = probe::claude_version(host)?;
+    // A machine that cannot say which Claude Code it has is still a machine an
+    // Account can be given up on. The version is not what answers this question
+    // — session markers are, and they are read straight off the Profile — it is
+    // only what a refusal quotes when the markers cannot be read. Propagated, it
+    // refused the whole removal on a machine where Claude Code had been
+    // uninstalled, leaving `perch purge` as the only way to give up one lapsed
+    // subscription. `export::the_live_store` swallows it for the same reason.
+    let version = probe::claude_version(host).unwrap_or_else(|_| "(not installed)".to_string());
     switch::refuse_if_live_anywhere(
         host,
         account,
@@ -288,7 +295,13 @@ fn land_on(
     successor: &Account,
     leaving: &Account,
 ) -> Result<()> {
-    let landed = switch::make_live(host, perch, successor);
+    let landed = switch::make_live(
+        host,
+        perch,
+        successor,
+        "the Default Profile, which is where the Account Perch would land on has \
+         to be written",
+    );
     let is_live = landed.as_ref().err().is_none_or(|stopped| stopped.is_live);
 
     if is_live {

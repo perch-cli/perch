@@ -29,8 +29,9 @@ use crate::target::{self, AccountTarget};
 /// lives with the command line that parses it.
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum GroupCommand {
-    /// Declare a Group. It starts empty, with the configuration a Group carries
-    /// by default: the most-headroom strategy, and the watcher switched off.
+    /// Declare a Group. It starts empty and Inheriting every Setting from
+    /// Global — an Override is something a Group has been told, and a new one
+    /// has been told nothing.
     Add {
         /// The name, which shares one namespace with Aliases.
         name: String,
@@ -245,7 +246,21 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
             let label = if index == 0 { "Accounts" } else { "" };
             write_line(out, label, &registry.named_for_the_user(account.email()))?;
         }
-        write_line(out, "Cycling", CYCLING_AMONG_UNGROUPED)?;
+        // The rule, and then what it currently answers. The constant alone
+        // printed the same words whether the declaration had been made or not,
+        // so the one Setting gating the whole Scope was never readable here.
+        write_line(
+            out,
+            "Cycling",
+            &format!(
+                "{CYCLING_AMONG_UNGROUPED} — `cycle-ungrouped` is {}",
+                if registry.global.cycle_ungrouped {
+                    "on"
+                } else {
+                    "off"
+                }
+            ),
+        )?;
         // The Accounts in no Group are a Scope (ADR 0017, amended), so what
         // governs Cycling among them is a thing with an answer rather than a
         // constant compiled into Perch. It is shown here for the same reason a
@@ -276,9 +291,22 @@ fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scop
         policy.ceiling(),
         policy.cooldown_minutes,
     );
-    let watcher = match settings.watcher_may_act {
-        true => format!("may switch unattended {acting}"),
-        false => format!("off (would act {acting})"),
+    // Being allowed to act is not the whole of whether it does. Among the
+    // Accounts in no Group, `cycle-ungrouped` is a separate declaration that
+    // they are interchangeable at all (ADR 0017), and without it there is
+    // nowhere for the watcher to Switch to — `perch watch` refuses outright and
+    // names both. Read from `watcher-may-act` alone, this line claimed
+    // unattended switching that the watcher declines, and said the same thing
+    // whichever way the gate was set, so it was unfalsifiable in both
+    // directions. `config::scope_lines` already answers this correctly.
+    let interchangeable = *scope != Scope::Ungrouped || registry.global.cycle_ungrouped;
+    let watcher = match (settings.watcher_may_act, interchangeable) {
+        (true, true) => format!("may switch unattended {acting}"),
+        (true, false) => format!(
+            "off — `cycle-ungrouped` is off, so there is nowhere to Switch to \
+             (would act {acting})"
+        ),
+        (false, _) => format!("off (would act {acting})"),
     };
     write_line(out, "Watcher", &watcher)?;
 

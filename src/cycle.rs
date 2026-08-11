@@ -307,11 +307,16 @@ impl Headroom {
             // comes back" would be untrue of an Account whose cache says
             // exactly that about a time now past.
             (Strategy::SoonestReset, None) => match resets_at {
+                // The clock time alone, because the clause says which side of
+                // now it falls on itself. `reset_phrase` renders a time already
+                // gone as "any moment now" — which is the right thing to say
+                // about a window somebody is waiting for, and reads as a
+                // contradiction two words before "which has passed".
                 Some(at) => format!(
                     "{percent}% headroom, and the window that leaves it least — \
                      {fullest_window} — was due back at {}, which has passed, so \
                      there was no reset still to come to rank it on, as of {age}",
-                    utilization::reset_phrase(*at, now),
+                    utilization::clock_time(*at),
                 ),
                 None => format!(
                     "{percent}% headroom, which is true of every one of its Quota \
@@ -855,13 +860,20 @@ fn chosen_because(
         Strategy::SoonestReset if best.headroom.ranked_on_reset(strategy, now).is_some() => {
             format!("{named} resets soonest: {figure}.")
         }
-        // Nothing that could be moved to says when it comes back — an Account
+        // Nothing that could be moved to has a reset still to come — an Account
         // that did would have outranked this one — so the Cycle fell back to
         // the room it could see rather than switching on nothing.
+        //
+        // Said as "no reset still to come" rather than as "no cached figure",
+        // because the two are not the same absence and the sentence used to
+        // claim the wrong one: a window whose reset elapsed is a figure the
+        // cache holds and `ranked_on_reset` declines, so "no cached figure says
+        // when any of them comes back" contradicted the clause beside it, which
+        // had just quoted the time one of them came back at.
         Strategy::SoonestReset => format!(
-            "{named} has the most room: {figure}. No cached figure says when any \
-             of them comes back, so there was no reset time to prefer one on — \
-             {HOW_TO_GET_FIGURES}"
+            "{named} has the most room: {figure}. Nothing that could be moved to \
+             has a reset still to come, so there was no reset time to prefer one \
+             on — {HOW_TO_GET_FIGURES}"
         ),
     }
 }
@@ -1612,6 +1624,21 @@ pub(crate) mod tests {
             "it says the reading is stale rather than absent: {}",
             choice.because
         );
+        // The parenthetical `reset_phrase` puts on a time already gone. Two
+        // words from "which has passed", it is the same contradiction one
+        // bracket further along, and the assertion above walks straight past it.
+        assert!(
+            !choice.because.contains("any moment now"),
+            "a window that came back is not one coming back: {}",
+            choice.because
+        );
+        // And the sentence that follows the clause may not call the figure
+        // absent when the clause it follows has just quoted it.
+        assert!(
+            !choice.because.contains("No cached figure says when any"),
+            "the cache said exactly when it came back: {}",
+            choice.because
+        );
     }
 
     /// The same disagreement on the staying-put path, which quotes the same
@@ -1636,6 +1663,10 @@ pub(crate) mod tests {
             "an elapsed reset is not a reset still to come: {said}"
         );
         assert!(said.contains("has passed"), "{said}");
+        assert!(
+            !said.contains("any moment now"),
+            "and the bracket after the time may not say it is still to come: {said}"
+        );
     }
 
     /// One Account being worth moving to does not make every Account worth

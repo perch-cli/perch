@@ -611,6 +611,36 @@ fn a_run_marks_its_profile_live_for_as_long_as_it_lasts() {
     );
 }
 
+/// A marker arrives whole or not at all.
+///
+/// Written straight into place, the file is truncated and then filled, and a
+/// reader catching it between the two reads a file it can see all of and that
+/// says nothing — which `clients_in` settles as "nothing is running", the
+/// opposite of the arm whose comment names this very case ("halfway through
+/// being written by a client that is starting up right now"). A `perch switch`
+/// landing in that window Captures the Credential the Run is about to hand a
+/// client, which is the mid-task logout ADR 0027's marker exists to prevent.
+///
+/// Asserted as a rename, because that is what makes a write atomic: the reader
+/// sees the old name or the new one and never a prefix of either.
+#[test]
+fn a_runs_marker_arrives_whole_rather_than_being_filled_in_place() {
+    let host = machine_with_two_accounts();
+    host.forget_effects();
+
+    run_run(&host, SECOND_EMAIL).0.expect("the client ran");
+
+    let marker = perch::probe::session_marker_at(&profile_of(&host, SECOND_EMAIL), THIS_PROCESS);
+    assert!(
+        host.effects().iter().any(|effect| matches!(
+            effect,
+            Effect::Renamed { to, .. } if to == &marker
+        )),
+        "the marker was filled in place rather than moved into it:\n{:?}",
+        host.effects()
+    );
+}
+
 /// The consequence that matters: while somebody is working in a Profile, the
 /// Capture that a Switch away from that Account would perform is refused. That
 /// write would land under a client holding the same file, which is the mid-task

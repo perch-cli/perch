@@ -213,6 +213,20 @@ fn unset(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
         // script told "done" would go on believing a Setting had gone back to
         // something, and there is no something for it to have gone back to.
         [key] => {
+            // A word that is a perfectly good Scope is an `unset` missing its
+            // key, not a misspelled Setting. `set` has the mirror of this guard
+            // one arm above, for the reason its test gives: being told "no such
+            // key" about a Group name that is spelled correctly sends somebody
+            // looking for a spelling mistake that is not the problem.
+            if Key::parse_quietly(key).is_err()
+                && let Ok(scope) = addressed(registry, key)
+            {
+                return Err(PerchError::Invalid(format!(
+                    "`perch config unset {key}` names {} but no key. \
+                     `perch config unset <scope> <key>` clears one Scope's Override.",
+                    scope.described(),
+                )));
+            }
             let key = Key::parse(key)?;
             Err(PerchError::Invalid(format!(
                 "`{}` cannot be unset at Global. Global is the value that applies \

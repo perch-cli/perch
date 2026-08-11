@@ -293,14 +293,14 @@ impl Recently {
     /// cannot act has no business spending an allowance on figures it will not
     /// use.
     pub fn resting(&self, policy: &Policy, now: DateTime<Utc>) -> Option<String> {
-        let (switched, left) = self.left_of_the_cooldown(policy, now)?;
+        let (_, since, left) = self.left_of_the_cooldown(policy, now)?;
         // The rule is named rather than only described, because a check's line
         // is read out of a cron mailbox by somebody who has to know which
         // setting to reach for.
         Some(format!(
             "the last Switch was {} ago and this Group's cooldown leaves at \
              least {} between two, so nothing moves {}.",
-            minutes(now - switched.at),
+            minutes(since),
             minutes(policy.cooldown()),
             still_to_wait(left),
         ))
@@ -325,7 +325,7 @@ impl Recently {
         if !policy.no_return {
             return None;
         }
-        let (switched, _) = self.left_of_the_cooldown(policy, now)?;
+        let (switched, _, _) = self.left_of_the_cooldown(policy, now)?;
         Some(switched.off.as_str())
     }
 
@@ -333,18 +333,28 @@ impl Recently {
     /// `None` where none of it is — which is also the answer when nothing has
     /// been Switched yet.
     ///
-    /// Both, because there is no answer that is one without the other: a
+    /// All three, because there is no answer that is one without the others: a
     /// caller asking how long is left is a caller that then names the Switch it
-    /// is left of, and asking twice made every caller repeat a question this
-    /// had already answered.
+    /// is left of and how long ago it was, and asking separately made every
+    /// caller repeat a question this had already answered.
+    ///
+    /// The elapsed span is floored at nothing, so a Switch stamped in the
+    /// future is treated as one that has just happened. `checks` is read off
+    /// disk and a `--once` watcher is the only thing that writes it, so the
+    /// stamp survives a clock the machine steps backwards — and unfloored, an
+    /// hour of skew held the Group for its cooldown *plus* the hour and said
+    /// "the last Switch was -55 minutes ago" while it did. `age_phrase` already
+    /// refuses to make that claim about a reading; this is the same refusal
+    /// about a Switch.
     fn left_of_the_cooldown(
         &self,
         policy: &Policy,
         now: DateTime<Utc>,
-    ) -> Option<(&Switched, Duration)> {
+    ) -> Option<(&Switched, Duration, Duration)> {
         let switched = self.switched.as_ref()?;
-        let left = policy.cooldown() - (now - switched.at);
-        (left > Duration::zero()).then_some((switched, left))
+        let since = (now - switched.at).max(Duration::zero());
+        let left = policy.cooldown() - since;
+        (left > Duration::zero()).then_some((switched, since, left))
     }
 }
 
@@ -1131,6 +1141,44 @@ mod tests {
             None,
             "a cooldown of fifteen minutes is over after fifteen minutes, not \
              after sixteen"
+        );
+    }
+
+    /// A Switch stamped ahead of the clock reading it.
+    ///
+    /// `checks` is written by a `perch watch --once` and read back by the next
+    /// one, so the stamp outlives the clock that made it — an NTP step
+    /// backwards, or a machine that was running fast, puts a Switch in the
+    /// future. Unfloored, the elapsed span went negative and the line read "the
+    /// last Switch was -55 minutes ago", which is not a length of time anybody
+    /// reading a cron mailbox can act on.
+    ///
+    /// Only the sentence is floored. The hold still runs a cooldown from the
+    /// stamp, so a stamp an hour ahead holds the Group for an hour and the
+    /// cooldown — which is the direction to err in: a stamp Perch cannot trust
+    /// is a reason to Switch less often rather than more, and the wait ends
+    /// without anybody having to repair anything.
+    #[test]
+    fn a_switch_stamped_in_the_future_is_not_said_to_have_happened_backwards() {
+        let mut recently = Recently::nothing();
+        recently.switched("left@example.com", now() + Duration::minutes(60));
+
+        let waiting = recently
+            .resting(&policy(), now())
+            .expect("a Switch it thinks has happened is one to wait on");
+        assert!(
+            !waiting.contains('-'),
+            "no span in the sentence runs backwards: {waiting}"
+        );
+        assert!(
+            waiting.contains("under a minute ago"),
+            "a Switch it cannot have been long since is said as one: {waiting}"
+        );
+
+        assert_eq!(
+            recently.resting(&policy(), now() + Duration::minutes(75)),
+            None,
+            "and the hold still ends, a cooldown after the stamp"
         );
     }
 

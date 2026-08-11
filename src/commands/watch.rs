@@ -659,7 +659,7 @@ fn considered(registry: &Registry, watching: &Watching) -> Vec<Considered> {
         .accounts(registry)
         .iter()
         .filter(|account| {
-            account.email() != watching.account.email() && account.enabled && !account.quarantined()
+            account.email() != watching.account.email() && cycle::is_a_candidate(account)
         })
         .map(|account| Considered {
             email: account.email().to_string(),

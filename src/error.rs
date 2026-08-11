@@ -301,7 +301,13 @@ impl From<KeychainError> for PerchError {
             KeychainError::NotFound { service, account } => PerchError::NotFound(format!(
                 "No credential stored for {account} under {service}"
             )),
-            other => PerchError::KeychainUnavailable(other.to_string()),
+            // Spelled out rather than caught by a `_`, for the reason
+            // `message_mut` and `exit_code` give about the enum above: a
+            // variant added later would otherwise be folded into "unavailable"
+            // silently, and "the keychain could not be consulted at all" is
+            // deliberately distinct from every other thing that can go wrong
+            // with one (ADR 0008). One arm is the price of the compiler asking.
+            KeychainError::Unavailable { detail } => PerchError::KeychainUnavailable(detail),
         }
     }
 }

@@ -146,8 +146,16 @@ fn mark_live(host: &dyn Host, profile: &Path) -> Result<PathBuf> {
     let pid = host.process_id();
     let marker = probe::session_marker_at(profile, pid);
 
+    // Atomically, so a reader sees the whole marker or no marker at all. A
+    // plain write truncates and then fills, and a reader catching it in between
+    // reads a file it can see all of and that says nothing — which `clients_in`
+    // settles as "not Live", the opposite of the arm its comment says this case
+    // takes. A `perch switch` in that window Captures the Credential the Run is
+    // about to hand a client (ADR 0027).
     host.create_dir_all(&probe::sessions_dir(profile))
-        .and_then(|()| host.write_file(&marker, &probe::session_marker(pid, host.now())))
+        .and_then(|()| {
+            crate::host::write_atomically(host, &marker, &probe::session_marker(pid, host.now()))
+        })
         .map_err(|err| {
             PerchError::Other(format!(
                 "{} could not be written ({err}), so Perch cannot record that a \

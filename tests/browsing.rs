@@ -368,6 +368,32 @@ fn a_group_says_how_many_accounts_still_have_headroom_and_how_much_the_best_has(
     );
 }
 
+/// The same Reserve on a terminal narrow enough to wrap it.
+///
+/// `wrapped` indents what runs over by four and the Overview budgeted for two,
+/// so every line that wrapped was two cells wider than the area it was drawn in
+/// and ratatui cut the tail off it. The tail of this one is its age: the line
+/// read `Reserve: ... the best 93% left (as of ago)`, which is a figure with no
+/// age on it — the one thing ADR 0015 will not have, and the thing the comment
+/// over that arithmetic says it is there to prevent.
+///
+/// Asserted through `said`, which puts the line back together across the breaks
+/// the terminal made: where the words went is the terminal's business, and
+/// whether they are all still there is not.
+#[test]
+fn a_reserve_keeps_its_age_on_a_terminal_that_wraps_it() {
+    let host = machine_with_a_group();
+
+    let mut screen = FakeScreen::sized(50, 40, vec![Some(Signal::Leave)]);
+    browse_with(&host, &mut screen, &mut FakeRefresher::out_for_ever());
+
+    let frame = screen.last_frame();
+    assert!(
+        said(frame).contains("the best 93% left (as of 4m ago)"),
+        "a figure that lost its age to the right-hand edge:\n{frame}"
+    );
+}
+
 /// Summing or averaging percentages across Accounts produces a number that
 /// looks quantitative, is not, and is exactly the kind of number people plan
 /// around. So every figure a Group's rows quote is one an Account reported.
@@ -1440,6 +1466,66 @@ fn one_key_flips_a_setting_and_it_is_written_at_once() {
     );
 }
 
+/// An arrow on a bool means the direction it points, not "the other one".
+///
+/// Both arrows read the value and inverted it, so `←` and `→` did the same
+/// thing and a held key oscillated: where the Setting ended up was the parity
+/// of how many repeats the terminal happened to send. A direction that means
+/// one settles on an answer however long the key is held, which is the property
+/// the Setting having two states and the arrows having two directions was
+/// always going to give.
+#[test]
+fn holding_an_arrow_on_a_bool_settles_rather_than_oscillating() {
+    for (signal, expected) in [(Signal::Right, true), (Signal::Left, false)] {
+        let host = machine_with_figures();
+
+        browse(
+            &host,
+            at_the_config(
+                [vec![Some(Signal::Right)], over(2, Signal::Down)]
+                    .concat()
+                    .into_iter()
+                    // An odd number, so a toggle and a direction disagree.
+                    .chain(over(3, signal))
+                    .chain([Some(Signal::Leave)])
+                    .collect(),
+            ),
+        );
+
+        assert_eq!(
+            registry_of(&host).global.settings.watcher_may_act,
+            expected,
+            "three {signal:?}s on `watcher-may-act` should mean {expected}"
+        );
+    }
+}
+
+/// And the key named for meaning "the other one" still does, which is the half
+/// a direction could have taken with it.
+#[test]
+fn the_flip_key_still_means_the_other_one() {
+    let host = machine_with_figures();
+    config_set(&host, &["watcher-may-act", "true"])
+        .0
+        .expect("it starts on");
+
+    browse(
+        &host,
+        at_the_config(
+            [vec![Some(Signal::Right)], over(2, Signal::Down)]
+                .concat()
+                .into_iter()
+                .chain([Some(Signal::Flip), Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    assert!(
+        !registry_of(&host).global.settings.watcher_may_act,
+        "Space flips what is there rather than setting a fixed value"
+    );
+}
+
 /// How many times the registry was written, which is what a write costs: one
 /// lock taken and given back per one of these.
 fn registry_writes(host: &FakeHost) -> usize {
@@ -1844,6 +1930,140 @@ fn neither_global_nor_the_ungrouped_scope_is_a_group_to_rename() {
         registry_of(&host).groups.len(),
         1,
         "and nothing was declared or renamed"
+    );
+}
+
+/// The `+ new Group` row is not a dead end.
+///
+/// `←` stepped unconditionally on the Config tab's content column, which made
+/// the arm that moves out unreachable. On every other row there is a value to
+/// step, so the key at least did something; on this one the content column is
+/// empty, so `←`, `↑`, `↓` and `Esc` all moved nothing and said nothing — the
+/// silent key this panel's own rule refuses.
+#[test]
+fn the_new_group_row_is_not_a_dead_end() {
+    let host = machine_with_a_group();
+    let to_the_last_row = over(3, Signal::Down);
+
+    let screen = browse(
+        &host,
+        at_the_config(
+            to_the_last_row
+                .into_iter()
+                .chain([
+                    Some(Signal::Right),
+                    Some(Signal::Left),
+                    Some(Signal::Up),
+                    Some(Signal::Leave),
+                ])
+                .collect(),
+        ),
+    );
+
+    // `↑` off the last row reaches `work`, whose page names it. Reached only
+    // from the sidebar, so seeing it is the proof `←` got the cursor out.
+    let frame = screen.last_frame();
+    assert!(
+        frame.contains("Group `work`"),
+        "`←` left the cursor stranded in an empty column:\n{frame}"
+    );
+}
+
+/// Stepping an Account out of the Scope whose page you are on must not leave
+/// the cursor on a Setting.
+///
+/// The `group` row moves the Account out of the Group, which takes the five
+/// per-Account rows off the page with it. The content cursor was clamped by row
+/// *number* while the other three cursors followed what they were on, so it
+/// landed on the last Setting — and because the write and the redraw are the
+/// same iteration, the highlight never appeared to jump. The next repeat of a
+/// held arrow then wrote an Override on a Setting nobody had touched.
+#[test]
+fn stepping_an_account_out_of_a_scope_does_not_leave_the_cursor_on_a_setting() {
+    let host = machine_with_figures();
+    declare_group(&host, "work");
+    move_to_group(&host, EMAIL, "work").0.expect("it moves");
+    host.forget_effects();
+
+    let to_the_group_row = [
+        over(2, Signal::Down),     // sidebar: Global, Ungrouped, work
+        vec![Some(Signal::Right)], // into the Accounts column
+        vec![Some(Signal::Right)], // into the content column
+        over(8, Signal::Down),     // six Settings, then alias, cycling, group
+    ]
+    .concat();
+
+    browse(
+        &host,
+        at_the_config(
+            to_the_group_row
+                .into_iter()
+                // The first steps the Account out of the Group. The second is
+                // the repeat a held key sends.
+                .chain([Some(Signal::Left), Some(Signal::Left), Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    let registry = registry_of(&host);
+    assert_eq!(
+        registry.account(EMAIL).and_then(|held| held.group.clone()),
+        None,
+        "the first press moved the Account out, which is what it is for"
+    );
+    assert_eq!(
+        registry
+            .group("work")
+            .expect("the Group is still declared")
+            .watcher_no_return,
+        None,
+        "and the second press did not write an Override on a Setting the \
+         cursor was moved onto"
+    );
+}
+
+/// Holding an arrow on a per-Account row is one write, like every other row.
+///
+/// These three wrote at once rather than waiting for the keys to stop, so a
+/// held key was one registry write and one lock taken and given back per repeat
+/// the terminal sent — "holding an arrow from 0 to 80 is otherwise eighty
+/// writes and eighty lock acquisitions, some of which will lose the race and
+/// leave a half-set value" (ADR 0034), which was the reason for the debounce
+/// these rows did not use.
+#[test]
+fn holding_an_arrow_on_an_account_row_is_one_write_once_the_keys_stop() {
+    let host = machine_with_a_group();
+
+    let to_the_cycling_row = [
+        over(2, Signal::Down),
+        vec![Some(Signal::Right), Some(Signal::Right)],
+        over(7, Signal::Down), // six Settings, then alias, then cycling
+    ]
+    .concat();
+
+    browse(
+        &host,
+        at_the_config(
+            to_the_cycling_row
+                .into_iter()
+                .chain(over(6, Signal::Left))
+                .chain(while_nobody_presses_anything())
+                .chain([Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    assert_eq!(
+        registry_writes(&host),
+        1,
+        "six repeats of one key is one change somebody made"
+    );
+    assert!(
+        !registry_of(&host)
+            .account(EMAIL)
+            .expect("the Account is held")
+            .enabled,
+        "and it is the change they made: `←` is the low end"
     );
 }
 

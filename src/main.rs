@@ -71,12 +71,15 @@ enum Command {
         unset: bool,
     },
 
-    /// Read and change how a Group behaves.
+    /// Read and change how Cycling behaves, at Global or for one Scope.
     ///
     /// Every setting is reachable from a script, because Perch has to be
-    /// complete over SSH and in CI (ADR 0011). Most belong to a Group; the one
-    /// about the Accounts in no Group has no Group to belong to, and is
-    /// addressed by naming none (ADR 0017).
+    /// complete over SSH and in CI (ADR 0011). Config is two layers: Global is
+    /// what applies where nothing narrower is said, and a Scope — a Group by
+    /// name, or `ungrouped` for the Accounts in no Group — Overrides it.
+    ///
+    /// So two words set Global's default and three set one Scope's Override,
+    /// and a Scope that has been told nothing goes on Inheriting Global.
     Config {
         #[command(subcommand)]
         action: ConfigCommand,
@@ -288,8 +291,10 @@ enum Command {
     ///
     /// A loop in this terminal rather than a daemon (ADR 0013): it runs until
     /// you stop it with Ctrl-C, and leaves nothing behind when you do. Only the
-    /// active Account is read, and only within a Group that has been told the
-    /// watcher may act on it — `perch config set <group> watcher-may-act true`.
+    /// active Account is read, and only within a Scope that has been told the
+    /// watcher may act on it — `perch config set <group> watcher-may-act true`
+    /// for a Group, or the same for `ungrouped` where `cycle-ungrouped` is on
+    /// as well, because being interchangeable at all is its own yes (ADR 0017).
     ///
     /// Every decision is printed as it is made, including the ones where
     /// nothing happens, which are most of them. They go to standard output, so

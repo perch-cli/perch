@@ -160,6 +160,20 @@ impl Row {
     fn is_a_setting(&self) -> bool {
         matches!(self, Row::Setting(_))
     }
+
+    /// Whether the row holds a value with an order the arrows can walk.
+    ///
+    /// What `←` asks before it decides whether it is stepping a value or
+    /// walking back out of the column, which is what `Signal::Left` has always
+    /// meant: step where there is something to step, and otherwise one column
+    /// left. A name is typed and a plan is a fact, so neither steps — and `→`,
+    /// which has nowhere further right to go, is the key that says so.
+    fn has_steps(&self) -> bool {
+        match self {
+            Row::Setting(_) | Row::CycleUngrouped | Row::Cycling | Row::Group => true,
+            Row::Alias | Row::Plan | Row::Quarantine => false,
+        }
+    }
 }
 
 /// Where the last Refresh got to — the whole of what the TUI says about the
@@ -246,6 +260,26 @@ fn about_the_same_row(edit: &Edit, scope: &Scope, key: Setting) -> bool {
         edit,
         Edit::Setting { scope: also, key: same, .. } if also == scope && *same == key
     )
+}
+
+/// The same question asked of two edits, for the rows that are not Settings.
+///
+/// A row is identified by what the edit acts on rather than by where the cursor
+/// was: an Account's Group and whether Cycling may choose it are each one row,
+/// and `cycle-ungrouped` is one wherever it is shown.
+fn about_one_row(one: &Edit, other: &Edit) -> bool {
+    match (one, other) {
+        (
+            Edit::Setting {
+                scope, key: held, ..
+            },
+            _,
+        ) => about_the_same_row(other, scope, *held),
+        (Edit::CycleUngrouped(_), Edit::CycleUngrouped(_)) => true,
+        (Edit::Cycling { email, .. }, Edit::Cycling { email: also, .. })
+        | (Edit::Group { email, .. }, Edit::Group { email: also, .. }) => email == also,
+        _ => false,
+    }
 }
 
 /// A name being typed, and what it is for.
@@ -744,11 +778,25 @@ impl Model {
     /// Left: step the value down where the cursor is on something with a
     /// natural order, and otherwise move out to the column on the left.
     fn leftwards(&mut self) -> Asked {
-        if self.tab == Tab::Config && self.column == Column::Content {
+        // Stepping was returned unconditionally, which made the arm below
+        // unreachable: `←` never left the content column at all, and the only
+        // way back to the sidebar was `Tab`, which resets the column as a side
+        // effect of changing view. On the `+ new Group` row it was worse —
+        // there are no rows to step there, so `←` moved nothing and said
+        // nothing, which is the silent key this panel's own rule refuses.
+        if self.tab == Tab::Config
+            && self.column == Column::Content
+            && self.content().is_some_and(|row| row.has_steps())
+        {
             return self.stepped(-1);
         }
         self.column = match self.column {
-            Column::Content if self.tab == Tab::Config => Column::Accounts,
+            // Past the middle column only where there is one. Global governs
+            // every Account and lists none of its own, and `rightwards` skips
+            // it on the way in for the same reason.
+            Column::Content if self.tab == Tab::Config && !self.scope_accounts().is_empty() => {
+                Column::Accounts
+            }
             _ => Column::Scopes,
         };
         Asked::Nothing
@@ -795,16 +843,18 @@ impl Model {
                     None => Asked::Nothing,
                 }
             }
-            Row::CycleUngrouped => {
-                self.write(Edit::CycleUngrouped(!self.registry.global.cycle_ungrouped))
-            }
+            // The direction, for the reason `next_value` gives about the other
+            // bools: these two read the value and inverted it whichever arrow
+            // was pressed, so `←` and `→` did the same thing and holding either
+            // one landed wherever the repeat count's parity left it.
+            Row::CycleUngrouped => self.defer_edit(Edit::CycleUngrouped(by > 0)),
             Row::Cycling => match self.scope_account() {
                 Some(account) => {
                     let edit = Edit::Cycling {
                         email: account.email().to_string(),
-                        enabled: !account.enabled,
+                        enabled: by > 0,
                     };
-                    self.write(edit)
+                    self.defer_edit(edit)
                 }
                 None => Asked::Nothing,
             },
@@ -827,6 +877,18 @@ impl Model {
             return Asked::Nothing;
         };
         let email = account.email().to_string();
+        // Where the step before this one is about to put it, where one is
+        // waiting. The write is deferred, so the registry still says what it
+        // said before the key was pressed — and recomputing from that would
+        // have every press in a run land on the same neighbour, which is a list
+        // the arrows could not walk more than one place along.
+        let held = match &self.pending {
+            Some(Pending {
+                edit: Edit::Group { email: also, group },
+                ..
+            }) if *also == email => group.clone(),
+            _ => account.group.clone(),
+        };
         let mut places: Vec<Option<String>> = vec![None];
         places.extend(
             self.registry
@@ -835,13 +897,13 @@ impl Model {
         );
         let at = places
             .iter()
-            .position(|place| place.as_deref() == account.group.as_deref())
+            .position(|place| place.as_deref() == held.as_deref())
             .unwrap_or(0);
         let group = places[step(at, by, places.len())].clone();
-        if group == account.group {
+        if group == held {
             return Asked::Nothing;
         }
-        self.write(Edit::Group { email, group })
+        self.defer_edit(Edit::Group { email, group })
     }
 
     /// Space: flip the simplest Setting there is, at once.
@@ -858,8 +920,19 @@ impl Model {
                 let (value, _) = self.value_of(&scope, key);
                 match key.shape() {
                     Shape::YesOrNo | Shape::OneOf(_) => {
-                        let Some(next) = next_value(&key.shape(), &value, 1) else {
-                            return Asked::Nothing;
+                        // The other one, which is what this key is named for.
+                        // Asked of `next_value` with a fixed direction it would
+                        // set the same value every time, now that a direction
+                        // means one — so the flip is spelled out here and the
+                        // arrows are left to mean what they point at.
+                        let next = match key.shape() {
+                            Shape::YesOrNo => (value != "true").to_string(),
+                            _ => {
+                                let Some(next) = next_value(&key.shape(), &value, 1) else {
+                                    return Asked::Nothing;
+                                };
+                                next
+                            }
                         };
                         self.write(Edit::Setting {
                             scope,
@@ -873,6 +946,22 @@ impl Model {
                     }
                 }
             }
+            // The other two bools on the page, flipped rather than stepped for
+            // the same reason: `stepped` now takes its answer from the
+            // direction, and this key has no direction to take one from.
+            Row::CycleUngrouped => {
+                self.write(Edit::CycleUngrouped(!self.registry.global.cycle_ungrouped))
+            }
+            Row::Cycling => match self.scope_account() {
+                Some(account) => {
+                    let edit = Edit::Cycling {
+                        email: account.email().to_string(),
+                        enabled: !account.enabled,
+                    };
+                    self.write(edit)
+                }
+                None => Asked::Nothing,
+            },
             _ => self.stepped(1),
         }
     }
@@ -1074,21 +1163,32 @@ impl Model {
     /// made, and a deferred write that quietly lost the first would be exactly
     /// the save button this exists not to be.
     fn defer(&mut self, scope: Scope, key: Setting, value: String) -> Asked {
+        self.defer_edit(Edit::Setting {
+            scope,
+            key,
+            value: Some(value),
+        })
+    }
+
+    /// The same, for the rows that are not Settings.
+    ///
+    /// Every row the arrows step goes through here. The three per-Account ones
+    /// wrote at once instead, so holding a key was one registry write and one
+    /// lock taken and given back per repeat the terminal sent — the cost ADR
+    /// 0034 names and this debounce exists for. It also moved the cursor under
+    /// the user: stepping the `group` row takes the Account's rows off the
+    /// page, and the repeat that followed landed on whatever Setting was last.
+    fn defer_edit(&mut self, edit: Edit) -> Asked {
         if let Some(refused) = self.in_the_way() {
             self.said = vec![refused];
             return Asked::Nothing;
         }
-        let edit = Edit::Setting {
-            scope: scope.clone(),
-            key,
-            value: Some(value),
-        };
         let displaced = self.pending.replace(Pending {
-            edit,
+            edit: edit.clone(),
             frames_left: SETTLES_AFTER,
         });
         match displaced.map(|pending| pending.edit) {
-            Some(was) if !about_the_same_row(&was, &scope, key) => Asked::ToWrite(was),
+            Some(was) if !about_one_row(&was, &edit) => Asked::ToWrite(was),
             _ => Asked::Nothing,
         }
     }
@@ -1229,6 +1329,7 @@ impl Model {
         let account_was = self
             .scope_account()
             .map(|account| account.email().to_string());
+        let content_was = self.content();
 
         self.registry = registry;
         (self.order, self.sections) = ranked(&self.registry, self.now);
@@ -1256,9 +1357,25 @@ impl Model {
             .and_then(|email| accounts.iter().position(|account| account.email() == email))
             .unwrap_or(self.account_row)
             .min(accounts.len().saturating_sub(1));
-        self.content_row = self
-            .content_row
-            .min(self.content_rows().len().saturating_sub(1));
+        // By identity, like the three above it. Clamped by number alone, this
+        // was the one cursor that could be moved under the user by their own
+        // keystroke: stepping the `group` row moves the Account out of the
+        // Scope, its five rows go with it, and the cursor landed on whatever
+        // Setting happened to be last. The write and the redraw are the same
+        // iteration, so the highlight never appears to jump — and the next
+        // repeat of a held arrow stepped that Setting instead.
+        let content = self.content_rows();
+        let followed = content_was
+            .as_ref()
+            .and_then(|was| content.iter().position(|now| now == was));
+        if content_was.is_some() && followed.is_none() {
+            // A report standing beside a row it is not about, which is the rule
+            // `moving` exists for, reached the other way.
+            self.said.clear();
+        }
+        self.content_row = followed
+            .unwrap_or(self.content_row)
+            .min(content.len().saturating_sub(1));
     }
 
     /// Where an Account sits in the listing now, or `None` if it is no longer
@@ -1295,7 +1412,13 @@ fn step(at: usize, by: i32, len: usize) -> usize {
 /// panel cannot offer a value `perch config set` would refuse.
 fn next_value(shape: &Shape, from: &str, by: i32) -> Option<String> {
     match shape {
-        Shape::YesOrNo => Some((from != "true").to_string()),
+        // The direction, not the opposite of what is there. A bool has two
+        // states and the arrows have two directions, so `←` is the low one and
+        // `→` the high one — and holding a key settles on an answer instead of
+        // oscillating between them, which is what a toggle did: where the value
+        // ended up was the parity of how many repeats the terminal sent.
+        // `Signal::Flip` is the key that means "the other one", and does.
+        Shape::YesOrNo => Some((by > 0).to_string()),
         Shape::OneOf(readings) => {
             let at = readings.iter().position(|reading| reading == from)?;
             let next = (at as i64 + by as i64).rem_euclid(readings.len() as i64) as usize;

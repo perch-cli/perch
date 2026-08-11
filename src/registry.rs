@@ -641,18 +641,28 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
             kind.names()
         )));
     }
+    // Both of the words that already address something are refused for either
+    // half of the namespace, and both say which half they were asked about.
+    // They were the two refusals in this function that did not: an Alias called
+    // `ungrouped` was turned down with "so it cannot also name a Group", which
+    // is a rule about something the user was not doing.
     if means_no_group(name) {
         return Err(PerchError::Invalid(format!(
-            "`{name}` means no Group at all on `perch group move`, so it cannot also name one."
+            "`{name}` means no Group at all on `perch group move`, so it cannot \
+             also be {}.",
+            kind.article()
         )));
     }
     // The other word that already addresses something. `perch config` reads
     // which Scope is meant off the words that were typed, so a Group called
     // `ungrouped` would be a Group no `perch config set` could reach — the
-    // Ungrouped Scope would answer to the name first.
+    // Ungrouped Scope would answer to the name first. An Alias called
+    // `ungrouped` is the same collision from the other side.
     if means_ungrouped(name) {
         return Err(PerchError::Invalid(format!(
-            "`{name}` addresses the Accounts in no Group on `perch config`, so it cannot also name a Group."
+            "`{name}` addresses the Accounts in no Group on `perch config`, so \
+             it cannot also be {}.",
+            kind.article()
         )));
     }
     if name.contains('@') {
@@ -2302,6 +2312,12 @@ mod tests {
                 " ",
                 "none",
                 "None",
+                // The other word that already addresses something. A Group
+                // called `ungrouped` is one no `perch config set` could reach;
+                // an Alias called `ungrouped` is the same collision from the
+                // other side, and was the case nothing asked about.
+                "ungrouped",
+                "Ungrouped",
                 " work",
                 "work ",
                 // Not only at the ends: `perch config get` prints settings as
@@ -2313,9 +2329,16 @@ mod tests {
                 "two\twords",
                 "someone@example.com",
             ] {
+                let refused = validate_name(kind, name)
+                    .expect_err(&format!("`{name}` should not be usable as a {kind:?} name"));
+                // And the refusal states the rule the user broke rather than a
+                // rule about the other half of the namespace. `none` and
+                // `ungrouped` both told somebody naming an Account that their
+                // name could not also name a Group.
                 assert!(
-                    validate_name(kind, name).is_err(),
-                    "`{name}` should not be usable as a {kind:?} name"
+                    refused.to_string().contains(kind.names())
+                        || refused.to_string().contains(kind.article()),
+                    "a {kind:?} refused `{name}` in words about something else: {refused}"
                 );
             }
             for name in ["work", "overflow-ltd", "personal-2"] {

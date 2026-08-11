@@ -375,6 +375,31 @@ fn removing_the_active_account_is_refused_while_a_client_is_running_against_the_
     assert_eq!(live_credential(&host).as_deref(), Some(CREDENTIAL));
 }
 
+/// Retiring a lapsed subscription on a machine that no longer runs Claude Code.
+///
+/// Nothing about a removal needs one: whether a client is holding the Profile
+/// is answered by the session markers in it, and the version is only what a
+/// refusal quotes when those cannot be read. Asked for outright, it refused the
+/// whole removal — and `perch purge`, which gives up everything, was the only
+/// way left to give up one Account. `perch export` already tolerates exactly
+/// this machine, and for the same stated reason: it is the one somebody is
+/// decommissioning.
+#[test]
+fn an_account_is_given_up_on_a_machine_that_no_longer_has_claude_code_on_it() {
+    let host = machine_with_two_accounts();
+    host.remove_file(std::path::Path::new(CLAUDE_BIN))
+        .expect("Claude Code is uninstalled");
+
+    let (result, printed) = run_remove(&host, SECOND_EMAIL);
+
+    result.expect("a removal needs no Claude Code");
+    assert!(!holds(&host, SECOND_EMAIL), "{printed}");
+    assert!(
+        credential_of(&host, SECOND_EMAIL).is_none(),
+        "and the Credential Perch held is gone: {printed}"
+    );
+}
+
 #[test]
 fn a_quarantined_account_is_not_what_perch_lands_on() {
     let host = machine_with_two_accounts().with_answers(&["y"]);

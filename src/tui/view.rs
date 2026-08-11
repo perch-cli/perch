@@ -277,7 +277,7 @@ fn render_overview(frame: &mut Frame, model: &Model, area: Rect) {
         lines.push(Line::from(""));
         let widest = utilization::window_width_across(std::iter::once(account));
         for figure in utilization::lines_with_resets(account, model.now, widest) {
-            lines.extend(wrapped(&figure, room + LABEL));
+            lines.extend(wrapped(&figure, area.width as usize));
         }
     }
 
@@ -303,7 +303,7 @@ fn render_overview(frame: &mut Frame, model: &Model, area: Rect) {
                     .style(Style::new().add_modifier(Modifier::BOLD)),
             );
             for figure in figures {
-                lines.extend(wrapped(&figure, room + LABEL));
+                lines.extend(wrapped(&figure, area.width as usize));
             }
         }
     }
@@ -316,13 +316,26 @@ const LABEL: usize = 14;
 
 /// One line of the Overview, broken between words rather than cut at the width,
 /// with what runs over indented under it.
-fn wrapped<'a>(text: &str, room: usize) -> Vec<Line<'a>> {
-    broken(text, room.max(20))
+///
+/// Takes the width of the area it will be drawn in and subtracts its own
+/// indents, because they are the one thing it knows and the caller does not.
+/// Asked for the room instead, two of the four callers worked it out from the
+/// first line's two-space indent and left the continuations' four unaccounted
+/// for — so every line that wrapped was two cells too wide and ratatui cut the
+/// tail off it. A Reserve that lost "(as of 4m ago)" and read "(as of ago)" is
+/// a figure with no age on it, which is the one thing ADR 0015 will not have.
+fn wrapped<'a>(text: &str, width: usize) -> Vec<Line<'a>> {
+    broken(text, width.saturating_sub(CONTINUATION_INDENT).max(20))
         .into_iter()
         .enumerate()
         .map(|(at, part)| Line::from(format!("  {}{part}", if at == 0 { "" } else { "  " })))
         .collect()
 }
+
+/// How far a line that runs over is indented under the one before it — the
+/// widest of the two indents [`wrapped`] writes, and so the one every line has
+/// to leave room for.
+const CONTINUATION_INDENT: usize = 4;
 
 /// The columns of the Accounts page: `perch list`'s own, and the figure the
 /// order was made on beside them.
@@ -434,10 +447,7 @@ fn render_governing(frame: &mut Frame, model: &Model, area: Rect) {
     let caveat = not_in_force(model, &scope);
     if !caveat.is_empty() {
         lines.push(Line::from(""));
-        lines.extend(wrapped(
-            caveat.trim(),
-            (area.width as usize).saturating_sub(4),
-        ));
+        lines.extend(wrapped(caveat.trim(), area.width as usize));
     }
 
     frame.render_widget(Paragraph::new(lines), area);
@@ -565,10 +575,7 @@ fn render_content(frame: &mut Frame, model: &Model, area: Rect) {
         Line::from(format!("  {}", scope.described()))
             .style(Style::new().add_modifier(Modifier::BOLD)),
     ];
-    said.extend(wrapped(
-        &declares(model, &scope),
-        (area.width as usize).saturating_sub(4),
-    ));
+    said.extend(wrapped(&declares(model, &scope), area.width as usize));
     let [heading, body] =
         Layout::vertical([Constraint::Length(said.len() as u16), Constraint::Min(0)]).areas(area);
     frame.render_widget(Paragraph::new(said), heading);

@@ -381,9 +381,13 @@ fn plain(path: &Path) -> &Path {
 mod tests {
     use super::*;
 
+    /// Driven off `HELD_BACK` rather than off a list beside it. Spelled out,
+    /// this loop named three of the four and had done since the entry that
+    /// makes it four was added — so the denylist could lose `.oauth_refresh.lock`
+    /// and the test that exists to say what is on it would not notice.
     #[test]
-    fn the_three_entries_that_stay_behind_are_the_only_ones() {
-        for stays in [".credentials.json", ".claude.json", "sessions"] {
+    fn the_entries_that_stay_behind_are_the_only_ones() {
+        for stays in HELD_BACK {
             assert!(
                 held_back(&Path::new("/Users/someone/.claude").join(stays)),
                 "{stays} stays behind"
@@ -434,7 +438,12 @@ mod tests {
     /// must not be able to cross by being written in a different case.
     #[test]
     fn what_stays_behind_stays_behind_however_it_is_spelled() {
-        for spelling in [".Credentials.JSON", ".Claude.json", "Sessions"] {
+        for spelling in [
+            ".Credentials.JSON",
+            ".Claude.json",
+            "Sessions",
+            ".OAuth_Refresh.LOCK",
+        ] {
             assert!(
                 held_back(&Path::new("C:/Users/someone/.claude").join(spelling)),
                 "{spelling} is the same entry"
