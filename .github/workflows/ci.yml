@@ -240,7 +240,16 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           shellcheck --shell=sh packaging/pages/install.sh
+          shellcheck --shell=sh packaging/pages/install-test.sh
           shellcheck --shell=sh packaging/homebrew/formula.sh
+
+      # Runs the real install.sh against a fabricated release and asserts on
+      # the PATH advice. The test builds its own PATH holding only the tools
+      # the installer needs, which is how `gh` is kept off it: the provenance
+      # check is binding by design and would refuse a fabricated archive.
+      - name: install.sh advises correctly
+        if: runner.os == 'Linux'
+        run: sh packaging/pages/install-test.sh
 
       - name: PowerShell parses
         if: runner.os == 'Windows'

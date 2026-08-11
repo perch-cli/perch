@@ -34,6 +34,14 @@ curl -fsSL https://perch-cli.github.io/perch/install.sh | sh
 irm https://perch-cli.github.io/perch/install.ps1 | iex
 ```
 
+It offers to add its directory to your user PATH, which belongs to the
+Installation rather than to anything Perch holds — so a Purge leaves it. To
+remove it, naming your `PERCH_INSTALL_DIR` instead if you set one:
+
+```powershell
+[Environment]::SetEnvironmentVariable('Path', ((([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') | Where-Object { $_ -ne "$env:LOCALAPPDATA\Perch\bin" }) -join ';'), 'User')
+```
+
 **npm**, anywhere:
 
 ```sh

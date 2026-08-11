@@ -122,15 +122,63 @@ finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
 
-# Windows resolves a command against the PATH of the process that starts it, so
-# a shell that was already open will not see this until it is restarted. Saying
-# so is cheaper than the confusion.
-$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($userPath -notlike "*$InstallDir*") {
-    Say ""
-    Say "$InstallDir is not on your PATH. Add it for future sessions with:"
-    Say "    [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ';$InstallDir', 'User')"
-    Say "and reopen your terminal."
+# A user PATH entry is a registry value, so the exact segment that was added
+# can be taken back out again later — which is what makes writing one here
+# defensible where appending to an rc file on Unix is not (ADR 0033).
+#
+# Both the user and the machine PATH are consulted, and each is matched a
+# segment at a time rather than as a substring: a machine-wide entry is still
+# on the PATH, and an existing `C:\foo\binary` is not a `C:\foo\bin`. Getting
+# that right is what makes a re-install — which is how Perch is updated
+# (ADR 0032) — neither ask again nor add the directory twice.
+function Test-OnPath($directory) {
+    $wanted = $directory.TrimEnd('\')
+    foreach ($scope in "User", "Machine") {
+        $value = [Environment]::GetEnvironmentVariable("Path", $scope)
+        if (-not $value) { continue }
+        foreach ($entry in $value -split ';') {
+            $entry = $entry.Trim().TrimEnd('\')
+            if ($entry -and $entry -ieq $wanted) { return $true }
+        }
+    }
+    return $false
+}
+
+if (-not (Test-OnPath $InstallDir)) {
+    $command = "[Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ';$InstallDir', 'User')"
+
+    # `irm ... | iex` runs in the session the user is standing in, so a prompt
+    # here reaches a real console. A scripted install has nobody to ask and
+    # stays inert.
+    if ([Environment]::UserInteractive) {
+        Say ""
+        $typed = Read-Host "perch: $InstallDir is not on your PATH. Add it for future sessions? [Y/n]"
+        # Everything but a plain no is a yes, including a bare Return, which is
+        # how `perch purge` asks about an Export. End of input is a no there
+        # too, and Read-Host answers $null for it — nobody was there to be
+        # asked, and this is the branch that writes.
+        $answered = if ($null -eq $typed) { "n" } else { $typed.Trim().ToLower() }
+        if ($answered -eq "n" -or $answered -eq "no") {
+            Say "left your PATH alone. Add it later with:"
+            Say "    $command"
+        }
+        else {
+            $current = [Environment]::GetEnvironmentVariable("Path", "User")
+            $updated = if ($current) { $current.TrimEnd(';') + ";$InstallDir" } else { $InstallDir }
+            [Environment]::SetEnvironmentVariable("Path", $updated, "User")
+            # .NET broadcasts WM_SETTINGCHANGE, so new processes see this — but
+            # Windows resolves a command against the PATH of the process that
+            # started it, and the console being typed at started before now.
+            Say "added $InstallDir to your user PATH — reopen your terminal to pick it up."
+            Say "The README says how to take it back out."
+        }
+    }
+    else {
+        Say ""
+        Say "$InstallDir is not on your PATH. Add it for future sessions with:"
+        Say "    $command"
+        Say "and reopen your terminal."
+    }
 }
 
 Say "run 'perch status' to see where you are"
