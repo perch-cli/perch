@@ -1075,6 +1075,18 @@ impl Model {
                 Asked::Nothing
             }
             Signal::Switch => self.confirmed(),
+            // Ctrl-C, which is not the key `q` is. Raw mode is what makes it a
+            // keystroke rather than a signal, so nothing else in Perch catches
+            // it and dropping it here left the view with no way out at all: the
+            // field took every key, and Esc-then-`q` was the only escape. A
+            // screen that does not leave when Ctrl-C is pressed is the one thing
+            // the frame loop is written not to be. The name is abandoned, which
+            // is what leaving without confirming means.
+            Signal::Leave => {
+                self.prompt = None;
+                self.leaving = Some(Left::Alone);
+                Asked::Nothing
+            }
             _ => Asked::Nothing,
         }
     }

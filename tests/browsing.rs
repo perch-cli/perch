@@ -1859,6 +1859,39 @@ fn a_name_that_collides_is_refused_at_the_prompt_before_anything_is_written() {
     );
 }
 
+/// Ctrl-C leaves from inside the field too.
+///
+/// Raw mode is what makes Ctrl-C a keystroke rather than a signal, so nothing
+/// else in Perch catches it — and the field dropped every key it did not
+/// recognise, this one included. That left the view with no way out at all: the
+/// only escape was Esc and then `q`, and a screen that does not leave when
+/// Ctrl-C is pressed is the one thing the frame loop is written not to be.
+///
+/// The script ends at the Ctrl-C, so the fake screen fails the test if the loop
+/// asks for another keystroke rather than leaving.
+#[test]
+fn ctrl_c_leaves_the_view_while_a_name_is_being_typed() {
+    let host = machine_with_figures();
+
+    let left = left_after(
+        &host,
+        at_the_config(
+            over(3, Signal::Down)
+                .into_iter()
+                .chain([Some(Signal::Name)])
+                .chain("spare".chars().map(|letter| Some(Signal::Typed(letter))))
+                .chain([Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    assert_eq!(left, Left::Alone, "and it is left for nothing else");
+    assert!(
+        registry_of(&host).declared_group("spare").is_none(),
+        "a name abandoned rather than confirmed is not written"
+    );
+}
+
 /// The third place text is typed (ADR 0034), and the surface the arrow keys
 /// navigate doing what the command line can: renaming a Group.
 #[test]
