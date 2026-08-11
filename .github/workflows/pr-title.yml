@@ -1,0 +1,58 @@
+name: PR title
+
+# A workflow of its own, for one job that takes five seconds, because the event
+# types are a property of the workflow and not of the job. This one needs
+# `edited`: a title is the one thing a check can ask the author to change, and
+# without it the check never runs again when they change it — the verdict stays
+# red on the old title until an unrelated push happens to refresh the payload,
+# so the only ways out were a junk commit or closing and reopening the pull
+# request. Asking `ci.yml` for `edited` meant a three-platform Rust matrix
+# rebuilding every time somebody fixed a typo in a description.
+#
+# `synchronize` is here despite a push never changing a title, because a
+# required check is required *per commit*: a run against the old head does not
+# satisfy branch protection for the new one.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+# A title edited twice in a row does not need the first verdict.
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # release-plz reads commit subjects to decide the next version, and this
+  # repository squash-merges with the pull request title as the subject, so the
+  # title *is* the commit it reads. A title that says nothing about the change
+  # does not break anything visibly — it silently produces the wrong version
+  # number, which is precisely the failure the tool was adopted to prevent.
+  # Checked here so it fails loudly instead, in the one place someone is already
+  # looking.
+  #
+  # Only the subject line carries the type. release-plz parses the whole commit
+  # message but takes `feat`/`fix`/`!` from the first line alone, so the
+  # `* feat: ...` bullets GitHub assembles into the squash body from the branch
+  # commits are read as prose and change nothing.
+  title:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Conventional Commits
+        # Through the environment rather than `${{ }}` inside the script. A
+        # pull request title is text a stranger chooses, and interpolating it
+        # into a shell would run whatever a `$(...)` in it said, with this
+        # workflow's token.
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if printf '%s' "$TITLE" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: .+'; then
+            echo "ok: $TITLE"
+            exit 0
+          fi
+          echo "got: $TITLE"
+          echo "::error::A pull request title is the commit message, and release-plz reads it to pick the version. Write it as a Conventional Commit: 'feat: run a client against a Group', 'fix(tui): ...', or 'feat!: ...' for a breaking change."
+          exit 1

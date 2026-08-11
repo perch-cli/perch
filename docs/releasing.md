@@ -18,7 +18,20 @@ else starts one.
 
 The version comes from the commits, so the commits have to say what they did.
 Pull request titles are Conventional Commits and CI refuses the ones that are
-not — see the `title` job in `ci.yml`.
+not — see `pr-title.yml`.
+
+Only the title. This repository squash-merges, so the one commit that reaches
+`main` has the pull request title as its subject and the branch's commit
+messages as its body, and release-plz takes the type from the subject alone:
+a `chore:` title over a body full of `* feat:` bullets is a patch release. The
+one thing the body can still do is escalate — a `BREAKING CHANGE:` footer
+anywhere in it is honoured wherever it came from, which is worth knowing when
+a branch commit carries one nobody put in the title.
+
+The previous version comes from the newest `v*` tag rather than from crates.io
+(`git_only` in `release-plz.toml`), which is what makes the whole thing work for
+a project that is never published — see the comment there for what happens
+without it.
 
 ## One-time setup
 

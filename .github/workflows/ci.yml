@@ -3,18 +3,13 @@ name: CI
 on:
   push:
     branches: [main]
-  # `edited` on top of the three types this fires on by default, for the `title`
-  # job below. A title is the one thing a check here asks the author to change,
-  # and without this the check does not run again when they change it: the
-  # verdict stays red on the old title until an unrelated push happens to
-  # refresh the event payload, so the only ways out were a junk commit or
-  # closing and reopening the pull request.
-  #
-  # The cost is the matrix re-running when a description is edited too, since
-  # types are the workflow's and not the job's. That is minutes of runner time
-  # against a check that could not otherwise be satisfied by doing what it asks.
+  # The default types, and deliberately not `edited`. The pull request title
+  # check needs that one — a title nobody can re-check after fixing it is a
+  # check nobody can satisfy — but types belong to the workflow rather than the
+  # job, so asking for it here rebuilt a three-platform Rust matrix every time
+  # somebody edited a description. It lives in `pr-title.yml` instead, which is
+  # one grep and costs seconds.
   pull_request:
-    types: [opened, synchronize, reopened, edited]
   # The contract suite exists to find Claude Code drift before a user does, and
   # Claude Code updates continuously while this repository may not change for a
   # week. A weekly run is what turns "we would have noticed" into "we did".
@@ -190,33 +185,6 @@ jobs:
       - name: Contract tests
         run: cargo test --locked --features contract --test contract --test contract_credentials --test contract_sessions --test contract_links -- --nocapture
 
-  # release-plz reads commit subjects to decide the next version, and this
-  # repository squash-merges, so the pull request title *is* the commit it
-  # reads. A title that says nothing about the change does not break anything
-  # visibly — it silently produces the wrong version number, which is precisely
-  # the failure the tool was adopted to prevent. Checked here so it fails
-  # loudly instead, in the one place someone is already looking.
-  title:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Conventional Commits
-        # Through the environment rather than `${{ }}` inside the script. A
-        # pull request title is text a stranger chooses, and interpolating it
-        # into a shell would run whatever a `$(...)` in it said, with this
-        # workflow's token.
-        env:
-          TITLE: ${{ github.event.pull_request.title }}
-        run: |
-          if printf '%s' "$TITLE" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: .+'; then
-            echo "ok: $TITLE"
-            exit 0
-          fi
-          echo "got: $TITLE"
-          echo "::error::A pull request title is the commit message, and release-plz reads it to pick the version. Write it as a Conventional Commit: 'feat: run a client against a Group', 'fix(tui): ...', or 'feat!: ...' for a breaking change."
-          exit 1
-
   # The installers are the one part of Perch that is not Rust, so nothing else
   # in this file would notice a mistake in them — and they are the copy people
   # pipe into a shell without reading. shellcheck and the PowerShell parser are
@@ -264,12 +232,18 @@ jobs:
           }
           Write-Output "install.ps1 parses cleanly"
 
-  # The one name branch protection listens to, however the matrix above grows
-  # or renames its legs. `if: always()` with an explicit verdict, because a
-  # plain `needs:` job is skipped when a leg fails — and a skipped required
-  # check satisfies branch protection, which would wave the failure through.
+  # The name branch protection listens to for this file, however the matrix
+  # above grows or renames its legs. `if: always()` with an explicit verdict,
+  # because a plain `needs:` job is skipped when a leg fails — and a skipped
+  # required check satisfies branch protection, which would wave the failure
+  # through.
+  #
+  # It does not speak for `pr-title.yml`. Aggregating across workflows is not
+  # something a job can do, so that check is required in its own right; the
+  # alternative was letting a description edit skip this matrix and report
+  # green on a commit whose real verdict was red.
   success:
-    needs: [check, installers, title]
+    needs: [check, installers]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -284,14 +258,3 @@ jobs:
             echo "installers concluded: ${{ needs.installers.result }}"
             exit 1
           fi
-          # `title` asks about a pull request title, so on a push to main there
-          # is nothing for it to ask about and it skips. Skipped is a pass here
-          # and only here — for `check` above it would be the failure this job
-          # exists to catch.
-          case "${{ needs.title.result }}" in
-            success | skipped) ;;
-            *)
-              echo "title concluded: ${{ needs.title.result }}"
-              exit 1
-              ;;
-          esac
