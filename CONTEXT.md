@@ -289,6 +289,53 @@ Utilization is still readable. A marker whose process is gone, or whose pid has
 been taken by something younger, makes nothing Live.
 _Avoid_: active, running, in-use
 
+## Configuration
+
+**Setting**:
+One named rule governing how Perch behaves rather than what it holds — which
+Account a Cycle prefers, whether the watcher may act, at what Utilization. Every
+one of them is reversible, which is what separates a Setting from everything
+else Perch can be told to do.
+_Avoid_: option, preference, flag, toggle, parameter
+
+**Config**:
+Every Setting in force, taken together. Said of the whole rather than of the
+file it happens to be written in, so a Config exists whether or not anybody has
+set anything in it.
+_Avoid_: preferences, options, prefs, settings file
+
+**Scope**:
+The set of Accounts a Setting governs: a Group, the Ungrouped Accounts, or
+Global. The only levels at which a Setting means anything — an Account never
+carries one, because every Setting there is describes how Perch chooses *between*
+Accounts, and a rule for choosing has nothing to say to a set of one.
+_Avoid_: level, tier, context, namespace
+
+**Global**:
+The Scope covering every Account there is, and the Config every other Scope falls
+back to. Not a Group and not a place — the value that applies where nothing
+narrower has been said.
+_Avoid_: default, root, system, top-level, base
+
+**Ungrouped**:
+The Accounts in no Group, taken as one Scope. A Scope so that there is somewhere
+to say how they are Cycled, and never a Group: a Group is a declaration somebody
+made, and this is the absence of one.
+_Avoid_: none, unassigned, orphans, default group, implicit group
+
+**Override**:
+A value a Group or the Ungrouped Scope holds for itself, in place of the one it
+would otherwise take from Global. Exactly two layers deep — an Override beats
+Global and nothing beats an Override.
+_Avoid_: local value, custom value, per-group setting
+
+**Inherit**:
+What a Scope does with a Setting it holds no Override for: takes Global's, and
+goes on taking it as Global changes. The ordinary state, and distinct from
+holding an Override that happens to equal Global's — one tracks and the other
+does not.
+_Avoid_: default, fall back, unset, empty
+
 ## Getting Perch onto a machine
 
 **Release**:

@@ -33,3 +33,35 @@ somewhere to hang per-group configuration, is what keeps them.
 
 The term "flock" was considered and rejected. Perch has already spent its whimsy
 budget on its own name, and `--group` reads better on a command line.
+
+## Amended: Global carries the defaults and a Group Overrides them
+
+A Group still carries the rules governing Cycling within it. What changes is
+that it no longer has to state all of them.
+
+Every Setting exists at Global as well, where it is the value that applies until
+something narrower is said. A Group holds an Override for a Setting it wants
+different and Inherits the rest, so somebody running four Groups sets a
+threshold once rather than four times, and changing their mind changes it once.
+Exactly two layers: an Override beats Global, nothing beats an Override, and an
+Account carries nothing — every Setting there is describes how Perch chooses
+*between* Accounts, and a rule for choosing has nothing to say to a set of one.
+
+Inherit is a state and not an absence. A Group that Inherits tracks Global as
+Global changes; a Group holding an Override that happens to equal Global's does
+not. The two look identical on screen unless the display says which, so it says
+which, everywhere a value is shown.
+
+Before this, Global held one Setting and Groups held six, disjoint, so nothing
+could override anything and "which layer set this" had no answer to give. It is
+worth being explicit that widening Global is not a step back towards the
+organization-UUID inference rejected above: that would have decided *which
+Accounts are interchangeable*, which is still and only the user's declaration.
+This decides what happens to a Group nobody has configured, which previously was
+a constant compiled into Perch.
+
+`perch config`'s existing shape already expresses it and needs no new syntax:
+three words name a Group and set an Override, two words set Global's default.
+The vocabulary that reads it back is the same one, so the layer a value came
+from is the number of words that would set it again.
+

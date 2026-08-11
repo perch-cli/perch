@@ -57,3 +57,34 @@ distinct code rather than pretending to have worked.
 Turning the setting on is a declaration about every ungrouped Account at once,
 present and future — including the next one `perch add` creates. Anyone wanting
 a narrower statement than that wants a Group, which is what Groups are for.
+
+## Amended: the Ungrouped Accounts are a Scope that reads Global
+
+The setting stays exactly where this decision put it — Global, because an
+ungrouped Account has no Group to carry one. What is added is that the Ungrouped
+Accounts are now a Scope, which is the level a Setting is said at rather than a
+declaration anybody made. They remain not a Group, and modelling them as one
+with a reserved name is still refused for the reason given above.
+
+The Scope closes a hole this ADR left open. Cycling among ungrouped Accounts
+used a Strategy compiled into Perch, with no way to say otherwise: the code read
+`Strategy::default()` because there was no Group to ask, and nothing else to ask
+either. Now it reads Global, like any Scope holding no Override, and the
+Strategy is finally something a person can set.
+
+**`watcher-may-act` does not reach here by Inheritance.** It is gated behind
+`cycle-ungrouped`, so the watcher acts on ungrouped Accounts only where both are
+on. This is the one place the layering is deliberately not uniform, and the
+reason is the one this whole ADR is about: somebody turning the watcher on at
+Global means "yes, Cycle my work Groups unattended", and Inheriting that
+straight through would authorise moving them off a work Account onto their
+personal subscription — precisely the failure Groups exist to prevent, arriving
+by a route nobody typed. Two independent yeses before anything moves underneath
+you: one saying these Accounts are interchangeable at all, one saying something
+may act on them unasked.
+
+The watcher is written throughout in terms of a named Group, so serving this
+Scope is work rather than a fallthrough. That is the correct amount of
+friction for the thing it is: a code path that can Switch somebody's Account
+without being asked.
+
