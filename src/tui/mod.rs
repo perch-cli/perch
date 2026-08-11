@@ -111,7 +111,7 @@ pub enum Signal {
     Left,
     Right,
     /// Flip the simplest Setting there is, in one keystroke.
-    Toggle,
+    Flip,
     /// Clear a Scope's Override, so it Inherits Global again. Also what closes
     /// a name being typed without writing it.
     Clear,
@@ -212,7 +212,7 @@ impl Signal {
             // Run hands the terminal to a client, and the two should not be
             // neighbours.
             'x' => Some(Signal::Run),
-            ' ' => Some(Signal::Toggle),
+            ' ' => Some(Signal::Flip),
             'j' => Some(Signal::Down),
             'k' => Some(Signal::Up),
             'h' => Some(Signal::Left),
@@ -292,6 +292,18 @@ pub fn browse(
             // Walking away mid-adjustment loses nothing: a deferred write is a
             // deferred write and not a save button.
             if let Some(edit) = model.take_pending() {
+                // Behind the Refresh rather than racing it. That Refresh holds
+                // Perch's own lock while it writes what it read, and a write
+                // that lost the race would be refused onto a frame nobody is
+                // going to see — the screen is about to go either way, so
+                // waiting is the cheap half of the bargain and losing the edit
+                // is the expensive one.
+                if refresher.outstanding() {
+                    refresher.wait_for_it(refresh::FINISHING_MILLIS);
+                    if let Some(refreshed) = refresher.collect() {
+                        model.refreshed(refreshed);
+                    }
+                }
                 act::write(host, &mut model, edit);
             }
             return Ok(left);
@@ -458,7 +470,7 @@ mod tests {
             Signal::Up,
             Signal::Left,
             Signal::Right,
-            Signal::Toggle,
+            Signal::Flip,
             Signal::Clear,
             Signal::Least,
             Signal::Most,

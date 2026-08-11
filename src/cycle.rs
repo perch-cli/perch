@@ -104,14 +104,12 @@ impl Scope {
 
     /// The scope as an adverbial phrase: "Nothing {} is worth Switching to".
     ///
-    /// Its own phrasing rather than [`Scope::described`], which is the middle
-    /// of "every Account in {}" and reads as "in no Group" — true there and
-    /// ungrammatical the moment anything else is said around it.
+    /// The Config layer's, because it is the same phrase about the same set of
+    /// Accounts ([`registry::Scope::within`]) — and not [`Scope::described`],
+    /// which is the middle of "every Account in {}" and reads as "in no Group",
+    /// true there and ungrammatical the moment anything else is said around it.
     pub fn within(&self) -> String {
-        match self {
-            Scope::Group(name) => format!("within {}", crate::commands::list::group_heading(name)),
-            Scope::Ungrouped => "among the Accounts in no Group".to_string(),
-        }
+        self.config().within()
     }
 
     /// What the Cycle is about to do, said before it does it.

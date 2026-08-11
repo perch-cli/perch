@@ -233,17 +233,13 @@ struct Pending {
 /// acquisitions, some of which lose the race and leave a half-set value.
 const SETTLES_AFTER: usize = 2;
 
-/// A stepped value as it stands on screen before it has been written.
-///
-/// Held so the row shows what the arrow keys have done to it rather than what
-/// is still on disk. Cleared when the write lands — or when it is refused, at
-/// which point the row goes back to what was actually written, because a value
-/// that was never written is not one anybody should be reading.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Draft {
-    scope: Scope,
-    key: Setting,
-    value: String,
+/// Whether a deferred write is about this row, which is what makes replacing it
+/// a correction rather than a second change somebody made.
+fn about_the_same_row(edit: &Edit, scope: &Scope, key: Setting) -> bool {
+    matches!(
+        edit,
+        Edit::Setting { scope: also, key: same, .. } if also == scope && *same == key
+    )
 }
 
 /// A name being typed, and what it is for.
@@ -378,7 +374,6 @@ pub struct Model {
     /// A name being typed, where one is.
     pub prompt: Option<Prompt>,
     pending: Option<Pending>,
-    draft: Option<Draft>,
     pub refreshing: Refreshing,
     /// What the last act said, in the words the command said it in. Cleared
     /// when the cursor moves, because a report standing beside a different
@@ -408,7 +403,6 @@ impl Model {
             column: Column::Scopes,
             prompt: None,
             pending: None,
-            draft: None,
             refreshing: Refreshing::Unasked,
             said: Vec::new(),
             leaving: None,
@@ -421,6 +415,13 @@ impl Model {
     }
 
     /// Whether Perch holds no Account at all.
+    ///
+    /// A question of its own because both callers were answering it by building
+    /// the whole listing and throwing it away: the frame allocated a `Vec` of
+    /// every Account to ask `.is_empty()` and then built it again to draw it,
+    /// and `ask_for_a_refresh` allocated a `Vec<String>` of every address to
+    /// ask the same thing. Four times a second, for as long as the view is
+    /// open.
     pub fn is_empty(&self) -> bool {
         self.order.is_empty()
     }
@@ -551,16 +552,23 @@ impl Model {
     /// A Setting as it stands for a Scope: the value on screen, and the Scope
     /// it came from.
     ///
-    /// The value is the draft where one is being stepped, so the row shows what
-    /// the arrow keys have done rather than what is still on disk. An unwritten
-    /// draft is shown as coming from the Scope being edited, because that is
-    /// what it will be the moment it lands.
+    /// The value is the deferred write where one is waiting, so the row shows
+    /// what the arrow keys have done rather than what is still on disk — read
+    /// out of the write itself rather than kept beside it, because the two
+    /// would otherwise be one fact in two pieces that could disagree. An
+    /// unwritten value is shown as coming from the Scope being edited, because
+    /// that is what it will be the moment it lands; and where the write is
+    /// refused there is nothing pending any more, so the row goes back to what
+    /// was actually written.
     pub fn value_of(&self, scope: &Scope, key: Setting) -> (String, Scope) {
-        if let Some(draft) = &self.draft
-            && draft.scope == *scope
-            && draft.key == key
+        if let Some(pending) = &self.pending
+            && about_the_same_row(&pending.edit, scope, key)
+            && let Edit::Setting {
+                value: Some(waiting),
+                ..
+            } = &pending.edit
         {
-            return (draft.value.clone(), scope.clone());
+            return (waiting.clone(), scope.clone());
         }
         (
             key.of(&self.registry.in_force(scope)),
@@ -605,7 +613,7 @@ impl Model {
             Signal::Up => self.moved(-1),
             Signal::Left => return self.leftwards(),
             Signal::Right => return self.rightwards(),
-            Signal::Toggle => return self.toggled(),
+            Signal::Flip => return self.flipped(),
             Signal::Clear => return self.cleared(),
             Signal::Least => return self.jumped_to_an_end(false),
             Signal::Most => return self.jumped_to_an_end(true),
@@ -628,6 +636,14 @@ impl Model {
     /// Returns the deferred write when it has settled. A run of these between
     /// two steps is what makes one write rather than several.
     pub fn settled(&mut self) -> Option<Edit> {
+        // Nothing settles under an outstanding Refresh. That Refresh holds
+        // Perch's own lock while it writes what it read, and a write taken on
+        // the frame loop would sit waiting on it with the screen frozen — the
+        // one wait this whole design exists to avoid. The edit is held rather
+        // than dropped, so it lands the moment the Refresh is back.
+        if self.refreshing == Refreshing::Waiting {
+            return None;
+        }
         let pending = self.pending.as_mut()?;
         if pending.frames_left > 0 {
             pending.frames_left -= 1;
@@ -644,12 +660,11 @@ impl Model {
 
     /// What a command the panel ran said, and the registry it left behind.
     ///
-    /// The draft goes either way. Where the write landed it is now on disk and
-    /// showing it a second time would be showing it twice; where it was refused
-    /// the row goes back to what was actually written, because a value nobody
+    /// Nothing is pending by this point either way, so the row now reads from
+    /// the registry: where the write landed that is the new value, and where it
+    /// was refused it is what was actually written — because a value nobody
     /// wrote is not one anybody should be reading.
     pub fn wrote(&mut self, said: Vec<String>, registry: Option<Registry>) {
-        self.draft = None;
         self.said = said;
         if let Some(registry) = registry {
             self.now_holds(registry);
@@ -674,44 +689,45 @@ impl Model {
     fn moved(&mut self, by: i32) {
         match self.tab {
             Tab::Status => match self.column {
-                Column::Content => self.move_the_cursor_to(step(self.cursor, by, self.order.len())),
-                _ => {
-                    let was = self.status_row;
-                    self.status_row = step(self.status_row, by, StatusRow::ALL.len());
-                    if self.status_row != was {
-                        self.said.clear();
-                    }
-                }
+                Column::Content => self.cursor = self.moving(self.cursor, by, self.order.len()),
+                _ => self.status_row = self.moving(self.status_row, by, StatusRow::ALL.len()),
             },
             Tab::Config => match self.column {
                 Column::Scopes => {
                     let was = self.scope_row;
-                    self.scope_row = step(self.scope_row, by, self.scope_rows().len());
+                    self.scope_row = self.moving(was, by, self.scope_rows().len());
                     if self.scope_row != was {
                         // A different Scope is a different set of Accounts and
                         // a different set of rows, so neither cursor below
                         // means what it did.
                         self.account_row = 0;
                         self.content_row = 0;
-                        self.said.clear();
                     }
                 }
                 Column::Accounts => {
-                    let was = self.account_row;
-                    self.account_row = step(self.account_row, by, self.scope_accounts().len());
-                    if self.account_row != was {
-                        self.said.clear();
-                    }
+                    let rows = self.scope_accounts().len();
+                    self.account_row = self.moving(self.account_row, by, rows);
                 }
                 Column::Content => {
-                    let was = self.content_row;
-                    self.content_row = step(self.content_row, by, self.content_rows().len());
-                    if self.content_row != was {
-                        self.said.clear();
-                    }
+                    let rows = self.content_rows().len();
+                    self.content_row = self.moving(self.content_row, by, rows);
                 }
             },
         }
+    }
+
+    /// One position along a column, dropping whatever the last act said if it
+    /// went anywhere.
+    ///
+    /// The dropping is the point, and is why every cursor moves through here: a
+    /// report is about the row it was made on, and one left standing beside a
+    /// different row is a report about the wrong thing.
+    fn moving(&mut self, at: usize, by: i32, rows: usize) -> usize {
+        let moved = step(at, by, rows);
+        if moved != at {
+            self.said.clear();
+        }
+        moved
     }
 
     /// Left: step the value down where the cursor is on something with a
@@ -742,26 +758,31 @@ impl Model {
         Asked::Nothing
     }
 
+    /// The Scope and the row the editing keys act on, or `None` where they are
+    /// not on one.
+    ///
+    /// Asked in one place because all four editing keys ask it, and four copies
+    /// of "am I on the Config tab, in the content column, on a row that exists"
+    /// is three chances for one of them to answer differently.
+    fn editing(&self) -> Option<(Scope, Row)> {
+        if self.tab != Tab::Config || self.column != Column::Content {
+            return None;
+        }
+        Some((self.scope()?, self.content()?))
+    }
+
     /// One step of whatever the cursor is on, deferred rather than written.
     fn stepped(&mut self, by: i32) -> Asked {
-        let Some(scope) = self.scope() else {
-            return Asked::Nothing;
-        };
-        let Some(row) = self.content() else {
+        let Some((scope, row)) = self.editing() else {
             return Asked::Nothing;
         };
         match row {
             Row::Setting(key) => {
                 let (value, _) = self.value_of(&scope, key);
-                let Some(next) = next_value(&key.shape(), &value, by) else {
-                    return Asked::Nothing;
-                };
-                self.defer(Draft {
-                    scope: scope.clone(),
-                    key,
-                    value: next.clone(),
-                });
-                Asked::Nothing
+                match next_value(&key.shape(), &value, by) {
+                    Some(next) => self.defer(scope, key, next),
+                    None => Asked::Nothing,
+                }
             }
             Row::CycleUngrouped => {
                 self.write(Edit::CycleUngrouped(!self.registry.global.cycle_ungrouped))
@@ -817,15 +838,12 @@ impl Model {
     /// Not deferred, because a bool has two states — there is no run of
     /// keystrokes to collapse, and a flip that took half a second to appear
     /// would read as a key that did nothing.
-    fn toggled(&mut self) -> Asked {
-        let Some(scope) = self.scope() else {
+    fn flipped(&mut self) -> Asked {
+        let Some((scope, row)) = self.editing() else {
             return Asked::Nothing;
         };
-        if self.tab != Tab::Config || self.column != Column::Content {
-            return Asked::Nothing;
-        }
-        match self.content() {
-            Some(Row::Setting(key)) => {
+        match row {
+            Row::Setting(key) => {
                 let (value, _) = self.value_of(&scope, key);
                 match key.shape() {
                     Shape::YesOrNo | Shape::OneOf(_) => {
@@ -844,8 +862,7 @@ impl Model {
                     }
                 }
             }
-            Some(_) => self.stepped(1),
-            None => Asked::Nothing,
+            _ => self.stepped(1),
         }
     }
 
@@ -856,15 +873,13 @@ impl Model {
     /// from — and a key that silently did nothing would leave somebody
     /// wondering whether it had.
     fn cleared(&mut self) -> Asked {
-        if self.tab != Tab::Config || self.column != Column::Content {
+        let Some((scope, row)) = self.editing() else {
+            return Asked::Nothing;
+        };
+        if row == Row::CycleUngrouped {
+            self.said = lines_of(GLOBALS_ALONE);
             return Asked::Nothing;
         }
-        let Some(scope) = self.scope() else {
-            return Asked::Nothing;
-        };
-        let Some(row) = self.content() else {
-            return Asked::Nothing;
-        };
         if !row.is_a_setting() {
             self.said = vec![ONLY_A_SETTING_IS_INHERITED.to_string()];
             return Asked::Nothing;
@@ -885,13 +900,7 @@ impl Model {
 
     /// Home and End: the ends of a range, one keystroke away.
     fn jumped_to_an_end(&mut self, most: bool) -> Asked {
-        let Some(scope) = self.scope() else {
-            return Asked::Nothing;
-        };
-        if self.tab != Tab::Config || self.column != Column::Content {
-            return Asked::Nothing;
-        }
-        let Some(Row::Setting(key)) = self.content() else {
+        let Some((scope, Row::Setting(key))) = self.editing() else {
             return Asked::Nothing;
         };
         let Shape::Range {
@@ -905,8 +914,7 @@ impl Model {
             false => least,
         }
         .to_string();
-        self.defer(Draft { scope, key, value });
-        Asked::Nothing
+        self.defer(scope, key, value)
     }
 
     /// The key that opens the one text field there is.
@@ -1018,20 +1026,30 @@ impl Model {
     ///
     /// Kept on screen while it waits, so the row shows what has been done to it
     /// rather than what is still on disk.
-    fn defer(&mut self, draft: Draft) {
+    ///
+    /// One deferred write at a time, and displacing one about a *different* row
+    /// writes it rather than dropping it. Stepping a threshold, moving down a
+    /// row and stepping a margin inside half a second is two changes somebody
+    /// made, and a deferred write that quietly lost the first would be exactly
+    /// the save button this exists not to be.
+    fn defer(&mut self, scope: Scope, key: Setting, value: String) -> Asked {
         if let Some(refused) = self.in_the_way() {
             self.said = vec![refused];
-            return;
+            return Asked::Nothing;
         }
-        self.pending = Some(Pending {
-            edit: Edit::Setting {
-                scope: draft.scope.clone(),
-                key: draft.key,
-                value: Some(draft.value.clone()),
-            },
+        let edit = Edit::Setting {
+            scope: scope.clone(),
+            key,
+            value: Some(value),
+        };
+        let displaced = self.pending.replace(Pending {
+            edit,
             frames_left: SETTLES_AFTER,
         });
-        self.draft = Some(draft);
+        match displaced.map(|pending| pending.edit) {
+            Some(was) if !about_the_same_row(&was, &scope, key) => Asked::ToWrite(was),
+            _ => Asked::Nothing,
+        }
     }
 
     /// Why an edit cannot be taken now, where it cannot.
@@ -1042,15 +1060,6 @@ impl Model {
     /// the same words, because it is the same lock and the same wait.
     fn in_the_way(&self) -> Option<String> {
         (self.refreshing == Refreshing::Waiting).then(|| WAITING_ON_A_REFRESH.to_string())
-    }
-
-    /// Moves the cursor, and drops whatever the last act said: the report was
-    /// about the Account it was on.
-    fn move_the_cursor_to(&mut self, row: usize) {
-        if row != self.cursor {
-            self.said.clear();
-        }
-        self.cursor = row;
     }
 
     /// Enter: make the Account under the cursor the active one.
@@ -1189,7 +1198,7 @@ impl Model {
             // while this was open, say. The cursor keeps its row number, so it
             // is on a different Account now, and a report left standing beside
             // it would be a report about the wrong one. That is the rule
-            // `move_the_cursor_to` exists for; this is the other way the cursor
+            // `moving` exists for; this is the other way the cursor
             // comes to point somewhere new.
             self.said.clear();
         }
@@ -1273,6 +1282,14 @@ const NOTHING_ABOVE_GLOBAL: &str = "Global is the value that applies where nothi
 
 const ONLY_A_SETTING_IS_INHERITED: &str = "That is a fact about the Account rather than a Setting, \
                                            so there is no Override on it to clear.";
+
+/// Why the clear key does nothing on the one key with no per-Scope form. It is
+/// a Setting, so the sentence above would be wrong about it — and it is shown
+/// on this page because this is where it takes effect rather than where it
+/// lives.
+const GLOBALS_ALONE: &str = "`cycle-ungrouped` is Global's alone: the Accounts it governs have no \
+                             Group to carry a Setting, so there is no Override of it anywhere to \
+                             clear (ADR 0017).";
 
 const A_NAME_IS_TYPED: &str = "A name has no natural order to step through. Press `n` to type one.";
 
@@ -1743,9 +1760,115 @@ mod tests {
         let _ = model.act_on(Signal::Refresh);
         on_the_config_setting(&mut model, Setting::WatcherMayAct);
 
-        assert_eq!(model.act_on(Signal::Toggle), Asked::Nothing);
+        assert_eq!(model.act_on(Signal::Flip), Asked::Nothing);
 
         assert_eq!(model.said, vec![WAITING_ON_A_REFRESH.to_string()]);
+    }
+
+    /// And a deferred one is held rather than taken, for the same reason and
+    /// about the same lock — then landed once the Refresh is back, because
+    /// dropping it would be the save button this exists not to be.
+    #[test]
+    fn a_deferred_write_does_not_go_out_under_a_refresh_and_is_not_dropped_either() {
+        let mut model = model_of(&["one@example.com"]);
+        on_the_config_setting(&mut model, Setting::WatcherMarginPercent);
+        let _ = model.act_on(Signal::Right);
+        assert_eq!(model.act_on(Signal::Refresh), Asked::ForARefresh);
+
+        for _ in 0..SETTLES_AFTER + 2 {
+            assert_eq!(model.settled(), None, "nothing while the Refresh is out");
+        }
+
+        model.refreshed(Refreshed::nothing_read(vec![]));
+        let settled = std::iter::repeat_with(|| model.settled())
+            .take(SETTLES_AFTER + 1)
+            .flatten()
+            .next();
+        assert_eq!(
+            settled,
+            Some(Edit::Setting {
+                scope: Scope::Global,
+                key: Setting::WatcherMarginPercent,
+                value: Some("15".to_string()),
+            }),
+            "and it lands the moment the lock is free again",
+        );
+    }
+
+    /// Two steps on two rows inside the debounce are two changes somebody made.
+    /// Displacing the first with the second writes it rather than dropping it.
+    #[test]
+    fn stepping_another_row_before_the_first_settles_writes_the_first() {
+        let mut model = model_of(&["one@example.com"]);
+        on_the_config_setting(&mut model, Setting::WatcherThresholdPercent);
+        let _ = model.act_on(Signal::Right);
+
+        on_the_config_setting(&mut model, Setting::WatcherMarginPercent);
+
+        assert_eq!(
+            model.act_on(Signal::Right),
+            Asked::ToWrite(Edit::Setting {
+                scope: Scope::Global,
+                key: Setting::WatcherThresholdPercent,
+                value: Some("85".to_string()),
+            }),
+            "the one being displaced goes out now"
+        );
+        assert_eq!(
+            model.take_pending(),
+            Some(Edit::Setting {
+                scope: Scope::Global,
+                key: Setting::WatcherMarginPercent,
+                value: Some("15".to_string()),
+            }),
+            "and the one that displaced it is still waiting"
+        );
+    }
+
+    /// Stepping the *same* row again is a correction rather than a second
+    /// change, so it replaces what was waiting instead of writing it.
+    #[test]
+    fn stepping_the_same_row_again_replaces_what_was_waiting() {
+        let mut model = model_of(&["one@example.com"]);
+        on_the_config_setting(&mut model, Setting::WatcherThresholdPercent);
+
+        assert_eq!(model.act_on(Signal::Right), Asked::Nothing);
+        assert_eq!(model.act_on(Signal::Right), Asked::Nothing);
+
+        assert_eq!(
+            model.take_pending(),
+            Some(Edit::Setting {
+                scope: Scope::Global,
+                key: Setting::WatcherThresholdPercent,
+                value: Some("90".to_string()),
+            }),
+            "one write, of where the stepping got to"
+        );
+    }
+
+    /// `cycle-ungrouped` is a Setting rather than a fact about an Account, so
+    /// the clear key says the right thing about it: it is Global's alone and
+    /// there is no Override of it anywhere to clear.
+    #[test]
+    fn the_clear_key_on_the_one_global_only_key_says_what_it_is() {
+        let mut model = model_of(&["one@example.com"]);
+        model.tab = Tab::Config;
+        model.column = Column::Content;
+        model.scope_row = 1;
+        model.content_row = model
+            .content_rows()
+            .iter()
+            .position(|row| *row == Row::CycleUngrouped)
+            .expect("it is on the Ungrouped page");
+
+        assert_eq!(model.act_on(Signal::Clear), Asked::Nothing);
+
+        let said = model.said.join(" ");
+        assert!(said.contains("Global's alone"), "{said}");
+        assert!(
+            !said.contains("fact about the Account"),
+            "it is a Setting, and the sentence for a fact would be wrong: {said}"
+        );
     }
 
     /// A Run lasts as long as somebody's session, so it is not something the
@@ -1893,7 +2016,7 @@ mod tests {
         on_the_config_setting(&mut model, Setting::WatcherMayAct);
 
         assert_eq!(
-            model.act_on(Signal::Toggle),
+            model.act_on(Signal::Flip),
             Asked::ToWrite(Edit::Setting {
                 scope: Scope::Global,
                 key: Setting::WatcherMayAct,
@@ -2128,6 +2251,21 @@ mod tests {
             "85"
         );
 
+        // What the loop does with it: the frames nobody pressed anything in,
+        // then the write, then whatever the command said.
+        let edit = std::iter::repeat_with(|| model.settled())
+            .take(SETTLES_AFTER + 1)
+            .flatten()
+            .next()
+            .expect("it settles");
+        assert_eq!(
+            edit,
+            Edit::Setting {
+                scope: Scope::Global,
+                key: Setting::WatcherThresholdPercent,
+                value: Some("85".to_string()),
+            }
+        );
         model.wrote(vec!["another `perch` holds it".to_string()], None);
 
         assert_eq!(

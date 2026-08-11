@@ -471,6 +471,18 @@ impl Scope {
         }
     }
 
+    /// The Scope as an adverbial phrase: "a Cycle {} prefers…", "Nothing {} is
+    /// worth Switching to". Said once here rather than per surface, because
+    /// three spellings of "among the Accounts in no Group" is how two of them
+    /// come to name the same set differently.
+    pub fn within(&self) -> String {
+        match self {
+            Scope::Global => "in any Scope that Inherits this".to_string(),
+            Scope::Ungrouped => "among the Accounts in no Group".to_string(),
+            Scope::Group(name) => format!("within Group `{name}`"),
+        }
+    }
+
     /// The Scope as the subject of a sentence about what it holds.
     pub fn described(&self) -> String {
         match self {
@@ -798,11 +810,6 @@ impl Registry {
             Some(overrides) => overrides.over(&self.global.settings),
             None => self.global.settings.clone(),
         }
-    }
-
-    /// The Settings in force for one Account, which is the Scope it is in.
-    pub fn governing(&self, account: &Account) -> Settings {
-        self.in_force(&self.scope_of(account))
     }
 
     /// The Scope an Account's Settings come from: its Group, or the Ungrouped

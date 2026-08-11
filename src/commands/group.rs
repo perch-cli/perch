@@ -233,11 +233,7 @@ fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scop
 
     let declared: Vec<&str> = config::SETTINGS
         .iter()
-        .filter(|setting| {
-            registry
-                .overrides(scope)
-                .is_some_and(|held| setting.read(held).is_some())
-        })
+        .filter(|setting| setting.overridden_at(registry, scope))
         .map(|setting| setting.as_str())
         .collect();
     let overrides = match declared.is_empty() {

@@ -281,18 +281,10 @@ fn permitted(registry: &Registry) -> Result<Watching> {
         None => Scope::Ungrouped,
     };
 
-    // The one place the layering is deliberately not uniform (ADR 0017,
-    // amended). `watcher-may-act` does not reach the Accounts in no Group by
-    // Inheritance: it is gated behind `cycle-ungrouped`, so the watcher acts
-    // there only where both are on.
-    //
-    // The reason is the whole of ADR 0017. Turning the watcher on at Global
-    // means "yes, Cycle my work Groups unattended", and Inheriting that
-    // straight through would authorise moving somebody off a work Account onto
-    // their personal subscription — precisely the failure Groups exist to
-    // prevent, arriving by a route nobody typed. Two independent yeses before
-    // anything moves underneath you: one saying these Accounts are
-    // interchangeable at all, one saying something may act on them unasked.
+    // The one place the layering is deliberately not uniform:
+    // `watcher-may-act` does not reach the Accounts in no Group by
+    // Inheritance, and is gated behind `cycle-ungrouped` instead. The reason is
+    // the whole of ADR 0017 (amended), and is not repeated here.
     //
     // Asked before `watcher-may-act` so that somebody who has said neither is
     // told about the declaration rather than about the permission — the

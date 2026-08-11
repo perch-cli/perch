@@ -401,12 +401,12 @@ fn render_governing(frame: &mut Frame, model: &Model, area: Rect) {
         rows.push((
             "cycle-ungrouped".to_string(),
             model.registry().global.cycle_ungrouped.to_string(),
-            from(&Scope::Global),
+            sourced(&Scope::Global),
         ));
     }
     for setting in crate::commands::config::SETTINGS {
         let (value, source) = model.value_of(&scope, setting);
-        rows.push((setting.as_str().to_string(), value, from(&source)));
+        rows.push((setting.as_str().to_string(), value, sourced(&source)));
     }
 
     let key_width = rows
@@ -427,12 +427,25 @@ fn render_governing(frame: &mut Frame, model: &Model, area: Rect) {
         ))
     }));
 
+    // And the one place the layering is deliberately not uniform, said here as
+    // well as on the panel. Without it this page reads `watcher-may-act false
+    // from Global` and a Global `true` would read as in force — which is
+    // exactly what ADR 0017 says it is not.
+    let caveat = not_in_force(model, &scope);
+    if !caveat.is_empty() {
+        lines.push(Line::from(""));
+        lines.extend(wrapped(
+            caveat.trim(),
+            (area.width as usize).saturating_sub(4),
+        ));
+    }
+
     frame.render_widget(Paragraph::new(lines), area);
 }
 
 /// Where a value came from, as words. Read once, over a pipe, on whatever
 /// palette — so never as a style alone.
-fn from(scope: &Scope) -> String {
+fn sourced(scope: &Scope) -> String {
     match scope {
         Scope::Global => "from Global".to_string(),
         Scope::Ungrouped => "set here".to_string(),
@@ -532,7 +545,7 @@ fn render_content(frame: &mut Frame, model: &Model, area: Rect) {
         .iter()
         .enumerate()
         .map(|(index, row)| {
-            let (value, inherited) = value_of(model, &scope, row);
+            let (value, inherited) = on_the_row(model, &scope, row);
             let line = Line::from(format!("  {}  {value}", list::padded(row.label(), width)));
             let line = match inherited {
                 true => line.style(Style::new().add_modifier(Modifier::DIM)),
@@ -603,7 +616,7 @@ fn not_in_force(model: &Model, scope: &Scope) -> String {
 
 /// One content row's value, and whether it is Inherited rather than declared
 /// here — which is what the dimming says.
-fn value_of(model: &Model, scope: &Scope, row: &Row) -> (String, bool) {
+fn on_the_row(model: &Model, scope: &Scope, row: &Row) -> (String, bool) {
     let registry = model.registry();
     match row {
         Row::Setting(setting) => {
@@ -932,8 +945,8 @@ mod tests {
     /// is read once and has to survive a pipe and a colour-blind palette.
     #[test]
     fn where_a_value_came_from_is_written_out_rather_than_only_styled() {
-        assert_eq!(from(&Scope::Global), "from Global");
-        assert!(from(&Scope::Group("work".to_string())).contains("work"));
-        assert!(from(&Scope::Ungrouped).contains("here"));
+        assert_eq!(sourced(&Scope::Global), "from Global");
+        assert!(sourced(&Scope::Group("work".to_string())).contains("work"));
+        assert!(sourced(&Scope::Ungrouped).contains("here"));
     }
 }

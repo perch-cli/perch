@@ -146,9 +146,7 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
             // boundary every Config crosses and this one is only a command
             // line. Both refusals name the same ranges, from the same constants.
             overrides.validate(&scope)?;
-            *registry
-                .overrides_mut(&scope)
-                .expect("the Scope was just addressed") = overrides;
+            *addressed_overrides(registry, &scope) = overrides;
 
             let now = key.in_force(registry, &scope);
             Ok(vec![
@@ -203,11 +201,7 @@ fn unset(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
             let scope = addressed(registry, scope)?;
             let key = Setting::parse(key)?;
             let was = key.in_force(registry, &scope);
-            key.clear(
-                registry
-                    .overrides_mut(&scope)
-                    .expect("the Scope was just addressed"),
-            );
+            key.clear(addressed_overrides(registry, &scope));
             let now = key.in_force(registry, &scope);
             Ok(vec![
                 inherited(&key, &scope, &was, &now),
@@ -285,13 +279,10 @@ fn everything(registry: &Registry) -> Vec<String> {
         })
         .collect();
     for scope in registry.scopes() {
-        let Some(overrides) = registry.overrides(&scope) else {
-            continue;
-        };
         lines.extend(
             SETTINGS
                 .iter()
-                .filter(|setting| setting.read(overrides).is_some())
+                .filter(|setting| setting.overridden_at(registry, &scope))
                 .map(|setting| setting.in_force(registry, &scope).as_a_set()),
         );
     }
@@ -404,11 +395,7 @@ fn inheriting(registry: &Registry, setting: Setting) -> Option<String> {
     let following: Vec<String> = registry
         .scopes()
         .into_iter()
-        .filter(|scope| {
-            registry
-                .overrides(scope)
-                .is_some_and(|held| setting.read(held).is_none())
-        })
+        .filter(|scope| *scope != Scope::Global && !setting.overridden_at(registry, scope))
         .map(|scope| scope.described())
         .collect();
     match following.is_empty() {
@@ -444,10 +431,19 @@ fn addressed(registry: &Registry, name: &str) -> Result<Scope> {
     }
 }
 
-/// A Scope's Overrides, for a Scope that has just been addressed.
+/// A Scope's Overrides, for a Scope that has just been addressed. Global is
+/// never one of them: it holds values rather than Overrides, and the forms that
+/// reach here have all named a Scope.
 fn held<'a>(registry: &'a Registry, scope: &Scope) -> &'a Overrides {
     registry
         .overrides(scope)
+        .expect("the Scope was just addressed")
+}
+
+/// The same, to write through.
+fn addressed_overrides<'a>(registry: &'a mut Registry, scope: &Scope) -> &'a mut Overrides {
+    registry
+        .overrides_mut(scope)
         .expect("the Scope was just addressed")
 }
 
@@ -575,13 +571,6 @@ impl Setting {
             })
     }
 
-    /// The same lookup where failing is an answer rather than a refusal.
-    pub fn named(name: &str) -> Option<Self> {
-        SETTINGS
-            .into_iter()
-            .find(|key| name.eq_ignore_ascii_case(key.as_str()))
-    }
-
     /// What this Setting can be stepped through.
     pub fn shape(self) -> Shape {
         match self {
@@ -619,8 +608,8 @@ impl Setting {
         }
     }
 
-    /// What a Scope Overrides this with, or `None` where it Inherits.
-    pub fn read(self, overrides: &Overrides) -> Option<String> {
+    /// What a Scope declares for this Setting, or `None` where it Inherits.
+    pub fn declared_by(self, overrides: &Overrides) -> Option<String> {
         match self {
             Setting::Strategy => overrides
                 .strategy
@@ -643,7 +632,7 @@ impl Setting {
     fn in_force(self, registry: &Registry, scope: &Scope) -> InForce {
         let settings = registry.in_force(scope);
         let from = match registry.overrides(scope) {
-            Some(held) if self.read(held).is_some() => scope.clone(),
+            Some(held) if self.declared_by(held).is_some() => scope.clone(),
             _ => Scope::Global,
         };
         InForce {
@@ -658,6 +647,18 @@ impl Setting {
     /// show provenance beside it.
     pub fn source(self, registry: &Registry, scope: &Scope) -> Scope {
         self.in_force(registry, scope).from
+    }
+
+    /// Whether a Scope declares this Setting itself rather than Inheriting it.
+    ///
+    /// Asked in one place because it is the question every surface asks — the
+    /// listing, the panel's dimming, and the sentence that says which Scopes a
+    /// change at Global reached — and three spellings of it is how one of them
+    /// comes to answer differently about an Override holding Global's value.
+    pub fn overridden_at(self, registry: &Registry, scope: &Scope) -> bool {
+        registry
+            .overrides(scope)
+            .is_some_and(|held| self.declared_by(held).is_some())
     }
 
     /// Sets a Scope's Override.
@@ -684,23 +685,15 @@ impl Setting {
     }
 
     /// Sets Global's value, which is never absent.
+    ///
+    /// Through an Override of one Setting laid over what is there, rather than
+    /// a second copy of the cascade above: which values a key accepts is one
+    /// fact, and two spellings of it is how Global comes to take a percentage
+    /// a Group would refuse.
     fn write_global(self, settings: &mut Settings, value: &str) -> Result<()> {
-        match self {
-            Setting::Strategy => settings.strategy = strategy(value)?,
-            Setting::WatcherMayAct => settings.watcher_may_act = yes_or_no(self.as_str(), value)?,
-            Setting::WatcherThresholdPercent => {
-                settings.watcher_threshold_percent = percentage(self.as_str(), value)?
-            }
-            Setting::WatcherCooldownMinutes => {
-                settings.watcher_cooldown_minutes = minutes(self.as_str(), value)?
-            }
-            Setting::WatcherMarginPercent => {
-                settings.watcher_margin_percent = percentage(self.as_str(), value)?
-            }
-            Setting::WatcherNoReturn => {
-                settings.watcher_no_return = yes_or_no(self.as_str(), value)?
-            }
-        }
+        let mut one = Overrides::default();
+        self.write(&mut one, value)?;
+        *settings = one.over(settings);
         Ok(())
     }
 
@@ -719,7 +712,7 @@ impl Setting {
     /// What the Scope now does, which is the half of the answer the value
     /// itself does not give.
     fn what_that_means(self, settings: &Settings, scope: &Scope) -> String {
-        let within = within(scope);
+        let within = scope.within();
         match self {
             Setting::Strategy => match settings.strategy {
                 Strategy::MostHeadroom => format!(
@@ -805,15 +798,6 @@ impl Setting {
                  ping-pong. {ONLY_WHILE_IT_RUNS}"
             ),
         }
-    }
-}
-
-/// The Scope as the middle of a sentence about where a Cycle happens.
-fn within(scope: &Scope) -> String {
-    match scope {
-        Scope::Global => "in any Scope that Inherits this".to_string(),
-        Scope::Ungrouped => "among the Accounts in no Group".to_string(),
-        Scope::Group(name) => format!("within Group `{name}`"),
     }
 }
 

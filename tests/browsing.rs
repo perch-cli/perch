@@ -11,6 +11,7 @@ use common::*;
 
 use chrono::Duration;
 use perch::commands::list;
+use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
 use perch::registry::Registry;
 use perch::tui::fake::{FakeRefresher, FakeScreen};
@@ -1428,7 +1429,7 @@ fn one_key_flips_a_setting_and_it_is_written_at_once() {
             [vec![Some(Signal::Right)], over(2, Signal::Down)]
                 .concat()
                 .into_iter()
-                .chain([Some(Signal::Toggle), Some(Signal::Leave)])
+                .chain([Some(Signal::Flip), Some(Signal::Leave)])
                 .collect(),
         ),
     );
@@ -1439,11 +1440,24 @@ fn one_key_flips_a_setting_and_it_is_written_at_once() {
     );
 }
 
+/// How many times the registry was written, which is what a write costs: one
+/// lock taken and given back per one of these.
+fn registry_writes(host: &FakeHost) -> usize {
+    host.effects()
+        .iter()
+        .filter(|effect| {
+            matches!(effect, Effect::WrotePrivateFile(path) | Effect::WroteFile(path)
+                if path.to_string_lossy().ends_with("registry.json"))
+        })
+        .count()
+}
+
 /// Holding an arrow key down is one write when it stops rather than one per
 /// step, so a long adjustment is not a long queue of lock acquisitions.
 #[test]
 fn a_run_of_steps_is_one_write_once_the_keys_stop() {
     let host = machine_with_figures();
+    host.forget_effects();
 
     browse(
         &host,
@@ -1461,8 +1475,78 @@ fn a_run_of_steps_is_one_write_once_the_keys_stop() {
     assert_eq!(
         registry_of(&host).global.settings.watcher_threshold_percent,
         100,
-        "four steps of five from 80, written once"
+        "four steps of five from 80"
     );
+    assert_eq!(
+        registry_writes(&host),
+        1,
+        "written once, when the keys stopped — not once per step: {:?}",
+        host.effects()
+    );
+}
+
+/// A Strategy steps between the readings there are, and a number's range has
+/// its ends one keystroke away — the two kinds of stepping the percentage test
+/// above does not cover.
+#[test]
+fn a_strategy_steps_between_its_readings_and_a_number_jumps_to_the_ends_of_its_range() {
+    let host = machine_with_figures();
+
+    browse(
+        &host,
+        at_the_config(
+            [vec![Some(Signal::Right)], over(1, Signal::Down)]
+                .concat()
+                .into_iter()
+                // The `strategy` row, then the cooldown, then its far end.
+                .chain([Some(Signal::Right)])
+                .chain(while_nobody_presses_anything())
+                .chain(over(3, Signal::Down))
+                .chain([Some(Signal::Most)])
+                .chain(while_nobody_presses_anything())
+                .chain([Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    let settings = registry_of(&host).global.settings;
+    assert_eq!(settings.strategy, perch::registry::Strategy::SoonestReset);
+    assert_eq!(
+        settings.watcher_cooldown_minutes, 10080,
+        "`End` is the far end of the range the Setting itself states, so the \
+         panel cannot offer a value `perch config set` would refuse"
+    );
+}
+
+/// A second edit inside the debounce is a second change somebody made, not a
+/// correction of the first — so displacing the deferred write writes it rather
+/// than dropping it.
+#[test]
+fn stepping_another_row_before_the_first_settles_writes_both() {
+    let host = machine_with_figures();
+
+    browse(
+        &host,
+        at_the_config(
+            [vec![Some(Signal::Right)], over(3, Signal::Down)]
+                .concat()
+                .into_iter()
+                // The threshold, then straight down to the margin with no wait
+                // in between.
+                .chain([Some(Signal::Right), Some(Signal::Down), Some(Signal::Down)])
+                .chain([Some(Signal::Right)])
+                .chain(while_nobody_presses_anything())
+                .chain([Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    let settings = registry_of(&host).global.settings;
+    assert_eq!(
+        settings.watcher_threshold_percent, 85,
+        "the first change was not lost to the second"
+    );
+    assert_eq!(settings.watcher_margin_percent, 15);
 }
 
 /// And walking away mid-adjustment writes it anyway: a deferred write is not a
@@ -1690,7 +1774,7 @@ fn an_account_is_taken_out_of_cycling_from_the_panel() {
             ]
             .concat()
             .into_iter()
-            .chain([Some(Signal::Toggle), Some(Signal::Leave)])
+            .chain([Some(Signal::Flip), Some(Signal::Leave)])
             .collect(),
         ),
     );
@@ -1780,7 +1864,7 @@ fn an_edit_is_refused_while_a_refresh_is_out_in_the_words_a_switch_is_refused_in
         ]
         .into_iter()
         .chain(over(2, Signal::Down))
-        .chain([Some(Signal::Toggle), Some(Signal::Leave)])
+        .chain([Some(Signal::Flip), Some(Signal::Leave)])
         .collect(),
     );
 
@@ -1809,7 +1893,7 @@ fn the_ungrouped_page_carries_the_setting_that_gates_it() {
         at_the_config(
             [Some(Signal::Down), Some(Signal::Right), Some(Signal::Right)]
                 .into_iter()
-                .chain([Some(Signal::Toggle), Some(Signal::Leave)])
+                .chain([Some(Signal::Flip), Some(Signal::Leave)])
                 .collect(),
         ),
     );
@@ -1858,5 +1942,164 @@ fn the_ungrouped_page_says_the_watcher_settings_are_not_in_force_until_the_gate_
         !said(screen.last_frame()).contains("not in force"),
         "{}",
         screen.last_frame()
+    );
+}
+
+/// The Scope's Accounts are a column of their own, so who is affected by these
+/// Settings is on the page beside them.
+#[test]
+fn a_scopes_page_lists_the_accounts_that_scope_governs() {
+    let host = machine_with_figures();
+    declare_group(&host, "work");
+    move_to_group(&host, EMAIL, "work").0.expect("it moves");
+
+    // The Ungrouped page: the Account left in no Group, and not the other.
+    let screen = browse(
+        &host,
+        at_the_config(vec![Some(Signal::Down), Some(Signal::Leave)]),
+    );
+    let frame = screen.last_frame();
+    assert!(frame.contains(SECOND_EMAIL), "{frame}");
+    assert!(
+        !frame.lines().skip(1).any(|line| line.contains(EMAIL)),
+        "the Account in a Group is not governed by this Scope\n{frame}"
+    );
+
+    // And the Group's page: the other way round.
+    let screen = browse(
+        &host,
+        at_the_config(
+            over(2, Signal::Down)
+                .into_iter()
+                .chain([Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+    let frame = screen.last_frame();
+    assert!(frame.contains(EMAIL), "{frame}");
+    assert!(
+        !frame
+            .lines()
+            .skip(1)
+            .any(|line| line.contains(SECOND_EMAIL)),
+        "{frame}"
+    );
+}
+
+/// An Account selected in that column shows its facts, which is what says what
+/// you are looking at before you change any of them.
+#[test]
+fn an_account_selected_in_that_column_shows_its_facts() {
+    let host = machine_with_figures();
+    set_alias(&host, "main", EMAIL).0.expect("it is named");
+    quarantine(&host, EMAIL);
+
+    // Wide enough that the values are read rather than cut: what is under test
+    // is which facts are on the page, not how a narrow terminal wraps them.
+    let mut screen = FakeScreen::sized(
+        100,
+        24,
+        at_the_config(vec![
+            Some(Signal::Down),
+            Some(Signal::Right),
+            Some(Signal::Right),
+            Some(Signal::Leave),
+        ]),
+    );
+    browse_with(&host, &mut screen, &mut FakeRefresher::out_for_ever());
+
+    let said = said(screen.last_frame());
+    assert!(said.contains("alias main"), "{said}");
+    assert!(said.contains("cycling-may-choose true"), "{said}");
+    assert!(said.contains("group none"), "{said}");
+    assert!(said.contains("quarantine renewal-rejected"), "{said}");
+}
+
+/// The three questions the `Status` tab answers are on screen as the rows they
+/// are, so the tab can be navigated by eye.
+#[test]
+fn the_status_sidebar_names_the_three_questions_it_answers() {
+    let host = machine_with_figures();
+
+    let screen = browse(&host, vec![Some(Signal::Leave)]);
+
+    let frame = screen.last_frame();
+    for row in ["Overview", "Accounts", "Config"] {
+        assert!(
+            frame
+                .lines()
+                .any(|line| line.trim_start_matches("> ").trim_start().starts_with(row)),
+            "{row} is a row of the sidebar\n{frame}"
+        );
+    }
+}
+
+/// A Setting a Scope Overrides reads as that Scope's own, and one it Inherits
+/// reads as Global's, on the page where a cursor is the way round.
+#[test]
+fn a_group_page_says_how_many_settings_it_declares_of_its_own() {
+    let host = machine_with_a_group();
+    config_set(&host, &["work", "strategy", "soonest-reset"])
+        .0
+        .expect("one Override");
+    config_set(&host, &["work", "watcher-no-return", "false"])
+        .0
+        .expect("and a second");
+
+    let screen = browse(
+        &host,
+        at_the_config(
+            over(2, Signal::Down)
+                .into_iter()
+                .chain([Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    let said = said(screen.last_frame());
+    assert!(said.contains("Overrides 2 Settings"), "{said}");
+    assert!(said.contains("strategy soonest-reset"), "{said}");
+    assert!(
+        said.contains("watcher-threshold-percent 80"),
+        "and the Inherited ones show Global's value: {said}"
+    );
+}
+
+/// A deferred write is held rather than taken while a Refresh is out — that
+/// Refresh holds Perch's own lock, and a write on the frame loop would sit
+/// waiting on it with the screen frozen — and it is held rather than dropped,
+/// so leaving still writes it.
+#[test]
+fn a_deferred_write_waits_out_a_refresh_and_is_not_lost_to_it() {
+    let host = machine_with_figures();
+    let mut refresher = FakeRefresher::out_for_ever();
+    let doing = at_the_config(
+        [vec![Some(Signal::Right)], over(3, Signal::Down)]
+            .concat()
+            .into_iter()
+            .chain([Some(Signal::Right), Some(Signal::Refresh)])
+            .chain(while_nobody_presses_anything())
+            .chain([Some(Signal::Leave)])
+            .collect(),
+    );
+    let scripted = doing.len();
+    let mut screen = FakeScreen::scripted(doing);
+
+    browse_with(&host, &mut screen, &mut refresher);
+
+    assert_eq!(
+        screen.frames().len(),
+        scripted,
+        "the loop went on drawing rather than blocking on the lock the Refresh \
+         is holding"
+    );
+    assert_eq!(
+        registry_of(&host).global.settings.watcher_threshold_percent,
+        85,
+        "and the edit was held rather than dropped, so leaving wrote it"
+    );
+    assert!(
+        refresher.was_waited_for(),
+        "behind the Refresh rather than racing it"
     );
 }
