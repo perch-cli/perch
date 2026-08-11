@@ -128,6 +128,9 @@ fi
 # -------------------------------------------------------------------- install
 
 tar -xzf "$tmp/$archive" -C "$tmp" perch
+# Asked before the mkdir, because only the mkdir knows the answer afterwards
+# and the PATH advice below turns on it.
+if [ -d "$INSTALL_DIR" ]; then dir_existed=yes; else dir_existed=no; fi
 mkdir -p "$INSTALL_DIR"
 # To a temporary name in the same directory and then moved, so a perch that is
 # running right now is replaced rather than written through.
@@ -137,13 +140,97 @@ mv "$INSTALL_DIR/.perch.$$" "$INSTALL_DIR/perch"
 
 say "installed to $INSTALL_DIR/perch"
 
+# ----------------------------------------------------------------------- path
+
+# Nothing below writes to any file. An rc file is a document its owner edits by
+# hand, and a line appended among their own lines could never be told back out
+# again at removal time — so the installer advises here and writes only on
+# Windows, where a PATH entry is a registry value that can be removed exactly
+# (ADR 0033).
+
+# The shells that read ~/.profile at login. zsh reads ~/.zprofile and fish
+# reads neither, so the Debian guard can only be the answer for these.
+reads_profile() {
+    case "$1" in
+    sh | bash | dash | ksh) return 0 ;;
+    *) return 1 ;;
+    esac
+}
+
+# Whether ~/.profile already carries a line naming the install directory.
+#
+# Debian and Ubuntu write their guard as `if [ -d "$HOME/.local/bin" ]`, with
+# $HOME unexpanded — so a grep for the expanded path finds nothing on the very
+# machines this is about. Both forms are looked for, and the tilde form too,
+# for the people who wrote their own.
+profile_names_install_dir() {
+    # An install directory can be named outright, and then nothing else has
+    # needed $HOME — so it is not certain to be set by the time we get here.
+    [ -n "${HOME:-}" ] || return 1
+    [ -r "$HOME/.profile" ] || return 1
+    case "$INSTALL_DIR" in
+    "$HOME"/*)
+        rest=${INSTALL_DIR#"$HOME"/}
+        # The tilde is a string being searched for, so it is meant not to expand.
+        # shellcheck disable=SC2088
+        grep -qF -e "$INSTALL_DIR" -e "\$HOME/$rest" -e "~/$rest" -- "$HOME/.profile"
+        ;;
+    *)
+        grep -qF -e "$INSTALL_DIR" -- "$HOME/.profile"
+        ;;
+    esac
+}
+
+advise_about_path() {
+    say ""
+
+    # $SHELL, and not the parent process: under the documented
+    # `curl … | sh` install the parent is that `sh`, so it reports the pipe's
+    # shell and says nothing about the human being advised.
+    shell_name=${SHELL:-}
+    shell_name=${shell_name##*/}
+
+    # We made the directory, and this machine's login file was always going to
+    # add it — the guard was simply false at login, because there was nothing
+    # there yet. A second export line is the wrong advice for that machine.
+    if [ "$dir_existed" = no ] && reads_profile "$shell_name" && profile_names_install_dir; then
+        say "$INSTALL_DIR is not on your PATH yet. Your ~/.profile adds it when it"
+        say "exists, and it did not exist until a moment ago."
+        say "Start a new login shell and it will be there."
+        return
+    fi
+
+    # The tildes are how a person writes the path they are being pointed at, so
+    # they are meant not to expand.
+    # shellcheck disable=SC2088
+    case "$shell_name" in
+    bash) rc="~/.bashrc" ;;
+    zsh) rc="~/.zshrc" ;;
+    fish)
+        # An export line is not valid fish, so printing one here would be a
+        # visibly wrong answer rather than a merely unhelpful one.
+        say "$INSTALL_DIR is not on your PATH. Add it to ~/.config/fish/config.fish:"
+        say "    fish_add_path \"$INSTALL_DIR\""
+        say "then restart your shell."
+        return
+        ;;
+    *)
+        # No file named, because naming one for a shell we did not recognise
+        # would be a guess the reader has to go and check.
+        say "$INSTALL_DIR is not on your PATH. Add it:"
+        say "    export PATH=\"$INSTALL_DIR:\$PATH\""
+        return
+        ;;
+    esac
+
+    say "$INSTALL_DIR is not on your PATH. Add it to $rc:"
+    say "    export PATH=\"$INSTALL_DIR:\$PATH\""
+    say "then restart your shell."
+}
+
 case ":$PATH:" in
 *":$INSTALL_DIR:"*) ;;
-*)
-    say ""
-    say "$INSTALL_DIR is not on your PATH. Add it:"
-    say "    export PATH=\"$INSTALL_DIR:\$PATH\""
-    ;;
+*) advise_about_path ;;
 esac
 
 say "run 'perch status' to see where you are"
