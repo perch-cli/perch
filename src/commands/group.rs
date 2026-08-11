@@ -29,8 +29,9 @@ use crate::target::{self, AccountTarget};
 /// lives with the command line that parses it.
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum GroupCommand {
-    /// Declare a Group. It starts empty, with the configuration a Group carries
-    /// by default: the most-headroom strategy, and the watcher switched off.
+    /// Declare a Group. It starts empty and Inheriting every Setting from
+    /// Global — an Override is something a Group has been told, and a new one
+    /// has been told nothing.
     Add {
         /// The name, which shares one namespace with Aliases.
         name: String,
