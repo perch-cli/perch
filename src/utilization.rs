@@ -289,7 +289,11 @@ pub fn age_phrase(observed_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
 /// now" rather than as a negative wait — a cached figure can outlive the window
 /// it describes, and a reset that has already happened is good news.
 pub fn reset_phrase(resets_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
-    format!("{} ({})", clock_time(resets_at), wait_phrase(resets_at, now))
+    format!(
+        "{} ({})",
+        clock_time(resets_at),
+        wait_phrase(resets_at, now)
+    )
 }
 
 /// The clock time alone, for the sentences that have already said which side of

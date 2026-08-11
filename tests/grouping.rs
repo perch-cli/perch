@@ -427,7 +427,9 @@ fn what_group_list_says_about_ungrouped_cycling_is_what_the_watcher_does() {
 
     let (outcome, said) = run_watch_once(&host);
     assert_eq!(
-        outcome.expect_err("there is nowhere to Switch to").exit_code(),
+        outcome
+            .expect_err("there is nowhere to Switch to")
+            .exit_code(),
         EXIT_NOT_INTERCHANGEABLE,
         "which is what the watcher itself says:\n{said}"
     );
