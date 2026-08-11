@@ -585,7 +585,7 @@ fn act(
         // themselves, and folding them in here had `perch watch --once` exiting
         // 15 every five minutes forever while a cron mailbox read "nothing to
         // do" — for a machine that needed somebody to look at it. They keep the
-        // code the failure earned (README's table promises `11` for a keychain
+        // code the failure earned (the exit-code table promises `11` for a keychain
         // nobody can reach), and the loop stops on them rather than retrying a
         // full Capture-and-write every two and a half minutes.
         Err(Interrupted {
