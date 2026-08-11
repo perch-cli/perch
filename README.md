@@ -151,7 +151,8 @@ from them:
 ## Guides
 
 [The guide](docs/guide/) is the whole of what each command does, and why it does
-it that way:
+it that way. The same pages, rendered and searchable, are at
+[perch-cli.github.io/perch/guide](https://perch-cli.github.io/perch/guide/):
 
 - [Installing](docs/guide/installing.md)
 - [Accounts](docs/guide/accounts.md) — adding, naming, reserving, repairing,

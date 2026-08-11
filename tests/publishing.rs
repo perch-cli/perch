@@ -1,0 +1,357 @@
+//! What the site publishes, asserted against the repository that publishes it
+//! (ADR 0035).
+//!
+//! The guide is written once, in `docs/guide/`, and read in two places: on
+//! GitHub, and rendered by mdBook at `https://perch-cli.github.io/perch/guide/`.
+//! Nothing in either of those places fails loudly — mdBook drops a page nobody
+//! listed in `SUMMARY.md` without a word, and a link to a heading that has been
+//! renamed is a 404 somebody else finds. So the things that would go quietly
+//! wrong are asserted here, on every pull request, rather than discovered on
+//! the deployed site.
+//!
+//! The other half is the constraint the site had before it had a guide: the
+//! installers are pasted into terminals from a versionless URL, so they sit at
+//! the root of what is deployed and the landing page quotes them exactly.
+
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+
+fn repo() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+fn read(path: &Path) -> String {
+    std::fs::read_to_string(path)
+        .unwrap_or_else(|err| panic!("{} is readable: {err}", path.display()))
+}
+
+/// Every `guide/*.md` there is, by file name, `SUMMARY.md` excepted — it is the
+/// table of contents rather than a page in it.
+fn guide_pages() -> BTreeSet<String> {
+    std::fs::read_dir(repo().join("docs/guide"))
+        .expect("docs/guide is a directory")
+        .map(|entry| entry.expect("a readable entry").file_name())
+        .filter_map(|name| name.into_string().ok())
+        .filter(|name| name.ends_with(".md") && name != "SUMMARY.md")
+        .collect()
+}
+
+/// The lines of a markdown document that are prose rather than fenced code. A
+/// transcript is most of what these pages are, and every one of them quotes URLs
+/// and prints `#` — so reading a link or a heading out of one would be reading
+/// what Perch said as if the page had said it.
+fn prose(markdown: &str) -> impl Iterator<Item = &str> {
+    let mut fenced = false;
+    markdown.lines().filter(move |line| {
+        if line.trim_start().starts_with("```") {
+            fenced = !fenced;
+            return false;
+        }
+        !fenced
+    })
+}
+
+/// The `[text](destination)` of every link in a markdown document.
+fn links(markdown: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    for line in prose(markdown) {
+        let mut rest = line;
+        while let Some(open) = rest.find("](") {
+            rest = &rest[open + 2..];
+            match rest.find(')') {
+                Some(close) => {
+                    found.push(rest[..close].to_string());
+                    rest = &rest[close..];
+                }
+                None => break,
+            }
+        }
+    }
+    found
+}
+
+/// The anchor a heading answers to, by the rule GitHub and mdBook agree on:
+/// lower-cased, spaces hyphenated, and everything that is not a letter, a digit,
+/// a hyphen or an underscore dropped.
+fn slug(heading: &str) -> String {
+    heading
+        .trim()
+        .chars()
+        .filter_map(|c| match c {
+            ' ' => Some('-'),
+            '-' | '_' => Some(c),
+            c if c.is_alphanumeric() => Some(c.to_lowercase().next().unwrap_or(c)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every anchor a markdown document offers, taken from its ATX headings.
+fn anchors(markdown: &str) -> BTreeSet<String> {
+    prose(markdown)
+        .filter(|line| line.starts_with('#'))
+        .map(|line| slug(line.trim_start_matches('#')))
+        .collect()
+}
+
+/// Asserts that one link out of `from` lands on a page that exists and, where it
+/// names one, a heading that exists. Only the destination is checked here, so a
+/// URL is somebody else's to keep working — but `#section` on its own is a link
+/// into `from` itself, and is checked against it rather than skipped: a page's
+/// own table of contents is the one most likely to name a heading it has since
+/// reworded.
+fn resolves(from: &Path, link: &str) {
+    if link.starts_with("http") {
+        return;
+    }
+    let (path, anchor) = match link.split_once('#') {
+        Some((path, anchor)) => (path, Some(anchor)),
+        None => (link, None),
+    };
+    let target = if path.is_empty() {
+        from.to_path_buf()
+    } else {
+        from.parent().expect("a parent directory").join(path)
+    };
+    assert!(
+        target.exists(),
+        "{} links to {link}, which is not there",
+        from.display()
+    );
+    if let Some(anchor) = anchor {
+        let offered = anchors(&read(&target));
+        assert!(
+            offered.contains(anchor),
+            "{} links to {link}, and {} has no such heading — it offers {offered:?}",
+            from.display(),
+            target.display()
+        );
+    }
+}
+
+/// The guide is written once and indexed three times, which is the one place
+/// this change did not manage to make single-source. `SUMMARY.md` is what mdBook
+/// publishes from; `docs/guide/README.md` is the table somebody browsing the
+/// repository reads; `README.md` is what npm shows, and the reason the README
+/// was not cut down to a link. Each is a different audience and none is
+/// derivable from the others — so rather than leave three lists to be kept in
+/// step by hand, they are kept in step here.
+///
+/// The failure this prevents is silent in every direction: mdBook drops a page
+/// missing from `SUMMARY.md` without a word, and a page missing from either
+/// index is one nobody finds except by search.
+///
+/// What it asserts is that each index *mentions* every page, not that any
+/// particular list within it does. The README names most pages twice — once in
+/// the command table and once under Guides — and requiring a page in both would
+/// be asserting the shape of the README rather than that it points at the guide.
+#[test]
+fn every_guide_page_is_named_by_every_index_of_the_guide() {
+    let indexes = [
+        ("docs/guide/SUMMARY.md", "the site would not publish it"),
+        (
+            "docs/guide/README.md",
+            "the guide's own table would not offer it",
+        ),
+        ("README.md", "the README would not point at it"),
+    ];
+
+    for (index, consequence) in indexes {
+        let named: BTreeSet<String> = links(&read(&repo().join(index)))
+            .into_iter()
+            .filter_map(|link| {
+                link.rsplit('/')
+                    .next()
+                    .filter(|name| name.ends_with(".md"))
+                    .map(str::to_string)
+            })
+            .collect();
+
+        for page in guide_pages() {
+            // The guide's index is not a chapter of itself, and the README links
+            // to the directory rather than to that file.
+            if page == "README.md" {
+                continue;
+            }
+            assert!(
+                named.contains(&page),
+                "docs/guide/{page} is a guide page that {index} does not name, so {consequence}"
+            );
+        }
+    }
+}
+
+/// The other direction: a page renamed or removed leaves mdBook building a
+/// chapter out of nothing.
+#[test]
+fn the_summary_lists_only_pages_that_exist() {
+    let summary = repo().join("docs/guide/SUMMARY.md");
+    for link in links(&read(&summary)) {
+        resolves(&summary, &link);
+    }
+}
+
+/// A relative link is resolved by the reader — GitHub against the repository,
+/// a browser against the deployed site — and only the ones that stay inside the
+/// guide mean the same thing to both. A link up out of `docs/guide/` reaches
+/// `CONTEXT.md` on GitHub and a 404 on the site, so those are written as URLs.
+#[test]
+fn a_guide_page_links_out_of_the_guide_only_by_url() {
+    for page in guide_pages() {
+        let path = repo().join("docs/guide").join(&page);
+        for link in links(&read(&path)) {
+            assert!(
+                !link.starts_with("../"),
+                "docs/guide/{page} links to {link}, which leaves the guide — the site cannot follow it, so it wants an https:// URL"
+            );
+            resolves(&path, &link);
+        }
+    }
+}
+
+/// The README's command table is a column of links into the guide, and its
+/// anchors are the part that rots: a heading reworded three files away breaks it
+/// without touching the README at all.
+#[test]
+fn the_readme_links_into_the_guide_land() {
+    let readme = repo().join("README.md");
+    for link in links(&read(&readme)) {
+        resolves(&readme, &link);
+    }
+}
+
+/// `packaging/pages/` is deployed to the root of the site, so an installer at
+/// its root is an installer at `https://perch-cli.github.io/perch/install.sh` —
+/// which is the URL that is already pasted into terminals and in every guide.
+/// The guide moving to a subdirectory must not have moved these.
+#[test]
+fn the_installers_stay_at_the_root_of_the_site() {
+    for installer in ["install.sh", "install.ps1"] {
+        assert!(
+            repo().join("packaging/pages").join(installer).is_file(),
+            "packaging/pages/{installer} is what https://perch-cli.github.io/perch/{installer} serves"
+        );
+    }
+}
+
+/// Every place that quotes an installer URL quotes the same one, and no place
+/// quotes any other URL on the site. Both halves matter: the first catches an
+/// installer that stopped being mentioned, and the second catches one that grew
+/// a version or moved under the guide — which is a command somebody has already
+/// pasted into a shell, now fetching nothing.
+///
+/// The whole of what the site serves at its root is the landing page and these
+/// two files, so the set below is exhaustive by construction rather than by
+/// having been kept up to date.
+#[test]
+fn every_url_on_the_site_is_one_the_site_serves() {
+    const SITE: &str = "https://perch-cli.github.io/perch/";
+    let served = ["", "install.sh", "install.ps1", "guide/"];
+
+    let quoting = [
+        "README.md",
+        "docs/guide/installing.md",
+        "docs/guide/README.md",
+        "packaging/pages/index.html",
+        "packaging/pages/install.sh",
+        "packaging/pages/install.ps1",
+    ];
+
+    for file in quoting {
+        let text = read(&repo().join(file));
+
+        let mut rest = text.as_str();
+        while let Some(at) = rest.find(SITE) {
+            rest = &rest[at + SITE.len()..];
+            // Whatever follows the site's root, up to whatever ended the URL.
+            let path: String = rest
+                .chars()
+                .take_while(|c| !c.is_whitespace() && !"\"'`)>|".contains(*c))
+                .collect();
+            assert!(
+                served.contains(&path.as_str()),
+                "{file} quotes {SITE}{path}, which is not one of the {served:?} the site serves"
+            );
+        }
+    }
+
+    // And the two that are pasted into terminals are still quoted where somebody
+    // reading would look for them.
+    for file in ["README.md", "docs/guide/installing.md"] {
+        let text = read(&repo().join(file));
+        for installer in ["install.sh", "install.ps1"] {
+            assert!(
+                text.contains(&format!("{SITE}{installer}")),
+                "{file} should quote {SITE}{installer}, and does not"
+            );
+        }
+    }
+}
+
+/// The landing page's job changed: it used to be an install page, and it is now
+/// what says what Perch does. It has to show that before it asks for a paste
+/// into a terminal.
+#[test]
+fn the_landing_page_shows_perch_before_it_asks_you_to_install() {
+    let landing = read(&repo().join("packaging/pages/index.html"));
+    let install = landing
+        .find("curl -fsSL")
+        .expect("the landing page offers the installer");
+
+    for shown in ["perch switch", "perch watch"] {
+        let at = landing
+            .find(shown)
+            .unwrap_or_else(|| panic!("the landing page shows `{shown}`"));
+        assert!(
+            at < install,
+            "the landing page asks for an install before it shows `{shown}`"
+        );
+    }
+}
+
+/// The site has a guide now, and the landing page is the only thing that says
+/// so. Its links into it are written as the `.html` mdBook will emit, which is
+/// a spelling nothing else in the repository uses and nothing else would catch:
+/// each one has to name a page the guide actually has.
+#[test]
+fn the_landing_page_leads_into_the_guide() {
+    let landing = read(&repo().join("packaging/pages/index.html"));
+    assert!(
+        landing.contains("\"guide/\"") || landing.contains("\"guide/index.html\""),
+        "the landing page should link into the guide mdBook renders at /guide/"
+    );
+
+    let mut rest = landing.as_str();
+    while let Some(open) = rest.find("href=\"guide/") {
+        rest = &rest[open + "href=\"guide/".len()..];
+        let href = &rest[..rest.find('"').expect("a closed attribute")];
+
+        let (file, anchor) = match href.split_once('#') {
+            Some((file, anchor)) => (file, Some(anchor)),
+            None => (href, None),
+        };
+        // `guide/` and `guide/#anchor` are the index, which is README.md.
+        let source = if file.is_empty() || file == "index.html" {
+            repo().join("docs/guide/README.md")
+        } else {
+            let page = file.strip_suffix(".html").unwrap_or_else(|| {
+                panic!("the landing page links to guide/{href}, and mdBook emits .html")
+            });
+            repo().join("docs/guide").join(format!("{page}.md"))
+        };
+
+        assert!(
+            source.is_file(),
+            "the landing page links to guide/{href}, and there is no {} to render it from",
+            source.display()
+        );
+        if let Some(anchor) = anchor {
+            let offered = anchors(&read(&source));
+            assert!(
+                offered.contains(anchor),
+                "the landing page links to guide/{href}, and {} has no such heading — it offers {offered:?}",
+                source.display()
+            );
+        }
+    }
+}
