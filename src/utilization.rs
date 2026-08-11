@@ -289,11 +289,20 @@ pub fn age_phrase(observed_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
 /// now" rather than as a negative wait — a cached figure can outlive the window
 /// it describes, and a reset that has already happened is good news.
 pub fn reset_phrase(resets_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
-    format!(
-        "{} ({})",
-        resets_at.format("%Y-%m-%d %H:%M UTC"),
-        wait_phrase(resets_at, now)
-    )
+    format!("{} ({})", clock_time(resets_at), wait_phrase(resets_at, now))
+}
+
+/// The clock time alone, for the sentences that have already said which side of
+/// now it falls on.
+///
+/// [`reset_phrase`] is the one to reach for wherever the wait is the point. This
+/// one exists because an elapsed reset is quoted by a clause that goes on to say
+/// "which has passed", and `reset_phrase` renders a time already gone as "any
+/// moment now" — good news where a Cycle is waiting for a window, and a flat
+/// contradiction beside the words "has passed". Written once so the two forms
+/// cannot drift into printing the same instant two ways.
+pub fn clock_time(at: DateTime<Utc>) -> String {
+    at.format("%Y-%m-%d %H:%M UTC").to_string()
 }
 
 fn wait_phrase(resets_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
