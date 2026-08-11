@@ -1729,6 +1729,124 @@ fn a_name_that_collides_is_refused_at_the_prompt_before_anything_is_written() {
     );
 }
 
+/// The third place text is typed (ADR 0034), and the surface the arrow keys
+/// navigate doing what the command line can: renaming a Group.
+#[test]
+fn a_group_is_renamed_by_typing_over_its_name() {
+    let host = machine_with_a_group();
+
+    let screen = browse(
+        &host,
+        at_the_config(
+            // Global, Ungrouped, then `work`.
+            over(2, Signal::Down)
+                .into_iter()
+                .chain([Some(Signal::Name)])
+                // The field opens with the name already in it, so correcting
+                // four characters is four keystrokes rather than the whole name
+                // typed again.
+                .chain(over("work".len(), Signal::Backspace))
+                .chain("day-job".chars().map(|letter| Some(Signal::Typed(letter))))
+                .chain([Some(Signal::Switch), Some(Signal::Leave)])
+                .collect(),
+        ),
+    );
+
+    assert!(
+        screen.ever_said("> work_"),
+        "the prompt opens with the current name in it:\n{}",
+        screen.frames().join("\n---\n")
+    );
+    let registry = registry_of(&host);
+    assert_eq!(
+        registry.declared_group("day-job"),
+        Some("day-job"),
+        "the Group answers to its new name"
+    );
+    assert_eq!(
+        registry.accounts_in("day-job").len(),
+        2,
+        "and its Accounts came with it"
+    );
+    assert!(
+        said(screen.last_frame()).contains("Renamed the Group `work` to `day-job`"),
+        "and the write is the command, so what it printed is what the frame shows:\n{}",
+        screen.last_frame()
+    );
+}
+
+/// The same refusal the command would have given, so the two surfaces agree —
+/// and the field stays open with what was typed still in it.
+#[test]
+fn a_rename_that_collides_is_refused_at_the_prompt_with_the_field_still_open() {
+    let host = machine_with_a_group();
+    declare_group(&host, "spare");
+
+    let screen = browse(
+        &host,
+        at_the_config(
+            // Global, Ungrouped, `spare`, `work` — the Groups in the order the
+            // registry holds them.
+            over(3, Signal::Down)
+                .into_iter()
+                .chain([Some(Signal::Name)])
+                .chain(over("work".len(), Signal::Backspace))
+                .chain("spare".chars().map(|letter| Some(Signal::Typed(letter))))
+                .chain([
+                    Some(Signal::Switch),
+                    Some(Signal::Clear),
+                    Some(Signal::Leave),
+                ])
+                .collect(),
+        ),
+    );
+
+    assert!(
+        screen.frames().iter().any(
+            |frame| said(frame).contains("already a Group called `spare`")
+                && frame.contains("> spare_")
+        ),
+        "the refusal stands with the field still open:\n{}",
+        screen.frames().join("\n---\n")
+    );
+    let registry = registry_of(&host);
+    assert!(
+        registry.group("work").is_some(),
+        "and nothing was written: {:?}",
+        registry.groups.keys().collect::<Vec<_>>()
+    );
+}
+
+/// Global is not a place and being Ungrouped is the absence of a declaration
+/// rather than one somebody made (ADR 0017), so neither has a name to change.
+#[test]
+fn neither_global_nor_the_ungrouped_scope_is_a_group_to_rename() {
+    let host = machine_with_a_group();
+
+    for reaching in [0, 1] {
+        let screen = browse(
+            &host,
+            at_the_config(
+                over(reaching, Signal::Down)
+                    .into_iter()
+                    .chain([Some(Signal::Name), Some(Signal::Leave)])
+                    .collect(),
+            ),
+        );
+
+        let said = said(screen.last_frame());
+        assert!(
+            said.contains("neither is a Group somebody named"),
+            "row {reaching} should say so rather than opening a field:\n{said}"
+        );
+    }
+    assert_eq!(
+        registry_of(&host).groups.len(),
+        1,
+        "and nothing was declared or renamed"
+    );
+}
+
 /// Naming an Account is done where the rest of the decisions about it are.
 #[test]
 fn an_account_is_given_an_alias_from_the_panel() {

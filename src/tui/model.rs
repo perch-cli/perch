@@ -207,6 +207,12 @@ pub enum Edit {
         group: Option<String>,
     },
     DeclareGroup(String),
+    /// A Group renamed, which keeps its Overrides, its Accounts and the cooldown
+    /// the watcher is pacing it by — so this is reversible by renaming it back.
+    RenameGroup {
+        from: String,
+        to: String,
+    },
 }
 
 /// A change made and not yet written, with how many quiet frames are left
@@ -257,6 +263,10 @@ pub struct Prompt {
 pub enum Naming {
     /// A Group to declare.
     NewGroup,
+    /// The Group of this name, renamed. A rename keeps everything the Group
+    /// carries, which is why it is a rename rather than a Group declared and one
+    /// forgotten.
+    Group(String),
     /// An Alias for this Account.
     Alias(String),
 }
@@ -266,6 +276,7 @@ impl Naming {
     pub fn asks(&self) -> String {
         match self {
             Naming::NewGroup => "Name the new Group:".to_string(),
+            Naming::Group(held) => format!("Rename the Group `{held}` to:"),
             Naming::Alias(email) => format!("Name {email}:"),
         }
     }
@@ -929,6 +940,18 @@ impl Model {
                     typed: String::new(),
                 })
             }
+            // With the name already in the field, because a rename is nearly
+            // always a correction: four characters changed rather than a name
+            // typed again from nothing.
+            (ScopeRow::Scope(Scope::Group(held)), _, Column::Scopes) => {
+                self.prompt = Some(Prompt {
+                    what: Naming::Group(held.clone()),
+                    typed: held,
+                })
+            }
+            (ScopeRow::Scope(Scope::Global | Scope::Ungrouped), _, Column::Scopes) => {
+                self.said = vec![NEITHER_IS_A_GROUP.to_string()]
+            }
             (_, Some(Row::Alias), Column::Content) => {
                 if let Some(account) = self.scope_account() {
                     self.prompt = Some(Prompt {
@@ -980,7 +1003,7 @@ impl Model {
         };
         let name = prompt.typed.trim().to_string();
         let kind = match prompt.what {
-            Naming::NewGroup => registry::NameKind::Group,
+            Naming::NewGroup | Naming::Group(_) => registry::NameKind::Group,
             Naming::Alias(_) => registry::NameKind::Alias,
         };
         if let Err(refused) = registry::validate_name(kind, &name) {
@@ -993,6 +1016,20 @@ impl Model {
             // come to accept a name the command refuses, or refuse one it would
             // have taken.
             Naming::NewGroup => self.registry.clone().declare_group(&name),
+            // The same trick and the same reason: `perch group rename` asks
+            // these of the real registry a moment later, including that
+            // recapitalising a Group is a rename rather than a collision with
+            // itself.
+            //
+            // Asked of the Group *this registry* holds rather than the name the
+            // field was opened with, because a Refresh landing replaces the
+            // registry under an open prompt: by now another `perch` may have
+            // renamed or forgotten it. Where it is gone there is nothing here to
+            // ask, and the command's own refusal is the one worth showing.
+            Naming::Group(held) => match self.registry.declared_group(held) {
+                Some(declared) => self.registry.clone().rename_group(declared, &name),
+                None => Ok(()),
+            },
             Naming::Alias(email) => match self.registry.alias_of(email) {
                 // Renaming an Account by the name it already answers to is not
                 // a collision with itself, which is the rule `perch alias`
@@ -1009,6 +1046,10 @@ impl Model {
         self.prompt = None;
         match prompt.what {
             Naming::NewGroup => self.write(Edit::DeclareGroup(name)),
+            Naming::Group(held) => self.write(Edit::RenameGroup {
+                from: held,
+                to: name,
+            }),
             Naming::Alias(email) => self.write(Edit::Alias { email, name }),
         }
     }
@@ -1299,8 +1340,12 @@ const A_NUMBER_IS_STEPPED: &str = "That one is a number rather than a yes or a n
 const A_FACT_RATHER_THAN_A_SETTING: &str = "That is something Anthropic says about the Account rather than something Perch was told, so \
      there is nothing here to change.";
 
-const NOTHING_HERE_IS_NAMED: &str = "Nothing on this row is named. `n` names a Group on the last row of the sidebar, and names \
-     the selected Account on its `alias` row.";
+const NOTHING_HERE_IS_NAMED: &str = "Nothing on this row is named. `n` names a Group on the last row of the sidebar, renames one \
+     on its own row, and names the selected Account on its `alias` row.";
+
+const NEITHER_IS_A_GROUP: &str = "Global is what applies where nothing narrower is said, and being in no Group is the absence of \
+     a declaration rather than one somebody made (ADR 0017) — so neither is a Group somebody named, \
+     and there is no name here to change. `n` renames a Group on its own row of the sidebar.";
 
 /// The Accounts in the order `perch switch` would rank them.
 ///
@@ -2218,6 +2263,46 @@ mod tests {
             Asked::ToWrite(Edit::DeclareGroup("spare".to_string()))
         );
         assert!(model.prompt.is_none());
+    }
+
+    /// The Group being renamed can go while the field is open: a Refresh
+    /// landing replaces the registry, and another `perch` may have forgotten
+    /// that Group by then. The panel hands the write over anyway, because
+    /// `perch group rename` is what refuses a Group nothing holds — in the
+    /// sentence every mistyped Group name gets, which is not a sentence the
+    /// screen owns.
+    #[test]
+    fn a_rename_of_a_group_that_has_since_gone_is_the_commands_to_refuse() {
+        let mut model = model_holding(vec![in_group(account("one@example.com"), "work")]);
+        model.tab = Tab::Config;
+        model.scope_row = 2;
+        let Some(ScopeRow::Scope(Scope::Group(_))) = Some(model.scope_row()) else {
+            panic!(
+                "the third sidebar row is the Group: {:?}",
+                model.scope_row()
+            )
+        };
+        let _ = model.act_on(Signal::Name);
+
+        // What another `perch group remove` leaves behind, arriving the way a
+        // landed Refresh arrives.
+        model.now_holds(Registry::default());
+
+        for _ in 0.."work".len() {
+            let _ = model.act_on(Signal::Backspace);
+        }
+        for letter in "day-job".chars() {
+            let _ = model.act_on(Signal::Typed(letter));
+        }
+
+        assert_eq!(
+            model.act_on(Signal::Switch),
+            Asked::ToWrite(Edit::RenameGroup {
+                from: "work".to_string(),
+                to: "day-job".to_string(),
+            }),
+            "the write is handed over rather than the panel deciding for itself"
+        );
     }
 
     /// Every letter belongs to the name while a field is open, including the

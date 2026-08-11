@@ -11,7 +11,7 @@ use common::*;
 use perch::commands::add::AddArgs;
 use perch::commands::group::GroupCommand;
 use perch::error::{EXIT_CONFLICT, EXIT_GENERAL, EXIT_INVALID, EXIT_NOT_FOUND};
-use perch::host::FakeHost;
+use perch::host::{FakeHost, Host};
 
 fn remove_group(host: &FakeHost, name: &str) -> (perch::Result<()>, String) {
     run_group(
@@ -20,6 +20,29 @@ fn remove_group(host: &FakeHost, name: &str) -> (perch::Result<()>, String) {
             name: name.to_string(),
         },
     )
+}
+
+fn rename_group(host: &FakeHost, from: &str, to: &str) -> (perch::Result<()>, String) {
+    run_group(
+        host,
+        GroupCommand::Rename {
+            from: from.to_string(),
+            to: to.to_string(),
+        },
+    )
+}
+
+/// A Group the watcher has switched within, so the next scheduled Check is
+/// paced by what the last one did.
+fn paced(host: &FakeHost, group: &str) -> perch::registry::Checked {
+    let mut registry = registry_of(host);
+    let record = perch::registry::Checked {
+        switched_at: host.now(),
+        switched_off: EMAIL.to_string(),
+    };
+    registry.checks.insert(group.to_string(), record.clone());
+    save_registry(host, &registry);
+    record
 }
 
 #[test]
@@ -277,7 +300,7 @@ fn a_group_name_that_would_be_ambiguous_is_refused_with_its_own_code() {
                 name: name.to_string(),
             },
         );
-        let error = result.expect_err("`{name}` cannot name a Group");
+        let error = result.expect_err(&format!("`{name}` cannot name a Group"));
         assert_eq!(
             error.exit_code(),
             EXIT_INVALID,
@@ -508,6 +531,197 @@ fn a_group_listing_says_when_its_watcher_may_switch_unattended() {
     assert!(
         !printed.contains("off (would act"),
         "it is on, so it must not read as off: {printed}"
+    );
+}
+
+/// The piece a remove-and-add would get *wrong* rather than merely lose. What
+/// the last scheduled Check left behind is keyed by the Group's name, and
+/// `perch group remove` deliberately drops it — a record kept past a removal
+/// would be a cooldown a Group declared under the same name later inherited
+/// from a Group it never was. A rename is the *same* Group, so a rename that
+/// dropped it would be a way to make the watcher Switch again at once.
+#[test]
+fn a_rename_keeps_the_cooldown_the_watcher_is_pacing_by() {
+    let host = machine_with_two_accounts();
+    declare_group(&host, "work");
+    move_to_group(&host, EMAIL, "work").0.unwrap();
+    let record = paced(&host, "work");
+
+    let (result, _) = rename_group(&host, "work", "day-job");
+
+    result.expect("the Group is renamed");
+    let registry = registry_of(&host);
+    assert_eq!(
+        registry.checked("day-job"),
+        Some(&record),
+        "the same Group under another name is paced by what its last Check did"
+    );
+    assert!(
+        registry.checked("work").is_none(),
+        "and nothing is left behind under the old name"
+    );
+}
+
+/// The Overrides are the whole point: what a rename by hand loses is precisely
+/// the part somebody deliberately said.
+#[test]
+fn a_rename_keeps_the_overrides_the_group_declared() {
+    let host = three_accounts_in_one_group();
+    config_set(&host, &["work", "watcher-threshold-percent", "55"])
+        .0
+        .expect("the Override is set");
+
+    let (result, printed) = rename_group(&host, "work", "day-job");
+
+    result.expect("the Group is renamed");
+    let registry = registry_of(&host);
+    assert_eq!(
+        registry
+            .group("day-job")
+            .expect("the Group is there under its new name")
+            .watcher_threshold_percent,
+        Some(55),
+        "the rules somebody set came with the name"
+    );
+    assert!(
+        registry.group("work").is_none(),
+        "and the old name holds nothing: {:?}",
+        registry.groups.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        printed.contains("day-job") && printed.contains("work"),
+        "the rename says both names:\n{printed}"
+    );
+}
+
+#[test]
+fn a_rename_leaves_the_accounts_in_the_group() {
+    let host = three_accounts_in_one_group();
+    let before = registry_of(&host).accounts_in("work").len();
+    assert!(before > 0, "the fixture has Accounts in it");
+
+    rename_group(&host, "work", "day-job")
+        .0
+        .expect("the Group is renamed");
+
+    let registry = registry_of(&host);
+    assert_eq!(
+        registry.accounts_in("day-job").len(),
+        before,
+        "the Accounts are still in it, under its new name"
+    );
+    assert!(
+        registry.ungrouped_accounts().is_empty(),
+        "and none of them quietly became Ungrouped"
+    );
+}
+
+/// The same refusal `perch group add` gives, because a rename must not reach a
+/// state a declaration could not.
+#[test]
+fn renaming_onto_a_name_already_spoken_for_is_refused_and_nothing_is_written() {
+    let host = three_accounts_in_one_group();
+    set_alias(&host, "overflow", SECOND_EMAIL)
+        .0
+        .expect("the Alias is set");
+    declare_group(&host, "spare");
+
+    for taken in ["overflow", "spare"] {
+        let (result, _) = rename_group(&host, "work", taken);
+
+        let error = result.expect_err("two things would answer to one name");
+        assert_eq!(error.exit_code(), EXIT_CONFLICT);
+        let registry = registry_of(&host);
+        assert!(
+            registry.group("work").is_some(),
+            "and the Group still answers to the name it had: {error}"
+        );
+        assert_eq!(
+            registry.accounts_in("work").len(),
+            3,
+            "with its Accounts untouched"
+        );
+    }
+}
+
+/// A name Perch would refuse to declare is refused here too, with the outcome
+/// of its own that a name it will not accept has.
+#[test]
+fn renaming_to_a_name_that_would_be_ambiguous_is_refused_with_its_own_code() {
+    let host = three_accounts_in_one_group();
+
+    for name in ["none", "ungrouped", "someone@example.com", "day job", ""] {
+        let (result, _) = rename_group(&host, "work", name);
+
+        let error = result.expect_err(&format!("`{name}` cannot name a Group"));
+        assert_eq!(
+            error.exit_code(),
+            EXIT_INVALID,
+            "a name Perch will not accept is its own outcome, not a general failure: {error}"
+        );
+    }
+
+    assert!(
+        registry_of(&host).group("work").is_some(),
+        "and the Group is still called what it was"
+    );
+}
+
+/// `perch alias` states this rule for an Account renaming itself, and the Group
+/// half must not disagree with it.
+#[test]
+fn recapitalising_a_group_is_a_rename_rather_than_a_collision_with_itself() {
+    let host = three_accounts_in_one_group();
+    config_set(&host, &["work", "watcher-threshold-percent", "55"])
+        .0
+        .expect("the Override is set");
+
+    let (result, _) = rename_group(&host, "work", "Work");
+
+    result.expect("changing how a Group is capitalised is a rename");
+    let registry = registry_of(&host);
+    assert_eq!(
+        registry.groups.len(),
+        1,
+        "one Group, not two that differ only in case: {:?}",
+        registry.groups.keys().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        registry.declared_group("work"),
+        Some("Work"),
+        "held under the capitalisation asked for"
+    );
+    assert_eq!(
+        registry
+            .group("Work")
+            .expect("the Group is there")
+            .watcher_threshold_percent,
+        Some(55),
+        "and it kept what it carries"
+    );
+    assert_eq!(
+        registry.accounts_in("Work").len(),
+        3,
+        "and its Accounts came with it rather than being left claiming `work`"
+    );
+}
+
+/// A typo is a typo wherever it is made, so it gets the sentence every mistyped
+/// Group name gets.
+#[test]
+fn renaming_a_group_perch_does_not_hold_is_refused_the_way_every_mistyped_group_is() {
+    let host = three_accounts_in_one_group();
+
+    let (result, _) = rename_group(&host, "zzzzzzzz", "day-job");
+
+    let error = result.expect_err("there is no such Group");
+    assert_eq!(error.exit_code(), EXIT_NOT_FOUND);
+    let said = error.to_string();
+    assert!(said.contains("No Group called `zzzzzzzz`"), "{said}");
+    assert!(said.contains("Groups Perch holds: work."), "{said}");
+    assert!(
+        registry_of(&host).group("day-job").is_none(),
+        "and nothing was declared under the name asked for"
     );
 }
 

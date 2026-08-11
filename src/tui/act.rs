@@ -200,5 +200,13 @@ fn run_it(host: &dyn Host, edit: &Edit, out: &mut dyn std::io::Write) -> crate::
         Edit::DeclareGroup(name) => {
             group::run(host, group::GroupCommand::Add { name: name.clone() }, out)
         }
+        Edit::RenameGroup { from, to } => group::run(
+            host,
+            group::GroupCommand::Rename {
+                from: from.clone(),
+                to: to.clone(),
+            },
+            out,
+        ),
     }
 }

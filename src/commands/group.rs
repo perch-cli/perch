@@ -6,6 +6,12 @@
 //! Accounts happen to sit — an empty Group is still a Group, and an Account is
 //! never quietly dropped out of one.
 //!
+//! A Group can be renamed, and the rename keeps what the Group carries: its
+//! Overrides, its Accounts, and what the last scheduled Check left behind. Doing
+//! it by hand — an add, a move per Account and a remove — would lose every
+//! Override the old Group held, which is precisely the part somebody
+//! deliberately said.
+//!
 //! A Group also carries the configuration that would govern Cycling within it.
 //! v1 stores and validates those fields and reads none of them; `perch group
 //! list` shows them so the rules are visible without opening a config file.
@@ -32,6 +38,16 @@ pub enum GroupCommand {
 
     /// Forget a Group. Refused while it still holds Accounts, which are named.
     Remove { name: String },
+
+    /// Rename a Group, keeping its Overrides, its Accounts and the cooldown the
+    /// watcher is pacing it by. Nothing about it changes but what it is called.
+    Rename {
+        /// The Group as it is called now.
+        from: String,
+        /// What to call it instead. Refused if an Alias or another Group already
+        /// answers to it, the same way declaring one is.
+        to: String,
+    },
 
     /// Move an Account into a Group, keeping its Profile, Credential and Alias.
     Move {
@@ -70,6 +86,14 @@ pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Resul
             registry::save(host, &mut perch, &registry)?;
             say(out, &format!("Removed the Group `{removed}`."))
         }
+        GroupCommand::Rename { from, to } => {
+            let renamed = rename(&mut registry, &from, &to)?;
+            registry::save(host, &mut perch, &registry)?;
+            say(out, &renamed)?;
+            // What it carries, because keeping it is the whole of what this
+            // command is for: the Overrides are the part a rename by hand loses.
+            describe_configuration(out, &registry, &Scope::Group(to))
+        }
         GroupCommand::Move { target, group } => {
             let account = target::resolve_account(&registry, &target)?;
             let moved = move_account(&mut registry, &account, &group)?;
@@ -107,6 +131,33 @@ fn remove(registry: &mut Registry, name: &str) -> Result<String> {
 
     registry.forget_group(&declared);
     Ok(declared)
+}
+
+/// Renames a Group. What moves with the name is
+/// [`Registry::rename_group`](Registry::rename_group)'s to say; what is here is
+/// the two things the command layer owns.
+///
+/// The old name is resolved the way every Group named in passing is, so a typo
+/// gets the sentence every mistyped Group name gets rather than one of its own.
+/// And the report says what the Group still holds, because "did my Accounts come
+/// too" is the other thing somebody renaming one wants to know and would
+/// otherwise need a second command to find out — said the way `remove` says it,
+/// since it is the same question answered from the other side.
+fn rename(registry: &mut Registry, from: &str, to: &str) -> Result<String> {
+    let held = match registry.declared_group(from) {
+        Some(declared) => declared.to_string(),
+        None => return Err(no_such_group(registry, from)),
+    };
+
+    registry.rename_group(&held, to)?;
+
+    Ok(match registry.accounts_in(to).len() {
+        0 => format!("Renamed the Group `{held}` to `{to}`."),
+        still_holds => format!(
+            "Renamed the Group `{held}` to `{to}`, which still holds {}.",
+            crate::commands::accounts(still_holds)
+        ),
+    })
 }
 
 /// Moves one Account between Groups, leaving everything else about it alone:
