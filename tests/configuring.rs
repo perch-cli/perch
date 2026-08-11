@@ -828,6 +828,33 @@ fn unset_at_global_is_refused_and_names_what_it_would_have_meant() {
     );
 }
 
+/// One word to `unset` names Global's key — unless it is a Scope, in which case
+/// what is missing is the key rather than the meaning. `set` has said this since
+/// it grew the mirror of the guard; `unset` reported a correctly spelled Group
+/// name as a Setting Perch does not hold, which sends somebody looking for a
+/// spelling mistake that is not the problem.
+#[test]
+fn an_unset_naming_only_a_scope_says_the_key_is_what_is_missing() {
+    let host = three_accounts_in_one_group();
+
+    for word in ["work", "ungrouped"] {
+        let refusal = config_unset(&host, &[word])
+            .0
+            .expect_err("a Scope on its own clears nothing");
+        assert_eq!(refusal.exit_code(), EXIT_INVALID);
+        let said = refusal.to_string();
+        assert!(
+            !said.contains("is not a Setting Perch holds"),
+            "`{word}` is spelled correctly and is not a key: {said}"
+        );
+        assert!(said.contains("but no key"), "{said}");
+        assert!(
+            said.contains("perch config unset <scope> <key>"),
+            "and the form that does exist is named: {said}"
+        );
+    }
+}
+
 /// A script can tell an Override from an Inheritance without diffing against
 /// Global: the layer a value came from is the number of words that would set it
 /// again.
