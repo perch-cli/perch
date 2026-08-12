@@ -402,3 +402,23 @@ that makes it runnable. The counterpart to what Perch *holds* — an Installatio
 outlives a Purge, and taking one back belongs to the Channel that made it
 rather than to any Perch command (ADR 0033).
 _Avoid_: install, setup, deployment, footprint
+
+## Proving it works
+
+**Dogfood**:
+Asserting that Perch works by using it as a person does: the real binary, on a
+machine somebody works on, against Accounts they actually hold. Named for who
+runs it rather than for what it checks, because that is what distinguishes it —
+every other suite holds something still, and this one holds nothing still. The
+Credentials are live, the network is Anthropic's, and a failure costs real
+state. Run a phase at a time by somebody watching, never unattended (ADR 0037).
+_Avoid_: e2e, smoke test, manual test, acceptance test
+
+**Preflight**:
+What a Dogfood run establishes about the machine before it acts: which Claude
+Code is installed, whether the network answers, how many Accounts are held and
+which are Quarantined — and, from those, how much of the suite this machine can
+prove. Said as a figure and said first, because a run that quietly proved a
+third of what it was asked to and a run that proved all of it look identical
+once they are over.
+_Avoid_: setup, precondition, capability check, sanity check
