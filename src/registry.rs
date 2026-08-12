@@ -1910,6 +1910,11 @@ fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
 pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -> Result<()> {
     perch.renew();
     if !perch.still_held() {
+        // A general failure rather than `Busy`, and deliberately (ADR 0036).
+        // `Busy` promises that nothing was changed, and `perch watch` branches
+        // on that promise by going round again — but this save is reached after
+        // a Switch has already moved a Credential as often as before anything
+        // has been written, and from here there is no telling which.
         return Err(PerchError::Other(
             "Another `perch` took the registry lock over while this command was \
              working, and has changed the registry since this one read it. \
