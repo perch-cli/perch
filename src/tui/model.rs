@@ -1103,41 +1103,39 @@ impl Model {
             return Asked::Nothing;
         };
         let name = prompt.typed.trim().to_string();
-        let kind = match prompt.what {
-            Naming::NewGroup | Naming::Group(_) => registry::NameKind::Group,
-            Naming::Alias(_) => registry::NameKind::Alias,
-        };
-        if let Err(refused) = registry::validate_name(kind, &name) {
-            self.said = lines_of(&refused.to_string());
-            return Asked::Nothing;
-        }
+        // The same question the command will ask of the real registry a moment
+        // later, asked of this one — so the panel cannot come to accept a name
+        // the command refuses, or refuse one it would have taken. One function
+        // rather than the three primitives reassembled, which is what this was:
+        // the shape, then a waiver, then the namespace, in an order the caller
+        // had to know.
+        //
+        // Asked rather than performed. It used to `clone()` the whole Registry
+        // twice per keypress to reach a check only a mutator exposed.
         let taken = match &prompt.what {
-            // Asked of a copy, which is exactly the checks `perch group add`
-            // will make of the real one a moment later — so the panel cannot
-            // come to accept a name the command refuses, or refuse one it would
-            // have taken.
-            Naming::NewGroup => self.registry.clone().declare_group(&name),
-            // The same trick and the same reason: `perch group rename` asks
-            // these of the real registry a moment later, including that
-            // recapitalising a Group is a rename rather than a collision with
-            // itself.
-            //
-            // Asked of the Group *this registry* holds rather than the name the
+            Naming::NewGroup => self.registry.refuse_a_name_nothing_may_answer_to(
+                registry::NameKind::Group,
+                &name,
+                None,
+            ),
+            // Against the Group *this registry* holds rather than the name the
             // field was opened with, because a Refresh landing replaces the
             // registry under an open prompt: by now another `perch` may have
             // renamed or forgotten it. Where it is gone there is nothing here to
             // ask, and the command's own refusal is the one worth showing.
             Naming::Group(held) => match self.registry.declared_group(held) {
-                Some(declared) => self.registry.clone().rename_group(declared, &name),
+                Some(declared) => self.registry.refuse_a_name_nothing_may_answer_to(
+                    registry::NameKind::Group,
+                    &name,
+                    Some(declared),
+                ),
                 None => Ok(()),
             },
-            Naming::Alias(email) => match self.registry.alias_of(email) {
-                // Renaming an Account by the name it already answers to is not
-                // a collision with itself, which is the rule `perch alias`
-                // states and this must not disagree with.
-                Some(held) if registry::same_name(held, &name) => Ok(()),
-                _ => self.registry.refuse_taken_names(Some(&name), None),
-            },
+            Naming::Alias(email) => self.registry.refuse_a_name_nothing_may_answer_to(
+                registry::NameKind::Alias,
+                &name,
+                self.registry.alias_of(email),
+            ),
         };
         if let Err(refused) = taken {
             self.said = lines_of(&refused.to_string());
