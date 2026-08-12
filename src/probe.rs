@@ -31,6 +31,48 @@ pub mod assumption {
         "a session marker names its process and when the session started";
 }
 
+/// Which Claude Code Perch is talking to.
+///
+/// Every refusal this module raises names the assumption that failed *and* the
+/// Claude Code it was reading, because an assumption about an unnamed version
+/// is a bug report nobody can act on (ADR 0007). That is the whole of what this
+/// is for: it is quoted, never compared.
+///
+/// A value rather than the `&str` it was, for two reasons. It is read by
+/// running `claude --version` — a `PATH` walk and a subprocess — and as six
+/// separate parameters it was read again at each entry point, so one
+/// `perch switch` asked twice. And a caller that has no version to give was
+/// left inventing a string: `perch remove` must go on working when Claude Code
+/// is gone, and said so by passing the literal `"(not installed)"` into a
+/// parameter typed as any string at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Installed(String);
+
+impl Installed {
+    /// Asks the installed Claude Code what it is. Once per command: the answer
+    /// cannot change under a process that is already running, and the reading
+    /// is a subprocess.
+    pub fn probed(host: &dyn Host) -> Result<Installed> {
+        Ok(Installed(claude_version(host)?))
+    }
+
+    /// When the question could not be asked, or is not the thing being tested.
+    ///
+    /// `said` is what a refusal will quote. `perch remove` uses it because a
+    /// machine whose Claude Code has been uninstalled is exactly the machine
+    /// somebody is giving an Account up on, and a removal that refused for want
+    /// of a version would be Perch holding their Credential hostage to a
+    /// program neither of them needs any more.
+    pub fn unknown(said: &str) -> Installed {
+        Installed(said.to_string())
+    }
+
+    /// What a refusal quotes.
+    pub fn version(&self) -> &str {
+        &self.0
+    }
+}
+
 /// The keychain service name Claude Code uses when `CLAUDE_CONFIG_DIR` is
 /// unset. Every other config directory gets this plus a hash of its path.
 pub const DEFAULT_SERVICE: &str = "Claude Code-credentials";
@@ -437,24 +479,28 @@ fn keychain_account_name(host: &dyn Host) -> Result<String> {
 pub fn read_credential(
     host: &dyn Host,
     store: &Store,
-    version: &str,
+    installed: &Installed,
 ) -> Result<Option<Credential>> {
     let Some(held) = credentials::read(host, store)? else {
         return Ok(None);
     };
 
-    understand_credential(held.credential, &held.kept_in.describe(), version).map(Some)
+    understand_credential(held.credential, &held.kept_in.describe(), installed).map(Some)
 }
 
 /// Makes sense of the bytes a keychain namespace holds, or says which belief
 /// they broke. `held_in` names the namespace they came out of, so a refusal
 /// says which Account's store stopped being recognisable.
-pub fn understand_credential(raw: String, held_in: &str, version: &str) -> Result<Credential> {
+pub fn understand_credential(
+    raw: String,
+    held_in: &str,
+    installed: &Installed,
+) -> Result<Credential> {
     let parsed: CredentialFile = serde_json::from_str(&raw).map_err(|err| {
         refusal(
             assumption::CREDENTIAL_SHAPE,
             &format!("{held_in} is not JSON Perch understands: {err}"),
-            version,
+            installed.version(),
         )
     })?;
 
@@ -462,7 +508,7 @@ pub fn understand_credential(raw: String, held_in: &str, version: &str) -> Resul
         refusal(
             assumption::CREDENTIAL_SHAPE,
             &format!("{held_in} has no claudeAiOauth block"),
-            version,
+            installed.version(),
         )
     })?;
 
@@ -470,7 +516,7 @@ pub fn understand_credential(raw: String, held_in: &str, version: &str) -> Resul
         return Err(refusal(
             assumption::CREDENTIAL_SHAPE,
             "the claudeAiOauth block has no accessToken",
-            version,
+            installed.version(),
         ));
     };
 
@@ -500,14 +546,14 @@ pub fn credential_after_rotation(
     access_token: &str,
     refresh_token: Option<&str>,
     expires_at: Option<i64>,
-    version: &str,
+    installed: &Installed,
 ) -> Result<String> {
     let mut document: serde_json::Value =
         serde_json::from_str(current.as_str()).map_err(|err| {
             refusal(
                 assumption::CREDENTIAL_SHAPE,
                 &format!("the Credential being renewed is not JSON Perch understands: {err}"),
-                version,
+                installed.version(),
             )
         })?;
 
@@ -518,7 +564,7 @@ pub fn credential_after_rotation(
             refusal(
                 assumption::CREDENTIAL_SHAPE,
                 "the Credential being renewed has no claudeAiOauth block",
-                version,
+                installed.version(),
             )
         })?;
 
@@ -552,7 +598,11 @@ pub fn credential_after_rotation(
 }
 
 /// Reads the Identity out of a store's `.claude.json`.
-pub fn read_identity(host: &dyn Host, store: &Store, version: &str) -> Result<Option<Identity>> {
+pub fn read_identity(
+    host: &dyn Host,
+    store: &Store,
+    installed: &Installed,
+) -> Result<Option<Identity>> {
     let contents = match host.read_file(&store.identity_file) {
         // No file at all is a machine that has never logged in.
         Err(HostError::NotFound { .. }) => return Ok(None),
@@ -576,7 +626,7 @@ pub fn read_identity(host: &dyn Host, store: &Store, version: &str) -> Result<Op
                 "{} is not JSON Perch understands: {err}",
                 store.identity_file.display()
             ),
-            version,
+            installed.version(),
         )
     })?;
 
@@ -592,7 +642,7 @@ pub fn read_identity(host: &dyn Host, store: &Store, version: &str) -> Result<Op
                 "{} has an oauthAccount with no emailAddress",
                 store.identity_file.display()
             ),
-            version,
+            installed.version(),
         )
     })?;
 
@@ -608,7 +658,7 @@ pub fn read_identity(host: &dyn Host, store: &Store, version: &str) -> Result<Op
                  can name a Profile after",
                 store.identity_file.display()
             ),
-            version,
+            installed.version(),
         ));
     }
 
@@ -626,7 +676,7 @@ pub fn read_identity(host: &dyn Host, store: &Store, version: &str) -> Result<Op
                  Alias or a Group name could be told from",
                 store.identity_file.display()
             ),
-            version,
+            installed.version(),
         ));
     }
 
@@ -872,9 +922,14 @@ struct SessionMarker {
 /// start the operating system will not say. That marker can be neither
 /// corroborated nor dismissed, and guessing either way is silently wrong on
 /// one side or the other, so the answer is a refusal naming the assumption.
-pub fn live_clients(host: &dyn Host, config_dir: &Path, version: &str) -> Result<Vec<u32>> {
-    clients_in(host, config_dir)
-        .map_err(|unsure| refusal(assumption::SESSION_MARKER, &unsure.detail(), version))
+pub fn live_clients(host: &dyn Host, config_dir: &Path, installed: &Installed) -> Result<Vec<u32>> {
+    clients_in(host, config_dir).map_err(|unsure| {
+        refusal(
+            assumption::SESSION_MARKER,
+            &unsure.detail(),
+            installed.version(),
+        )
+    })
 }
 
 /// Why whether anything is running went unanswered.
@@ -1051,7 +1106,7 @@ pub fn patch_oauth_account(
     contents: &str,
     block: &str,
     path: &Path,
-    version: &str,
+    installed: &Installed,
 ) -> Result<String> {
     // Written rather than replaced, so a file that has no `oauthAccount` yet
     // gets one. Claude Code writes `.claude.json` the moment it is first run —
@@ -1078,7 +1133,7 @@ pub fn patch_oauth_account(
                  Account into it",
                 path.display()
             ),
-            version,
+            installed.version(),
         )
     })
 }
@@ -1121,10 +1176,11 @@ impl Identity {
 /// same Credential. [`crate::registry::the_default_profile`] is the answer, and
 /// this module is below the one that can give it.
 pub fn probe(host: &dyn Host, store: Store) -> Result<Verdict> {
-    let version = claude_version(host)?;
+    let installed = Installed::probed(host)?;
+    let version = installed.version().to_string();
 
-    let credential = read_credential(host, &store, &version)?;
-    let identity = read_identity(host, &store, &version)?;
+    let credential = read_credential(host, &store, &installed)?;
+    let identity = read_identity(host, &store, &installed)?;
 
     match (credential, identity) {
         (Some(credential), Some(identity)) => Ok(Verdict::Recognised(Box::new(Findings {
@@ -1158,6 +1214,11 @@ fn refusal(assumption: &str, detail: &str, version: &str) -> PerchError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A version to quote, for the tests that are not about the quoting.
+    fn version_under_test() -> Installed {
+        Installed::unknown("2.1.221")
+    }
     use crate::host::{Execution, FakeHost, Platform};
 
     /// The round trip through this module's own interface: a claim makes the
@@ -1358,7 +1419,7 @@ mod tests {
             IDENTITY_FILE,
             "{\n  \"emailAddress\": \"overflow@example.com\"\n}",
             Path::new("/Users/someone/.claude.json"),
-            "2.1.221",
+            &Installed::unknown("2.1.221"),
         )
         .expect("the block is there to patch");
 
@@ -1388,7 +1449,7 @@ mod tests {
             IDENTITY_FILE,
             from_elsewhere,
             Path::new("/Users/someone/.claude.json"),
-            "2.1.221",
+            &Installed::unknown("2.1.221"),
         )
         .expect("the block is there to patch");
 
@@ -1415,7 +1476,7 @@ mod tests {
             r#"{"numStartups": 41}"#,
             r#"{"emailAddress": "someone@example.com"}"#,
             Path::new("/Users/someone/.claude.json"),
-            "2.1.221",
+            &Installed::unknown("2.1.221"),
         )
         .expect("a file with no block is a file to write one into");
 
@@ -1438,7 +1499,7 @@ mod tests {
             r#"["not what this file is"]"#,
             "{}",
             Path::new("/Users/someone/.claude.json"),
-            "2.1.221",
+            &Installed::unknown("2.1.221"),
         )
         .unwrap_err();
         assert!(
@@ -1523,7 +1584,7 @@ mod tests {
                 );
             let store = default_store(&host).expect("the store is derivable");
 
-            let refused = read_identity(&host, &store, "2.1.221")
+            let refused = read_identity(&host, &store, &version_under_test())
                 .expect_err("Perch cannot key anything on that");
 
             assert!(refused.to_string().contains(expected), "{refused}");
@@ -1603,7 +1664,8 @@ mod tests {
     }
 
     fn understood(raw: &str) -> Credential {
-        understand_credential(raw.to_string(), "a test", "2.1.221").expect("a Credential")
+        understand_credential(raw.to_string(), "a test", &version_under_test())
+            .expect("a Credential")
     }
 
     /// Midday on the day the rest of the fixtures are set, in milliseconds.
@@ -1648,7 +1710,7 @@ mod tests {
             "new-access",
             Some("new-refresh"),
             Some(NOON + 3_600_000),
-            "2.1.221",
+            &Installed::unknown("2.1.221"),
         )
         .expect("the block is there to renew");
 
@@ -1671,8 +1733,9 @@ mod tests {
             r#"{"claudeAiOauth":{"accessToken":"old-access","refreshToken":"still-good"}}"#,
         );
 
-        let rotated = credential_after_rotation(&current, "new-access", None, None, "2.1.221")
-            .expect("the block is there to renew");
+        let rotated =
+            credential_after_rotation(&current, "new-access", None, None, &version_under_test())
+                .expect("the block is there to renew");
 
         let back = understood(&rotated);
         assert_eq!(back.refresh_token.as_deref(), Some("still-good"));
@@ -1694,8 +1757,9 @@ mod tests {
             "the Credential being renewed is one that had already expired",
         );
 
-        let rotated = credential_after_rotation(&current, "new-access", None, None, "2.1.221")
-            .expect("the block is there to renew");
+        let rotated =
+            credential_after_rotation(&current, "new-access", None, None, &version_under_test())
+                .expect("the block is there to renew");
 
         let back = understood(&rotated);
         assert_eq!(back.expires_at, None);
@@ -1816,7 +1880,7 @@ mod tests {
         let refused = understand_credential(
             "not json at all".to_string(),
             "the Credential Perch holds for someone@example.com",
-            "2.1.221",
+            &Installed::unknown("2.1.221"),
         )
         .expect_err("that is not JSON");
 
@@ -1831,7 +1895,7 @@ mod tests {
         let refused = understand_credential(
             r#"{"somethingElse": {}}"#.to_string(),
             "the keychain",
-            "2.1.221",
+            &Installed::unknown("2.1.221"),
         )
         .expect_err("there is no claudeAiOauth block");
 
@@ -1846,7 +1910,7 @@ mod tests {
         let refused = understand_credential(
             r#"{"claudeAiOauth": {"refreshToken": "sk-ant-ort01-x"}}"#.to_string(),
             "the keychain",
-            "2.1.221",
+            &Installed::unknown("2.1.221"),
         )
         .expect_err("there is nothing to ask Anthropic with");
 
@@ -1863,8 +1927,9 @@ mod tests {
         let raw =
             r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-x","refreshToken":"sk-ant-ort01-x"}}"#;
 
-        let credential = understand_credential(raw.to_string(), "the keychain", "2.1.221")
-            .expect("that is a Credential");
+        let credential =
+            understand_credential(raw.to_string(), "the keychain", &version_under_test())
+                .expect("that is a Credential");
 
         assert_eq!(credential.access_token, "sk-ant-oat01-x");
         assert_eq!(credential.refresh_token.as_deref(), Some("sk-ant-ort01-x"));
@@ -1888,8 +1953,14 @@ mod tests {
             subscription_type: None,
         };
 
-        let refused = credential_after_rotation(&broken, "sk-ant-oat01-new", None, None, "2.1.221")
-            .expect_err("what is being renewed is not JSON");
+        let refused = credential_after_rotation(
+            &broken,
+            "sk-ant-oat01-new",
+            None,
+            None,
+            &version_under_test(),
+        )
+        .expect_err("what is being renewed is not JSON");
 
         assert!(
             refused
@@ -1909,8 +1980,14 @@ mod tests {
             subscription_type: None,
         };
 
-        let refused = credential_after_rotation(&broken, "sk-ant-oat01-new", None, None, "2.1.221")
-            .expect_err("there is no block to write into");
+        let refused = credential_after_rotation(
+            &broken,
+            "sk-ant-oat01-new",
+            None,
+            None,
+            &version_under_test(),
+        )
+        .expect_err("there is no block to write into");
 
         assert!(
             refused

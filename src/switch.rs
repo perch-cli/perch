@@ -24,7 +24,7 @@ use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::host::{self, Host};
 use crate::lock;
-use crate::probe::{self, Credential, Store};
+use crate::probe::{self, Credential, Installed, Store};
 use crate::profile;
 use crate::registry::{self, Account, Quarantine, Registry};
 
@@ -186,7 +186,7 @@ fn record_active(
 /// prevent. Once the locks are held, nothing can change the answer, which is
 /// the only condition under which asking is worth anything.
 struct Prepared {
-    version: String,
+    installed: Installed,
     store: Store,
     credential: Credential,
     /// The `oauthAccount` block to write, ready to splice in.
@@ -212,10 +212,11 @@ struct Prepared {
 pub fn perform(
     host: &dyn Host,
     perch: &mut lock::Held<'_>,
+    installed: &Installed,
     incoming: &Account,
     outgoing: Option<&Account>,
 ) -> Landing {
-    let (version, store) = match ground(host) {
+    let store = match registry::the_default_profile(host) {
         Ok(ground) => ground,
         // Nothing has been written and nothing can have moved, so this is a
         // Landing that did not land — the same shape, so that the one way out
@@ -231,7 +232,7 @@ pub fn perform(
 
     let mut incoming_is_live = false;
     let switched: Result<Captured> = lock::under(host, probe::locks_for(&store), |held| {
-        let prepared = prepare(host, incoming, outgoing, version, store)?;
+        let prepared = prepare(host, incoming, outgoing, installed.clone(), store)?;
 
         // Said between every step rather than only after the writes. `prepare`
         // reads a Credential and `capture` reads and writes one, and a keychain
@@ -297,7 +298,7 @@ pub fn make_live(
     account: &Account,
     whose: &str,
 ) -> std::result::Result<(), NotLanded> {
-    let (version, store) = ground(host).map_err(|error| NotLanded {
+    let (installed, store) = ground(host).map_err(|error| NotLanded {
         error,
         is_live: false,
     })?;
@@ -315,9 +316,9 @@ pub fn make_live(
         // The Default Profile alone. The Account's own Profile is only read
         // here, and reading a Credential takes nothing away from the session
         // using it (ADR 0027).
-        refuse_if_live_in(host, &store.config_dir, whose, &version)?;
+        refuse_if_live_in(host, &store.config_dir, whose, &installed)?;
 
-        let prepared = prepare(host, account, None, version, store)?;
+        let prepared = prepare(host, account, None, installed, store)?;
 
         held.renew();
         perch.renew();
@@ -359,10 +360,9 @@ pub struct NotLanded {
 /// and `perch switch <that account>` is exactly the command that would put it
 /// back. It is the same shape of half-state as the interrupted Switch, reached
 /// from the other side, and it wants the same answer.
-pub fn already_landed(host: &dyn Host, account: &Account) -> Result<bool> {
-    let version = probe::claude_version(host)?;
+pub fn already_landed(host: &dyn Host, installed: &Installed, account: &Account) -> Result<bool> {
     let store = registry::the_default_profile(host)?;
-    let named = probe::read_identity(host, &store, &version)?
+    let named = probe::read_identity(host, &store, installed)?
         .is_some_and(|identity| registry::same_name(&identity.email, account.email()));
 
     // A live store holding bytes that are not a Credential has not landed
@@ -372,7 +372,7 @@ pub fn already_landed(host: &dyn Host, account: &Account) -> Result<bool> {
     // side, and it wants the same answer — so an unreadable store is `false`
     // rather than an error. Propagating it refused every Switch on the machine,
     // including the repair, on the strength of a file it was about to replace.
-    let usable = matches!(probe::read_credential(host, &store, &version), Ok(Some(_)));
+    let usable = matches!(probe::read_credential(host, &store, installed), Ok(Some(_)));
 
     Ok(named && usable)
 }
@@ -380,9 +380,9 @@ pub fn already_landed(host: &dyn Host, account: &Account) -> Result<bool> {
 /// The two things that are true whatever else is: which Claude Code is
 /// installed, and where the Default Profile is. Established before the locks,
 /// because the locks are derived from the second of them.
-fn ground(host: &dyn Host) -> Result<(String, Store)> {
+fn ground(host: &dyn Host) -> Result<(Installed, Store)> {
     Ok((
-        probe::claude_version(host)?,
+        Installed::probed(host)?,
         registry::the_default_profile(host)?,
     ))
 }
@@ -391,7 +391,7 @@ fn prepare(
     host: &dyn Host,
     incoming: &Account,
     outgoing: Option<&Account>,
-    version: String,
+    installed: Installed,
     store: Store,
 ) -> Result<Prepared> {
     // Before anything is written, and only of the Profile that is written to.
@@ -405,7 +405,7 @@ fn prepare(
     // Switch lock each other out for no reason: an Account you are running in
     // one terminal is exactly the Account you would want active in the others.
     if let Some(outgoing) = outgoing {
-        refuse_if_live(host, outgoing, &version)?;
+        refuse_if_live(host, outgoing, &installed)?;
     }
 
     // From whichever of the Profile's two Credential Stores holds one (ADR
@@ -427,12 +427,12 @@ fn prepare(
     let credential = probe::understand_credential(
         held.credential,
         &format!("the Credential Perch holds for {}", incoming.email()),
-        &version,
+        &installed,
     )?;
 
     Ok(Prepared {
         identity_block: identity_block_for(host, incoming)?,
-        version,
+        installed,
         store,
         credential,
     })
@@ -492,7 +492,7 @@ fn capture(
     // incoming Credential over it, and the only good copy was gone. So it is
     // refused: nothing has been written yet, and a Switch that has to be run
     // again after a `chmod` is recoverable where a lost refresh token is not.
-    let live = match probe::read_credential(host, &prepared.store, &prepared.version) {
+    let live = match probe::read_credential(host, &prepared.store, &prepared.installed) {
         Ok(live) => live,
         Err(why @ PerchError::ProbeRefused { .. }) => {
             return Ok(Captured::Unreadable {
@@ -555,7 +555,7 @@ fn capture(
     // this read `CAFÉ@example.com` and `café@example.com` as two different
     // people, declined the Capture, and let the write below destroy the
     // Rotation it had just declined to save.
-    if let Ok(Some(identity)) = probe::read_identity(host, &prepared.store, &prepared.version)
+    if let Ok(Some(identity)) = probe::read_identity(host, &prepared.store, &prepared.installed)
         && !registry::same_name(&identity.email, outgoing.email())
     {
         return Ok(Captured::NotTheirs {
@@ -603,7 +603,7 @@ fn patch_identity(host: &dyn Host, prepared: &Prepared) -> Result<()> {
             &contents,
             &prepared.identity_block,
             file,
-            &prepared.version,
+            &prepared.installed,
         )?,
         // No file at all is a Claude Code that has never been run here. One
         // holding the Account and nothing else is exactly what it would write
@@ -642,20 +642,25 @@ fn identity_block_for(host: &dyn Host, incoming: &Account) -> Result<String> {
 /// watch` asks before it reads every candidate's Utilization, because a Switch
 /// that is going to be refused is a Switch whose candidates never needed
 /// ranking.
-pub fn refuse_if_live(host: &dyn Host, account: &Account, version: &str) -> Result<()> {
+pub fn refuse_if_live(host: &dyn Host, account: &Account, installed: &Installed) -> Result<()> {
     refuse_if_live_in(
         host,
         &account.profile_dir(host)?,
         &format!("{}'s Profile", account.email()),
-        version,
+        installed,
     )
 }
 
 /// The same, of a config directory named rather than derived — the Default
 /// Profile, which belongs to no one Account and is where a repair of the Account
 /// you are on has to land.
-fn refuse_if_live_in(host: &dyn Host, config_dir: &Path, whose: &str, version: &str) -> Result<()> {
-    let running = probe::live_clients(host, config_dir, version)?;
+fn refuse_if_live_in(
+    host: &dyn Host,
+    config_dir: &Path,
+    whose: &str,
+    installed: &Installed,
+) -> Result<()> {
+    let running = probe::live_clients(host, config_dir, installed)?;
     if running.is_empty() {
         return Ok(());
     }
@@ -688,9 +693,9 @@ pub fn refuse_if_live_anywhere(
     host: &dyn Host,
     account: &Account,
     the_default_profile_too: Option<&str>,
-    version: &str,
+    installed: &Installed,
 ) -> Result<()> {
-    refuse_if_live(host, account, version)?;
+    refuse_if_live(host, account, installed)?;
 
     if let Some(whose) = the_default_profile_too {
         // Its Credential is the one a running client is holding, and this would
@@ -700,7 +705,7 @@ pub fn refuse_if_live_anywhere(
             host,
             &registry::the_default_profile(host)?.config_dir,
             whose,
-            version,
+            installed,
         )?;
     }
     Ok(())

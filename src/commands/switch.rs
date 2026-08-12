@@ -19,6 +19,7 @@ use crate::commands::say;
 use crate::cycle::{self, Scope};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::probe::Installed;
 use crate::registry::{Account, Registry};
 use crate::switch::{self, Captured};
 use crate::target::{self, Target};
@@ -46,13 +47,20 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
     let Decision { incoming, caveat } = decide(&registry, args.target.as_deref(), host.now(), out)?;
     let outgoing = registry.active_account().cloned();
 
-    already_there(host, &registry, &incoming)?;
+    // Read once, for the whole command. Both the question below and the Switch
+    // after it name the Claude Code they were reading in anything they refuse
+    // (ADR 0007), and each used to ask it for itself — so one `perch switch`
+    // ran `claude --version` twice, walking `PATH` and spawning a subprocess
+    // each time, for a sentence neither of them usually prints.
+    let installed = Installed::probed(host)?;
+
+    already_there(host, &installed, &registry, &incoming)?;
 
     // Everything the Switch owes the registry — the Quarantine it may have
     // discovered, which Account is active now — is written by `record`, which
     // is the only way to reach what the Switch found. What is left here is
     // saying it.
-    let landing = switch::perform(host, &mut perch, &incoming, outgoing.as_ref());
+    let landing = switch::perform(host, &mut perch, &installed, &incoming, outgoing.as_ref());
     let captured = landing.record(host, &mut perch, &mut registry)?;
 
     report(out, &registry, &incoming, &captured, host.now())?;
@@ -154,11 +162,16 @@ fn leaving(registry: &Registry) -> Result<&Account> {
 /// between writing the Credential and patching the Identity is recorded as
 /// active while Claude Code still names somebody else, and running the same
 /// command again is how that is repaired.
-fn already_there(host: &dyn Host, registry: &Registry, incoming: &Account) -> Result<()> {
+fn already_there(
+    host: &dyn Host,
+    installed: &Installed,
+    registry: &Registry,
+    incoming: &Account,
+) -> Result<()> {
     if registry.active.as_deref() != Some(incoming.email()) {
         return Ok(());
     }
-    if !switch::already_landed(host, incoming)? {
+    if !switch::already_landed(host, installed, incoming)? {
         return Ok(());
     }
 

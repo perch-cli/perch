@@ -512,7 +512,8 @@ fn act(
     // and then met the same failure in the Switch below, which is the one thing
     // the ask above exists to prevent: the allowance is gone by the time the
     // round finds out it was never going to move.
-    match switch::refuse_if_live(host, &outgoing, &probe::claude_version(host)?) {
+    let installed = probe::Installed::probed(host)?;
+    match switch::refuse_if_live(host, &outgoing, &installed) {
         Ok(()) => {}
         Err(refused @ PerchError::ProfileLive(_)) => {
             return Ok(Outcome::Refused {
@@ -571,7 +572,7 @@ fn act(
         Err(error) => return Err(error),
     };
 
-    let landing = switch::perform(host, perch, &choice.account, Some(&outgoing));
+    let landing = switch::perform(host, perch, &installed, &choice.account, Some(&outgoing));
 
     // Only a Switch that happened starts a cooldown. A round that was refused
     // or found nowhere to go has changed nothing, and making it wait would be

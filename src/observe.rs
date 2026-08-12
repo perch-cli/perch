@@ -30,7 +30,7 @@ use crate::commands::say;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::lock::{self, Held};
-use crate::probe::{self, Credential, Store};
+use crate::probe::{self, Credential, Installed, Store};
 use crate::profile;
 use crate::registry::{self, Account, CachedUtilization, Quarantine, Registry};
 
@@ -260,10 +260,10 @@ fn observe(host: &dyn Host, registry: &Registry, account: &Account) -> Step<Quot
         return Err(Outcome::Quarantined { why, detail: None });
     }
 
-    let version = probe::claude_version(host)?;
+    let installed = Installed::probed(host)?;
     let asked = holding(host, registry, account)?;
-    let token = usable_token(host, &asked, &version).map_err(|outcome| {
-        only_off_a_credential_that_is_theirs(host, outcome, &asked, account, &version)
+    let token = usable_token(host, &asked, &installed).map_err(|outcome| {
+        only_off_a_credential_that_is_theirs(host, outcome, &asked, account, &installed)
     })?;
     confirm(host, &token, account)?;
     let read = anthropic::utilization(host, &token);
@@ -292,12 +292,12 @@ fn only_off_a_credential_that_is_theirs(
     outcome: Outcome,
     asked: &Asked,
     account: &Account,
-    version: &str,
+    installed: &Installed,
 ) -> Outcome {
     let Outcome::Quarantined { why, detail } = &outcome else {
         return outcome;
     };
-    if asked.its_own_profile || names(host, &asked.store, account, version) {
+    if asked.its_own_profile || names(host, &asked.store, account, installed) {
         return outcome;
     }
 
@@ -318,8 +318,8 @@ fn only_off_a_credential_that_is_theirs(
 }
 
 /// Whether a store's Identity names this Account.
-fn names(host: &dyn Host, store: &Store, account: &Account, version: &str) -> bool {
-    probe::read_identity(host, store, version)
+fn names(host: &dyn Host, store: &Store, account: &Account, installed: &Installed) -> bool {
+    probe::read_identity(host, store, installed)
         .ok()
         .flatten()
         .is_some_and(|identity| registry::same_name(&identity.email, account.email()))
@@ -375,8 +375,8 @@ fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<As
 
 /// An access token that can still be asked a question, renewing the Credential
 /// when the one there is has run out.
-fn usable_token(host: &dyn Host, asked: &Asked, version: &str) -> Step<String> {
-    let credential = credential_in(host, asked, version)?;
+fn usable_token(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<String> {
+    let credential = credential_in(host, asked, installed)?;
     if credential.usable_at(host.now()) {
         return Ok(credential.access_token);
     }
@@ -384,8 +384,8 @@ fn usable_token(host: &dyn Host, asked: &Asked, version: &str) -> Step<String> {
     // Asked before the locks are taken, so an Account that was never going to
     // be renewed says so without queueing behind anything, and asked again
     // under them, where the answer is the one that counts.
-    refuse_if_live(host, asked, version)?;
-    renew_under_the_lock(host, asked, version)
+    refuse_if_live(host, asked, installed)?;
+    renew_under_the_lock(host, asked, installed)
 }
 
 /// Refuses to renew a Credential something else is holding (ADR 0005).
@@ -395,10 +395,10 @@ fn usable_token(host: &dyn Host, asked: &Asked, version: &str) -> Step<String> {
 /// silently, mid-task. Asked of every directory that Credential could be in use
 /// from rather than only the one being written, because a Rotation kills every
 /// copy of it at once.
-fn refuse_if_live(host: &dyn Host, asked: &Asked, version: &str) -> Step<()> {
+fn refuse_if_live(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<()> {
     let mut running = Vec::new();
     for config_dir in &asked.in_use_from {
-        running.extend(probe::live_clients(host, config_dir, version)?);
+        running.extend(probe::live_clients(host, config_dir, installed)?);
     }
     if running.is_empty() {
         return Ok(());
@@ -420,8 +420,8 @@ fn refuse_if_live(host: &dyn Host, asked: &Asked, version: &str) -> Step<()> {
 /// answerable again. The Default Profile holding nothing is not terminal at all
 /// — it is a Claude Code that has been logged out, and the Account's own copy is
 /// still there to switch back to.
-fn credential_in(host: &dyn Host, asked: &Asked, version: &str) -> Step<Credential> {
-    probe::read_credential(host, &asked.store, version)?.ok_or_else(|| {
+fn credential_in(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<Credential> {
+    probe::read_credential(host, &asked.store, installed)?.ok_or_else(|| {
         if asked.its_own_profile {
             Outcome::Quarantined {
                 why: Quarantine::NoCredential,
@@ -443,13 +443,13 @@ fn credential_in(host: &dyn Host, asked: &Asked, version: &str) -> Step<Credenti
 /// Under Claude Code's own locks, in Claude Code's own order (ADR 0006), with
 /// Claude Code's own double-checked re-read: whoever was holding the lock while
 /// Perch waited for it may have renewed the very Credential Perch was about to.
-fn renew_under_the_lock(host: &dyn Host, asked: &Asked, version: &str) -> Step<String> {
+fn renew_under_the_lock(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<String> {
     let store = &asked.store;
     lock::under(host, probe::locks_for(store), |held| {
         // Both of the questions asked before the locks were taken, asked again
         // now that nothing can change the answer underneath Perch.
-        refuse_if_live(host, asked, version)?;
-        let credential = credential_in(host, asked, version)?;
+        refuse_if_live(host, asked, installed)?;
+        let credential = credential_in(host, asked, installed)?;
         if credential.usable_at(host.now()) {
             return Ok(credential.access_token);
         }
@@ -484,7 +484,7 @@ fn renew_under_the_lock(host: &dyn Host, asked: &Asked, version: &str) -> Step<S
             &fresh.access_token,
             fresh.refresh_token.as_deref(),
             fresh.expires_at,
-            version,
+            installed,
         )?;
         // Only where Anthropic actually handed a new refresh token over is a
         // failed write unrecoverable. A Renewal that Rotated nothing leaves the

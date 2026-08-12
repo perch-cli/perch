@@ -581,8 +581,12 @@ fn a_quarantined_account_is_refused_whatever_is_being_launched() {
 
 /// The processes Perch would say are running against a Profile right now.
 fn live_against(host: &FakeHost, email: &str) -> Vec<u32> {
-    perch::probe::live_clients(host, &profile_of(host, email), CLAUDE_VERSION)
-        .expect("every marker here can be corroborated or dismissed")
+    perch::probe::live_clients(
+        host,
+        &profile_of(host, email),
+        &perch::probe::Installed::unknown(CLAUDE_VERSION),
+    )
+    .expect("every marker here can be corroborated or dismissed")
 }
 
 /// A Profile with a Run against it is a Live Profile, and stops being one when

@@ -373,7 +373,7 @@ fn utilization_for_a_live_account_is_read_without_a_renewal() {
         perch::probe::live_clients(
             &host,
             &perch::registry::profile_dir_for(&host, SECOND_EMAIL).expect("home is known"),
-            CLAUDE_VERSION
+            &perch::probe::Installed::unknown(CLAUDE_VERSION),
         )
         .expect("the marker corroborates"),
         vec![THIS_PROCESS],

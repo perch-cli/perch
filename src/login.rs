@@ -17,7 +17,7 @@ use std::io::Write;
 use crate::commands::say;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::probe::{self, Credential, Identity};
+use crate::probe::{self, Credential, Identity, Installed};
 use crate::profile;
 use crate::registry;
 
@@ -42,7 +42,7 @@ pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Pr
     // three are derivations rather than effects: which Claude Code is
     // installed, where to find it, and what a Profile at that path would be
     // called.
-    let version = probe::claude_version(host)?;
+    let installed = Installed::probed(host)?;
     let claude = probe::claude_bin(host)?;
     let dir = registry::pending_login_dir(host, host.now())?;
     let store = probe::store_for_profile(host, &dir)?;
@@ -75,7 +75,7 @@ pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Pr
     // no Credential has been written yet — but `reap_abandoned` exists because
     // they accumulate, and one left by a failure is one it will not tidy for
     // thirty minutes.
-    let produced = run_the_login(host, out, purpose, &claude, &dir, &store, &version);
+    let produced = run_the_login(host, out, purpose, &claude, &dir, &store, &installed);
     profile::discard(host, &store);
     produced
 }
@@ -88,7 +88,7 @@ fn run_the_login(
     claude: &std::path::Path,
     dir: &std::path::Path,
     store: &probe::Store,
-    version: &str,
+    installed: &Installed,
 ) -> Result<Produced> {
     say(out, purpose)?;
     say(
@@ -104,18 +104,18 @@ fn run_the_login(
         )
         .map_err(|err| PerchError::Other(format!("could not launch a login: {err}")))?;
 
-    what_the_login_left(host, store, version, status)
+    what_the_login_left(host, store, installed, status)
 }
 
 /// Reads the Account the login produced, or says why there is not one.
 fn what_the_login_left(
     host: &dyn Host,
     store: &probe::Store,
-    version: &str,
+    installed: &Installed,
     status: i32,
 ) -> Result<Produced> {
-    let credential = probe::read_credential(host, store, version)?;
-    let identity = probe::read_identity(host, store, version)?;
+    let credential = probe::read_credential(host, store, installed)?;
+    let identity = probe::read_identity(host, store, installed)?;
 
     let (credential, identity) = match (credential, identity) {
         (Some(credential), Some(identity)) => (credential, identity),

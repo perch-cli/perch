@@ -26,7 +26,7 @@ use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::lock::Held;
 use crate::login::{self, Produced};
-use crate::probe::{self, Identity};
+use crate::probe::{Identity, Installed};
 use crate::profile;
 use crate::registry::{self, Account, Registry};
 use crate::switch;
@@ -50,9 +50,9 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
 
     // Asked before the login rather than after: a Profile Perch may not write
     // to is one no browser round trip was going to repair (ADR 0005).
-    let version = probe::claude_version(host)?;
+    let installed = Installed::probed(host)?;
     let repairing_the_account_you_are_on = registry.active.as_deref() == Some(account.email());
-    refuse_while_anything_is_running(host, &account, repairing_the_account_you_are_on, &version)?;
+    refuse_while_anything_is_running(host, &account, repairing_the_account_you_are_on, &installed)?;
 
     let produced = login::perform(
         host,
@@ -86,7 +86,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // now: another terminal may have switched away during the login, and then
     // this repair lands in the Account's own Profile alone.
     let repairing_the_account_you_are_on = registry.active.as_deref() == Some(account.email());
-    refuse_while_anything_is_running(host, &account, repairing_the_account_you_are_on, &version)?;
+    refuse_while_anything_is_running(host, &account, repairing_the_account_you_are_on, &installed)?;
 
     settle_into_its_own_profile(host, &account, &produced)?;
 
@@ -167,7 +167,7 @@ fn refuse_while_anything_is_running(
     host: &dyn Host,
     account: &Account,
     repairing_the_account_you_are_on: bool,
-    version: &str,
+    installed: &Installed,
 ) -> Result<()> {
     switch::refuse_if_live_anywhere(
         host,
@@ -176,7 +176,7 @@ fn refuse_while_anything_is_running(
             "the Default Profile, which is where this Account's repaired \
              Credential has to land",
         ),
-        version,
+        installed,
     )
 }
 

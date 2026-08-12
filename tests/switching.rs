@@ -147,6 +147,29 @@ fn session_marker(pid: u32, began: chrono::DateTime<chrono::Utc>) -> String {
     )
 }
 
+/// One `perch switch` asks the installed Claude Code its version once.
+///
+/// Every refusal the probe raises names the Claude Code it was reading (ADR
+/// 0007), and both halves of a Switch — the question of whether it has already
+/// landed, and the Switch itself — used to read it for themselves. That is a
+/// `PATH` walk and a subprocess each, twice per command, for a sentence neither
+/// of them usually prints.
+#[test]
+fn a_switch_asks_which_claude_code_is_installed_once() {
+    let host = machine_with_two_accounts();
+    // The fixture logs two Accounts in, and each login asks for itself.
+    host.forget_effects();
+
+    run_switch(&host, SECOND_EMAIL).0.expect("it switches");
+
+    let asked = host
+        .effects()
+        .iter()
+        .filter(|effect| matches!(effect, Effect::Exec { args, .. } if args == &["--version"]))
+        .count();
+    assert_eq!(asked, 1, "{:?}", host.effects());
+}
+
 #[test]
 fn switching_by_email_makes_that_account_the_one_every_client_reads() {
     let host = machine_with_two_accounts();

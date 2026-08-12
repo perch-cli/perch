@@ -322,8 +322,12 @@ fn every_session_marker_claude_code_has_left_names_a_process() {
         markers.len()
     );
 
-    for pid in probe::live_clients(&host, &store.config_dir, "contract")
-        .expect("every marker here can be corroborated or dismissed")
+    for pid in probe::live_clients(
+        &host,
+        &store.config_dir,
+        &probe::Installed::unknown("contract"),
+    )
+    .expect("every marker here can be corroborated or dismissed")
     {
         assert!(
             host.process_alive(pid),
