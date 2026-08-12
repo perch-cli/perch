@@ -225,9 +225,7 @@ pub fn refuse_a_quarantined_account(
     email: &str,
     consequence: &str,
 ) -> Result<()> {
-    let account = registry
-        .account(email)
-        .expect("resolution named an Account Perch holds");
+    let account = registry.held(email)?;
     match account.quarantine {
         None => Ok(()),
         Some(why) => Err(why.refusal(&registry.named_for_the_user(email), email, consequence)),

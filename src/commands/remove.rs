@@ -68,10 +68,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
 
     let found = target::resolve_account(&registry, &args.target)?;
     say(out, &found.matched)?;
-    let account = registry
-        .account(&found.email)
-        .cloned()
-        .expect("resolution named an Account Perch holds");
+    let account = registry.held(&found.email)?.clone();
 
     // Before the question rather than after: an Account Perch may not touch is
     // not one to ask about giving up (ADR 0005).

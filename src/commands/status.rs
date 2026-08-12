@@ -72,9 +72,7 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
     match scope {
         Some(scope) => list::render(host, out, &registry, scope, now, args.json, &report),
         None => {
-            let account = registry
-                .account(&active)
-                .expect("the active Account is one Perch holds");
+            let account = registry.held(&active)?;
             if args.json {
                 render_json(host, out, &registry, account, now, &report)
             } else {

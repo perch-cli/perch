@@ -82,10 +82,7 @@ fn decide(
             match found {
                 Target::Group { name } => Scope::Group(name),
                 Target::Alias { email, .. } | Target::Account { email } => {
-                    let incoming = registry
-                        .account(&email)
-                        .cloned()
-                        .expect("resolution named an Account Perch holds");
+                    let incoming = registry.held(&email)?.clone();
                     refuse_a_quarantined_account(registry, &incoming)?;
                     return Ok(Decision {
                         incoming,

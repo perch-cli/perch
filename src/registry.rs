@@ -1024,6 +1024,31 @@ impl Registry {
             .find(|account| same_name(account.email(), email))
     }
 
+    /// The same, where the Account has to be there.
+    ///
+    /// Eight call sites reached for [`Self::account`] behind an `expect` saying
+    /// resolution had named an Account Perch holds — the proof dropped at the
+    /// seam and bought again, eight times, as an assertion. What they are
+    /// asserting is real and [`validate`] owns it: an Alias or an `active`
+    /// naming an Account that is not there is refused on the way in and, since
+    /// `save` validates too, on the way out.
+    ///
+    /// So this is the same defence in depth `save` keeps: the state cannot
+    /// happen, and if it does the answer is a refusal naming what could not be
+    /// found rather than a panic. Nothing a person can act on — which is why it
+    /// says so — but a wedged machine is worse than a bad sentence.
+    pub fn held(&self, email: &str) -> Result<&Account> {
+        self.account(email).ok_or_else(|| no_such_account(email))
+    }
+
+    /// [`Self::held`], for the callers that go on to change what they find.
+    pub fn held_mut(&mut self, email: &str) -> Result<&mut Account> {
+        match self.account_mut(email) {
+            Some(account) => Ok(account),
+            None => Err(no_such_account(email)),
+        }
+    }
+
     /// The Alias an Account answers to, if it has been given one.
     pub fn alias_of(&self, email: &str) -> Option<&str> {
         self.aliases
@@ -1469,6 +1494,21 @@ pub fn the_file_to_edit(path: &Path) -> String {
          ones that would set it. Edit the value there.",
         path.display(),
     )
+}
+
+/// The refusal for an Account that was named and is not there.
+///
+/// Unreachable by construction — [`validate`] refuses every registry that could
+/// produce it, on the way in and on the way out — so this is worded as what it
+/// is rather than as something to go and fix.
+fn no_such_account(email: &str) -> PerchError {
+    PerchError::Other(format!(
+        "Perch was asked for {email}, which it does not hold, by something that \
+         had already established it did.\n\
+         {}\n\
+         Nothing was changed.",
+        crate::report::this_is_a_bug(),
+    ))
 }
 
 /// Everything a registry has to be true of before any command acts on it.
@@ -2024,6 +2064,33 @@ mod tests {
         registry.forget("CAFÉ@example.com");
         assert!(registry.accounts.is_empty(), "and it is the one that goes");
         assert!(registry.aliases.is_empty(), "with the name it answered to");
+    }
+
+    /// An Account that was named and is not there is a refusal, not a panic.
+    ///
+    /// Eight call sites asserted this with `expect`, each having thrown away
+    /// the proof resolution gave them and bought it back as a lookup. The state
+    /// cannot happen — `validate` refuses every registry that could produce it,
+    /// on the way in and, since `save` validates too, on the way out — which is
+    /// exactly why the answer to it happening anyway should be a machine that
+    /// still works.
+    #[test]
+    fn an_account_that_was_named_and_is_not_there_is_refused_rather_than_panicked_on() {
+        let registry = Registry::default();
+
+        let refused = registry
+            .held("nobody@example.com")
+            .expect_err("Perch does not hold it");
+
+        assert!(
+            refused.to_string().contains("nobody@example.com"),
+            "{refused}"
+        );
+        assert!(
+            refused.to_string().contains("bug in Perch"),
+            "whose fault it is, because there is nothing for a person to do: {refused}"
+        );
+        assert_eq!(refused.exit_code(), crate::error::EXIT_GENERAL);
     }
 
     /// The pointer the Alias check was written for, asked of the other one.

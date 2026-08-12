@@ -174,9 +174,7 @@ fn move_account(registry: &mut Registry, target: &AccountTarget, group: &str) ->
         return Err(no_such_group(registry, group));
     };
 
-    let account = registry
-        .account_mut(&email)
-        .expect("the Account was just resolved");
+    let account = registry.held_mut(&email)?;
     let previous = account.group.take();
     account.group = destination.clone();
 
