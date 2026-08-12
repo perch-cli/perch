@@ -70,7 +70,7 @@ fn the_marker_a_run_writes_corroborates_itself_on_this_machine() {
     let me = host.process_id();
     assert_eq!(me, std::process::id());
     let marker = probe::session_marker_at(&dir, me);
-    host.write_file(&marker, &probe::session_marker(me, host.now()))
+    host.create_file_with_mode(&marker, &probe::session_marker(me, host.now()), 0o600)
         .expect("the marker is written");
 
     let live = probe::live_clients(&host, &dir, "contract")

@@ -615,7 +615,7 @@ fn the_active_accounts_credential_is_the_live_one_rather_than_the_copy_in_its_pr
 fn a_live_credential_belonging_to_somebody_else_is_not_exported_as_the_active_accounts() {
     let host = machine_with_three_accounts();
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
-    host.write_file(
+    host.write_private_file(
         std::path::Path::new(IDENTITY_PATH),
         &SECOND_IDENTITY_FILE.replace(SECOND_EMAIL, "stranger@example.com"),
     )

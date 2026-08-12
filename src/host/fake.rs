@@ -930,21 +930,6 @@ impl FakeHost {
         Ok(at)
     }
 
-    /// The same for a write. A link whose target has gone is still written
-    /// through: `fs::write` creates the file the link names.
-    fn written_through_links(&self, path: &Path) -> Result<PathBuf, HostError> {
-        let at = self
-            .link_at(path)
-            .map(|(_, target)| target)
-            .unwrap_or_else(|| path.to_path_buf());
-        for named in [path, at.as_path()] {
-            if let Some(detail) = self.unwritable.borrow().get(named) {
-                return Err(HostError::Other(detail.clone()));
-            }
-        }
-        Ok(at)
-    }
-
     fn record(&self, effect: Effect) {
         self.effects.borrow_mut().push(effect);
     }
@@ -1082,19 +1067,6 @@ impl Host for FakeHost {
             .ok_or_else(|| HostError::NotFound {
                 path: path.to_path_buf(),
             })
-    }
-
-    /// Through a link, as `fs::write` writes through one — which is what makes
-    /// a `~/.claude.json` managed by stow or chezmoi stay managed.
-    fn write_file(&self, path: &Path, contents: &str) -> Result<(), HostError> {
-        self.record(Effect::WroteFile(path.to_path_buf()));
-        let at = self.written_through_links(path)?;
-        self.note_directories_of(&at);
-        self.files
-            .borrow_mut()
-            .insert(at.clone(), contents.to_string());
-        self.mark_written(&at);
-        Ok(())
     }
 
     /// Records the mode the file was *created* with, which is the whole point

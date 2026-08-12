@@ -273,7 +273,6 @@ pub trait Host {
     // ---- filesystem -----------------------------------------------------
 
     fn read_file(&self, path: &Path) -> Result<String, HostError>;
-    fn write_file(&self, path: &Path, contents: &str) -> Result<(), HostError>;
 
     /// Writes a file created with exactly this mode, rather than with whatever
     /// the process umask happens to be.
