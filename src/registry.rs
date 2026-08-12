@@ -245,6 +245,12 @@ pub const MAX_WATCHER_COOLDOWN_MINUTES: u32 = 7 * 24 * 60;
 /// the range check, and again in the step range the TUI's arrow keys walk — so
 /// what `perch config set` accepts, what a hand-edited registry is refused for,
 /// and what the panel will let you reach were three statements of one number.
+///
+/// Not the bound on a Utilization figure, which `validate` checks separately
+/// and `anthropic::understand` clamps to. That one is what a *reading* may be;
+/// this is what a Setting may be *set to*, which is a decision — a Perch that
+/// declined to let the watcher act above ninety would move this and must not
+/// move that. They are the same number today and two facts always.
 pub const MAX_PERCENTAGE: u8 = 100;
 
 /// What a percentage accepts, said once so that the refusal a mistyped `perch
