@@ -568,10 +568,21 @@ impl FakeHost {
     }
 
     pub fn with_exec(self, program: &str, args: &[&str], execution: Execution) -> Self {
+        self.set_exec(program, args, execution);
+        self
+    }
+
+    /// The same, for a world being arranged from inside a [`Login`], where the
+    /// fake is already borrowed and cannot be consumed.
+    ///
+    /// What a login *changes* is read back by a later command, so a fake where
+    /// the two could not disagree could not model a login at all: `perch relogin`
+    /// clears a Quarantine, and the `perch list --json` after it has to say
+    /// something the one before it did not.
+    pub fn set_exec(&self, program: &str, args: &[&str], execution: Execution) {
         self.executions
             .borrow_mut()
             .insert(exec_key(program, args), execution);
-        self
     }
 
     /// What an interactive login leaves behind in the directory it was pointed

@@ -12,6 +12,11 @@
 //! at a time and the suite never pauses — the human watching is the pause — so
 //! there is nothing for a test harness to interleave.
 //!
+//! Every run opens with a Repair, which walks a browser login for each Account
+//! another machine's run left Quarantined. On a machine with nothing Quarantined
+//! it passes in a line, and on a runner holding no Accounts there is nothing to
+//! repair — which is why this stays green in CI without a terminal.
+//!
 //! Held back by `required-features = ["dogfood"]`, so `cargo test` does not
 //! reach it, and it refuses outright on a machine nothing has marked:
 //!

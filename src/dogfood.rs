@@ -11,6 +11,11 @@
 //!
 //! Held back by the `dogfood` feature, for the reason the fakes are: none of it
 //! belongs in the binary somebody downloads.
+//!
+//! Every run opens with a [`repair`], before any phase acts: there are more
+//! machines than Accounts, so a Quarantine yesterday's run elsewhere caused is
+//! the ordinary starting state rather than an ambush. It cannot fail a run — all
+//! it changes is what the machine can prove afterwards.
 
 pub mod phases;
 
@@ -181,9 +186,10 @@ pub struct Preflight {
     /// machines than Accounts means yesterday's run elsewhere may have retired
     /// what this one holds — which is why Repair is phase zero (ADR 0037).
     ///
-    /// Reported and not yet acted on: the Repair itself is #125. Until it lands,
-    /// [`Needs::accounts`] counts a Quarantined Account as held, which is
-    /// harmless only for as long as no phase reads a Credential.
+    /// Not counted as held for the purposes of [`Needs::accounts`]: a retired
+    /// token is not something a phase can prove anything with, and a machine
+    /// that can prove nothing reporting that it can prove everything is the
+    /// failure the figure was added to prevent.
     pub quarantined: Vec<String>,
     /// The Account that is active, if one is.
     ///
@@ -201,7 +207,13 @@ pub struct Preflight {
 /// of it runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Needs {
-    /// How many Accounts Perch must hold, at least.
+    /// How many *usable* Accounts Perch must hold, at least — held, and not
+    /// Quarantined.
+    ///
+    /// Held alone was the wrong count: an Account whose refresh token another
+    /// machine's run retired is one a phase would run against and then report
+    /// Perch as broken over. The Repair clears what it can before this is
+    /// counted, and what it could not clear is what the skip line names.
     pub accounts: usize,
     /// A Claude Code to launch.
     pub client: bool,
@@ -220,7 +232,8 @@ impl Needs {
         active: false,
     };
 
-    /// A phase that reads what Perch holds, and so needs it to hold something.
+    /// A phase that reads what Perch holds, and so needs it to hold something
+    /// it can still use.
     pub const AN_ACCOUNT: Needs = Needs {
         accounts: 1,
         ..Needs::NOTHING
@@ -279,6 +292,20 @@ impl Preflight {
         Ok(())
     }
 
+    /// The Accounts a phase could actually prove something with: held here, and
+    /// not Quarantined.
+    ///
+    /// The distinction the Repair exists for. A Quarantined Account is one whose
+    /// refresh token something retired — usually this suite, running on another
+    /// machine yesterday — so a phase pointed at one proves nothing and reports
+    /// Perch as broken while doing it.
+    pub fn usable(&self) -> Vec<&String> {
+        self.accounts
+            .iter()
+            .filter(|email| !self.quarantined.contains(email))
+            .collect()
+    }
+
     /// How many of these phases this machine can prove, as it stands.
     pub fn provable(&self, phases: &[Phase]) -> usize {
         phases
@@ -287,18 +314,37 @@ impl Preflight {
             .count()
     }
 
+    /// The figure, and the whole reason the Preflight is said out loud.
+    pub fn figure(&self, phases: &[Phase]) -> String {
+        self.figure_said("", phases)
+    }
+
+    /// The same, for the machine the Repair left behind.
+    ///
+    /// Both are said in a run, because a Repair that changed nothing and a
+    /// Repair that changed everything must not read alike — and "now" is the
+    /// whole of what tells the two figures apart.
+    pub fn figure_after_a_repair(&self, phases: &[Phase]) -> String {
+        self.figure_said("now ", phases)
+    }
+
+    fn figure_said(&self, now: &str, phases: &[Phase]) -> String {
+        format!(
+            "This machine can {now}prove {} of {}",
+            self.provable(phases),
+            counted(phases.len())
+        )
+    }
+
     /// The first thing this machine has not got that a phase needs, said as the
     /// line the skip is printed with — or nothing, if it can prove it.
     ///
     /// First rather than all of them: a skip line is read to find out what to
     /// fix next, and a machine missing three things is fixed one at a time.
     pub fn unmet(&self, needs: &Needs) -> Option<String> {
-        if self.accounts.len() < needs.accounts {
-            return Some(format!(
-                "Perch holds {} here and this phase needs {}",
-                crate::commands::accounts(self.accounts.len()),
-                crate::commands::accounts(needs.accounts)
-            ));
+        let usable = self.usable();
+        if usable.len() < needs.accounts {
+            return Some(self.too_few_usable(usable.len(), needs.accounts));
         }
         if needs.client
             && let Client::Absent(why) = &self.client
@@ -310,12 +356,47 @@ impl Preflight {
         {
             return Some(format!("Anthropic did not answer: {why}"));
         }
-        if needs.active && self.active.is_none() {
-            return Some(
-                "no Account is active here, so there is no Account to be about".to_string(),
-            );
+        if needs.active {
+            let Some(active) = &self.active else {
+                return Some(
+                    "no Account is active here, so there is no Account to be about".to_string(),
+                );
+            };
+            // The Account somebody is on can be the Quarantined one, and then
+            // `perch status` is about an Account nothing will work as. Its own
+            // reason rather than the count above, which this machine may well
+            // satisfy with a different Account entirely.
+            if self.quarantined.contains(active) {
+                return Some(format!(
+                    "{active} is the Account this machine is on, and it is still Quarantined"
+                ));
+            }
         }
         None
+    }
+
+    /// Why a phase needing usable Accounts cannot run here.
+    ///
+    /// Two readings, because one sentence covering both lies in the ordinary
+    /// case: with nothing Quarantined, "holds" and "can use" are the same number
+    /// and the shorter line is the honest one. With a Quarantine, the difference
+    /// between them *is* the answer — a skip line saying Perch holds nothing,
+    /// two lines under a Preflight that named two Accounts, sends somebody
+    /// looking for a bug in the registry.
+    fn too_few_usable(&self, usable: usize, needed: usize) -> String {
+        let needed = crate::commands::accounts(needed);
+        if self.quarantined.is_empty() {
+            return format!(
+                "Perch holds {} here and this phase needs {needed}",
+                crate::commands::accounts(usable)
+            );
+        }
+        format!(
+            "Perch can use {usable} of the {} it holds here and this phase needs \
+             {needed} — {} still Quarantined",
+            crate::commands::accounts(self.accounts.len()),
+            or_none(&self.quarantined)
+        )
     }
 
     /// The word a report file is named after, so a directory of them can be
@@ -355,12 +436,7 @@ impl Preflight {
             // state, and Repair is phase zero because of it (ADR 0037).
             format!("Quarantined: {}", or_none(&self.quarantined)),
             format!("Active: {}", self.active.as_deref().unwrap_or("none")),
-            // The figure, and the whole reason the Preflight is said out loud.
-            format!(
-                "This machine can prove {} of {}",
-                self.provable(phases),
-                counted(phases.len())
-            ),
+            self.figure(phases),
         ]
     }
 }
@@ -503,6 +579,53 @@ pub enum Fault {
     Upstream,
 }
 
+impl Fault {
+    /// The sentence that tells the reader who has work to do.
+    ///
+    /// One string, because a stopped phase and a Repair that could not clear a
+    /// Quarantine owe the reader the same answer, and two spellings of it would
+    /// eventually come to mean two different things.
+    pub fn said(&self) -> &'static str {
+        match self {
+            Fault::Perch => "This is a fault in Perch.",
+            Fault::Upstream => "This is news about something upstream, not a fault in Perch.",
+        }
+    }
+}
+
+/// What a `perch relogin` that did not clear a Quarantine exited with: whose
+/// fault it was, and what that code is Perch's way of refusing.
+///
+/// Read off the exit code, because the Repair hands the terminal to the command
+/// and never sees what it printed. The person watching saw the refusal itself
+/// go by; what this adds is the same thing in a report read a week later, when
+/// a bare `13` says nothing about a browser that was signed in as somebody else.
+///
+/// It is a reading of the code rather than a second opinion about what happened
+/// — the Repair inherits Perch's refusals and does not re-implement them, so
+/// nothing here is checked, only named.
+///
+/// One match for both answers: which of the two a failure is and how it is said
+/// are decided by the same fact, and splitting them is how they come to
+/// disagree. Each arm is a refusal `relogin` makes deliberately and so is news
+/// rather than a defect. Everything else — argv it could not parse, a Cycling
+/// code from a command that never Cycles, its own `Quarantined` refusal over the
+/// one command that ends a Quarantine — is Perch disagreeing with itself, and
+/// that is a bug.
+fn refused_with(status: i32) -> (Fault, &'static str) {
+    use crate::error::*;
+    let news = |said| (Fault::Upstream, said);
+    match status {
+        EXIT_PROBE_REFUSED => news("Claude Code did not report a version"),
+        EXIT_KEYCHAIN_UNAVAILABLE => news("the keychain would not open"),
+        EXIT_NOT_FOUND => news("the login did not complete"),
+        EXIT_CONFLICT => news("that login came back as a different Account"),
+        EXIT_PROFILE_LIVE => news("a client is running against the Profile"),
+        EXIT_HELD => news("another Perch is holding the registry"),
+        _ => (Fault::Perch, "Perch did not say which refusal that is"),
+    }
+}
+
 /// A phase that stopped, and everything the person watching needs.
 ///
 /// It never unwinds itself: on a real machine an unwind can fail too, and a
@@ -552,12 +675,7 @@ impl Setback {
         let mut lines = vec![
             self.because.clone(),
             String::new(),
-            match self.fault {
-                Fault::Perch => "This is a fault in Perch.".to_string(),
-                Fault::Upstream => {
-                    "This is news about something upstream, not a fault in Perch.".to_string()
-                }
-            },
+            self.fault.said().to_string(),
             String::new(),
         ];
 
@@ -570,12 +688,407 @@ impl Setback {
 
         if !self.put_it_back.is_empty() {
             lines.push(String::new());
-            lines.push("What puts it back:".to_string());
-            lines.extend(self.put_it_back.iter().map(|line| format!("  $ {line}")));
+            lines.extend(to_type("What puts it back:", &self.put_it_back));
         }
 
         lines.join("\n")
     }
+}
+
+/// Commands somebody could type, said the same way wherever a run offers them —
+/// a stopped phase's way back, and a Repair's way to finish by hand.
+///
+/// One place, because a run offers these twice and three spellings of one shape
+/// had already grown between two: the heading and the `$` are what somebody
+/// scans for, and they should not move depending on which of the two they are
+/// reading.
+/// What a Repair heads its leftovers with, in one place because the run says it
+/// on the terminal and the report says it again on disk.
+const FINISH_BY_HAND: &str = "What would finish the job by hand:";
+
+fn to_type(heading: &str, commands: &[String]) -> Vec<String> {
+    let mut lines = vec![heading.to_string()];
+    lines.extend(commands.iter().map(|command| format!("  $ {command}")));
+    lines
+}
+
+// ---- phase zero: the Repair ------------------------------------------------
+
+/// How one Quarantined Account the Repair found ended up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ending {
+    /// Perch lists it, and no longer lists it as Quarantined. The login worked.
+    Cleared,
+    /// It is Quarantined still, for this reason — and whether that is Perch's
+    /// to fix or news about something else.
+    StillQuarantined { fault: Fault, why: String },
+    /// Perch does not list the Account at all any more.
+    ///
+    /// Its own ending rather than a [`Ending::Cleared`], which is what reading
+    /// "is it Quarantined?" off a listing alone would have made it: `relogin`
+    /// refuses when the Account was removed while the login was happening, and
+    /// a run recording that as a repair would claim to have proved something
+    /// about an Account that is gone.
+    NoLongerListed,
+}
+
+/// One Quarantined Account, and what opening the run did about it.
+///
+/// Per Account rather than one verdict for the whole Repair: a run against three
+/// Accounts where one login was abandoned has to be legible as exactly that.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Attempt {
+    pub account: String,
+    /// Why it was Quarantined when the Repair found it, as `perch list --json`
+    /// gave the reason.
+    pub was_quarantined_because: String,
+    /// What `perch relogin` exited with, or nothing where it was never launched.
+    pub exited: Option<i32>,
+    pub ended: Ending,
+}
+
+impl Attempt {
+    /// What was wrong with this Account, said before the browser opens.
+    ///
+    /// Somebody about to walk a login is owed what stopped working, and the two
+    /// halves are apart because minutes of browser round trip sit between them:
+    /// this is said going in, [`Attempt::ended_as`] the moment it comes back.
+    pub fn found(&self) -> String {
+        Attempt::what_was_wrong(&self.account, &self.was_quarantined_because)
+    }
+
+    /// The same line before there is an Attempt to hang it on. The Repair says
+    /// what was wrong on the way in and only learns how it ended minutes later,
+    /// so the sentence has to exist without the ending.
+    fn what_was_wrong(account: &str, was_quarantined_because: &str) -> String {
+        format!("{account} was Quarantined: {was_quarantined_because}")
+    }
+
+    /// How it ended.
+    pub fn ended_as(&self) -> String {
+        let ran = match self.exited {
+            Some(status) => format!("`perch relogin {}` exited {status}", self.account),
+            None => "no login was attempted".to_string(),
+        };
+        match &self.ended {
+            Ending::Cleared => format!("{ran} — it is no longer Quarantined"),
+            Ending::StillQuarantined { fault, why } => {
+                format!("{ran} — it is Quarantined still: {why}. {}", fault.said())
+            }
+            Ending::NoLongerListed => format!(
+                "{ran} — Perch does not list it at all any more, so nothing was \
+                 repaired. {}",
+                Fault::Upstream.said()
+            ),
+        }
+    }
+
+    /// Both, for a report read a week later with no run around it.
+    pub fn said(&self) -> [String; 2] {
+        [self.found(), self.ended_as()]
+    }
+}
+
+/// What opening the run came to.
+///
+/// It can never be a [`Setback`]. A Quarantine another machine's run caused is
+/// the ordinary starting state rather than a defect (ADR 0037), so a Repair that
+/// could not clear one records why and the run carries on. The one thing that
+/// changes is what the machine can prove afterwards.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Repair {
+    /// Perch holds nothing here, so there was nothing to repair. A CI runner,
+    /// and the reason a degraded run needs no terminal at all.
+    NothingHeld,
+    /// Everything this machine holds is usable. The ordinary case, and one line.
+    NothingQuarantined,
+    /// The listing could not be read, so the Repair never learned what was
+    /// Quarantined. Recorded rather than raised: failing over a `perch list`
+    /// that does not work is a phase's job, not phase zero's.
+    NotRead(String),
+    /// The Quarantined Accounts, in the order the listing gave them, and what
+    /// came of each.
+    Found(Vec<Attempt>),
+}
+
+impl Repair {
+    /// The whole of what a Repair is written down as.
+    pub fn said(&self) -> Vec<String> {
+        match self {
+            Repair::NothingHeld => {
+                vec!["Perch holds no Accounts here, so there was nothing to repair.".to_string()]
+            }
+            Repair::NothingQuarantined => {
+                vec!["Nothing is Quarantined here, so there was nothing to repair.".to_string()]
+            }
+            Repair::NotRead(why) => vec![format!(
+                "Nothing could be repaired: {why}. {}",
+                Fault::Perch.said()
+            )],
+            Repair::Found(attempts) => attempts.iter().flat_map(Attempt::said).collect(),
+        }
+    }
+
+    /// Every Account the Repair left Quarantined.
+    pub fn left_quarantined(&self) -> Vec<&str> {
+        match self {
+            Repair::Found(attempts) => attempts
+                .iter()
+                .filter(|attempt| matches!(attempt.ended, Ending::StillQuarantined { .. }))
+                .map(|attempt| attempt.account.as_str())
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The commands that would finish the job by hand.
+    ///
+    /// Nothing is unwound, here as everywhere else in the suite: a Repair that
+    /// got halfway leaves the machine where it is, says what is true, and says
+    /// what somebody could type to put the rest right themselves.
+    pub fn finish_by_hand(&self) -> Vec<String> {
+        // A Repair that could not read the listing does not know which Accounts
+        // to name, so it offers the command that would say — leaving somebody
+        // with nothing to type is the one outcome that helps nobody.
+        if let Repair::NotRead(_) = self {
+            return vec!["perch list --json".to_string()];
+        }
+        self.left_quarantined()
+            .iter()
+            .map(|account| format!("perch relogin {account}"))
+            .collect()
+    }
+
+    /// Whether it said itself as it went, one Account at a time.
+    ///
+    /// Only a Repair that found Quarantined Accounts has anything to interleave:
+    /// somebody three browser round trips into a run cannot wait until the end
+    /// to find out which of them failed. The rest are a line, and are said once
+    /// the answer is known.
+    fn said_itself(&self) -> bool {
+        matches!(self, Repair::Found(_))
+    }
+}
+
+/// Phase zero: the Quarantines another machine's run left behind, cleared before
+/// any phase acts (ADR 0037).
+///
+/// It reads `list --json` rather than the registry, unlike the Preflight: the
+/// Repair acts *through* the binary under test, so it should see what that
+/// binary sees. It spends no Utilization — a listing renders from cache and a
+/// browser login is not an API call — and it cannot stop the run.
+///
+/// The terminal goes to `perch relogin`, one Account at a time. Every refusal
+/// that command already makes is inherited rather than pre-empted: it refuses
+/// while a client is running against the Profile, it requires a Claude Code that
+/// reports a version, and it refuses a login that came back as somebody else.
+/// Two implementations of one rule is how they come to disagree.
+pub fn repair(perch: &Perch<'_>, preflight: &Preflight, out: &mut dyn Write) -> Result<Repair> {
+    say(out, "")?;
+    say(out, "Repair")?;
+
+    let repair = what_it_came_to(perch, preflight, out)?;
+
+    if !repair.said_itself() {
+        for line in repair.said() {
+            say(out, &format!("  {line}"))?;
+        }
+    }
+
+    let by_hand = repair.finish_by_hand();
+    if !by_hand.is_empty() {
+        say(out, "")?;
+        for line in to_type(FINISH_BY_HAND, &by_hand) {
+            say(out, &format!("  {line}"))?;
+        }
+    }
+
+    Ok(repair)
+}
+
+fn what_it_came_to(
+    perch: &Perch<'_>,
+    preflight: &Preflight,
+    out: &mut dyn Write,
+) -> Result<Repair> {
+    // Asked of the Preflight rather than of the binary, and it is the one thing
+    // that is: `perch list` refuses on a machine holding nothing, so a Repair
+    // that opened with it would report a machine with nothing to repair as a
+    // machine it could not read. It is also what keeps a CI runner from needing
+    // a terminal.
+    if preflight.accounts.is_empty() {
+        return Ok(Repair::NothingHeld);
+    }
+
+    let listed = match listed_now(perch) {
+        Ok(listed) => listed,
+        Err(setback) => return Ok(Repair::NotRead(setback.because)),
+    };
+    let quarantined: Vec<(String, String)> = listed
+        .into_iter()
+        .filter_map(|(email, why)| Some((email, why?)))
+        .collect();
+    if quarantined.is_empty() {
+        return Ok(Repair::NothingQuarantined);
+    }
+
+    let mut attempts = Vec::new();
+    for (account, was_quarantined_because) in quarantined {
+        // A line between each, because three logins in a row are three browser
+        // round trips and somebody has to be able to tell which one they are on.
+        say(out, "")?;
+        let attempt = repair_one(
+            perch,
+            &preflight.client,
+            account,
+            was_quarantined_because,
+            out,
+        )?;
+        say(out, &format!("  {}", attempt.ended_as()))?;
+        attempts.push(attempt);
+    }
+    Ok(Repair::Found(attempts))
+}
+
+/// One Account: the login, and then what Perch says about it afterwards.
+///
+/// The listing decides, not the exit code. An abandoned login and a repair that
+/// worked have to be told apart by what the machine holds now — and a `relogin`
+/// that exited nought over an Account Perch still calls Quarantined is a
+/// disagreement worth catching rather than one to take the command's word on.
+fn repair_one(
+    perch: &Perch<'_>,
+    client: &Client,
+    account: String,
+    was_quarantined_because: String,
+    out: &mut dyn Write,
+) -> Result<Attempt> {
+    let attempted = |exited, ended| Attempt {
+        account: account.clone(),
+        was_quarantined_because: was_quarantined_because.clone(),
+        exited,
+        ended,
+    };
+
+    say(
+        out,
+        &format!(
+            "  {}",
+            Attempt::what_was_wrong(&account, &was_quarantined_because)
+        ),
+    )?;
+
+    // `relogin` probes for a Claude Code before it starts, so a machine without
+    // one records that as why this Account is Quarantined still rather than
+    // being walked through a login that was never going to happen.
+    if let Client::Absent(why) = client {
+        return Ok(attempted(
+            None,
+            Ending::StillQuarantined {
+                fault: Fault::Upstream,
+                why: format!("there is no Claude Code to log in with: {why}"),
+            },
+        ));
+    }
+
+    say(
+        out,
+        &format!("  Logging it in again — the browser will ask you for {account}."),
+    )?;
+
+    let exited = match perch.interactive(&["relogin", &account]) {
+        Ok(status) => status,
+        // A binary that could not be executed at all: nothing about this
+        // Account or about Anthropic is involved in that.
+        Err(setback) => {
+            return Ok(attempted(
+                None,
+                Ending::StillQuarantined {
+                    fault: setback.fault,
+                    why: setback.because,
+                },
+            ));
+        }
+    };
+
+    // Three answers, not two: Perch may list it as healthy, list it as
+    // Quarantined still, or not list it at all — `relogin` refuses when the
+    // Account was removed while the login was happening, and that is not a
+    // repair however cleanly it reads off "is it Quarantined?".
+    let ending = match listed_now(perch) {
+        Ok(listed) => match listed.into_iter().find(|(email, _)| email == &account) {
+            None => Ending::NoLongerListed,
+            Some((_, None)) => Ending::Cleared,
+            Some((_, Some(why))) => still_quarantined(exited, why),
+        },
+        Err(setback) => still_quarantined(
+            exited,
+            format!(
+                "the listing could not be read afterwards: {}",
+                setback.because
+            ),
+        ),
+    };
+    Ok(attempted(Some(exited), ending))
+}
+
+/// An Account the login did not get back, said with whose fault that was.
+///
+/// A `relogin` that exited nought over an Account Perch still calls Quarantined
+/// is the one reading of this that is nobody's news but Perch's: the command
+/// said it had done the thing, and the listing says it had not.
+fn still_quarantined(exited: i32, why: String) -> Ending {
+    if exited == crate::error::EXIT_OK {
+        return Ending::StillQuarantined {
+            fault: Fault::Perch,
+            why: format!("{why} — and `perch relogin` exited 0 over it"),
+        };
+    }
+    let (fault, refusal) = refused_with(exited);
+    Ending::StillQuarantined {
+        fault,
+        why: format!("{refusal} ({why})"),
+    }
+}
+
+/// Every Account Perch lists, with why it is Quarantined where it is, in the
+/// order the listing put them.
+///
+/// The whole listing rather than the Quarantined part of it, because absent and
+/// healthy are different answers and only one of them is a repair.
+fn listed_now(perch: &Perch<'_>) -> std::result::Result<Vec<(String, Option<String>)>, Setback> {
+    let listing = perch.json(&["list", "--json"])?;
+    let accounts = listing["accounts"].as_array().ok_or_else(|| {
+        Setback::perch("`perch list --json` printed no `accounts` array".to_string())
+    })?;
+
+    accounts
+        .iter()
+        .map(|account| {
+            let email = account["email"].as_str().ok_or_else(|| {
+                Setback::perch(format!(
+                    "`perch list --json` listed a nameless Account: {account}"
+                ))
+            })?;
+            // Null where an Account is healthy, which is the whole of the
+            // question being asked here.
+            let quarantine = &account["quarantined"];
+            if quarantine.is_null() {
+                return Ok((email.to_string(), None));
+            }
+            // `detail` and not a fallback to `reason`: one binary writes this
+            // document and it always writes both, so a `detail` that is not
+            // there is Perch disagreeing with itself rather than an older shape
+            // to tolerate.
+            let why = quarantine["detail"].as_str().ok_or_else(|| {
+                Setback::perch(format!(
+                    "`perch list --json` said {email} is Quarantined without saying \
+                     why: {quarantine}"
+                ))
+            })?;
+            Ok((email.to_string(), Some(why.to_string())))
+        })
+        .collect()
 }
 
 /// What a phase proved, or what stopped it.
@@ -619,7 +1132,17 @@ pub struct Run {
     pub began: DateTime<Utc>,
     pub marker: Marker,
     pub bin: PathBuf,
+    /// The machine as the run found it.
     pub preflight: Preflight,
+    /// What opening the run came to. Its own field rather than another entry in
+    /// [`Run::outcomes`]: the two are read differently, and a report that folded
+    /// them together would invite somebody to add a second thing that "opens the
+    /// run".
+    pub repair: Repair,
+    /// The machine as the Repair left it, and what the phases were measured
+    /// against. Only the registry is asked again — the client and the network do
+    /// not change inside one run, and each costs a process or a round trip.
+    pub after: Preflight,
     pub outcomes: Vec<(&'static str, Outcome)>,
 }
 
@@ -657,6 +1180,20 @@ impl Run {
                 .iter()
                 .map(|line| format!("- {line}")),
         );
+        lines.push(String::new());
+        lines.push("## Repair".to_string());
+        lines.push(String::new());
+        lines.extend(self.repair.said().iter().map(|line| format!("- {line}")));
+        // The second figure, so that a run against two Accounts and a run
+        // against two Accounts one of which was dead do not read alike.
+        lines.push(format!("- {}", self.after.figure_after_a_repair(phases)));
+
+        let by_hand = self.repair.finish_by_hand();
+        if !by_hand.is_empty() {
+            lines.push(String::new());
+            lines.extend(to_type(FINISH_BY_HAND, &by_hand));
+        }
+
         lines.push(String::new());
         lines.push("## Phases".to_string());
 
@@ -701,6 +1238,8 @@ fn stamp(at: DateTime<Utc>) -> String {
 ///
 /// The marker first, before the Preflight and long before a phase touches
 /// anything. Then what the machine holds, said out loud as a figure. Then the
+/// Repair, which clears what yesterday's run on another machine retired and
+/// changes the figure rather than the run's fate. Then the
 /// phases, one at a time, stopping at the first that does — and the report,
 /// written whatever happened, because a run that stopped is the one worth
 /// having written down.
@@ -724,12 +1263,22 @@ pub fn dogfood(
         say(out, &line)?;
     }
 
+    let repaired = repair(&perch, &preflight, out)?;
+
+    // The machine as the Repair left it, which is what the phases are measured
+    // against: a figure taken before it would count an Account nobody could log
+    // back in as one this machine can prove things with.
+    let mut after = preflight.clone();
+    after.read_the_registry(host)?;
+    say(out, "")?;
+    say(out, &after.figure_after_a_repair(phases))?;
+
     let mut outcomes: Vec<(&'static str, Outcome)> = Vec::new();
     let mut stopped = false;
     for phase in phases {
         let outcome = if stopped {
             Outcome::NotRun
-        } else if let Some(why) = preflight.unmet(&phase.needs) {
+        } else if let Some(why) = after.unmet(&phase.needs) {
             Outcome::Skipped(why)
         } else {
             match (phase.prove)(&perch) {
@@ -761,6 +1310,8 @@ pub fn dogfood(
         marker,
         bin: perch.bin().to_path_buf(),
         preflight,
+        repair: repaired,
+        after,
         outcomes,
     };
     let written = write_the_report(host, &run, phases, reports)?;
@@ -1026,7 +1577,7 @@ fn write_the_report(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::FakeHost;
+    use crate::host::{Execution, FakeHost};
     use crate::registry::Quarantine;
 
     fn a_marker() -> Marker {
@@ -1131,6 +1682,20 @@ mod tests {
         host.with_file(
             "/tmp/perch/registry.json",
             &serde_json::to_string(&registry).unwrap(),
+        )
+    }
+
+    /// A Claude Code that answers, which `perch relogin` probes for before it
+    /// will start.
+    fn with_a_claude_code(host: FakeHost) -> FakeHost {
+        host.with_env("PERCH_CLAUDE_BIN", "/bin/claude").with_exec(
+            "/bin/claude",
+            &["--version"],
+            Execution {
+                status: 0,
+                stdout: "2.1.221 (Claude Code)".to_string(),
+                stderr: String::new(),
+            },
         )
     }
 
@@ -1452,6 +2017,569 @@ mod tests {
             "one phase is a phase, not a phase(s): {written}"
         );
         assert!(written.contains("### runs anywhere — proved"));
+    }
+
+    // ---- phase zero: the Repair -------------------------------------------
+    //
+    // Everything here is driven through the run loop against a fake machine, and
+    // asserts what somebody watching would see: which Accounts the Repair
+    // attempted, what it reported for each, what the figure said before and
+    // after, and which phases then ran or skipped and why. Nothing names a
+    // function, so none of it breaks because the Repair was reorganised.
+
+    /// What a `perch relogin` the Repair walks comes to.
+    #[derive(Debug, Clone, Copy)]
+    enum Login {
+        /// It works, and the Account is no longer Quarantined afterwards.
+        Works,
+        /// It does not, and the Account is exactly as broken as it was — a login
+        /// somebody abandoned, a client still holding the Profile, a browser
+        /// signed in as somebody else.
+        Leaves(i32),
+        /// The Account was removed while the login was happening, which is a
+        /// refusal `perch relogin` already makes: the login worked and there is
+        /// nothing left to repair in place.
+        Removes,
+    }
+
+    /// A machine holding these Accounts, where `perch list --json` says what the
+    /// registry says and `perch relogin` repairs whichever Account it was
+    /// pointed at unless `logins` scripts it otherwise.
+    ///
+    /// The two moving together is the whole of what makes this a machine rather
+    /// than two canned documents: the Repair reads the listing through the
+    /// binary under test, and the figure it changes is read off the registry.
+    fn a_machine(held: &[(&str, Option<Quarantine>)], logins: &[(&str, Login)]) -> FakeHost {
+        let host = marked(with_a_claude_code(with_a_perch(a_bare_machine())));
+
+        let holds: Vec<(String, Option<Quarantine>)> = held
+            .iter()
+            .map(|(email, quarantine)| ((*email).to_string(), *quarantine))
+            .collect();
+        now_holding(&host, &holds);
+
+        let scripted: Vec<(String, Login)> = logins
+            .iter()
+            .map(|(email, login)| ((*email).to_string(), *login))
+            .collect();
+        let holds = std::cell::RefCell::new(holds);
+        host.with_login(move |host, _| {
+            let repairing = being_repaired(host);
+            let login = scripted
+                .iter()
+                .find(|(email, _)| *email == repairing)
+                .map_or(Login::Works, |(_, login)| *login);
+            match login {
+                Login::Leaves(status) => status,
+                Login::Works => {
+                    let mut holds = holds.borrow_mut();
+                    for held in holds.iter_mut().filter(|(email, _)| *email == repairing) {
+                        held.1 = None;
+                    }
+                    now_holding(host, &holds);
+                    crate::error::EXIT_OK
+                }
+                Login::Removes => {
+                    let mut holds = holds.borrow_mut();
+                    holds.retain(|(email, _)| *email != repairing);
+                    now_holding(host, &holds);
+                    crate::error::EXIT_NOT_FOUND
+                }
+            }
+        })
+    }
+
+    /// What this machine holds, written where both things that read it look: the
+    /// registry the Preflight reads directly, and the `perch list --json` the
+    /// Repair reads through the binary under test.
+    fn now_holding(host: &FakeHost, held: &[(String, Option<Quarantine>)]) {
+        let mut registry = crate::registry::Registry::default();
+        for (email, quarantine) in held {
+            registry.upsert(an_account(email, *quarantine));
+        }
+        registry.active = held.first().map(|(email, _)| email.clone());
+        host.set_file(
+            "/tmp/perch/registry.json",
+            &serde_json::to_string(&registry).unwrap(),
+        );
+
+        let accounts: Vec<serde_json::Value> = held
+            .iter()
+            .map(|(email, quarantine)| {
+                serde_json::json!({
+                    "email": email,
+                    "active": registry.active.as_deref() == Some(email.as_str()),
+                    "quarantined": Quarantine::document(*quarantine),
+                })
+            })
+            .collect();
+        host.set_exec(
+            "/build/perch",
+            &["list", "--json"],
+            Execution {
+                status: crate::error::EXIT_OK,
+                stdout: serde_json::json!({
+                    "active_account": registry.active,
+                    "accounts": accounts,
+                })
+                .to_string(),
+                stderr: String::new(),
+            },
+        );
+    }
+
+    /// Which Account the `perch relogin` now running was pointed at, read off
+    /// the launch the fake just recorded. A login hook stands in for a process,
+    /// and a process knows its own argv.
+    fn being_repaired(host: &FakeHost) -> String {
+        relogins(host)
+            .pop()
+            .expect("the only thing this machine's login stands in for is a relogin")
+    }
+
+    /// Every `perch relogin` the run handed the terminal to, in order.
+    fn relogins(host: &FakeHost) -> Vec<String> {
+        host.effects()
+            .iter()
+            .filter_map(|effect| match effect {
+                crate::host::fake::Effect::ExecInteractive { args, .. }
+                    if args.first().is_some_and(|arg| arg == "relogin") =>
+                {
+                    args.get(1).cloned()
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A run, and everything it printed, so a test can assert on what somebody
+    /// watching would have seen as well as on what came back.
+    fn a_watched_run(host: &dyn Host, phases: &[Phase]) -> Result<(Run, String)> {
+        let mut said = Vec::new();
+        let run = dogfood(
+            host,
+            "/build/perch",
+            phases,
+            Path::new("/tmp/reports"),
+            &mut said,
+        )?;
+        Ok((run, String::from_utf8(said).unwrap()))
+    }
+
+    #[test]
+    fn a_machine_with_nothing_quarantined_says_so_in_a_line_and_walks_no_login() {
+        let host = a_machine(&[("one@example.com", None)], &[]);
+
+        let (run, said) = a_watched_run(&host, &[a_phase("needs an Account", Needs::AN_ACCOUNT)])
+            .expect("a marked machine runs");
+
+        assert_eq!(run.repair, Repair::NothingQuarantined);
+        assert!(said.contains("Nothing is Quarantined here"), "{said}");
+        assert!(relogins(&host).is_empty(), "nothing was there to repair");
+        assert!(matches!(run.outcomes[0].1, Outcome::Proved(_)));
+    }
+
+    /// The one the CI runner takes, on every platform, on every run: nothing is
+    /// held, so nothing needs a terminal and the degraded run stays green.
+    #[test]
+    fn a_machine_holding_no_accounts_says_there_was_nothing_to_repair() {
+        let host = marked(with_a_claude_code(with_a_perch(a_bare_machine())));
+
+        let (run, said) =
+            a_watched_run(&host, &[a_phase("runs anywhere", Needs::NOTHING)]).expect("it runs");
+
+        assert_eq!(run.repair, Repair::NothingHeld);
+        assert!(said.contains("Perch holds no Accounts here"), "{said}");
+        assert!(
+            relogins(&host).is_empty(),
+            "a skip and a success must not look alike, and neither needs a terminal"
+        );
+    }
+
+    #[test]
+    fn a_quarantine_that_clears_is_reported_cleared_and_the_phase_then_runs() {
+        let host = a_machine(
+            &[("one@example.com", Some(Quarantine::RenewalRejected))],
+            &[],
+        );
+        let phases = [a_phase("needs an Account", Needs::AN_ACCOUNT)];
+
+        let (run, said) = a_watched_run(&host, &phases).expect("it runs");
+
+        assert_eq!(relogins(&host), vec!["one@example.com".to_string()]);
+        assert_eq!(
+            run.repair.left_quarantined(),
+            Vec::<&str>::new(),
+            "the login worked: {said}"
+        );
+        assert!(
+            said.contains("one@example.com was Quarantined: Anthropic would not renew"),
+            "somebody about to walk a login is owed what stopped working: {said}"
+        );
+        assert!(
+            said.contains("the browser will ask you for one@example.com"),
+            "so that they log in as the right Account: {said}"
+        );
+        assert!(said.contains("it is no longer Quarantined"), "{said}");
+        assert!(
+            said.contains("This machine can prove 0 of 1 phase"),
+            "what it could prove when it was found: {said}"
+        );
+        assert!(
+            said.contains("This machine can now prove 1 of 1 phase"),
+            "and what it can prove now: {said}"
+        );
+        assert!(matches!(run.outcomes[0].1, Outcome::Proved(_)));
+    }
+
+    /// A Quarantine another machine's run caused is the ordinary starting state
+    /// rather than a defect, so a login somebody abandoned costs the phase and
+    /// nothing else (ADR 0037).
+    #[test]
+    fn an_abandoned_login_leaves_the_account_quarantined_and_does_not_stop_the_run() {
+        let host = a_machine(
+            &[("one@example.com", Some(Quarantine::RenewalRejected))],
+            &[(
+                "one@example.com",
+                Login::Leaves(crate::error::EXIT_NOT_FOUND),
+            )],
+        );
+        let phases = [a_phase("needs an Account", Needs::AN_ACCOUNT)];
+
+        let (run, said) = a_watched_run(&host, &phases).expect("a Repair cannot stop a run");
+
+        assert_eq!(run.stopped(), None, "the Repair never produces a Setback");
+        assert_eq!(run.repair.left_quarantined(), vec!["one@example.com"]);
+        assert!(said.contains("it is Quarantined still"), "{said}");
+        assert!(
+            said.contains("not a fault in Perch"),
+            "a red run still has to say who has work to do: {said}"
+        );
+        assert!(
+            said.contains("$ perch relogin one@example.com"),
+            "the commands that would finish the job by hand: {said}"
+        );
+
+        let Outcome::Skipped(why) = &run.outcomes[0].1 else {
+            panic!("a phase needing a usable Account cannot run here: {run:?}");
+        };
+        assert!(
+            why.contains("one@example.com still Quarantined"),
+            "the skip line names the Quarantine as the reason: {why}"
+        );
+        assert!(
+            said.contains("This machine can now prove 0 of 1 phase"),
+            "{said}"
+        );
+    }
+
+    /// The property that makes a Repair worth having at all.
+    #[test]
+    fn a_login_that_failed_does_not_cost_the_next_account_its_repair() {
+        let host = a_machine(
+            &[
+                ("one@example.com", Some(Quarantine::RenewalRejected)),
+                ("two@example.com", Some(Quarantine::NoCredential)),
+            ],
+            &[(
+                "one@example.com",
+                Login::Leaves(crate::error::EXIT_PROFILE_LIVE),
+            )],
+        );
+
+        let (run, said) = a_watched_run(&host, &[]).expect("it runs");
+
+        assert_eq!(
+            relogins(&host),
+            vec!["one@example.com".to_string(), "two@example.com".to_string()],
+            "one Account somebody cannot get into must not cost them the other"
+        );
+        assert_eq!(run.repair.left_quarantined(), vec!["one@example.com"]);
+        assert!(
+            said.contains("two@example.com was Quarantined: Perch holds no Credential for it"),
+            "each Account is named with why it was Quarantined: {said}"
+        );
+        assert_eq!(run.after.quarantined, vec!["one@example.com".to_string()]);
+        assert_eq!(run.after.usable(), vec!["two@example.com"]);
+    }
+
+    #[test]
+    fn a_machine_with_no_claude_code_records_that_as_why_nothing_was_repaired() {
+        let host = a_machine(
+            &[("one@example.com", Some(Quarantine::RenewalRejected))],
+            &[],
+        )
+        .with_env("PERCH_CLAUDE_BIN", "/nowhere/claude");
+
+        let (run, said) = a_watched_run(&host, &[]).expect("it runs");
+
+        assert!(
+            relogins(&host).is_empty(),
+            "`relogin` probes for one before it starts, so there is no login to walk"
+        );
+        assert_eq!(run.repair.left_quarantined(), vec!["one@example.com"]);
+        assert!(
+            said.contains("there is no Claude Code to log in with"),
+            "so that somebody fixes the right thing: {said}"
+        );
+    }
+
+    /// `perch relogin` refuses a login that came back as somebody else, and the
+    /// Repair reports that refusal rather than re-implementing it: two
+    /// implementations of one rule is how they come to disagree.
+    #[test]
+    fn a_login_as_the_wrong_account_is_reported_as_the_refusal_perch_already_made() {
+        let host = a_machine(
+            &[("one@example.com", Some(Quarantine::RenewalRejected))],
+            &[(
+                "one@example.com",
+                Login::Leaves(crate::error::EXIT_CONFLICT),
+            )],
+        );
+
+        let (_, said) = a_watched_run(&host, &[]).expect("it runs");
+
+        assert!(
+            said.contains("`perch relogin one@example.com` exited 13"),
+            "the exit code is the whole of what the Repair sees: {said}"
+        );
+        assert!(
+            said.contains("that login came back as a different Account"),
+            "a bare 13 says nothing to somebody reading the report a week later: {said}"
+        );
+        assert!(said.contains("not a fault in Perch"), "{said}");
+    }
+
+    /// Every exit code `relogin` refuses with is named, so a report read later
+    /// says what happened rather than a number — and everything else is Perch
+    /// disagreeing with itself, which is a bug.
+    #[test]
+    fn each_refusal_relogin_makes_is_named_and_anything_else_is_a_fault_in_perch() {
+        use crate::error::*;
+        for (status, expected) in [
+            (EXIT_PROFILE_LIVE, "a client is running against the Profile"),
+            (EXIT_NOT_FOUND, "the login did not complete"),
+            (EXIT_PROBE_REFUSED, "Claude Code did not report a version"),
+            (EXIT_HELD, "another Perch is holding the registry"),
+            (EXIT_KEYCHAIN_UNAVAILABLE, "the keychain would not open"),
+        ] {
+            let (fault, said) = refused_with(status);
+            assert_eq!(fault, Fault::Upstream, "exit {status} is a refusal");
+            assert_eq!(said, expected);
+        }
+
+        // A Cycling code from a command that never Cycles, and Perch's own
+        // Quarantined refusal from the one command that ends a Quarantine.
+        for status in [EXIT_NO_CANDIDATE, EXIT_QUARANTINED, EXIT_GENERAL] {
+            assert_eq!(refused_with(status).0, Fault::Perch, "exit {status}");
+        }
+    }
+
+    /// `relogin` refuses when the Account was removed while the login was
+    /// happening. Reading "is it Quarantined?" off the listing alone would call
+    /// that a repair, and the run would go on to claim it had proved something
+    /// about an Account that is gone.
+    #[test]
+    fn an_account_removed_while_its_login_was_happening_is_not_reported_repaired() {
+        let host = a_machine(
+            &[
+                ("one@example.com", Some(Quarantine::RenewalRejected)),
+                ("two@example.com", None),
+            ],
+            &[("one@example.com", Login::Removes)],
+        );
+
+        let (run, said) = a_watched_run(&host, &[]).expect("a Repair cannot stop a run");
+
+        let Repair::Found(attempts) = &run.repair else {
+            panic!("one Account was Quarantined: {:?}", run.repair);
+        };
+        assert_eq!(
+            attempts[0].ended,
+            Ending::NoLongerListed,
+            "gone is not cleared"
+        );
+        assert!(
+            said.contains("Perch does not list it at all any more, so nothing was repaired"),
+            "{said}"
+        );
+        assert!(
+            !said.contains("it is no longer Quarantined"),
+            "a removed Account must not read as a repair: {said}"
+        );
+    }
+
+    /// A Repair that could not read the listing still has something to type.
+    #[test]
+    fn a_repair_that_could_not_read_the_listing_says_what_would_say_why() {
+        let repair = Repair::NotRead("`perch list --json` exited 1".to_string());
+
+        assert_eq!(
+            repair.finish_by_hand(),
+            vec!["perch list --json".to_string()]
+        );
+    }
+
+    /// The listing decides whether an Account was repaired, not the exit code —
+    /// so a `relogin` claiming it worked over an Account Perch still calls
+    /// Quarantined is caught rather than believed.
+    #[test]
+    fn a_relogin_that_exited_nought_and_repaired_nothing_is_a_fault_in_perch() {
+        let host = a_machine(
+            &[("one@example.com", Some(Quarantine::RenewalRejected))],
+            &[("one@example.com", Login::Leaves(crate::error::EXIT_OK))],
+        );
+
+        let (run, said) = a_watched_run(&host, &[]).expect("a Repair cannot stop a run");
+
+        assert_eq!(run.repair.left_quarantined(), vec!["one@example.com"]);
+        assert!(said.contains("This is a fault in Perch."), "{said}");
+    }
+
+    #[test]
+    fn the_report_holds_the_repair_as_its_own_section() {
+        let host = a_machine(
+            &[
+                ("one@example.com", Some(Quarantine::RenewalRejected)),
+                ("two@example.com", Some(Quarantine::NoRefreshToken)),
+            ],
+            &[(
+                "two@example.com",
+                Login::Leaves(crate::error::EXIT_NOT_FOUND),
+            )],
+        );
+        let phases = [a_phase("runs anywhere", Needs::NOTHING)];
+
+        let (run, _) = a_watched_run(&host, &phases).expect("it runs");
+        let written = host
+            .read_file(&Path::new("/tmp/reports").join(run.file_name()))
+            .expect("the report was written");
+
+        assert!(written.contains("## Repair"), "{written}");
+        assert!(
+            written.contains("- one@example.com was Quarantined: Anthropic would not renew"),
+            "{written}"
+        );
+        assert!(
+            written.contains("exited 0 — it is no longer Quarantined"),
+            "{written}"
+        );
+        assert!(
+            written.contains("- two@example.com was Quarantined: the Credential Perch holds"),
+            "{written}"
+        );
+        assert!(written.contains("it is Quarantined still"), "{written}");
+        assert!(
+            written.contains("$ perch relogin two@example.com"),
+            "{written}"
+        );
+        // Both figures, so a run against two Accounts and a run against two
+        // Accounts one of which was dead do not read alike.
+        assert!(
+            written.contains("- This machine can prove 1 of 1 phase"),
+            "{written}"
+        );
+        assert!(
+            written.contains("- This machine can now prove 1 of 1 phase"),
+            "{written}"
+        );
+    }
+
+    /// The Repair happens before any phase acts, so no phase is ever pointed at
+    /// an Account that was never going to work.
+    #[test]
+    fn nothing_acts_until_the_repair_has_had_its_turn() {
+        fn reads_the_machine(perch: &Perch<'_>) -> Proof {
+            let listing = perch.json(&["list", "--json"])?;
+            let quarantined: Vec<&serde_json::Value> = listing["accounts"]
+                .as_array()
+                .expect("a listing")
+                .iter()
+                .filter(|account| !account["quarantined"].is_null())
+                .collect();
+            assert!(
+                quarantined.is_empty(),
+                "a phase ran against a Quarantined Account: {quarantined:?}"
+            );
+            Ok(vec![
+                "nothing was Quarantined by the time this ran".to_string(),
+            ])
+        }
+
+        let host = a_machine(
+            &[("one@example.com", Some(Quarantine::RenewalRejected))],
+            &[],
+        );
+
+        let (run, _) = a_watched_run(
+            &host,
+            &[Phase {
+                name: "reads the machine",
+                needs: Needs::AN_ACCOUNT,
+                prove: reads_the_machine,
+            }],
+        )
+        .expect("it runs");
+
+        assert!(matches!(run.outcomes[0].1, Outcome::Proved(_)));
+    }
+
+    /// The Account somebody is on can be the Quarantined one, and then `perch
+    /// status` is about an Account nothing will work as.
+    #[test]
+    fn an_active_account_the_repair_could_not_clear_is_not_one_a_phase_can_use() {
+        // A healthy Account beside the broken one, deliberately: with only the
+        // Quarantined one held, the count would refuse this phase on its own and
+        // the rule being tested here would never be reached. What has to be
+        // proved is that a machine with an Account to spare *still* cannot prove
+        // a phase about the Account it is on.
+        let host = a_machine(
+            &[
+                ("one@example.com", Some(Quarantine::RenewalRejected)),
+                ("two@example.com", None),
+            ],
+            &[(
+                "one@example.com",
+                Login::Leaves(crate::error::EXIT_NOT_FOUND),
+            )],
+        );
+
+        let (run, _) = a_watched_run(
+            &host,
+            &[a_phase("needs the active one", Needs::THE_ACTIVE_ACCOUNT)],
+        )
+        .expect("it runs");
+
+        assert_eq!(run.after.active, Some("one@example.com".to_string()));
+        assert_eq!(
+            run.after.usable(),
+            vec!["two@example.com"],
+            "the count this phase asks for is satisfied, and it still cannot run"
+        );
+        let Outcome::Skipped(why) = &run.outcomes[0].1 else {
+            panic!("the Account this machine is on cannot be used: {run:?}");
+        };
+        assert_eq!(
+            why, "one@example.com is the Account this machine is on, and it is still Quarantined",
+            "the Account it is about, not the number of Accounts it holds"
+        );
+    }
+
+    /// A `perch list --json` that could not be read is recorded and carried
+    /// past: failing over a Perch that does not work is a phase's job, and the
+    /// Repair's job is never to stop the run.
+    #[test]
+    fn a_listing_the_repair_could_not_read_is_recorded_rather_than_raised() {
+        let host = marked(with_a_claude_code(with_a_perch(holding(
+            a_bare_machine(),
+            &[an_account("one@example.com", None)],
+        ))));
+
+        let (run, said) = a_watched_run(&host, &[]).expect("a Repair cannot stop a run");
+
+        assert!(matches!(run.repair, Repair::NotRead(_)), "{:?}", run.repair);
+        assert!(said.contains("Nothing could be repaired"), "{said}");
+        assert!(said.contains("This is a fault in Perch."), "{said}");
     }
 
     // ---- the wizard -------------------------------------------------------

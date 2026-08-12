@@ -7,7 +7,9 @@
 //!
 //! Each phase says what it needs of a machine *before* it runs, so the Preflight
 //! can turn "what can this machine prove" into a figure rather than into a pile
-//! of skip lines somebody scrolls past.
+//! of skip lines somebody scrolls past. What it needs is counted against the
+//! machine the *Repair* left behind, so an Account nobody could log back in is
+//! not one this list is measured as able to prove anything with.
 //!
 //! ## Adding one
 //!
@@ -30,11 +32,12 @@ use super::{Needs, Perch, Phase, Proof, Setback};
 /// Credential proves that no better while costing more to get wrong. The list
 /// grows once the skeleton has been proved wrong at least once.
 ///
-/// **The Repair is not here, and it is owed.** ADR 0037 opens every run with
+/// **The Repair is not here, and never will be.** ADR 0037 opens every run with
 /// one, and it is structural rather than an entry on this list: a Quarantine
 /// yesterday's run on another machine caused is the ordinary starting state, so
 /// it belongs before the phases and outside the stop-at-the-first-failure
-/// sequence they run in. It is #125.
+/// sequence they run in. It lives in the run loop, and the ordering is the
+/// driver's rather than a flag on an entry with exactly one true case forever.
 pub const PHASES: &[Phase] = &[Phase {
     name: "the listing and the status agree on which Account is active",
     needs: Needs::THE_ACTIVE_ACCOUNT,

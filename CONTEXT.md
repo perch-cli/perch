@@ -201,7 +201,11 @@ _Avoid_: dead, expired, invalid
 **Repair**:
 Logging a Quarantined Account in again in place, so it keeps its Alias, its
 Group, whether Cycling may choose it and its position rather than being rebuilt.
-What `perch relogin` does, and the only thing that ends a Quarantine.
+What `perch relogin` does, and the only thing that ends a Quarantine. One
+Account at a time, which is why a Dogfood run's Phase zero — the Repair ADR 0037
+opens every run with — is one of these per Quarantined Account in turn, each
+reported on its own: a run where one login of three was abandoned has to be
+legible as exactly that.
 _Avoid_: fix, restore, re-add, reauth
 
 ## Making an account active
@@ -420,8 +424,20 @@ Code is installed, whether the network answers, how many Accounts are held and
 which are Quarantined — and, from those, how much of the suite this machine can
 prove. Said as a figure and said first, because a run that quietly proved a
 third of what it was asked to and a run that proved all of it look identical
-once they are over.
+once they are over. A Quarantined Account does not count toward the figure: it
+is one nothing could be proved with.
 _Avoid_: setup, precondition, capability check, sanity check
+
+**Phase zero**:
+The Repair every Dogfood run opens with, before any Phase acts. There are more
+machines than Accounts, so a run on one may retire what the others hold — and
+phase zero hands the terminal to `perch relogin` for each Quarantined Account in
+turn rather than making somebody quit, repair by hand and start again. It is not
+a Phase, is not on the phase list, and can never fail a run: a Quarantine
+somebody else's run caused is the ordinary starting state (ADR 0037). All it
+changes is the figure, and an Account it could not clear is one the Phases
+needing a usable Account then skip over.
+_Avoid_: setup phase, phase 0, bootstrap, fixup
 
 **Marker**:
 The receipt `dogfood-setup` writes beside the registry once it has taken an
