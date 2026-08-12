@@ -26,7 +26,7 @@ use crate::host::{self, Host};
 use crate::lock;
 use crate::probe::{self, Credential, Store};
 use crate::profile;
-use crate::registry::{self, Account, Quarantine};
+use crate::registry::{self, Account, Quarantine, Registry};
 
 /// What the Capture found, which is the part of a Switch worth saying out loud:
 /// it is the part that protects the Account being left behind.
@@ -71,36 +71,110 @@ pub enum Captured {
     NothingToSave,
 }
 
-/// A Switch that stopped part way, and what the machine is holding now.
-pub struct Interrupted {
-    pub error: PerchError,
-    /// Whether the incoming Account's Credential is the live one. It decides
-    /// which Account Perch must now record as active — being active is a fact
-    /// about which Credential is in the Default Profile, not a wish.
-    pub incoming_is_live: bool,
-    /// Set when the Switch did not merely fail but found the incoming Account
-    /// unusable for good, so the caller records it rather than letting the same
-    /// discovery be made again from scratch next time.
-    pub quarantine: Option<Quarantine>,
+/// A Switch that has been performed and not yet written down.
+///
+/// Between [`perform`] returning and [`Landing::record`] there is a machine
+/// acting as one Account while Perch's own record names another: the write to
+/// the Default Profile is the second of the three steps, and the patch after it
+/// can fail. That gap is the whole of what ADR 0006 is about — the next Switch
+/// Captures the live Credential into the Profile the registry names, and where
+/// that is the wrong Account its only good copy is gone.
+///
+/// So there is no way to read what a Switch found without recording it first.
+/// `record` consumes the Landing and hands back the [`Captured`]; what it
+/// writes is not the caller's to sequence, to word or to forget. Two callers
+/// used to sequence it themselves, and the second of them dropped a clause the
+/// first kept.
+///
+/// [`Landing::moved`] is the one question with an answer before the write,
+/// because a caller pacing itself has to know whether anything happened.
+pub struct Landing {
+    outcome: Result<Captured>,
+    /// The Account this Switch was to. Held rather than borrowed, so a caller
+    /// may hand `record` the `&mut Registry` the Account was read out of.
+    incoming: String,
+    incoming_is_live: bool,
 }
 
-/// A Switch that stopped before it wrote anything, carrying whatever the
-/// failure knew about the incoming Account.
-///
-/// A Switch can find an Account unusable for good — a Profile with neither
-/// store holding a Credential — and when it does, the failure itself says which
-/// Quarantine that is. Nothing here decides: it reads what was diagnosed where
-/// it was diagnosed.
-fn stopped(error: PerchError) -> Interrupted {
-    let quarantine = match &error {
-        PerchError::Quarantined { why, .. } => Some(*why),
-        _ => None,
-    };
-    Interrupted {
-        error,
-        incoming_is_live: false,
-        quarantine,
+impl Landing {
+    /// Whether the incoming Account's Credential is the live one — true of a
+    /// Switch that finished, and of one that failed after the Credential was
+    /// written but before the Identity was patched.
+    ///
+    /// Asked before the write because a Switch that happened starts a Cooldown
+    /// whether or not it finished, and the Cooldown has to reach the registry
+    /// in the same save as everything else (ADR 0013). It is a question about
+    /// the machine rather than about what the caller must now do, which is what
+    /// separates it from everything `record` keeps.
+    pub fn moved(&self) -> bool {
+        self.incoming_is_live
     }
+
+    /// Writes down what the Switch did, and hands back what it found.
+    ///
+    /// Three things, in this order, none of them optional:
+    ///
+    /// - A Quarantine, where the Switch did not merely fail but found the
+    ///   incoming Account unusable for good. Best effort, deliberately: the
+    ///   failure the user is about to read already says the Account has to be
+    ///   logged into again, and losing it over a registry Perch could not write
+    ///   would be a poor trade. The worst a missed write costs is making the
+    ///   same discovery next time.
+    /// - Which Account is active, wherever the Credential moved — including on
+    ///   the way out of a failure. Being active is a fact about which
+    ///   Credential is in the Default Profile, not a wish, and recording
+    ///   anything else sends the next Capture into the wrong Profile.
+    /// - The failure that got us here, kept. A write that could not be recorded
+    ///   is worth saying and is not worth losing the original over, so the user
+    ///   is told both and the exit code stays the one the failure earned.
+    ///
+    /// Nothing here decides what a Quarantine is: the failure itself says which
+    /// one, diagnosed where it was diagnosed, and this reads it off the error.
+    pub fn record(
+        self,
+        host: &dyn Host,
+        perch: &mut lock::Held<'_>,
+        registry: &mut Registry,
+    ) -> Result<Captured> {
+        if let Err(PerchError::Quarantined { why, .. }) = &self.outcome
+            && registry.quarantine(&self.incoming, *why)
+        {
+            let _ = registry::save(host, perch, registry);
+        }
+
+        match self.outcome {
+            Ok(captured) => {
+                record_active(host, perch, registry, &self.incoming)?;
+                Ok(captured)
+            }
+            Err(error) if self.incoming_is_live => {
+                match record_active(host, perch, registry, &self.incoming) {
+                    Ok(()) => Err(error),
+                    Err(unrecorded) => Err(error.with_note(&unrecorded.to_string())),
+                }
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+/// Records which Account is active, and says what it costs when that write
+/// fails: the Switch itself worked, so Perch's own record is behind until this
+/// is fixed.
+fn record_active(
+    host: &dyn Host,
+    perch: &mut lock::Held<'_>,
+    registry: &mut Registry,
+    incoming: &str,
+) -> Result<()> {
+    registry.active = Some(incoming.to_string());
+    registry::save(host, perch, registry).map_err(|error| {
+        error.with_note(&format!(
+            "The Switch itself worked: {incoming}'s Credential is the live one. \
+             Perch could not record that, so its own view of which Account is \
+             active is behind until this is fixed."
+        ))
+    })
 }
 
 /// Everything the three steps need, established under the locks.
@@ -126,18 +200,34 @@ struct Prepared {
 /// the load to after the save, so every slow step below runs under it — and it
 /// goes stale in ninety seconds. A keychain that stopped to ask the user for
 /// permission ran that out, another Perch cleared the artifact and worked under
-/// it, and the `record_active` that follows this then refused: the live
+/// it, and the [`Landing::record`] that follows this then refused: the live
 /// Credential belongs to `incoming` while the registry still names `outgoing`,
 /// so the *next* Switch Captures the live Credential into `outgoing`'s Profile
 /// and destroys its only copy (ADR 0006). Re-running the Switch does not repair
-/// that, because `already_there` answers before `record_active` is reached.
+/// that, because `already_there` answers before the recording is reached.
+///
+/// Returns a [`Landing`] rather than a `Result`, because whether a Switch
+/// succeeded is not a thing a caller may act on before it has written down what
+/// happened.
 pub fn perform(
     host: &dyn Host,
     perch: &mut lock::Held<'_>,
     incoming: &Account,
     outgoing: Option<&Account>,
-) -> std::result::Result<Captured, Interrupted> {
-    let (version, store) = ground(host).map_err(stopped)?;
+) -> Landing {
+    let (version, store) = match ground(host) {
+        Ok(ground) => ground,
+        // Nothing has been written and nothing can have moved, so this is a
+        // Landing that did not land — the same shape, so that the one way out
+        // is the same way out.
+        Err(error) => {
+            return Landing {
+                outcome: Err(error),
+                incoming: incoming.email().to_string(),
+                incoming_is_live: false,
+            };
+        }
+    };
 
     let mut incoming_is_live = false;
     let switched: Result<Captured> = lock::under(host, probe::locks_for(&store), |held| {
@@ -168,10 +258,11 @@ pub fn perform(
         Ok(captured)
     });
 
-    switched.map_err(|error| Interrupted {
+    Landing {
+        outcome: switched,
+        incoming: incoming.email().to_string(),
         incoming_is_live,
-        ..stopped(error)
-    })
+    }
 }
 
 /// Makes an Account's Credential the live one without Capturing what it
@@ -242,7 +333,7 @@ pub fn make_live(
 
 /// A `make_live` that stopped part way, and what the machine is holding now.
 ///
-/// The same distinction [`Interrupted`] draws, for the same reason: a failure
+/// The same distinction [`Landing`] draws, for the same reason: a failure
 /// after the Credential was written but before the Identity was patched has
 /// still changed which Account the machine is acting as, and a caller that
 /// records who is active has to record what is true rather than what it asked
@@ -662,4 +753,190 @@ fn live_but_unnamed(prepared: &Prepared, outgoing: Option<&Account>, incoming: &
         incoming = incoming.email(),
         file = prepared.store.identity_file.display(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host::FakeHost;
+    use crate::probe::Identity;
+
+    const INCOMING: &str = "incoming@example.com";
+    const OUTGOING: &str = "outgoing@example.com";
+
+    fn two_accounts() -> Registry {
+        let mut registry = Registry::default();
+        for email in [OUTGOING, INCOMING] {
+            registry.upsert(Account {
+                identity: Identity {
+                    email: email.to_string(),
+                    account_uuid: None,
+                    organization_name: None,
+                    organization_uuid: None,
+                },
+                plan: None,
+                enabled: true,
+                quarantine: None,
+                group: None,
+                utilization: None,
+            });
+        }
+        registry.active = Some(OUTGOING.to_string());
+        registry
+    }
+
+    fn landing(outcome: Result<Captured>, incoming_is_live: bool) -> Landing {
+        Landing {
+            outcome,
+            incoming: INCOMING.to_string(),
+            incoming_is_live,
+        }
+    }
+
+    fn quarantined() -> PerchError {
+        PerchError::Quarantined {
+            why: Quarantine::NoCredential,
+            said: "neither store holds a Credential".to_string(),
+        }
+    }
+
+    /// Not `Quarantined`, and not one either caller turns into an outcome of
+    /// its own: the ordinary failure, which is only ever handed back.
+    fn ordinary() -> PerchError {
+        PerchError::Other("the store would not answer".to_string())
+    }
+
+    /// The four states a Landing can be in, asserted against one another rather
+    /// than one at a time — the pair that diverged between `perch switch` and
+    /// `perch watch` was a *combination*, and each half of it was covered.
+    ///
+    /// The fifth row is the one no `perform` produces today: a Quarantine
+    /// diagnosed after the Credential was written. Nothing after
+    /// `store_credential` raises `Quarantined`, so it is unreachable — and that
+    /// was exactly the invariant one caller silently relied on and no test
+    /// stated. `record` answers it the same way for everybody, so a fourth step
+    /// in `perform` cannot reopen it.
+    #[test]
+    fn what_a_landing_records_is_the_same_whoever_asks() {
+        struct Case {
+            what: &'static str,
+            outcome: Result<Captured>,
+            moved: bool,
+            active: &'static str,
+            quarantine: Option<Quarantine>,
+        }
+
+        let cases = [
+            Case {
+                what: "a Switch that finished",
+                outcome: Ok(Captured::NothingLive),
+                moved: true,
+                active: INCOMING,
+                quarantine: None,
+            },
+            Case {
+                what: "a Switch that failed before it wrote anything",
+                outcome: Err(ordinary()),
+                moved: false,
+                active: OUTGOING,
+                quarantine: None,
+            },
+            Case {
+                what: "a Switch that made the Credential live and then failed",
+                outcome: Err(ordinary()),
+                moved: true,
+                active: INCOMING,
+                quarantine: None,
+            },
+            Case {
+                what: "a Switch that found the Account unusable for good",
+                outcome: Err(quarantined()),
+                moved: false,
+                active: OUTGOING,
+                quarantine: Some(Quarantine::NoCredential),
+            },
+            Case {
+                what: "a Quarantine diagnosed after the Credential went live",
+                outcome: Err(quarantined()),
+                moved: true,
+                active: INCOMING,
+                quarantine: Some(Quarantine::NoCredential),
+            },
+        ];
+
+        for case in cases {
+            let host = FakeHost::new();
+            let mut perch = registry::lock(&host).expect("the registry lock is free");
+            let mut registry = two_accounts();
+            let failed = case.outcome.is_err();
+
+            let recorded =
+                landing(case.outcome, case.moved).record(&host, &mut perch, &mut registry);
+
+            assert_eq!(
+                recorded.is_err(),
+                failed,
+                "{}: it hands back what it was given",
+                case.what
+            );
+            assert_eq!(
+                registry.active.as_deref(),
+                Some(case.active),
+                "{}: which Account is active is a fact about which Credential is live",
+                case.what
+            );
+            assert_eq!(
+                registry.account(INCOMING).and_then(|held| held.quarantine),
+                case.quarantine,
+                "{}: a Quarantine is written wherever it was diagnosed",
+                case.what
+            );
+        }
+    }
+
+    /// The failure that got us here is the one the user reads and the one the
+    /// exit code comes from. A `record` that replaced it with its own would cost
+    /// a script the code it branches on.
+    #[test]
+    fn recording_a_landing_never_replaces_the_failure_that_stopped_it() {
+        for (what, error) in [
+            ("an ordinary failure", ordinary()),
+            ("a Quarantine", quarantined()),
+        ] {
+            let host = FakeHost::new();
+            let mut perch = registry::lock(&host).expect("the registry lock is free");
+            let mut registry = two_accounts();
+            let (said, code) = (error.to_string(), error.exit_code());
+
+            let handed_back = landing(Err(error), true)
+                .record(&host, &mut perch, &mut registry)
+                .expect_err("the Switch failed");
+
+            assert_eq!(handed_back.to_string(), said, "{what}");
+            assert_eq!(handed_back.exit_code(), code, "{what}");
+        }
+    }
+
+    /// A registry Perch could not write is not worth losing the failure over:
+    /// the worst a missed Quarantine costs is making the same discovery next
+    /// time, and the failure already says the Account has to be logged into
+    /// again.
+    #[test]
+    fn a_quarantine_that_cannot_be_written_does_not_replace_the_failure_either() {
+        let host = FakeHost::new();
+        let path = registry::registry_path(&host).expect("there is a home to write under");
+        let host = host.with_a_disk_that_fills_writing(&path);
+        let mut perch = registry::lock(&host).expect("the registry lock is free");
+        let mut registry = two_accounts();
+
+        let handed_back = landing(Err(quarantined()), false)
+            .record(&host, &mut perch, &mut registry)
+            .expect_err("the Switch failed");
+
+        assert_eq!(
+            handed_back.exit_code(),
+            quarantined().exit_code(),
+            "the Quarantine is what the user is told about, not the write"
+        );
+    }
 }
