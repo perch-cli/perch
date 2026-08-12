@@ -67,6 +67,31 @@ fn scratch(case: &str) -> PathBuf {
     dir
 }
 
+/// Which links this machine will actually make, asked of the real filesystem.
+///
+/// A Windows without Developer Mode makes no symbolic link, and that is a fact
+/// about the *machine* rather than about either adapter. The fake models it with
+/// a knob that defaults to off, so left alone the two answer differently and
+/// each skips on its own: the fake skips every symbolic case while the real host
+/// asserts them, both tests pass, and the suite reports an agreement it never
+/// checked. So the machine is asked once and the fake is told the answer.
+fn links_this_machine_makes() -> &'static [Link] {
+    // Asked once. The two tests run in parallel and the answer is a property of
+    // the machine rather than of either of them, so asking twice would be two
+    // threads racing over one scratch directory for the same answer.
+    static MADE: std::sync::OnceLock<Vec<Link>> = std::sync::OnceLock::new();
+    MADE.get_or_init(|| {
+        let host = RealHost::new();
+        let root = scratch("what-links-this-machine-makes");
+        let made = [Link::Symbolic, Link::Junction, Link::Hard]
+            .into_iter()
+            .filter(|kind| can_link(&host, *kind, &root, "the machine"))
+            .collect();
+        let _ = std::fs::remove_dir_all(&root);
+        made
+    })
+}
+
 /// Whether this machine will make a link of this kind at all — a Windows
 /// without Developer Mode will not make a symbolic one, which is the case the
 /// other two kinds exist for. Said out loud, because a case that skipped itself
@@ -482,6 +507,30 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "a kind this platform will not make is refused rather than substituted",
+        asserts: |host, root, adapter| {
+            // A junction is Windows' link for a directory and exists nowhere
+            // else. Which kind was made decides what happens when the target is
+            // replaced, so a platform that cannot make one says so rather than
+            // quietly putting a symbolic link there instead.
+            let target = root.join("a-directory");
+            host.create_dir_all(&target).expect("something to point at");
+            let at = root.join("the-junction");
+
+            match (cfg!(windows), host.link(Link::Junction, &target, &at)) {
+                (true, Ok(())) => assert_eq!(
+                    host.link_target(&at).expect("it is there"),
+                    Some(target),
+                    "{adapter}: and it names what it was pointed at"
+                ),
+                (false, Err(_)) => {}
+                (windows, made) => {
+                    panic!("{adapter}: windows is {windows} and the link was {made:?}")
+                }
+            }
+        },
+    },
+    Case {
         named: "a hard link is a second name rather than a link",
         asserts: |host, root, adapter| {
             let real = root.join("first-name");
@@ -508,9 +557,22 @@ const CASES: &[Case] = &[
     },
 ];
 
+/// A run in which every link case skipped is a run that checked nothing about
+/// the half of this port that ADR 0026 turns on.
+fn refuse_a_run_with_no_links_in_it(made: &[Link]) {
+    assert!(
+        made.iter()
+            .any(|kind| matches!(kind, Link::Symbolic | Link::Hard)),
+        "this machine makes neither a symbolic nor a hard link, so every link \
+         case skipped itself and the suite passed without asking anything"
+    );
+}
+
 /// The real filesystem, one scratch directory per case.
 #[test]
 fn the_real_host_conforms_to_the_port() {
+    refuse_a_run_with_no_links_in_it(links_this_machine_makes());
+
     let host = RealHost::new();
     for case in CASES {
         let root = scratch(&case.named.replace(' ', "-"));
@@ -523,8 +585,18 @@ fn the_real_host_conforms_to_the_port() {
 /// world per case.
 #[test]
 fn the_fake_host_conforms_to_the_port() {
+    let made = links_this_machine_makes();
+    refuse_a_run_with_no_links_in_it(made);
+    let developer_mode = made.contains(&Link::Symbolic);
+
     for case in CASES {
         let host = FakeHost::new().with_platform(this_platform());
+        // What the machine the real host is on will actually make, so the two
+        // skip the same cases rather than each skipping its own.
+        let host = match developer_mode {
+            true => host.with_developer_mode(),
+            false => host,
+        };
         let root = PathBuf::from("/conformance").join(case.named.replace(' ', "-"));
         host.create_dir_all(&root).expect("a root to work under");
         (case.asserts)(&host, &root, "FakeHost");
