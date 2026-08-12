@@ -290,8 +290,7 @@ fn get(registry: &Registry, words: &[String]) -> Result<Vec<String>> {
 /// output would turn every Inheritance into an Override. What a Scope Inherits
 /// is what `perch config get <scope>` is for.
 fn everything(registry: &Registry) -> Vec<String> {
-    let mut lines: Vec<String> = GLOBAL_KEYS
-        .iter()
+    let mut lines: Vec<String> = global_keys()
         .map(|key| {
             format!(
                 "{} {}",
@@ -616,7 +615,7 @@ impl Setting {
             // rather than eighty.
             Setting::WatcherThresholdPercent | Setting::WatcherMarginPercent => Shape::Range {
                 least: 0,
-                most: 100,
+                most: registry::MAX_PERCENTAGE as u32,
                 step: 5,
             },
             Setting::WatcherCooldownMinutes => Shape::Range {
@@ -870,15 +869,16 @@ enum Key {
     CycleUngrouped,
 }
 
-const GLOBAL_KEYS: [Key; 7] = [
-    Key::CycleUngrouped,
-    Key::Setting(Setting::Strategy),
-    Key::Setting(Setting::WatcherMayAct),
-    Key::Setting(Setting::WatcherThresholdPercent),
-    Key::Setting(Setting::WatcherCooldownMinutes),
-    Key::Setting(Setting::WatcherMarginPercent),
-    Key::Setting(Setting::WatcherNoReturn),
-];
+/// Everything Global holds, in the order `perch config get` prints it:
+/// `cycle-ungrouped`, which is Global's alone, and then every Setting.
+///
+/// Walked rather than listed. It was a second array beside [`SETTINGS`],
+/// holding the same six names in the same order and free to fall behind it —
+/// and a Setting missing from here is one `perch config get` does not print,
+/// on the one Scope where every value is declared rather than Inherited.
+fn global_keys() -> impl Iterator<Item = Key> {
+    std::iter::once(Key::CycleUngrouped).chain(SETTINGS.map(Key::Setting))
+}
 
 impl Key {
     fn as_str(self) -> &'static str {
@@ -889,7 +889,7 @@ impl Key {
     }
 
     fn vocabulary() -> String {
-        listed(GLOBAL_KEYS.map(Key::as_str).as_slice())
+        listed(&global_keys().map(Key::as_str).collect::<Vec<_>>())
     }
 
     fn parse(name: &str) -> Result<Self> {
@@ -904,8 +904,7 @@ impl Key {
     /// The same lookup where failing is an answer rather than a refusal — for
     /// the forms that have a second thing to try.
     fn parse_quietly(name: &str) -> std::result::Result<Self, ()> {
-        GLOBAL_KEYS
-            .into_iter()
+        global_keys()
             .find(|key| name.eq_ignore_ascii_case(key.as_str()))
             .ok_or(())
     }
@@ -989,7 +988,7 @@ fn yes_or_no(key: &str, value: &str) -> Result<bool> {
 
 /// A percentage, refused with the numbers that would have been accepted.
 ///
-/// The range is the registry's to state (`A_PERCENTAGE`), so the refusal a
+/// The range is the registry's to state (`a_percentage`), so the refusal a
 /// number too large for the field gets and the one a number the field can hold
 /// but the policy cannot gets are the same sentence. To the script that
 /// mistyped, `300` and `101` are the same mistake.
@@ -997,8 +996,8 @@ fn percentage(key: &str, value: &str) -> Result<u8> {
     value
         .parse::<u8>()
         .ok()
-        .filter(|percent| *percent <= 100)
-        .ok_or_else(|| not_a_value(key, value, registry::A_PERCENTAGE))
+        .filter(|percent| *percent <= registry::MAX_PERCENTAGE)
+        .ok_or_else(|| not_a_value(key, value, &registry::a_percentage()))
 }
 
 /// A count of minutes, refused the same way.
@@ -1043,6 +1042,60 @@ mod tests {
         let mut registry = Registry::default();
         registry.declare_group("work").unwrap();
         registry
+    }
+
+    /// Every surface agrees what a percentage is.
+    ///
+    /// `Shape`'s own doc says why this has to hold — "a second statement of it
+    /// in the view is how the panel comes to offer a value `set` would refuse"
+    /// — and the bound was stated five times: in `shape`'s step range, twice in
+    /// `Overrides::validate`, in the parser here, and inside the sentence all
+    /// of them quote. The cooldown beside each of them read a named bound; the
+    /// percentage did not.
+    #[test]
+    fn every_surface_agrees_what_a_percentage_is() {
+        let most = registry::MAX_PERCENTAGE;
+        let past_it = u32::from(most) + 1;
+
+        for setting in [
+            Setting::WatcherThresholdPercent,
+            Setting::WatcherMarginPercent,
+        ] {
+            // What the arrow keys will walk to.
+            assert_eq!(
+                setting.shape(),
+                Shape::Range {
+                    least: 0,
+                    most: u32::from(most),
+                    step: 5,
+                },
+                "{setting:?}"
+            );
+
+            // What `perch config set` accepts.
+            percentage(setting.as_str(), &most.to_string()).expect("the top of the range");
+            percentage(setting.as_str(), &past_it.to_string()).expect_err("and one past it");
+        }
+
+        // And what a registry somebody edited by hand is refused for.
+        let scope = registry::Scope::Group("work".to_string());
+        registry::Overrides {
+            watcher_threshold_percent: Some(most),
+            ..Default::default()
+        }
+        .validate(&scope)
+        .expect("the top of the range is a value the registry holds");
+
+        let refused = registry::Overrides {
+            watcher_threshold_percent: Some(most.saturating_add(1)),
+            ..Default::default()
+        }
+        .validate(&scope)
+        .expect_err("and one past it is not");
+        assert!(
+            refused.to_string().contains(&registry::a_percentage()),
+            "refused in the words every other surface uses: {refused}"
+        );
     }
 
     fn words(said: &[&str]) -> Vec<String> {

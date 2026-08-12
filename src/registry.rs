@@ -238,9 +238,23 @@ pub const DEFAULT_WATCHER_MARGIN_PERCENT: u8 = 10;
 /// second Switch happen inside any window it is pacing.
 pub const MAX_WATCHER_COOLDOWN_MINUTES: u32 = 7 * 24 * 60;
 
+/// The most a Setting said as a share of something can be.
+///
+/// Named for the reason [`MAX_WATCHER_COOLDOWN_MINUTES`] is, and it was the one
+/// bound that was not: `100` was written out in the sentence below, twice in
+/// the range check, and again in the step range the TUI's arrow keys walk — so
+/// what `perch config set` accepts, what a hand-edited registry is refused for,
+/// and what the panel will let you reach were three statements of one number.
+pub const MAX_PERCENTAGE: u8 = 100;
+
 /// What a percentage accepts, said once so that the refusal a mistyped `perch
 /// config set` gets and the one a hand-edited registry gets are the same words.
-pub const A_PERCENTAGE: &str = "a whole number between 0 and 100";
+///
+/// Built from the bound rather than written out beside it, as
+/// [`a_cooldown`] already was.
+pub fn a_percentage() -> String {
+    format!("a whole number between 0 and {MAX_PERCENTAGE}")
+}
 
 /// The same for a cooldown, which is a count of minutes rather than a share of
 /// a window. Built from the bound rather than written out beside it, so the
@@ -384,21 +398,24 @@ impl Overrides {
     pub fn validate(&self, scope: &Scope) -> Result<()> {
         if self
             .watcher_threshold_percent
-            .is_some_and(|held| held > 100)
+            .is_some_and(|held| held > MAX_PERCENTAGE)
         {
             return Err(out_of_range(
                 scope,
                 "watcher-threshold-percent",
                 self.watcher_threshold_percent.expect("just read"),
-                A_PERCENTAGE,
+                &a_percentage(),
             ));
         }
-        if self.watcher_margin_percent.is_some_and(|held| held > 100) {
+        if self
+            .watcher_margin_percent
+            .is_some_and(|held| held > MAX_PERCENTAGE)
+        {
             return Err(out_of_range(
                 scope,
                 "watcher-margin-percent",
                 self.watcher_margin_percent.expect("just read"),
-                A_PERCENTAGE,
+                &a_percentage(),
             ));
         }
         if self
