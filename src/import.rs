@@ -96,7 +96,8 @@ pub fn restored(export: &Export, path: &std::path::Path) -> Result<Registry> {
     // The path named is where the registry is about to be written rather than
     // where it came from, because that is the file the refusal tells them to
     // edit — and the Export it came from is encrypted.
-    registry::validate(&export.registry, path)?;
+    registry::validate(&export.registry)
+        .map_err(|refusal| refusal.with_note(&registry::the_file_to_edit(path)))?;
 
     Ok(Registry {
         active: None,

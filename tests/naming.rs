@@ -318,9 +318,12 @@ fn a_name_that_differs_only_in_case_is_the_same_name() {
 
 #[test]
 fn an_alias_command_on_a_registry_from_before_aliases_finds_nothing() {
+    // Holding the Account it names: a registry from before Aliases still had
+    // the Account it was active on, and one that named an Account it did not
+    // hold is a state `validate` refuses rather than a machine anybody had.
     let host = logged_in_machine().with_file(
         REGISTRY_PATH,
-        r#"{"version":1,"active":"someone@example.com","accounts":[]}"#,
+        r#"{"version":1,"active":"someone@example.com","accounts":[{"identity":{"email":"someone@example.com"},"enabled":true}]}"#,
     );
 
     let (result, _) = run_alias(

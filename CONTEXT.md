@@ -217,6 +217,17 @@ Copying the live Credential back into the Profile of the Account it belongs to,
 so a Rotation that happened while it was active is not lost when you Switch away.
 _Avoid_: backup, save, snapshot
 
+**Landing**:
+A Switch that has happened and is not yet written down. The state exists because
+the Credential reaches the Default Profile one step before the Identity is
+patched, so a Switch can move the machine and then fail: what is live and what
+Perch records as active disagree until the Landing is recorded. Never read for
+its outcome before then — the next Switch Captures into whichever Profile the
+registry names, and that is the one mistake this design cannot recover from
+(ADR 0006). Only whether it *moved* is answerable earlier, because a Switch that
+happened paces the Watcher whether or not it finished.
+_Avoid_: result, outcome, attempt
+
 **Cycle**:
 Choosing which Account to Switch to rather than being told — by Utilization,
 within a Group. What Perch does when you name no target, and what the watcher

@@ -61,6 +61,22 @@ pub fn create(host: &dyn Host, dir: &Path, credential: &str) -> Result<Store> {
 /// Store *is* — one store holding a Profile's Credential at a time — has to
 /// hold after the rarer write too, and that direction is the more dangerous of
 /// the two: see [`supersede`].
+///
+/// There is a fourth thing a write owes that this cannot check, and a caller
+/// must: **a Live Profile is not written into**. Something else is holding that
+/// Credential, and replacing it is the mid-task logout ADR 0005 exists to
+/// prevent. The question is [`crate::probe::live_clients`], and it has to be
+/// asked of the Profile being written *under whatever lock the write is taken
+/// under* — an answer from before a browser round trip or a lock wait is an
+/// answer about a machine that has since had minutes to move on
+/// ([`crate::switch::refuse_if_live_anywhere`] is the shape of asking it twice).
+///
+/// It is not enforced here because this function cannot tell the callers apart:
+/// three of the eight paths write into a Profile something could be running
+/// against and ask first, and five are bringing a Profile into being, where
+/// there is nothing to be running yet and the question is vacuous. A parameter
+/// saying which would be a caller asserting it rather than being held to it,
+/// which is a comment with a type around it — so it is a comment.
 pub fn store_credential(host: &dyn Host, store: &Store, credential: &str) -> Result<()> {
     let [primary, fallback] = credentials::stores_for(host, store);
 

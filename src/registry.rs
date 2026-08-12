@@ -238,9 +238,29 @@ pub const DEFAULT_WATCHER_MARGIN_PERCENT: u8 = 10;
 /// second Switch happen inside any window it is pacing.
 pub const MAX_WATCHER_COOLDOWN_MINUTES: u32 = 7 * 24 * 60;
 
+/// The most a Setting said as a share of something can be.
+///
+/// Named for the reason [`MAX_WATCHER_COOLDOWN_MINUTES`] is, and it was the one
+/// bound that was not: `100` was written out in the sentence below, twice in
+/// the range check, and again in the step range the TUI's arrow keys walk — so
+/// what `perch config set` accepts, what a hand-edited registry is refused for,
+/// and what the panel will let you reach were three statements of one number.
+///
+/// Not the bound on a Utilization figure, which `validate` checks separately
+/// and `anthropic::understand` clamps to. That one is what a *reading* may be;
+/// this is what a Setting may be *set to*, which is a decision — a Perch that
+/// declined to let the watcher act above ninety would move this and must not
+/// move that. They are the same number today and two facts always.
+pub const MAX_PERCENTAGE: u8 = 100;
+
 /// What a percentage accepts, said once so that the refusal a mistyped `perch
 /// config set` gets and the one a hand-edited registry gets are the same words.
-pub const A_PERCENTAGE: &str = "a whole number between 0 and 100";
+///
+/// Built from the bound rather than written out beside it, as
+/// [`a_cooldown`] already was.
+pub fn a_percentage() -> String {
+    format!("a whole number between 0 and {MAX_PERCENTAGE}")
+}
 
 /// The same for a cooldown, which is a count of minutes rather than a share of
 /// a window. Built from the bound rather than written out beside it, so the
@@ -384,21 +404,24 @@ impl Overrides {
     pub fn validate(&self, scope: &Scope) -> Result<()> {
         if self
             .watcher_threshold_percent
-            .is_some_and(|held| held > 100)
+            .is_some_and(|held| held > MAX_PERCENTAGE)
         {
             return Err(out_of_range(
                 scope,
                 "watcher-threshold-percent",
                 self.watcher_threshold_percent.expect("just read"),
-                A_PERCENTAGE,
+                &a_percentage(),
             ));
         }
-        if self.watcher_margin_percent.is_some_and(|held| held > 100) {
+        if self
+            .watcher_margin_percent
+            .is_some_and(|held| held > MAX_PERCENTAGE)
+        {
             return Err(out_of_range(
                 scope,
                 "watcher-margin-percent",
                 self.watcher_margin_percent.expect("just read"),
-                A_PERCENTAGE,
+                &a_percentage(),
             ));
         }
         if self
@@ -760,7 +783,7 @@ impl Registry {
     pub fn account(&self, email: &str) -> Option<&Account> {
         self.accounts
             .iter()
-            .find(|account| account.email() == email)
+            .find(|account| same_name(account.email(), email))
     }
 
     pub fn active_account(&self) -> Option<&Account> {
@@ -862,7 +885,7 @@ impl Registry {
     /// Declares a Group, refusing a name that is not usable or already means
     /// something else.
     pub fn declare_group(&mut self, name: &str) -> Result<()> {
-        self.refuse_a_name_no_group_may_answer_to(name, None)?;
+        self.refuse_a_name_nothing_may_answer_to(NameKind::Group, name, None)?;
         // Holding nothing, which is a Group that Inherits every Setting there
         // is. A freshly declared Group tracks Global rather than copying it, so
         // a threshold set at Global afterwards reaches it too.
@@ -870,31 +893,74 @@ impl Registry {
         Ok(())
     }
 
-    /// Refuses a name no Group may answer to: one that is not usable at all,
-    /// one another Group already answers to, or one an Alias holds.
+    /// Refuses a name nothing may answer to: one that is not usable at all, one
+    /// another name of the same kind already answers to, or one the other half
+    /// of the shared namespace holds.
     ///
-    /// Declaring a Group and renaming one both ask this, so a rename cannot
-    /// reach a state a declaration could not.
+    /// One function for both halves. Every way a name enters the registry asks
+    /// this — `perch group add`, `perch group rename`, `perch alias`, `perch
+    /// add` and both of the TUI's typed fields — so what the two halves accept
+    /// cannot come apart, and a caller cannot get the order wrong. The order is
+    /// load-bearing: shape before collision, because `refuse_taken_names` opens
+    /// by asking whether the Alias and the Group are the same name, and with it
+    /// reversed `perch add --alias '' --group ''` was refused as "`` cannot be
+    /// both an Alias and a Group name" — a Conflict about two names neither of
+    /// which was usable in the first place.
     ///
-    /// `renaming` is the name the Group already answers to, where there is one.
-    /// A Group renaming itself does not collide with itself, and that includes
-    /// recapitalising it — the rule `perch alias` states for an Account, which
-    /// this must not disagree with. Nothing else is waived by it: the shared
-    /// namespace is still checked, so a recapitalisation cannot walk into an
-    /// Alias either.
-    fn refuse_a_name_no_group_may_answer_to(
+    /// `instead_of` is the name this one is replacing, where it is replacing
+    /// one: the Group's current name, or the Alias the Account already answers
+    /// to. A name renaming itself does not collide with itself, and that
+    /// includes recapitalising it.
+    ///
+    /// Nothing else is waived by it. The shared namespace is still checked, so
+    /// a recapitalisation cannot walk into the other half — which the Group
+    /// path has always done and the two Alias paths did not: both returned `Ok`
+    /// on a self-rename without asking anything. That was sound, but only by an
+    /// argument about what `declare_group` would have refused earlier, and an
+    /// inference held in one head is the kind that stops being true when
+    /// somebody adds a third way to make a name.
+    pub fn refuse_a_name_nothing_may_answer_to(
         &self,
+        kind: NameKind,
         name: &str,
-        renaming: Option<&str>,
+        instead_of: Option<&str>,
     ) -> Result<()> {
-        validate_name(NameKind::Group, name)?;
-        let renaming_itself = renaming.is_some_and(|held| same_name(held, name));
-        if !renaming_itself && let Some(declared) = self.declared_group(name) {
-            return Err(PerchError::Conflict(format!(
-                "There is already a Group called `{declared}`."
-            )));
+        validate_name(kind, name)?;
+
+        let renaming_itself = instead_of.is_some_and(|held| same_name(held, name));
+        if !renaming_itself {
+            // The same-kind collision. Asked here for a Group and inside
+            // `refuse_taken_names` for an Alias, because that function is
+            // asymmetric: given an Alias it checks both halves, and given a
+            // Group only the Alias half.
+            if let (NameKind::Group, Some(declared)) = (kind, self.declared_group(name)) {
+                return Err(PerchError::Conflict(format!(
+                    "There is already a Group called `{declared}`."
+                )));
+            }
         }
-        self.refuse_taken_names(None, Some(name))
+
+        match kind {
+            NameKind::Group => self.refuse_taken_names(None, Some(name)),
+            NameKind::Alias => match renaming_itself {
+                // An Account keeping its own Alias under another capitalisation
+                // cannot collide with the Alias it is giving up, and
+                // `refuse_taken_names` would find exactly that.
+                true => self.refuse_a_group_of_this_name(name),
+                false => self.refuse_taken_names(Some(name), None),
+            },
+        }
+    }
+
+    /// The half of [`Self::refuse_taken_names`] that still applies to an Alias
+    /// renaming itself: the other side of the shared namespace.
+    fn refuse_a_group_of_this_name(&self, name: &str) -> Result<()> {
+        match self.declared_group(name) {
+            Some(declared) => Err(PerchError::Conflict(format!(
+                "`{declared}` is already a Group name, and a name cannot be both."
+            ))),
+            None => Ok(()),
+        }
     }
 
     /// Renames a Group, keeping everything it carries.
@@ -915,7 +981,7 @@ impl Registry {
     /// rename that dropped it would be a way to make the watcher Switch again at
     /// once.
     pub fn rename_group(&mut self, held: &str, to: &str) -> Result<()> {
-        self.refuse_a_name_no_group_may_answer_to(to, Some(held))?;
+        self.refuse_a_name_nothing_may_answer_to(NameKind::Group, to, Some(held))?;
 
         let overrides = self
             .groups
@@ -978,14 +1044,39 @@ impl Registry {
     pub fn account_mut(&mut self, email: &str) -> Option<&mut Account> {
         self.accounts
             .iter_mut()
-            .find(|account| account.email() == email)
+            .find(|account| same_name(account.email(), email))
+    }
+
+    /// The same, where the Account has to be there.
+    ///
+    /// Eight call sites reached for [`Self::account`] behind an `expect` saying
+    /// resolution had named an Account Perch holds — the proof dropped at the
+    /// seam and bought again, eight times, as an assertion. What they are
+    /// asserting is real and [`validate`] owns it: an Alias or an `active`
+    /// naming an Account that is not there is refused on the way in and, since
+    /// `save` validates too, on the way out.
+    ///
+    /// So this is the same defence in depth `save` keeps: the state cannot
+    /// happen, and if it does the answer is a refusal naming what could not be
+    /// found rather than a panic. Nothing a person can act on — which is why it
+    /// says so — but a wedged machine is worse than a bad sentence.
+    pub fn held(&self, email: &str) -> Result<&Account> {
+        self.account(email).ok_or_else(|| no_such_account(email))
+    }
+
+    /// [`Self::held`], for the callers that go on to change what they find.
+    pub fn held_mut(&mut self, email: &str) -> Result<&mut Account> {
+        match self.account_mut(email) {
+            Some(account) => Ok(account),
+            None => Err(no_such_account(email)),
+        }
     }
 
     /// The Alias an Account answers to, if it has been given one.
     pub fn alias_of(&self, email: &str) -> Option<&str> {
         self.aliases
             .iter()
-            .find(|(_, target)| *target == email)
+            .find(|(_, target)| same_name(target, email))
             .map(|(alias, _)| alias.as_str())
     }
 
@@ -1052,14 +1143,32 @@ impl Registry {
         Ok(())
     }
 
-    /// Names an Account, having established the name is free.
+    /// Names an Account, refusing a name that is not usable or already means
+    /// something else. Hands back the Alias the Account gave up, where it had
+    /// one.
+    ///
+    /// The check is not the caller's to remember, for the reason
+    /// [`declare_group`](Self::declare_group) does not leave it to one either:
+    /// this was three primitives — `validate_name`, then a self-rename waiver,
+    /// then `refuse_taken_names` — reassembled at every call site, in an order
+    /// that had already been got wrong once. The Group half has had one door
+    /// since it was written and the Alias half had none.
     ///
     /// An Account answers to one Alias, so naming one that already had a name
     /// replaces it: a name the user has moved on from should not go on
     /// reaching the Account behind their back.
-    pub fn set_alias(&mut self, alias: &str, email: &str) {
-        self.aliases.retain(|_, named| named != email);
+    ///
+    /// An address is compared the way a name is, with [`same_name`], which is
+    /// what every lookup in this module does — so `CAFÉ@example.com` reaches
+    /// the Account held as `café@example.com` rather than quietly naming
+    /// nothing.
+    pub fn name_account(&mut self, alias: &str, email: &str) -> Result<Option<String>> {
+        let previous = self.alias_of(email).map(str::to_string);
+        self.refuse_a_name_nothing_may_answer_to(NameKind::Alias, alias, previous.as_deref())?;
+
+        self.aliases.retain(|_, named| !same_name(named, email));
         self.aliases.insert(alias.to_string(), email.to_string());
+        Ok(previous)
     }
 
     /// Frees a name, returning the name as it was held and the Account it used
@@ -1110,9 +1219,14 @@ impl Registry {
     /// caller's to take away before the row that names it goes, so a store that
     /// will not give it up is met while the Account can still be named.
     pub fn forget(&mut self, email: &str) {
-        self.accounts.retain(|account| account.email() != email);
-        self.aliases.retain(|_, named| named != email);
-        if self.active.as_deref() == Some(email) {
+        self.accounts
+            .retain(|account| !same_name(account.email(), email));
+        self.aliases.retain(|_, named| !same_name(named, email));
+        if self
+            .active
+            .as_deref()
+            .is_some_and(|held| same_name(held, email))
+        {
             self.active = None;
         }
     }
@@ -1121,7 +1235,7 @@ impl Registry {
         match self
             .accounts
             .iter_mut()
-            .find(|existing| existing.email() == account.email())
+            .find(|existing| same_name(existing.email(), account.email()))
         {
             Some(existing) => *existing = account,
             None => self.accounts.push(account),
@@ -1382,9 +1496,42 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
             detail: err.to_string(),
         })?;
 
-    validate(&registry, path)?;
+    validate(&registry).map_err(|refusal| refusal.with_note(&the_file_to_edit(path)))?;
 
     Ok(Some(with_every_claimed_group_declared(registry)))
+}
+
+/// Where to put right something only a hand edit could have put wrong.
+///
+/// The rule [`validate`] states is about the registry; this is about the file it
+/// happens to be written in, and only a caller that read one can say which file
+/// that is. Kept apart because the other caller — [`save`] — is holding a
+/// registry nobody hand-edited, and telling somebody to go and edit a value that
+/// is not in the file yet is the one sentence that would make it worse.
+///
+/// Named as one sentence rather than spelled at each refusal, which is where it
+/// was: seven copies, of which one had already drifted to the singular.
+pub fn the_file_to_edit(path: &Path) -> String {
+    format!(
+        "It is in {}, and every Perch command reads that file — including the \
+         ones that would set it. Edit the value there.",
+        path.display(),
+    )
+}
+
+/// The refusal for an Account that was named and is not there.
+///
+/// Unreachable by construction — [`validate`] refuses every registry that could
+/// produce it, on the way in and on the way out — so this is worded as what it
+/// is rather than as something to go and fix.
+fn no_such_account(email: &str) -> PerchError {
+    PerchError::Other(format!(
+        "Perch was asked for {email}, which it does not hold, by something that \
+         had already established it did.\n\
+         {}\n\
+         Nothing was changed.",
+        crate::report::this_is_a_bug(),
+    ))
 }
 
 /// Everything a registry has to be true of before any command acts on it.
@@ -1395,17 +1542,18 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
 /// and surprise somebody by acting on it.
 ///
 /// Checked here means every command meets it, including `perch config set` —
-/// the one that would otherwise be the repair. So the refusals name the file: a
-/// value only a hand edit can produce is a value only a hand edit can take back
-/// out, and a range with nowhere to apply it is a dead end rather than an
-/// instruction.
+/// the one that would otherwise be the repair. A value only a hand edit can
+/// produce is a value only a hand edit can take back out, so a caller that read
+/// the registry off a disk says where to do that, with
+/// [`the_file_to_edit`]. The rule itself names no file, because the other
+/// caller is holding a registry that came from nowhere but Perch.
 ///
 /// Public because an Import writes a registry without reading one first, and
 /// was running a narrower check of its own — so a file `perch import` accepted
 /// could be one every later command refused to read, which leaves a machine
 /// with no working command on it and no `perch purge` either. One function, so
 /// what an Import will accept and what a load will accept cannot differ.
-pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
+pub fn validate(registry: &Registry) -> Result<()> {
     // Global's own values as well as every Scope's Overrides. Global is where a
     // Setting nobody has Overridden is read from, so a range it breaks is one
     // every Scope in the registry inherits — the widest way in, and the one
@@ -1425,13 +1573,7 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
             .map(|(name, held)| (Scope::Group(name.clone()), held.clone())),
     );
     for (scope, held) in declared {
-        held.validate(&scope).map_err(|refusal| {
-            refusal.with_note(&format!(
-                "It is in {}, and every Perch command reads that file — including \
-                 the one that would set it. Edit the value there.",
-                path.display(),
-            ))
-        })?;
+        held.validate(&scope)?;
     }
 
     // The Group *names* an Account claims, for the same reason.
@@ -1460,10 +1602,10 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
         .iter()
         .filter_map(|account| account.group.as_deref());
     for name in claimed.chain(registry.groups.keys().map(String::as_str)) {
-        refuse_a_name_nothing_would_have_accepted(registry, NameKind::Group, name, path)?;
+        refuse_a_name_nothing_would_have_accepted(registry, NameKind::Group, name)?;
     }
     for name in registry.aliases.keys() {
-        refuse_a_name_nothing_would_have_accepted(registry, NameKind::Alias, name, path)?;
+        refuse_a_name_nothing_would_have_accepted(registry, NameKind::Alias, name)?;
     }
 
     // What each Alias points *at*, which the loop above does not look at: it
@@ -1483,10 +1625,7 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
         if registry.account(email).is_none() {
             return Err(PerchError::Invalid(format!(
                 "The registry gives the Alias `{alias}` to {email}, which is not \
-                 an Account Perch holds.\n\
-                 It is in {}, and every Perch command reads that file — including \
-                 the ones that would set it. Edit the value there.",
-                path.display(),
+                 an Account Perch holds.",
             )));
         }
         // One Account, one Alias. `set_alias` enforces it by dropping the old key
@@ -1504,13 +1643,30 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
                 "The registry gives {email} both the Alias `{already}` and the \
                  Alias `{alias}`, and an Account answers to one Alias at a time \
                  — so which of them Perch shows it under is not decided by \
-                 anything.\n\
-                 It is in {}, and every Perch command reads that file — including \
-                 the ones that would set it. Edit the value there.",
-                path.display(),
+                 anything.",
             )));
         }
         named.push((alias, email));
+    }
+
+    // The other pointer into the Accounts, and the one the Alias check above was
+    // written for: "a dangling one is not a refusal anywhere downstream — it is
+    // a panic". `active` has exactly the same shape and had no such check. It
+    // survives today because `active_account` resolves through `and_then` and
+    // its callers turn `None` into a refusal — which means a dangling pointer
+    // reads as "no Account is active", and the repair somebody is offered is to
+    // switch to one, on a machine where the Account they are on is right there
+    // in the file.
+    //
+    // Holding nothing is a state and not a fault: a machine that has never
+    // switched has no active Account.
+    if let Some(active) = &registry.active
+        && registry.account(active).is_none()
+    {
+        return Err(PerchError::Invalid(format!(
+            "The registry says {active} is the active Account, which is not an \
+             Account Perch holds."
+        )));
     }
 
     // The third member of the namespace, which nothing was checking. A Target is
@@ -1533,11 +1689,8 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
             return Err(PerchError::Invalid(format!(
                 "The registry holds an Account called `{}`, which is not an \
                  address an Alias or a Group name could be told from — and a \
-                 Target that could be either has no single answer.\n\
-                 It is in {}, and every Perch command reads that file — including \
-                 the ones that would set it. Edit the value there.",
+                 Target that could be either has no single answer.",
                 account.email(),
-                path.display(),
             )));
         }
     }
@@ -1554,11 +1707,8 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
             return Err(PerchError::Invalid(format!(
                 "The registry holds two Accounts spelled `{already}` and `{}`, \
                  which are one Account — so which entry a command reads, and \
-                 which one it writes, is not decided by anything.\n\
-                 It is in {}, and every Perch command reads that file — including \
-                 the ones that would set it. Edit the value there.",
+                 which one it writes, is not decided by anything.",
                 account.email(),
-                path.display(),
             )));
         }
         held.push(account.email());
@@ -1576,8 +1726,8 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
     // `aliases` holding both `work` and `Work` renders one of them in `perch
     // list` and resolves `perch switch work` to the other, and freeing `work`
     // frees neither reliably.
-    refuse_two_names_that_differ_only_in_case(NameKind::Group, registry.groups.keys(), path)?;
-    refuse_two_names_that_differ_only_in_case(NameKind::Alias, registry.aliases.keys(), path)?;
+    refuse_two_names_that_differ_only_in_case(NameKind::Group, registry.groups.keys())?;
+    refuse_two_names_that_differ_only_in_case(NameKind::Alias, registry.aliases.keys())?;
 
     // The percentages a Cycle ranks on, checked the way a Group's are and for
     // the reason `GroupConfig::validate` states: the thing that reads them is a
@@ -1612,14 +1762,11 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
                      window is between 0 and 100 percent full — so what a Cycle \
                      would rank it on, and what the watcher would compare \
                      against a threshold, is not a figure at all.\n\
-                     It is in {}, and every Perch command reads that file — \
-                     including the ones that would set it. Edit the value there, \
-                     or delete the Account's `utilization` and let a `perch \
-                     status --refresh` read it again.",
+                     Deleting the Account's `utilization` lets a `perch status \
+                     --refresh` read it again.",
                     account.email(),
                     window.used_percent,
                     window.window,
-                    path.display(),
                 )));
             }
         }
@@ -1634,7 +1781,6 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
 fn refuse_two_names_that_differ_only_in_case<'a>(
     kind: NameKind,
     names: impl Iterator<Item = &'a String>,
-    path: &Path,
 ) -> Result<()> {
     let mut seen: Vec<&str> = Vec::new();
     for name in names {
@@ -1642,11 +1788,8 @@ fn refuse_two_names_that_differ_only_in_case<'a>(
             return Err(PerchError::Invalid(format!(
                 "The registry holds {} `{already}` and `{name}`, which differ \
                  only in case — so which one a Target finds is not decided by \
-                 anything.\n\
-                 It is in {}, and every Perch command reads that file — including \
-                 the ones that would set it. Edit the value there.",
+                 anything.",
                 kind.article(),
-                path.display(),
             )));
         }
         seen.push(name);
@@ -1675,7 +1818,6 @@ fn refuse_a_name_nothing_would_have_accepted(
     registry: &Registry,
     kind: NameKind,
     name: &str,
-    path: &Path,
 ) -> Result<()> {
     // `none` is not a case of its own here. `validate_name` already refuses it,
     // for both kinds, in words true of a claim and a declaration alike — "means
@@ -1704,11 +1846,8 @@ fn refuse_a_name_nothing_would_have_accepted(
         None => Ok(()),
         Some(why) => Err(PerchError::Invalid(format!(
             "The registry holds {} `{name}`, which is not a name Perch would \
-             have accepted: {why}.\n\
-             It is in {}, and every Perch command reads that file — including \
-             the ones that would set it. Edit the value there.",
+             have accepted: {why}.",
             kind.article(),
-            path.display(),
         ))),
     }
 }
@@ -1771,9 +1910,17 @@ fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
 /// the lock over and ran a whole command under it — is a hold whose registry is
 /// behind the one on disk, and writing it back would revert that command
 /// wholesale. So it is refused, and the caller says what that cost.
+///
+/// It is also where [`validate`] is asked on the way out, so that what this
+/// writes and what [`load`] will accept cannot come apart.
 pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -> Result<()> {
     perch.renew();
     if !perch.still_held() {
+        // A general failure rather than `Busy`, and deliberately (ADR 0036).
+        // `Busy` promises that nothing was changed, and `perch watch` branches
+        // on that promise by going round again — but this save is reached after
+        // a Switch has already moved a Credential as often as before anything
+        // has been written, and from here there is no telling which.
         return Err(PerchError::Other(
             "Another `perch` took the registry lock over while this command was \
              working, and has changed the registry since this one read it. \
@@ -1782,6 +1929,32 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) ->
                 .to_string(),
         ));
     }
+
+    // What `load` will accept, asked before `load` has to refuse it.
+    //
+    // Eight invariants were enforced on the way in and none on the way out, so
+    // a command could write a file every later command declined to read — which
+    // leaves a machine with no working `perch` on it and no `perch purge`
+    // either. That gap has been found twice from the other side: `perch import`
+    // ran a narrower check of its own until `validate` was made public for it,
+    // and `used_percent` was range-checked in one of the two places a figure can
+    // enter the registry. Both repairs added an obligation to a caller. This one
+    // removes the need for it.
+    //
+    // Nothing reachable trips it today — the whole suite is green without this
+    // line — which is what it is for: the failure it catches is a bug in Perch,
+    // and the value of catching it is that the file is never written. So it is
+    // a refusal in the shipped binary rather than a `debug_assert`, and it says
+    // what it is rather than telling somebody to hand-edit a value that is not
+    // in the file. `Other` rather than the `Invalid` the rule raises, because a
+    // script reading exit 14 is being told its input was wrong, and it was not.
+    validate(registry).map_err(|invalid| {
+        PerchError::Other(format!(
+            "{invalid}\n\n{}\n\
+             Nothing was written, and the registry on disk is as it was.",
+            crate::report::this_is_a_bug(),
+        ))
+    })?;
 
     let path = registry_path(host)?;
     // Stamped rather than carried through. `load` returns whatever version the
@@ -1882,6 +2055,275 @@ mod tests {
     /// The hold spans the whole command, and a command can stall for as long as
     /// somebody takes to answer a `[y/N]`. Renewed at every write, so the
     /// ordinary long command keeps the lock it took rather than letting it
+    /// An address is a name, and is compared the way every other name here is.
+    ///
+    /// It was not: the lookups compared with `==` while everything feeding them
+    /// — `target::matched`, `add`, `relogin`, `remove` and `validate` — compared
+    /// with [`same_name`]. Sound, but only because resolution always hands back
+    /// the spelling the registry holds, which was prose in five places and the
+    /// thing eight `expect`s downstream rested on. `validate` refuses two
+    /// Accounts whose addresses differ only in case, on the way in and now on
+    /// the way out, so inside a registry Perch will load there is never more
+    /// than one to find.
+    #[test]
+    fn an_account_is_found_however_its_address_is_capitalised() {
+        let mut registry = Registry::default();
+        registry.upsert(Account {
+            identity: Identity {
+                email: "café@example.com".into(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            enabled: true,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        });
+        registry
+            .name_account("work", "CAFÉ@example.com")
+            .expect("the same Account, spelled the way somebody typed it");
+
+        assert!(registry.account("CAFÉ@example.com").is_some());
+        assert!(registry.account_mut("CAFÉ@EXAMPLE.COM").is_some());
+        assert_eq!(registry.alias_of("Café@Example.com"), Some("work"));
+
+        registry.forget("CAFÉ@example.com");
+        assert!(registry.accounts.is_empty(), "and it is the one that goes");
+        assert!(registry.aliases.is_empty(), "with the name it answered to");
+    }
+
+    /// An Account that was named and is not there is a refusal, not a panic.
+    ///
+    /// Eight call sites asserted this with `expect`, each having thrown away
+    /// the proof resolution gave them and bought it back as a lookup. The state
+    /// cannot happen — `validate` refuses every registry that could produce it,
+    /// on the way in and, since `save` validates too, on the way out — which is
+    /// exactly why the answer to it happening anyway should be a machine that
+    /// still works.
+    #[test]
+    fn an_account_that_was_named_and_is_not_there_is_refused_rather_than_panicked_on() {
+        let registry = Registry::default();
+
+        let refused = registry
+            .held("nobody@example.com")
+            .expect_err("Perch does not hold it");
+
+        assert!(
+            refused.to_string().contains("nobody@example.com"),
+            "{refused}"
+        );
+        assert!(
+            refused.to_string().contains("bug in Perch"),
+            "whose fault it is, because there is nothing for a person to do: {refused}"
+        );
+        assert_eq!(refused.exit_code(), crate::error::EXIT_GENERAL);
+
+        // The mutable half answers the same way. Two functions rather than one
+        // because a caller that goes on to change what it finds needs the other
+        // borrow, and a refusal that differed between them would be the two
+        // halves of one rule disagreeing.
+        let mut registry = Registry::default();
+        assert_eq!(
+            registry
+                .held_mut("nobody@example.com")
+                .expect_err("Perch does not hold it")
+                .to_string(),
+            refused.to_string()
+        );
+    }
+
+    /// The pointer the Alias check was written for, asked of the other one.
+    ///
+    /// `validate` refuses an Alias naming an Account Perch does not hold,
+    /// because "a dangling one is not a refusal anywhere downstream — it is a
+    /// panic". `active` is the same shape and had no check: it reads as "no
+    /// Account is active", so the repair somebody is offered is to switch to
+    /// one, on a machine where the Account they are on is right there in the
+    /// file.
+    #[test]
+    fn an_active_pointer_naming_nothing_is_refused_like_a_dangling_alias() {
+        let mut registry = Registry {
+            active: Some("nobody@example.com".to_string()),
+            ..Default::default()
+        };
+
+        let refused = validate(&registry).expect_err("it names an Account Perch does not hold");
+        assert!(
+            refused.to_string().contains("nobody@example.com"),
+            "{refused}"
+        );
+
+        registry.active = None;
+        validate(&registry).expect("holding nothing is a state rather than a fault");
+    }
+
+    /// Every rule the shared namespace has, asked of both halves of it.
+    ///
+    /// A table because the rules are one fact with two spellings, and they had
+    /// come apart: the Group half funnelled through a single private check and
+    /// the Alias half was three primitives reassembled at each of its three
+    /// call sites, in an order one of them had already got wrong. Asked here of
+    /// the one function all four callers now go through, so a fifth cannot
+    /// reassemble it differently.
+    #[test]
+    fn what_a_name_may_be_is_one_rule_for_both_halves_of_the_namespace() {
+        /// An Account answering to `work`, and a Group called `personal`.
+        fn held() -> Registry {
+            let mut registry = Registry::default();
+            registry.upsert(Account {
+                identity: Identity {
+                    email: "someone@example.com".into(),
+                    account_uuid: None,
+                    organization_name: None,
+                    organization_uuid: None,
+                },
+                plan: None,
+                enabled: true,
+                quarantine: None,
+                group: None,
+                utilization: None,
+            });
+            registry
+                .name_account("work", "someone@example.com")
+                .expect("the name is free");
+            registry.declare_group("personal").expect("so is this one");
+            registry
+        }
+
+        let cases: &[(NameKind, &str, Option<&str>, Option<&str>)] = &[
+            // kind, name, instead_of, the refusal it earns (None = accepted)
+            (NameKind::Group, "spare", None, None),
+            (NameKind::Alias, "spare", None, None),
+            // Its own half.
+            (NameKind::Group, "personal", None, Some("already a Group")),
+            (NameKind::Alias, "work", None, Some("already names")),
+            // Two names that differ only in case are one name.
+            (NameKind::Group, "PERSONAL", None, Some("already a Group")),
+            (NameKind::Alias, "WORK", None, Some("already names")),
+            // The other half, which is what makes the namespace shared.
+            (NameKind::Group, "work", None, Some("already an Alias")),
+            (
+                NameKind::Alias,
+                "personal",
+                None,
+                Some("already a Group name"),
+            ),
+            // Renaming itself is not colliding with itself, recapitalisation
+            // included — the same waiver on both halves, which is new for the
+            // Alias one.
+            (NameKind::Group, "Personal", Some("personal"), None),
+            (NameKind::Alias, "Work", Some("work"), None),
+            // Shape before collision. `perch add --alias '' --group ''` was
+            // refused as "`` cannot be both an Alias and a Group name" — a
+            // Conflict, about two names neither of which was usable at all.
+            (NameKind::Group, "", None, Some("cannot be empty")),
+            (NameKind::Alias, "", None, Some("cannot be empty")),
+            (
+                NameKind::Alias,
+                "has a space",
+                None,
+                Some("has a space in it"),
+            ),
+            (NameKind::Group, "none", None, Some("means no Group at all")),
+        ];
+
+        for (kind, name, instead_of, refusal) in cases {
+            let asked = held().refuse_a_name_nothing_may_answer_to(*kind, name, *instead_of);
+            match refusal {
+                None => asked.unwrap_or_else(|err| {
+                    panic!("{kind:?} `{name}` should be free: {err}");
+                }),
+                Some(said) => {
+                    let refused = asked.expect_err(&format!("{kind:?} `{name}` is not free"));
+                    assert!(
+                        refused.to_string().contains(said),
+                        "{kind:?} `{name}`: expected {said:?}, got {refused}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The half of the check an Alias renaming itself used to skip.
+    ///
+    /// Both Alias paths returned `Ok` the moment the new name matched the held
+    /// one, without asking the other half of the namespace anything. That was
+    /// sound — a Group cannot be declared under a name an Alias already holds —
+    /// but only by an argument about what `declare_group` would have refused
+    /// earlier, which is why the registry here is built by hand: nothing
+    /// reachable can produce it. It is what a third way of making a name would
+    /// walk into, and it now has one answer rather than an inference.
+    #[test]
+    fn recapitalising_an_alias_still_cannot_walk_into_a_group() {
+        let mut registry = Registry::default();
+        registry
+            .aliases
+            .insert("work".to_string(), "someone@example.com".to_string());
+        registry
+            .groups
+            .insert("Work".to_string(), Overrides::default());
+
+        let refused = registry
+            .refuse_a_name_nothing_may_answer_to(NameKind::Alias, "Work", Some("work"))
+            .expect_err("the shared namespace is still checked");
+
+        assert!(
+            refused.to_string().contains("already a Group name"),
+            "{refused}"
+        );
+    }
+
+    /// A registry `load` would refuse is one `save` declines to write.
+    ///
+    /// Nothing reachable produces one — every command in the suite passes with
+    /// this guard in place, and `registry_of` runs `load` after each of them —
+    /// so what is asserted here is the guard rather than the property. The
+    /// property is already covered; the part that is not is what happens on the
+    /// day a command gets it wrong, and the whole value of that is that the file
+    /// on disk is left alone.
+    ///
+    /// The message is asserted too. A refusal that told somebody to edit a value
+    /// in a file it just declined to write would send them looking for something
+    /// that is not there, which is how the wording drifts back.
+    #[test]
+    fn a_registry_load_would_not_read_is_one_save_declines_to_write() {
+        let host = crate::host::FakeHost::new();
+        let mut perch = lock(&host).expect("the registry lock is free");
+        let path = registry_path(&host).unwrap();
+        save(&host, &mut perch, &Registry::default()).expect("an empty one is fine");
+        let before = host.file(&path).expect("it was written");
+
+        // An Alias naming an Account Perch does not hold: a dangling one is not
+        // a refusal downstream, it is the `expect` in every command that
+        // resolves a Target.
+        let mut broken = Registry::default();
+        broken
+            .aliases
+            .insert("work".to_string(), "nobody@example.com".to_string());
+
+        let refused = save(&host, &mut perch, &broken).expect_err("load would not read it");
+
+        let said = refused.to_string();
+        assert!(said.contains("nobody@example.com"), "the rule: {said}");
+        assert!(said.contains("bug in Perch"), "whose fault it is: {said}");
+        assert!(
+            !said.contains("Edit the value there"),
+            "and not an instruction to edit a file it did not write: {said}"
+        );
+        assert_eq!(
+            refused.exit_code(),
+            crate::error::EXIT_GENERAL,
+            "a script told 14 would read it as its own input being wrong"
+        );
+        assert_eq!(
+            host.file(&path).as_deref(),
+            Some(before.as_str()),
+            "and the registry on disk is untouched, which is the whole of it"
+        );
+    }
+
     /// expire silently underneath itself.
     #[test]
     fn a_command_that_takes_its_time_keeps_the_lock_it_took() {
@@ -2350,8 +2792,12 @@ mod tests {
     #[test]
     fn naming_an_account_that_is_already_named_replaces_the_name() {
         let mut registry = Registry::default();
-        registry.set_alias("overflow", "someone@example.com");
-        registry.set_alias("work", "someone@example.com");
+        registry
+            .name_account("overflow", "someone@example.com")
+            .expect("the name is free");
+        registry
+            .name_account("work", "someone@example.com")
+            .expect("the Account renames itself");
 
         assert_eq!(registry.alias_of("someone@example.com"), Some("work"));
         assert!(!registry.aliases.contains_key("overflow"));

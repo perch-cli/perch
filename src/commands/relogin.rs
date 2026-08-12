@@ -26,7 +26,7 @@ use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::lock::Held;
 use crate::login::{self, Produced};
-use crate::probe::{self, Identity};
+use crate::probe::{Identity, Installed};
 use crate::profile;
 use crate::registry::{self, Account, Registry};
 use crate::switch;
@@ -46,16 +46,13 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
 
     let found = target::resolve_account(&registry, &args.target)?;
     say(out, &found.matched)?;
-    let account = registry
-        .account(&found.email)
-        .cloned()
-        .expect("resolution named an Account Perch holds");
+    let account = registry.held(&found.email)?.clone();
 
     // Asked before the login rather than after: a Profile Perch may not write
     // to is one no browser round trip was going to repair (ADR 0005).
-    let version = probe::claude_version(host)?;
+    let installed = Installed::probed(host)?;
     let repairing_the_account_you_are_on = registry.active.as_deref() == Some(account.email());
-    refuse_while_anything_is_running(host, &account, repairing_the_account_you_are_on, &version)?;
+    refuse_while_anything_is_running(host, &account, repairing_the_account_you_are_on, &installed)?;
 
     let produced = login::perform(
         host,
@@ -89,14 +86,14 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // now: another terminal may have switched away during the login, and then
     // this repair lands in the Account's own Profile alone.
     let repairing_the_account_you_are_on = registry.active.as_deref() == Some(account.email());
-    refuse_while_anything_is_running(host, &account, repairing_the_account_you_are_on, &version)?;
+    refuse_while_anything_is_running(host, &account, repairing_the_account_you_are_on, &installed)?;
 
     settle_into_its_own_profile(host, &account, &produced)?;
 
     // Recorded before the Credential is made live, because the repair is true
     // by now whatever happens next: the Account has a working Credential in its
     // own Profile, which is the whole of what a Quarantine said it did not have.
-    let was_quarantined = record(&mut registry, &account, produced);
+    let was_quarantined = record(&mut registry, &account, produced)?;
     registry::save(host, &mut perch, &registry)
         .map_err(|error| unrecorded(&account, repairing_the_account_you_are_on, error))?;
 
@@ -170,7 +167,7 @@ fn refuse_while_anything_is_running(
     host: &dyn Host,
     account: &Account,
     repairing_the_account_you_are_on: bool,
-    version: &str,
+    installed: &Installed,
 ) -> Result<()> {
     switch::refuse_if_live_anywhere(
         host,
@@ -179,7 +176,7 @@ fn refuse_while_anything_is_running(
             "the Default Profile, which is where this Account's repaired \
              Credential has to land",
         ),
-        version,
+        installed,
     )
 }
 
@@ -239,11 +236,9 @@ fn settle_into_its_own_profile(host: &dyn Host, account: &Account, fresh: &Produ
 /// The Alias, the Group, whether Cycling may choose it and where it sits in the
 /// listing are all untouched — they are the user's decisions, and a login is not
 /// a chance to revisit them.
-fn record(registry: &mut Registry, account: &Account, fresh: Produced) -> bool {
+fn record(registry: &mut Registry, account: &Account, fresh: Produced) -> Result<bool> {
     let was_quarantined = registry.release(account.email()).is_some();
-    let held = registry
-        .account_mut(account.email())
-        .expect("the Account was just resolved");
+    let held = registry.held_mut(account.email())?;
 
     // The email is kept as Perch already holds it. It is the identifier every
     // Alias, Group and Profile path is derived from, so adopting a differently
@@ -254,7 +249,7 @@ fn record(registry: &mut Registry, account: &Account, fresh: Produced) -> bool {
         ..fresh.identity
     };
     held.plan = fresh.credential.subscription_type.clone();
-    was_quarantined
+    Ok(was_quarantined)
 }
 
 /// What is on the machine when the repaired Credential did not become the live

@@ -229,6 +229,22 @@ impl Default for FakeHost {
     }
 }
 
+/// Arranging a world, and reading back what Perch did to it.
+///
+/// The fixture language, and the half of this file that grows fastest: a Host
+/// method arrives with the builders a test needs to set it up, so
+/// `process_started_at` cost ten lines of trait, thirty-six here, and four
+/// `with_*` methods for one concept.
+///
+/// Kept in the same file as `impl Host for FakeHost` below, deliberately. It
+/// looks like the obvious split for a file this size and it is not: over the
+/// last twenty-five commits that added or removed a function here, eleven
+/// touched both halves and eight touched one. Separating them would put the
+/// majority of changes across two files and say less about each, not more.
+///
+/// What does separate cleanly is the *port's* semantics from either — and that
+/// is `tests/conformance.rs`, which asks this fake and [`super::RealHost`] the
+/// same questions and is where a disagreement between them now shows up.
 impl FakeHost {
     pub fn new() -> Self {
         let home = PathBuf::from("/Users/someone");
@@ -930,21 +946,6 @@ impl FakeHost {
         Ok(at)
     }
 
-    /// The same for a write. A link whose target has gone is still written
-    /// through: `fs::write` creates the file the link names.
-    fn written_through_links(&self, path: &Path) -> Result<PathBuf, HostError> {
-        let at = self
-            .link_at(path)
-            .map(|(_, target)| target)
-            .unwrap_or_else(|| path.to_path_buf());
-        for named in [path, at.as_path()] {
-            if let Some(detail) = self.unwritable.borrow().get(named) {
-                return Err(HostError::Other(detail.clone()));
-            }
-        }
-        Ok(at)
-    }
-
     fn record(&self, effect: Effect) {
         self.effects.borrow_mut().push(effect);
     }
@@ -1082,19 +1083,6 @@ impl Host for FakeHost {
             .ok_or_else(|| HostError::NotFound {
                 path: path.to_path_buf(),
             })
-    }
-
-    /// Through a link, as `fs::write` writes through one — which is what makes
-    /// a `~/.claude.json` managed by stow or chezmoi stay managed.
-    fn write_file(&self, path: &Path, contents: &str) -> Result<(), HostError> {
-        self.record(Effect::WroteFile(path.to_path_buf()));
-        let at = self.written_through_links(path)?;
-        self.note_directories_of(&at);
-        self.files
-            .borrow_mut()
-            .insert(at.clone(), contents.to_string());
-        self.mark_written(&at);
-        Ok(())
     }
 
     /// Records the mode the file was *created* with, which is the whole point

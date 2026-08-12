@@ -129,22 +129,58 @@ fn trace(host: &FakeHost) -> Vec<String> {
         .collect()
 }
 
-/// A Claude Code running against a Profile: the marker file it writes for the
-/// session — naming its process and when the session began — and a process that
-/// has been there since before it.
-fn client_running_against(host: FakeHost, profile_dir: &str, pid: u32) -> FakeHost {
-    let marker = session_marker(pid, host.now());
-    host.with_file(format!("{profile_dir}/sessions/{pid}.json"), &marker)
-        .with_live_process(pid)
+/// One `perch switch` asks the installed Claude Code its version once.
+///
+/// Every refusal the probe raises names the Claude Code it was reading (ADR
+/// 0007), and both halves of a Switch — the question of whether it has already
+/// landed, and the Switch itself — used to read it for themselves. That is a
+/// `PATH` walk and a subprocess each, twice per command, for a sentence neither
+/// of them usually prints.
+#[test]
+fn a_switch_asks_which_claude_code_is_installed_once() {
+    let host = machine_with_two_accounts();
+    // The fixture logs two Accounts in, and each login asks for itself.
+    host.forget_effects();
+
+    run_switch(&host, SECOND_EMAIL).0.expect("it switches");
+
+    let asked = host
+        .effects()
+        .iter()
+        .filter(|effect| matches!(effect, Effect::Exec { args, .. } if args == &["--version"]))
+        .count();
+    assert_eq!(asked, 1, "{:?}", host.effects());
 }
 
-/// The marker Claude Code writes for a session that began at `began`, in the
-/// shape the probe believes in.
-fn session_marker(pid: u32, began: chrono::DateTime<chrono::Utc>) -> String {
-    format!(
-        r#"{{"pid":{pid},"cwd":"/Users/someone/work","startedAt":{}}}"#,
-        began.timestamp_millis()
-    )
+/// A Switch that cannot work out where the Default Profile is has not landed,
+/// and says so as a Switch rather than as a probe.
+///
+/// It is the one way `perch switch` can fail before it has taken a lock or read
+/// a Credential — the store a Profile derives is keyed by the login name, and on
+/// macOS with neither `USER` nor `USERNAME` set there is nothing to derive it
+/// from (ADR 0008). Nothing has been written and nothing can have moved, so
+/// `perform` hands back a Landing that did not land: the same shape every other
+/// outcome takes, so that recording it is the same one way out.
+#[test]
+fn a_switch_that_cannot_place_the_default_profile_changes_nothing() {
+    let host = machine_with_two_accounts().without_env("USER");
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    let refused = result.expect_err("there is no login name to derive a store from");
+    assert!(
+        refused.to_string().contains("USER"),
+        "it names the assumption that failed: {refused}"
+    );
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(EMAIL),
+        "and nothing moved: the Account that was active still is"
+    );
+    assert!(
+        !printed.contains("Switched to"),
+        "nor did it claim to have switched: {printed}"
+    );
 }
 
 #[test]
@@ -726,7 +762,7 @@ fn a_profile_whose_sessions_is_a_link_reads_the_clients_at_the_other_end() {
 fn a_marker_left_behind_by_a_client_that_died_is_not_a_live_profile() {
     let host = machine_with_two_accounts().with_file(
         format!("{FIRST_PROFILE}/sessions/9999.json"),
-        &session_marker(9999, Utc.with_ymd_and_hms(2026, 8, 4, 9, 0, 0).unwrap()),
+        &a_client_marker(9999, Utc.with_ymd_and_hms(2026, 8, 4, 9, 0, 0).unwrap()),
     );
 
     assert_the_switch_captured_and_landed(&host, "nothing is holding that Profile");
@@ -741,7 +777,7 @@ fn a_marker_whose_pid_now_belongs_to_a_younger_process_is_not_a_live_profile() {
     let host = machine_with_two_accounts()
         .with_file(
             format!("{FIRST_PROFILE}/sessions/4242.json"),
-            &session_marker(4242, session_began),
+            &a_client_marker(4242, session_began),
         )
         .with_live_process_started_at(4242, Utc.with_ymd_and_hms(2026, 8, 4, 11, 0, 0).unwrap());
 
@@ -853,7 +889,7 @@ fn a_live_process_whose_start_cannot_be_read_is_a_refusal_naming_the_assumption(
     let host = machine_with_two_accounts()
         .with_file(
             format!("{FIRST_PROFILE}/sessions/4242.json"),
-            &session_marker(4242, Utc.with_ymd_and_hms(2026, 8, 4, 9, 0, 0).unwrap()),
+            &a_client_marker(4242, Utc.with_ymd_and_hms(2026, 8, 4, 9, 0, 0).unwrap()),
         )
         .with_live_process_of_unknown_start(4242);
 
@@ -1186,7 +1222,7 @@ fn a_client_that_starts_during_the_lock_wait_still_stops_the_switch() {
                 .expect("the holder is done");
             host.set_file(
                 format!("{FIRST_PROFILE}/sessions/7788.json"),
-                &session_marker(7788, now),
+                &a_client_marker(7788, now),
             );
             host.set_live_process(7788);
         });

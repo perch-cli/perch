@@ -42,17 +42,6 @@ fn broken_second_account() -> FakeHost {
     host.with_login(login_producing(SECOND_REPAIRED, SECOND_IDENTITY_FILE))
 }
 
-/// A Claude Code running against a config directory: the marker file it writes
-/// for the session, and a process that has been there since before it.
-fn client_running_against(host: FakeHost, config_dir: &str, pid: u32) -> FakeHost {
-    let marker = format!(
-        r#"{{"pid":{pid},"cwd":"/Users/someone/work","startedAt":{}}}"#,
-        host.now().timestamp_millis()
-    );
-    host.with_file(format!("{config_dir}/sessions/{pid}.json"), &marker)
-        .with_live_process(pid)
-}
-
 fn is_enabled(host: &FakeHost, email: &str) -> bool {
     registry_of(host)
         .account(email)

@@ -70,10 +70,10 @@ fn the_marker_a_run_writes_corroborates_itself_on_this_machine() {
     let me = host.process_id();
     assert_eq!(me, std::process::id());
     let marker = probe::session_marker_at(&dir, me);
-    host.write_file(&marker, &probe::session_marker(me, host.now()))
+    host.create_file_with_mode(&marker, &probe::session_marker(me, host.now()), 0o600)
         .expect("the marker is written");
 
-    let live = probe::live_clients(&host, &dir, "contract")
+    let live = probe::live_clients(&host, &dir, &probe::Installed::unknown("contract"))
         .expect("the marker names this very process, which is plainly alive");
     assert_eq!(
         live,
@@ -84,7 +84,7 @@ fn the_marker_a_run_writes_corroborates_itself_on_this_machine() {
 
     host.remove_file(&marker).expect("the marker is taken away");
     assert!(
-        probe::live_clients(&host, &dir, "contract")
+        probe::live_clients(&host, &dir, &probe::Installed::unknown("contract"))
             .expect("an empty directory is no evidence")
             .is_empty(),
         "and the Profile stops being Live when the Run ends"
@@ -110,8 +110,12 @@ fn a_running_clients_marker_is_the_shape_perch_believes_in() {
         return;
     };
 
-    let corroborated = probe::live_clients(&host, &store.config_dir, "contract")
-        .expect("every marker here can be corroborated or dismissed");
+    let corroborated = probe::live_clients(
+        &host,
+        &store.config_dir,
+        &probe::Installed::unknown("contract"),
+    )
+    .expect("every marker here can be corroborated or dismissed");
 
     let mut live = 0;
     for marker in &markers {

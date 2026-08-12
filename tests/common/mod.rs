@@ -168,6 +168,37 @@ pub fn a_run_against(host: &FakeHost, email: &str, began: DateTime<Utc>) {
     );
 }
 
+/// The marker a Claude Code client writes for a session that began at `began`.
+///
+/// Deliberately not [`probe::session_marker`], which is the one a *Run* writes:
+/// that carries `writtenBy` and no `cwd`, because inventing fields Claude Code
+/// has and Perch does not would be a file claiming to be something it is not.
+/// This is the other writer, and the difference is what ADR 0022 turns on — the
+/// probe reads `startedAt` and ignores the rest, whoever left it. A fixture that
+/// wrote Perch's marker for a client would stop testing that.
+///
+/// The path is `probe`'s, though. Where a marker lives — `sessions/<pid>.json`
+/// — is Claude Code's convention rather than this fixture's, and it is the one
+/// thing `tests/contract_sessions.rs` checks against a real client. Five test
+/// files spelled it out by hand.
+pub fn a_client_marker(pid: u32, began: DateTime<Utc>) -> String {
+    format!(
+        r#"{{"pid":{pid},"cwd":"/Users/someone/work","startedAt":{}}}"#,
+        began.timestamp_millis()
+    )
+}
+
+/// A machine with a client running against `config_dir` right now: the marker
+/// it wrote, and a process still behind it.
+pub fn client_running_against(host: FakeHost, config_dir: &str, pid: u32) -> FakeHost {
+    let marker = a_client_marker(pid, host.now());
+    host.with_file(
+        probe::session_marker_at(Path::new(config_dir), pid),
+        &marker,
+    )
+    .with_live_process(pid)
+}
+
 /// Runs `perch run <target>`, returning the status the client exited with — or
 /// Perch's refusal to launch one — alongside what was printed.
 pub fn run_run(host: &FakeHost, target: &str) -> (perch::Result<i32>, String) {

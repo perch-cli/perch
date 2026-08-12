@@ -27,7 +27,7 @@ use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::lock::Held;
-use crate::probe;
+use crate::probe::Installed;
 use crate::registry::{self, Account, Registry};
 use crate::switch;
 use crate::target;
@@ -68,10 +68,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
 
     let found = target::resolve_account(&registry, &args.target)?;
     say(out, &found.matched)?;
-    let account = registry
-        .account(&found.email)
-        .cloned()
-        .expect("resolution named an Account Perch holds");
+    let account = registry.held(&found.email)?.clone();
 
     // Before the question rather than after: an Account Perch may not touch is
     // not one to ask about giving up (ADR 0005).
@@ -141,7 +138,8 @@ fn refuse_while_anything_is_running(
     // refused the whole removal on a machine where Claude Code had been
     // uninstalled, leaving `perch purge` as the only way to give up one lapsed
     // subscription. `export::the_live_store` swallows it for the same reason.
-    let version = probe::claude_version(host).unwrap_or_else(|_| "(not installed)".to_string());
+    let installed =
+        Installed::probed(host).unwrap_or_else(|_| Installed::unknown("(not installed)"));
     switch::refuse_if_live_anywhere(
         host,
         account,
@@ -149,7 +147,7 @@ fn refuse_while_anything_is_running(
             "the Default Profile, which is where the Account Perch would land on \
              has to be written",
         ),
-        &version,
+        &installed,
     )
 }
 

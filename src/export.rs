@@ -203,8 +203,8 @@ fn the_live_store(
     // `perch purge` with it, because the Export it offers first is one that
     // stops the Purge when it fails.
     let somebody_else = matches!(
-        crate::probe::claude_version(host)
-            .and_then(|version| crate::probe::read_identity(host, &live, &version)),
+        crate::probe::Installed::probed(host)
+            .and_then(|installed| crate::probe::read_identity(host, &live, &installed)),
         Ok(Some(identity)) if !registry::same_name(&identity.email, account.email())
     );
     Ok((!somebody_else).then_some(live))
@@ -442,7 +442,9 @@ mod tests {
             utilization: None,
         });
         registry.declare_group("work").expect("a usable name");
-        registry.set_alias("overflow", "someone@example.com");
+        registry
+            .name_account("overflow", "someone@example.com")
+            .expect("the name is free");
 
         Export {
             version: CURRENT_VERSION,

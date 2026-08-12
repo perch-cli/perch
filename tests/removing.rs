@@ -33,17 +33,6 @@ fn live_credential(host: &FakeHost) -> Option<String> {
     host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME)
 }
 
-/// A Claude Code running against a Profile: the marker file it writes for the
-/// session, and a process that has been there since before it (ADR 0022).
-fn client_running_against(host: FakeHost, profile_dir: &str, pid: u32) -> FakeHost {
-    let marker = format!(
-        r#"{{"pid":{pid},"cwd":"/Users/someone/work","startedAt":{}}}"#,
-        host.now().timestamp_millis()
-    );
-    host.with_file(format!("{profile_dir}/sessions/{pid}.json"), &marker)
-        .with_live_process(pid)
-}
-
 fn holds(host: &FakeHost, email: &str) -> bool {
     registry_of(host).account(email).is_some()
 }

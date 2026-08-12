@@ -515,8 +515,13 @@ impl Model {
         rows
     }
 
-    /// The sidebar row the `Config` tab is on.
-    pub fn scope_row(&self) -> ScopeRow {
+    /// What the `Config` sidebar's cursor is on — a Scope, or the row that
+    /// declares a new Group.
+    ///
+    /// Named apart from the `scope_row` field it reads, which is the *position*
+    /// rather than what sits at it. The two were one word, both public, both in
+    /// live code and telling apart only by a pair of brackets.
+    pub fn scope_at_the_cursor(&self) -> ScopeRow {
         let rows = self.scope_rows();
         rows[self.scope_row.min(rows.len() - 1)].clone()
     }
@@ -524,7 +529,7 @@ impl Model {
     /// The Scope the `Config` tab is showing, or `None` on the row that
     /// declares a new Group — which is not a Scope until it exists.
     pub fn scope(&self) -> Option<Scope> {
-        match self.scope_row() {
+        match self.scope_at_the_cursor() {
             ScopeRow::Scope(scope) => Some(scope),
             ScopeRow::NewGroup => None,
         }
@@ -619,6 +624,94 @@ impl Model {
             key.of(&self.registry.in_force(scope)),
             key.source(&self.registry, scope),
         )
+    }
+
+    /// What a row reads as right now, and whether the value is Global's rather
+    /// than this Scope's own — which is what the dimming says.
+    ///
+    /// Row-shaped rather than Setting-shaped, which is the whole of it. The
+    /// deferred write was overlaid by [`Self::value_of`], and `value_of`
+    /// answers about a Setting — so the view, which has to answer for every
+    /// row, had no way to ask the pending-aware question about the three that
+    /// are not Settings and read them off the registry instead. Six rows of a
+    /// Config page moved as the arrow keys were held and three did not, while
+    /// [`Self::defer`] promised "the row shows what has been done to it rather
+    /// than what is still on disk".
+    ///
+    /// The Alias row has no overlay because it needs none: a typed name is
+    /// written when it is confirmed rather than deferred, so nothing is ever
+    /// waiting on that row. Plan and Quarantine are facts rather than Settings
+    /// and cannot be edited at all.
+    pub fn shown(&self, scope: &Scope, row: &Row) -> (String, bool) {
+        match row {
+            Row::Setting(setting) => {
+                let (value, source) = self.value_of(scope, *setting);
+                (value, source == Scope::Global && *scope != Scope::Global)
+            }
+            // Global's own, wherever it is shown — so on the Ungrouped page it
+            // is dimmed like anything else read from Global, and on Global's
+            // own page it is not. A write waiting on it is still Global's, so
+            // what is pending changes the value and not the dimming.
+            Row::CycleUngrouped => {
+                let value = match &self.pending {
+                    Some(Pending {
+                        edit: Edit::CycleUngrouped(waiting),
+                        ..
+                    }) => *waiting,
+                    _ => self.registry.global.cycle_ungrouped,
+                };
+                (value.to_string(), *scope != Scope::Global)
+            }
+            _ => {
+                let Some(account) = self.scope_account() else {
+                    return (String::new(), false);
+                };
+                let value = match row {
+                    Row::Alias => self
+                        .registry
+                        .alias_of(account.email())
+                        .map(str::to_string)
+                        .unwrap_or_else(|| "(none)".to_string()),
+                    Row::Cycling => match &self.pending {
+                        Some(Pending {
+                            edit: Edit::Cycling { email, enabled },
+                            ..
+                        }) if email == account.email() => enabled.to_string(),
+                        _ => account.enabled.to_string(),
+                    },
+                    Row::Group => self
+                        .pending_group_of(account.email())
+                        .unwrap_or_else(|| account.group.clone())
+                        .unwrap_or_else(|| registry::NO_GROUP.to_string()),
+                    Row::Plan => account
+                        .plan
+                        .clone()
+                        .unwrap_or_else(|| "(not reported)".to_string()),
+                    Row::Quarantine => match account.quarantine {
+                        Some(why) => why.as_str().to_string(),
+                        None => "none".to_string(),
+                    },
+                    Row::Setting(_) | Row::CycleUngrouped => unreachable!("answered above"),
+                };
+                (value, false)
+            }
+        }
+    }
+
+    /// Where a Group write that has not landed yet would put an Account, if one
+    /// is waiting.
+    ///
+    /// Two `Option`s and both mean something: the outer is whether a write is
+    /// waiting at all, and the inner is the value it carries — `None` being out
+    /// of every Group, which is a place like any other.
+    fn pending_group_of(&self, email: &str) -> Option<Option<String>> {
+        match &self.pending {
+            Some(Pending {
+                edit: Edit::Group { email: also, group },
+                ..
+            }) if also == email => Some(group.clone()),
+            _ => None,
+        }
     }
 
     /// Which Accounts a Refresh covers: the ones on screen, and no others.
@@ -882,13 +975,9 @@ impl Model {
         // said before the key was pressed — and recomputing from that would
         // have every press in a run land on the same neighbour, which is a list
         // the arrows could not walk more than one place along.
-        let held = match &self.pending {
-            Some(Pending {
-                edit: Edit::Group { email: also, group },
-                ..
-            }) if *also == email => group.clone(),
-            _ => account.group.clone(),
-        };
+        let held = self
+            .pending_group_of(&email)
+            .unwrap_or_else(|| account.group.clone());
         let mut places: Vec<Option<String>> = vec![None];
         places.extend(
             self.registry
@@ -1022,7 +1111,7 @@ impl Model {
         if self.tab != Tab::Config {
             return;
         }
-        match (self.scope_row(), self.content(), self.column) {
+        match (self.scope_at_the_cursor(), self.content(), self.column) {
             (ScopeRow::NewGroup, _, _) => {
                 self.prompt = Some(Prompt {
                     what: Naming::NewGroup,
@@ -1103,41 +1192,39 @@ impl Model {
             return Asked::Nothing;
         };
         let name = prompt.typed.trim().to_string();
-        let kind = match prompt.what {
-            Naming::NewGroup | Naming::Group(_) => registry::NameKind::Group,
-            Naming::Alias(_) => registry::NameKind::Alias,
-        };
-        if let Err(refused) = registry::validate_name(kind, &name) {
-            self.said = lines_of(&refused.to_string());
-            return Asked::Nothing;
-        }
+        // The same question the command will ask of the real registry a moment
+        // later, asked of this one — so the panel cannot come to accept a name
+        // the command refuses, or refuse one it would have taken. One function
+        // rather than the three primitives reassembled, which is what this was:
+        // the shape, then a waiver, then the namespace, in an order the caller
+        // had to know.
+        //
+        // Asked rather than performed. It used to `clone()` the whole Registry
+        // twice per keypress to reach a check only a mutator exposed.
         let taken = match &prompt.what {
-            // Asked of a copy, which is exactly the checks `perch group add`
-            // will make of the real one a moment later — so the panel cannot
-            // come to accept a name the command refuses, or refuse one it would
-            // have taken.
-            Naming::NewGroup => self.registry.clone().declare_group(&name),
-            // The same trick and the same reason: `perch group rename` asks
-            // these of the real registry a moment later, including that
-            // recapitalising a Group is a rename rather than a collision with
-            // itself.
-            //
-            // Asked of the Group *this registry* holds rather than the name the
+            Naming::NewGroup => self.registry.refuse_a_name_nothing_may_answer_to(
+                registry::NameKind::Group,
+                &name,
+                None,
+            ),
+            // Against the Group *this registry* holds rather than the name the
             // field was opened with, because a Refresh landing replaces the
             // registry under an open prompt: by now another `perch` may have
             // renamed or forgotten it. Where it is gone there is nothing here to
             // ask, and the command's own refusal is the one worth showing.
             Naming::Group(held) => match self.registry.declared_group(held) {
-                Some(declared) => self.registry.clone().rename_group(declared, &name),
+                Some(declared) => self.registry.refuse_a_name_nothing_may_answer_to(
+                    registry::NameKind::Group,
+                    &name,
+                    Some(declared),
+                ),
                 None => Ok(()),
             },
-            Naming::Alias(email) => match self.registry.alias_of(email) {
-                // Renaming an Account by the name it already answers to is not
-                // a collision with itself, which is the rule `perch alias`
-                // states and this must not disagree with.
-                Some(held) if registry::same_name(held, &name) => Ok(()),
-                _ => self.registry.refuse_taken_names(Some(&name), None),
-            },
+            Naming::Alias(email) => self.registry.refuse_a_name_nothing_may_answer_to(
+                registry::NameKind::Alias,
+                &name,
+                self.registry.alias_of(email),
+            ),
         };
         if let Err(refused) = taken {
             self.said = lines_of(&refused.to_string());
@@ -1359,7 +1446,7 @@ impl Model {
         // The Config tab's cursors are followed the same way and for the same
         // reason: an edit can move an Account into another Group, which takes it
         // out of the column it was selected in.
-        let scope_was = self.scope_row();
+        let scope_was = self.scope_at_the_cursor();
         let account_was = self
             .scope_account()
             .map(|account| account.email().to_string());
@@ -1647,16 +1734,25 @@ mod tests {
         model_holding(emails.iter().map(|email| account(email)).collect())
     }
 
-    fn shown(model: &Model) -> Vec<&str> {
+    /// The Accounts the Status tab lists, in the order it lists them.
+    fn listed(model: &Model) -> Vec<&str> {
         model.accounts().into_iter().map(Account::email).collect()
     }
 
     /// Moves the Status tab onto its Accounts row and into the table, which is
     /// where the two acting keys mean anything.
+    ///
+    /// By pressing the keys rather than by assigning the cursor, as every
+    /// placement helper here does. A test that put the cursor somewhere no
+    /// keystroke reaches is a test asserting about a state nobody can be in —
+    /// and `moved`, which is the whole of how a cursor gets anywhere, was
+    /// exercised by no unit test at all.
     fn on_the_accounts(model: &mut Model) {
-        model.status_row = 1;
-        model.column = Column::Content;
-        assert_eq!(model.status(), StatusRow::Accounts);
+        while model.status() != StatusRow::Accounts {
+            let _ = model.act_on(Signal::Down);
+        }
+        let _ = model.act_on(Signal::Right);
+        assert_eq!(model.column, Column::Content, "inside the table");
     }
 
     #[test]
@@ -1789,7 +1885,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            shown(&model),
+            listed(&model),
             [
                 "fresh@example.com",
                 "middling@example.com",
@@ -1813,7 +1909,7 @@ mod tests {
         let model = Model::new(registry, at(12));
 
         assert_eq!(
-            shown(&model),
+            listed(&model),
             ["spare@example.com", "here@example.com", "loose@example.com",],
             "Group `work` first and ranked, then the Accounts in no Group",
         );
@@ -2130,7 +2226,7 @@ mod tests {
 
         let model = Model::new(registry_of(held.clone()), at(12));
         assert_eq!(
-            shown(&model),
+            listed(&model),
             ["tired@example.com", "fresh@example.com"],
             "as held, which is how `perch list` shows them",
         );
@@ -2139,7 +2235,7 @@ mod tests {
         saying_they_are.global.cycle_ungrouped = true;
         let model = Model::new(saying_they_are, at(12));
         assert_eq!(
-            shown(&model),
+            listed(&model),
             ["fresh@example.com", "tired@example.com"],
             "and ranked once something says a Cycle may move between them",
         );
@@ -2149,14 +2245,201 @@ mod tests {
 
     /// Puts the cursor on one Setting of Global's page.
     fn on_the_config_setting(model: &mut Model, setting: Setting) {
-        model.tab = Tab::Config;
-        model.column = Column::Content;
-        model.scope_row = 0;
-        model.content_row = model
-            .content_rows()
-            .iter()
-            .position(|row| *row == Row::Setting(setting))
-            .expect("the Setting is on the page");
+        on_the_row(model, &Scope::Global, Row::Setting(setting));
+    }
+
+    /// Puts the cursor on one row of a Scope's page, whichever kind of row it
+    /// is.
+    ///
+    /// The Scope is found by name rather than counted to: the sidebar orders
+    /// Groups alphabetically after Global and Ungrouped, so an index is a fact
+    /// about the fixture rather than about the test.
+    fn on_the_row(model: &mut Model, scope: &Scope, row: Row) {
+        // Round the tabs until the Config page is showing with the keys back on
+        // its sidebar. `Tab` rather than `←`, because `←` on a row that steps
+        // is a *decrement* rather than a way out — `leftwards` says so, and it
+        // means the sidebar cannot be reached by arrow key from a Setting at
+        // all. Changing view resets the column, which is the way back.
+        for _ in 0..Tab::ALL.len() {
+            let _ = model.act_on(Signal::NextTab);
+            if model.tab == Tab::Config && model.column == Column::Scopes {
+                break;
+            }
+        }
+        assert_eq!(model.tab, Tab::Config);
+        assert_eq!(model.column, Column::Scopes, "the keys are on the sidebar");
+
+        // Then up it and down to the Scope. Walked rather than assigned,
+        // because stepping the sidebar is what resets the two cursors below it
+        // — the behaviour a test that jumped straight to the row would be
+        // assuming rather than exercising. Up first because the sidebar does
+        // not wrap, so a cursor already past the Scope cannot walk down to it.
+        let scopes = model.scope_rows().len();
+        for _ in 0..scopes {
+            let _ = model.act_on(Signal::Up);
+        }
+        for _ in 0..scopes {
+            if model.scope_at_the_cursor() == ScopeRow::Scope(scope.clone()) {
+                break;
+            }
+            let _ = model.act_on(Signal::Down);
+        }
+        assert_eq!(
+            model.scope_at_the_cursor(),
+            ScopeRow::Scope(scope.clone()),
+            "the Scope is in the sidebar"
+        );
+
+        // Rightwards until the keys are acting on the content pane, which is
+        // one column on a Scope holding no Accounts and two on one that does.
+        while model.column != Column::Content {
+            let _ = model.act_on(Signal::Right);
+        }
+
+        let rows = model.content_rows().len();
+        for _ in 0..rows {
+            if model.content_rows()[model.content_row] == row {
+                break;
+            }
+            let _ = model.act_on(Signal::Down);
+        }
+        assert_eq!(
+            model.content_rows()[model.content_row],
+            row,
+            "the row is on the page"
+        );
+    }
+
+    /// Every row that can be stepped shows the write the arrow keys have made,
+    /// while it is still waiting to land.
+    ///
+    /// This is what [`Model::defer`] promises — "the row shows what has been
+    /// done to it rather than what is still on disk" — and it was true of the
+    /// six Setting rows and false of the three below them. `value_of` overlaid
+    /// the pending write and answers about a *Setting*, so the view had no way
+    /// to ask the same question about a row that is not one and read the
+    /// registry instead: hold `→` on the `group` row across four Groups and the
+    /// value stepped underneath while the frame showed the Group it started on.
+    #[test]
+    fn a_stepped_row_shows_the_write_that_has_not_landed_yet() {
+        // Global, Ungrouped, then `personal` and `work` — the sidebar order the
+        // scope_row indices below are counting.
+        let mut registry = registry_of(vec![
+            in_group(account("one@example.com"), "work"),
+            account("two@example.com"),
+        ]);
+        // A second Group to step into, so the `group` row has somewhere to walk.
+        registry
+            .declare_group("personal")
+            .expect("the name is free");
+        let mut model = Model::new(registry, at(12));
+        let work = Scope::Group("work".to_string());
+        let ungrouped = Scope::Ungrouped;
+
+        // A Setting, which already worked — here so the row that behaved and
+        // the rows that did not are pinned by one test.
+        on_the_row(
+            &mut model,
+            &Scope::Global,
+            Row::Setting(Setting::WatcherThresholdPercent),
+        );
+        let before = model.shown(
+            &Scope::Global,
+            &Row::Setting(Setting::WatcherThresholdPercent),
+        );
+        let _ = model.act_on(Signal::Right);
+        assert_ne!(
+            model
+                .shown(
+                    &Scope::Global,
+                    &Row::Setting(Setting::WatcherThresholdPercent)
+                )
+                .0,
+            before.0,
+            "a Setting moves as it is stepped"
+        );
+
+        // `cycling`, on the Group page holding one@example.com.
+        on_the_row(&mut model, &work, Row::Cycling);
+        assert_eq!(model.shown(&work, &Row::Cycling).0, "true");
+        let _ = model.act_on(Signal::Left);
+        assert_eq!(
+            model.shown(&work, &Row::Cycling).0,
+            "false",
+            "the row reads as what the key did, not as what is on disk"
+        );
+
+        // `group`, stepped twice, which is the case that could not be walked at
+        // all: each press reads where the last one put it, so without the
+        // overlay every press in a run lands on the same neighbour. Leftwards,
+        // because the places are `(none)`, `personal`, `work` in that order and
+        // the Account starts on the last of them.
+        on_the_row(&mut model, &work, Row::Group);
+        assert_eq!(model.shown(&work, &Row::Group).0, "work");
+        let _ = model.act_on(Signal::Left);
+        assert_eq!(
+            model.shown(&work, &Row::Group).0,
+            "personal",
+            "one press moves it to the neighbour"
+        );
+        let _ = model.act_on(Signal::Left);
+        assert_eq!(
+            model.shown(&work, &Row::Group).0,
+            registry::NO_GROUP,
+            "and the next press moves it again rather than back to the same one"
+        );
+
+        // `cycle-ungrouped`, which is Global's and shown on the Ungrouped page.
+        on_the_row(&mut model, &ungrouped, Row::CycleUngrouped);
+        assert_eq!(model.shown(&ungrouped, &Row::CycleUngrouped).0, "false");
+        let _ = model.act_on(Signal::Right);
+        assert_eq!(
+            model.shown(&ungrouped, &Row::CycleUngrouped).0,
+            "true",
+            "Global's own row moves too"
+        );
+    }
+
+    /// A per-Account row asked of a page with no Account on it.
+    ///
+    /// `content_rows` only offers those five rows where there is an Account for
+    /// them to be about, so the panel never asks — but `shown` is public and
+    /// answers rather than panicking, because a row and the Account it is about
+    /// are two pieces of state and a view that got them out of step should draw
+    /// a blank rather than take the terminal down.
+    #[test]
+    fn a_per_account_row_on_a_page_with_no_account_reads_as_nothing() {
+        let model = model_holding(vec![account("one@example.com")]);
+
+        assert!(
+            !model.content_rows().contains(&Row::Alias),
+            "Global lists no Accounts of its own, so the row is not offered"
+        );
+        assert_eq!(
+            model.shown(&Scope::Global, &Row::Alias),
+            (String::new(), false)
+        );
+    }
+
+    /// The dimming is a fact about where the value came from, and a write that
+    /// has not landed does not change where it will come from.
+    #[test]
+    fn a_pending_write_moves_the_value_and_not_the_dimming() {
+        let mut model = model_holding(vec![account("one@example.com")]);
+        let ungrouped = Scope::Ungrouped;
+
+        on_the_row(&mut model, &ungrouped, Row::CycleUngrouped);
+        assert!(
+            model.shown(&ungrouped, &Row::CycleUngrouped).1,
+            "read from Global, so dimmed on the Ungrouped page"
+        );
+
+        let _ = model.act_on(Signal::Right);
+        assert_eq!(model.shown(&ungrouped, &Row::CycleUngrouped).0, "true");
+        assert!(
+            model.shown(&ungrouped, &Row::CycleUngrouped).1,
+            "and still Global's, so still dimmed"
+        );
     }
 
     #[test]
@@ -2433,10 +2716,10 @@ mod tests {
         let mut model = model_holding(vec![in_group(account("one@example.com"), "work")]);
         model.tab = Tab::Config;
         model.scope_row = 2;
-        let Some(ScopeRow::Scope(Scope::Group(_))) = Some(model.scope_row()) else {
+        let Some(ScopeRow::Scope(Scope::Group(_))) = Some(model.scope_at_the_cursor()) else {
             panic!(
                 "the third sidebar row is the Group: {:?}",
-                model.scope_row()
+                model.scope_at_the_cursor()
             )
         };
         let _ = model.act_on(Signal::Name);

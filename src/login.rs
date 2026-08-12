@@ -17,7 +17,7 @@ use std::io::Write;
 use crate::commands::say;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::probe::{self, Credential, Identity};
+use crate::probe::{self, Credential, Identity, Installed};
 use crate::profile;
 use crate::registry;
 
@@ -42,7 +42,7 @@ pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Pr
     // three are derivations rather than effects: which Claude Code is
     // installed, where to find it, and what a Profile at that path would be
     // called.
-    let version = probe::claude_version(host)?;
+    let installed = Installed::probed(host)?;
     let claude = probe::claude_bin(host)?;
     let dir = registry::pending_login_dir(host, host.now())?;
     let store = probe::store_for_profile(host, &dir)?;
@@ -67,7 +67,7 @@ pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Pr
     // in a directory it has never had a session in is the least likely thing to
     // have written a marker of its own, which is why depending on it was the
     // wrong way round. `profile::discard` takes it with the directory.
-    mark_live(host, &dir);
+    let _live = probe::claim(host, &dir).ok();
 
     // From here every way out has to take the directory back out again, which
     // is what the doc above promises and what `?` in the middle of this would
@@ -75,30 +75,9 @@ pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Pr
     // no Credential has been written yet — but `reap_abandoned` exists because
     // they accumulate, and one left by a failure is one it will not tidy for
     // thirty minutes.
-    let produced = run_the_login(host, out, purpose, &claude, &dir, &store, &version);
+    let produced = run_the_login(host, out, purpose, &claude, &dir, &store, &installed);
     profile::discard(host, &store);
     produced
-}
-
-/// Says that Perch is driving a login in this directory, so nothing reaps it.
-///
-/// Best effort, unlike the same write in a Run. A Run refuses when it cannot mark
-/// its Profile, because what it is protecting is a Credential a client is about to
-/// hold for hours; here the directory holds nothing yet, the window is thirty
-/// minutes, and refusing a login over it would turn a tidying-up detail into a
-/// reason somebody cannot add an Account at all. What is lost without it is the
-/// protection alone, which is where this started.
-fn mark_live(host: &dyn Host, dir: &std::path::Path) {
-    let pid = host.process_id();
-    if host.create_dir_all(&probe::sessions_dir(dir)).is_ok() {
-        // Atomically, for the reason `commands::run::mark_live` gives: a
-        // half-written marker is one a reader settles as "nothing is running".
-        let _ = crate::host::write_atomically(
-            host,
-            &probe::session_marker_at(dir, pid),
-            &probe::session_marker(pid, host.now()),
-        );
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -109,7 +88,7 @@ fn run_the_login(
     claude: &std::path::Path,
     dir: &std::path::Path,
     store: &probe::Store,
-    version: &str,
+    installed: &Installed,
 ) -> Result<Produced> {
     say(out, purpose)?;
     say(
@@ -125,18 +104,18 @@ fn run_the_login(
         )
         .map_err(|err| PerchError::Other(format!("could not launch a login: {err}")))?;
 
-    what_the_login_left(host, store, version, status)
+    what_the_login_left(host, store, installed, status)
 }
 
 /// Reads the Account the login produced, or says why there is not one.
 fn what_the_login_left(
     host: &dyn Host,
     store: &probe::Store,
-    version: &str,
+    installed: &Installed,
     status: i32,
 ) -> Result<Produced> {
-    let credential = probe::read_credential(host, store, version)?;
-    let identity = probe::read_identity(host, store, version)?;
+    let credential = probe::read_credential(host, store, installed)?;
+    let identity = probe::read_identity(host, store, installed)?;
 
     let (credential, identity) = match (credential, identity) {
         (Some(credential), Some(identity)) => (credential, identity),

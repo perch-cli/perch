@@ -108,6 +108,12 @@ pub fn ask_secret(host: &dyn Host, out: &mut dyn Write, question: &str) -> Resul
 /// that need it are the destructive ones and two copies is how the third of
 /// them ships without either. `did` is what this command will not have done —
 /// "removed", "purged", "exported".
+///
+/// A general failure rather than `Busy`, which reads as the obvious tidy-up and
+/// is not (ADR 0036). Nothing *has* been written here — this is asked before
+/// the first irreversible thing — so the promise `Busy` makes would hold; what
+/// does not hold is folding this together with the two other sentences about a
+/// lost hold, one of which is reached after a Credential has moved.
 pub fn still_ours(perch: &mut crate::lock::Held<'_>, did: &str) -> Result<()> {
     perch.renew();
     if perch.still_held() {
@@ -225,9 +231,7 @@ pub fn refuse_a_quarantined_account(
     email: &str,
     consequence: &str,
 ) -> Result<()> {
-    let account = registry
-        .account(email)
-        .expect("resolution named an Account Perch holds");
+    let account = registry.held(email)?;
     match account.quarantine {
         None => Ok(()),
         Some(why) => Err(why.refusal(&registry.named_for_the_user(email), email, consequence)),

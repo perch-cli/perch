@@ -360,14 +360,6 @@ impl Host for RealHost {
         }
     }
 
-    fn write_file(&self, path: &Path, contents: &str) -> Result<(), HostError> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(path, contents)?;
-        Ok(())
-    }
-
     fn create_file_with_mode(
         &self,
         path: &Path,

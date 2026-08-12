@@ -3,9 +3,9 @@
 //! Every client reads the same Default Profile, so one Switch moves the
 //! terminal you are in, the ones you are not, the editor extension and the
 //! desktop app together. The work itself — and every refusal that protects it —
-//! is [`crate::switch`]; what lives here is deciding which Account was meant,
-//! declining to do it again when it is already done, recording who is active
-//! afterwards, and saying where you landed.
+//! is [`crate::switch`] — including everything it owes the registry afterwards.
+//! What lives here is deciding which Account was meant, declining to do it
+//! again when it is already done, and saying where you landed.
 //!
 //! With no Target the Account is chosen rather than named — a Cycle within the
 //! current Account's Group ([`crate::cycle`]), which is the command someone
@@ -19,9 +19,9 @@ use crate::commands::say;
 use crate::cycle::{self, Scope};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::lock::Held;
-use crate::registry::{self, Account, Quarantine, Registry};
-use crate::switch::{self, Captured, Interrupted};
+use crate::probe::Installed;
+use crate::registry::{Account, Registry};
+use crate::switch::{self, Captured};
 use crate::target::{self, Target};
 use crate::utilization;
 
@@ -47,47 +47,26 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
     let Decision { incoming, caveat } = decide(&registry, args.target.as_deref(), host.now(), out)?;
     let outgoing = registry.active_account().cloned();
 
-    if let Some(nothing_to_do) = already_there(host, &registry, &incoming)? {
-        return Err(nothing_to_do);
-    }
+    // Read once, for the whole command. Both the question below and the Switch
+    // after it name the Claude Code they were reading in anything they refuse
+    // (ADR 0007), and each used to ask it for itself — so one `perch switch`
+    // ran `claude --version` twice, walking `PATH` and spawning a subprocess
+    // each time, for a sentence neither of them usually prints.
+    let installed = Installed::probed(host)?;
 
-    match switch::perform(host, &mut perch, &incoming, outgoing.as_ref()) {
-        Ok(captured) => {
-            record_active(host, &mut perch, &mut registry, &incoming)?;
-            report(out, &registry, &incoming, &captured, host.now())?;
-            match caveat {
-                Some(caveat) => say(out, &caveat),
-                None => Ok(()),
-            }
-        }
-        Err(Interrupted {
-            error,
-            incoming_is_live,
-            quarantine,
-        }) => {
-            // Found out the hard way that the Account cannot be switched to at
-            // all. Recorded before anything else is said about it, so the next
-            // command shows it as broken rather than making the same discovery
-            // from scratch — and so `perch list` names it as something needing
-            // attention rather than as an Account that simply failed once.
-            if let Some(why) = quarantine {
-                record_quarantine(host, &mut perch, &mut registry, incoming.email(), why);
-            }
-            // Which Account is active is a fact about which Credential is in
-            // the Default Profile. Recording anything else would send the next
-            // Switch to Capture this Credential into the wrong Profile, which
-            // is the one mistake this design cannot recover from (ADR 0006).
-            //
-            // Failing to record it is worth saying and is not worth losing the
-            // failure that got us here over: the user is told both, and the
-            // exit code stays the one the original failure earned.
-            if incoming_is_live
-                && let Err(unrecorded) = record_active(host, &mut perch, &mut registry, &incoming)
-            {
-                return Err(error.with_note(&unrecorded.to_string()));
-            }
-            Err(error)
-        }
+    already_there(host, &installed, &registry, &incoming)?;
+
+    // Everything the Switch owes the registry — the Quarantine it may have
+    // discovered, which Account is active now — is written by `record`, which
+    // is the only way to reach what the Switch found. What is left here is
+    // saying it.
+    let landing = switch::perform(host, &mut perch, &installed, &incoming, outgoing.as_ref());
+    let captured = landing.record(host, &mut perch, &mut registry)?;
+
+    report(out, &registry, &incoming, &captured, host.now())?;
+    match caveat {
+        Some(caveat) => say(out, &caveat),
+        None => Ok(()),
     }
 }
 
@@ -111,10 +90,7 @@ fn decide(
             match found {
                 Target::Group { name } => Scope::Group(name),
                 Target::Alias { email, .. } | Target::Account { email } => {
-                    let incoming = registry
-                        .account(&email)
-                        .cloned()
-                        .expect("resolution named an Account Perch holds");
+                    let incoming = registry.held(&email)?.clone();
                     refuse_a_quarantined_account(registry, &incoming)?;
                     return Ok(Decision {
                         incoming,
@@ -188,64 +164,21 @@ fn leaving(registry: &Registry) -> Result<&Account> {
 /// command again is how that is repaired.
 fn already_there(
     host: &dyn Host,
+    installed: &Installed,
     registry: &Registry,
     incoming: &Account,
-) -> Result<Option<PerchError>> {
-    if registry.active.as_deref() != Some(incoming.email()) {
-        return Ok(None);
-    }
-
-    Ok(switch::already_landed(host, incoming)?.then(|| {
-        PerchError::NothingToDo(format!(
-            "{} is already the active Account. Nothing was changed.",
-            registry.named_for_the_user(incoming.email())
-        ))
-    }))
-}
-
-/// Writes down that an Account is Quarantined, on the way out of a Switch that
-/// discovered it.
-///
-/// Shared with the watcher, which performs the same Switch and meets the same
-/// discovery: a Quarantine recorded by one and not the other would be an
-/// Account that `perch switch` knows is broken and `perch watch` keeps
-/// choosing.
-///
-/// Best effort, and deliberately so: the failure the user is about to read is
-/// the one that matters, and it already says the Account has to be logged into
-/// again. Losing that failure over a registry Perch could not write would be a
-/// poor trade — the worst a missed write costs is making the same discovery
-/// next time.
-pub(crate) fn record_quarantine(
-    host: &dyn Host,
-    perch: &mut Held<'_>,
-    registry: &mut Registry,
-    email: &str,
-    why: Quarantine,
-) {
-    if registry.quarantine(email, why) {
-        let _ = registry::save(host, perch, registry);
-    }
-}
-
-/// Records which Account is active, and says what it costs when that write
-/// fails: the Switch itself worked, so Perch's own record is behind until this
-/// is fixed. Shared with the watcher, which lands the same Switch.
-pub(crate) fn record_active(
-    host: &dyn Host,
-    perch: &mut Held<'_>,
-    registry: &mut Registry,
-    incoming: &Account,
 ) -> Result<()> {
-    registry.active = Some(incoming.email().to_string());
-    registry::save(host, perch, registry).map_err(|error| {
-        error.with_note(&format!(
-            "The Switch itself worked: {}'s Credential is the live one. \
-             Perch could not record that, so its own view of which Account is \
-             active is behind until this is fixed.",
-            incoming.email()
-        ))
-    })
+    if registry.active.as_deref() != Some(incoming.email()) {
+        return Ok(());
+    }
+    if !switch::already_landed(host, installed, incoming)? {
+        return Ok(());
+    }
+
+    Err(PerchError::NothingToDo(format!(
+        "{} is already the active Account. Nothing was changed.",
+        registry.named_for_the_user(incoming.email())
+    )))
 }
 
 fn report(

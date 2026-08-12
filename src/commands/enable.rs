@@ -47,7 +47,7 @@ pub fn run(host: &dyn Host, command: EnableCommand, out: &mut dyn Write) -> Resu
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
     let account = target::resolve_account(&registry, command.target())?;
-    let said = set(&mut registry, &account, &command);
+    let said = set(&mut registry, &account, &command)?;
     registry::save(host, &mut perch, &registry)?;
 
     say(out, &account.matched)?;
@@ -57,13 +57,11 @@ pub fn run(host: &dyn Host, command: EnableCommand, out: &mut dyn Write) -> Resu
 /// Moves one Account in or out of the Cycling pool, touching nothing else about
 /// it. Returns what to tell the user: what changed, and what the state it is
 /// now in means for them.
-fn set(registry: &mut Registry, target: &AccountTarget, command: &EnableCommand) -> String {
+fn set(registry: &mut Registry, target: &AccountTarget, command: &EnableCommand) -> Result<String> {
     let named = registry.named_for_the_user(&target.email);
     let candidate = matches!(command, EnableCommand::Enable { .. });
 
-    let account = registry
-        .account_mut(&target.email)
-        .expect("the Account was just resolved");
+    let account = registry.held_mut(&target.email)?;
     let was = std::mem::replace(&mut account.enabled, candidate);
     let quarantine = account.quarantine;
 
@@ -73,10 +71,10 @@ fn set(registry: &mut Registry, target: &AccountTarget, command: &EnableCommand)
         (_, false) => format!("Disabled {named}."),
         (_, true) => format!("Enabled {named}."),
     };
-    format!(
+    Ok(format!(
         "{changed} {}",
         what_that_means(candidate, quarantine, &target.email)
-    )
+    ))
 }
 
 /// What the Account's state now means, which is where the honesty lives.

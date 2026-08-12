@@ -70,7 +70,9 @@ fn machine_holding_three_accounts() -> FakeHost {
     registry
         .groups
         .insert("work".to_string(), Overrides::default());
-    registry.set_alias("overflow", SECOND_EMAIL);
+    registry
+        .name_account("overflow", SECOND_EMAIL)
+        .expect("the name is free");
 
     machine_holding(&registry)
 }

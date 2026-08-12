@@ -46,19 +46,31 @@ fn asked_for(set: Option<&std::ffi::OsStr>) -> bool {
     set.is_some_and(|asked| asked != "0")
 }
 
+/// What every report of a Perch bug has to carry: which Perch, on what, and
+/// where to send it.
+///
+/// Shared with [`crate::registry::save`], which declines to write a registry no
+/// later command could read — not a panic, but a bug all the same, and one the
+/// person in front of it can do nothing about. What each of them adds after
+/// this sentence is their own: a panic can suggest a backtrace, and a refusal
+/// says what it did not do instead.
+pub(crate) fn this_is_a_bug() -> String {
+    format!(
+        "This is a bug in Perch {} ({} {}). Please report it, with everything \
+         above, at {ISSUES}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    )
+}
+
 /// The section Perch adds, as one block of text.
 ///
 /// A separate function because it is the part worth being sure of: a panic hook
 /// runs once, on the worst day somebody is having with this tool, and is not
 /// somewhere to find out that a line was wrong.
 fn bug_report(backtrace_was_asked_for: bool) -> String {
-    let mut said = format!(
-        "\nThis is a bug in Perch {} ({} {}). Please report it, with everything \
-         above, at {ISSUES}",
-        env!("CARGO_PKG_VERSION"),
-        std::env::consts::OS,
-        std::env::consts::ARCH,
-    );
+    let mut said = format!("\n{}", this_is_a_bug());
     if !backtrace_was_asked_for {
         said.push_str(
             "\nRunning the same command again with RUST_BACKTRACE=1 set adds a \

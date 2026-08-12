@@ -52,14 +52,14 @@ use std::io::Write;
 use chrono::{DateTime, Utc};
 
 use crate::adopt;
-use crate::commands::{say, switch as switch_command};
+use crate::commands::say;
 use crate::cycle::{self, Scope};
 use crate::error::{EXIT_OK, PerchError, Result};
 use crate::host::{Host, Waited};
 use crate::observe::{self, Attempt};
 use crate::probe;
 use crate::registry::{Account, Registry, UNGROUPED};
-use crate::switch::{self, Interrupted};
+use crate::switch;
 use crate::watch::{self, Backoff, Considered, Fullest, Outcome, Policy, Recently, Round};
 
 /// How the watcher was asked for: as the loop, or as one check.
@@ -512,7 +512,8 @@ fn act(
     // and then met the same failure in the Switch below, which is the one thing
     // the ask above exists to prevent: the allowance is gone by the time the
     // round finds out it was never going to move.
-    match switch::refuse_if_live(host, &outgoing, &probe::claude_version(host)?) {
+    let installed = probe::Installed::probed(host)?;
+    match switch::refuse_if_live(host, &outgoing, &installed) {
         Ok(()) => {}
         Err(refused @ PerchError::ProfileLive(_)) => {
             return Ok(Outcome::Refused {
@@ -571,19 +572,28 @@ fn act(
         Err(error) => return Err(error),
     };
 
-    let landed = switch::perform(host, perch, &choice.account, Some(&outgoing));
-    match landed {
-        Ok(_captured) => {
-            // Only a Switch that happened starts a cooldown. A round that was
-            // refused or found nowhere to go has changed nothing, and making it
-            // wait would be pacing the watcher on its failures.
-            recently.switched(outgoing.email(), host.now());
-            watcher.remember(registry, &watching.scope, outgoing.email(), host.now());
-            switch_command::record_active(host, perch, registry, &choice.account)?;
-            Ok(Outcome::Switched {
-                because: also(choice.because, &unread),
-            })
-        }
+    let landing = switch::perform(host, perch, &installed, &choice.account, Some(&outgoing));
+
+    // Only a Switch that happened starts a cooldown. A round that was refused
+    // or found nowhere to go has changed nothing, and making it wait would be
+    // pacing the watcher on its failures.
+    //
+    // A Switch that moved and then failed counts, and this is written before
+    // the recording below so that the one save carries both. Without it a check
+    // that moved and then failed left no record of having moved, and the next
+    // scheduled one was free to move straight back: exactly the "cooldown that
+    // did not survive the process" ADR 0013 names. Asking the Landing rather
+    // than the outcome is what makes the two cases one.
+    let moved = landing.moved();
+    if moved {
+        recently.switched(outgoing.email(), host.now());
+        watcher.remember(registry, &watching.scope, outgoing.email(), host.now());
+    }
+
+    match landing.record(host, perch, registry) {
+        Ok(_captured) => Ok(Outcome::Switched {
+            because: also(choice.because, &unread),
+        }),
         // Nothing was changed, so there is nothing to look at and nothing to
         // repair — a client holding the outgoing Profile, most often, which
         // stops holding it when it exits. The round says so and the loop goes
@@ -593,8 +603,9 @@ fn act(
         // A refusal is reported as `nothing to do now`, which is a scheduler's
         // cue to come back in five minutes and expect the machine to have moved
         // on — true of a client that will exit and of an Account just
-        // Quarantined, which is recorded here and passed over from the next
-        // round onwards. A locked keychain, a probe that cannot find Claude
+        // Quarantined, which `record` has already written down and which is
+        // passed over from the next round onwards. A locked keychain, a probe
+        // that cannot find Claude
         // Code, a Profile that will not be written: none of those clear
         // themselves, and folding them in here had `perch watch --once` exiting
         // 15 every five minutes forever while a cron mailbox read "nothing to
@@ -602,55 +613,21 @@ fn act(
         // code the failure earned (the exit-code table promises `11` for a keychain
         // nobody can reach), and the loop stops on them rather than retrying a
         // full Capture-and-write every two and a half minutes.
-        Err(Interrupted {
-            error,
-            incoming_is_live: false,
-            quarantine,
-        }) => {
-            if let Some(why) = quarantine {
-                switch_command::record_quarantine(
-                    host,
-                    perch,
-                    registry,
-                    choice.account.email(),
-                    why,
-                );
-                return Ok(Outcome::Refused {
-                    why: error.to_string(),
-                });
-            }
-            match error {
-                PerchError::ProfileLive(_) => Ok(Outcome::Refused {
-                    why: error.to_string(),
-                }),
-                other => Err(other),
-            }
-        }
-        // The incoming Credential is live and something after that failed, so
-        // the machine is part way through a Switch. The loop stops on it: a
+        //
+        // The incoming Credential being live and something after that failing
+        // is not one of them: the machine is part way through a Switch, and a
         // watcher that carried on watching would be deciding what to do next
-        // about a machine nobody has looked at yet.
-        Err(Interrupted { error, .. }) => {
-            // The Switch happened — the incoming Credential is live — so it
-            // starts a cooldown like any other, and this is written before the
-            // save below so that the one save carries both. Without it a check
-            // that moved and then failed left no record of having moved, and
-            // the next scheduled one was free to move straight back: exactly
-            // the "cooldown that did not survive the process" ADR 0013 names.
-            recently.switched(outgoing.email(), host.now());
-            watcher.remember(registry, &watching.scope, outgoing.email(), host.now());
-
-            // Which Account is active is a fact about which Credential is in
-            // the Default Profile, so it is recorded before the failure is
-            // reported — anything else would send the next Capture into the
-            // wrong Profile (ADR 0006).
-            if let Err(unrecorded) =
-                switch_command::record_active(host, perch, registry, &choice.account)
-            {
-                return Err(error.with_note(&unrecorded.to_string()));
-            }
-            Err(error)
+        // about a machine nobody has looked at yet. So it is answered first,
+        // whatever the failure was.
+        Err(error) if moved => Err(error),
+        // A Quarantine has already been written by `record`, so the next round
+        // passes the Account over rather than making the same discovery again.
+        Err(error @ (PerchError::Quarantined { .. } | PerchError::ProfileLive(_))) => {
+            Ok(Outcome::Refused {
+                why: error.to_string(),
+            })
         }
+        Err(other) => Err(other),
     }
 }
 
