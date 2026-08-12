@@ -442,7 +442,9 @@ mod tests {
             utilization: None,
         });
         registry.declare_group("work").expect("a usable name");
-        registry.set_alias("overflow", "someone@example.com");
+        registry
+            .name_account("overflow", "someone@example.com")
+            .expect("the name is free");
 
         Export {
             version: CURRENT_VERSION,

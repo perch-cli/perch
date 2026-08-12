@@ -862,7 +862,7 @@ impl Registry {
     /// Declares a Group, refusing a name that is not usable or already means
     /// something else.
     pub fn declare_group(&mut self, name: &str) -> Result<()> {
-        self.refuse_a_name_no_group_may_answer_to(name, None)?;
+        self.refuse_a_name_nothing_may_answer_to(NameKind::Group, name, None)?;
         // Holding nothing, which is a Group that Inherits every Setting there
         // is. A freshly declared Group tracks Global rather than copying it, so
         // a threshold set at Global afterwards reaches it too.
@@ -870,31 +870,74 @@ impl Registry {
         Ok(())
     }
 
-    /// Refuses a name no Group may answer to: one that is not usable at all,
-    /// one another Group already answers to, or one an Alias holds.
+    /// Refuses a name nothing may answer to: one that is not usable at all, one
+    /// another name of the same kind already answers to, or one the other half
+    /// of the shared namespace holds.
     ///
-    /// Declaring a Group and renaming one both ask this, so a rename cannot
-    /// reach a state a declaration could not.
+    /// One function for both halves. Every way a name enters the registry asks
+    /// this — `perch group add`, `perch group rename`, `perch alias`, `perch
+    /// add` and both of the TUI's typed fields — so what the two halves accept
+    /// cannot come apart, and a caller cannot get the order wrong. The order is
+    /// load-bearing: shape before collision, because `refuse_taken_names` opens
+    /// by asking whether the Alias and the Group are the same name, and with it
+    /// reversed `perch add --alias '' --group ''` was refused as "`` cannot be
+    /// both an Alias and a Group name" — a Conflict about two names neither of
+    /// which was usable in the first place.
     ///
-    /// `renaming` is the name the Group already answers to, where there is one.
-    /// A Group renaming itself does not collide with itself, and that includes
-    /// recapitalising it — the rule `perch alias` states for an Account, which
-    /// this must not disagree with. Nothing else is waived by it: the shared
-    /// namespace is still checked, so a recapitalisation cannot walk into an
-    /// Alias either.
-    fn refuse_a_name_no_group_may_answer_to(
+    /// `instead_of` is the name this one is replacing, where it is replacing
+    /// one: the Group's current name, or the Alias the Account already answers
+    /// to. A name renaming itself does not collide with itself, and that
+    /// includes recapitalising it.
+    ///
+    /// Nothing else is waived by it. The shared namespace is still checked, so
+    /// a recapitalisation cannot walk into the other half — which the Group
+    /// path has always done and the two Alias paths did not: both returned `Ok`
+    /// on a self-rename without asking anything. That was sound, but only by an
+    /// argument about what `declare_group` would have refused earlier, and an
+    /// inference held in one head is the kind that stops being true when
+    /// somebody adds a third way to make a name.
+    pub fn refuse_a_name_nothing_may_answer_to(
         &self,
+        kind: NameKind,
         name: &str,
-        renaming: Option<&str>,
+        instead_of: Option<&str>,
     ) -> Result<()> {
-        validate_name(NameKind::Group, name)?;
-        let renaming_itself = renaming.is_some_and(|held| same_name(held, name));
-        if !renaming_itself && let Some(declared) = self.declared_group(name) {
-            return Err(PerchError::Conflict(format!(
-                "There is already a Group called `{declared}`."
-            )));
+        validate_name(kind, name)?;
+
+        let renaming_itself = instead_of.is_some_and(|held| same_name(held, name));
+        if !renaming_itself {
+            // The same-kind collision. Asked here for a Group and inside
+            // `refuse_taken_names` for an Alias, because that function is
+            // asymmetric: given an Alias it checks both halves, and given a
+            // Group only the Alias half.
+            if let (NameKind::Group, Some(declared)) = (kind, self.declared_group(name)) {
+                return Err(PerchError::Conflict(format!(
+                    "There is already a Group called `{declared}`."
+                )));
+            }
         }
-        self.refuse_taken_names(None, Some(name))
+
+        match kind {
+            NameKind::Group => self.refuse_taken_names(None, Some(name)),
+            NameKind::Alias => match renaming_itself {
+                // An Account keeping its own Alias under another capitalisation
+                // cannot collide with the Alias it is giving up, and
+                // `refuse_taken_names` would find exactly that.
+                true => self.refuse_a_group_of_this_name(name),
+                false => self.refuse_taken_names(Some(name), None),
+            },
+        }
+    }
+
+    /// The half of [`Self::refuse_taken_names`] that still applies to an Alias
+    /// renaming itself: the other side of the shared namespace.
+    fn refuse_a_group_of_this_name(&self, name: &str) -> Result<()> {
+        match self.declared_group(name) {
+            Some(declared) => Err(PerchError::Conflict(format!(
+                "`{declared}` is already a Group name, and a name cannot be both."
+            ))),
+            None => Ok(()),
+        }
     }
 
     /// Renames a Group, keeping everything it carries.
@@ -915,7 +958,7 @@ impl Registry {
     /// rename that dropped it would be a way to make the watcher Switch again at
     /// once.
     pub fn rename_group(&mut self, held: &str, to: &str) -> Result<()> {
-        self.refuse_a_name_no_group_may_answer_to(to, Some(held))?;
+        self.refuse_a_name_nothing_may_answer_to(NameKind::Group, to, Some(held))?;
 
         let overrides = self
             .groups
@@ -1052,14 +1095,35 @@ impl Registry {
         Ok(())
     }
 
-    /// Names an Account, having established the name is free.
+    /// Names an Account, refusing a name that is not usable or already means
+    /// something else. Hands back the Alias the Account gave up, where it had
+    /// one.
+    ///
+    /// The check is not the caller's to remember, for the reason
+    /// [`declare_group`](Self::declare_group) does not leave it to one either:
+    /// this was three primitives — `validate_name`, then a self-rename waiver,
+    /// then `refuse_taken_names` — reassembled at every call site, in an order
+    /// that had already been got wrong once. The Group half has had one door
+    /// since it was written and the Alias half had none.
     ///
     /// An Account answers to one Alias, so naming one that already had a name
     /// replaces it: a name the user has moved on from should not go on
     /// reaching the Account behind their back.
-    pub fn set_alias(&mut self, alias: &str, email: &str) {
+    ///
+    /// `email` is the address as this registry holds it. The Account it names
+    /// is found by exact comparison, where every *name* nearby is compared with
+    /// [`same_name`] — sound because resolution always hands back the held
+    /// spelling, and one of several places resting on that. Deciding it
+    /// properly means deciding it for `account`, `account_mut`, `forget` and
+    /// `upsert` at the same time, and changing it here alone would add a
+    /// spelling of the rule while appearing to remove one.
+    pub fn name_account(&mut self, alias: &str, email: &str) -> Result<Option<String>> {
+        let previous = self.alias_of(email).map(str::to_string);
+        self.refuse_a_name_nothing_may_answer_to(NameKind::Alias, alias, previous.as_deref())?;
+
         self.aliases.retain(|_, named| named != email);
         self.aliases.insert(alias.to_string(), email.to_string());
+        Ok(previous)
     }
 
     /// Frees a name, returning the name as it was held and the Account it used
@@ -1901,6 +1965,122 @@ mod tests {
     /// The hold spans the whole command, and a command can stall for as long as
     /// somebody takes to answer a `[y/N]`. Renewed at every write, so the
     /// ordinary long command keeps the lock it took rather than letting it
+    /// Every rule the shared namespace has, asked of both halves of it.
+    ///
+    /// A table because the rules are one fact with two spellings, and they had
+    /// come apart: the Group half funnelled through a single private check and
+    /// the Alias half was three primitives reassembled at each of its three
+    /// call sites, in an order one of them had already got wrong. Asked here of
+    /// the one function all four callers now go through, so a fifth cannot
+    /// reassemble it differently.
+    #[test]
+    fn what_a_name_may_be_is_one_rule_for_both_halves_of_the_namespace() {
+        /// An Account answering to `work`, and a Group called `personal`.
+        fn held() -> Registry {
+            let mut registry = Registry::default();
+            registry.upsert(Account {
+                identity: Identity {
+                    email: "someone@example.com".into(),
+                    account_uuid: None,
+                    organization_name: None,
+                    organization_uuid: None,
+                },
+                plan: None,
+                enabled: true,
+                quarantine: None,
+                group: None,
+                utilization: None,
+            });
+            registry
+                .name_account("work", "someone@example.com")
+                .expect("the name is free");
+            registry.declare_group("personal").expect("so is this one");
+            registry
+        }
+
+        let cases: &[(NameKind, &str, Option<&str>, Option<&str>)] = &[
+            // kind, name, instead_of, the refusal it earns (None = accepted)
+            (NameKind::Group, "spare", None, None),
+            (NameKind::Alias, "spare", None, None),
+            // Its own half.
+            (NameKind::Group, "personal", None, Some("already a Group")),
+            (NameKind::Alias, "work", None, Some("already names")),
+            // Two names that differ only in case are one name.
+            (NameKind::Group, "PERSONAL", None, Some("already a Group")),
+            (NameKind::Alias, "WORK", None, Some("already names")),
+            // The other half, which is what makes the namespace shared.
+            (NameKind::Group, "work", None, Some("already an Alias")),
+            (
+                NameKind::Alias,
+                "personal",
+                None,
+                Some("already a Group name"),
+            ),
+            // Renaming itself is not colliding with itself, recapitalisation
+            // included — the same waiver on both halves, which is new for the
+            // Alias one.
+            (NameKind::Group, "Personal", Some("personal"), None),
+            (NameKind::Alias, "Work", Some("work"), None),
+            // Shape before collision. `perch add --alias '' --group ''` was
+            // refused as "`` cannot be both an Alias and a Group name" — a
+            // Conflict, about two names neither of which was usable at all.
+            (NameKind::Group, "", None, Some("cannot be empty")),
+            (NameKind::Alias, "", None, Some("cannot be empty")),
+            (
+                NameKind::Alias,
+                "has a space",
+                None,
+                Some("has a space in it"),
+            ),
+            (NameKind::Group, "none", None, Some("means no Group at all")),
+        ];
+
+        for (kind, name, instead_of, refusal) in cases {
+            let asked = held().refuse_a_name_nothing_may_answer_to(*kind, name, *instead_of);
+            match refusal {
+                None => asked.unwrap_or_else(|err| {
+                    panic!("{kind:?} `{name}` should be free: {err}");
+                }),
+                Some(said) => {
+                    let refused = asked.expect_err(&format!("{kind:?} `{name}` is not free"));
+                    assert!(
+                        refused.to_string().contains(said),
+                        "{kind:?} `{name}`: expected {said:?}, got {refused}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The half of the check an Alias renaming itself used to skip.
+    ///
+    /// Both Alias paths returned `Ok` the moment the new name matched the held
+    /// one, without asking the other half of the namespace anything. That was
+    /// sound — a Group cannot be declared under a name an Alias already holds —
+    /// but only by an argument about what `declare_group` would have refused
+    /// earlier, which is why the registry here is built by hand: nothing
+    /// reachable can produce it. It is what a third way of making a name would
+    /// walk into, and it now has one answer rather than an inference.
+    #[test]
+    fn recapitalising_an_alias_still_cannot_walk_into_a_group() {
+        let mut registry = Registry::default();
+        registry
+            .aliases
+            .insert("work".to_string(), "someone@example.com".to_string());
+        registry
+            .groups
+            .insert("Work".to_string(), Overrides::default());
+
+        let refused = registry
+            .refuse_a_name_nothing_may_answer_to(NameKind::Alias, "Work", Some("work"))
+            .expect_err("the shared namespace is still checked");
+
+        assert!(
+            refused.to_string().contains("already a Group name"),
+            "{refused}"
+        );
+    }
+
     /// A registry `load` would refuse is one `save` declines to write.
     ///
     /// Nothing reachable produces one — every command in the suite passes with
@@ -2418,8 +2598,12 @@ mod tests {
     #[test]
     fn naming_an_account_that_is_already_named_replaces_the_name() {
         let mut registry = Registry::default();
-        registry.set_alias("overflow", "someone@example.com");
-        registry.set_alias("work", "someone@example.com");
+        registry
+            .name_account("overflow", "someone@example.com")
+            .expect("the name is free");
+        registry
+            .name_account("work", "someone@example.com")
+            .expect("the Account renames itself");
 
         assert_eq!(registry.alias_of("someone@example.com"), Some("work"));
         assert!(!registry.aliases.contains_key("overflow"));

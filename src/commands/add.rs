@@ -39,18 +39,20 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
 
     // Everything knowable before the login is checked before the login, so a
     // name Perch was always going to refuse never costs a browser round trip.
-    // Shape before collision. `refuse_taken_names` opens by asking whether the
-    // Alias and the Group are the same name, so with the order reversed
-    // `perch add --alias '' --group ''` was refused as "`` cannot be both an
-    // Alias and a Group name" — a Conflict, about two names neither of which
-    // was usable in the first place. What is wrong with a name is worth saying
-    // before what it clashes with.
+    // Each name against the whole namespace, in the order the registry decides
+    // — shape before collision, which this command is the reason for.
     if let Some(alias) = &args.alias {
-        registry::validate_name(NameKind::Alias, alias)?;
+        registry.refuse_a_name_nothing_may_answer_to(NameKind::Alias, alias, None)?;
     }
+    // Its shape only, and not whether it is free: naming a Group here *joins*
+    // one, and `ensure_group` declares it if nobody has. The half of the check
+    // that still applies — that it is not an Alias — is the pair check below.
     if let Some(group) = &args.group {
         registry::validate_name(NameKind::Group, group)?;
     }
+    // And the pair against each other, which no check of one name can see: a
+    // command that sets both at once could otherwise plant the collision the
+    // shared namespace exists to prevent.
     registry.refuse_taken_names(args.alias.as_deref(), args.group.as_deref())?;
     if args.group.is_none() && !args.no_group && !host.is_interactive() {
         return Err(PerchError::Invalid(
@@ -90,7 +92,11 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     let placed = account.store(host)?;
     registry.upsert(account);
     if let Some(alias) = &args.alias {
-        registry.set_alias(alias, &email);
+        // Refused before the login and again here, against the registry as it
+        // is now. Nothing has changed under the lock this holds, so this cannot
+        // fail — and a name that reached this point unchecked would be one no
+        // command could ever free.
+        registry.name_account(alias, &email)?;
     }
     // A Profile that nothing records is worse than no Profile at all: it holds
     // a live refresh token, and nothing ever looks at it again. `reap_abandoned`

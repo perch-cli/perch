@@ -50,18 +50,7 @@ pub fn run(host: &dyn Host, command: AliasCommand, out: &mut dyn Write) -> Resul
 /// to one name. Returns what to tell the user, which includes the name the
 /// Account gave up when it had one.
 fn set(registry: &mut Registry, name: &str, account: &AccountTarget) -> Result<String> {
-    let previous = registry.alias_of(&account.email).map(str::to_string);
-
-    // Renaming an Account by the name it already answers to is not a collision
-    // with itself, so the name it is about to give up is not in the way — and
-    // that includes recapitalising it, which is a rename like any other.
-    let renaming_itself = previous
-        .as_deref()
-        .is_some_and(|held| registry::same_name(held, name));
-    if !renaming_itself {
-        registry.refuse_taken_names(Some(name), None)?;
-    }
-    registry.set_alias(name, &account.email);
+    let previous = registry.name_account(name, &account.email)?;
 
     let email = &account.email;
     Ok(match previous {
