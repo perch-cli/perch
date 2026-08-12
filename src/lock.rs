@@ -227,6 +227,52 @@ impl Drop for Held<'_> {
     }
 }
 
+/// Two holds that have to move together.
+///
+/// A Switch runs under Claude Code's locks *and* Perch's registry lock, and
+/// both go stale on their own clocks — ten seconds for the config file, ninety
+/// for the registry. So every slow step has to renew both, and the two lines
+/// doing it appeared in lockstep five times across [`crate::switch`] because
+/// nothing said they were one act. Nothing stopped a sixth step renewing one of
+/// them, and a hold renewed only after a slow step is a hold that was already
+/// lost while it ran.
+///
+/// The pairing is the whole of what this is for: it holds no state of its own
+/// and adds no protocol. What it buys is that "the slow steps" becomes
+/// something that can be grepped for, rather than a discipline kept by reading
+/// a comment.
+pub struct Holds<'a, 'one, 'other> {
+    one: &'a mut Held<'one>,
+    other: &'a mut Held<'other>,
+}
+
+impl<'a, 'one, 'other> Holds<'a, 'one, 'other> {
+    /// Two holds this scope has, whoever took them and whenever. The lifetimes
+    /// stay apart because they are: a Switch takes Claude Code's locks inside
+    /// the very scope that was handed Perch's.
+    pub fn of(one: &'a mut Held<'one>, other: &'a mut Held<'other>) -> Holds<'a, 'one, 'other> {
+        Holds { one, other }
+    }
+
+    /// Runs something slow with both holds renewed either side of it.
+    ///
+    /// Before as well as after. A renewal that only happens *between* steps
+    /// leaves the longest step of all running under a lock somebody else may
+    /// take over, and the takeover is then discovered afterwards — when
+    /// whatever that step did has already happened.
+    pub fn around<T>(&mut self, work: impl FnOnce() -> T) -> T {
+        self.renew();
+        let done = work();
+        self.renew();
+        done
+    }
+
+    fn renew(&mut self) {
+        self.one.renew();
+        self.other.renew();
+    }
+}
+
 /// Runs `work` with every lock in `locks` held, in the order given, and gives
 /// them all back afterwards however it ends.
 ///
@@ -614,6 +660,67 @@ mod tests {
         assert!(
             host.notes().iter().any(|note| note.contains("taken over")),
             "and the loss is said out loud rather than passed over: {:?}",
+            host.notes()
+        );
+    }
+
+    /// A slow step under two holds leaves both of them held — because both
+    /// were renewed *before* it started, not only after it finished.
+    ///
+    /// The case a Switch is made of. `prepare` reads a Credential before the
+    /// first write, and a keychain that stops to ask the user for permission
+    /// stretches it without warning; then the write itself is slow for the same
+    /// reason. Neither exceeds the window on its own, and together they do — so
+    /// a hold renewed only between steps is one somebody else may take over
+    /// while the longest step of all is running, discovered afterwards, when
+    /// whatever that step did has already happened.
+    ///
+    /// Both holds, because a step that outlasts one outlasts the other. The
+    /// pair had no test of any kind: this suite covers the artifact protocol
+    /// thoroughly and said nothing about holding one across something slow,
+    /// which is the only reason `renew` exists.
+    #[test]
+    fn a_slow_step_renews_both_holds_before_it_starts_and_not_only_after() {
+        let theirs = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
+        let ours = a_lock("/Users/someone/.config/perch/.registry.lock");
+        let host = FakeHost::new();
+
+        /// Somebody who wants the lock and takes it only if it looks abandoned,
+        /// which is the protocol every holder is judged by.
+        fn a_contender_looks(host: &FakeHost, lock: &LockSpec) {
+            let left = host.modified_at(&lock.dir).expect("the artifact is there");
+            if (host.now() - left).num_milliseconds() >= lock.stale_millis {
+                host.remove_dir_all(&lock.dir).unwrap();
+                host.create_dir_exclusive(&lock.dir).unwrap();
+            }
+        }
+
+        let mut both_held = false;
+        let taken: Result<()> = under(&host, vec![ours.clone()], |perch| {
+            under(&host, vec![theirs.clone()], |held| {
+                // Whatever the step is preceded by — `prepare`, in a Switch.
+                // Under the window on its own.
+                host.sleep(55_000);
+
+                let mut holds = Holds::of(held, perch);
+                holds.around(|| {
+                    // And the step, also under the window on its own. Together
+                    // they are over it, so what decides this is whether the
+                    // holds were renewed on the way in.
+                    host.sleep(55_000);
+                    a_contender_looks(&host, &theirs);
+                    a_contender_looks(&host, &ours);
+                });
+
+                both_held = held.still_held() && perch.still_held();
+                Ok(())
+            })
+        });
+        taken.expect("the work finishes");
+
+        assert!(
+            both_held,
+            "a step whose hold was renewed before it began is a step nobody              could have judged abandoned: {:?}",
             host.notes()
         );
     }

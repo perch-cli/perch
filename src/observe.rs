@@ -471,6 +471,14 @@ fn renew_under_the_lock(host: &dyn Host, asked: &Asked, installed: &Installed) -
         // between steps leaves the longest step of all running under a lock
         // somebody else may take over — and the takeover is then discovered
         // afterwards, when the Rotation has already happened.
+        //
+        // Claude Code's lock alone, and not Perch's, which is why this is not
+        // the [`crate::lock::Holds`] pair a Switch uses. The registry hold is
+        // renewed once per Account above and goes stale in ninety seconds
+        // rather than ten, and what it is protecting here is the write of the
+        // *figures* — a Credential that Rotated is written under this lock, not
+        // that one. So a round trip long enough to lose it costs the reading
+        // and says so, through `not_kept`, rather than costing a Credential.
         held.renew();
 
         // Anthropic may Rotate here. Everything after this line is Perch making

@@ -234,26 +234,25 @@ pub fn perform(
     let switched: Result<Captured> = lock::under(host, probe::locks_for(&store), |held| {
         let prepared = prepare(host, incoming, outgoing, installed.clone(), store)?;
 
-        // Said between every step rather than only after the writes. `prepare`
+        // Every step of the Switch is slow enough to outlast a hold. `prepare`
         // reads a Credential and `capture` reads and writes one, and a keychain
         // that stops to ask the user for permission stretches either without
-        // warning — past the ten seconds the config-file lock goes stale in. A
-        // hold renewed only after the slow steps is a hold that was already
-        // lost while they ran.
-        held.renew();
-        perch.renew();
-        let captured = capture(host, &prepared, incoming, outgoing)
+        // warning — past the ten seconds the config-file lock goes stale in.
+        let mut holds = lock::Holds::of(held, perch);
+
+        let captured = holds
+            .around(|| capture(host, &prepared, incoming, outgoing))
             .map_err(|error| error.with_note(&nothing_happened(outgoing)))?;
 
-        held.renew();
-        perch.renew();
-        profile::store_credential(host, &prepared.store, prepared.credential.as_str())
+        holds
+            .around(|| {
+                profile::store_credential(host, &prepared.store, prepared.credential.as_str())
+            })
             .map_err(|error| error.with_note(&only_captured(&captured, outgoing, incoming)))?;
         incoming_is_live = true;
 
-        held.renew();
-        perch.renew();
-        patch_identity(host, &prepared)
+        holds
+            .around(|| patch_identity(host, &prepared))
             .map_err(|error| error.with_note(&live_but_unnamed(&prepared, outgoing, incoming)))?;
 
         Ok(captured)
@@ -319,14 +318,13 @@ pub fn make_live(
         refuse_if_live_in(host, &store.config_dir, whose, &installed)?;
 
         let prepared = prepare(host, account, None, installed, store)?;
+        let mut holds = lock::Holds::of(held, perch);
 
-        held.renew();
-        perch.renew();
-        profile::store_credential(host, &prepared.store, prepared.credential.as_str())?;
+        holds.around(|| {
+            profile::store_credential(host, &prepared.store, prepared.credential.as_str())
+        })?;
         is_live = true;
-        held.renew();
-        perch.renew();
-        patch_identity(host, &prepared)
+        holds.around(|| patch_identity(host, &prepared))
     });
 
     landed.map_err(|error| NotLanded { error, is_live })
