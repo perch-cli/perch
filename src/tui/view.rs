@@ -411,9 +411,13 @@ fn render_governing(frame: &mut Frame, model: &Model, area: Rect) {
 
     let mut rows: Vec<(String, String, String)> = Vec::new();
     if scope == Scope::Ungrouped {
+        // Through the model rather than off the registry, for the reason every
+        // row below it goes that way: a write the arrow keys have made and the
+        // debounce has not landed yet is what the row is showing, and this line
+        // used to be the one that said what was still on disk.
         rows.push((
             "cycle-ungrouped".to_string(),
-            model.registry().global.cycle_ungrouped.to_string(),
+            model.shown(&scope, &Row::CycleUngrouped).0,
             sourced(&Scope::Global),
         ));
     }
@@ -555,7 +559,7 @@ fn render_content(frame: &mut Frame, model: &Model, area: Rect) {
         .iter()
         .enumerate()
         .map(|(index, row)| {
-            let (value, inherited) = on_the_row(model, &scope, row);
+            let (value, inherited) = model.shown(&scope, row);
             let line = Line::from(format!("  {}  {value}", list::padded(row.label(), width)));
             let line = match inherited {
                 true => line.style(Style::new().add_modifier(Modifier::DIM)),
@@ -618,51 +622,6 @@ fn not_in_force(model: &Model, scope: &Scope) -> String {
                 .to_string()
         }
         _ => String::new(),
-    }
-}
-
-/// One content row's value, and whether it is Inherited rather than declared
-/// here — which is what the dimming says.
-fn on_the_row(model: &Model, scope: &Scope, row: &Row) -> (String, bool) {
-    let registry = model.registry();
-    match row {
-        Row::Setting(setting) => {
-            let (value, source) = model.value_of(scope, *setting);
-            (value, source == Scope::Global && *scope != Scope::Global)
-        }
-        // Global's own, wherever it is shown — so on the Ungrouped page it is
-        // dimmed like anything else read from Global, and on Global's own page
-        // it is not.
-        Row::CycleUngrouped => (
-            registry.global.cycle_ungrouped.to_string(),
-            *scope != Scope::Global,
-        ),
-        _ => {
-            let Some(account) = model.scope_account() else {
-                return (String::new(), false);
-            };
-            let value = match row {
-                Row::Alias => registry
-                    .alias_of(account.email())
-                    .map(str::to_string)
-                    .unwrap_or_else(|| "(none)".to_string()),
-                Row::Cycling => account.enabled.to_string(),
-                Row::Group => account
-                    .group
-                    .clone()
-                    .unwrap_or_else(|| registry::NO_GROUP.to_string()),
-                Row::Plan => account
-                    .plan
-                    .clone()
-                    .unwrap_or_else(|| "(not reported)".to_string()),
-                Row::Quarantine => match account.quarantine {
-                    Some(why) => why.as_str().to_string(),
-                    None => "none".to_string(),
-                },
-                Row::Setting(_) | Row::CycleUngrouped => unreachable!("answered above"),
-            };
-            (value, false)
-        }
     }
 }
 

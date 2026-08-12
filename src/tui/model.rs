@@ -621,6 +621,94 @@ impl Model {
         )
     }
 
+    /// What a row reads as right now, and whether the value is Global's rather
+    /// than this Scope's own — which is what the dimming says.
+    ///
+    /// Row-shaped rather than Setting-shaped, which is the whole of it. The
+    /// deferred write was overlaid by [`Self::value_of`], and `value_of`
+    /// answers about a Setting — so the view, which has to answer for every
+    /// row, had no way to ask the pending-aware question about the three that
+    /// are not Settings and read them off the registry instead. Six rows of a
+    /// Config page moved as the arrow keys were held and three did not, while
+    /// [`Self::defer`] promised "the row shows what has been done to it rather
+    /// than what is still on disk".
+    ///
+    /// The Alias row has no overlay because it needs none: a typed name is
+    /// written when it is confirmed rather than deferred, so nothing is ever
+    /// waiting on that row. Plan and Quarantine are facts rather than Settings
+    /// and cannot be edited at all.
+    pub fn shown(&self, scope: &Scope, row: &Row) -> (String, bool) {
+        match row {
+            Row::Setting(setting) => {
+                let (value, source) = self.value_of(scope, *setting);
+                (value, source == Scope::Global && *scope != Scope::Global)
+            }
+            // Global's own, wherever it is shown — so on the Ungrouped page it
+            // is dimmed like anything else read from Global, and on Global's
+            // own page it is not. A write waiting on it is still Global's, so
+            // what is pending changes the value and not the dimming.
+            Row::CycleUngrouped => {
+                let value = match &self.pending {
+                    Some(Pending {
+                        edit: Edit::CycleUngrouped(waiting),
+                        ..
+                    }) => *waiting,
+                    _ => self.registry.global.cycle_ungrouped,
+                };
+                (value.to_string(), *scope != Scope::Global)
+            }
+            _ => {
+                let Some(account) = self.scope_account() else {
+                    return (String::new(), false);
+                };
+                let value = match row {
+                    Row::Alias => self
+                        .registry
+                        .alias_of(account.email())
+                        .map(str::to_string)
+                        .unwrap_or_else(|| "(none)".to_string()),
+                    Row::Cycling => match &self.pending {
+                        Some(Pending {
+                            edit: Edit::Cycling { email, enabled },
+                            ..
+                        }) if email == account.email() => enabled.to_string(),
+                        _ => account.enabled.to_string(),
+                    },
+                    Row::Group => self
+                        .pending_group_of(account.email())
+                        .unwrap_or_else(|| account.group.clone())
+                        .unwrap_or_else(|| registry::NO_GROUP.to_string()),
+                    Row::Plan => account
+                        .plan
+                        .clone()
+                        .unwrap_or_else(|| "(not reported)".to_string()),
+                    Row::Quarantine => match account.quarantine {
+                        Some(why) => why.as_str().to_string(),
+                        None => "none".to_string(),
+                    },
+                    Row::Setting(_) | Row::CycleUngrouped => unreachable!("answered above"),
+                };
+                (value, false)
+            }
+        }
+    }
+
+    /// Where a Group write that has not landed yet would put an Account, if one
+    /// is waiting.
+    ///
+    /// Two `Option`s and both mean something: the outer is whether a write is
+    /// waiting at all, and the inner is the value it carries — `None` being out
+    /// of every Group, which is a place like any other.
+    fn pending_group_of(&self, email: &str) -> Option<Option<String>> {
+        match &self.pending {
+            Some(Pending {
+                edit: Edit::Group { email: also, group },
+                ..
+            }) if also == email => Some(group.clone()),
+            _ => None,
+        }
+    }
+
     /// Which Accounts a Refresh covers: the ones on screen, and no others.
     ///
     /// Every read spends from an hourly budget that does not refill early (ADR
@@ -882,13 +970,9 @@ impl Model {
         // said before the key was pressed — and recomputing from that would
         // have every press in a run land on the same neighbour, which is a list
         // the arrows could not walk more than one place along.
-        let held = match &self.pending {
-            Some(Pending {
-                edit: Edit::Group { email: also, group },
-                ..
-            }) if *also == email => group.clone(),
-            _ => account.group.clone(),
-        };
+        let held = self
+            .pending_group_of(&email)
+            .unwrap_or_else(|| account.group.clone());
         let mut places: Vec<Option<String>> = vec![None];
         places.extend(
             self.registry
@@ -1645,7 +1729,8 @@ mod tests {
         model_holding(emails.iter().map(|email| account(email)).collect())
     }
 
-    fn shown(model: &Model) -> Vec<&str> {
+    /// The Accounts the Status tab lists, in the order it lists them.
+    fn listed(model: &Model) -> Vec<&str> {
         model.accounts().into_iter().map(Account::email).collect()
     }
 
@@ -1787,7 +1872,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            shown(&model),
+            listed(&model),
             [
                 "fresh@example.com",
                 "middling@example.com",
@@ -1811,7 +1896,7 @@ mod tests {
         let model = Model::new(registry, at(12));
 
         assert_eq!(
-            shown(&model),
+            listed(&model),
             ["spare@example.com", "here@example.com", "loose@example.com",],
             "Group `work` first and ranked, then the Accounts in no Group",
         );
@@ -2128,7 +2213,7 @@ mod tests {
 
         let model = Model::new(registry_of(held.clone()), at(12));
         assert_eq!(
-            shown(&model),
+            listed(&model),
             ["tired@example.com", "fresh@example.com"],
             "as held, which is how `perch list` shows them",
         );
@@ -2137,7 +2222,7 @@ mod tests {
         saying_they_are.global.cycle_ungrouped = true;
         let model = Model::new(saying_they_are, at(12));
         assert_eq!(
-            shown(&model),
+            listed(&model),
             ["fresh@example.com", "tired@example.com"],
             "and ranked once something says a Cycle may move between them",
         );
@@ -2155,6 +2240,138 @@ mod tests {
             .iter()
             .position(|row| *row == Row::Setting(setting))
             .expect("the Setting is on the page");
+    }
+
+    /// Puts the cursor on one row of a Scope's page, whichever kind of row it
+    /// is.
+    ///
+    /// The Scope is found by name rather than counted to: the sidebar orders
+    /// Groups alphabetically after Global and Ungrouped, so an index is a fact
+    /// about the fixture rather than about the test.
+    fn on_the_row(model: &mut Model, scope: &Scope, row: Row) {
+        model.tab = Tab::Config;
+        model.scope_row = model
+            .scope_rows()
+            .iter()
+            .position(|held| matches!(held, ScopeRow::Scope(on) if on == scope))
+            .expect("the Scope is in the sidebar");
+        model.column = Column::Content;
+        model.content_row = model
+            .content_rows()
+            .iter()
+            .position(|held| *held == row)
+            .expect("the row is on the page");
+    }
+
+    /// Every row that can be stepped shows the write the arrow keys have made,
+    /// while it is still waiting to land.
+    ///
+    /// This is what [`Model::defer`] promises — "the row shows what has been
+    /// done to it rather than what is still on disk" — and it was true of the
+    /// six Setting rows and false of the three below them. `value_of` overlaid
+    /// the pending write and answers about a *Setting*, so the view had no way
+    /// to ask the same question about a row that is not one and read the
+    /// registry instead: hold `→` on the `group` row across four Groups and the
+    /// value stepped underneath while the frame showed the Group it started on.
+    #[test]
+    fn a_stepped_row_shows_the_write_that_has_not_landed_yet() {
+        // Global, Ungrouped, then `personal` and `work` — the sidebar order the
+        // scope_row indices below are counting.
+        let mut registry = registry_of(vec![
+            in_group(account("one@example.com"), "work"),
+            account("two@example.com"),
+        ]);
+        // A second Group to step into, so the `group` row has somewhere to walk.
+        registry
+            .declare_group("personal")
+            .expect("the name is free");
+        let mut model = Model::new(registry, at(12));
+        let work = Scope::Group("work".to_string());
+        let ungrouped = Scope::Ungrouped;
+
+        // A Setting, which already worked — here so the row that behaved and
+        // the rows that did not are pinned by one test.
+        on_the_row(
+            &mut model,
+            &Scope::Global,
+            Row::Setting(Setting::WatcherThresholdPercent),
+        );
+        let before = model.shown(
+            &Scope::Global,
+            &Row::Setting(Setting::WatcherThresholdPercent),
+        );
+        let _ = model.act_on(Signal::Right);
+        assert_ne!(
+            model
+                .shown(
+                    &Scope::Global,
+                    &Row::Setting(Setting::WatcherThresholdPercent)
+                )
+                .0,
+            before.0,
+            "a Setting moves as it is stepped"
+        );
+
+        // `cycling`, on the Group page holding one@example.com.
+        on_the_row(&mut model, &work, Row::Cycling);
+        assert_eq!(model.shown(&work, &Row::Cycling).0, "true");
+        let _ = model.act_on(Signal::Left);
+        assert_eq!(
+            model.shown(&work, &Row::Cycling).0,
+            "false",
+            "the row reads as what the key did, not as what is on disk"
+        );
+
+        // `group`, stepped twice, which is the case that could not be walked at
+        // all: each press reads where the last one put it, so without the
+        // overlay every press in a run lands on the same neighbour. Leftwards,
+        // because the places are `(none)`, `personal`, `work` in that order and
+        // the Account starts on the last of them.
+        on_the_row(&mut model, &work, Row::Group);
+        assert_eq!(model.shown(&work, &Row::Group).0, "work");
+        let _ = model.act_on(Signal::Left);
+        assert_eq!(
+            model.shown(&work, &Row::Group).0,
+            "personal",
+            "one press moves it to the neighbour"
+        );
+        let _ = model.act_on(Signal::Left);
+        assert_eq!(
+            model.shown(&work, &Row::Group).0,
+            registry::NO_GROUP,
+            "and the next press moves it again rather than back to the same one"
+        );
+
+        // `cycle-ungrouped`, which is Global's and shown on the Ungrouped page.
+        on_the_row(&mut model, &ungrouped, Row::CycleUngrouped);
+        assert_eq!(model.shown(&ungrouped, &Row::CycleUngrouped).0, "false");
+        let _ = model.act_on(Signal::Right);
+        assert_eq!(
+            model.shown(&ungrouped, &Row::CycleUngrouped).0,
+            "true",
+            "Global's own row moves too"
+        );
+    }
+
+    /// The dimming is a fact about where the value came from, and a write that
+    /// has not landed does not change where it will come from.
+    #[test]
+    fn a_pending_write_moves_the_value_and_not_the_dimming() {
+        let mut model = model_holding(vec![account("one@example.com")]);
+        let ungrouped = Scope::Ungrouped;
+
+        on_the_row(&mut model, &ungrouped, Row::CycleUngrouped);
+        assert!(
+            model.shown(&ungrouped, &Row::CycleUngrouped).1,
+            "read from Global, so dimmed on the Ungrouped page"
+        );
+
+        let _ = model.act_on(Signal::Right);
+        assert_eq!(model.shown(&ungrouped, &Row::CycleUngrouped).0, "true");
+        assert!(
+            model.shown(&ungrouped, &Row::CycleUngrouped).1,
+            "and still Global's, so still dimmed"
+        );
     }
 
     #[test]
