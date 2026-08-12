@@ -554,7 +554,7 @@ impl<'a> Perch<'a> {
         let execution = self.run(args)?;
         let said = format!("`perch {}`", args.join(" "));
         if !execution.succeeded() {
-            return Err(Setback::perch(format!(
+            return Err(read_as(execution.status).because(format!(
                 "{said} exited {}: {}",
                 execution.status,
                 execution.stderr.trim()
@@ -590,6 +590,46 @@ impl Fault {
             Fault::Perch => "This is a fault in Perch.",
             Fault::Upstream => "This is news about something upstream, not a fault in Perch.",
         }
+    }
+
+    /// A [`Setback`] of this kind, with nothing changed on the machine. The one
+    /// constructor the other two are written in terms of, so which fault a
+    /// Setback carries is only ever decided in one place.
+    pub fn because(self, because: impl Into<String>) -> Setback {
+        Setback {
+            fault: self,
+            because: because.into(),
+            now_true: Vec::new(),
+            put_it_back: Vec::new(),
+        }
+    }
+}
+
+/// Which of the two a non-zero exit from a phase's own command is.
+///
+/// A phase reads through `perch list --json` and `perch status --json`, and the
+/// machine it reads on is one somebody works on. Another `perch` holding the
+/// registry, a client running against the Profile, a keychain that has locked
+/// itself since the Preflight — all of those are the machine being busy, and
+/// none of them is a defect. Blaming them on Perch is how a suite's red comes
+/// to be ignored (ADR 0037), which is the distinction [`Fault`] exists to draw.
+///
+/// Everything else is Perch disagreeing with itself: the Preflight named these
+/// Accounts through the same binary moments earlier, so a `NotFound` or an
+/// `Invalid` now is a bug rather than news.
+///
+/// Deliberately not [`refused_with`], which reads the same codes for a
+/// different question. There, `NotFound` means a browser login the person
+/// abandoned and `Conflict` means they signed in as somebody else — news, both
+/// of them, because the Repair hands the terminal to a human. A phase hands it
+/// to nobody, so the same code means the opposite thing.
+fn read_as(status: i32) -> Fault {
+    use crate::error::*;
+    match status {
+        EXIT_HELD | EXIT_PROFILE_LIVE | EXIT_KEYCHAIN_UNAVAILABLE | EXIT_PROBE_REFUSED => {
+            Fault::Upstream
+        }
+        _ => Fault::Perch,
     }
 }
 
@@ -642,20 +682,12 @@ pub struct Setback {
 impl Setback {
     /// A fault in Perch, with nothing changed on the machine.
     pub fn perch(because: impl Into<String>) -> Setback {
-        Setback {
-            fault: Fault::Perch,
-            because: because.into(),
-            now_true: Vec::new(),
-            put_it_back: Vec::new(),
-        }
+        Fault::Perch.because(because)
     }
 
     /// News about something upstream, with nothing changed on the machine.
     pub fn upstream(because: impl Into<String>) -> Setback {
-        Setback {
-            fault: Fault::Upstream,
-            ..Setback::perch(because)
-        }
+        Fault::Upstream.because(because)
     }
 
     /// What the machine looks like now the phase has stopped on it.
@@ -1914,6 +1946,56 @@ mod tests {
             Perch::under_test(&installed, "/build/perch").bin(),
             Path::new("/usr/local/bin/perch"),
             "the only way a bug in the release archive itself is ever caught"
+        );
+    }
+
+    /// A `perch` under test that exits with `status` and says `said` when a
+    /// phase reads a listing through it.
+    fn exiting(status: i32, said: &str) -> FakeHost {
+        a_bare_machine().with_exec(
+            "/build/perch",
+            &["list", "--json"],
+            Execution {
+                status,
+                stdout: String::new(),
+                stderr: said.to_string(),
+            },
+        )
+    }
+
+    #[test]
+    fn a_listing_another_perch_was_holding_is_news_rather_than_a_defect() {
+        let host = exiting(
+            crate::error::EXIT_HELD,
+            "Another perch is holding the registry.",
+        );
+
+        let setback = Perch::under_test(&host, "/build/perch")
+            .json(&["list", "--json"])
+            .expect_err("it exited non-zero");
+
+        assert_eq!(
+            setback.fault,
+            Fault::Upstream,
+            "a machine somebody works on runs other Perches: {}",
+            setback.because
+        );
+        assert!(setback.said().contains("not a fault in Perch"));
+    }
+
+    #[test]
+    fn a_listing_that_refused_for_a_reason_the_preflight_ruled_out_is_a_defect() {
+        let host = exiting(crate::error::EXIT_NOT_FOUND, "No such Account.");
+
+        let setback = Perch::under_test(&host, "/build/perch")
+            .json(&["list", "--json"])
+            .expect_err("it exited non-zero");
+
+        assert_eq!(
+            setback.fault,
+            Fault::Perch,
+            "the Preflight read these Accounts through the same binary: {}",
+            setback.because
         );
     }
 
