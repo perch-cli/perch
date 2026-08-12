@@ -1382,9 +1382,27 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
             detail: err.to_string(),
         })?;
 
-    validate(&registry, path)?;
+    validate(&registry).map_err(|refusal| refusal.with_note(&the_file_to_edit(path)))?;
 
     Ok(Some(with_every_claimed_group_declared(registry)))
+}
+
+/// Where to put right something only a hand edit could have put wrong.
+///
+/// The rule [`validate`] states is about the registry; this is about the file it
+/// happens to be written in, and only a caller that read one can say which file
+/// that is. Kept apart because the other caller — [`save`] — is holding a
+/// registry nobody hand-edited, and telling somebody to go and edit a value that
+/// is not in the file yet is the one sentence that would make it worse.
+///
+/// Named as one sentence rather than spelled at each refusal, which is where it
+/// was: seven copies, of which one had already drifted to the singular.
+pub fn the_file_to_edit(path: &Path) -> String {
+    format!(
+        "It is in {}, and every Perch command reads that file — including the \
+         ones that would set it. Edit the value there.",
+        path.display(),
+    )
 }
 
 /// Everything a registry has to be true of before any command acts on it.
@@ -1395,17 +1413,18 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
 /// and surprise somebody by acting on it.
 ///
 /// Checked here means every command meets it, including `perch config set` —
-/// the one that would otherwise be the repair. So the refusals name the file: a
-/// value only a hand edit can produce is a value only a hand edit can take back
-/// out, and a range with nowhere to apply it is a dead end rather than an
-/// instruction.
+/// the one that would otherwise be the repair. A value only a hand edit can
+/// produce is a value only a hand edit can take back out, so a caller that read
+/// the registry off a disk says where to do that, with
+/// [`the_file_to_edit`]. The rule itself names no file, because the other
+/// caller is holding a registry that came from nowhere but Perch.
 ///
 /// Public because an Import writes a registry without reading one first, and
 /// was running a narrower check of its own — so a file `perch import` accepted
 /// could be one every later command refused to read, which leaves a machine
 /// with no working command on it and no `perch purge` either. One function, so
 /// what an Import will accept and what a load will accept cannot differ.
-pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
+pub fn validate(registry: &Registry) -> Result<()> {
     // Global's own values as well as every Scope's Overrides. Global is where a
     // Setting nobody has Overridden is read from, so a range it breaks is one
     // every Scope in the registry inherits — the widest way in, and the one
@@ -1425,13 +1444,7 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
             .map(|(name, held)| (Scope::Group(name.clone()), held.clone())),
     );
     for (scope, held) in declared {
-        held.validate(&scope).map_err(|refusal| {
-            refusal.with_note(&format!(
-                "It is in {}, and every Perch command reads that file — including \
-                 the one that would set it. Edit the value there.",
-                path.display(),
-            ))
-        })?;
+        held.validate(&scope)?;
     }
 
     // The Group *names* an Account claims, for the same reason.
@@ -1460,10 +1473,10 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
         .iter()
         .filter_map(|account| account.group.as_deref());
     for name in claimed.chain(registry.groups.keys().map(String::as_str)) {
-        refuse_a_name_nothing_would_have_accepted(registry, NameKind::Group, name, path)?;
+        refuse_a_name_nothing_would_have_accepted(registry, NameKind::Group, name)?;
     }
     for name in registry.aliases.keys() {
-        refuse_a_name_nothing_would_have_accepted(registry, NameKind::Alias, name, path)?;
+        refuse_a_name_nothing_would_have_accepted(registry, NameKind::Alias, name)?;
     }
 
     // What each Alias points *at*, which the loop above does not look at: it
@@ -1483,10 +1496,7 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
         if registry.account(email).is_none() {
             return Err(PerchError::Invalid(format!(
                 "The registry gives the Alias `{alias}` to {email}, which is not \
-                 an Account Perch holds.\n\
-                 It is in {}, and every Perch command reads that file — including \
-                 the ones that would set it. Edit the value there.",
-                path.display(),
+                 an Account Perch holds.",
             )));
         }
         // One Account, one Alias. `set_alias` enforces it by dropping the old key
@@ -1504,10 +1514,7 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
                 "The registry gives {email} both the Alias `{already}` and the \
                  Alias `{alias}`, and an Account answers to one Alias at a time \
                  — so which of them Perch shows it under is not decided by \
-                 anything.\n\
-                 It is in {}, and every Perch command reads that file — including \
-                 the ones that would set it. Edit the value there.",
-                path.display(),
+                 anything.",
             )));
         }
         named.push((alias, email));
@@ -1533,11 +1540,8 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
             return Err(PerchError::Invalid(format!(
                 "The registry holds an Account called `{}`, which is not an \
                  address an Alias or a Group name could be told from — and a \
-                 Target that could be either has no single answer.\n\
-                 It is in {}, and every Perch command reads that file — including \
-                 the ones that would set it. Edit the value there.",
+                 Target that could be either has no single answer.",
                 account.email(),
-                path.display(),
             )));
         }
     }
@@ -1554,11 +1558,8 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
             return Err(PerchError::Invalid(format!(
                 "The registry holds two Accounts spelled `{already}` and `{}`, \
                  which are one Account — so which entry a command reads, and \
-                 which one it writes, is not decided by anything.\n\
-                 It is in {}, and every Perch command reads that file — including \
-                 the ones that would set it. Edit the value there.",
+                 which one it writes, is not decided by anything.",
                 account.email(),
-                path.display(),
             )));
         }
         held.push(account.email());
@@ -1576,8 +1577,8 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
     // `aliases` holding both `work` and `Work` renders one of them in `perch
     // list` and resolves `perch switch work` to the other, and freeing `work`
     // frees neither reliably.
-    refuse_two_names_that_differ_only_in_case(NameKind::Group, registry.groups.keys(), path)?;
-    refuse_two_names_that_differ_only_in_case(NameKind::Alias, registry.aliases.keys(), path)?;
+    refuse_two_names_that_differ_only_in_case(NameKind::Group, registry.groups.keys())?;
+    refuse_two_names_that_differ_only_in_case(NameKind::Alias, registry.aliases.keys())?;
 
     // The percentages a Cycle ranks on, checked the way a Group's are and for
     // the reason `GroupConfig::validate` states: the thing that reads them is a
@@ -1612,14 +1613,11 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
                      window is between 0 and 100 percent full — so what a Cycle \
                      would rank it on, and what the watcher would compare \
                      against a threshold, is not a figure at all.\n\
-                     It is in {}, and every Perch command reads that file — \
-                     including the ones that would set it. Edit the value there, \
-                     or delete the Account's `utilization` and let a `perch \
-                     status --refresh` read it again.",
+                     Deleting the Account's `utilization` lets a `perch status \
+                     --refresh` read it again.",
                     account.email(),
                     window.used_percent,
                     window.window,
-                    path.display(),
                 )));
             }
         }
@@ -1634,7 +1632,6 @@ pub fn validate(registry: &Registry, path: &Path) -> Result<()> {
 fn refuse_two_names_that_differ_only_in_case<'a>(
     kind: NameKind,
     names: impl Iterator<Item = &'a String>,
-    path: &Path,
 ) -> Result<()> {
     let mut seen: Vec<&str> = Vec::new();
     for name in names {
@@ -1642,11 +1639,8 @@ fn refuse_two_names_that_differ_only_in_case<'a>(
             return Err(PerchError::Invalid(format!(
                 "The registry holds {} `{already}` and `{name}`, which differ \
                  only in case — so which one a Target finds is not decided by \
-                 anything.\n\
-                 It is in {}, and every Perch command reads that file — including \
-                 the ones that would set it. Edit the value there.",
+                 anything.",
                 kind.article(),
-                path.display(),
             )));
         }
         seen.push(name);
@@ -1675,7 +1669,6 @@ fn refuse_a_name_nothing_would_have_accepted(
     registry: &Registry,
     kind: NameKind,
     name: &str,
-    path: &Path,
 ) -> Result<()> {
     // `none` is not a case of its own here. `validate_name` already refuses it,
     // for both kinds, in words true of a claim and a declaration alike — "means
@@ -1704,11 +1697,8 @@ fn refuse_a_name_nothing_would_have_accepted(
         None => Ok(()),
         Some(why) => Err(PerchError::Invalid(format!(
             "The registry holds {} `{name}`, which is not a name Perch would \
-             have accepted: {why}.\n\
-             It is in {}, and every Perch command reads that file — including \
-             the ones that would set it. Edit the value there.",
+             have accepted: {why}.",
             kind.article(),
-            path.display(),
         ))),
     }
 }
