@@ -46,9 +46,7 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
     let Decision { incoming, caveat } = decide(&registry, args.target.as_deref(), host.now(), out)?;
     let outgoing = registry.active_account().cloned();
 
-    if let Some(nothing_to_do) = already_there(host, &registry, &incoming)? {
-        return Err(nothing_to_do);
-    }
+    already_there(host, &registry, &incoming)?;
 
     // Everything the Switch owes the registry — the Quarantine it may have
     // discovered, which Account is active now — is written by `record`, which
@@ -159,21 +157,18 @@ fn leaving(registry: &Registry) -> Result<&Account> {
 /// between writing the Credential and patching the Identity is recorded as
 /// active while Claude Code still names somebody else, and running the same
 /// command again is how that is repaired.
-fn already_there(
-    host: &dyn Host,
-    registry: &Registry,
-    incoming: &Account,
-) -> Result<Option<PerchError>> {
+fn already_there(host: &dyn Host, registry: &Registry, incoming: &Account) -> Result<()> {
     if registry.active.as_deref() != Some(incoming.email()) {
-        return Ok(None);
+        return Ok(());
+    }
+    if !switch::already_landed(host, incoming)? {
+        return Ok(());
     }
 
-    Ok(switch::already_landed(host, incoming)?.then(|| {
-        PerchError::NothingToDo(format!(
-            "{} is already the active Account. Nothing was changed.",
-            registry.named_for_the_user(incoming.email())
-        ))
-    }))
+    Err(PerchError::NothingToDo(format!(
+        "{} is already the active Account. Nothing was changed.",
+        registry.named_for_the_user(incoming.email())
+    )))
 }
 
 fn report(
