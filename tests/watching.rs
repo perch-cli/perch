@@ -94,17 +94,6 @@ fn active(host: &FakeHost) -> Option<String> {
     registry_of(host).active
 }
 
-/// A Claude Code running against a config directory: the session marker it
-/// wrote, naming a process that has been there since before it.
-fn client_running_against(host: FakeHost, config_dir: &str, pid: u32) -> FakeHost {
-    let marker = format!(
-        r#"{{"pid":{pid},"cwd":"/Users/someone/work","startedAt":{}}}"#,
-        host.now().timestamp_millis()
-    );
-    host.with_file(format!("{config_dir}/sessions/{pid}.json"), &marker)
-        .with_live_process(pid)
-}
-
 /// The decision log is the whole of the evidence that the policy works, and
 /// most of what a watcher decides is to do nothing. A line for the rounds that
 /// switched and silence for the rest would be a log that cannot answer "was it

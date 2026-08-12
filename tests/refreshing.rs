@@ -69,18 +69,6 @@ fn ready() -> FakeHost {
     host
 }
 
-/// A Claude Code running against a config directory: the marker file it writes
-/// for the session — naming its process and when the session began — and a
-/// process that has been there since before it.
-fn client_running_against(host: FakeHost, config_dir: &str, pid: u32) -> FakeHost {
-    let marker = format!(
-        r#"{{"pid":{pid},"cwd":"/Users/someone/work","startedAt":{}}}"#,
-        host.now().timestamp_millis()
-    );
-    host.with_file(format!("{config_dir}/sessions/{pid}.json"), &marker)
-        .with_live_process(pid)
-}
-
 /// Two Accounts declared interchangeable, so `--group` reads both of them.
 fn two_accounts_in_a_group() -> FakeHost {
     let host = machine_with_two_accounts();
