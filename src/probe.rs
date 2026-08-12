@@ -774,6 +774,80 @@ pub fn session_marker(pid: u32, started_at: DateTime<Utc>) -> String {
     .to_string()
 }
 
+/// A config directory this process has made Live, for as long as this value is
+/// held.
+///
+/// Perch writes session markers as well as reading them: a Run makes the Profile
+/// it launches Live (ADR 0027), and a login makes the directory it is driving
+/// Live so nothing reaps a login somebody is in the middle of. Both wrote the
+/// same three steps for themselves — the sessions directory, then the marker,
+/// atomically — and the second said so by pointing at a comment in the first's
+/// file.
+///
+/// A value rather than a function, and `Drop` rather than a call to make, for
+/// the reason [`crate::lock::Held`] is the same shape: what is being held is an
+/// artifact whose lifetime is an operation, and a bare removal at the end of a
+/// function is the line the next early return walks past.
+pub struct Claim<'a> {
+    host: &'a dyn Host,
+    marker: PathBuf,
+}
+
+impl Drop for Claim<'_> {
+    /// However the operation ended, including not having started. The Profile
+    /// stops being Live when the thing holding it does.
+    ///
+    /// A login's directory is gone by now — `profile::discard` takes it whole,
+    /// which is why nothing there ever removed the marker itself — so this is
+    /// removing a file inside a directory that is not there. The port says a
+    /// file that was not there is not a failure, which makes that the ordinary
+    /// case rather than a special one.
+    fn drop(&mut self) {
+        let _ = self.host.remove_file(&self.marker);
+    }
+}
+
+/// Makes a config directory Live, naming this process.
+///
+/// Perch's own pid, because Perch waits for what it started — the client a Run
+/// launched, or the login it is driving — so the marker holds for exactly as
+/// long as the operation and no longer, and it is knowable *before* the launch
+/// where the child's is not (ADR 0027).
+///
+/// Written atomically, so a reader sees the whole marker or no marker at all. A
+/// plain write truncates and then fills, and a reader catching it in between
+/// reads a file it can see all of and that says nothing — which [`clients_in`]
+/// settles as "not Live", the opposite of what the caller asked for. A `perch
+/// switch` in that window Captures the Credential the Run is about to hand a
+/// client.
+///
+/// Whether a claim that cannot be made is fatal is the caller's to decide, and
+/// the two disagree: a Run refuses, because what it protects is a Credential a
+/// client is about to hold for hours, and a login discards the failure, because
+/// the directory holds nothing yet and refusing a login over a tidying-up detail
+/// would be a reason somebody cannot add an Account at all. Neither judgement
+/// belongs here — this module has no idea which caller can afford to lose it.
+pub fn claim<'a>(host: &'a dyn Host, config_dir: &Path) -> Result<Claim<'a>> {
+    let pid = host.process_id();
+    let marker = session_marker_at(config_dir, pid);
+
+    host.create_dir_all(&sessions_dir(config_dir))
+        .and_then(|()| {
+            crate::host::write_atomically(host, &marker, &session_marker(pid, host.now()))
+        })
+        .map_err(|err| {
+            PerchError::Other(format!(
+                "{} could not be written ({err}), so Perch cannot record that a \
+                 client is running against this Profile — and another Perch \
+                 would be free to Capture or Renew the Credential that client \
+                 is holding. Nothing was launched.",
+                marker.display()
+            ))
+        })?;
+
+    Ok(Claim { host, marker })
+}
+
 /// The marker Claude Code writes for a running session, to the extent Perch
 /// reads it. `startedAt` is when the session began, in milliseconds since the
 /// epoch — which means the same thing on every platform, and is why it is the
@@ -1085,6 +1159,39 @@ fn refusal(assumption: &str, detail: &str, version: &str) -> PerchError {
 mod tests {
     use super::*;
     use crate::host::{Execution, FakeHost, Platform};
+
+    /// The round trip through this module's own interface: a claim makes the
+    /// directory Live, and letting it go stops it.
+    ///
+    /// Asserted through `anything_running` rather than by reaching for the
+    /// marker path, which is what every existing test does — `tests/running.rs`
+    /// and `tests/watching.rs` both check the file directly, and a check on the
+    /// path is a check past the interface. What a caller of this module cares
+    /// about is the answer to "is anything running here", and that is what had
+    /// no test.
+    ///
+    /// The fake reports its own process as running, which is exactly the
+    /// situation being modelled: Perch waits for what it started, so the pid a
+    /// claim names is alive for precisely as long as the Run or the login.
+    #[test]
+    fn a_claim_makes_a_directory_live_and_letting_it_go_stops_it() {
+        let dir = Path::new("/Users/someone/.perch/profiles/someone-example-com");
+        let host = FakeHost::new();
+
+        assert!(!anything_running(&host, dir), "nothing has claimed it yet");
+
+        let claimed = claim(&host, dir).expect("the marker is written");
+        assert!(
+            anything_running(&host, dir),
+            "a Run or a login holding this is a Live Profile"
+        );
+
+        drop(claimed);
+        assert!(
+            !anything_running(&host, dir),
+            "and it stops being Live when the thing holding it lets go"
+        );
+    }
 
     #[test]
     fn claude_is_the_first_match_on_path() {

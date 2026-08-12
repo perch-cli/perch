@@ -33,7 +33,6 @@
 //! the whole of what a Run says on stdout.
 
 use std::io::Write;
-use std::path::{Path, PathBuf};
 
 use crate::adopt;
 use crate::commands;
@@ -104,7 +103,7 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // therefore refuse its own Run; and immediately before the launch, with
     // nothing fallible in between, so the marker cannot outlive a Run that never
     // started (ADR 0027).
-    let marker = mark_live(host, &profile)?;
+    let _live = probe::claim(host, &profile)?;
 
     // The environment of this one process, and the whole of what makes the Run
     // a Run.
@@ -115,58 +114,7 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
         &[("CLAUDE_CONFIG_DIR", &profile.to_string_lossy())],
     );
 
-    // However it ended, including not having started. The Profile stops being
-    // Live when the Run does.
-    let _ = host.remove_file(&marker);
-
     ended.map_err(|err| PerchError::Other(format!("could not launch {}: {err}", launch.said)))
-}
-
-/// Makes the Profile a Live Profile for the length of the Run, and hands back
-/// the marker that says so.
-///
-/// A Profile with a Run against it is Live, evidenced the way ADR 0022 already
-/// evidences one: a session marker naming a process that is still the one that
-/// wrote it. The process named is Perch's own, because Perch waits for what it
-/// launched — so the marker holds for exactly as long as the Run, and it can be
-/// written *before* the launch, which the child's pid cannot.
-///
-/// Refused rather than remarked on when it cannot be written. What the marker
-/// buys is that no other Perch Captures, Renews or writes `.claude.json` into
-/// this Profile while somebody is working in it — a mid-task logout, silently,
-/// which is the failure ADR 0005 exists for. A Run that cannot claim its Profile
-/// is a Run nothing is protecting, and a person told so beforehand has lost a
-/// command rather than their work.
-///
-/// The failure is a refused Run rather than a bare `file_write`, which is how
-/// [`crate::reconcile`] reports the same class of thing on this same path: the
-/// person needs to know that nothing was launched and why, and a line naming
-/// only the file leaves them to work out both.
-fn mark_live(host: &dyn Host, profile: &Path) -> Result<PathBuf> {
-    let pid = host.process_id();
-    let marker = probe::session_marker_at(profile, pid);
-
-    // Atomically, so a reader sees the whole marker or no marker at all. A
-    // plain write truncates and then fills, and a reader catching it in between
-    // reads a file it can see all of and that says nothing — which `clients_in`
-    // settles as "not Live", the opposite of the arm its comment says this case
-    // takes. A `perch switch` in that window Captures the Credential the Run is
-    // about to hand a client (ADR 0027).
-    host.create_dir_all(&probe::sessions_dir(profile))
-        .and_then(|()| {
-            crate::host::write_atomically(host, &marker, &probe::session_marker(pid, host.now()))
-        })
-        .map_err(|err| {
-            PerchError::Other(format!(
-                "{} could not be written ({err}), so Perch cannot record that a \
-                 client is running against this Profile — and another Perch \
-                 would be free to Capture or Renew the Credential that client \
-                 is holding. Nothing was launched.",
-                marker.display()
-            ))
-        })?;
-
-    Ok(marker)
 }
 
 /// The program a Run launches and what it is handed.

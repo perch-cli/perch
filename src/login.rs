@@ -67,7 +67,7 @@ pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Pr
     // in a directory it has never had a session in is the least likely thing to
     // have written a marker of its own, which is why depending on it was the
     // wrong way round. `profile::discard` takes it with the directory.
-    mark_live(host, &dir);
+    let _live = probe::claim(host, &dir).ok();
 
     // From here every way out has to take the directory back out again, which
     // is what the doc above promises and what `?` in the middle of this would
@@ -78,27 +78,6 @@ pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Pr
     let produced = run_the_login(host, out, purpose, &claude, &dir, &store, &version);
     profile::discard(host, &store);
     produced
-}
-
-/// Says that Perch is driving a login in this directory, so nothing reaps it.
-///
-/// Best effort, unlike the same write in a Run. A Run refuses when it cannot mark
-/// its Profile, because what it is protecting is a Credential a client is about to
-/// hold for hours; here the directory holds nothing yet, the window is thirty
-/// minutes, and refusing a login over it would turn a tidying-up detail into a
-/// reason somebody cannot add an Account at all. What is lost without it is the
-/// protection alone, which is where this started.
-fn mark_live(host: &dyn Host, dir: &std::path::Path) {
-    let pid = host.process_id();
-    if host.create_dir_all(&probe::sessions_dir(dir)).is_ok() {
-        // Atomically, for the reason `commands::run::mark_live` gives: a
-        // half-written marker is one a reader settles as "nothing is running".
-        let _ = crate::host::write_atomically(
-            host,
-            &probe::session_marker_at(dir, pid),
-            &probe::session_marker(pid, host.now()),
-        );
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
