@@ -2119,6 +2119,19 @@ mod tests {
             "whose fault it is, because there is nothing for a person to do: {refused}"
         );
         assert_eq!(refused.exit_code(), crate::error::EXIT_GENERAL);
+
+        // The mutable half answers the same way. Two functions rather than one
+        // because a caller that goes on to change what it finds needs the other
+        // borrow, and a refusal that differed between them would be the two
+        // halves of one rule disagreeing.
+        let mut registry = Registry::default();
+        assert_eq!(
+            registry
+                .held_mut("nobody@example.com")
+                .expect_err("Perch does not hold it")
+                .to_string(),
+            refused.to_string()
+        );
     }
 
     /// The pointer the Alias check was written for, asked of the other one.

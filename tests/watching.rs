@@ -94,6 +94,57 @@ fn active(host: &FakeHost) -> Option<String> {
     registry_of(host).active
 }
 
+/// A client that starts during the lock wait is a refusal the loop survives.
+///
+/// `one_round` asks whether the outgoing Profile is Live before it spends a
+/// Refresh on the candidates, and the Switch asks again under the locks —
+/// because taking them can take seconds and a `claude` started in that gap is
+/// one the first answer never saw (ADR 0005). The second ask is the one that
+/// finds this, so the refusal comes back out of `perform` rather than from the
+/// check above it.
+///
+/// Nothing moved, so it is news about the machine rather than a fault in it:
+/// the round says so, and the loop goes on watching. `perch switch` meeting the
+/// same race exits 16 and stops, because it has nothing else to do.
+#[test]
+fn a_client_that_starts_during_the_lock_wait_is_refused_and_the_loop_carries_on() {
+    let now = watched().now();
+    let outgoing = store_of(&watched(), EMAIL).config_dir;
+    let host = watching(&[86.0, 40.0], 5.0)
+        .with_dir_held_since("/Users/someone/.claude/.oauth_refresh.lock", now)
+        .once_while_waiting(move |host| {
+            // The holder gives the lock back — and in the same moment somebody
+            // starts working against the Profile being switched away from.
+            host.remove_dir_all(std::path::Path::new(
+                "/Users/someone/.claude/.oauth_refresh.lock",
+            ))
+            .expect("the holder is done");
+            host.set_file(
+                format!("{}/sessions/7788.json", outgoing.display()),
+                &a_client_marker(7788, now),
+            );
+            host.set_live_process(7788);
+        });
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a Switch the machine turned away does not end the watch");
+    let decisions = decisions(&printed);
+    assert!(
+        decisions[0].contains("7788"),
+        "the round says which client holds it: {printed}"
+    );
+    assert_eq!(
+        active(&host).as_deref(),
+        Some(EMAIL),
+        "and nothing was switched"
+    );
+    assert!(
+        decisions.len() > 1,
+        "the loop went round again rather than stopping: {printed}"
+    );
+}
+
 /// The decision log is the whole of the evidence that the policy works, and
 /// most of what a watcher decides is to do nothing. A line for the rounds that
 /// switched and silence for the rest would be a log that cannot answer "was it

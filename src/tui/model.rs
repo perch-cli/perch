@@ -2400,6 +2400,27 @@ mod tests {
         );
     }
 
+    /// A per-Account row asked of a page with no Account on it.
+    ///
+    /// `content_rows` only offers those five rows where there is an Account for
+    /// them to be about, so the panel never asks — but `shown` is public and
+    /// answers rather than panicking, because a row and the Account it is about
+    /// are two pieces of state and a view that got them out of step should draw
+    /// a blank rather than take the terminal down.
+    #[test]
+    fn a_per_account_row_on_a_page_with_no_account_reads_as_nothing() {
+        let model = model_holding(vec![account("one@example.com")]);
+
+        assert!(
+            !model.content_rows().contains(&Row::Alias),
+            "Global lists no Accounts of its own, so the row is not offered"
+        );
+        assert_eq!(
+            model.shown(&Scope::Global, &Row::Alias),
+            (String::new(), false)
+        );
+    }
+
     /// The dimming is a fact about where the value came from, and a write that
     /// has not landed does not change where it will come from.
     #[test]

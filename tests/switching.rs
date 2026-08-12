@@ -152,6 +152,37 @@ fn a_switch_asks_which_claude_code_is_installed_once() {
     assert_eq!(asked, 1, "{:?}", host.effects());
 }
 
+/// A Switch that cannot work out where the Default Profile is has not landed,
+/// and says so as a Switch rather than as a probe.
+///
+/// It is the one way `perch switch` can fail before it has taken a lock or read
+/// a Credential — the store a Profile derives is keyed by the login name, and on
+/// macOS with neither `USER` nor `USERNAME` set there is nothing to derive it
+/// from (ADR 0008). Nothing has been written and nothing can have moved, so
+/// `perform` hands back a Landing that did not land: the same shape every other
+/// outcome takes, so that recording it is the same one way out.
+#[test]
+fn a_switch_that_cannot_place_the_default_profile_changes_nothing() {
+    let host = machine_with_two_accounts().without_env("USER");
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    let refused = result.expect_err("there is no login name to derive a store from");
+    assert!(
+        refused.to_string().contains("USER"),
+        "it names the assumption that failed: {refused}"
+    );
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(EMAIL),
+        "and nothing moved: the Account that was active still is"
+    );
+    assert!(
+        !printed.contains("Switched to"),
+        "nor did it claim to have switched: {printed}"
+    );
+}
+
 #[test]
 fn switching_by_email_makes_that_account_the_one_every_client_reads() {
     let host = machine_with_two_accounts();

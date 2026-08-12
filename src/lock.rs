@@ -720,9 +720,28 @@ mod tests {
 
         assert!(
             both_held,
-            "a step whose hold was renewed before it began is a step nobody              could have judged abandoned: {:?}",
+            "a step whose hold was renewed before it began is a step nobody \
+             could have judged abandoned: {:?}",
             host.notes()
         );
+
+        // And the contender is a real one. Left alone past the window, the same
+        // fixture takes the lock — without which the assertion above would pass
+        // just as well for a contender that never looks, which is a test that
+        // proves nothing.
+        let alone = a_lock("/Users/someone/.claude/.unrenewed.lock");
+        let left_alone: Result<()> = under(&host, vec![alone.clone()], |_| {
+            let taken_at = host.modified_at(&alone.dir).expect("it was taken");
+            host.sleep(90_000);
+            a_contender_looks(&host, &alone);
+            assert_ne!(
+                host.modified_at(&alone.dir).expect("somebody holds it now"),
+                taken_at,
+                "the contender takes a lock nobody renewed"
+            );
+            Ok(())
+        });
+        left_alone.expect("the work finishes");
     }
 
     /// The mirror, and the reason a takeover is read off the stamp alone: a
