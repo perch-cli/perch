@@ -1446,15 +1446,6 @@ pub fn lock(host: &dyn Host) -> Result<lock::Held<'_>> {
 /// `None` is "it does not say", which is not a claim about a newer Perch: the
 /// caller goes on to read the document properly and reports what it finds
 /// there.
-fn version_of(contents: &str) -> Option<u32> {
-    #[derive(serde::Deserialize)]
-    struct Versioned {
-        version: Option<u32>,
-    }
-
-    serde_json::from_str::<Versioned>(contents).ok()?.version
-}
-
 /// Reads the registry, or `None` when Perch has never run here.
 pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     let path = &registry_path(host)?;
@@ -1479,7 +1470,7 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     // about a file that is perfectly well-formed, with nothing in the sentence
     // saying the build in front of them is simply too old. That is the
     // misdiagnosis the version field exists to prevent.
-    if let Some(version) = version_of(&contents)
+    if let Some(version) = crate::error::claimed_version(&contents)
         && version > CURRENT_VERSION
     {
         return Err(crate::error::written_by_a_newer_perch(

@@ -190,6 +190,29 @@ pub fn written_by_a_newer_perch(what: &str, of: &str, version: u32, understood: 
     ))
 }
 
+/// What version a document Perch wrote claims to be, read on its own and ahead
+/// of reading the document properly.
+///
+/// The other half of [`written_by_a_newer_perch`], and here beside it because
+/// the two are only ever used together: every format Perch versions is asked
+/// this first, and the answer decides whether the parse is even attempted. A
+/// newer Perch is exactly what writes a value this build has no variant for, so
+/// parsing first fails with serde's words — `unknown variant \`round-robin\`` —
+/// about a document that is perfectly well-formed, with nothing in the sentence
+/// saying the build in front of the reader is simply too old.
+///
+/// Nothing rather than an error for a document that will not parse at all: this
+/// is the version question only, and what a caller does about nonsense is its
+/// own to say, in its own words, about its own file.
+pub fn claimed_version(contents: &str) -> Option<u32> {
+    #[derive(serde::Deserialize)]
+    struct Versioned {
+        version: Option<u32>,
+    }
+
+    serde_json::from_str::<Versioned>(contents).ok()?.version
+}
+
 impl PerchError {
     /// A file that could not be read, from whatever said so.
     ///

@@ -70,9 +70,10 @@ jobs:
 
       # Everything the default feature set builds — lib, bin, doc tests, and
       # every tests/*.rs Cargo finds. Nothing to add here when a suite is: the
-      # contract tests are the only ones held back, and they are held back by
-      # `required-features` in Cargo.toml rather than by being absent from a
-      # list somebody has to remember to extend.
+      # contract and Dogfood suites are the only ones held back, and each is
+      # held back by `required-features` in Cargo.toml rather than by being
+      # absent from a list somebody has to remember to extend. Both have steps
+      # of their own below, so a failure in either reads as what it is.
       #
       # --locked because a resolver that is free to update Cargo.lock is a CI
       # run that tested a dependency set no one has committed.
@@ -184,6 +185,33 @@ jobs:
       # itself and a suite that asserted look identical otherwise.
       - name: Contract tests
         run: cargo test --locked --features contract --test contract --test contract_credentials --test contract_sessions --test contract_links -- --nocapture
+
+      # Dogfood drives the real binary against real Accounts on a machine
+      # somebody works on (ADR 0037), and a runner holds none — so almost
+      # everything here skips, deliberately. The point is not what CI proves: it
+      # is that the Preflight and the degradation are exercised continuously, so
+      # the day somebody sits down to a full run on their own machine, the part
+      # that decides what to run is not itself broken.
+      #
+      # The suite refuses outright on an unmarked machine, so the wizard runs
+      # first. `--unattended` takes no Export and walks no login, and is refused
+      # on any machine holding an Account — which a runner never does, and which
+      # is what makes it safe to have in a workflow file at all.
+      #
+      # `--bins` before `run`, because `cargo run --bin dogfood-setup` builds the
+      # wizard and not the `perch` it drives.
+      - name: Mark the runner for a Dogfood run
+        run: |
+          cargo build --locked --features dogfood --bins
+          cargo run --locked --features dogfood --bin dogfood-setup -- --unattended
+
+      # `--lib` alongside, because the harness's own unit tests are held back by
+      # the same feature and would otherwise go unrun everywhere. `--nocapture`
+      # so the Preflight figure is visible: a suite that skipped itself and a
+      # suite that asserted look identical without it, which is the failure the
+      # figure exists to prevent.
+      - name: Dogfood
+        run: cargo test --locked --features dogfood --lib --test dogfood -- --nocapture
 
   # The installers are the one part of Perch that is not Rust, so nothing else
   # in this file would notice a mistake in them — and they are the copy people
