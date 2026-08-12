@@ -515,8 +515,13 @@ impl Model {
         rows
     }
 
-    /// The sidebar row the `Config` tab is on.
-    pub fn scope_row(&self) -> ScopeRow {
+    /// What the `Config` sidebar's cursor is on — a Scope, or the row that
+    /// declares a new Group.
+    ///
+    /// Named apart from the `scope_row` field it reads, which is the *position*
+    /// rather than what sits at it. The two were one word, both public, both in
+    /// live code and telling apart only by a pair of brackets.
+    pub fn scope_at_the_cursor(&self) -> ScopeRow {
         let rows = self.scope_rows();
         rows[self.scope_row.min(rows.len() - 1)].clone()
     }
@@ -524,7 +529,7 @@ impl Model {
     /// The Scope the `Config` tab is showing, or `None` on the row that
     /// declares a new Group — which is not a Scope until it exists.
     pub fn scope(&self) -> Option<Scope> {
-        match self.scope_row() {
+        match self.scope_at_the_cursor() {
             ScopeRow::Scope(scope) => Some(scope),
             ScopeRow::NewGroup => None,
         }
@@ -1106,7 +1111,7 @@ impl Model {
         if self.tab != Tab::Config {
             return;
         }
-        match (self.scope_row(), self.content(), self.column) {
+        match (self.scope_at_the_cursor(), self.content(), self.column) {
             (ScopeRow::NewGroup, _, _) => {
                 self.prompt = Some(Prompt {
                     what: Naming::NewGroup,
@@ -1441,7 +1446,7 @@ impl Model {
         // The Config tab's cursors are followed the same way and for the same
         // reason: an edit can move an Account into another Group, which takes it
         // out of the column it was selected in.
-        let scope_was = self.scope_row();
+        let scope_was = self.scope_at_the_cursor();
         let account_was = self
             .scope_account()
             .map(|account| account.email().to_string());
@@ -1736,10 +1741,18 @@ mod tests {
 
     /// Moves the Status tab onto its Accounts row and into the table, which is
     /// where the two acting keys mean anything.
+    ///
+    /// By pressing the keys rather than by assigning the cursor, as every
+    /// placement helper here does. A test that put the cursor somewhere no
+    /// keystroke reaches is a test asserting about a state nobody can be in —
+    /// and `moved`, which is the whole of how a cursor gets anywhere, was
+    /// exercised by no unit test at all.
     fn on_the_accounts(model: &mut Model) {
-        model.status_row = 1;
-        model.column = Column::Content;
-        assert_eq!(model.status(), StatusRow::Accounts);
+        while model.status() != StatusRow::Accounts {
+            let _ = model.act_on(Signal::Down);
+        }
+        let _ = model.act_on(Signal::Right);
+        assert_eq!(model.column, Column::Content, "inside the table");
     }
 
     #[test]
@@ -2232,14 +2245,7 @@ mod tests {
 
     /// Puts the cursor on one Setting of Global's page.
     fn on_the_config_setting(model: &mut Model, setting: Setting) {
-        model.tab = Tab::Config;
-        model.column = Column::Content;
-        model.scope_row = 0;
-        model.content_row = model
-            .content_rows()
-            .iter()
-            .position(|row| *row == Row::Setting(setting))
-            .expect("the Setting is on the page");
+        on_the_row(model, &Scope::Global, Row::Setting(setting));
     }
 
     /// Puts the cursor on one row of a Scope's page, whichever kind of row it
@@ -2249,18 +2255,59 @@ mod tests {
     /// Groups alphabetically after Global and Ungrouped, so an index is a fact
     /// about the fixture rather than about the test.
     fn on_the_row(model: &mut Model, scope: &Scope, row: Row) {
-        model.tab = Tab::Config;
-        model.scope_row = model
-            .scope_rows()
-            .iter()
-            .position(|held| matches!(held, ScopeRow::Scope(on) if on == scope))
-            .expect("the Scope is in the sidebar");
-        model.column = Column::Content;
-        model.content_row = model
-            .content_rows()
-            .iter()
-            .position(|held| *held == row)
-            .expect("the row is on the page");
+        // Round the tabs until the Config page is showing with the keys back on
+        // its sidebar. `Tab` rather than `←`, because `←` on a row that steps
+        // is a *decrement* rather than a way out — `leftwards` says so, and it
+        // means the sidebar cannot be reached by arrow key from a Setting at
+        // all. Changing view resets the column, which is the way back.
+        for _ in 0..Tab::ALL.len() {
+            let _ = model.act_on(Signal::NextTab);
+            if model.tab == Tab::Config && model.column == Column::Scopes {
+                break;
+            }
+        }
+        assert_eq!(model.tab, Tab::Config);
+        assert_eq!(model.column, Column::Scopes, "the keys are on the sidebar");
+
+        // Then up it and down to the Scope. Walked rather than assigned,
+        // because stepping the sidebar is what resets the two cursors below it
+        // — the behaviour a test that jumped straight to the row would be
+        // assuming rather than exercising. Up first because the sidebar does
+        // not wrap, so a cursor already past the Scope cannot walk down to it.
+        let scopes = model.scope_rows().len();
+        for _ in 0..scopes {
+            let _ = model.act_on(Signal::Up);
+        }
+        for _ in 0..scopes {
+            if model.scope_at_the_cursor() == ScopeRow::Scope(scope.clone()) {
+                break;
+            }
+            let _ = model.act_on(Signal::Down);
+        }
+        assert_eq!(
+            model.scope_at_the_cursor(),
+            ScopeRow::Scope(scope.clone()),
+            "the Scope is in the sidebar"
+        );
+
+        // Rightwards until the keys are acting on the content pane, which is
+        // one column on a Scope holding no Accounts and two on one that does.
+        while model.column != Column::Content {
+            let _ = model.act_on(Signal::Right);
+        }
+
+        let rows = model.content_rows().len();
+        for _ in 0..rows {
+            if model.content_rows()[model.content_row] == row {
+                break;
+            }
+            let _ = model.act_on(Signal::Down);
+        }
+        assert_eq!(
+            model.content_rows()[model.content_row],
+            row,
+            "the row is on the page"
+        );
     }
 
     /// Every row that can be stepped shows the write the arrow keys have made,
@@ -2648,10 +2695,10 @@ mod tests {
         let mut model = model_holding(vec![in_group(account("one@example.com"), "work")]);
         model.tab = Tab::Config;
         model.scope_row = 2;
-        let Some(ScopeRow::Scope(Scope::Group(_))) = Some(model.scope_row()) else {
+        let Some(ScopeRow::Scope(Scope::Group(_))) = Some(model.scope_at_the_cursor()) else {
             panic!(
                 "the third sidebar row is the Group: {:?}",
-                model.scope_row()
+                model.scope_at_the_cursor()
             )
         };
         let _ = model.act_on(Signal::Name);
