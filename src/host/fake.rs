@@ -229,6 +229,22 @@ impl Default for FakeHost {
     }
 }
 
+/// Arranging a world, and reading back what Perch did to it.
+///
+/// The fixture language, and the half of this file that grows fastest: a Host
+/// method arrives with the builders a test needs to set it up, so
+/// `process_started_at` cost ten lines of trait, thirty-six here, and four
+/// `with_*` methods for one concept.
+///
+/// Kept in the same file as `impl Host for FakeHost` below, deliberately. It
+/// looks like the obvious split for a file this size and it is not: over the
+/// last twenty-five commits that added or removed a function here, eleven
+/// touched both halves and eight touched one. Separating them would put the
+/// majority of changes across two files and say less about each, not more.
+///
+/// What does separate cleanly is the *port's* semantics from either — and that
+/// is `tests/conformance.rs`, which asks this fake and [`super::RealHost`] the
+/// same questions and is where a disagreement between them now shows up.
 impl FakeHost {
     pub fn new() -> Self {
         let home = PathBuf::from("/Users/someone");
