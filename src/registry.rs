@@ -760,7 +760,7 @@ impl Registry {
     pub fn account(&self, email: &str) -> Option<&Account> {
         self.accounts
             .iter()
-            .find(|account| account.email() == email)
+            .find(|account| same_name(account.email(), email))
     }
 
     pub fn active_account(&self) -> Option<&Account> {
@@ -1021,14 +1021,14 @@ impl Registry {
     pub fn account_mut(&mut self, email: &str) -> Option<&mut Account> {
         self.accounts
             .iter_mut()
-            .find(|account| account.email() == email)
+            .find(|account| same_name(account.email(), email))
     }
 
     /// The Alias an Account answers to, if it has been given one.
     pub fn alias_of(&self, email: &str) -> Option<&str> {
         self.aliases
             .iter()
-            .find(|(_, target)| *target == email)
+            .find(|(_, target)| same_name(target, email))
             .map(|(alias, _)| alias.as_str())
     }
 
@@ -1110,18 +1110,15 @@ impl Registry {
     /// replaces it: a name the user has moved on from should not go on
     /// reaching the Account behind their back.
     ///
-    /// `email` is the address as this registry holds it. The Account it names
-    /// is found by exact comparison, where every *name* nearby is compared with
-    /// [`same_name`] — sound because resolution always hands back the held
-    /// spelling, and one of several places resting on that. Deciding it
-    /// properly means deciding it for `account`, `account_mut`, `forget` and
-    /// `upsert` at the same time, and changing it here alone would add a
-    /// spelling of the rule while appearing to remove one.
+    /// An address is compared the way a name is, with [`same_name`], which is
+    /// what every lookup in this module does — so `CAFÉ@example.com` reaches
+    /// the Account held as `café@example.com` rather than quietly naming
+    /// nothing.
     pub fn name_account(&mut self, alias: &str, email: &str) -> Result<Option<String>> {
         let previous = self.alias_of(email).map(str::to_string);
         self.refuse_a_name_nothing_may_answer_to(NameKind::Alias, alias, previous.as_deref())?;
 
-        self.aliases.retain(|_, named| named != email);
+        self.aliases.retain(|_, named| !same_name(named, email));
         self.aliases.insert(alias.to_string(), email.to_string());
         Ok(previous)
     }
@@ -1174,9 +1171,14 @@ impl Registry {
     /// caller's to take away before the row that names it goes, so a store that
     /// will not give it up is met while the Account can still be named.
     pub fn forget(&mut self, email: &str) {
-        self.accounts.retain(|account| account.email() != email);
-        self.aliases.retain(|_, named| named != email);
-        if self.active.as_deref() == Some(email) {
+        self.accounts
+            .retain(|account| !same_name(account.email(), email));
+        self.aliases.retain(|_, named| !same_name(named, email));
+        if self
+            .active
+            .as_deref()
+            .is_some_and(|held| same_name(held, email))
+        {
             self.active = None;
         }
     }
@@ -1185,7 +1187,7 @@ impl Registry {
         match self
             .accounts
             .iter_mut()
-            .find(|existing| existing.email() == account.email())
+            .find(|existing| same_name(existing.email(), account.email()))
         {
             Some(existing) => *existing = account,
             None => self.accounts.push(account),
@@ -1584,6 +1586,26 @@ pub fn validate(registry: &Registry) -> Result<()> {
         named.push((alias, email));
     }
 
+    // The other pointer into the Accounts, and the one the Alias check above was
+    // written for: "a dangling one is not a refusal anywhere downstream — it is
+    // a panic". `active` has exactly the same shape and had no such check. It
+    // survives today because `active_account` resolves through `and_then` and
+    // its callers turn `None` into a refusal — which means a dangling pointer
+    // reads as "no Account is active", and the repair somebody is offered is to
+    // switch to one, on a machine where the Account they are on is right there
+    // in the file.
+    //
+    // Holding nothing is a state and not a fault: a machine that has never
+    // switched has no active Account.
+    if let Some(active) = &registry.active
+        && registry.account(active).is_none()
+    {
+        return Err(PerchError::Invalid(format!(
+            "The registry says {active} is the active Account, which is not an \
+             Account Perch holds."
+        )));
+    }
+
     // The third member of the namespace, which nothing was checking. A Target is
     // an Alias, a Group name or an Account's address, and `validate_name` keeps
     // the first two tellable from the third by refusing an `@` in them —
@@ -1965,6 +1987,70 @@ mod tests {
     /// The hold spans the whole command, and a command can stall for as long as
     /// somebody takes to answer a `[y/N]`. Renewed at every write, so the
     /// ordinary long command keeps the lock it took rather than letting it
+    /// An address is a name, and is compared the way every other name here is.
+    ///
+    /// It was not: the lookups compared with `==` while everything feeding them
+    /// — `target::matched`, `add`, `relogin`, `remove` and `validate` — compared
+    /// with [`same_name`]. Sound, but only because resolution always hands back
+    /// the spelling the registry holds, which was prose in five places and the
+    /// thing eight `expect`s downstream rested on. `validate` refuses two
+    /// Accounts whose addresses differ only in case, on the way in and now on
+    /// the way out, so inside a registry Perch will load there is never more
+    /// than one to find.
+    #[test]
+    fn an_account_is_found_however_its_address_is_capitalised() {
+        let mut registry = Registry::default();
+        registry.upsert(Account {
+            identity: Identity {
+                email: "café@example.com".into(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            enabled: true,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        });
+        registry
+            .name_account("work", "CAFÉ@example.com")
+            .expect("the same Account, spelled the way somebody typed it");
+
+        assert!(registry.account("CAFÉ@example.com").is_some());
+        assert!(registry.account_mut("CAFÉ@EXAMPLE.COM").is_some());
+        assert_eq!(registry.alias_of("Café@Example.com"), Some("work"));
+
+        registry.forget("CAFÉ@example.com");
+        assert!(registry.accounts.is_empty(), "and it is the one that goes");
+        assert!(registry.aliases.is_empty(), "with the name it answered to");
+    }
+
+    /// The pointer the Alias check was written for, asked of the other one.
+    ///
+    /// `validate` refuses an Alias naming an Account Perch does not hold,
+    /// because "a dangling one is not a refusal anywhere downstream — it is a
+    /// panic". `active` is the same shape and had no check: it reads as "no
+    /// Account is active", so the repair somebody is offered is to switch to
+    /// one, on a machine where the Account they are on is right there in the
+    /// file.
+    #[test]
+    fn an_active_pointer_naming_nothing_is_refused_like_a_dangling_alias() {
+        let mut registry = Registry {
+            active: Some("nobody@example.com".to_string()),
+            ..Default::default()
+        };
+
+        let refused = validate(&registry).expect_err("it names an Account Perch does not hold");
+        assert!(
+            refused.to_string().contains("nobody@example.com"),
+            "{refused}"
+        );
+
+        registry.active = None;
+        validate(&registry).expect("holding nothing is a state rather than a fault");
+    }
+
     /// Every rule the shared namespace has, asked of both halves of it.
     ///
     /// A table because the rules are one fact with two spellings, and they had
