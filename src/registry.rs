@@ -1761,6 +1761,9 @@ fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
 /// the lock over and ran a whole command under it — is a hold whose registry is
 /// behind the one on disk, and writing it back would revert that command
 /// wholesale. So it is refused, and the caller says what that cost.
+///
+/// It is also where [`validate`] is asked on the way out, so that what this
+/// writes and what [`load`] will accept cannot come apart.
 pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -> Result<()> {
     perch.renew();
     if !perch.still_held() {
@@ -1772,6 +1775,32 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) ->
                 .to_string(),
         ));
     }
+
+    // What `load` will accept, asked before `load` has to refuse it.
+    //
+    // Eight invariants were enforced on the way in and none on the way out, so
+    // a command could write a file every later command declined to read — which
+    // leaves a machine with no working `perch` on it and no `perch purge`
+    // either. That gap has been found twice from the other side: `perch import`
+    // ran a narrower check of its own until `validate` was made public for it,
+    // and `used_percent` was range-checked in one of the two places a figure can
+    // enter the registry. Both repairs added an obligation to a caller. This one
+    // removes the need for it.
+    //
+    // Nothing reachable trips it today — the whole suite is green without this
+    // line — which is what it is for: the failure it catches is a bug in Perch,
+    // and the value of catching it is that the file is never written. So it is
+    // a refusal in the shipped binary rather than a `debug_assert`, and it says
+    // what it is rather than telling somebody to hand-edit a value that is not
+    // in the file. `Other` rather than the `Invalid` the rule raises, because a
+    // script reading exit 14 is being told its input was wrong, and it was not.
+    validate(registry).map_err(|invalid| {
+        PerchError::Other(format!(
+            "{invalid}\n\n{}\n\
+             Nothing was written, and the registry on disk is as it was.",
+            crate::report::this_is_a_bug(),
+        ))
+    })?;
 
     let path = registry_path(host)?;
     // Stamped rather than carried through. `load` returns whatever version the
@@ -1872,6 +1901,55 @@ mod tests {
     /// The hold spans the whole command, and a command can stall for as long as
     /// somebody takes to answer a `[y/N]`. Renewed at every write, so the
     /// ordinary long command keeps the lock it took rather than letting it
+    /// A registry `load` would refuse is one `save` declines to write.
+    ///
+    /// Nothing reachable produces one — every command in the suite passes with
+    /// this guard in place, and `registry_of` runs `load` after each of them —
+    /// so what is asserted here is the guard rather than the property. The
+    /// property is already covered; the part that is not is what happens on the
+    /// day a command gets it wrong, and the whole value of that is that the file
+    /// on disk is left alone.
+    ///
+    /// The message is asserted too. A refusal that told somebody to edit a value
+    /// in a file it just declined to write would send them looking for something
+    /// that is not there, which is how the wording drifts back.
+    #[test]
+    fn a_registry_load_would_not_read_is_one_save_declines_to_write() {
+        let host = crate::host::FakeHost::new();
+        let mut perch = lock(&host).expect("the registry lock is free");
+        let path = registry_path(&host).unwrap();
+        save(&host, &mut perch, &Registry::default()).expect("an empty one is fine");
+        let before = host.file(&path).expect("it was written");
+
+        // An Alias naming an Account Perch does not hold: a dangling one is not
+        // a refusal downstream, it is the `expect` in every command that
+        // resolves a Target.
+        let mut broken = Registry::default();
+        broken
+            .aliases
+            .insert("work".to_string(), "nobody@example.com".to_string());
+
+        let refused = save(&host, &mut perch, &broken).expect_err("load would not read it");
+
+        let said = refused.to_string();
+        assert!(said.contains("nobody@example.com"), "the rule: {said}");
+        assert!(said.contains("bug in Perch"), "whose fault it is: {said}");
+        assert!(
+            !said.contains("Edit the value there"),
+            "and not an instruction to edit a file it did not write: {said}"
+        );
+        assert_eq!(
+            refused.exit_code(),
+            crate::error::EXIT_GENERAL,
+            "a script told 14 would read it as its own input being wrong"
+        );
+        assert_eq!(
+            host.file(&path).as_deref(),
+            Some(before.as_str()),
+            "and the registry on disk is untouched, which is the whole of it"
+        );
+    }
+
     /// expire silently underneath itself.
     #[test]
     fn a_command_that_takes_its_time_keeps_the_lock_it_took() {
