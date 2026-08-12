@@ -422,3 +422,20 @@ prove. Said as a figure and said first, because a run that quietly proved a
 third of what it was asked to and a run that proved all of it look identical
 once they are over.
 _Avoid_: setup, precondition, capability check, sanity check
+
+**Marker**:
+The receipt `dogfood-setup` writes beside the registry once it has taken an
+Export, and the thing a Dogfood run refuses to act without. Named for what it
+records rather than for what it permits: it is not a switch anybody may set, it
+is the wizard saying that every Account on this machine is in a file. A machine
+somebody only meant to connect to should not be able to start Switching
+Accounts around because a command was recalled from history (ADR 0037).
+_Avoid_: flag, opt-in, sentinel, consent file
+
+**Phase**:
+One step of a Dogfood run, declaring what it needs of a machine before it runs
+so the Preflight can count it. It steers policy and never figures, reads
+`list --json`, `status --json` and exit codes, and never unwinds itself — one
+that stops says what is now true and what puts it back, and says whether it is a
+fault in Perch or news about something upstream (ADR 0037).
+_Avoid_: step, stage, scenario, case

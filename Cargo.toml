@@ -120,6 +120,13 @@ contract = []
 # does". `cargo test` gets it without being asked, `cargo build` does not.
 fakes = []
 
+# The Dogfood suite and the wizard that marks a machine for it (ADR 0037). Off
+# unless asked for, because everything it carries is about driving a real
+# machine: the marker, the Preflight, the report a run leaves behind — and the
+# `dogfood-setup` binary, which would otherwise be a second thing a release
+# archive had to explain.
+dogfood = []
+
 [dev-dependencies]
 perch = { path = ".", features = ["fakes"] }
 
@@ -143,6 +150,13 @@ required-features = ["contract"]
 name = "contract_links"
 required-features = ["contract"]
 
+# Dogfood drives the real binary against real Accounts on a machine somebody
+# works on (ADR 0037), so it is held back the same way — and it refuses outright
+# on any machine `dogfood-setup` has not marked.
+[[test]]
+name = "dogfood"
+required-features = ["dogfood"]
+
 [lib]
 name = "perch"
 path = "src/lib.rs"
@@ -150,3 +164,11 @@ path = "src/lib.rs"
 [[bin]]
 name = "perch"
 path = "src/main.rs"
+
+# The wizard that marks a machine for Dogfood runs. Behind the same feature the
+# suite is, so it is never built by `cargo build` and never reaches a release
+# archive — nothing somebody downloads has to explain a second binary.
+[[bin]]
+name = "dogfood-setup"
+path = "src/bin/dogfood-setup.rs"
+required-features = ["dogfood"]
