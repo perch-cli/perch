@@ -504,12 +504,20 @@ pub fn choose(
         )));
     }
 
-    let here = ranked
-        .iter()
-        .find(|ranked| Some(ranked.account.email()) == leaving);
+    // `same_name` rather than `==`, for the reason `Registry::is_active` gives:
+    // an address is compared case-folded everywhere the registry answers a
+    // question about one, and this is the comparison that decides whether the
+    // Account being left is still in `landable`. Spelled differently, `here` is
+    // `None`, the Account stays a candidate, and `choose` can hand back the
+    // Account Perch is already on — the one thing its doc forbids, because
+    // landing where you already are rewrites Credentials for nothing.
+    let is_leaving = |ranked: &Ranked| {
+        leaving.is_some_and(|email| registry::same_name(ranked.account.email(), email))
+    };
+    let here = ranked.iter().find(|ranked| is_leaving(ranked));
     let landable: Vec<&Ranked> = ranked
         .iter()
-        .filter(|ranked| Some(ranked.account.email()) != leaving && !ranked.headroom.is_exhausted())
+        .filter(|ranked| !is_leaving(ranked) && !ranked.headroom.is_exhausted())
         .collect();
     let elsewhere: Vec<&Ranked> = landable
         .iter()

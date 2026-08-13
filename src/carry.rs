@@ -233,7 +233,7 @@ fn where_it_works(
     account: &Account,
     default_profile: &Store,
 ) -> Option<Candidate> {
-    let active = registry.active.as_deref() == Some(account.email());
+    let active = registry.is_active(account.email());
     let identity_file = if active {
         default_profile.identity_file.clone()
     } else {

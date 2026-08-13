@@ -72,6 +72,12 @@ const MAX_WORK_FACTOR: u8 = 22;
 /// the backup is encrypted.
 const WORK_FACTOR: u8 = 19;
 
+/// What Perch spends sealing has to stay under what it will spend opening, or
+/// every Export it writes is one it refuses to read. Asserted where the two
+/// numbers are, and at compile time, because there is no run in which it is
+/// worth discovering.
+const _: () = assert!(WORK_FACTOR < MAX_WORK_FACTOR);
+
 /// An Export, unsealed: what one `age` file holds before it is encrypted and
 /// after it is decrypted again.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -209,7 +215,7 @@ fn the_live_store(
     registry: &Registry,
     account: &Account,
 ) -> Result<Option<crate::probe::Store>> {
-    if registry.active.as_deref() != Some(account.email()) {
+    if !registry.is_active(account.email()) {
         return Ok(None);
     }
     let live = registry::the_default_profile(host)?;
@@ -565,12 +571,6 @@ mod tests {
             }
             other => panic!("the refusal says how much work the file wants: {other}"),
         }
-
-        assert!(
-            WORK_FACTOR < MAX_WORK_FACTOR,
-            "and what Perch spends stays under what it will spend opening one, \
-             or every Export it writes is one it refuses to read"
-        );
     }
 
     /// The one shape in Perch carrying every Credential on the machine at once,

@@ -688,7 +688,7 @@ fn markers(model: &Model, account: &Account, index: usize) -> String {
     format!(
         "{}{} ",
         if index == model.cursor { '>' } else { ' ' },
-        if model.registry().active.as_deref() == Some(account.email()) {
+        if model.registry().is_active(account.email()) {
             '*'
         } else {
             ' '

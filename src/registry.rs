@@ -790,6 +790,32 @@ impl Registry {
         self.active.as_deref().and_then(|email| self.account(email))
     }
 
+    /// Whether this address is the one the registry records as active.
+    ///
+    /// One place, and case-folded like every other way the registry is asked
+    /// about a name. A dozen call sites spelled this as
+    /// `registry.active.as_deref() == Some(account.email())`, which is the one
+    /// comparison in Perch that answered a question about an address by exact
+    /// bytes — while [`account`] beside it has always answered the same question
+    /// with [`same_name`].
+    ///
+    /// The two agree only while `active` holds the identical spelling of the
+    /// entry it names, which is true today and is nothing that guarantees it:
+    /// `upsert` matches an existing entry with `same_name` and stores the
+    /// incoming spelling, so an Identity re-read with different capitalisation
+    /// replaces the Account and leaves `active` naming it the old way. From
+    /// there `observe::holding` reads the Account's own Profile instead of the
+    /// Default Profile, finds the store empty, and records `NoCredential` — a
+    /// permanent Quarantine off a comparison every other part of the registry
+    /// makes case-insensitively.
+    ///
+    /// [`account`]: Registry::account
+    pub fn is_active(&self, email: &str) -> bool {
+        self.active
+            .as_deref()
+            .is_some_and(|active| same_name(active, email))
+    }
+
     /// Every Group name in use. A Group an Account claims is always declared
     /// too — [`load`] sees to that — so this is the declared set.
     pub fn group_names(&self) -> impl Iterator<Item = &str> {
@@ -2079,6 +2105,15 @@ mod tests {
         assert!(registry.account("CAFÉ@example.com").is_some());
         assert!(registry.account_mut("CAFÉ@EXAMPLE.COM").is_some());
         assert_eq!(registry.alias_of("Café@Example.com"), Some("work"));
+
+        registry.active = Some("CAFÉ@EXAMPLE.COM".into());
+        assert!(
+            registry.is_active("café@example.com"),
+            "and which Account is active is the same question, asked the same \
+             way — a dozen call sites compared these by exact bytes, which is \
+             the one place in Perch an address was not case-folded"
+        );
+        assert!(!registry.is_active("someone@example.com"));
 
         registry.forget("CAFÉ@example.com");
         assert!(registry.accounts.is_empty(), "and it is the one that goes");

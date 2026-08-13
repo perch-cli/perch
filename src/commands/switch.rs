@@ -168,7 +168,7 @@ fn already_there(
     registry: &Registry,
     incoming: &Account,
 ) -> Result<()> {
-    if registry.active.as_deref() != Some(incoming.email()) {
+    if !registry.is_active(incoming.email()) {
         return Ok(());
     }
     if !switch::already_landed(host, installed, incoming)? {

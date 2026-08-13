@@ -228,7 +228,7 @@ fn rows(registry: &Registry, accounts: &[&Account], now: DateTime<Utc>) -> Vec<R
     accounts
         .iter()
         .map(|account| Row {
-            active: registry.active.as_deref() == Some(account.email()),
+            active: registry.is_active(account.email()),
             cells: columns(registry, account),
             figures: utilization::lines(account, now, width),
         })
@@ -401,7 +401,7 @@ pub fn document(
         "group": account.group,
         "enabled": account.enabled,
         "quarantined": Quarantine::document(account.quarantine),
-        "active": registry.active.as_deref() == Some(account.email()),
+        "active": registry.is_active(account.email()),
         "organization": account.identity.organization_name,
         "plan": account.plan,
         "profile_dir": account.profile_dir(host)?,
