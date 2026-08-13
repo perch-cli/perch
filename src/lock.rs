@@ -509,7 +509,7 @@ fn take_over(host: &dyn Host, lock: &LockSpec) -> Result<bool> {
     // Asked again, under the claim. The answer read before it was about a
     // moment that has passed, and what it decides is a deletion.
     let cleared = match abandoned(host, lock) {
-        true => clear_the_abandoned(host, lock).map(|()| true),
+        true => clear_the_abandoned(host, lock),
         false => Ok(false),
     };
 
@@ -533,16 +533,37 @@ fn take_over(host: &dyn Host, lock: &LockSpec) -> Result<bool> {
 /// So this is a refusal of its own, naming the path and saying what is wrong
 /// with it — the one message that turns an unrecoverable state into a
 /// five-second fix.
-fn clear_the_abandoned(host: &dyn Host, lock: &LockSpec) -> Result<()> {
-    host.remove_dir_all(&lock.dir).map_err(|err| {
-        PerchError::Other(format!(
-            "{} ({}) is not a lock directory and could not be cleared: {err}.\n\
-             Nothing was changed. A lock is a directory, and nothing will be \
-             able to take this one until whatever is at that path is removed.",
-            lock.name,
-            lock.dir.display(),
-        ))
-    })
+/// `Ok(true)` when the lock was cleared, `Ok(false)` when it was not and trying
+/// again might work, and a refusal for the wedge above.
+///
+/// The two are told apart by asking whether the path is a directory at all,
+/// because that is the whole of what the refusal claims. Every failure was being
+/// reported as the wedge, and most of them are not it: a child held open on
+/// Windows is the sharing violation `rename_replacing` retries for, arriving
+/// here instead, and EBUSY and EACCES are the same shape. Each of those aborted
+/// the whole Switch on the first of five attempts — telling somebody their lock
+/// path is not a directory when it is, and to delete it by hand when waiting one
+/// more second would have done — while the state the message describes is the
+/// one it never actually diagnosed.
+fn clear_the_abandoned(host: &dyn Host, lock: &LockSpec) -> Result<bool> {
+    let Err(err) = host.remove_dir_all(&lock.dir) else {
+        return Ok(true);
+    };
+
+    // Listable is the definition of the thing the refusal says this is not. A
+    // directory that would not go is contention, so it falls through to the
+    // ordinary wait rather than ending the command.
+    if host.list_dir(&lock.dir).is_ok() {
+        return Ok(false);
+    }
+
+    Err(PerchError::Other(format!(
+        "{} ({}) is not a lock directory and could not be cleared: {err}.\n\
+         Nothing was changed. A lock is a directory, and nothing will be \
+         able to take this one until whatever is at that path is removed.",
+        lock.name,
+        lock.dir.display(),
+    )))
 }
 
 /// Whether a lock is one its holder died still holding.
