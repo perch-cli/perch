@@ -63,8 +63,17 @@ pub struct Marker {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Held {
-    /// An Export was written here, and every Account on this machine is in it.
-    Exported { path: PathBuf },
+    /// An Export was written here, and every Account on this machine at that
+    /// moment is in it — which is what `accounts` names.
+    ///
+    /// The addresses travel because the guarantee is about a *set* rather than
+    /// about a file. A marker saying only "there is an Export at this path" is
+    /// true for ever, including three `perch add`s later, and the run it waves
+    /// through is the one whose Credentials nothing has a copy of.
+    Exported {
+        path: PathBuf,
+        accounts: Vec<String>,
+    },
     /// Perch held no Accounts, so there was nothing an Export could have saved.
     /// The only machine this is honest on is one that has never logged in — a
     /// CI runner, or a laptop somebody has just cloned the repository onto.
@@ -75,10 +84,55 @@ impl Held {
     /// The line a report and the Preflight both say it with.
     pub fn said(&self) -> String {
         match self {
-            Held::Exported { path } => format!("Export at {}", path.display()),
+            Held::Exported { path, .. } => format!("Export at {}", path.display()),
             Held::NothingHeld => "no Export: this machine held no Accounts".to_string(),
         }
     }
+
+    /// Which Accounts this is a receipt for. `NothingHeld` is a receipt for
+    /// none, which is the honest reading of it rather than a special case.
+    pub fn covers(&self) -> &[String] {
+        match self {
+            Held::Exported { accounts, .. } => accounts,
+            Held::NothingHeld => &[],
+        }
+    }
+}
+
+/// Refuses a machine holding an Account the marker's Export was not taken over.
+///
+/// The marker is time-of-setup and nothing was revisiting it, so the ordinary
+/// sequence — mark a fresh machine, `perch add` three times over the following
+/// weeks, run the suite — passed the guard and then moved real Credentials
+/// around with no Export behind them at all, while the report said "no Export:
+/// this machine held no Accounts".
+///
+/// That is exactly the belief ADR 0037 names as the one that is wrong on the
+/// occasion it matters. The Export is only a safety net if it is guaranteed,
+/// and a guarantee about a set has to be checked against the set.
+fn refuse_accounts_no_export_covers(marker: &Marker, held: &[String]) -> Result<()> {
+    let covered = marker.export.covers();
+    let uncovered: Vec<&str> = held
+        .iter()
+        .filter(|email| {
+            !covered
+                .iter()
+                .any(|known| registry::same_name(known, email))
+        })
+        .map(String::as_str)
+        .collect();
+    if uncovered.is_empty() {
+        return Ok(());
+    }
+
+    Err(PerchError::Invalid(format!(
+        "This machine was marked when there was {}, and it now holds {} that no          Export covers: {}.
+         A Dogfood run moves real Credentials around, and the Export is the only          thing that makes that reversible — so the suite will not touch a machine          holding a login nothing has a copy of.
+{HOW_TO_SET_UP}",
+        marker.export.said(),
+        crate::commands::accounts(uncovered.len()),
+        uncovered.join(", "),
+    )))
 }
 
 /// How to mark a machine, said in every refusal that is about not having done
@@ -1301,6 +1355,10 @@ pub fn dogfood(
     // and a stamp taken at the end names the wrong sitting.
     let began = host.now();
     let preflight = Preflight::taken(host)?;
+    // The second half of the marker's promise, and the half nothing was asking.
+    // Before the Repair, because the Repair is the first thing that hands the
+    // terminal to a real login.
+    refuse_accounts_no_export_covers(&marker, &preflight.accounts)?;
     let perch = Perch::under_test(host, built);
 
     say(out, &format!("Under test: {}", perch.bin().display()))?;
@@ -1453,6 +1511,7 @@ pub fn set_up(
         )?;
         Held::Exported {
             path: take_an_export(host, &perch, args, out)?,
+            accounts: preflight.accounts.clone(),
         }
     };
 
@@ -1559,6 +1618,7 @@ fn walk_a_login(
     )?;
     Ok(Held::Exported {
         path: take_an_export(host, perch, args, out)?,
+        accounts: preflight.accounts.clone(),
     })
 }
 
@@ -1638,12 +1698,19 @@ mod tests {
     use crate::registry::Quarantine;
 
     fn a_marker() -> Marker {
+        covering(&[])
+    }
+
+    /// The marker a wizard run on a machine holding exactly these would have
+    /// written: an Export, taken over all of them.
+    fn covering(accounts: &[&str]) -> Marker {
         Marker {
             version: MARKER_VERSION,
             marked_at: "2026-08-12T09:00:00Z".parse().unwrap(),
             perch_version: "0.1.1".to_string(),
             export: Held::Exported {
                 path: PathBuf::from("/Users/someone/perch-2026-08-12.age"),
+                accounts: accounts.iter().map(|email| (*email).to_string()).collect(),
             },
         }
     }
@@ -1924,8 +1991,15 @@ mod tests {
 
     // ---- the run ----------------------------------------------------------
 
+    /// Marks the machine as it stands, which is the only marking a wizard can
+    /// do: the Export it is a receipt for is taken over what is there when it
+    /// runs. So anything a test wants covered has to be held *before* this.
     fn marked(host: FakeHost) -> FakeHost {
-        mark(&host, &a_marker()).expect("the wizard marked it");
+        let held = Preflight::taken(&host)
+            .map(|preflight| preflight.accounts)
+            .unwrap_or_default();
+        let covered: Vec<&str> = held.iter().map(String::as_str).collect();
+        mark(&host, &covering(&covered)).expect("the wizard marked it");
         host
     }
 
@@ -2024,6 +2098,41 @@ mod tests {
         );
     }
 
+    /// Mark a fresh machine, `perch add` over the following weeks, run the
+    /// suite. The marker said what was true when it was written and nothing
+    /// revisited it, so the run went ahead and moved real Credentials around
+    /// with no Export behind them — while the report said "no Export: this
+    /// machine held no Accounts".
+    #[test]
+    fn a_machine_that_has_gained_an_account_since_it_was_marked_is_refused() {
+        let host = marked(with_a_claude_code(with_a_perch(a_bare_machine())));
+        now_holding(&host, &[("later@example.com".to_string(), None)]);
+
+        let refused = a_run(&host, &[a_phase("would act", Needs::NOTHING)])
+            .expect_err("nothing covers that login");
+
+        assert!(
+            refused.to_string().contains("later@example.com"),
+            "{refused}"
+        );
+        assert!(refused.to_string().contains("dogfood-setup"), "{refused}");
+        assert!(
+            relogins(&host).is_empty(),
+            "and the Repair never got the terminal: {:?}",
+            relogins(&host)
+        );
+    }
+
+    /// The other side of it: an Export taken over the Accounts that are there
+    /// is a receipt for those Accounts, and the run proceeds.
+    #[test]
+    fn a_machine_the_export_still_covers_runs() {
+        let host = a_machine(&[("one@example.com", None)], &[]);
+
+        a_run(&host, &[a_phase("runs anywhere", Needs::NOTHING)])
+            .expect("the marker covers what this machine holds");
+    }
+
     /// The reading `usable` was added for, closed against the phase two lines
     /// above rather than only against yesterday's run on another machine.
     #[test]
@@ -2033,21 +2142,19 @@ mod tests {
             Ok(vec!["it left an Account Quarantined".to_string()])
         }
 
-        let host = marked(with_a_claude_code(with_a_perch(a_bare_machine()))).with_login(
-            |host, _| {
-                now_holding(
-                    host,
-                    &[
-                        ("one@example.com".to_string(), None),
-                        (
-                            "two@example.com".to_string(),
-                            Some(Quarantine::RenewalRejected),
-                        ),
-                    ],
-                );
-                crate::error::EXIT_OK
-            },
-        );
+        let host = with_a_claude_code(with_a_perch(a_bare_machine())).with_login(|host, _| {
+            now_holding(
+                host,
+                &[
+                    ("one@example.com".to_string(), None),
+                    (
+                        "two@example.com".to_string(),
+                        Some(Quarantine::RenewalRejected),
+                    ),
+                ],
+            );
+            crate::error::EXIT_OK
+        });
         now_holding(
             &host,
             &[
@@ -2055,6 +2162,7 @@ mod tests {
                 ("two@example.com".to_string(), None),
             ],
         );
+        let host = marked(host);
 
         let both = Needs {
             accounts: 2,
@@ -2220,13 +2328,17 @@ mod tests {
     /// than two canned documents: the Repair reads the listing through the
     /// binary under test, and the figure it changes is read off the registry.
     fn a_machine(held: &[(&str, Option<Quarantine>)], logins: &[(&str, Login)]) -> FakeHost {
-        let host = marked(with_a_claude_code(with_a_perch(a_bare_machine())));
+        let host = with_a_claude_code(with_a_perch(a_bare_machine()));
 
         let holds: Vec<(String, Option<Quarantine>)> = held
             .iter()
             .map(|(email, quarantine)| ((*email).to_string(), *quarantine))
             .collect();
         now_holding(&host, &holds);
+
+        // Marked after, because that is the order a wizard runs in: it Exports
+        // what the machine holds and writes the receipt for it.
+        let host = marked(host);
 
         let scripted: Vec<(String, Login)> = logins
             .iter()
@@ -2841,8 +2953,10 @@ mod tests {
         assert_eq!(
             wrote.export,
             Held::Exported {
-                path: PathBuf::from("/tmp/perch.age")
-            }
+                path: PathBuf::from("/tmp/perch.age"),
+                accounts: vec!["one@example.com".to_string()],
+            },
+            "the marker is a receipt for a set, not only for a path"
         );
         assert_eq!(marker(&host).expect("and it was written"), wrote);
         assert!(said.contains("An Export comes before anything else"));
