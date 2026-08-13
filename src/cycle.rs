@@ -902,18 +902,39 @@ fn everyone_is_exhausted(
     ranked: &[Ranked],
     now: DateTime<Utc>,
 ) -> String {
+    // `> now` for the reason `ranked_on_reset` gives for the half of this that
+    // has Room: a cached figure outlives the window it describes (ADR 0015), so
+    // an elapsed `resets_at` is not a fact about when this Account comes back —
+    // it is a window that already came back, under a percentage that is stale.
+    //
+    // Taken as one, it sorted the wrong way twice over. `min_by_key` picked the
+    // *earliest* reset, so among Accounts whose windows had all come back the
+    // stalest reading won; and `reset_phrase` renders a past instant as "(any
+    // moment now)". A six-hour-old figure would announce that an Account frees
+    // up "soonest, at 07:00 (any moment now)" about a window that came back
+    // five hours ago, while a fresh figure twenty minutes from resetting went
+    // unmentioned.
     let soonest = ranked
         .iter()
         .filter_map(|ranked| match ranked.headroom {
             Headroom::Exhausted {
                 frees_at: Some(at), ..
-            } => Some((at, ranked.account)),
+            } if at > now => Some((at, ranked.account)),
             _ => None,
         })
         .min_by_key(|(at, _)| *at);
+    // An elapsed reset says as little about the wait as no reset at all, so it
+    // is counted here rather than dropped: both mean "the wait could be shorter
+    // than that", and for an elapsed one it very likely is.
     let unsaid = ranked
         .iter()
-        .filter(|ranked| matches!(ranked.headroom, Headroom::Exhausted { frees_at: None }))
+        .filter(|ranked| match ranked.headroom {
+            Headroom::Exhausted { frees_at: None } => true,
+            Headroom::Exhausted {
+                frees_at: Some(at), ..
+            } => at <= now,
+            _ => false,
+        })
         .count();
 
     let mut waiting = match soonest {

@@ -232,6 +232,60 @@ fn every_account_exhausted_picks_nothing_and_names_the_one_that_frees_up_soonest
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
 }
 
+/// A cached figure outlives the window it describes (ADR 0015), so an exhausted
+/// reading whose reset has already gone by says nothing about when that Account
+/// comes back — the window came back, and the percentage beside it is stale.
+///
+/// Read as a fact it sorted wrong twice: the soonest reset is the *earliest*, so
+/// among Accounts whose windows had all come back the stalest reading won, and
+/// `reset_phrase` renders a past instant as "(any moment now)". The refusal
+/// named a six-hour-old figure and announced it as freeing up any moment, while
+/// the one actually resetting within the hour went unmentioned.
+#[test]
+fn a_reset_that_has_already_gone_by_is_not_what_frees_up_soonest() {
+    let host = three_accounts_in_one_group();
+    // Read six hours ago, and its window came back five hours ago.
+    observed(
+        &host,
+        EMAIL,
+        vec![resetting("5-hour", 100.0, host.now() - Duration::hours(5))],
+    );
+    // The only one whose reset is still ahead of it, so the only one that can
+    // answer "when does any of this come back?".
+    observed(
+        &host,
+        SECOND_EMAIL,
+        vec![resetting("7-day", 100.0, host.now() + Duration::hours(2))],
+    );
+    observed(
+        &host,
+        THIRD_EMAIL,
+        vec![resetting("5-hour", 100.0, host.now() - Duration::hours(1))],
+    );
+
+    let (result, printed) = run_cycle(&host);
+
+    let error = result.expect_err("every cached figure says exhausted");
+    assert_eq!(error.exit_code(), EXIT_NO_CANDIDATE);
+    let said = error.to_string();
+    assert!(
+        said.contains(SECOND_EMAIL),
+        "the one whose reset is still ahead is what frees up soonest: {said}"
+    );
+    assert!(
+        !said.contains("any moment now"),
+        "and nothing is announced as arriving any moment on the strength of a \
+         window that came back hours ago: {said}"
+    );
+    assert!(
+        said.contains("2 of them cache no reset time"),
+        "the two elapsed ones say as little about the wait as no reset at all, \
+         so the wait may be shorter than the one figure that can still speak: \
+         {said}"
+    );
+    assert_eq!(active(&host).as_deref(), Some(EMAIL), "{printed}");
+}
+
 #[test]
 fn an_account_frees_up_when_its_last_full_window_resets_rather_than_its_first() {
     let host = three_accounts_in_one_group();
