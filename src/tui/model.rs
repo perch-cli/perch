@@ -359,23 +359,6 @@ pub enum Left {
     ToRun(String),
 }
 
-/// One scope's worth of the listing: what it is, and which rows of the listing
-/// its Accounts are.
-///
-/// A Cycle never leaves the scope it started in (ADR 0002), so the listing is
-/// one ranking per scope rather than one over everything ([`ranked`]) — and the
-/// scope is the only level at which a figure spanning several Accounts means
-/// anything at all ([`crate::reserve`]). Carried rather than worked out per
-/// frame for the same reason the order is: the row the cursor is on cannot
-/// change between deciding it and drawing it.
-#[derive(Debug, Clone)]
-pub struct Section {
-    pub scope: cycle::Scope,
-    /// Where its Accounts sit in the listing — positions in
-    /// [`Model::accounts`], not in the registry.
-    pub rows: std::ops::Range<usize>,
-}
-
 /// Everything the TUI is showing.
 pub struct Model {
     /// The Accounts as Perch last held them: read before the terminal was
@@ -392,10 +375,6 @@ pub struct Model {
     /// worked out per frame so that the row the cursor is on cannot change
     /// between deciding it and drawing it.
     order: Vec<usize>,
-    /// Which scope each stretch of the listing belongs to, in the same order.
-    /// Cut from the same pass that builds `order`, so a section can never name
-    /// rows the listing does not have.
-    sections: Vec<Section>,
     /// The clock the ages on the figures are measured against, moved on by the
     /// frame loop rather than read here.
     pub now: DateTime<Utc>,
@@ -433,10 +412,9 @@ pub struct Model {
 
 impl Model {
     pub fn new(registry: Registry, now: DateTime<Utc>) -> Model {
-        let (order, sections) = ranked(&registry, now);
+        let order = ranked(&registry, now);
         Model {
             order,
-            sections,
             registry,
             now,
             tab: Tab::Status,
@@ -478,14 +456,6 @@ impl Model {
             .iter()
             .map(|at| &self.registry.accounts[*at])
             .collect()
-    }
-
-    /// The listing cut into the scopes it is a ranking within, in the order it
-    /// shows them. Every Account is in exactly one, and a scope holding none is
-    /// not among them: a heading over no Accounts is a heading that says
-    /// nothing.
-    pub fn sections(&self) -> &[Section] {
-        &self.sections
     }
 
     /// The Account under the cursor on the `Status` tab, or `None` when Perch
@@ -1480,7 +1450,7 @@ impl Model {
         let content_was = self.content();
 
         self.registry = registry;
-        (self.order, self.sections) = ranked(&self.registry, self.now);
+        self.order = ranked(&self.registry, self.now);
 
         let found = was_on.and_then(|email| self.row_of(&email));
         if found.is_none() {
@@ -1629,11 +1599,9 @@ const NEITHER_IS_A_GROUP: &str = "Global is what applies where nothing narrower 
 ///
 /// The scope the active Account is in comes first, because it is where you are
 /// and, wherever a Cycle happens at all, the one a bare `perch switch` looks in.
-fn ranked(registry: &Registry, now: DateTime<Utc>) -> (Vec<usize>, Vec<Section>) {
+fn ranked(registry: &Registry, now: DateTime<Utc>) -> Vec<usize> {
     let mut order = Vec::with_capacity(registry.accounts.len());
-    let mut sections = Vec::new();
     for scope in scopes(registry) {
-        let from = order.len();
         for account in listed(registry, &scope, now) {
             let at = registry
                 .accounts
@@ -1642,14 +1610,8 @@ fn ranked(registry: &Registry, now: DateTime<Utc>) -> (Vec<usize>, Vec<Section>)
                 .expect("the listing is of Accounts the registry holds");
             order.push(at);
         }
-        if order.len() > from {
-            sections.push(Section {
-                scope,
-                rows: from..order.len(),
-            });
-        }
     }
-    (order, sections)
+    order
 }
 
 /// One scope's Accounts: ranked where a Cycle could happen in it, and in the
