@@ -17,7 +17,7 @@ use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
 use crate::adopt;
-use crate::commands::{CYCLING_AMONG_UNGROUPED, IN_NO_GROUP, say, say_json, write_failed};
+use crate::commands::{IN_NO_GROUP, cycling_among_ungrouped, say, say_json, write_failed};
 use crate::error::Result;
 use crate::host::Host;
 use crate::observe::Report;
@@ -328,7 +328,10 @@ fn render_human(
     }
 
     if matches!(scope, Scope::Ungrouped) {
-        say(out, &format!("Cycling {CYCLING_AMONG_UNGROUPED}."))?;
+        say(
+            out,
+            &format!("Cycling {}.", cycling_among_ungrouped(registry)),
+        )?;
     }
 
     for why in broken {

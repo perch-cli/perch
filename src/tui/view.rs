@@ -22,7 +22,6 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Tabs};
 
-use crate::commands::CYCLING_AMONG_UNGROUPED;
 use crate::commands::list::{self, COLUMNS};
 use crate::cycle;
 use crate::registry::{self, Account, Scope};
@@ -264,9 +263,8 @@ fn render_overview(frame: &mut Frame, model: &Model, area: Rect) {
         match &account.group {
             Some(group) => format!("{group} — a bare Switch Cycles within it"),
             None => format!(
-                "in no Group — Cycling {CYCLING_AMONG_UNGROUPED}, and \
-                 `cycle-ungrouped` is {}",
-                registry.global.cycle_ungrouped
+                "in no Group — Cycling {}",
+                crate::commands::cycling_among_ungrouped(registry)
             ),
         },
     );

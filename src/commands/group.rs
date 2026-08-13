@@ -19,7 +19,7 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::{CYCLING_AMONG_UNGROUPED, IN_NO_GROUP, config, say, write_failed};
+use crate::commands::{IN_NO_GROUP, config, cycling_among_ungrouped, say, write_failed};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::registry::{self, NO_GROUP, Registry, Scope};
@@ -244,21 +244,11 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
             let label = if index == 0 { "Accounts" } else { "" };
             write_line(out, label, &registry.named_for_the_user(account.email()))?;
         }
-        // The rule, and then what it currently answers. The constant alone
-        // printed the same words whether the declaration had been made or not,
-        // so the one Setting gating the whole Scope was never readable here.
-        write_line(
-            out,
-            "Cycling",
-            &format!(
-                "{CYCLING_AMONG_UNGROUPED} — `cycle-ungrouped` is {}",
-                if registry.global.cycle_ungrouped {
-                    "on"
-                } else {
-                    "off"
-                }
-            ),
-        )?;
+        // The rule, and then what it currently answers — said by the one
+        // function all three surfaces that show this Scope now ask, because
+        // three spellings of it had grown and one of them offered `on`/`off`,
+        // which is not a value the Setting takes.
+        write_line(out, "Cycling", &cycling_among_ungrouped(registry))?;
         // The Accounts in no Group are a Scope (ADR 0017, amended), so what
         // governs Cycling among them is a thing with an answer rather than a
         // constant compiled into Perch. It is shown here for the same reason a
