@@ -110,11 +110,15 @@ jobs:
       # claim that quietly stops being true the first time somebody uses a
       # newer language feature. Checked rather than tested: building is what the
       # promise is about.
+      #
+      # --all-features for the reason the Lint step above gives: without it the
+      # contract suite, the fakes and the whole of `dogfood.rs` were exempt from
+      # the claim, and the exemption grew every time one of them did.
       - name: Minimum supported Rust version
         if: runner.os == 'Linux'
         run: |
           rustup toolchain install 1.97 --profile minimal
-          cargo +1.97 check --locked --all-targets
+          cargo +1.97 check --locked --all-targets --all-features
 
       # Gives the contract tests a real bundle to assert against. If the install
       # is unavailable they assert the "no Claude Code here" branch instead, so
