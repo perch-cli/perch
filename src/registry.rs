@@ -1461,17 +1461,6 @@ pub fn lock(host: &dyn Host) -> Result<lock::Held<'_>> {
     lock::take_all(host, vec![lock_spec(host)?])
 }
 
-/// The `version` a document claims, read on its own.
-///
-/// Deliberately not a parse of the whole thing: what this exists to answer is
-/// "was this written by something newer than me", and a document from something
-/// newer is exactly the document this build cannot deserialize. A shape holding
-/// one number deserializes out of any JSON object that carries it, whatever
-/// else the object holds and whatever the rest of it means.
-///
-/// `None` is "it does not say", which is not a claim about a newer Perch: the
-/// caller goes on to read the document properly and reports what it finds
-/// there.
 /// Reads the registry, or `None` when Perch has never run here.
 pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     let path = &registry_path(host)?;
@@ -2069,9 +2058,6 @@ mod tests {
         lock(&host).expect("a lock given back can be taken again");
     }
 
-    /// The hold spans the whole command, and a command can stall for as long as
-    /// somebody takes to answer a `[y/N]`. Renewed at every write, so the
-    /// ordinary long command keeps the lock it took rather than letting it
     /// An address is a name, and is compared the way every other name here is.
     ///
     /// It was not: the lookups compared with `==` while everything feeding them
@@ -2350,6 +2336,9 @@ mod tests {
         );
     }
 
+    /// The hold spans the whole command, and a command can stall for as long as
+    /// somebody takes to answer a `[y/N]`. Renewed at every write, so the
+    /// ordinary long command keeps the lock it took rather than letting it
     /// expire silently underneath itself.
     #[test]
     fn a_command_that_takes_its_time_keeps_the_lock_it_took() {
