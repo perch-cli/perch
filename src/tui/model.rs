@@ -772,11 +772,22 @@ impl Model {
     /// the registry: where the write landed that is the new value, and where it
     /// was refused it is what was actually written — because a value nobody
     /// wrote is not one anybody should be reading.
+    ///
+    /// The registry lands *first*, and the ordering is the whole of it.
+    /// [`now_holds`] clears `said` whenever a cursor could not follow what it
+    /// was on — the rule `moving` exists for, reached the other way — and that
+    /// is exactly what a successful write does when it moves an Account out of
+    /// the Scope on screen. Said first, the report of the write was set and then
+    /// dropped by the write's own effect: moving the last Ungrouped Account into
+    /// a Group emptied the Scope, the row the cursor was on stopped existing,
+    /// and the frame said nothing at all about what had just happened.
+    ///
+    /// [`now_holds`]: Model::now_holds
     pub fn wrote(&mut self, said: Vec<String>, registry: Option<Registry>) {
-        self.said = said;
         if let Some(registry) = registry {
             self.now_holds(registry);
         }
+        self.said = said;
     }
 
     /// Moves between tabs, and takes what was said with it: a report about the

@@ -77,16 +77,17 @@ pub fn switch(host: &dyn Host, model: &mut Model, email: &str) {
             .into_iter()
             .filter(|remark| !before.contains(remark)),
     );
-    model.said = said;
-
     // Re-read rather than patched, because a Switch writes more than which
     // Account is active — a Quarantine it discovered the hard way, for one —
     // and a display that took one and not the other would show an Account as
     // merely idle. Where it cannot be read, what is on screen stands: the
     // Switch's own words are the news, and they have already been kept.
-    if let Ok(Some(registry)) = registry::load(host) {
-        model.now_holds(registry);
-    }
+    //
+    // Handed to `wrote` rather than applied here, so the ordering that keeps a
+    // report from being dropped by its own write is stated once. Inlined, this
+    // was the same four lines as `write` below with the two steps the other way
+    // round — which is how the bug came to exist in two places at once.
+    model.wrote(said, registry::load(host).ok().flatten());
 }
 
 /// Writes one change and puts what the command said on the next frame.
