@@ -183,8 +183,15 @@ jobs:
       #
       # --nocapture so the "skipping:" lines are visible: a suite that skipped
       # itself and a suite that asserted look identical otherwise.
+      #
+      # `--lib` alongside, for the reason the Dogfood step below gives: naming
+      # `--test` targets suppresses the default set, so the two unit tests held
+      # back by this same feature ran nowhere at all. `lock::exclusivity` is the
+      # one that matters — its own comment says everything else "checks a claim
+      # about concurrency without any", which made it the only execution of the
+      # lock's exclusivity claim, and it had never executed.
       - name: Contract tests
-        run: cargo test --locked --features contract --test contract --test contract_credentials --test contract_sessions --test contract_links -- --nocapture
+        run: cargo test --locked --features contract --lib --test contract --test contract_credentials --test contract_sessions --test contract_links -- --nocapture
 
       # Dogfood drives the real binary against real Accounts on a machine
       # somebody works on (ADR 0037), and a runner holds none — so almost
