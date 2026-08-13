@@ -1775,8 +1775,21 @@ impl Host for FakeHost {
     /// onto was invisible from here.
     fn print_remarks(&self, _aloud: bool) {}
 
+    /// Sorted, because [`RealHost::remarks`] keeps them in a `BTreeSet` and
+    /// says so — "in the order a `BTreeSet` keeps".
+    ///
+    /// Insertion order here meant a frame test could assert two remarks appear
+    /// in the order the Switch made them, pass, and show them alphabetised on
+    /// the machine: `tui::act` appends `host.remarks()` straight into
+    /// `model.said`, which is drawn. [`FakeHost::notes`] is the inspector and
+    /// stays in the order they were made, which is what a test asking "what did
+    /// this command remark on" wants.
+    ///
+    /// [`RealHost::remarks`]: crate::host::RealHost
     fn remarks(&self) -> Vec<String> {
-        self.notes()
+        let mut remarks = self.notes();
+        remarks.sort();
+        remarks
     }
 
     fn read_line(&self) -> Result<Option<String>, HostError> {
