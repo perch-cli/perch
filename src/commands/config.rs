@@ -170,7 +170,14 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
                 // and the first message pointed away from it. The sibling guard
                 // in `unset` gets this right by making no claim about a second
                 // word, because it has none to make.
-                Key::parse(value)?;
+                //
+                // Asked in the vocabulary the form being advised uses, which is
+                // a Scope's rather than Global's. `Key::parse` accepts
+                // `cycle-ungrouped`, which `Setting::parse` refuses because it
+                // has no per-Scope form — so this guard sent somebody to
+                // `perch config set work cycle-ungrouped true`, which is the
+                // second round trip it exists to save them.
+                Setting::parse(value)?;
                 return Err(PerchError::Invalid(format!(
                     "`perch config set {key} {value}` names {} and a key, but nothing \
                      to set it to. `perch config set <scope> <key> <value>` sets one.",
@@ -274,6 +281,20 @@ fn get(registry: &Registry, words: &[String]) -> Result<Vec<String>> {
         }
         [scope, key] => {
             let scope = addressed(registry, scope)?;
+            // The one key a Scope's page carries without carrying a form of it.
+            // `scope_lines` prints `cycle-ungrouped` against the Ungrouped Scope
+            // because that is where it takes effect (ADR 0017) — and asking for
+            // that same line by name was refused as "Global's alone and has no
+            // per-Scope form", which is true of setting it and not of reading
+            // it. A line a listing offers should be one the targeted form can
+            // read back.
+            if scope == Scope::Ungrouped && Key::parse_quietly(key) == Ok(Key::CycleUngrouped) {
+                return Ok(vec![format!(
+                    "{} {}",
+                    Key::CycleUngrouped.as_str(),
+                    registry.global.cycle_ungrouped
+                )]);
+            }
             let key = Setting::parse(key)?;
             Ok(vec![key.in_force(registry, &scope).as_a_set()])
         }

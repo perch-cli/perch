@@ -1049,3 +1049,45 @@ fn the_ungrouped_page_shows_the_setting_that_gates_it() {
     assert!(printed.contains("cycle-ungrouped false"), "{printed}");
     assert!(printed.contains("strategy most-headroom"), "{printed}");
 }
+
+/// The one key a Scope's page carries without carrying a form of it, asked for
+/// both ways round.
+///
+/// `cycle-ungrouped` is Global's and has no per-Scope form (ADR 0017), but
+/// `scope_lines` prints it against the Ungrouped Scope because that is where it
+/// takes effect. Two commands disagreed with that page.
+///
+/// `set` names a Scope and a key with no value, and the guard that says "you are
+/// missing the value" checked the key against *Global's* vocabulary — which
+/// accepts `cycle-ungrouped`. So it advised the three-word form, and the
+/// three-word form refuses, which is the second round trip the guard exists to
+/// save.
+///
+/// `get` printed the line and then refused to read it back by name.
+#[test]
+fn the_setting_a_scope_shows_and_cannot_override_is_answered_the_way_it_is_shown() {
+    let host = three_accounts_in_one_group();
+
+    let refusal = config_set(&host, &["work", "cycle-ungrouped"])
+        .0
+        .expect_err("a Group cannot carry it at all");
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    let said = refusal.to_string();
+    assert!(
+        said.contains("per-Scope form"),
+        "the refusal is that there is no per-Scope form, said on the first run \
+         rather than after a value is added: {said}"
+    );
+    assert!(
+        !said.contains("nothing to set it to"),
+        "and it does not send somebody off to type a value that will be \
+         refused for a different reason: {said}"
+    );
+
+    let (result, printed) = config_get(&host, &["ungrouped", "cycle-ungrouped"]);
+    result.expect("the Ungrouped page shows this line, so it can be asked for");
+    assert!(
+        printed.contains("cycle-ungrouped") && printed.contains("false"),
+        "and it reads back what the page prints: {printed}"
+    );
+}
