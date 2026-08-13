@@ -1318,3 +1318,42 @@ fn a_check_another_perch_holds_the_registry_against_says_so_where_cron_is_readin
          back is whatever scheduled it: {printed}"
     );
 }
+
+/// The wait a Ctrl-C lands in spends nothing, because that is what the real one
+/// spends.
+///
+/// `RealHost::wait` asks `interrupted()` before its first slice and returns
+/// having slept none of the interval. The fake advanced its clock by the whole
+/// of it and only then decided, so the wait that *ends* an interrupted
+/// `perch watch` moved the clock 2.5 minutes — or 20 under back-off — that a
+/// real Ctrl-C never moves it. Every age a test measured after an interrupted
+/// watch was measuring a duration production does not have.
+#[test]
+fn the_wait_a_ctrl_c_lands_in_costs_the_clock_nothing() {
+    let host = watching(&[40.0, 45.0], 5.0);
+    let opened_at = host.now();
+
+    let (result, printed) = run_watch(&host);
+    result.expect("it was stopped");
+
+    let rounds = waits(&host).len() as i64;
+    let interrupted_wait = waits(&host)
+        .last()
+        .copied()
+        .expect("it waited at least once");
+    assert!(
+        interrupted_wait > 0,
+        "the last wait was entered with an interval, which is what makes this \
+         worth asserting: {:?}",
+        waits(&host)
+    );
+
+    // Every wait but the last one, which is the one the interrupt landed in.
+    let spent = (host.now() - opened_at).num_milliseconds();
+    let waited: i64 = waits(&host).iter().map(|millis| *millis as i64).sum();
+    assert_eq!(
+        spent,
+        waited - interrupted_wait as i64,
+        "{rounds} rounds' waits, less the one that was interrupted:\n{printed}"
+    );
+}
