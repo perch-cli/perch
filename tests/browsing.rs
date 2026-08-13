@@ -2297,6 +2297,43 @@ fn an_edit_is_refused_while_a_refresh_is_out_in_the_words_a_switch_is_refused_in
     );
 }
 
+/// Space flips what the row is showing, and a row showing a deferred step is
+/// showing what it will become. Reading the value off disk instead, the flip
+/// set what was already displayed and the write dropped the pending step as
+/// same-row — so the row read the same before and after, which is the whole
+/// symptom the debounce's same-row rule exists to prevent.
+#[test]
+fn space_on_a_stepped_flag_flips_what_is_on_screen_rather_than_what_is_on_disk() {
+    let host = machine_with_figures();
+
+    let screen = browse(
+        &host,
+        at_the_config(
+            [
+                Some(Signal::Down),
+                Some(Signal::Right),
+                Some(Signal::Right),
+                // Steps the flag to `true` and defers the write, so the row is
+                // now showing `true` while the registry still says `false`.
+                Some(Signal::Right),
+                // Inside the debounce, before the step has landed.
+                Some(Signal::Flip),
+            ]
+            .into_iter()
+            .chain(while_nobody_presses_anything())
+            .chain([Some(Signal::Leave)])
+            .collect(),
+        ),
+    );
+
+    assert!(
+        !registry_of(&host).global.cycle_ungrouped,
+        "Space flipped the `true` the row was showing back to `false`, rather \
+         than flipping the `false` on disk to the `true` already on screen:\n{}",
+        screen.last_frame()
+    );
+}
+
 /// A value the model refuses is refused in the words the command would have
 /// used, because it *is* the command.
 #[test]

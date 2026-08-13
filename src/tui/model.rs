@@ -1038,14 +1038,26 @@ impl Model {
             // The other two bools on the page, flipped rather than stepped for
             // the same reason: `stepped` now takes its answer from the
             // direction, and this key has no direction to take one from.
+            //
+            // Flipped off what is *shown*, the way `Row::Setting` above reads
+            // through `value_of` — and for the same reason, which these two
+            // were left out of. A `→` a moment ago defers a write and the row
+            // already displays what it will become, so flipping the value on
+            // disk sets it to what is on screen already; `write` then drops the
+            // pending edit as same-row, and the row reads the same before and
+            // after. That is the keystroke-that-did-nothing `write` was written
+            // to cure, cured on one of the three bool rows and not on the other
+            // two.
             Row::CycleUngrouped => {
-                self.write(Edit::CycleUngrouped(!self.registry.global.cycle_ungrouped))
+                let displayed = self.shown(&scope, &Row::CycleUngrouped).0;
+                self.write(Edit::CycleUngrouped(displayed != "true"))
             }
-            Row::Cycling => match self.scope_account() {
-                Some(account) => {
+            Row::Cycling => match self.scope_account().map(|account| account.email().to_string()) {
+                Some(email) => {
+                    let displayed = self.shown(&scope, &Row::Cycling).0;
                     let edit = Edit::Cycling {
-                        email: account.email().to_string(),
-                        enabled: !account.enabled,
+                        email,
+                        enabled: displayed != "true",
                     };
                     self.write(edit)
                 }
