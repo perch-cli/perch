@@ -2453,6 +2453,46 @@ fn the_status_tab_says_which_column_the_keys_are_in() {
     );
 }
 
+/// The other two Status pages have no column to step into, so `→` leaves the
+/// keys where the frame says they are.
+///
+/// `rightwards` moved them regardless, into a column only `Accounts` draws.
+/// From there `↓` and `↑` drove the Accounts table's cursor — not on screen —
+/// while the sidebar stopped marking its own row because the keys had left it.
+/// Nothing on the frame said where they had gone, `Enter` did nothing, and only
+/// `←` or `Tab` got back out.
+#[test]
+fn the_status_pages_with_no_column_to_enter_keep_the_keys_on_the_sidebar() {
+    let host = machine_with_figures();
+
+    // Asked of where `↓` goes rather than of a modifier, because that is the
+    // symptom: the keys landing in an undrawn column showed up as arrows that
+    // moved nothing anybody could see.
+    // `Accounts` either way, because the sidebar clamps at its ends rather than
+    // wrapping: it is the row below `Overview` and the row above `Config`.
+    for (page, reaching, moves, next) in [
+        ("Overview", 0, Signal::Down, "Accounts"),
+        ("Config", 2, Signal::Up, "Accounts"),
+    ] {
+        let screen = browse(
+            &host,
+            [
+                over(reaching, Signal::Down),
+                vec![Some(Signal::Right), Some(moves), Some(Signal::Leave)],
+            ]
+            .concat(),
+        );
+
+        assert_eq!(
+            screen.emphasis_on(next),
+            Some(Modifier::REVERSED),
+            "`→` on {page} leaves the keys on the sidebar, so `↓` moves it to \
+             {next} rather than an Accounts cursor no frame draws:\n{}",
+            screen.last_frame()
+        );
+    }
+}
+
 /// A value the model refuses is refused in the words the command would have
 /// used, because it *is* the command.
 #[test]

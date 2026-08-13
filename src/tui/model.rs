@@ -882,8 +882,19 @@ impl Model {
             return self.stepped(1);
         }
         self.column = match (self.tab, self.column) {
-            // `Status` has no middle column, so one step in is the page itself.
-            (Tab::Status, _) => Column::Content,
+            // `Status` has no middle column, so one step in is the page itself
+            // — but only the `Accounts` page has anything in it to be on.
+            //
+            // Unconditionally, this put the keys in a column `Overview` and
+            // `Config` do not draw: `moved` then routed ↓ and ↑ to the Accounts
+            // table's cursor, which is not on screen, while `render_sidebar`
+            // stopped marking the sidebar row because the keys had left it. So
+            // nothing on the frame said where the keys were, `Enter` did
+            // nothing (`ask_for_a_switch` answers `Nothing` off the same
+            // question), and only `←` or `Tab` got out. The same guard
+            // `ask_for_a_run` already puts on `x`.
+            (Tab::Status, _) if self.status() == StatusRow::Accounts => Column::Content,
+            (Tab::Status, _) => Column::Scopes,
             (Tab::Config, Column::Scopes) if self.scope_accounts().is_empty() => Column::Content,
             (Tab::Config, Column::Scopes) => Column::Accounts,
             (Tab::Config, _) => Column::Content,
