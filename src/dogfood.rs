@@ -126,9 +126,12 @@ fn refuse_accounts_no_export_covers(marker: &Marker, held: &[String]) -> Result<
     }
 
     Err(PerchError::Invalid(format!(
-        "This machine was marked when there was {}, and it now holds {} that no          Export covers: {}.
-         A Dogfood run moves real Credentials around, and the Export is the only          thing that makes that reversible — so the suite will not touch a machine          holding a login nothing has a copy of.
-{HOW_TO_SET_UP}",
+        "This machine was marked when there was {}, and it now holds {} that no \
+         Export covers: {}.\n\
+         A Dogfood run moves real Credentials around, and the Export is the only \
+         thing that makes that reversible — so the suite will not touch a machine \
+         holding a login nothing has a copy of.\n\
+         {HOW_TO_SET_UP}",
         marker.export.said(),
         crate::commands::accounts(uncovered.len()),
         uncovered.join(", "),
@@ -781,6 +784,10 @@ impl Setback {
     }
 }
 
+/// What a Repair heads its leftovers with, in one place because the run says it
+/// on the terminal and the report says it again on disk.
+const FINISH_BY_HAND: &str = "What would finish the job by hand:";
+
 /// Commands somebody could type, said the same way wherever a run offers them —
 /// a stopped phase's way back, and a Repair's way to finish by hand.
 ///
@@ -788,10 +795,6 @@ impl Setback {
 /// had already grown between two: the heading and the `$` are what somebody
 /// scans for, and they should not move depending on which of the two they are
 /// reading.
-/// What a Repair heads its leftovers with, in one place because the run says it
-/// on the terminal and the report says it again on disk.
-const FINISH_BY_HAND: &str = "What would finish the job by hand:";
-
 fn to_type(heading: &str, commands: &[String]) -> Vec<String> {
     let mut lines = vec![heading.to_string()];
     lines.extend(commands.iter().map(|command| format!("  $ {command}")));
@@ -891,7 +894,16 @@ pub enum Repair {
     /// The listing could not be read, so the Repair never learned what was
     /// Quarantined. Recorded rather than raised: failing over a `perch list`
     /// that does not work is a phase's job, not phase zero's.
-    NotRead(String),
+    ///
+    /// Carries whose fault it was, like every other verdict here. It used to
+    /// drop the `Setback`'s `Fault` and say `Fault::Perch` regardless — but
+    /// `read_as` classifies a held registry, a live Profile and an unavailable
+    /// keychain as `Fault::Upstream` on purpose, because a machine somebody
+    /// works on runs other Perches. A `perch watch` holding the lock for the
+    /// second the Repair opened in was reported as a bug in Perch, which is the
+    /// misclassification ADR 0037 names as the one that gets a suite's red
+    /// ignored within a month.
+    NotRead { fault: Fault, why: String },
     /// The Quarantined Accounts, in the order the listing gave them, and what
     /// came of each.
     Found(Vec<Attempt>),
@@ -907,10 +919,12 @@ impl Repair {
             Repair::NothingQuarantined => {
                 vec!["Nothing is Quarantined here, so there was nothing to repair.".to_string()]
             }
-            Repair::NotRead(why) => vec![format!(
-                "Nothing could be repaired: {why}. {}",
-                Fault::Perch.said()
-            )],
+            Repair::NotRead { fault, why } => {
+                vec![format!(
+                    "Nothing could be repaired: {why}. {}",
+                    fault.said()
+                )]
+            }
             Repair::Found(attempts) => attempts.iter().flat_map(Attempt::said).collect(),
         }
     }
@@ -936,7 +950,7 @@ impl Repair {
         // A Repair that could not read the listing does not know which Accounts
         // to name, so it offers the command that would say — leaving somebody
         // with nothing to type is the one outcome that helps nobody.
-        if let Repair::NotRead(_) = self {
+        if let Repair::NotRead { .. } = self {
             return vec!["perch list --json".to_string()];
         }
         self.left_quarantined()
@@ -1008,7 +1022,12 @@ fn what_it_came_to(
 
     let listed = match listed_now(perch) {
         Ok(listed) => listed,
-        Err(setback) => return Ok(Repair::NotRead(setback.because)),
+        Err(setback) => {
+            return Ok(Repair::NotRead {
+                fault: setback.fault,
+                why: setback.because,
+            });
+        }
     };
     let quarantined: Vec<(String, String)> = listed
         .into_iter()
@@ -2116,6 +2135,20 @@ mod tests {
             "{refused}"
         );
         assert!(refused.to_string().contains("dogfood-setup"), "{refused}");
+        // The most important refusal the harness has, and it was rendering with
+        // ten-space gaps mid-sentence and hard-wrapped nine-space indents: the
+        // literal was written across lines with no `\` continuations, unlike
+        // `HOW_TO_SET_UP` two lines below it. Every assertion on it was a
+        // `contains`, which is exactly the shape that cannot see whitespace.
+        let said = refused.to_string();
+        assert!(
+            !said.contains("  "),
+            "no run of spaces inside a sentence: {said:?}"
+        );
+        assert!(
+            said.lines().all(|line| !line.starts_with(' ')),
+            "and no line indented as though it were a continuation: {said:?}"
+        );
         assert!(
             relogins(&host).is_empty(),
             "and the Repair never got the terminal: {:?}",
@@ -2694,11 +2727,45 @@ mod tests {
     /// A Repair that could not read the listing still has something to type.
     #[test]
     fn a_repair_that_could_not_read_the_listing_says_what_would_say_why() {
-        let repair = Repair::NotRead("`perch list --json` exited 1".to_string());
+        let repair = Repair::NotRead {
+            fault: Fault::Perch,
+            why: "`perch list --json` exited 1".to_string(),
+        };
 
         assert_eq!(
             repair.finish_by_hand(),
             vec!["perch list --json".to_string()]
+        );
+    }
+
+    /// And it says whose fault it was rather than assuming Perch's.
+    ///
+    /// `read_as` classifies a held registry, a live Profile and an unavailable
+    /// keychain as `Fault::Upstream` deliberately: a machine somebody works on
+    /// runs other Perches, and a `perch watch` holding the lock for the second
+    /// the Repair opened in is not a bug. The verdict dropped that and said
+    /// "This is a fault in Perch" over every one of them — the misclassification
+    /// ADR 0037 says gets a suite's red ignored within a month.
+    #[test]
+    fn a_listing_the_repair_could_not_read_says_whose_fault_it_was() {
+        let upstream = Repair::NotRead {
+            fault: Fault::Upstream,
+            why: "another Perch holds the registry".to_string(),
+        };
+        let said = upstream.said().join("\n");
+        assert!(said.contains(Fault::Upstream.said()), "{said}");
+        assert!(
+            !said.contains(Fault::Perch.said()),
+            "a busy machine is not a bug to go and fix: {said}"
+        );
+
+        let ours = Repair::NotRead {
+            fault: Fault::Perch,
+            why: "`perch list --json` exited 1".to_string(),
+        };
+        assert!(
+            ours.said().join("\n").contains(Fault::Perch.said()),
+            "and one that really is Perch's still says so"
         );
     }
 
@@ -2859,7 +2926,11 @@ mod tests {
 
         let (run, said) = a_watched_run(&host, &[]).expect("a Repair cannot stop a run");
 
-        assert!(matches!(run.repair, Repair::NotRead(_)), "{:?}", run.repair);
+        assert!(
+            matches!(run.repair, Repair::NotRead { .. }),
+            "{:?}",
+            run.repair
+        );
         assert!(said.contains("Nothing could be repaired"), "{said}");
         assert!(said.contains("This is a fault in Perch."), "{said}");
     }
