@@ -12,6 +12,7 @@ use std::collections::VecDeque;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
+use ratatui::style::Modifier;
 
 use crate::error::{PerchError, Result};
 use crate::tui::model::Model;
@@ -26,6 +27,16 @@ pub struct FakeScreen {
     /// terminal.
     doing: VecDeque<Option<Signal>>,
     drawn: Vec<String>,
+    /// The last frame's cells, styles and all.
+    ///
+    /// Kept beside the text rather than instead of it, because the text is what
+    /// nearly every test wants: a Perch frame says what it means in characters
+    /// so that it survives a pipe and a colour-blind palette, and `>` and `*`
+    /// are assertable without any of this. What is *not* a character is which
+    /// column the keys are in — that one is a style by design — so a fake
+    /// holding symbols alone could not tell a sidebar holding the keys from one
+    /// that had lost them, and did not.
+    styled: Option<Buffer>,
 }
 
 impl FakeScreen {
@@ -41,6 +52,7 @@ impl FakeScreen {
                 .expect("a buffer is always available to draw in"),
             doing: doing.into(),
             drawn: Vec::new(),
+            styled: None,
         }
     }
 
@@ -54,6 +66,29 @@ impl FakeScreen {
         self.drawn.last().map(String::as_str).unwrap_or_default()
     }
 
+    /// How the cell where `said` begins was emphasised in the last frame.
+    ///
+    /// The question `frames` cannot answer, and the one the two sidebars and
+    /// the two listings settle between them: reversed is "the keys are here",
+    /// bold is "this is where they would come back to".
+    ///
+    /// `None` is a frame that does not say it at all, which is a different
+    /// failure from one that says it without emphasis — so the two are not
+    /// collapsed into a default.
+    pub fn emphasis_on(&self, said: &str) -> Option<Modifier> {
+        let buffer = self.styled.as_ref()?;
+        (0..buffer.area.height).find_map(|row| {
+            let line: String = (0..buffer.area.width)
+                .map(|column| buffer[(column, row)].symbol())
+                .collect();
+            let at = line.find(said)?;
+            // `find` answers in bytes and a buffer is indexed in cells. Every
+            // label a test asks about is one Perch wrote, so the two agree.
+            let column = line[..at].chars().count() as u16;
+            Some(buffer[(column, row)].modifier)
+        })
+    }
+
     /// Whether anything drawn so far said this.
     pub fn ever_said(&self, said: &str) -> bool {
         self.drawn.iter().any(|frame| frame.contains(said))
@@ -65,7 +100,9 @@ impl Screen for FakeScreen {
         self.terminal
             .draw(|frame| view::render(frame, model))
             .expect("a buffer is always available to draw in");
-        self.drawn.push(as_text(self.terminal.backend().buffer()));
+        let buffer = self.terminal.backend().buffer();
+        self.drawn.push(as_text(buffer));
+        self.styled = Some(buffer.clone());
         Ok(())
     }
 

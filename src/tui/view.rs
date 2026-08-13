@@ -191,7 +191,18 @@ fn render_status(frame: &mut Frame, model: &Model, area: Rect) {
         Constraint::Min(1),
     ])
     .areas(area);
-    render_sidebar(frame, sidebar, &labels, model.status_row, true);
+    // Which of the two the keys are on, said the way the `Config` tab says it.
+    // Hardcoded `true` here and no column check on the table below, both
+    // sidebar and table drew themselves as the one holding the keys on every
+    // frame — so `←` and `→`, which decide whether `↓` moves the sidebar or the
+    // listing and whether `Enter` Switches, changed nothing anybody could see.
+    render_sidebar(
+        frame,
+        sidebar,
+        &labels,
+        model.status_row,
+        model.column == Column::Scopes,
+    );
 
     // Asked once rather than at the head of each row: holding no Accounts is a
     // fact about the machine, not about which page is showing.
@@ -370,9 +381,13 @@ fn render_accounts(frame: &mut Frame, model: &Model, area: Rect) {
                 markers(model, accounts[index], index),
                 row(cells, &widths)
             ));
-            match index == model.cursor {
-                true => line.style(Style::new().add_modifier(Modifier::REVERSED)),
-                false => line,
+            // The same pair `render_sidebar` draws, and for the same reason:
+            // reversed while the keys are here, bold while they are in the
+            // sidebar. The `>` in `markers` says which row either way.
+            match (index == model.cursor, model.column == Column::Content) {
+                (true, true) => line.style(Style::new().add_modifier(Modifier::REVERSED)),
+                (true, false) => line.style(Style::new().add_modifier(Modifier::BOLD)),
+                (false, _) => line,
             }
         })
         .collect();

@@ -110,11 +110,15 @@ jobs:
       # claim that quietly stops being true the first time somebody uses a
       # newer language feature. Checked rather than tested: building is what the
       # promise is about.
+      #
+      # --all-features for the reason the Lint step above gives: without it the
+      # contract suite, the fakes and the whole of `dogfood.rs` were exempt from
+      # the claim, and the exemption grew every time one of them did.
       - name: Minimum supported Rust version
         if: runner.os == 'Linux'
         run: |
           rustup toolchain install 1.97 --profile minimal
-          cargo +1.97 check --locked --all-targets
+          cargo +1.97 check --locked --all-targets --all-features
 
       # Gives the contract tests a real bundle to assert against. If the install
       # is unavailable they assert the "no Claude Code here" branch instead, so
@@ -183,8 +187,15 @@ jobs:
       #
       # --nocapture so the "skipping:" lines are visible: a suite that skipped
       # itself and a suite that asserted look identical otherwise.
+      #
+      # `--lib` alongside, for the reason the Dogfood step below gives: naming
+      # `--test` targets suppresses the default set, so the two unit tests held
+      # back by this same feature ran nowhere at all. `lock::exclusivity` is the
+      # one that matters — its own comment says everything else "checks a claim
+      # about concurrency without any", which made it the only execution of the
+      # lock's exclusivity claim, and it had never executed.
       - name: Contract tests
-        run: cargo test --locked --features contract --test contract --test contract_credentials --test contract_sessions --test contract_links -- --nocapture
+        run: cargo test --locked --features contract --lib --test contract --test contract_credentials --test contract_sessions --test contract_links -- --nocapture
 
       # Dogfood drives the real binary against real Accounts on a machine
       # somebody works on (ADR 0037), and a runner holds none — so almost

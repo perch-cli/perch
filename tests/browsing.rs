@@ -17,6 +17,7 @@ use perch::registry::Registry;
 use perch::tui::fake::{FakeRefresher, FakeScreen};
 use perch::tui::refresh::Refreshed;
 use perch::tui::{Left, Signal};
+use ratatui::style::Modifier;
 
 /// Opens the TUI on this machine and does these things at it, with a Refresh
 /// that never comes back — which is what one looks like for as long as it is
@@ -1211,6 +1212,33 @@ fn the_run_key_leaves_the_view_naming_the_account_to_launch() {
     );
 }
 
+/// The two acting keys are confined to the same place (ADR 0011), and only one
+/// of them was asking about the column. With the sidebar cursor on `Accounts`
+/// but the keys still in the sidebar, `Enter` moved right and `x` handed the
+/// terminal to a client — from a state the frame did not draw.
+#[test]
+fn the_run_key_does_nothing_while_the_keys_are_still_in_the_sidebar() {
+    let host = machine_with_a_group();
+
+    assert_eq!(
+        left_after(
+            &host,
+            vec![Some(Signal::Down), Some(Signal::Run), Some(Signal::Leave)]
+        ),
+        Left::Alone,
+        "`x` is the expensive one to fire by accident, which is why it is `x` \
+         rather than Enter",
+    );
+    assert_eq!(
+        left_after(
+            &host,
+            at_the_accounts(vec![Some(Signal::Run), Some(Signal::Leave)])
+        ),
+        Left::ToRun(SECOND_EMAIL.to_string()),
+        "and one `→` still runs, on the Account under the cursor",
+    );
+}
+
 /// A Run from the picker is the Run `perch run` performs: the client against
 /// that Account's Profile, the active Account untouched, and what the client
 /// said coming back as Perch's own exit code.
@@ -2294,6 +2322,84 @@ fn an_edit_is_refused_while_a_refresh_is_out_in_the_words_a_switch_is_refused_in
     assert!(
         !registry_of(&host).global.settings.watcher_may_act,
         "and nothing was written"
+    );
+}
+
+/// Space flips what the row is showing, and a row showing a deferred step is
+/// showing what it will become. Reading the value off disk instead, the flip
+/// set what was already displayed and the write dropped the pending step as
+/// same-row — so the row read the same before and after, which is the whole
+/// symptom the debounce's same-row rule exists to prevent.
+#[test]
+fn space_on_a_stepped_flag_flips_what_is_on_screen_rather_than_what_is_on_disk() {
+    let host = machine_with_figures();
+
+    let screen = browse(
+        &host,
+        at_the_config(
+            [
+                Some(Signal::Down),
+                Some(Signal::Right),
+                Some(Signal::Right),
+                // Steps the flag to `true` and defers the write, so the row is
+                // now showing `true` while the registry still says `false`.
+                Some(Signal::Right),
+                // Inside the debounce, before the step has landed.
+                Some(Signal::Flip),
+            ]
+            .into_iter()
+            .chain(while_nobody_presses_anything())
+            .chain([Some(Signal::Leave)])
+            .collect(),
+        ),
+    );
+
+    assert!(
+        !registry_of(&host).global.cycle_ungrouped,
+        "Space flipped the `true` the row was showing back to `false`, rather \
+         than flipping the `false` on disk to the `true` already on screen:\n{}",
+        screen.last_frame()
+    );
+}
+
+/// `←` and `→` decide whether `↓` moves the sidebar or the listing, and whether
+/// `Enter` Switches — so a frame that does not say which of the two the keys are
+/// in is a frame where both acting keys fire from a state nobody can see. Both
+/// columns drew themselves as the one holding them, on every frame.
+#[test]
+fn the_status_tab_says_which_column_the_keys_are_in() {
+    let host = machine_with_figures();
+
+    // The listing's own row rather than the bare address, which the dimmed
+    // `active:` label in the header says first.
+    let cursor_row = format!(">* {EMAIL}");
+
+    let sidebar = browse(&host, vec![Some(Signal::Down), Some(Signal::Leave)]);
+    assert_eq!(
+        sidebar.emphasis_on("Accounts"),
+        Some(Modifier::REVERSED),
+        "the keys open on the sidebar:\n{}",
+        sidebar.last_frame()
+    );
+    assert_eq!(
+        sidebar.emphasis_on(&cursor_row),
+        Some(Modifier::BOLD),
+        "and the listing says it is where they would go:\n{}",
+        sidebar.last_frame()
+    );
+
+    let listing = browse(&host, at_the_accounts(vec![Some(Signal::Leave)]));
+    assert_eq!(
+        listing.emphasis_on(&cursor_row),
+        Some(Modifier::REVERSED),
+        "one `→` and the listing has them:\n{}",
+        listing.last_frame()
+    );
+    assert_eq!(
+        listing.emphasis_on("Accounts"),
+        Some(Modifier::BOLD),
+        "and the sidebar has given them up:\n{}",
+        listing.last_frame()
     );
 }
 

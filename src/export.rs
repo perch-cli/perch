@@ -356,6 +356,23 @@ fn would_not_open(err: age::DecryptError) -> PerchError {
              passphrase is not in question — `age -d` opens it where this will \
              not."
         )),
+        // This *is* the Export, and it did not come through intact: a header
+        // whose MAC no longer checks out, or a payload that stops early. A
+        // backup copied off a filling disk, an interrupted transfer, a file
+        // half-pasted out of a password manager.
+        //
+        // Its own answer rather than the catch-all, which told somebody holding
+        // a damaged copy of the right file to go and look for a different one.
+        // That is the sentence that matters most on the one day this is read —
+        // the day the machine it was taken from is gone — and it was the answer
+        // that is definitely wrong.
+        damaged @ (age::DecryptError::InvalidMac | age::DecryptError::Io(_)) => {
+            PerchError::Invalid(format!(
+                "This is an `age` file and it did not come through intact \
+                 ({damaged}). The passphrase is not in question — nothing will \
+                 open this copy. Find another one."
+            ))
+        }
         other => PerchError::Invalid(format!("This is not an `age` file Perch can read: {other}")),
     }
 }
@@ -561,6 +578,36 @@ mod tests {
 
         let refused = unseal("not an age file at all", PASSPHRASE).expect_err("nor does this");
         assert!(refused.to_string().contains("`age` file"), "{refused}");
+    }
+
+    /// The Export somebody has, damaged. The whole of what an Export is for is
+    /// the day the machine it was taken from is gone, and on that day being
+    /// told to go and find a different file — because this one is "not an `age`
+    /// file" — is the one answer that is definitely wrong.
+    ///
+    /// Sealed and then cut, rather than asserted against the mapping: a payload
+    /// that stops early is the ordinary way an Export is damaged, and it costs
+    /// one scrypt to produce honestly.
+    #[test]
+    fn an_export_that_did_not_come_through_intact_is_said_to_be_the_export() {
+        let sealed = seal(&an_export(), PASSPHRASE).expect("it seals");
+        let cut = &sealed[..sealed.len() * 3 / 4];
+
+        let refused = unseal(cut, PASSPHRASE).expect_err("three quarters of a file opens nothing");
+
+        assert!(
+            !refused.to_string().contains("not the passphrase"),
+            "the passphrase was right and retyping it will not help: {refused}"
+        );
+        assert!(
+            !refused.to_string().contains("not an `age` file"),
+            "it is exactly an `age` file, which is why finding another copy of \
+             it is the next move: {refused}"
+        );
+        assert!(
+            refused.to_string().contains("intact"),
+            "and it says which of the two happened: {refused}"
+        );
     }
 
     /// The two refusals that arrive at the worst possible moment — the day the
