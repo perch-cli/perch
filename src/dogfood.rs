@@ -1275,6 +1275,19 @@ fn stamp(at: DateTime<Utc>) -> String {
 /// phases, one at a time, stopping at the first that does — and the report,
 /// written whatever happened, because a run that stopped is the one worth
 /// having written down.
+///
+/// What one phase came to, measured against the machine as it stands rather
+/// than as the Repair left it.
+fn prove(perch: &Perch<'_>, standing: &Preflight, phase: &Phase) -> Outcome {
+    if let Some(why) = standing.unmet(&phase.needs) {
+        return Outcome::Skipped(why);
+    }
+    match (phase.prove)(perch) {
+        Ok(established) => Outcome::Proved(established),
+        Err(setback) => Outcome::Stopped(setback),
+    }
+}
+
 pub fn dogfood(
     host: &dyn Host,
     built: &str,
@@ -1297,30 +1310,42 @@ pub fn dogfood(
 
     let repaired = repair(&perch, &preflight, out)?;
 
-    // The machine as the Repair left it, which is what the phases are measured
-    // against: a figure taken before it would count an Account nobody could log
-    // back in as one this machine can prove things with.
+    // The machine as the Repair left it, which is the figure the run reports: a
+    // figure taken before it would count an Account nobody could log back in as
+    // one this machine can prove things with. It is a sentence about what the
+    // machine could prove when the run started, and deliberately not a running
+    // total — `standing` below is what each phase is actually gated on.
     let mut after = preflight.clone();
     after.read_the_registry(host)?;
     say(out, "")?;
     say(out, &after.figure_after_a_repair(phases))?;
+
+    // The machine as the phase before it left it. A phase that Switches changes
+    // which Account is active, and one that walks a Renewal can Rotate and leave
+    // a `RenewalRejected` Quarantine behind — so gating every phase on the
+    // snapshot taken before the first of them ran admits phase n+1 on facts
+    // phase n has already invalidated, and runs it against a Quarantined
+    // Account. That is the reading `usable` was added to prevent, closed against
+    // yesterday's run on another machine and left open against the phase two
+    // lines above.
+    let mut standing = after.clone();
 
     let mut outcomes: Vec<(&'static str, Outcome)> = Vec::new();
     let mut stopped = false;
     for phase in phases {
         let outcome = if stopped {
             Outcome::NotRun
-        } else if let Some(why) = after.unmet(&phase.needs) {
-            Outcome::Skipped(why)
+        } else if let Err(why) = standing.read_the_registry(host) {
+            // Not a `?`: everything before this point has already touched the
+            // machine, and a registry that will not be read is the moment a
+            // report is worth most rather than the moment to throw one away.
+            Outcome::Stopped(Setback::perch(format!(
+                "the registry could not be read between phases: {why}"
+            )))
         } else {
-            match (phase.prove)(&perch) {
-                Ok(established) => Outcome::Proved(established),
-                Err(setback) => {
-                    stopped = true;
-                    Outcome::Stopped(setback)
-                }
-            }
+            prove(&perch, &standing, phase)
         };
+        stopped = stopped || matches!(outcome, Outcome::Stopped(_));
 
         say(out, "")?;
         say(out, &format!("{} — {}", phase.name, outcome.word()))?;
@@ -1997,6 +2022,69 @@ mod tests {
             "the Preflight read these Accounts through the same binary: {}",
             setback.because
         );
+    }
+
+    /// The reading `usable` was added for, closed against the phase two lines
+    /// above rather than only against yesterday's run on another machine.
+    #[test]
+    fn a_phase_is_gated_on_the_machine_the_phase_before_it_left() {
+        fn breaks_one(perch: &Perch<'_>) -> Proof {
+            perch.interactive(&["relogin", "two@example.com"])?;
+            Ok(vec!["it left an Account Quarantined".to_string()])
+        }
+
+        let host = marked(with_a_claude_code(with_a_perch(a_bare_machine()))).with_login(
+            |host, _| {
+                now_holding(
+                    host,
+                    &[
+                        ("one@example.com".to_string(), None),
+                        (
+                            "two@example.com".to_string(),
+                            Some(Quarantine::RenewalRejected),
+                        ),
+                    ],
+                );
+                crate::error::EXIT_OK
+            },
+        );
+        now_holding(
+            &host,
+            &[
+                ("one@example.com".to_string(), None),
+                ("two@example.com".to_string(), None),
+            ],
+        );
+
+        let both = Needs {
+            accounts: 2,
+            ..Needs::NOTHING
+        };
+        let run = a_run(
+            &host,
+            &[
+                Phase {
+                    name: "leaves one broken",
+                    needs: both,
+                    prove: breaks_one,
+                },
+                a_phase("needs both", both),
+            ],
+        )
+        .expect("the run finished");
+
+        assert!(
+            matches!(run.outcomes[0].1, Outcome::Proved(_)),
+            "the first phase had both Accounts: {:?}",
+            run.outcomes[0].1
+        );
+        let Outcome::Skipped(why) = &run.outcomes[1].1 else {
+            panic!(
+                "the second phase must be measured against what the first left: {:?}",
+                run.outcomes[1].1
+            );
+        };
+        assert!(why.contains('2') && why.contains('1'), "{why}");
     }
 
     #[test]
