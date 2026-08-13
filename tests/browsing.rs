@@ -14,6 +14,7 @@ use perch::commands::list;
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
 use perch::registry::Registry;
+use ratatui::style::Modifier;
 use perch::tui::fake::{FakeRefresher, FakeScreen};
 use perch::tui::refresh::Refreshed;
 use perch::tui::{Left, Signal};
@@ -2331,6 +2332,47 @@ fn space_on_a_stepped_flag_flips_what_is_on_screen_rather_than_what_is_on_disk()
         "Space flipped the `true` the row was showing back to `false`, rather \
          than flipping the `false` on disk to the `true` already on screen:\n{}",
         screen.last_frame()
+    );
+}
+
+/// `←` and `→` decide whether `↓` moves the sidebar or the listing, and whether
+/// `Enter` Switches — so a frame that does not say which of the two the keys are
+/// in is a frame where both acting keys fire from a state nobody can see. Both
+/// columns drew themselves as the one holding them, on every frame.
+#[test]
+fn the_status_tab_says_which_column_the_keys_are_in() {
+    let host = machine_with_figures();
+
+    // The listing's own row rather than the bare address, which the dimmed
+    // `active:` label in the header says first.
+    let cursor_row = format!(">* {EMAIL}");
+
+    let sidebar = browse(&host, vec![Some(Signal::Down), Some(Signal::Leave)]);
+    assert_eq!(
+        sidebar.emphasis_on("Accounts"),
+        Some(Modifier::REVERSED),
+        "the keys open on the sidebar:\n{}",
+        sidebar.last_frame()
+    );
+    assert_eq!(
+        sidebar.emphasis_on(&cursor_row),
+        Some(Modifier::BOLD),
+        "and the listing says it is where they would go:\n{}",
+        sidebar.last_frame()
+    );
+
+    let listing = browse(&host, at_the_accounts(vec![Some(Signal::Leave)]));
+    assert_eq!(
+        listing.emphasis_on(&cursor_row),
+        Some(Modifier::REVERSED),
+        "one `→` and the listing has them:\n{}",
+        listing.last_frame()
+    );
+    assert_eq!(
+        listing.emphasis_on("Accounts"),
+        Some(Modifier::BOLD),
+        "and the sidebar has given them up:\n{}",
+        listing.last_frame()
     );
 }
 
