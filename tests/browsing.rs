@@ -14,10 +14,10 @@ use perch::commands::list;
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
 use perch::registry::Registry;
-use ratatui::style::Modifier;
 use perch::tui::fake::{FakeRefresher, FakeScreen};
 use perch::tui::refresh::Refreshed;
 use perch::tui::{Left, Signal};
+use ratatui::style::Modifier;
 
 /// Opens the TUI on this machine and does these things at it, with a Refresh
 /// that never comes back — which is what one looks like for as long as it is

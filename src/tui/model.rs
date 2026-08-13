@@ -1052,7 +1052,10 @@ impl Model {
                 let displayed = self.shown(&scope, &Row::CycleUngrouped).0;
                 self.write(Edit::CycleUngrouped(displayed != "true"))
             }
-            Row::Cycling => match self.scope_account().map(|account| account.email().to_string()) {
+            Row::Cycling => match self
+                .scope_account()
+                .map(|account| account.email().to_string())
+            {
                 Some(email) => {
                     let displayed = self.shown(&scope, &Row::Cycling).0;
                     let edit = Edit::Cycling {
