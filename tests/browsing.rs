@@ -1212,6 +1212,33 @@ fn the_run_key_leaves_the_view_naming_the_account_to_launch() {
     );
 }
 
+/// The two acting keys are confined to the same place (ADR 0011), and only one
+/// of them was asking about the column. With the sidebar cursor on `Accounts`
+/// but the keys still in the sidebar, `Enter` moved right and `x` handed the
+/// terminal to a client — from a state the frame did not draw.
+#[test]
+fn the_run_key_does_nothing_while_the_keys_are_still_in_the_sidebar() {
+    let host = machine_with_a_group();
+
+    assert_eq!(
+        left_after(
+            &host,
+            vec![Some(Signal::Down), Some(Signal::Run), Some(Signal::Leave)]
+        ),
+        Left::Alone,
+        "`x` is the expensive one to fire by accident, which is why it is `x` \
+         rather than Enter",
+    );
+    assert_eq!(
+        left_after(
+            &host,
+            at_the_accounts(vec![Some(Signal::Run), Some(Signal::Leave)])
+        ),
+        Left::ToRun(SECOND_EMAIL.to_string()),
+        "and one `→` still runs, on the Account under the cursor",
+    );
+}
+
 /// A Run from the picker is the Run `perch run` performs: the client against
 /// that Account's Profile, the active Account untouched, and what the client
 /// said coming back as Perch's own exit code.

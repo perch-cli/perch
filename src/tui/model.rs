@@ -1383,7 +1383,19 @@ impl Model {
     /// refusal arriving after that is one the user reads with the view they
     /// were choosing in already gone.
     fn ask_for_a_run(&mut self) {
-        if self.tab != Tab::Status || self.status() != StatusRow::Accounts {
+        // The same three questions `ask_for_a_switch` asks, and the column is
+        // the one this was missing. The two acting keys ADR 0011 confines the
+        // picker to disagreed about the same state: with the sidebar cursor on
+        // the `Accounts` row but the keys still in the sidebar, `Enter` moved
+        // right while `x` ended the loop and handed the terminal to a client.
+        //
+        // Of the two that is the one to get wrong. `x` was chosen over `Enter`
+        // precisely because a mistyped Run is expensive, and the frame did not
+        // say which column the keys were in until it was made to.
+        if self.tab != Tab::Status
+            || self.column != Column::Content
+            || self.status() != StatusRow::Accounts
+        {
             return;
         }
         let Some(email) = self.selected().map(|account| account.email().to_string()) else {
