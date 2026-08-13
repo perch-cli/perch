@@ -1280,3 +1280,41 @@ fn nowhere_to_go_says_which_candidates_could_not_be_read() {
         "and the loop stayed where it was"
     );
 }
+
+/// A check that could not take the registry says so on standard output, like
+/// every other outcome it has.
+///
+/// The whole of what `--once` promises is that "the line goes to standard
+/// output for cron to capture, and what was decided goes into the exit code" —
+/// and the one outcome most likely to recur was the one with no line. Another
+/// `perch` holding the registry is ordinary: `perch status --refresh` holds it
+/// across every Renewal and every read it makes, comfortably longer than
+/// `lock::take` waits. Raised rather than said, it went to standard error by way
+/// of `main`, so a cron job capturing standard output got a line for every
+/// outcome except that one.
+#[test]
+fn a_check_another_perch_holds_the_registry_against_says_so_where_cron_is_reading() {
+    let host = watching(&[86.0], 5.0);
+    let _held = perch::registry::lock(&host).expect("the other `perch` has it");
+
+    let (result, printed) = run_watch_once(&host);
+
+    assert_eq!(
+        result.expect("a held round is an outcome rather than a failure"),
+        perch::error::EXIT_HELD,
+        "and the exit code a scheduler branches on is unchanged: {printed}"
+    );
+    assert!(
+        printed.contains("held"),
+        "the decision line is on standard output: {printed}"
+    );
+    assert!(
+        printed.contains("nothing was decided"),
+        "and says what came of the round: {printed}"
+    );
+    assert!(
+        !printed.contains("Asking again in"),
+        "without promising an interval a check has no part in — when it comes \
+         back is whatever scheduled it: {printed}"
+    );
+}
