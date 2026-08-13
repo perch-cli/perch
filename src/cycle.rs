@@ -1321,6 +1321,32 @@ pub(crate) mod tests {
         );
     }
 
+    /// An observation carrying no windows is not an observation, and the one
+    /// thing that says so is `Account::observed_utilization`'s filter.
+    ///
+    /// Behind it, `headroom_of` calls `fullest_window(cached).expect("an
+    /// observation carries at least one window")` — reached by every Switch,
+    /// every Cycle and every watch round. `anthropic::windows_in` answers
+    /// `Ok(empty)` for a `{}` usage body and `observe::keep` stores what it is
+    /// given, so the value the `expect` forbids is one Perch can write; nothing
+    /// in `validate` refuses it either. The filter is the whole guard and no
+    /// test was holding it, so removing it read as a tidy-up.
+    #[test]
+    fn an_observation_carrying_no_windows_reads_as_never_observed_rather_than_panicking() {
+        let mut held = account("a@example.com", vec![window("5-hour", 4.0)]);
+        held.utilization = Some(CachedUtilization {
+            observed_at: now(),
+            windows: Vec::new(),
+        });
+
+        assert_eq!(held.observed_utilization(), None);
+        assert_eq!(
+            headroom_of(&held),
+            Headroom::Unobserved,
+            "a figure with nothing in it is no figure, not a full window"
+        );
+    }
+
     #[test]
     fn a_full_window_exhausts_an_account_however_empty_its_others_are() {
         let headroom = headroom_of(&account(
