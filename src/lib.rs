@@ -40,6 +40,7 @@ pub mod reserve;
 pub mod switch;
 pub mod target;
 pub mod tui;
+pub mod upgrade;
 pub mod utilization;
 pub mod watch;
 

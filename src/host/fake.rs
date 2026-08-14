@@ -74,6 +74,12 @@ pub enum Effect {
         program: String,
         args: Vec<String>,
         config_dir: PathBuf,
+        /// What was added to the launched program's environment. Kept whole
+        /// rather than only as `config_dir`, because it is how an Upgrade tells
+        /// the embedded installer which Release to fetch (ADR 0039) — and a
+        /// tag that never reached the script is an upgrade to the wrong thing,
+        /// which nothing else here would notice.
+        env: Vec<(String, String)>,
     },
     /// A request that went out to the network.
     Http {
@@ -95,6 +101,12 @@ pub struct Sent {
     pub url: String,
     pub headers: Vec<(String, String)>,
     pub body: Option<String>,
+    /// The bound the caller put on it, if any. Kept because a request that was
+    /// supposed to be abandoned quickly and was not is invisible in a test that
+    /// only looks at where it went — and the whole point of the check on
+    /// `perch --version` is that it costs nothing on a machine that cannot
+    /// answer (ADR 0039).
+    pub within_millis: Option<u64>,
 }
 
 impl Sent {
@@ -202,6 +214,11 @@ pub struct FakeHost {
     secrets: RefCell<VecDeque<String>>,
     /// How long the person at the terminal takes over each answer.
     answering_takes_millis: RefCell<u64>,
+    /// Where this Perch's own binary sits. Nowhere any Channel would have put
+    /// it, so a test about which Channel installed the machine has to say —
+    /// and one that is not about it reads as an Installation Perch did not
+    /// make, which is the answer that refuses rather than the one that acts.
+    current_exe: RefCell<PathBuf>,
     /// What each endpoint answers, by URL and by the access token that asked.
     replies: RefCell<BTreeMap<(String, Option<String>), HttpResponse>>,
     /// What an endpoint answers each time it is asked, where a test is about a
@@ -296,6 +313,7 @@ impl FakeHost {
             answers: RefCell::new(VecDeque::new()),
             secrets: RefCell::new(VecDeque::new()),
             answering_takes_millis: RefCell::new(0),
+            current_exe: RefCell::new(PathBuf::from("/somewhere/nobody/installs/perch")),
             replies: RefCell::new(BTreeMap::new()),
             traces: RefCell::new(BTreeMap::new()),
             sent: RefCell::new(Vec::new()),
@@ -335,6 +353,13 @@ impl FakeHost {
     /// a test about the project entry that crosses being the current one.
     pub fn in_directory(self, path: impl AsRef<Path>) -> Self {
         *self.current_dir.borrow_mut() = path.as_ref().to_path_buf();
+        self
+    }
+
+    /// Where this Perch's binary sits, which is the whole of what says which
+    /// Channel installed it (ADR 0039).
+    pub fn installed_at(self, path: impl AsRef<Path>) -> Self {
+        *self.current_exe.borrow_mut() = path.as_ref().to_path_buf();
         self
     }
 
@@ -1109,6 +1134,10 @@ impl Host for FakeHost {
         *self.platform.borrow()
     }
 
+    fn current_exe(&self) -> Result<PathBuf, HostError> {
+        Ok(self.current_exe.borrow().clone())
+    }
+
     fn read_file(&self, path: &Path) -> Result<String, HostError> {
         self.record(Effect::ReadFile(path.to_path_buf()));
         let at = self.through_links(path)?;
@@ -1688,6 +1717,10 @@ impl Host for FakeHost {
             program: program.to_string(),
             args: args.iter().map(|arg| arg.to_string()).collect(),
             config_dir: config_dir.clone(),
+            env: env
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect(),
         });
 
         let login = self.login.borrow();
@@ -1844,6 +1877,7 @@ impl Host for FakeHost {
                 .map(|(name, value)| (name.to_string(), value.to_string()))
                 .collect(),
             body: request.body.map(str::to_string),
+            within_millis: request.within_millis,
         };
         self.record(Effect::Http {
             url: sent.url.clone(),

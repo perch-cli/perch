@@ -64,6 +64,72 @@ gh attestation verify perch-v0.1.0-aarch64-apple-darwin.tar.gz --repo perch-cli/
 Both installers check the checksum, and check the provenance too when `gh` is
 installed and logged in — and refuse to install if that check fails.
 
+## Upgrading
+
+```sh
+perch upgrade
+```
+
+It works out which of the channels above installed this Perch and hands the work
+back to that one — `brew upgrade perch` on Homebrew, `npm update -g perch-cli`
+on npm — because those binaries belong to Homebrew and npm, and a Perch that
+wrote over one would be reverted at the next `brew upgrade` or thrown away at
+the next `npm install`. It prints the command before running it. Only a binary
+the installer script put in `~/.local/bin` does Perch replace itself, by
+re-running that same installer, which is what it did before this command
+existed.
+
+A binary you unpacked from the releases page by hand belongs to no channel, and
+Perch will not write over a file it did not put there. Re-run the installer to
+move to a managed installation, or use `--channel homebrew|npm|installer` to
+say which one this really is — for a relocated or symlinked binary, say.
+
+To ask without installing anything:
+
+```sh
+perch upgrade --check           # what is installed, what is newest, from where
+perch upgrade --check --json    # the same, for a script
+```
+
+`--check` exits 0 either way, so branch on `upgradeAvailable` in the JSON rather
+than on the exit code.
+
+`--release` takes a particular one, with or without the leading `v`:
+
+```sh
+perch upgrade --release v0.2.0
+```
+
+Going backwards is allowed and is confirmed first, because a Perch older than
+the one that last wrote your registry will refuse to read it — `--yes` says you
+have accounted for that. Homebrew installs whatever its formula names and cannot
+be pointed at an older release, so `--release` is refused there rather than
+quietly ignored; the installer script takes `PERCH_VERSION` if you need to hold
+a particular one.
+
+On Windows, an npm installation prints the command instead of running it: npm
+would be replacing `perch.exe` while it is the running process, and Windows will
+not allow that. Run it from a terminal where Perch is not running. An installer
+installation on Windows is fine — it renames the running binary aside, which
+leaves a `perch.exe.old` beside it that the next upgrade clears.
+
+### Being told about new releases
+
+`perch --version` says what is installed, and adds a line when a newer release
+exists. It is the only thing in Perch that looks — `perch status` never touches
+the network, and nothing else mentions upgrades. The check happens only when
+you are at a terminal, is abandoned after two seconds, and says nothing at all
+if it fails, so a machine that is offline or behind a proxy just doesn't get the
+line.
+
+To switch it off entirely:
+
+```sh
+export PERCH_NO_UPGRADE_CHECK=1
+```
+
+That is checked before the request rather than after it, so nothing goes out.
+
 ## On macOS, if you download an archive in a browser
 
 Gatekeeper marks it as quarantined, and the binary inside is unsigned: Perch

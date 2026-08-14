@@ -17,6 +17,7 @@ pub mod run;
 pub mod status;
 pub mod switch;
 pub mod tui;
+pub mod upgrade;
 pub mod watch;
 
 use std::io::Write;

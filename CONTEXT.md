@@ -404,8 +404,17 @@ _Avoid_: formula, bottle, brew repo
 What a Channel left on this machine: the binary, and on Windows the PATH entry
 that makes it runnable. The counterpart to what Perch *holds* — an Installation
 outlives a Purge, and taking one back belongs to the Channel that made it
-rather than to any Perch command (ADR 0033).
+rather than to any Perch command (ADR 0033), as does replacing one (ADR 0039).
 _Avoid_: install, setup, deployment, footprint
+
+**Upgrade**:
+Replacing this machine's Installation with a newer Release, through the Channel
+that made it. Names the act rather than the command: what `perch upgrade` does
+on three of the four Channels is hand the work to Homebrew or npm, and only the
+Installation the installer script left is one Perch replaces itself. Goes
+backwards when asked, which is still an Upgrade — the direction is the user's
+and the route is not.
+_Avoid_: update, self-update, bump, install
 
 ## Proving it works
 

@@ -1,5 +1,13 @@
 # Perch does not look for its own updates
 
+> **Superseded by ADR 0039.** Perch now carries `perch upgrade`, and
+> `perch --version` says when a newer Release exists. Most of the argument below
+> survived — there is still no schedule, no cache and no age, and `perch status`
+> is still silent on the network — but the title is no longer true, and the
+> reopener this ADR asked for is not what happened. ADR 0039 says which parts it
+> kept and what it gave up. Left here as written, because what it refused is the
+> thing that has to go on being refused.
+
 Most distributed CLIs tell you when a newer version exists. Perch does not, and
 will not add it without a reason that has actually happened.
 
