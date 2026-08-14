@@ -488,11 +488,17 @@ pub fn watched() -> FakeHost {
     host
 }
 
-/// What the usage endpoint answers: one Quota Window, as full as the trace
-/// says at that point.
+/// What the usage endpoint answers: the two Quota Windows every Account has,
+/// with the five-hour one as full as the trace says at that point.
+///
+/// Both, because a reply leaving one out is one Perch refuses — it cannot tell
+/// that from the fullest window going missing, which is the ADR 0012 loss. The
+/// seven-day window sits at nought so the five-hour one is always the fullest
+/// and every figure the traces assert on is still the one they set.
 pub fn usage(used_percent: f64) -> String {
     format!(
-        r#"{{"five_hour": {{"utilization": {used_percent}, "resets_at": "2026-08-04T14:30:00Z"}}}}"#
+        r#"{{"five_hour": {{"utilization": {used_percent}, "resets_at": "2026-08-04T14:30:00Z"}},
+            "seven_day": {{"utilization": 0, "resets_at": "2026-08-09T00:00:00Z"}}}}"#
     )
 }
 

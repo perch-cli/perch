@@ -352,6 +352,24 @@ fn windows_in(
         windows.push(window_from(name, used_percent, value, said));
     }
 
+    // The two every Account has, held to the same standard when they are missing
+    // as when they are unreadable. [`is_drift`] can only refuse a window that is
+    // *there* and has stopped answering, because it is asked once per key the
+    // reply carries — so a `"five_hour": null` was the loud failure and a
+    // `five_hour` the reply simply left out was the quiet one, which is the same
+    // ADR 0012 loss arriving by omission instead of by type.
+    //
+    // Only where something was read. A reply carrying no window at all is not
+    // this — it is an answer that says nothing about the Account rather than one
+    // missing a window, and [`utilization`] already has the sentence for it.
+    if !windows.is_empty()
+        && let Some(missing) = EVERY_ACCOUNT_HAS
+            .iter()
+            .find(|name| !windows.iter().any(|held| held.window == window_name(name)))
+    {
+        return Err(went_missing(missing));
+    }
+
     windows.sort_by(|one, other| {
         rank(&one.window)
             .cmp(&rank(&other.window))
@@ -443,9 +461,10 @@ fn never_a_window(name: &str) -> bool {
 const EXTRA_USAGE: &str = "extra_usage";
 
 /// The Quota Windows every Account has, in the order they run out. The only
-/// two, and named here once because [`rank`] shows them first and [`is_drift`]
-/// holds them back from being read as absent for the same reason: they are the
-/// ones always there to be read.
+/// two, and named here once because [`rank`] shows them first, [`is_drift`]
+/// holds them back from being read as absent, and [`windows_in`] refuses a
+/// reply that leaves one out — all three for the same reason: they are the ones
+/// always there to be read.
 const EVERY_ACCOUNT_HAS: [&str; 2] = ["five_hour", "seven_day"];
 
 /// Whether a key names one of [`EVERY_ACCOUNT_HAS`], as the endpoint spells it
@@ -458,6 +477,13 @@ fn drifted(name: &str) -> String {
     format!(
         "the usage endpoint named the Quota Window `{name}` without a numeric \
          `utilization`, so how full it is could not be read"
+    )
+}
+
+fn went_missing(name: &str) -> String {
+    format!(
+        "the usage endpoint did not name the Quota Window `{name}` at all, and \
+         every Account has one, so the fullest window could not be read"
     )
 }
 
@@ -713,6 +739,35 @@ mod tests {
         }
     }
 
+    /// A window every Account has, left out of the reply altogether, is the same
+    /// loss as one that has stopped answering — and it used to be the quiet one.
+    ///
+    /// [`is_drift`] is asked once per key the reply *carries*, so it can only
+    /// ever catch a window that is there and unreadable. A `five_hour` the reply
+    /// simply omits was never asked about, and `utilization` refuses only a reply
+    /// naming no window at all — so a partial outage answering with the weekly
+    /// window alone left an Account whose five-hour window was 98% full reading
+    /// as 90% Headroom, ranked top of its Group and switched onto. That is
+    /// exactly the ADR 0012 failure [`is_drift`]'s doc refuses, arriving by
+    /// omission instead of by type.
+    #[test]
+    fn a_window_every_account_has_is_drift_when_the_reply_leaves_it_out() {
+        for (left_out, document) in [
+            ("five_hour", r#"{"seven_day": {"utilization": 10}}"#),
+            ("seven_day", r#"{"five_hour": {"utilization": 10}}"#),
+        ] {
+            let document: Value = serde_json::from_str(document).unwrap();
+
+            let refused = windows_of(&document)
+                .expect_err("half a picture is not a picture: {left_out} was left out");
+
+            assert!(
+                refused.contains(left_out),
+                "it names the window that went missing: {refused}"
+            );
+        }
+    }
+
     /// A per-model window is `null` for every model the Account has no window
     /// for, which is most of them, and that is the endpoint saying there is no
     /// such window rather than a window declining to say how full it is.
@@ -779,17 +834,18 @@ mod tests {
         let document: Value = serde_json::from_str(
             r#"{
               "five_hour": {"utilization": 12},
+              "seven_day": {"utilization": 5},
               "extra_usage": {"is_enabled": true, "utilization": 90.0, "monthly_limit": 200}
             }"#,
         )
         .unwrap();
 
-        let windows = windows_of(&document).expect("the one window says how full it is");
+        let windows = windows_of(&document).expect("both windows say how full they are");
 
         let named: Vec<&str> = windows.iter().map(|w| w.window.as_str()).collect();
         assert_eq!(
             named,
-            vec!["5-hour"],
+            vec!["5-hour", "7-day"],
             "an allowance beyond the plan is not a constraint on it"
         );
     }
@@ -826,16 +882,17 @@ mod tests {
         let document: Value = serde_json::from_str(
             r#"{
               "five_hour": {"utilization": 42},
+              "seven_day": {"utilization": 8},
               "organization": {"uuid": "org-1", "name": "Overflow Ltd"},
               "session": "not a window"
             }"#,
         )
         .unwrap();
 
-        let windows = windows_of(&document).expect("the one window says how full it is");
+        let windows = windows_of(&document).expect("both windows say how full they are");
 
         let named: Vec<&str> = windows.iter().map(|w| w.window.as_str()).collect();
-        assert_eq!(named, vec!["5-hour"]);
+        assert_eq!(named, vec!["5-hour", "7-day"]);
     }
 
     /// The line between the two, which is the name. Something carrying no

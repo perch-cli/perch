@@ -286,6 +286,46 @@ fn a_binary_perch_did_not_place_is_refused_rather_than_written_over() {
     }
 }
 
+/// The same binary, asked a question rather than told to replace itself.
+///
+/// A check writes nothing, so the refusal that protects a hand-placed binary
+/// has nothing to protect here — and it used to fire anyway, because the Channel
+/// was resolved before `--check` was consulted. What a script got back was
+/// "Perch will not write over a file it did not put there", a sentence about an
+/// act it had not asked for, and no `installed` or `newest` at all. A check is a
+/// question and answering it is success whichever way the answer went (ADR
+/// 0039); the Channel is the one thing that cannot be answered, so it is `null`.
+#[test]
+fn a_check_answers_on_a_binary_perch_did_not_place_rather_than_refusing() {
+    let host = machine().installed_at("/usr/local/bin/perch");
+
+    let (outcome, said) = upgrading(
+        &host,
+        UpgradeArgs {
+            check: true,
+            json: true,
+            ..UpgradeArgs::default()
+        },
+    );
+
+    let code = outcome.expect("a question is answered, not refused");
+    assert_eq!(code, EXIT_OK, "{said}");
+    let answered: serde_json::Value =
+        serde_json::from_str(&said).unwrap_or_else(|_| panic!("it is a document: {said}"));
+    assert_eq!(
+        answered["installed"],
+        upgrade_installed(),
+        "the facts a script came for are there: {said}"
+    );
+    assert!(answered["newest"].is_string(), "{said}");
+    assert_eq!(
+        answered["channel"],
+        serde_json::Value::Null,
+        "and the one thing that cannot be answered says so: {said}"
+    );
+    assert!(ran(&host).is_empty(), "a check runs nothing");
+}
+
 /// The escape hatch for the machine where the path is wrong — a relocated
 /// binary, or one reached through a symlink Perch could not follow. What is
 /// named is taken as given rather than checked back against the path, because
@@ -557,6 +597,61 @@ fn a_named_release_is_refused_on_homebrew_rather_than_quietly_ignored() {
     let refused = outcome.expect_err("Homebrew cannot be pointed at a Release");
     assert!(refused.to_string().contains("Homebrew"), "{refused}");
     assert!(ran(&host).is_empty(), "and nothing was run");
+}
+
+/// The same refusal, for a Release older than the one installed — which is the
+/// ordering that was wrong.
+///
+/// The refusal used to sit after the downgrade agreement, so this asked "Install
+/// the older Release? [y/N]", waited for somebody to type `y`, and only then
+/// said Homebrew cannot be pointed at a Release at all. Nobody should be asked
+/// to agree to something that is going to be refused whatever they answer.
+#[test]
+fn a_named_release_older_than_this_one_is_refused_before_anybody_agrees_to_it() {
+    let host = machine()
+        .with_answers(&["y"])
+        .installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch");
+
+    let (outcome, said) = upgrading(
+        &host,
+        UpgradeArgs {
+            release: Some(OLDER.to_string()),
+            ..UpgradeArgs::default()
+        },
+    );
+
+    let refused = outcome.expect_err("Homebrew cannot be pointed at a Release");
+    assert!(refused.to_string().contains("Homebrew"), "{refused}");
+    assert!(
+        !said.contains("[y/N]"),
+        "nobody is asked to agree to something that is refused either way: {said}"
+    );
+    assert!(ran(&host).is_empty(), "and nothing was run");
+}
+
+/// The same again with no terminal to agree on, which is where the ordering
+/// gave advice that could not work: the downgrade refusal names `--yes` as the
+/// way past it, and `--yes` reached the Homebrew refusal instead.
+#[test]
+fn a_named_release_on_homebrew_is_refused_as_itself_where_there_is_no_terminal() {
+    let host = machine()
+        .without_terminal()
+        .installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch");
+
+    let (outcome, _) = upgrading(
+        &host,
+        UpgradeArgs {
+            release: Some(OLDER.to_string()),
+            ..UpgradeArgs::default()
+        },
+    );
+
+    let refused = outcome.expect_err("Homebrew cannot be pointed at a Release");
+    assert!(
+        refused.to_string().contains("Homebrew"),
+        "the refusal is the one that is actually true, rather than one naming a \
+         flag that reaches this same refusal: {refused}"
+    );
 }
 
 // ---- going backwards -----------------------------------------------------

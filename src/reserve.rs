@@ -216,7 +216,8 @@ impl<'a> Reserve<'a> {
         let width = utilization::window_width(kinds.iter().map(String::as_str));
         let mut lines = Vec::new();
         for kind in kinds {
-            let mut emptiest: Option<(&Account, f64)> = None;
+            let mut emptiest: Option<f64> = None;
+            let mut oldest: Option<DateTime<Utc>> = None;
             let mut read = 0;
             for account in &read_for {
                 let cached = account
@@ -226,21 +227,34 @@ impl<'a> Reserve<'a> {
                     continue;
                 };
                 read += 1;
-                if emptiest.is_none_or(|(_, least)| window.used_percent < least) {
-                    emptiest = Some((account, window.used_percent));
+                if emptiest.is_none_or(|least| window.used_percent < least) {
+                    emptiest = Some(window.used_percent);
                 }
+                oldest =
+                    Some(oldest.map_or(cached.observed_at, |held| held.min(cached.observed_at)));
             }
-            let Some((account, used_percent)) = emptiest else {
+            let Some(used_percent) = emptiest else {
                 continue;
             };
             // "used", because the line above it says how much is *left*: two
             // percentages of the same window an inch apart, and the reader is
             // not asked to tell them apart by context.
+            //
+            // The age is the oldest of the readings this row counts, not the age
+            // of the Account the percentage came from. `lines` above states the
+            // rule and the reason at length: a count of Accounts rests on every
+            // one of their readings, so quoting the freshest beside it says the
+            // whole sentence is four minutes old when half of it is eight hours
+            // old. This row is the same sentence — "emptiest 30% used across 2
+            // Accounts" — and it was making the same claim.
             lines.push(format!(
                 "{kind:<width$} emptiest {:>3}% used across {} ({})",
                 crate::utilization::percentage(used_percent),
                 accounts(read),
-                observed(account, now),
+                match oldest {
+                    Some(at) => format!("as of {}", utilization::age_phrase(at, now)),
+                    None => "never observed".to_string(),
+                },
             ));
         }
         lines
@@ -508,6 +522,33 @@ mod tests {
                 "5-hour     emptiest  40% used across 3 Accounts (as of 4m ago)",
                 "7-day-opus emptiest   8% used across 1 Account (as of 4m ago)",
             ]
+        );
+    }
+
+    /// The age on a window row is the oldest reading the row counts, not the age
+    /// of the Account the percentage happens to come from.
+    ///
+    /// `lines` was fixed for this and `window_lines` was not, though it builds
+    /// the same sentence: a percentage and a count of Accounts, with one age
+    /// after them. Taken from the emptiest Account, the age described one of the
+    /// two figures the sentence is made of — so "emptiest 7% used across 2
+    /// Accounts (as of 4m ago)" rested on a reading eight hours old and said it
+    /// was four minutes old. Every test here gave both Accounts the same stamp,
+    /// so the two could not come apart.
+    #[test]
+    fn the_age_on_a_window_row_is_the_oldest_reading_the_row_counts() {
+        let mut stale = account("stale@example.com", vec![window("5-hour", 60.0)]);
+        stale.utilization.as_mut().expect("it was read").observed_at =
+            now() - chrono::Duration::hours(8);
+        let registry = holding(vec![
+            stale,
+            account("fresh@example.com", vec![window("5-hour", 7.0)]),
+        ]);
+
+        assert_eq!(
+            windows_of(&registry),
+            ["5-hour emptiest   7% used across 2 Accounts (as of 8h ago)"],
+            "the count and the age have to be about the same set of readings"
         );
     }
 

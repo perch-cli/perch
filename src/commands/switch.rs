@@ -60,7 +60,14 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
     // discovered, which Account is active now — is written by `record`, which
     // is the only way to reach what the Switch found. What is left here is
     // saying it.
-    let landing = switch::perform(host, &mut perch, &installed, &incoming, outgoing.as_ref());
+    let landing = switch::perform(
+        host,
+        &mut perch,
+        &installed,
+        &incoming,
+        outgoing.as_ref(),
+        &registry,
+    );
     let captured = landing.record(host, &mut perch, &mut registry)?;
 
     report(out, &registry, &incoming, &captured, host.now())?;

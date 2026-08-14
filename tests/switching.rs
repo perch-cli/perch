@@ -299,6 +299,57 @@ fn a_live_credential_belonging_to_a_login_made_outside_perch_is_not_captured() {
     );
 }
 
+/// A stale Identity is not evidence, and it is Perch that leaves them stale.
+///
+/// `Landing::record` files the incoming Account as active whenever its
+/// Credential went live — including when the patch of `.claude.json` failed
+/// afterwards, which is a state the suite above already produces on purpose. So
+/// the registry says B and Claude Code's file still says A. B then runs and
+/// Anthropic Rotates it.
+///
+/// On the next Switch, to a third Account, the Identity said A, the Capture was
+/// declined as "not B's", and the incoming Credential went over the only copy of
+/// B's Rotation — the loss ADR 0006 exists to prevent, reached by believing a
+/// file Perch had just failed to write. The report said the live Credential was
+/// A's and had been left alone, which was untrue twice over.
+///
+/// Nothing on the machine says whose Rotation it is, so nothing is written.
+#[test]
+fn a_rotation_is_not_lost_to_an_identity_perch_itself_failed_to_patch() {
+    // Three, because the Switch that loses the Rotation is the one to a *third*
+    // Account: with two, the repair path recognises the Account it is on.
+    let host = machine_with_three_accounts();
+    host.set_unwritable(IDENTITY_PATH, "read-only file");
+    run_switch(&host, SECOND_EMAIL)
+        .0
+        .expect_err("the Identity could not be patched");
+    host.writable_again(IDENTITY_PATH);
+    assert!(
+        identity_file(&host).contains(EMAIL),
+        "the file still names the Account the Switch left: {}",
+        identity_file(&host)
+    );
+
+    // The Account that is actually live Rotates, which is the whole reason a
+    // Capture happens before anything is written.
+    let rotated = SECOND_CREDENTIAL.replace("sk-ant-ort01-second", "sk-ant-ort01-rotated");
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, &rotated);
+
+    let (result, printed) = run_switch(&host, THIRD_EMAIL);
+
+    result.expect_err("nothing on the machine says whose Rotation that is");
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(rotated.as_str()),
+        "the Rotation is still live rather than written over: {printed}"
+    );
+    assert_ne!(
+        stored_credential(&host, EMAIL).as_deref(),
+        Some(rotated.as_str()),
+        "and it was not filed under the Account the stale Identity named"
+    );
+}
+
 /// The mirror, so the guard above cannot be satisfied by never Capturing at
 /// all: an Identity that says nothing is no evidence against, and a Rotation
 /// made under a Profile Claude Code has never written an Identity into must
@@ -1581,6 +1632,40 @@ fn an_identity_file_that_is_not_json_leaves_a_switch_that_says_how_to_finish_it(
         "{said}"
     );
     assert_eq!(live_credential(&host).as_deref(), Some(SECOND_CREDENTIAL));
+}
+
+/// The same file, and the Switch that repairs it: onto the Account Perch
+/// already records as active.
+///
+/// `already_landed` asks Claude Code's own file whether the machine already says
+/// what this Switch would make it say, and it read that file with a `?`. So an
+/// `oauthAccount` with no `emailAddress` — a state `perch adopt`'s own suite
+/// shows is real — refused the one command that rewrites it, while a Switch to
+/// any *other* Account went through untroubled: `capture` swallows the identical
+/// failure and the patch only needs the file to be a JSON object. An Identity
+/// naming nobody is a Switch that has not landed, which is the answer the
+/// unreadable Credential beside it already gets.
+#[test]
+fn a_switch_onto_the_active_account_repairs_an_identity_naming_nobody() {
+    let host = machine_with_two_accounts();
+    host.set_file(
+        IDENTITY_PATH,
+        r#"{"oauthAccount": {"organization": "Acme"}}"#,
+    );
+
+    let (result, _) = run_switch(&host, EMAIL);
+
+    result.expect("the Switch that repairs the file is not refused by it");
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(CREDENTIAL),
+        "the Account Perch records as active is the live one"
+    );
+    let identity = host.file(IDENTITY_PATH).expect("the file is still there");
+    assert!(
+        identity.contains(EMAIL),
+        "and it now names somebody: {identity}"
+    );
 }
 
 /// A `.claude.json` that cannot be read at all is different from one that is

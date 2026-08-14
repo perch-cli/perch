@@ -471,6 +471,33 @@ fn a_profile_inside_the_default_profile_is_not_linked_into_itself() {
     );
 }
 
+/// The same refusal at any depth, not only where the Profile is a direct child.
+///
+/// `PERCH_HOME=~/.claude/perch` under `CLAUDE_CONFIG_DIR=~/.claude` is the
+/// arrangement that reaches it: the entry that crosses is `~/.claude/perch` and
+/// the Profile sits three levels inside it, so the two are different paths and
+/// an equality check waved the link through. What it made was a link whose own
+/// subtree contained the Profile it was made in — so anything walking that
+/// Profile afterwards, Claude Code's plugin and memory discovery among it,
+/// descends for ever.
+#[test]
+fn an_entry_that_contains_the_profile_is_not_linked_into_it_however_deep_it_is() {
+    let inside = format!("{SHARED}/perch/profiles/someone-example-com");
+    let host = machine().with_file(shared("perch/registry.json"), "{}");
+
+    reconcile(&host, Path::new(SHARED), Path::new(&inside)).expect("everything else crosses");
+
+    assert_eq!(
+        host.link_at(format!("{inside}/perch")),
+        None,
+        "a link here holds the Profile it was made in"
+    );
+    assert_eq!(
+        host.link_at(format!("{inside}/CLAUDE.md")),
+        Some((Link::Symbolic, PathBuf::from(shared("CLAUDE.md"))))
+    );
+}
+
 /// The Default Profile already holds all of it, and a directory linked into
 /// itself is a shape nothing recovers from.
 #[test]

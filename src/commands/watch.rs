@@ -591,7 +591,14 @@ fn act(
         Err(error) => return Err(error),
     };
 
-    let landing = switch::perform(host, perch, &installed, &choice.account, Some(&outgoing));
+    let landing = switch::perform(
+        host,
+        perch,
+        &installed,
+        &choice.account,
+        Some(&outgoing),
+        registry,
+    );
 
     // Only a Switch that happened starts a cooldown. A round that was refused
     // or found nowhere to go has changed nothing, and making it wait would be

@@ -655,10 +655,22 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
     // an Account a bare `perch switch` would not land on, and the one it does
     // land on could be the bottom row. The picker exists to make the ranking
     // visible; showing a different one is worse than showing none.
+    // `same_name` rather than `==`, for the reason [`choose`] gives at its own
+    // reading of this value: `upsert` matches an Account with `same_name` but
+    // stores the incoming spelling, so an Identity re-read under another
+    // capitalisation leaves `active` naming the entry the old way. Compared by
+    // bytes, `here` came back `None` on exactly those machines — and a `None`
+    // here is the staying-put veto silently dropped from the listing while
+    // `choose` keeps it, which is the disagreement this whole function exists to
+    // prevent.
     let here = registry
         .active
         .as_deref()
-        .and_then(|active| accounts.iter().find(|account| account.email() == active))
+        .and_then(|active| {
+            accounts
+                .iter()
+                .find(|account| registry::same_name(account.email(), active))
+        })
         .filter(|account| is_a_candidate(account))
         .map(|account| headroom_of(account));
     let here = measured_against(here.as_ref());
@@ -1788,6 +1800,43 @@ pub(crate) mod tests {
                  uses — listed {listed:?}"
             );
         }
+    }
+
+    /// The same agreement, on a machine where `active` and the Account it names
+    /// are capitalised differently.
+    ///
+    /// `Registry::upsert` matches with `same_name` but stores the *incoming*
+    /// spelling, so an Identity Claude Code re-writes under another
+    /// capitalisation leaves `active` naming the entry the old way — a state
+    /// `Registry::is_active`'s doc describes and every other reader of an address
+    /// compares for. `ranked` compared by bytes, found no `here`, and dropped the
+    /// staying-put veto from the listing alone: `choose` still refused to move,
+    /// and the picker showed the Account it would not have moved to at the top.
+    #[test]
+    fn the_listing_agrees_with_the_cycle_however_the_active_address_is_capitalised() {
+        let registry = preferring(
+            {
+                let mut registry = holding(vec![
+                    account("here@example.com", vec![resetting("5-hour", 40.0, 1)]),
+                    account("worse@example.com", vec![resetting("5-hour", 95.0, 2)]),
+                    account("roomiest@example.com", vec![window("5-hour", 5.0)]),
+                ]);
+                registry.active = Some("HERE@EXAMPLE.COM".to_string());
+                registry
+            },
+            Strategy::SoonestReset,
+        );
+
+        assert_eq!(
+            ranked_emails(&registry),
+            [
+                "roomiest@example.com",
+                "here@example.com",
+                "worse@example.com"
+            ],
+            "the Account being left sorts by the veto whatever case `active` \
+             happens to spell it in",
+        );
     }
 
     /// The Account being left sits above every Account a Cycle has ruled out, and

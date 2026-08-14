@@ -86,7 +86,14 @@ pub fn reconcile(host: &dyn Host, shared: &Path, into: &Path) -> Result<()> {
         // one inside the other, and anything a listing yields that has no final
         // component to be named after. Both would be a link to itself, which is
         // a shape nothing recovers from.
-        let Some(name) = entry.file_name().filter(|_| entry != *into) else {
+        //
+        // Anything *containing* the Profile, not only the Profile exactly:
+        // `PERCH_HOME=~/.claude/perch` under `CLAUDE_CONFIG_DIR=~/.claude` makes
+        // the crossing entry `~/.claude/perch` and the Profile several levels
+        // below it. Compared for equality the two are different paths, so the
+        // link was made — and its subtree held the Profile it was made in, so
+        // every walk through that Profile afterwards recurses without bottom.
+        let Some(name) = entry.file_name().filter(|_| !into.starts_with(&entry)) else {
             continue;
         };
         establish(host, &entry, &into.join(name))?;

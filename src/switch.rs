@@ -215,6 +215,7 @@ pub fn perform(
     installed: &Installed,
     incoming: &Account,
     outgoing: Option<&Account>,
+    registry: &Registry,
 ) -> Landing {
     let store = match registry::the_default_profile(host) {
         Ok(ground) => ground,
@@ -241,7 +242,7 @@ pub fn perform(
         let mut holds = lock::Holds::of(held, perch);
 
         let captured = holds
-            .around(|| capture(host, &prepared, incoming, outgoing))
+            .around(|| capture(host, &prepared, incoming, outgoing, registry))
             .map_err(|error| error.with_note(&nothing_happened(outgoing)))?;
 
         holds
@@ -360,7 +361,18 @@ pub struct NotLanded {
 /// from the other side, and it wants the same answer.
 pub fn already_landed(host: &dyn Host, installed: &Installed, account: &Account) -> Result<bool> {
     let store = registry::the_default_profile(host)?;
-    let named = probe::read_identity(host, &store, installed)?
+    // Read the way the Credential beside it is read, and for the same reason
+    // spelled out there. An Identity Perch cannot understand — an `oauthAccount`
+    // with no `emailAddress`, a `.claude.json` that is not JSON, an address with
+    // nothing nameable in it — is a file naming nobody, so nothing has landed,
+    // and `perch switch <the active Account>` is precisely the command that
+    // rewrites it. Propagated, it refused that repair on the strength of the
+    // file the repair exists to replace, while a Switch to any *other* Account
+    // went through: `capture` swallows the same failure and `patch_oauth_account`
+    // only needs the file to be a JSON object.
+    let named = probe::read_identity(host, &store, installed)
+        .ok()
+        .flatten()
         .is_some_and(|identity| registry::same_name(&identity.email, account.email()));
 
     // A live store holding bytes that are not a Credential has not landed
@@ -468,6 +480,7 @@ fn capture(
     prepared: &Prepared,
     incoming: &Account,
     outgoing: Option<&Account>,
+    registry: &Registry,
 ) -> Result<Captured> {
     let Some(outgoing) = outgoing else {
         return Ok(Captured::NoOutgoing);
@@ -556,10 +569,34 @@ fn capture(
     if let Ok(Some(identity)) = probe::read_identity(host, &prepared.store, &prepared.installed)
         && !registry::same_name(&identity.email, outgoing.email())
     {
-        return Ok(Captured::NotTheirs {
-            outgoing: outgoing.email().to_string(),
-            live: identity.email,
-        });
+        // And corroborated, because an Identity naming somebody else is the one
+        // piece of evidence here that Perch does not write and that goes stale
+        // in a state Perch itself produces. `Landing::record` files the incoming
+        // Account as active whenever its Credential went live, including when
+        // step three failed — so a Switch to B whose `patch_identity` failed
+        // leaves the registry saying B and `.claude.json` still saying A. B then
+        // runs and Rotates. On the next `perch switch C`, this branch read A,
+        // declined the Capture, and the write below put C's Credential over B's
+        // Rotation: the one loss ADR 0006 exists to prevent, reached by
+        // believing a file Perch had just failed to update. The report even said
+        // the live Credential was A's and "not kept", which was untrue.
+        //
+        // So the Identity is decisive only where something else agrees with it.
+        // An address Perch does not hold is a login made outside Perch, whose
+        // Credential is nobody's to file. An address Perch does hold, whose own
+        // stored copy *is* what is live, is a machine that really is on that
+        // Account. Anything else is unaccounted for, and gets what the same
+        // ambiguity gets above: a refusal, with nothing written.
+        return match corroborates(host, registry, outgoing, &identity.email, live.as_str()) {
+            Corroboration::NothingAtStake => Ok(Captured::NothingToSave),
+            Corroboration::NotOurs => Ok(Captured::NotTheirs {
+                outgoing: outgoing.email().to_string(),
+                live: identity.email,
+            }),
+            Corroboration::Unaccounted => Err(PerchError::Conflict(
+                the_identity_is_not_corroborated(outgoing, &identity.email),
+            )),
+        };
     }
 
     profile::store_credential(host, &outgoing.store(host)?, live.as_str())?;
@@ -567,6 +604,78 @@ fn capture(
     Ok(Captured::Copied {
         from: outgoing.email().to_string(),
     })
+}
+
+/// Whether an Identity naming somebody other than the outgoing Account is borne
+/// out by anything besides itself.
+enum Corroboration {
+    /// There is no Rotation here to lose: the live Credential is already exactly
+    /// what the outgoing Account's Profile holds, so a Capture would copy a file
+    /// over itself and skipping it costs nothing whoever the Identity names.
+    NothingAtStake,
+    /// The live Credential is not the outgoing Account's to save: the address
+    /// belongs to a login Perch does not hold, or to an Account Perch holds
+    /// whose own stored copy is exactly what is live.
+    NotOurs,
+    /// The live Credential is a Rotation of something — it matches neither the
+    /// outgoing Account's stored copy nor that of the Account the Identity names
+    /// — and nothing on the machine says whose.
+    Unaccounted,
+}
+
+/// Reads the second opinion, in the order that settles it most cheaply.
+///
+/// A store that will not answer corroborates nothing, which lands on
+/// [`Corroboration::Unaccounted`]: this decides whether a refresh token is about
+/// to be written over, and "the keychain was locked" is not evidence that it is
+/// safe to.
+fn corroborates(
+    host: &dyn Host,
+    registry: &Registry,
+    outgoing: &Account,
+    named: &str,
+    live: &str,
+) -> Corroboration {
+    // Asked first, and of the outgoing Account rather than of the one named. It
+    // is the question with something at stake in it: a Capture exists to save a
+    // Rotation, and where the live Credential is already the copy that Profile
+    // holds there is no Rotation and nothing a wrong answer could cost. That is
+    // the ordinary interrupted Switch — Perch's record moved on and
+    // `.claude.json` did not — and it must stay a Switch that simply runs.
+    if held_by(host, outgoing).is_some_and(|held| held == live) {
+        return Corroboration::NothingAtStake;
+    }
+    let Some(account) = registry.account(named) else {
+        return Corroboration::NotOurs;
+    };
+    match held_by(host, account) {
+        Some(held) if held == live => Corroboration::NotOurs,
+        _ => Corroboration::Unaccounted,
+    }
+}
+
+/// What an Account's own Profile holds, where it can be read at all.
+fn held_by(host: &dyn Host, account: &Account) -> Option<String> {
+    let store = account.store(host).ok()?;
+    Some(credentials::read(host, &store).ok()??.credential)
+}
+
+/// The refusal for a live Credential an Identity names somebody else for, where
+/// that somebody else is an Account Perch holds and is not holding this.
+fn the_identity_is_not_corroborated(outgoing: &Account, named: &str) -> String {
+    format!(
+        "The Identity beside the live Credential names {named}, but the live \
+         Credential is not the one Perch holds for {named} either — and Perch is \
+         on {}, so it cannot tell whose Rotation this is.\n\
+         It may be {}'s, made after a Switch that could not finish writing the \
+         Identity: writing over it would destroy the only good copy, so nothing \
+         was changed.\n\
+         It may be {named}'s, Rotated since. `perch switch {named}` files it \
+         under the Account the Identity names; `perch relogin` replaces it with \
+         a fresh login for whichever Account you meant.",
+        outgoing.email(),
+        outgoing.email(),
+    )
 }
 
 /// What Perch cannot establish, when the repair for an interrupted Switch finds a
