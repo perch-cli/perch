@@ -658,6 +658,15 @@ impl FakeHost {
     /// is should not have an answer invented for it. Anything comparing two ages
     /// therefore sees nothing on an ordinary fixture, which is what leaves it
     /// free to treat "will not say" as "nothing to report".
+    ///
+    /// Behind `dogfood` as well as `fakes`, because the Dogfood tests are the
+    /// only thing that has ever wanted it and the fakes feature on its own would
+    /// carry a builder with no caller. The same reasoning the fakes are held
+    /// back by, one level in — and it keeps the coverage run, which compiles
+    /// `dogfood` out, from measuring a function whose only tests it has
+    /// compiled out with it. The day an ordinary suite needs a file with an age,
+    /// this line is what comes off.
+    #[cfg(feature = "dogfood")]
     pub fn with_file_written_at(self, path: impl AsRef<Path>, at: DateTime<Utc>) -> Self {
         self.set_file(path.as_ref(), "");
         self.modified
