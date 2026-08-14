@@ -241,6 +241,7 @@ fn offer_an_export(
 
     let Some(path) = ask(host, out, "Where to write it: ")?
         .map(|typed| expanded(host, typed.trim()))
+        .transpose()?
         .filter(|path| !path.as_os_str().is_empty())
     else {
         // Not read as a change of mind. Somebody who has just asked for an
@@ -272,21 +273,39 @@ fn offer_an_export(
 /// Purge stopped, and every question before it had to be answered again — a
 /// refusal that reads as a bug rather than as an instruction.
 ///
-/// Only a leading `~/`, and only against this machine's home. `~someone/` is
-/// another user's home, which is a lookup Perch has no way to do and nothing to
-/// gain from; a `~` anywhere else in a path is an ordinary character, and a
-/// bare `~` is a directory nobody means to write a file to.
-fn expanded(host: &dyn Host, typed: &str) -> PathBuf {
-    let Some(rest) = typed.strip_prefix("~/") else {
-        return PathBuf::from(typed);
+/// Only a leading `~/`, and only against this machine's home. A `~` anywhere
+/// else in a path is an ordinary character and is left alone.
+///
+/// Every other leading `~` is refused rather than taken verbatim. `~someone/` is
+/// another user's home, which is a lookup Perch has no way to do; a bare `~` and
+/// a `~backups` are a home directory somebody meant and a shell did not expand.
+/// Passed through, all three named a file in whatever directory the command was
+/// typed in — so the Export landed at `./~`, the report said "Exported 3
+/// Accounts to ~", and the Purge that followed took every Credential on the
+/// machine while the only copy of them sat somewhere nobody would look. This
+/// prompt is the one path in Perch a shell has not been over, which is exactly
+/// why it cannot read an unexpanded `~` as a filename.
+fn expanded(host: &dyn Host, typed: &str) -> Result<PathBuf> {
+    let Some(rest) = typed.strip_prefix('~') else {
+        return Ok(PathBuf::from(typed));
+    };
+    let Some(rest) = rest.strip_prefix('/') else {
+        return Err(PerchError::Invalid(format!(
+            "`{typed}` begins with a `~` that does not name this machine's home, \
+             and Perch will not read it as the name of a file — written where it \
+             says, the Export would land in whatever directory you typed this \
+             in.\n\
+             Nothing was purged. Run `perch purge` again and name a path, such \
+             as `~/perch.age`."
+        )));
     };
     match host.home_dir() {
-        Ok(home) => home.join(rest),
+        Ok(home) => Ok(home.join(rest)),
         // A machine that cannot say where home is has already refused this
         // command at `perch_home`, so this is unreachable rather than a
         // fallback. Verbatim is the honest answer for it either way: the
         // refusal that follows names the `~` the user typed.
-        Err(_) => PathBuf::from(typed),
+        Err(_) => Ok(PathBuf::from(typed)),
     }
 }
 

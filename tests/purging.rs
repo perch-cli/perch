@@ -284,6 +284,37 @@ fn a_tilde_typed_at_the_export_prompt_means_home_because_no_shell_will_say_so() 
     );
 }
 
+/// A `~` this prompt cannot expand is refused rather than read as a filename.
+///
+/// Only `~/` is a home directory. A bare `~`, a `~backups` and a `~someone/`
+/// were all taken verbatim, and every guard downstream let them through: the
+/// parent of `~` is the current directory, which exists; nothing is at that path
+/// yet; and it does not start with Perch's home, so the Purge would not take it.
+/// So the Export was written to `./~`, the report said "Exported 3 Accounts to
+/// ~", the user typed `purge`, and every Credential on the machine went — with
+/// the only copy of them in whatever directory the command was run from.
+#[test]
+fn a_tilde_this_prompt_cannot_expand_is_refused_rather_than_written_beside_the_cwd() {
+    for typed in ["~", "~backups", "~someone/perch.age"] {
+        let host = a_machine_to_give_back()
+            .with_answers(&["y", typed, "purge"])
+            .with_secrets(&[PASSPHRASE, PASSPHRASE]);
+
+        let (outcome, printed) = run_purge(&host);
+
+        let refused = outcome.expect_err("a `~` Perch cannot expand is not a path");
+        assert!(
+            refused.to_string().contains("Nothing was purged"),
+            "the Purge is off, and says so: {refused}"
+        );
+        assert_eq!(
+            registry_on(&host).map(|registry| registry.accounts.len()),
+            Some(3),
+            "and every Account is still here: {printed}"
+        );
+    }
+}
+
 /// The Export is offered before the word is asked for, so a Purge can be
 /// declined *after* one has been written. That leaves a file holding a working
 /// Credential for every Account at a path the user is about to stop thinking
