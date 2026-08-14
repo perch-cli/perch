@@ -1349,7 +1349,21 @@ impl Model {
         // On the Config tab it is only ever that: nothing on it is a Switch, and
         // a Switch a keystroke away from an edit would be a Credential moved by
         // somebody adjusting a percentage.
-        if self.tab == Tab::Config || self.column != Column::Content {
+        //
+        // Only ever that, which took saying twice. Handed to `rightwards` from
+        // the content column, Enter was not a move at all: `rightwards` opens by
+        // stepping the value when there is no column further right to reach. So
+        // Enter on `watcher-may-act` read `false`, stepped it to `true`, and two
+        // frames later ran `perch config set watcher-may-act true` — the watcher
+        // turned on by a key the legend does not mention and this comment says
+        // does nothing.
+        if self.tab == Tab::Config {
+            return match self.column {
+                Column::Content => Asked::Nothing,
+                _ => self.rightwards(),
+            };
+        }
+        if self.column != Column::Content {
             return self.rightwards();
         }
         if self.status() != StatusRow::Accounts {
@@ -2222,6 +2236,32 @@ mod tests {
         assert_eq!(model.act_on(Signal::Run), Asked::Nothing);
         assert!(model.said.is_empty(), "{:?}", model.said);
         assert_eq!(model.leaving, None);
+    }
+
+    /// Enter on the Config tab is a move and never an edit.
+    ///
+    /// It is Enter's whole meaning there — nothing on that tab is a Switch — but
+    /// it was handed to `rightwards`, which steps the value when there is no
+    /// column further right to reach. So Enter on a Setting was `→`: it read
+    /// `watcher-may-act` as `false`, stepped it to `true`, and the deferred
+    /// write ran `perch config set watcher-may-act true` two frames later. The
+    /// watcher turned on by a key the legend does not mention.
+    #[test]
+    fn enter_never_edits_a_setting_it_is_only_ever_a_move() {
+        let mut model = model_of(&["one@example.com"]);
+        let _ = model.act_on(Signal::NextTab);
+        assert_eq!(model.tab, Tab::Config);
+        let _ = model.act_on(Signal::Right);
+        assert_eq!(model.column, Column::Content, "on the Settings");
+        let scope = model.scope().expect("a Scope is under the sidebar cursor");
+        let was = model.content().expect("a row is under the cursor");
+        let before = model.shown(&scope, &was);
+
+        assert_eq!(model.act_on(Signal::Switch), Asked::Nothing);
+
+        assert_eq!(model.content(), Some(was.clone()), "the cursor did not move");
+        assert_eq!(model.shown(&scope, &was), before, "and nothing was stepped");
+        assert_eq!(model.pending, None, "so there is nothing to write");
     }
 
     /// ADR 0017: being ungrouped is the absence of a declaration that Accounts
