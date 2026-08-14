@@ -3131,6 +3131,25 @@ mod tests {
         chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 8, 14, hour, minute, 0).unwrap()
     }
 
+    /// The directory a fixture machine's commands are typed in — `FakeHost`'s
+    /// working directory, and where an Export now goes by default.
+    const TYPED_IN: &str = "/Users/someone/work";
+
+    /// A path spelled the way `Path::join` spells it *here*, for the assertions
+    /// that read a rendered message rather than compare two paths.
+    ///
+    /// `/repo/src/switch.rs` is the right path on every platform and the wrong
+    /// string on one: `join` answers with Windows' separator there, so a message
+    /// built by joining says `\` and a literal looking for `/` finds nothing.
+    /// Comparing two `PathBuf`s is safe — that is by components — and this is
+    /// for the times a message is the thing under test.
+    fn spelled(base: &str, tail: &str) -> String {
+        tail.split('/')
+            .fold(PathBuf::from(base), |path, name| path.join(name))
+            .display()
+            .to_string()
+    }
+
     /// The footgun the existence check above does not catch: `cargo run --bin
     /// dogfood-setup` relinks the wizard and leaves `target/debug/perch` where
     /// it was, so a binary from last week is there to be driven. The suite has
@@ -3150,7 +3169,7 @@ mod tests {
         .expect_err("that binary is not what this working copy describes");
 
         let said = refused.to_string();
-        assert!(said.contains("/repo/src/switch.rs"), "{said}");
+        assert!(said.contains(&spelled(SOURCES, "src/switch.rs")), "{said}");
         assert!(said.contains("cargo build --features dogfood"), "{said}");
         assert!(marker(&host).is_err(), "a refused setup marks nothing");
     }
@@ -3166,7 +3185,9 @@ mod tests {
             .expect_err("a nested source file is still source");
 
         assert!(
-            refused.to_string().contains("src/commands/switch.rs"),
+            refused
+                .to_string()
+                .contains(&spelled(SOURCES, "src/commands/switch.rs")),
             "{refused}"
         );
     }
@@ -3253,13 +3274,13 @@ mod tests {
 
         let path = exported_to(&wrote);
         assert!(
-            path.starts_with("/Users/someone/work"),
+            path.starts_with(TYPED_IN),
             "the Export went to {} rather than the directory the wizard was run \
              from",
             path.display()
         );
         assert!(
-            said.contains("[/Users/someone/work/perch-dogfood-"),
+            said.contains(&format!("[{}", spelled(TYPED_IN, "perch-dogfood-"))),
             "the default is offered as the path it will be: {said}"
         );
     }
@@ -3307,13 +3328,13 @@ mod tests {
 
         assert_eq!(
             exported_to(&wrote),
-            PathBuf::from("/Users/someone/work/export.age")
+            PathBuf::from(TYPED_IN).join("export.age")
         );
         assert!(
             wrote
                 .export
                 .said()
-                .contains("/Users/someone/work/export.age"),
+                .contains(&spelled(TYPED_IN, "export.age")),
             "the receipt is read later and from somewhere else: {}",
             wrote.export.said()
         );
