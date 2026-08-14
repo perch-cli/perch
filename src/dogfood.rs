@@ -1478,15 +1478,22 @@ pub struct SetupArgs {
 /// has nothing an Export could save; there, a login is offered first, and the
 /// Export follows if one arrives. Either way the marker means the same thing:
 /// every Account on this machine at the moment it was written is in a file.
+///
+/// `sources` is the tree `built` was compiled from — `CARGO_MANIFEST_DIR`, and
+/// passed in rather than read from the environment here so that the guard using
+/// it can be driven against a fake machine. A path that is not there is fine:
+/// the guard has nothing to say about a Perch whose source is somewhere else.
 pub fn set_up(
     host: &dyn Host,
     built: &str,
+    sources: &Path,
     args: &SetupArgs,
     phases: &[Phase],
     out: &mut dyn Write,
 ) -> Result<Marker> {
     let perch = Perch::under_test(host, built);
     refuse_a_binary_that_is_not_there(host, &perch)?;
+    refuse_a_binary_the_source_has_moved_past(host, &perch, sources)?;
     // Taken once and carried through. The client and the network are a process
     // and a round trip apiece, and neither answers differently for the length of
     // a setup; what a login changes is the registry, which is re-read where it
@@ -1574,10 +1581,108 @@ fn refuse_a_binary_that_is_not_there(host: &dyn Host, perch: &Perch<'_>) -> Resu
     Err(PerchError::NotFound(format!(
         "There is no Perch at {} to set this machine up against.\n\
          `cargo run --bin dogfood-setup` builds the wizard and not the binary it \
-         drives. Run `cargo build --features dogfood --bins` first, or point \
-         {BIN_VARIABLE} at an installed Perch.",
+         drives. Run {HOW_TO_BUILD} first, or point {BIN_VARIABLE} at an \
+         installed Perch.",
         bin.display()
     )))
+}
+
+/// The command that builds the binary the wizard drives, said in both refusals
+/// about not having a usable one. One string, for the reason [`HOW_TO_SET_UP`]
+/// is one: the two places printing it must not come to disagree about it.
+const HOW_TO_BUILD: &str = "`cargo build --features dogfood --bins`";
+
+/// What a binary is built from, as far as a walk can see it: the source tree,
+/// and the two files deciding what goes into it. A dependency bump changes the
+/// binary as surely as an edit does, and costs one `modified_at` to notice.
+const BUILT_FROM: &[&str] = &["src", "Cargo.toml", "Cargo.lock"];
+
+/// How far down the source tree the walk goes.
+///
+/// Not about Perch's, which is two deep. `list_dir` follows a link, so a
+/// directory linked at one of its own ancestors would walk for ever — and a
+/// wizard that hangs is a worse answer than any this guard can give.
+const AS_DEEP_AS: usize = 16;
+
+/// Refuses a `perch` that the source tree has moved past.
+///
+/// The footgun next door to the one above, and the reason the existence check
+/// alone was not enough: `cargo run --bin dogfood-setup` builds the wizard and
+/// relinks nothing else, so a `target/debug/perch` from last week satisfies
+/// "there is a binary there" and the wizard drives it.
+///
+/// What makes that worth refusing rather than tolerating is that the *suite*
+/// does not have the problem. `CARGO_BIN_EXE_perch` makes the binary a build
+/// dependency of the test, so a run always drives a fresh one. Left alone, the
+/// Export standing behind the marker is one Perch's work and the run that
+/// marker admits is another's — and the Export is the half of it that has to be
+/// trustworthy.
+///
+/// Everything it cannot see, it passes. This is here to catch a mistake rather
+/// than to stand between somebody and their own machine, so a binary that will
+/// not say when it was built, a source tree that is not there, and a file whose
+/// age will not be read are all let through.
+fn refuse_a_binary_the_source_has_moved_past(
+    host: &dyn Host,
+    perch: &Perch<'_>,
+    sources: &Path,
+) -> Result<()> {
+    // A binary named on purpose is not one this source tree has anything to say
+    // about. `$PERCH_DOGFOOD_BIN` is how somebody asks for an installed Perch —
+    // the only way a bug in a release archive is ever caught — and an installed
+    // Perch is older than the working copy nearly by definition.
+    if host.env_var(BIN_VARIABLE).is_some() {
+        return Ok(());
+    }
+    let Ok(built_at) = host.modified_at(perch.bin()) else {
+        return Ok(());
+    };
+    let Some((newer, written_at)) = BUILT_FROM
+        .iter()
+        .filter_map(|name| newest_under(host, &sources.join(name), AS_DEEP_AS))
+        .filter(|(_, when)| *when > built_at)
+        .max_by_key(|(_, when)| *when)
+    else {
+        return Ok(());
+    };
+
+    Err(PerchError::Invalid(format!(
+        "The Perch at {} was built at {}, and {} was written at {} — so it is \
+         not the Perch this working copy describes.\n\
+         `cargo run --bin dogfood-setup` builds the wizard and relinks nothing \
+         else, so the Export about to be taken would be an older Perch's work, \
+         while the suite this marker admits builds a fresh binary and drives \
+         that instead. Run {HOW_TO_BUILD} first, or point {BIN_VARIABLE} at the \
+         Perch you mean.",
+        perch.bin().display(),
+        stamp(built_at),
+        newer.display(),
+        stamp(written_at),
+    )))
+}
+
+/// The newest file at or under `at`, by the time it was last written — or
+/// nothing, where there is none or the walk could not see.
+///
+/// Written here rather than reached for from a crate because it is eight lines
+/// and has to go through [`Host`]: a walk using `std::fs` directly is one no
+/// test could arrange a stale tree for, which is the whole of what is being
+/// tested.
+fn newest_under(host: &dyn Host, at: &Path, depth: usize) -> Option<(PathBuf, DateTime<Utc>)> {
+    if host.is_file(at) {
+        return host
+            .modified_at(at)
+            .ok()
+            .map(|when| (at.to_path_buf(), when));
+    }
+    if depth == 0 {
+        return None;
+    }
+    host.list_dir(at)
+        .ok()?
+        .iter()
+        .filter_map(|entry| newest_under(host, entry, depth - 1))
+        .max_by_key(|(_, when)| *when)
 }
 
 /// An unattended setup may skip the Export only where there was nothing for it
@@ -1650,7 +1755,7 @@ fn take_an_export(
     out: &mut dyn Write,
 ) -> Result<PathBuf> {
     let path = match &args.export_to {
-        Some(path) => path.clone(),
+        Some(path) => where_it_goes(host, path),
         None => {
             let default = default_export_path(host);
             let answered = crate::commands::ask(
@@ -1660,7 +1765,7 @@ fn take_an_export(
             )?;
             match answered.as_deref().map(str::trim) {
                 Some("") | None => default,
-                Some(typed) => PathBuf::from(typed),
+                Some(typed) => where_it_goes(host, Path::new(typed)),
             }
         }
     };
@@ -1679,16 +1784,64 @@ fn take_an_export(
     Ok(path)
 }
 
-/// Where an Export goes when nobody says. In the home directory rather than
-/// under `~/.config/perch`, which is exactly what `perch purge` deletes.
+/// Where an Export goes when nobody says: beside the command, in the directory
+/// it was typed in.
+///
+/// The home directory was the first answer and it was the wrong one — a file
+/// somebody has to go and find later, in a directory they were not looking at.
+/// The one place it must not be is under `~/.config/perch`, which is exactly
+/// what `perch purge` deletes; anywhere else is a matter of who has to find it,
+/// and that is whoever is sitting in the directory they ran the wizard from.
+///
+/// The repository is where that will nearly always be, so `*.age` is gitignored
+/// and `tests/dogfood.rs` asserts the line is there — a working Credential for
+/// every Account, one `git add -A` away from a public history, is not a trap to
+/// leave lying under a default.
 fn default_export_path(host: &dyn Host) -> PathBuf {
     let named = format!(
         "perch-dogfood-{}.age",
         host.now().format("%Y-%m-%dT%H-%M-%SZ")
     );
-    match host.home_dir() {
-        Ok(home) => home.join(named),
+    match host.current_dir() {
+        Ok(here) => here.join(named),
         Err(_) => PathBuf::from(named),
+    }
+}
+
+/// A path somebody typed, as the filesystem will read it.
+///
+/// Two things the shell would have done and this prompt does not, because
+/// nothing between the terminal and here is a shell:
+///
+/// A leading `~` is expanded. Typing one is the ordinary way to name a file in
+/// the home directory, and taken literally it makes a directory *called* `~`
+/// under wherever the wizard was run — which is not a place anybody would look
+/// for the only copy of their Credentials.
+///
+/// What is left is resolved against the directory the command was typed in. A
+/// relative path already reaches the right file, because `perch export` is a
+/// child process and inherits the working directory — but the marker keeps this
+/// path as its receipt, and `Export at dogfood.age` is a sentence that stops
+/// being true the moment somebody reads it from anywhere else.
+///
+/// `~someone` is left alone. Resolving another user's home is a lookup Perch
+/// has no business doing, and a literal path is at least one the error message
+/// will name in full.
+fn where_it_goes(host: &dyn Host, typed: &Path) -> PathBuf {
+    let expanded = match typed.strip_prefix("~") {
+        Ok(rest) => match host.home_dir() {
+            Ok(home) => home.join(rest),
+            Err(_) => typed.to_path_buf(),
+        },
+        Err(_) => typed.to_path_buf(),
+    };
+
+    if expanded.is_absolute() {
+        return expanded;
+    }
+    match host.current_dir() {
+        Ok(here) => here.join(expanded),
+        Err(_) => expanded,
     }
 }
 
@@ -2937,17 +3090,303 @@ mod tests {
 
     // ---- the wizard -------------------------------------------------------
 
+    /// The source tree the wizard is told `/build/perch` came from. Empty on
+    /// most fixtures, which is one of the two ways the staleness guard has
+    /// nothing to say — the other being a `perch` with no age recorded.
+    const SOURCES: &str = "/repo";
+
     fn set_it_up(host: &dyn Host, args: &SetupArgs) -> Result<(Marker, String)> {
         let mut said = Vec::new();
-        let marker = set_up(host, "/build/perch", args, &[], &mut said)?;
+        let marker = set_up(
+            host,
+            "/build/perch",
+            Path::new(SOURCES),
+            args,
+            &[],
+            &mut said,
+        )?;
         Ok((marker, String::from_utf8(said).unwrap()))
     }
 
     /// A bare machine with the binary the wizard is about to drive on it. Every
     /// wizard test needs one, because a wizard with nothing to drive is refused
     /// before it does anything else.
+    ///
+    /// No age, deliberately: [`FakeHost::with_file`] records none, so the
+    /// staleness guard cannot see this binary and passes it. Every wizard test
+    /// but the ones below is therefore about what it was about before.
     fn with_a_perch(host: FakeHost) -> FakeHost {
         host.with_file("/build/perch", "")
+    }
+
+    /// A machine where `/build/perch` was built at `built`, and one source file
+    /// under [`SOURCES`] was written at `written`.
+    fn built_then_written(built: DateTime<Utc>, at: &str, written: DateTime<Utc>) -> FakeHost {
+        a_bare_machine()
+            .with_file_written_at("/build/perch", built)
+            .with_file_written_at(format!("{SOURCES}/{at}"), written)
+    }
+
+    fn at(hour: u32, minute: u32) -> DateTime<Utc> {
+        chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 8, 14, hour, minute, 0).unwrap()
+    }
+
+    /// The directory a fixture machine's commands are typed in — `FakeHost`'s
+    /// working directory, and where an Export now goes by default.
+    const TYPED_IN: &str = "/Users/someone/work";
+
+    /// A path spelled the way `Path::join` spells it *here*, for the assertions
+    /// that read a rendered message rather than compare two paths.
+    ///
+    /// `/repo/src/switch.rs` is the right path on every platform and the wrong
+    /// string on one: `join` answers with Windows' separator there, so a message
+    /// built by joining says `\` and a literal looking for `/` finds nothing.
+    /// Comparing two `PathBuf`s is safe — that is by components — and this is
+    /// for the times a message is the thing under test.
+    fn spelled(base: &str, tail: &str) -> String {
+        tail.split('/')
+            .fold(PathBuf::from(base), |path, name| path.join(name))
+            .display()
+            .to_string()
+    }
+
+    /// The footgun the existence check above does not catch: `cargo run --bin
+    /// dogfood-setup` relinks the wizard and leaves `target/debug/perch` where
+    /// it was, so a binary from last week is there to be driven. The suite has
+    /// no such problem — `CARGO_BIN_EXE_perch` rebuilds it — so a stale wizard
+    /// takes the Export with one Perch and admits a run of another.
+    #[test]
+    fn a_perch_older_than_the_source_beside_it_is_refused_and_the_newer_file_named() {
+        let host = built_then_written(at(9, 0), "src/switch.rs", at(9, 30));
+
+        let refused = set_it_up(
+            &host,
+            &SetupArgs {
+                unattended: true,
+                ..SetupArgs::default()
+            },
+        )
+        .expect_err("that binary is not what this working copy describes");
+
+        let said = refused.to_string();
+        assert!(said.contains(&spelled(SOURCES, "src/switch.rs")), "{said}");
+        assert!(said.contains("cargo build --features dogfood"), "{said}");
+        assert!(marker(&host).is_err(), "a refused setup marks nothing");
+    }
+
+    /// The walk goes down rather than across the top: nearly every file that
+    /// changes Perch's behaviour is in a subdirectory of `src`, so a guard
+    /// reading only the top level would pass on almost every stale tree there is.
+    #[test]
+    fn a_newer_file_is_found_however_deep_in_the_tree_it_sits() {
+        let host = built_then_written(at(9, 0), "src/commands/switch.rs", at(9, 30));
+
+        let refused = set_it_up(&host, &SetupArgs::default())
+            .expect_err("a nested source file is still source");
+
+        assert!(
+            refused
+                .to_string()
+                .contains(&spelled(SOURCES, "src/commands/switch.rs")),
+            "{refused}"
+        );
+    }
+
+    /// A dependency bump changes the binary as surely as an edit does, and it is
+    /// the case somebody is least likely to connect to a `perch` behaving oddly.
+    #[test]
+    fn a_newer_cargo_lock_is_a_stale_binary_too() {
+        let host = built_then_written(at(9, 0), "Cargo.lock", at(9, 30));
+
+        let refused = set_it_up(&host, &SetupArgs::default())
+            .expect_err("that binary was linked against something else");
+
+        assert!(refused.to_string().contains("Cargo.lock"), "{refused}");
+    }
+
+    /// The ordinary case, and the one that must not become a refusal: a build
+    /// somebody has just run is newer than everything it was built from.
+    #[test]
+    fn a_perch_newer_than_all_of_the_source_is_what_the_guard_is_looking_for() {
+        let host = built_then_written(at(9, 30), "src/switch.rs", at(9, 0))
+            .with_file_written_at(format!("{SOURCES}/Cargo.toml"), at(8, 0));
+
+        let (wrote, _) = set_it_up(
+            &host,
+            &SetupArgs {
+                unattended: true,
+                ..SetupArgs::default()
+            },
+        )
+        .expect("this binary is the one this working copy describes");
+
+        assert_eq!(wrote.export, Held::NothingHeld);
+    }
+
+    /// `$PERCH_DOGFOOD_BIN` is how somebody says which Perch they mean — an
+    /// installed one, to catch a bug in a release archive. It is older than the
+    /// working copy nearly by definition, and refusing it would break the one
+    /// case the variable exists for.
+    #[test]
+    fn a_perch_named_on_purpose_is_never_refused_for_being_older_than_the_source() {
+        let host = built_then_written(at(9, 0), "src/switch.rs", at(9, 30))
+            .with_file_written_at("/usr/local/bin/perch", at(1, 0))
+            .with_env(BIN_VARIABLE, "/usr/local/bin/perch");
+
+        let (wrote, _) = set_it_up(
+            &host,
+            &SetupArgs {
+                unattended: true,
+                ..SetupArgs::default()
+            },
+        )
+        .expect("that Perch was asked for by name");
+
+        assert_eq!(wrote.export, Held::NothingHeld);
+    }
+
+    /// A machine that gets as far as the Export: one Account to save, a `perch
+    /// export` that works, and `answers` for the one question the wizard asks.
+    fn a_machine_that_exports(answers: &[&str]) -> FakeHost {
+        with_a_perch(holding(
+            a_bare_machine(),
+            &[an_account("one@example.com", None)],
+        ))
+        .with_answers(answers)
+        .with_login(|_, _| crate::error::EXIT_OK)
+    }
+
+    /// Where the wizard's Export ended up, according to the receipt it wrote.
+    fn exported_to(wrote: &Marker) -> PathBuf {
+        match &wrote.export {
+            Held::Exported { path, .. } => path.clone(),
+            held => panic!("an Export was taken, not {held:?}"),
+        }
+    }
+
+    /// The home directory was the first answer and it was the wrong one: a file
+    /// somebody has to go and find later, somewhere they were not looking.
+    #[test]
+    fn the_default_export_goes_in_the_directory_the_command_was_typed_in() {
+        let host = a_machine_that_exports(&[""]);
+
+        let (wrote, said) = set_it_up(&host, &SetupArgs::default()).expect("the Export worked");
+
+        let path = exported_to(&wrote);
+        assert!(
+            path.starts_with(TYPED_IN),
+            "the Export went to {} rather than the directory the wizard was run \
+             from",
+            path.display()
+        );
+        assert!(
+            said.contains(&format!("[{}", spelled(TYPED_IN, "perch-dogfood-"))),
+            "the default is offered as the path it will be: {said}"
+        );
+    }
+
+    /// Nothing between the terminal and the wizard is a shell, so nothing has
+    /// expanded this. Taken literally it makes a directory *called* `~` under
+    /// wherever the wizard was run, which is not where anybody would look for
+    /// the only copy of their Credentials.
+    #[test]
+    fn a_typed_tilde_reaches_the_home_directory_rather_than_a_directory_called_that() {
+        let host = a_machine_that_exports(&["~/Downloads/dogfood-test.age"]);
+
+        let (wrote, _) = set_it_up(&host, &SetupArgs::default()).expect("the Export worked");
+
+        assert_eq!(
+            exported_to(&wrote),
+            PathBuf::from("/Users/someone/Downloads/dogfood-test.age")
+        );
+    }
+
+    /// Resolving another user's home is a lookup Perch has no business doing,
+    /// and a path left alone is at least one the failure will name in full.
+    #[test]
+    fn a_tilde_naming_somebody_else_is_left_as_it_was_typed() {
+        let host = a_machine_that_exports(&["~someone/export.age"]);
+
+        let (wrote, _) = set_it_up(&host, &SetupArgs::default()).expect("the Export worked");
+
+        assert_eq!(
+            exported_to(&wrote),
+            PathBuf::from("/Users/someone/work/~someone/export.age"),
+            "resolved against the working directory, and otherwise untouched"
+        );
+    }
+
+    /// A relative path already reaches the right file — `perch export` is a
+    /// child process and inherits the working directory. It is the *marker*
+    /// that needs the long spelling: `Export at export.age` is a receipt that
+    /// stops being true the moment somebody reads it from another directory.
+    #[test]
+    fn a_relative_path_is_written_down_as_the_one_it_reaches() {
+        let host = a_machine_that_exports(&["export.age"]);
+
+        let (wrote, _) = set_it_up(&host, &SetupArgs::default()).expect("the Export worked");
+
+        assert_eq!(
+            exported_to(&wrote),
+            PathBuf::from(TYPED_IN).join("export.age")
+        );
+        assert!(
+            wrote
+                .export
+                .said()
+                .contains(&spelled(TYPED_IN, "export.age")),
+            "the receipt is read later and from somewhere else: {}",
+            wrote.export.said()
+        );
+    }
+
+    /// The flag comes through a shell, which expands its own `~` — but not the
+    /// relative path it may equally be given, and the receipt has the same
+    /// problem either way. One rule for a path, wherever it arrived from.
+    #[test]
+    fn a_path_given_as_a_flag_is_resolved_the_same_way_a_typed_one_is() {
+        let host = a_machine_that_exports(&[]);
+
+        let (wrote, _) = set_it_up(
+            &host,
+            &SetupArgs {
+                export_to: Some(PathBuf::from("~/export.age")),
+                ..SetupArgs::default()
+            },
+        )
+        .expect("the Export worked");
+
+        assert_eq!(
+            exported_to(&wrote),
+            PathBuf::from("/Users/someone/export.age")
+        );
+    }
+
+    /// A guard that cannot see is not a guard that refuses. Neither a binary
+    /// whose age will not be read nor a source tree that is not there says
+    /// anything about staleness, and both are ordinary: a `perch` copied into
+    /// place, a repository built on another machine.
+    #[test]
+    fn a_binary_or_a_source_tree_the_guard_cannot_see_is_passed_rather_than_refused() {
+        for host in [
+            // An age for the source and none for the binary.
+            a_bare_machine()
+                .with_file("/build/perch", "")
+                .with_file_written_at(format!("{SOURCES}/src/switch.rs"), at(9, 30)),
+            // An age for the binary and no source tree at all.
+            a_bare_machine().with_file_written_at("/build/perch", at(9, 0)),
+        ] {
+            let (wrote, _) = set_it_up(
+                &host,
+                &SetupArgs {
+                    unattended: true,
+                    ..SetupArgs::default()
+                },
+            )
+            .expect("nothing here says the binary is stale");
+
+            assert_eq!(wrote.export, Held::NothingHeld);
+        }
     }
 
     /// `cargo run --bin dogfood-setup` builds the wizard and not the binary it
