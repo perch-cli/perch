@@ -361,6 +361,15 @@ fn an_export_that_cannot_be_written_purges_nothing() {
 
     let refused = outcome.expect_err("something is already at that path");
     assert!(refused.to_string().contains(AT), "{refused}");
+    // The Export's own refusal is about the Export, and true — but somebody who
+    // typed `perch purge` is waiting to hear about the Purge. Every other way
+    // this command stops says so, and this was the one that left them reading a
+    // sentence about a file and inferring the rest.
+    assert!(
+        refused.to_string().contains("Nothing was purged"),
+        "a Purge stopped by the Export it offered still has to say the Purge is \
+         off: {refused}"
+    );
     assert_eq!(
         host.file(AT).as_deref(),
         Some("an Export somebody else wrote"),

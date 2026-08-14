@@ -258,7 +258,18 @@ fn offer_an_export(
     };
     refuse_a_path_the_purge_would_take(&path, home)?;
 
-    export::write_the_export(host, perch, registry, &path, out)?;
+    // The Export's own refusals are about the Export — a path already taken, a
+    // passphrase typed twice and differently, a registry another Perch has since
+    // written. Every one of them is true and none of them says what the person
+    // typing `perch purge` is waiting to hear, which is whether the Purge
+    // happened. Every other way this command stops says so; this was the one
+    // that left them reading a sentence about a file and inferring the rest.
+    export::write_the_export(host, perch, registry, &path, out).map_err(|error| {
+        error.with_note(
+            "Nothing was purged. Run `perch purge` again — answering `n` to the \
+             offer purges without an Export.",
+        )
+    })?;
     Ok(Some(path))
 }
 
