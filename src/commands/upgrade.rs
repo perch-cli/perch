@@ -208,9 +208,10 @@ fn check(
         out,
         &format!(
             "channel    {}",
-            channel.map_or("unknown (nothing about this binary's path says)", |channel| {
-                channel.name()
-            })
+            channel.map_or(
+                "unknown (nothing about this binary's path says)",
+                |channel| { channel.name() }
+            )
         ),
     )?;
     say(

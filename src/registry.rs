@@ -2457,7 +2457,10 @@ mod tests {
             let refused = load(&host).expect_err("a key Perch does not know is not a registry");
 
             let said = refused.to_string();
-            assert!(said.contains(key), "it names the key it could not read: {said}");
+            assert!(
+                said.contains(key),
+                "it names the key it could not read: {said}"
+            );
             assert!(
                 said.contains("registry.json"),
                 "and the file to put it right in: {said}"

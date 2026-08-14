@@ -2300,7 +2300,11 @@ mod tests {
 
         assert_eq!(model.act_on(Signal::Switch), Asked::Nothing);
 
-        assert_eq!(model.content(), Some(was.clone()), "the cursor did not move");
+        assert_eq!(
+            model.content(),
+            Some(was.clone()),
+            "the cursor did not move"
+        );
         assert_eq!(model.shown(&scope, &was), before, "and nothing was stepped");
         assert_eq!(model.pending, None, "so there is nothing to write");
     }
