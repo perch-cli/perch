@@ -23,6 +23,7 @@ pub const CURRENT_VERSION: u32 = 1;
 
 /// One Quota Window's Utilization, as observed at a point in time (ADR 0015).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WindowUtilization {
     /// The window this figure describes, e.g. `5-hour`, `7-day`, `7-day-opus`.
     pub window: String,
@@ -36,6 +37,7 @@ pub struct WindowUtilization {
 /// Cached Utilization for one Account. What every surface renders, and what
 /// only `perch status --refresh` ever goes and fetches (ADR 0015).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CachedUtilization {
     pub observed_at: DateTime<Utc>,
     pub windows: Vec<WindowUtilization>,
@@ -160,6 +162,7 @@ pub fn how_to_repair(target: &str) -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Account {
     /// Who this Account is. Its email address is also its identifier.
     pub identity: Identity,
@@ -281,7 +284,7 @@ pub fn a_cooldown() -> String {
 /// allowance rather than from anyone's taste, and lives in
 /// [`crate::watch::REFRESH_INTERVAL_MILLIS`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Settings {
     pub strategy: Strategy,
     /// Whether the watcher may Switch within this Scope unattended. Off unless
@@ -340,7 +343,7 @@ impl Settings {
 /// Setting there is describes how Perch chooses *between* Accounts and a rule
 /// for choosing has nothing to say to a set of one.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Overrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strategy: Option<Strategy>,
@@ -540,6 +543,7 @@ pub fn means_ungrouped(name: &str) -> bool {
 /// Per Group rather than per machine: a cooldown is a Group's setting, and a
 /// Switch within `work` has nothing to say about how soon `personal` may move.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Checked {
     /// When the Switch happened, which is what the cooldown counts from.
     pub switched_at: DateTime<Utc>,
@@ -554,7 +558,7 @@ pub struct Checked {
 /// from, so clearing here is not a state that exists — which is why this is
 /// [`Settings`] rather than [`Overrides`].
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct GlobalConfig {
     /// Whether bare `perch switch` may Cycle among the Accounts in no Group.
     ///
@@ -698,6 +702,7 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Registry {
     pub version: u32,
     /// The email address of the active Account, if there is one.
@@ -1496,11 +1501,23 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
         ));
     }
 
-    let registry: Registry =
-        serde_json::from_str(&contents).map_err(|err| PerchError::Malformed {
+    // Strictly, so a key nobody recognises is a refusal naming it rather than a
+    // value that quietly did nothing. Every type here is Perch's own — Claude
+    // Code's `.claude.json` is read through `probe`'s own lenient shapes, which
+    // have to tolerate whatever Anthropic adds — so there is nothing upstream
+    // for this to be brittle about. What it catches is a hand edit: one
+    // transposed letter in `watcher_threshold_percent` used to deserialise as
+    // Global's value, run the watcher at a threshold nobody set, and then be
+    // erased by the next command that wrote the file, with nothing said at any
+    // point. The version guard above runs first, so a genuinely newer Perch is
+    // still diagnosed as one rather than as a typo.
+    let registry: Registry = serde_json::from_str(&contents).map_err(|err| {
+        PerchError::Malformed {
             path: path.display().to_string(),
             detail: err.to_string(),
-        })?;
+        }
+        .with_note(&the_file_to_edit(path))
+    })?;
 
     validate(&registry).map_err(|refusal| refusal.with_note(&the_file_to_edit(path)))?;
 
@@ -2407,6 +2424,45 @@ mod tests {
             host.mode_of(perch_home(&host).unwrap()),
             Some(crate::host::PRIVATE_DIR_MODE)
         );
+    }
+
+    /// A key nobody recognises is a refusal naming it, rather than a value that
+    /// quietly did nothing and was then erased.
+    ///
+    /// Every other way of getting this file wrong by hand has a named refusal —
+    /// a bad version, a bad Strategy, a percentage out of range, a dangling
+    /// Alias, an address with no `@`. A transposed letter had neither a refusal
+    /// nor an effect: `watcher_treshold_percent` deserialised as
+    /// `Overrides::default()`, so the Group went on taking Global's threshold,
+    /// and the next command that wrote the file re-serialised the Group as `{}`
+    /// — the edit gone, with nothing said at any point in between.
+    #[test]
+    fn a_key_the_registry_does_not_know_is_refused_rather_than_ignored() {
+        let path = "/Users/someone/.config/perch/registry.json";
+        for (written, key) in [
+            (
+                format!(
+                    "{{\"version\":{CURRENT_VERSION},\"accounts\":[],\"groups\":\
+                     {{\"work\":{{\"watcher_treshold_percent\":50}}}}}}"
+                ),
+                "watcher_treshold_percent",
+            ),
+            (
+                format!("{{\"version\":{CURRENT_VERSION},\"accounts\":[],\"aliasses\":{{}}}}"),
+                "aliasses",
+            ),
+        ] {
+            let host = crate::host::FakeHost::new().with_file(path, &written);
+
+            let refused = load(&host).expect_err("a key Perch does not know is not a registry");
+
+            let said = refused.to_string();
+            assert!(said.contains(key), "it names the key it could not read: {said}");
+            assert!(
+                said.contains("registry.json"),
+                "and the file to put it right in: {said}"
+            );
+        }
     }
 
     /// The registry is the whole of Perch's state and every command reads it
