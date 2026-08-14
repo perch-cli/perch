@@ -526,6 +526,21 @@ fn what_should_cross(host: &dyn crate::host::Host, shared: &Path) -> Vec<String>
 /// (ADR 0038). It is read here, for the one Account this phase is about, and a
 /// token that has not run out is a skip with a reason somebody can act on rather
 /// than a pass that renewed nothing.
+///
+/// Two things it is careful about, both learned from a run that went red on a
+/// machine where nothing was wrong.
+///
+/// The Credential it reads is the one a Renewal *writes*. For the Account
+/// somebody is on that is the Default Profile's, not the Account's own — both
+/// copies exist and only one is renewed (ADR 0027, and `observe::holding`) — so
+/// a phase reading the Account's own Profile gates on an expiry nothing updates
+/// and then reports the Renewal it just asked for as unfiled.
+///
+/// And whether a Renewal was reached at all is read out of the report rather
+/// than inferred from the exit code. ADR 0018 has a refresh that could not renew
+/// report what it could not read and still exit 0, so an Anthropic 429 inferred
+/// from the status alone becomes "This is a fault in Perch" — which is exactly
+/// what ADR 0037 says a phase that cannot tell the two apart does.
 fn a_renewal_is_asked_of_anthropic(
     perch: &Perch<'_>,
     _standing: &Preflight,
@@ -535,38 +550,28 @@ fn a_renewal_is_asked_of_anthropic(
     let account = the_active_one(&listed)?;
     let host = perch.host();
 
-    let expiry = |when: &str| -> std::result::Result<Option<i64>, Halt> {
-        let installed = crate::probe::Installed::probed(host).map_err(|why| {
-            Fault::Upstream.because(format!("Claude Code could not be asked what it is: {why}"))
-        })?;
-        let store = crate::probe::store_for_profile(host, &account.profile_dir)
-            .map_err(|why| Fault::Upstream.because(format!("{when}: {why}")))?;
-        let credential = crate::probe::read_credential(host, &store, &installed)
-            .map_err(|why| Fault::Upstream.because(format!("{when}: {why}")))?
-            .ok_or_else(|| {
-                Fault::Upstream.because(format!(
-                    "{when}: {} holds no Credential to renew",
-                    account.profile_dir.display()
-                ))
-            })?;
-        Ok(credential.expires_at)
-    };
-
     let installed = crate::probe::Installed::probed(host).map_err(|why| {
         Fault::Upstream.because(format!("Claude Code could not be asked what it is: {why}"))
     })?;
-    let store = crate::probe::store_for_profile(host, &account.profile_dir).map_err(|why| {
-        Fault::Upstream.because(format!("{}'s Credential Store: {why}", account.email))
+    // The copy a Renewal renews, which for the active Account is the Default
+    // Profile's. This phase is about the active Account by construction —
+    // `THE_ACTIVE_ACCOUNT` — so there is no second case to write here, and a
+    // branch for one that cannot arise is a branch nothing would ever correct.
+    let store = crate::registry::the_default_profile(host).map_err(|why| {
+        Fault::Upstream.because(format!("the Default Profile's Credential Store: {why}"))
     })?;
-    let before = crate::probe::read_credential(host, &store, &installed)
-        .map_err(|why| Fault::Upstream.because(format!("{}'s Credential: {why}", account.email)))?
-        .ok_or_else(|| {
-            Fault::Upstream.because(format!(
-                "{} holds no Credential, so there is nothing to renew",
-                account.email
-            ))
-        })?;
+    let credential = |when: &str| -> std::result::Result<crate::probe::Credential, Halt> {
+        Ok(crate::probe::read_credential(host, &store, &installed)
+            .map_err(|why| Fault::Upstream.because(format!("{when}: {why}")))?
+            .ok_or_else(|| {
+                Fault::Upstream.because(format!(
+                    "{when}: the Default Profile holds no Credential, so Claude \
+                     Code is logged out here and there is nothing to renew"
+                ))
+            })?)
+    };
 
+    let before = credential("before the Refresh")?;
     if before.usable_at(host.now()) {
         return Err(Halt::not_here(format!(
             "{}'s access token has not run out, so a Refresh would renew nothing \
@@ -578,36 +583,40 @@ fn a_renewal_is_asked_of_anthropic(
     let was = before.expires_at;
 
     // The one command in Perch that touches the network, and the one that
-    // reaches a Renewal. A figure that cannot be read falls back to the cached
-    // one rather than failing, so a non-zero exit here is about the Renewal
-    // rather than about Anthropic being slow.
-    let refreshed = perch.run(&["status", "--refresh", "--json"])?;
-    if !refreshed.succeeded() {
-        return Err(Halt::Stopped(read_as(refreshed.status).because(format!(
-            "`perch status --refresh --json` exited {}: {}",
-            refreshed.status,
-            refreshed.stderr.trim()
-        ))));
+    // reaches a Renewal.
+    let document = perch.json(&["status", "--refresh", "--json"])?;
+    match what_the_refresh_came_to(&document, &account.email)? {
+        Renewal::Reached => {}
+        Renewal::NotReached(why) => return Err(Halt::not_here(why)),
+        Renewal::Lost => {
+            return Err(Setback::perch(format!(
+                "Anthropic Rotated {}'s refresh token and Perch could not store \
+                 what came back, so the one it holds is retired",
+                account.email
+            ))
+            .leaving(&[format!("{} is Quarantined", account.email)])
+            .put_back_with(&[crate::registry::how_to_repair(&account.email)])
+            .into());
+        }
     }
 
     // Whether the Renewal was filed, asked of the Credential Store rather than
     // of the command that was supposed to write it. A Rotation that Anthropic
     // performed and Perch failed to keep is the one failure in this area that
     // costs a login, and it is invisible from `--json`.
-    let now = expiry("reading the Credential back")?;
-    if now == was {
+    if credential("reading the Credential back")?.expires_at == was {
         return Err(Setback::perch(format!(
-            "{}'s access token had run out, `perch status --refresh` exited 0, \
-             and the Credential Store holds the same expiry it did before. \
-             Either nothing was renewed or what came back was not filed.",
+            "Anthropic renewed {}'s access token and the Default Profile holds \
+             the same expiry it did before, so what came back was not filed",
             account.email
         ))
         .into());
     }
 
     // A Renewal may Rotate, and a Rotation retires what every other machine
-    // holds — so a Quarantine appearing *here*, on the Account just renewed, is
-    // Perch failing to keep what it was handed.
+    // holds — so a Quarantine appearing *here*, on the Account just renewed and
+    // after a report that said it was renewed, is Perch failing to keep what it
+    // was handed.
     let after = listing(perch)?;
     if after
         .iter()
@@ -623,12 +632,94 @@ fn a_renewal_is_asked_of_anthropic(
 
     Ok(vec![
         format!("{}'s access token had run out", account.email),
-        "`perch status --refresh --json` exited 0".to_string(),
-        "the Credential Store holds an expiry it did not hold before, so what \
+        format!(
+            "`perch status --refresh --json` reported a Renewal for {}",
+            account.email
+        ),
+        "the Default Profile holds an expiry it did not hold before, so what \
          Anthropic handed back was filed"
             .to_string(),
         format!("{} is not Quarantined by its own Renewal", account.email),
     ])
+}
+
+/// What a `perch status --refresh` came to for the one Account it was asked
+/// about.
+#[derive(Debug, PartialEq, Eq)]
+enum Renewal {
+    /// A token came back, so there is something to assert about what was filed.
+    Reached,
+    /// Nothing was renewed, and Perch said why. Named and counted (ADR 0038)
+    /// rather than red: Anthropic rate-limiting a refresh is news about an
+    /// afternoon, not a defect anybody can go and fix.
+    NotReached(String),
+    /// Anthropic Rotated and the new token could not be stored — the one failure
+    /// in this area that costs a login, and Perch's to answer for.
+    Lost,
+}
+
+/// Read out of the report rather than inferred from the exit code.
+///
+/// The inference is invalid by design: ADR 0018 has a refresh that cannot renew
+/// degrade to the cached figure and still exit 0, so an exit code alone cannot
+/// tell a Renewal that happened from one Anthropic refused. Reading `--json`
+/// — which this phase asks for anyway — is what lets the two be told apart, and
+/// telling them apart is the whole of what ADR 0037 requires of a phase.
+fn what_the_refresh_came_to(
+    document: &serde_json::Value,
+    email: &str,
+) -> std::result::Result<Renewal, Halt> {
+    let attempts = document["refresh"]["accounts"].as_array().ok_or_else(|| {
+        Setback::perch(
+            "`perch status --refresh --json` printed no `refresh.accounts` array".to_string(),
+        )
+    })?;
+    let mine = attempts
+        .iter()
+        .find(|attempt| {
+            attempt["email"]
+                .as_str()
+                .is_some_and(|named| crate::registry::same_name(named, email))
+        })
+        .ok_or_else(|| {
+            Setback::perch(format!(
+                "`perch status --refresh --json` says nothing about {email}, \
+                 which is the Account it was asked to refresh"
+            ))
+        })?;
+    let detail = mine["detail"].as_str().unwrap_or("no reason was given");
+
+    match mine["outcome"].as_str() {
+        // A token came back in both cases. `throttled` is the Utilization
+        // allowance being spent (ADR 0015), and that is met *after* the
+        // Renewal: `usable_token` has already renewed by the time the usage
+        // endpoint is asked for anything.
+        Some("observed" | "throttled") => Ok(Renewal::Reached),
+        Some("failed") => Ok(Renewal::NotReached(format!(
+            "nothing was renewed for {email}, and Perch said why — so there is \
+             no Renewal here to prove: {detail}"
+        ))),
+        Some("quarantined") if detail == crate::registry::Quarantine::RotationLost.as_str() => {
+            Ok(Renewal::Lost)
+        }
+        // Every other Quarantine is a refresh token something upstream retired
+        // — usually this suite, running on another machine yesterday, which ADR
+        // 0037 calls the ordinary starting state rather than an ambush.
+        Some("quarantined") => Ok(Renewal::NotReached(format!(
+            "{email} was Quarantined `{detail}` rather than renewed, which is a \
+             login ended somewhere else rather than a fault here. {}",
+            crate::registry::how_to_repair(email)
+        ))),
+        Some(other) => Err(Setback::perch(format!(
+            "`perch status --refresh --json` reported `{other}` for {email}, \
+             which is not an outcome this phase knows how to read"
+        ))
+        .into()),
+        None => Err(Setback::perch(format!(
+            "the refresh report for {email} carries no `outcome`"
+        ))
+        .into()),
+    }
 }
 
 // ---- 5: a Switch ------------------------------------------------------------
@@ -1389,6 +1480,97 @@ mod tests {
         };
 
         assert!(setback.because.contains("definitely-not-a-command"));
+    }
+
+    // ---- what a Refresh came to --------------------------------------------
+
+    /// As `observe::Report` writes it, so a change to the shape of that document
+    /// arrives here as a failing test rather than as a phase quietly reading
+    /// `None` off every key it wanted.
+    fn a_refresh(email: &str, outcome: &str, detail: &str) -> serde_json::Value {
+        serde_json::json!({
+            "refresh": {
+                "accounts": [{"email": email, "outcome": outcome, "detail": detail}],
+                "kept": true,
+            }
+        })
+    }
+
+    const WHOEVER: &str = "one@example.com";
+
+    /// The reading this phase was rewritten for. A run went red on a machine
+    /// where nothing was wrong: Anthropic rate-limited the Renewal, `perch
+    /// status --refresh` degraded to the cached figure and exited 0 exactly as
+    /// ADR 0018 says it must, and the phase read the exit code alone and called
+    /// it a fault in Perch.
+    #[test]
+    fn a_renewal_anthropic_refused_is_news_rather_than_a_fault() {
+        let rate_limited = "Anthropic is rate-limiting Perch, so nothing about \
+                            this Account could be read. The cached figure is \
+                            what you see.";
+
+        let came_to =
+            what_the_refresh_came_to(&a_refresh(WHOEVER, "failed", rate_limited), WHOEVER)
+                .expect("a report that says what happened is a report that can be read");
+
+        let Renewal::NotReached(why) = came_to else {
+            panic!("a refusal upstream was read as a Renewal: {came_to:?}");
+        };
+        // The reason Perch gave travels, because the whole point of not being
+        // red is that somebody can still see what happened.
+        assert!(why.contains("rate-limiting"), "{why}");
+    }
+
+    #[test]
+    fn a_renewal_that_reached_anthropic_is_something_to_assert_about() {
+        for outcome in ["observed", "throttled"] {
+            assert_eq!(
+                what_the_refresh_came_to(&a_refresh(WHOEVER, outcome, "null"), WHOEVER)
+                    .expect("a report that can be read"),
+                Renewal::Reached,
+                "`{outcome}` is met after `usable_token` has already renewed"
+            );
+        }
+    }
+
+    /// The one Quarantine here that is Perch's: Anthropic Rotated, and what came
+    /// back could not be stored. Every other one is a login ended somewhere
+    /// else, which ADR 0037 calls the ordinary starting state.
+    #[test]
+    fn only_a_rotation_perch_could_not_keep_is_a_fault_in_perch() {
+        assert_eq!(
+            what_the_refresh_came_to(&a_refresh(WHOEVER, "quarantined", "rotation-lost"), WHOEVER)
+                .expect("a report that can be read"),
+            Renewal::Lost
+        );
+
+        let came_to = what_the_refresh_came_to(
+            &a_refresh(WHOEVER, "quarantined", "renewal-rejected"),
+            WHOEVER,
+        )
+        .expect("a report that can be read");
+
+        let Renewal::NotReached(why) = came_to else {
+            panic!("a login ended elsewhere was read as Perch losing one: {came_to:?}");
+        };
+        assert!(why.contains("perch relogin"), "{why}");
+    }
+
+    /// Drift in Perch's own document, which is the one thing here that is a
+    /// fault: a phase reading a key that has moved would otherwise go on to
+    /// assert against a figure it never read.
+    #[test]
+    fn a_refresh_report_that_cannot_be_read_stops_the_run() {
+        for document in [
+            serde_json::json!({"refresh": null}),
+            a_refresh("somebody@example.com", "observed", "null"),
+            a_refresh(WHOEVER, "invented-since", "null"),
+        ] {
+            let Err(Halt::Stopped(setback)) = what_the_refresh_came_to(&document, WHOEVER) else {
+                panic!("a report nothing could read was read anyway: {document}");
+            };
+            assert_eq!(setback.fault, Fault::Perch);
+        }
     }
 
     // ---- a phase that gives up ---------------------------------------------
