@@ -445,7 +445,10 @@ Export, and the thing a Dogfood run refuses to act without. Named for what it
 records rather than for what it permits: it is not a switch anybody may set, it
 is the wizard saying that every Account on this machine is in a file. A machine
 somebody only meant to connect to should not be able to start Switching
-Accounts around because a command was recalled from history (ADR 0037).
+Accounts around because a command was recalled from history (ADR 0037). It also
+records what this machine was deliberately arranged to prove — which Group is
+set aside for the Phases needing a pair, and how many logins the person holds,
+so a machine that is behind can be told from one that is complete.
 _Avoid_: flag, opt-in, sentinel, consent file
 
 **Phase**:
@@ -453,5 +456,24 @@ One step of a Dogfood run, declaring what it needs of a machine before it runs
 so the Preflight can count it. It steers policy and never figures, reads
 `list --json`, `status --json` and exit codes, and never unwinds itself — one
 that stops says what is now true and what puts it back, and says whether it is a
-fault in Perch or news about something upstream (ADR 0037).
+fault in Perch or news about something upstream (ADR 0037). One that discovers
+only as it runs that this machine can prove nothing with it says that instead of
+passing hollow, so what the Preflight counts is a ceiling rather than a promise.
 _Avoid_: step, stage, scenario, case
+
+**Attended**:
+A Phase that hands the terminal to a person: a login to walk, a client to quit.
+Asked for rather than inferred — a run takes them on only where it has been told
+somebody is there, and refuses the telling on a terminal that could not carry a
+question anyway. What a person may be asked for is an act, never a verdict:
+whether the Phase passed is Perch's to judge, from what is on disk once the
+person is done (ADR 0038).
+_Avoid_: interactive, manual, supervised, human phase
+
+**Attestation**:
+A line in a report a person vouched for rather than one Perch established, kept
+for the little a Phase structurally cannot see for itself. Said as attested, so
+that it and an assertion never read alike a week later, and never the whole of
+what a Phase came to — a pass that is a keystroke is a pass somebody can type
+away on the fourth login of the evening (ADR 0038).
+_Avoid_: confirmation, sign-off, manual check, verification

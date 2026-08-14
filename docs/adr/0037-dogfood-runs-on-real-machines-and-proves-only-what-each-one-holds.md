@@ -31,6 +31,33 @@ So Dogfood takes the opposite bargain. Nothing is replaced, and the price is pai
 where it is cheapest to pay: the suite asks the machine in front of it what it
 can prove, and proves that.
 
+## The observer may be replaced; the subject may not
+
+That rule needs one refinement, because read carelessly it forbids something it
+should allow. `perch run <target> -- <program>` reaches the probe for Claude Code
+only where nothing was named after `--`; name anything else and the Run is a Run
+in full — Reconcile, then Carry, then a Live Profile claimed, then a launch with
+`CLAUDE_CONFIG_DIR` pointing at the Profile. So a phase can run `perch run alias
+-- <perch> --version`, wait for it to exit, and read off the real filesystem what
+Reconcile actually linked. No client, no quota, no human.
+
+That looks like the stub above wearing a different hat, and it is not. The stub
+is rejected for replacing *the subject*: a script printing a version string
+stands in for the very thing whose behaviour is the question, so what survives is
+a test of the harness. Here the subject is Reconcile, and Reconcile runs
+untouched, over the real filesystem, against the real Profile. What has been
+replaced is who is *watching* — and since what Reconcile does it does to disk,
+the watcher can be anything at all, including nothing.
+
+The question that separates the two: *what would still be proved if the
+replacement were perfect?* A flawless fake client proves nothing whatever about a
+Renewal, which is why replacing it there is the rejected bargain. A flawless fake
+observer changes nothing about the links Reconcile made, because it never went
+near them.
+
+A real client is still launched once, attended, and it has to be: whether Claude
+Code accepts what Reconcile built is a question only Claude Code can answer.
+
 ## A machine proves what it holds
 
 A Preflight opens every run and reports before anything acts — which client is

@@ -23,11 +23,18 @@
 //! ```text
 //! cargo run --features dogfood --bin dogfood-setup
 //! cargo test --features dogfood --test dogfood -- --nocapture
+//!
+//! PERCH_DOGFOOD_ATTENDED=1   # take on the phases that hand you the terminal
+//! PERCH_DOGFOOD_PHASES=run,cycle   # only the phases whose names contain these
 //! ```
 //!
-//! `--nocapture`, always. A suite that skipped itself and a suite that asserted
-//! look identical otherwise, which is the failure the Preflight figure exists to
-//! prevent.
+//! `--nocapture`, always — but not for the reason it looks like. The Preflight
+//! and every phase write through a `Stdout` handle rather than through `print!`,
+//! and libtest only captures the macro sink, so the run is legible either way.
+//! What the flag buys is that a *passing* run is legible: libtest holds a
+//! passing test's captured output back, and a suite that skipped itself and a
+//! suite that asserted look identical when neither says anything. That is the
+//! failure the Preflight figure exists to prevent.
 
 use std::path::{Path, PathBuf};
 

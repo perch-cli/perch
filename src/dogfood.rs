@@ -38,8 +38,14 @@ use crate::registry;
 /// a machine that no longer exists.
 pub const MARKER_FILE: &str = "dogfood.json";
 
-/// The version this build writes, and the only one there has ever been.
-pub const MARKER_VERSION: u32 = 1;
+/// The version this build writes, and the only one it reads.
+///
+/// Two rather than one because the marker now records what the machine was
+/// arranged to prove as well as what was saved, and *other* is refused rather
+/// than only *newer*: Perch has no installed base, so a marker written before
+/// the arrangement existed is one minute of the wizard's time to replace and no
+/// lines at all of code that has to reason about what it left out.
+pub const MARKER_VERSION: u32 = 2;
 
 /// What the setup wizard writes once it has taken an Export, and what the suite
 /// refuses to run without.
@@ -57,6 +63,58 @@ pub struct Marker {
     pub perch_version: String,
     /// The Export the wizard took, or why there was none to take.
     pub export: Held,
+    /// What this machine was deliberately set up to prove.
+    pub arrangement: Arrangement,
+}
+
+/// What the wizard was told, beyond what it could see for itself.
+///
+/// Both of these are things only a person knows, and both gate phases — so both
+/// are asked for once, while somebody is watching, rather than guessed at on
+/// every run. A machine nobody told anything is [`Arrangement::default`], and
+/// the phases needing either simply skip there.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Arrangement {
+    /// The Group set aside for the phases that need a pair of Accounts.
+    ///
+    /// Named rather than discovered. A Group is a declaration somebody made
+    /// (`CONTEXT.md`), so a phase that Cycled inside the largest Group it could
+    /// find would be moving Accounts around a set declared for somebody's own
+    /// reasons — and doing it after the marker check had passed, which is the
+    /// one place the suite promises not to surprise anybody.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// How many logins with Anthropic this person holds, in total, across every
+    /// machine.
+    ///
+    /// The one fact that makes "this machine is behind" computable: a machine
+    /// holding fewer Accounts than there are logins has one spare to `add`, and
+    /// that is the only circumstance in which a Dogfood run may walk a real
+    /// browser login for an Account it did not already have.
+    #[serde(default)]
+    pub logins: usize,
+}
+
+impl Arrangement {
+    /// The line the wizard and a report both say it with.
+    pub fn said(&self) -> String {
+        let pair = match &self.group {
+            Some(group) => {
+                format!("the Group `{group}` is set aside for the phases needing a pair")
+            }
+            None => "no Group is set aside".to_string(),
+        };
+        format!("{pair}, and {} held in all", logins(self.logins))
+    }
+}
+
+/// A count of logins, with the noun agreeing with it. The rule
+/// [`crate::commands::accounts`] holds for Accounts, and for the same reason.
+fn logins(held: usize) -> String {
+    match held {
+        1 => "1 login".to_string(),
+        _ => format!("{held} logins"),
+    }
 }
 
 /// What the wizard's first act came to.
@@ -163,15 +221,32 @@ pub fn marker(host: &dyn Host) -> Result<Marker> {
     };
 
     // Before the parse, for the reason `claimed_version` is written down at.
-    if let Some(version) = crate::error::claimed_version(&contents)
-        && version > MARKER_VERSION
-    {
-        return Err(crate::error::written_by_a_newer_perch(
-            &path.display().to_string(),
-            "dogfood marker",
-            version,
-            MARKER_VERSION,
-        ));
+    //
+    // Any version but this one is refused, and the two are refused apart. A
+    // newer Perch's marker is the standing forward-looking guard and says so in
+    // the words every other one of Perch's files uses. An older one earns a
+    // sentence of its own because the answer to it is different and is a minute
+    // of somebody's time: a marker written before the arrangement existed says
+    // nothing about which Group was set aside or how many logins are held, and
+    // a run reading it would skip half the suite while reporting that the
+    // machine simply had not got the Accounts.
+    match crate::error::claimed_version(&contents) {
+        Some(version) if version > MARKER_VERSION => {
+            return Err(crate::error::written_by_a_newer_perch(
+                &path.display().to_string(),
+                "dogfood marker",
+                version,
+                MARKER_VERSION,
+            ));
+        }
+        Some(version) if version != MARKER_VERSION => {
+            return Err(PerchError::Invalid(format!(
+                "This machine was marked by an earlier Perch, whose marker \
+                 (version {version}) says nothing about what the machine was \
+                 set up to prove.\n{HOW_TO_SET_UP}"
+            )));
+        }
+        _ => {}
     }
 
     serde_json::from_str(&contents).map_err(|err| PerchError::Malformed {
@@ -255,6 +330,26 @@ pub struct Preflight {
     /// rather than a document. A phase reading one has to be skipped by the
     /// Preflight and counted in the figure, not stopped halfway through.
     pub active: Option<String>,
+    /// Which Group each Account is in, where it is in one.
+    ///
+    /// Kept beside the Accounts rather than derived when a phase asks, because
+    /// the question the arrangement poses — *does this machine still hold two
+    /// usable Accounts in the Group somebody set aside?* — is one about
+    /// membership, and membership changes under a run as surely as a Quarantine
+    /// does.
+    pub in_group: Vec<(String, String)>,
+    /// What the marker says this machine was set up to prove.
+    ///
+    /// Not read by [`Preflight::taken`], which describes what is *here*: the
+    /// wizard takes a Preflight before it has decided the arrangement, and a
+    /// machine describing itself must not need a marker that does not exist
+    /// yet. A run sets it from the marker before anything is measured.
+    pub arrangement: Arrangement,
+    /// Whether somebody is at the terminal, having said so and been believed.
+    ///
+    /// Both halves, and neither alone (ADR 0038): the variable is what opts in,
+    /// and the terminal is what makes the opting-in honourable.
+    pub attended: bool,
 }
 
 /// What a phase needs of a machine before it can prove anything.
@@ -272,21 +367,44 @@ pub struct Needs {
     /// Perch as broken over. The Repair clears what it can before this is
     /// counted, and what it could not clear is what the skip line names.
     pub accounts: usize,
+    /// How many usable Accounts the *arranged* Group must hold.
+    ///
+    /// The arranged one and not the largest one: Cycling only ever happens
+    /// inside a Group, so a phase about it moves Accounts around a declaration
+    /// somebody made, and the only declaration this suite may act on is the one
+    /// the wizard was told to act on.
+    pub grouped: usize,
     /// A Claude Code to launch.
     pub client: bool,
     /// A network that answers.
     pub network: bool,
     /// One of those Accounts to be active.
     pub active: bool,
+    /// Somebody at the terminal to walk a login or quit a client.
+    ///
+    /// What a person may be asked for is an act and never a verdict (ADR 0038)
+    /// — this says the phase needs one of them done, not that it needs one
+    /// witnessed.
+    pub attended: bool,
+    /// A login this machine has not got: more logins held than Accounts here.
+    ///
+    /// The only circumstance in which a run may walk a browser login for an
+    /// Account it did not already have, and the reason it is a *machine* being
+    /// behind rather than a person having a spare — across a matrix of four
+    /// machines, the one that can prove `add` is the one that is out of date.
+    pub spare_login: bool,
 }
 
 impl Needs {
     /// A phase that runs anywhere — argv, a refusal, an exit code.
     pub const NOTHING: Needs = Needs {
         accounts: 0,
+        grouped: 0,
         client: false,
         network: false,
         active: false,
+        attended: false,
+        spare_login: false,
     };
 
     /// A phase that reads what Perch holds, and so needs it to hold something
@@ -301,6 +419,20 @@ impl Needs {
     pub const THE_ACTIVE_ACCOUNT: Needs = Needs {
         active: true,
         ..Needs::AN_ACCOUNT
+    };
+
+    /// A phase that moves between two Accounts, whether or not they are
+    /// declared interchangeable.
+    pub const TWO_ACCOUNTS: Needs = Needs {
+        accounts: 2,
+        active: true,
+        ..Needs::NOTHING
+    };
+
+    /// A phase about Cycling, which only happens inside a Group.
+    pub const A_PAIR: Needs = Needs {
+        grouped: 2,
+        ..Needs::TWO_ACCOUNTS
     };
 }
 
@@ -318,9 +450,24 @@ impl Preflight {
             accounts: Vec::new(),
             quarantined: Vec::new(),
             active: None,
+            in_group: Vec::new(),
+            arrangement: Arrangement::default(),
+            attended: false,
         };
         preflight.read_the_registry(host)?;
         Ok(preflight)
+    }
+
+    /// What the marker says this machine was set up to prove, and whether
+    /// anybody is watching it happen.
+    ///
+    /// Apart from [`Preflight::taken`] because the wizard needs the description
+    /// before there is a marker to describe it with — and because attendance is
+    /// a question about the process the suite is running in rather than about
+    /// the machine, which is the one thing a Preflight otherwise never asks.
+    pub fn arranged(&mut self, marker: &Marker, attended: bool) {
+        self.arrangement = marker.arrangement.clone();
+        self.attended = attended;
     }
 
     /// What the registry says, read again.
@@ -346,7 +493,39 @@ impl Preflight {
         self.active = registry
             .active_account()
             .map(|account| account.email().to_string());
+        self.in_group = registry
+            .accounts
+            .iter()
+            .filter_map(|account| Some((account.email().to_string(), account.group.clone()?)))
+            .collect();
         Ok(())
+    }
+
+    /// The usable Accounts in the Group the wizard set aside, or none at all
+    /// where nothing was set aside.
+    ///
+    /// A machine with no arrangement answers the same as one whose arranged
+    /// Group has emptied out, and deliberately: both are machines that cannot
+    /// prove anything about Cycling, and the skip line is where the difference
+    /// between them is worth spelling out rather than here.
+    pub fn arranged_pair(&self) -> Vec<&String> {
+        let Some(group) = &self.arrangement.group else {
+            return Vec::new();
+        };
+        let usable = self.usable();
+        self.in_group
+            .iter()
+            .filter(|(_, theirs)| theirs == group)
+            .filter_map(|(email, _)| usable.iter().find(|held| **held == email).copied())
+            .collect()
+    }
+
+    /// Whether this machine has a login it has not got an Account for.
+    ///
+    /// Arithmetic rather than a question, and the whole of what makes an `add`
+    /// phase safe: it runs on the machine that is behind and nowhere else.
+    pub fn has_a_spare_login(&self) -> bool {
+        self.arrangement.logins > self.accounts.len()
     }
 
     /// The Accounts a phase could actually prove something with: held here, and
@@ -385,9 +564,14 @@ impl Preflight {
         self.figure_said("now ", phases)
     }
 
+    /// *Up to*, because a phase may discover as it runs that this machine can
+    /// prove nothing with it (ADR 0038) — a Renewal against a token that has
+    /// not run out is the case, and its gate is on the Credential rather than
+    /// anywhere the Preflight can cheaply look. The figure is an upper bound and
+    /// says so, which is a different thing from a run that quietly proved less.
     fn figure_said(&self, now: &str, phases: &[Phase]) -> String {
         format!(
-            "This machine can {now}prove {} of {}",
+            "This machine can {now}prove up to {} of {}",
             self.provable(phases),
             counted(phases.len())
         )
@@ -399,9 +583,26 @@ impl Preflight {
     /// First rather than all of them: a skip line is read to find out what to
     /// fix next, and a machine missing three things is fixed one at a time.
     pub fn unmet(&self, needs: &Needs) -> Option<String> {
+        // Attendance first, ahead of everything the machine holds. Every
+        // attended phase also needs Accounts, so a CI runner would otherwise
+        // report each of them as short of Accounts — true, and not the thing
+        // the reader is short of. What is missing there is a person, and no
+        // amount of logging in fixes it.
+        if needs.attended && !self.attended {
+            return Some(format!(
+                "nobody is at the terminal: this phase hands one over, and a run \
+                 takes those on only where {ATTENDED_VARIABLE} is set"
+            ));
+        }
         let usable = self.usable();
         if usable.len() < needs.accounts {
             return Some(self.too_few_usable(usable.len(), needs.accounts));
+        }
+        if needs.grouped > 0 {
+            let pair = self.arranged_pair();
+            if pair.len() < needs.grouped {
+                return Some(self.too_few_arranged(pair.len(), needs.grouped));
+            }
         }
         if needs.client
             && let Client::Absent(why) = &self.client
@@ -429,7 +630,36 @@ impl Preflight {
                 ));
             }
         }
+        if needs.spare_login && !self.has_a_spare_login() {
+            return Some(format!(
+                "this machine already holds {}, and the wizard was told there are \
+                 {} — so there is no login here left to add",
+                crate::commands::accounts(self.accounts.len()),
+                logins(self.arrangement.logins),
+            ));
+        }
         None
+    }
+
+    /// Why a phase about Cycling cannot run here.
+    ///
+    /// Three readings, because "the Group has not got two" is the least likely
+    /// of them and the other two send somebody to completely different places:
+    /// a machine nobody arranged is a wizard to re-run, and a Group that has
+    /// emptied out is a Quarantine or a Remove to look into.
+    fn too_few_arranged(&self, usable: usize, needed: usize) -> String {
+        let Some(group) = &self.arrangement.group else {
+            return format!(
+                "no Group is set aside on this machine, and this phase Cycles \
+                 within one — {HOW_TO_SET_UP}"
+            );
+        };
+        format!(
+            "the Group `{group}` holds {} this machine can use and this phase \
+             needs {}",
+            crate::commands::accounts(usable),
+            crate::commands::accounts(needed),
+        )
     }
 
     /// Why a phase needing usable Accounts cannot run here.
@@ -493,6 +723,18 @@ impl Preflight {
             // state, and Repair is phase zero because of it (ADR 0037).
             format!("Quarantined: {}", or_none(&self.quarantined)),
             format!("Active: {}", self.active.as_deref().unwrap_or("none")),
+            // What somebody told the wizard, said back to them: the two facts
+            // gating a third of the suite are the two facts nothing on the
+            // machine can check, so a run that skips those phases has to make
+            // it possible to see *why* without opening the marker.
+            format!("Arranged: {}", self.arrangement.said()),
+            format!(
+                "Attended: {}",
+                match self.attended {
+                    true => "yes — phases that hand over the terminal will run",
+                    false => "no — phases that hand over the terminal will skip",
+                }
+            ),
             self.figure(phases),
         ]
     }
@@ -555,6 +797,59 @@ fn anthropic_answers(host: &dyn Host) -> Answering {
 /// release archive itself is ever caught.
 pub const BIN_VARIABLE: &str = "PERCH_DOGFOOD_BIN";
 
+/// How somebody says they are sitting there, so the phases that hand the
+/// terminal over may run (ADR 0038).
+///
+/// A variable rather than an inference from the terminal, and checked against
+/// the terminal rather than believed on its own. A tty is not a person — a pane
+/// left open upstairs has one — so being there is a claim only somebody there
+/// can make; and a variable exported into a CI job or a shell profile reaches
+/// contexts where nothing can be typed, so the claim is checked before it is
+/// acted on.
+pub const ATTENDED_VARIABLE: &str = "PERCH_DOGFOOD_ATTENDED";
+
+/// Which phases to run, as words any part of a phase's name may contain.
+///
+/// For the Tuesday when one phase failed on Windows and it is that phase that
+/// wants running again, rather than the hour of them in front of it. Empty or
+/// unset is every phase, which is what an unfiltered run has to keep meaning.
+pub const PHASES_VARIABLE: &str = "PERCH_DOGFOOD_PHASES";
+
+/// Whether the phases that hand the terminal over may run.
+///
+/// Both halves have to agree, and they fail differently on purpose: an
+/// unattended run simply skips them, and a run that asked for them on a
+/// terminal that cannot carry a question is refused outright — see
+/// [`refuse_an_attendance_nobody_could_honour`].
+fn attendance(host: &dyn Host) -> bool {
+    asked_to_attend(host) && host.is_interactive()
+}
+
+fn asked_to_attend(host: &dyn Host) -> bool {
+    host.env_var(ATTENDED_VARIABLE)
+        .is_some_and(|set| !set.is_empty() && set != "0")
+}
+
+/// Refuses an opt-in the terminal could not honour, at the top of the run.
+///
+/// The failure this prevents is not a skip. A phase that handed the terminal
+/// over where nothing could be typed would block on an answer that is never
+/// coming — a hang, halfway through a suite, in a pipeline or a CI job where
+/// the question is at best on a screen nobody is reading.
+fn refuse_an_attendance_nobody_could_honour(host: &dyn Host) -> Result<()> {
+    if !asked_to_attend(host) || host.is_interactive() {
+        return Ok(());
+    }
+    Err(PerchError::Invalid(format!(
+        "{ATTENDED_VARIABLE} is set, and this is not a terminal anything could \
+         be typed at.\n\
+         The phases it turns on hand the terminal to a browser login or to a \
+         client, so a run that took them on here would stop at the first \
+         question and wait for an answer that is not coming. Unset it, or run \
+         the suite where you can type."
+    )))
+}
+
 /// The Perch a run drives, as a process rather than as a library.
 ///
 /// The whole point of the suite: argv, the exit codes and every rendered line
@@ -577,6 +872,41 @@ impl<'a> Perch<'a> {
 
     pub fn bin(&self) -> &Path {
         &self.bin
+    }
+
+    /// The machine underneath, for the little a phase has to look at directly.
+    ///
+    /// Not a way round "a phase reads `list --json`, `status --json` and exit
+    /// codes" (ADR 0037), which is about not building a backdoor into the
+    /// *shipped* binary. What this is for is the same thing the Preflight reads
+    /// the registry for: seeing the machine as a person would, with the library
+    /// this suite already links, so that what Perch *did* to a Profile can be
+    /// checked rather than taken on trust from Perch.
+    pub fn host(&self) -> &dyn Host {
+        self.host
+    }
+
+    /// Puts a question to whoever is watching, and hands back the word they
+    /// typed, folded and trimmed.
+    ///
+    /// Only ever to ask for an *act* — walk this login, quit that client. A
+    /// phase does not ask whether it passed (ADR 0038): a verdict that is a
+    /// keystroke is one somebody types away on the fourth round trip of the
+    /// evening, and nearly everything worth judging is on disk by then anyway.
+    ///
+    /// Reachable only from a phase the Preflight admitted as attended, so end
+    /// of input here is a terminal that went away mid-run rather than a
+    /// question asked where none could be.
+    pub fn ask(&self, out: &mut dyn Write, question: &str) -> std::result::Result<String, Halt> {
+        crate::commands::ask_a_word(self.host, out, question)
+            .map_err(|err| {
+                Fault::Upstream.because(format!("the terminal could not be read: {err}"))
+            })?
+            .ok_or_else(|| {
+                Halt::Stopped(Fault::Upstream.because(
+                    "the terminal ended while this phase was waiting for an answer".to_string(),
+                ))
+            })
     }
 
     /// Runs `perch` and hands back what it said, whatever it said. A command
@@ -1197,13 +1527,60 @@ fn listed_now(perch: &Perch<'_>) -> std::result::Result<Vec<(String, Option<Stri
 }
 
 /// What a phase proved, or what stopped it.
-pub type Proof = std::result::Result<Vec<String>, Setback>;
+/// The two ways a phase ends other than by proving something.
+///
+/// On the error side rather than the success side, and that is the whole of why
+/// this type exists: a phase discovering it can prove nothing here is an early
+/// return, which is what `?` spells. A Renewal reads one Credential and stops if
+/// the token has not run out; on the success side that is a `match` at every
+/// call site that could learn the same thing, and one of them eventually
+/// forgets.
+///
+/// A [`Halt::Skipped`] is not a failure. It becomes the [`Outcome::Skipped`] the
+/// report already knows how to print, so nothing downstream needs a word for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Halt {
+    /// This machine cannot prove this, discovered as the phase ran rather than
+    /// before it (ADR 0038). Named and counted, never silent.
+    Skipped(String),
+    /// It stopped, and the run stops with it.
+    Stopped(Setback),
+}
+
+/// So a phase's ordinary `perch.json(…)?` still reads as it did: what those
+/// hand back is a [`Setback`], and a Setback is always a stop.
+impl From<Setback> for Halt {
+    fn from(setback: Setback) -> Halt {
+        Halt::Stopped(setback)
+    }
+}
+
+impl Halt {
+    /// This machine cannot prove this phase, for a reason found at run time.
+    ///
+    /// Worth a constructor of its own so the call reads as what it means where
+    /// a phase gives up, rather than as an error being built.
+    pub fn not_here(why: impl Into<String>) -> Halt {
+        Halt::Skipped(why.into())
+    }
+}
+
+pub type Proof = std::result::Result<Vec<String>, Halt>;
 
 /// One phase: a name, what it needs of the machine, and the proving.
+///
+/// `Copy` so a run can be narrowed to the phases somebody asked for
+/// ([`PHASES_VARIABLE`]) without every figure, report and count in the module
+/// learning to speak in references — a name, a `Needs` and a function pointer
+/// are cheaper to copy than to borrow around.
+#[derive(Clone, Copy)]
 pub struct Phase {
     pub name: &'static str,
     pub needs: Needs,
-    pub prove: fn(&Perch<'_>) -> Proof,
+    /// The writer is the terminal, where a phase was admitted as attended, and
+    /// somewhere harmless where it was not — a phase says what it is about to
+    /// ask somebody to do, and nothing else prints from inside one.
+    pub prove: fn(&Perch<'_>, &Preflight, &mut dyn Write) -> Proof,
 }
 
 /// What became of one phase in one run.
@@ -1248,6 +1625,12 @@ pub struct Run {
     /// against. Only the registry is asked again — the client and the network do
     /// not change inside one run, and each costs a process or a round trip.
     pub after: Preflight,
+    /// What somebody narrowed the run to, where they did.
+    ///
+    /// Kept so the report says it. A report of one phase and a report of a suite
+    /// that has shrunk to one phase are the same document otherwise, and the
+    /// second is the kind of thing a matrix is read to notice.
+    pub filtered: Option<String>,
     pub outcomes: Vec<(&'static str, Outcome)>,
 }
 
@@ -1275,6 +1658,10 @@ impl Run {
             ),
             format!("- Marked by Perch {}", self.marker.perch_version),
             format!("- Under test: {}", self.bin.display()),
+            match &self.filtered {
+                Some(asked) => format!("- Narrowed to `{PHASES_VARIABLE}={asked}`"),
+                None => "- Every phase, unfiltered".to_string(),
+            },
             String::new(),
             "## Preflight".to_string(),
             String::new(),
@@ -1351,14 +1738,79 @@ fn stamp(at: DateTime<Utc>) -> String {
 ///
 /// What one phase came to, measured against the machine as it stands rather
 /// than as the Repair left it.
-fn prove(perch: &Perch<'_>, standing: &Preflight, phase: &Phase) -> Outcome {
+fn prove(perch: &Perch<'_>, standing: &Preflight, phase: &Phase, out: &mut dyn Write) -> Outcome {
     if let Some(why) = standing.unmet(&phase.needs) {
         return Outcome::Skipped(why);
     }
-    match (phase.prove)(perch) {
+    match (phase.prove)(perch, standing, out) {
         Ok(established) => Outcome::Proved(established),
-        Err(setback) => Outcome::Stopped(setback),
+        // Both are the phase saying it proved nothing. They are told apart by
+        // whose problem that is, which is the distinction the whole suite turns
+        // on: a Skip is a machine that has not got what the phase needed, and a
+        // Setback is somebody's work.
+        Err(Halt::Skipped(why)) => Outcome::Skipped(why),
+        Err(Halt::Stopped(setback)) => Outcome::Stopped(setback),
     }
+}
+
+/// The phases this run is about: all of them, or the ones somebody named.
+///
+/// The narrowing happens once and everything downstream is measured against the
+/// result — the figure, the report, the count. A run filtered to one phase that
+/// went on saying "1 of 9" would be describing a suite nobody asked it to run.
+fn chosen(host: &dyn Host, phases: &[Phase]) -> (Vec<Phase>, Option<String>) {
+    let Some(asked) = host
+        .env_var(PHASES_VARIABLE)
+        .filter(|set| !set.trim().is_empty())
+    else {
+        return (phases.to_vec(), None);
+    };
+    let words: Vec<String> = asked
+        .split(',')
+        .map(|word| word.trim().to_lowercase())
+        .filter(|word| !word.is_empty())
+        .collect();
+
+    let narrowed = phases
+        .iter()
+        .filter(|phase| {
+            let name = phase.name.to_lowercase();
+            words.iter().any(|word| name.contains(word))
+        })
+        .copied()
+        .collect();
+    (narrowed, Some(asked))
+}
+
+/// Refuses a narrowing that matched no phase at all.
+///
+/// A typo in the variable is the whole of what this is about, and it fails in
+/// the direction the Preflight figure exists to prevent: a run of nothing
+/// reports a green "0 of 0 phases", which is the same document a run that
+/// proved everything would produce if the suite were empty. Left alone, the
+/// answer to "did Windows pass?" would be yes.
+fn refuse_a_narrowing_that_matched_nothing(
+    asked: &Option<String>,
+    narrowed: &[Phase],
+    phases: &[Phase],
+) -> Result<()> {
+    let Some(asked) = asked else {
+        return Ok(());
+    };
+    if !narrowed.is_empty() {
+        return Ok(());
+    }
+    Err(PerchError::NotFound(format!(
+        "{PHASES_VARIABLE}={asked} matches none of the {}, so this run would \
+         prove nothing and report it as a run with nothing left to prove.\n\
+         Any part of a phase's name will do. They are:\n{}",
+        counted(phases.len()),
+        phases
+            .iter()
+            .map(|phase| format!("  {}", phase.name))
+            .collect::<Vec<_>>()
+            .join("\n")
+    )))
 }
 
 pub fn dogfood(
@@ -1369,18 +1821,38 @@ pub fn dogfood(
     out: &mut dyn Write,
 ) -> Result<Run> {
     let marker = marker(host)?;
+    // Before anything is described, let alone acted on: an opt-in the terminal
+    // could not honour is a hang halfway through rather than a skip, and the
+    // only harmless moment to say so is before the run has touched anything.
+    refuse_an_attendance_nobody_could_honour(host)?;
     // Read before the phases rather than after them, so a report is named after
     // when the run started. A full run is somebody sitting there for an hour,
     // and a stamp taken at the end names the wrong sitting.
     let began = host.now();
-    let preflight = Preflight::taken(host)?;
+    let mut preflight = Preflight::taken(host)?;
+    preflight.arranged(&marker, attendance(host));
     // The second half of the marker's promise, and the half nothing was asking.
     // Before the Repair, because the Repair is the first thing that hands the
     // terminal to a real login.
     refuse_accounts_no_export_covers(&marker, &preflight.accounts)?;
     let perch = Perch::under_test(host, built);
 
+    // Narrowed before the figure is said, so every count in the run and in the
+    // report is about the same set of phases.
+    let (narrowed, filtered) = chosen(host, phases);
+    refuse_a_narrowing_that_matched_nothing(&filtered, &narrowed, phases)?;
+    let phases = narrowed.as_slice();
+
     say(out, &format!("Under test: {}", perch.bin().display()))?;
+    if let Some(asked) = &filtered {
+        say(
+            out,
+            &format!(
+                "Narrowed to {} by {PHASES_VARIABLE}={asked}",
+                counted(phases.len())
+            ),
+        )?;
+    }
     for line in preflight.said(phases) {
         say(out, &line)?;
     }
@@ -1420,7 +1892,7 @@ pub fn dogfood(
                 "the registry could not be read between phases: {why}"
             )))
         } else {
-            prove(&perch, &standing, phase)
+            prove(&perch, &standing, phase, out)
         };
         stopped = stopped || matches!(outcome, Outcome::Stopped(_));
 
@@ -1446,6 +1918,7 @@ pub fn dogfood(
         preflight,
         repair: repaired,
         after,
+        filtered,
         outcomes,
     };
     let written = write_the_report(host, &run, phases, reports)?;
@@ -1541,11 +2014,21 @@ pub fn set_up(
         }
     };
 
+    let arrangement = if args.unattended {
+        // A runner holds nothing and nobody is there to say what it holds
+        // elsewhere. Both phases this gates then skip, which is the honest
+        // answer and the one CI wants.
+        Arrangement::default()
+    } else {
+        arrange(host, &perch, &mut preflight, out)?
+    };
+
     let marker = Marker {
         version: MARKER_VERSION,
         marked_at: host.now(),
         perch_version: env!("CARGO_PKG_VERSION").to_string(),
         export,
+        arrangement,
     };
     mark(host, &marker)?;
 
@@ -1555,11 +2038,199 @@ pub fn set_up(
     say(out, "")?;
     // The figure, said at the end of setup as well as at the start of a run:
     // whoever just walked this is the person who can do something about it.
+    // Measured with the arrangement in force, because arranging one is most of
+    // what the figure just changed.
+    preflight.arranged(&marker, attendance(host));
     for line in preflight.said(phases) {
         say(out, &line)?;
     }
 
     Ok(marker)
+}
+
+/// The two things only a person knows, asked once, while they are watching.
+///
+/// Both gate phases and neither is on the machine: how many logins exist in all
+/// is a fact about somebody's subscriptions, and which Group may be Cycled
+/// through is a decision about their Accounts. A run inferring either would be
+/// acting on something nobody told it — and it would be doing so after the
+/// marker check had passed, which is the one point in a Dogfood run where the
+/// suite promises no surprises.
+fn arrange(
+    host: &dyn Host,
+    perch: &Perch<'_>,
+    preflight: &mut Preflight,
+    out: &mut dyn Write,
+) -> Result<Arrangement> {
+    say(out, "")?;
+    say(out, "What this machine may be asked to prove:")?;
+
+    let logins = ask_how_many_logins(host, preflight.accounts.len(), out)?;
+    let group = set_a_group_aside(host, perch, preflight, out)?;
+    Ok(Arrangement { group, logins })
+}
+
+/// How many logins there are in all, across every machine.
+///
+/// What it buys is the `add` phase: a machine holding fewer Accounts than this
+/// has a login it has not got, and that is the only circumstance in which a run
+/// may walk a browser login for an Account it did not already have. Answered
+/// with what is here by anybody who does not want that, which is why the
+/// default is the count held rather than a number that turns the phase on.
+fn ask_how_many_logins(host: &dyn Host, held: usize, out: &mut dyn Write) -> Result<usize> {
+    let answered = crate::commands::ask_a_word(
+        host,
+        out,
+        &format!(
+            "  How many logins with Anthropic do you hold in all, across every \
+             machine? [{held}] "
+        ),
+    )?;
+    match answered.as_deref().map(str::trim) {
+        Some("") | None => Ok(held),
+        Some(typed) => match typed.parse::<usize>() {
+            // Fewer than are on this machine is not a number a phase could act
+            // on — `spare_login` is arithmetic between the two — so it is taken
+            // as the count held and said out loud rather than stored to puzzle
+            // somebody later.
+            Ok(count) if count >= held => Ok(count),
+            Ok(count) => {
+                say(
+                    out,
+                    &format!(
+                        "  This machine already holds {}, so {count} is taken as \
+                         {held}.",
+                        crate::commands::accounts(held)
+                    ),
+                )?;
+                Ok(held)
+            }
+            Err(_) => {
+                say(out, &format!("  `{typed}` is not a number; taking {held}."))?;
+                Ok(held)
+            }
+        },
+    }
+}
+
+/// Which Group the phases that Cycle may move Accounts around in.
+///
+/// Offered rather than chosen: a Group already holding a usable pair is the
+/// obvious answer and is proposed as one, and a machine without such a Group is
+/// asked before anything is declared or moved. Declining leaves no Group set
+/// aside, which costs the two Cycling phases and nothing else.
+fn set_a_group_aside(
+    host: &dyn Host,
+    perch: &Perch<'_>,
+    preflight: &mut Preflight,
+    out: &mut dyn Write,
+) -> Result<Option<String>> {
+    let usable: Vec<String> = preflight.usable().into_iter().cloned().collect();
+    if usable.len() < 2 {
+        say(
+            out,
+            "  The phases that Cycle need two usable Accounts here, and this \
+             machine has not got them yet. None is set aside.",
+        )?;
+        return Ok(None);
+    }
+
+    if let Some(group) = a_group_already_holding_a_pair(preflight, &usable) {
+        let answered = crate::commands::ask_a_word(
+            host,
+            out,
+            &format!("  Set the Group `{group}` aside for the phases that Cycle? [Y/n] "),
+        )?;
+        if !matches!(answered.as_deref(), Some("n" | "no")) {
+            return Ok(Some(group));
+        }
+        say(out, "  No Group set aside.")?;
+        return Ok(None);
+    }
+
+    let pair = &usable[..2];
+    let answered = crate::commands::ask_a_word(
+        host,
+        out,
+        &format!(
+            "  No Group here holds two usable Accounts. Declare `{ARRANGED_GROUP}` \
+             and move {} and {} into it? [y/N] ",
+            pair[0], pair[1]
+        ),
+    )?;
+    if !matches!(answered.as_deref(), Some("y" | "yes")) {
+        say(
+            out,
+            "  No Group set aside. The phases that Cycle will skip on this machine.",
+        )?;
+        return Ok(None);
+    }
+
+    declare_and_fill(perch, pair, out)?;
+    // What was just moved changes who is in which Group, and the figure printed
+    // at the end of setup is measured from it.
+    preflight.read_the_registry(host)?;
+    Ok(Some(ARRANGED_GROUP.to_string()))
+}
+
+/// The Group the wizard declares where somebody has none to offer. A fixed name
+/// rather than one typed, because it is Perch's suggestion and a name somebody
+/// chose is one they would rather have declared themselves.
+const ARRANGED_GROUP: &str = "dogfood";
+
+/// A Group on this machine already holding two Accounts a phase could use.
+fn a_group_already_holding_a_pair(preflight: &Preflight, usable: &[String]) -> Option<String> {
+    let mut counted: Vec<(String, usize)> = Vec::new();
+    for (email, group) in &preflight.in_group {
+        if !usable.contains(email) {
+            continue;
+        }
+        match counted.iter_mut().find(|(name, _)| name == group) {
+            Some((_, held)) => *held += 1,
+            None => counted.push((group.clone(), 1)),
+        }
+    }
+    counted
+        .into_iter()
+        .find(|(_, held)| *held >= 2)
+        .map(|(name, _)| name)
+}
+
+/// Declares the Group and moves the pair into it, through the binary under test
+/// rather than through the registry.
+///
+/// The wizard is the last place to reimplement something `perch group` already
+/// does: a namespace shared with Aliases, a Group that already exists, an
+/// Account that will not move — every one of those refusals is already written,
+/// and a second implementation of them is how the two come to disagree.
+fn declare_and_fill(perch: &Perch<'_>, pair: &[String], out: &mut dyn Write) -> Result<()> {
+    let declared = perch
+        .run(&["group", "add", ARRANGED_GROUP])
+        .map_err(|setback| PerchError::Other(setback.because))?;
+    // A Group that is already there is the answer this wanted, arrived at
+    // earlier — the pair below is what actually has to be true.
+    if !declared.succeeded() && declared.status != crate::error::EXIT_CONFLICT {
+        return Err(PerchError::Other(format!(
+            "`perch group add {ARRANGED_GROUP}` exited {}: {}",
+            declared.status,
+            declared.stderr.trim()
+        )));
+    }
+
+    for email in pair {
+        let moved = perch
+            .run(&["group", "move", email, ARRANGED_GROUP])
+            .map_err(|setback| PerchError::Other(setback.because))?;
+        if !moved.succeeded() {
+            return Err(PerchError::Other(format!(
+                "`perch group move {email} {ARRANGED_GROUP}` exited {}: {}",
+                moved.status,
+                moved.stderr.trim()
+            )));
+        }
+        say(out, &format!("  {email} is now in `{ARRANGED_GROUP}`."))?;
+    }
+    Ok(())
 }
 
 /// The footgun this closes: `cargo run --bin dogfood-setup` builds that binary
@@ -1884,6 +2555,7 @@ mod tests {
                 path: PathBuf::from("/Users/someone/perch-2026-08-12.age"),
                 accounts: accounts.iter().map(|email| (*email).to_string()).collect(),
             },
+            arrangement: Arrangement::default(),
         }
     }
 
@@ -1915,7 +2587,7 @@ mod tests {
             .with_env("PERCH_HOME", "/tmp/perch")
             .with_file(
                 "/tmp/perch/dogfood.json",
-                r#"{"version": 2, "marked_at": "2026-08-12T09:00:00Z",
+                r#"{"version": 3, "marked_at": "2026-08-12T09:00:00Z",
                     "perch_version": "9.9.9", "export": {"kind": "whatever-comes-next"}}"#,
             );
 
@@ -2055,7 +2727,7 @@ mod tests {
 
     // ---- what a machine can prove -----------------------------------------
 
-    fn proves_nothing(_: &Perch<'_>) -> Proof {
+    fn proves_nothing(_: &Perch<'_>, _: &Preflight, _: &mut dyn Write) -> Proof {
         Ok(vec!["nothing worth saying".to_string()])
     }
 
@@ -2143,7 +2815,7 @@ mod tests {
         assert!(
             bare.said(&phases)
                 .iter()
-                .any(|line| line == "This machine can prove 1 of 2 phases"),
+                .any(|line| line == "This machine can prove up to 1 of 2 phases"),
             "{:?}",
             bare.said(&phases)
         );
@@ -2157,7 +2829,7 @@ mod tests {
             logged_in
                 .said(&phases)
                 .iter()
-                .any(|line| line == "This machine can prove 2 of 2 phases")
+                .any(|line| line == "This machine can prove up to 2 of 2 phases")
         );
     }
 
@@ -2187,7 +2859,7 @@ mod tests {
 
     #[test]
     fn an_unmarked_machine_is_refused_before_a_phase_can_touch_it() {
-        fn touches_it(_: &Perch<'_>) -> Proof {
+        fn touches_it(_: &Perch<'_>, _: &Preflight, _: &mut dyn Write) -> Proof {
             panic!("an unmarked machine must not reach a phase");
         }
 
@@ -2323,7 +2995,7 @@ mod tests {
     /// above rather than only against yesterday's run on another machine.
     #[test]
     fn a_phase_is_gated_on_the_machine_the_phase_before_it_left() {
-        fn breaks_one(perch: &Perch<'_>) -> Proof {
+        fn breaks_one(perch: &Perch<'_>, _: &Preflight, _: &mut dyn Write) -> Proof {
             perch.interactive(&["relogin", "two@example.com"])?;
             Ok(vec!["it left an Account Quarantined".to_string()])
         }
@@ -2403,10 +3075,11 @@ mod tests {
     /// after a failed assertion leaves a state nobody can read (ADR 0037).
     #[test]
     fn a_phase_that_stops_stops_the_run_and_says_what_puts_it_back() {
-        fn stops(_: &Perch<'_>) -> Proof {
+        fn stops(_: &Perch<'_>, _: &Preflight, _: &mut dyn Write) -> Proof {
             Err(Setback::perch("`perch switch` landed on the wrong Account")
                 .leaving(&["two@example.com is active".to_string()])
-                .put_back_with(&["perch switch one@example.com".to_string()]))
+                .put_back_with(&["perch switch one@example.com".to_string()])
+                .into())
         }
 
         let host = marked(a_bare_machine());
@@ -2477,7 +3150,7 @@ mod tests {
         assert_eq!(written, run.report(&phases));
         assert!(written.contains("someone@example.com"));
         assert!(
-            written.contains("This machine can prove 1 of 1 phase"),
+            written.contains("This machine can prove up to 1 of 1 phase"),
             "one phase is a phase, not a phase(s): {written}"
         );
         assert!(written.contains("### runs anywhere — proved"));
@@ -2690,11 +3363,11 @@ mod tests {
         );
         assert!(said.contains("it is no longer Quarantined"), "{said}");
         assert!(
-            said.contains("This machine can prove 0 of 1 phase"),
+            said.contains("This machine can prove up to 0 of 1 phase"),
             "what it could prove when it was found: {said}"
         );
         assert!(
-            said.contains("This machine can now prove 1 of 1 phase"),
+            said.contains("This machine can now prove up to 1 of 1 phase"),
             "and what it can prove now: {said}"
         );
         assert!(matches!(run.outcomes[0].1, Outcome::Proved(_)));
@@ -2736,7 +3409,7 @@ mod tests {
             "the skip line names the Quarantine as the reason: {why}"
         );
         assert!(
-            said.contains("This machine can now prove 0 of 1 phase"),
+            said.contains("This machine can now prove up to 0 of 1 phase"),
             "{said}"
         );
     }
@@ -2978,11 +3651,11 @@ mod tests {
         // Both figures, so a run against two Accounts and a run against two
         // Accounts one of which was dead do not read alike.
         assert!(
-            written.contains("- This machine can prove 1 of 1 phase"),
+            written.contains("- This machine can prove up to 1 of 1 phase"),
             "{written}"
         );
         assert!(
-            written.contains("- This machine can now prove 1 of 1 phase"),
+            written.contains("- This machine can now prove up to 1 of 1 phase"),
             "{written}"
         );
     }
@@ -2991,7 +3664,7 @@ mod tests {
     /// an Account that was never going to work.
     #[test]
     fn nothing_acts_until_the_repair_has_had_its_turn() {
-        fn reads_the_machine(perch: &Perch<'_>) -> Proof {
+        fn reads_the_machine(perch: &Perch<'_>, _: &Preflight, _: &mut dyn Write) -> Proof {
             let listing = perch.json(&["list", "--json"])?;
             let quarantined: Vec<&serde_json::Value> = listing["accounts"]
                 .as_array()
@@ -3529,10 +4202,389 @@ mod tests {
         assert!(said.contains("The login added no Account."));
     }
 
+    // ---- what the wizard was told, and who is watching ---------------------
+
+    /// The arrangement is the wizard's word for two things nothing on a machine
+    /// can check, so a marker carrying one is how a test states them.
+    fn arranged(host: FakeHost, group: Option<&str>, logins: usize) -> FakeHost {
+        let held = Preflight::taken(&host)
+            .map(|preflight| preflight.accounts)
+            .unwrap_or_default();
+        let covered: Vec<&str> = held.iter().map(String::as_str).collect();
+        let mut marker = covering(&covered);
+        marker.arrangement = Arrangement {
+            group: group.map(str::to_string),
+            logins,
+        };
+        mark(&host, &marker).expect("the wizard marked it");
+        host
+    }
+
+    /// An Account in a Group, which `an_account` never is: what a Cycle needs is
+    /// a declaration somebody made, and the arrangement names which one.
+    fn grouped(email: &str, group: &str) -> crate::registry::Account {
+        crate::registry::Account {
+            group: Some(group.to_string()),
+            ..an_account(email, None)
+        }
+    }
+
+    /// Reading what an older Perch wrote is exactly what this repository does
+    /// not do — and the sentence has to send somebody to the wizard rather than
+    /// to the file.
+    #[test]
+    fn a_marker_from_an_older_perch_is_refused_and_says_how_to_replace_it() {
+        let host = a_bare_machine().with_file(
+            "/tmp/perch/dogfood.json",
+            r#"{"version": 1, "marked_at": "2026-08-12T09:00:00Z",
+                "perch_version": "0.1.0", "export": {"kind": "nothing-held"}}"#,
+        );
+
+        let refused = marker(&host).expect_err("a marker written before the arrangement");
+
+        assert!(matches!(refused, PerchError::Invalid(_)));
+        assert!(refused.to_string().contains("dogfood-setup"), "{refused}");
+        assert!(
+            !refused.to_string().contains("newer Perch"),
+            "an older marker and a newer one are two different problems: {refused}"
+        );
+    }
+
+    /// The skip line names what is missing, and what is missing on a runner is a
+    /// person. Every attended phase also needs Accounts, so a machine holding
+    /// none would otherwise report the true thing that helps nobody.
+    #[test]
+    fn a_phase_that_hands_the_terminal_over_skips_where_nobody_is_watching() {
+        let attended = Needs {
+            attended: true,
+            ..Needs::AN_ACCOUNT
+        };
+        let preflight = Preflight::taken(&a_bare_machine()).unwrap();
+
+        let why = preflight.unmet(&attended).expect("nobody is here");
+
+        assert!(why.contains("nobody is at the terminal"), "{why}");
+        assert!(why.contains(ATTENDED_VARIABLE), "{why}");
+    }
+
+    /// A hang is worse than any skip, and it is what believing the variable on
+    /// its own would buy: an opt-in exported into a CI job or carried in from a
+    /// shell profile reaches machines where nothing can be typed at all.
+    #[test]
+    fn asking_for_attendance_where_nothing_could_be_asked_is_refused_before_anything_acts() {
+        fn touches_it(_: &Perch<'_>, _: &Preflight, _: &mut dyn Write) -> Proof {
+            panic!("a run refused at the top must not reach a phase");
+        }
+
+        let host = marked(with_a_claude_code(with_a_perch(a_bare_machine())))
+            .with_env(ATTENDED_VARIABLE, "1")
+            .without_terminal();
+
+        let refused = a_run(
+            &host,
+            &[Phase {
+                name: "would act",
+                needs: Needs::NOTHING,
+                prove: touches_it,
+            }],
+        )
+        .expect_err("nothing here could ask a question");
+
+        assert!(
+            refused.to_string().contains("where you can type"),
+            "the refusal has to say what to do about it: {refused}"
+        );
+    }
+
+    #[test]
+    fn attendance_asked_for_at_a_terminal_that_can_answer_admits_the_phase() {
+        let host = a_machine(&[("one@example.com", None)], &[]).with_env(ATTENDED_VARIABLE, "1");
+        let attended = Needs {
+            attended: true,
+            ..Needs::AN_ACCOUNT
+        };
+
+        let (run, said) = a_watched_run(&host, &[a_phase("hands it over", attended)])
+            .expect("a marked machine runs");
+
+        assert!(matches!(run.outcomes[0].1, Outcome::Proved(_)), "{run:?}");
+        assert!(said.contains("Attended: yes"), "{said}");
+    }
+
+    /// The arranged Group and not the largest one: a phase Cycling through a
+    /// Group somebody declared for their own reasons is the surprise the marker
+    /// exists to prevent, arriving after the marker check has passed.
+    #[test]
+    fn a_pair_is_counted_in_the_group_that_was_set_aside_and_nowhere_else() {
+        let host = arranged(
+            holding(
+                a_bare_machine(),
+                &[
+                    grouped("one@example.com", "work"),
+                    grouped("two@example.com", "work"),
+                    grouped("three@example.com", "personal"),
+                ],
+            ),
+            Some("personal"),
+            3,
+        );
+        let mut preflight = Preflight::taken(&host).unwrap();
+        preflight.arranged(&marker(&host).unwrap(), false);
+
+        let why = preflight
+            .unmet(&Needs::A_PAIR)
+            .expect("`personal` holds one");
+
+        assert!(why.contains("`personal`"), "{why}");
+        assert!(
+            !why.contains("work"),
+            "the Group somebody declared for their own reasons is not this suite's: {why}"
+        );
+    }
+
+    #[test]
+    fn a_machine_with_no_group_set_aside_is_sent_to_the_wizard_rather_than_to_a_count() {
+        let host = arranged(
+            holding(
+                a_bare_machine(),
+                &[
+                    an_account("one@example.com", None),
+                    an_account("two@example.com", None),
+                ],
+            ),
+            None,
+            2,
+        );
+        let mut preflight = Preflight::taken(&host).unwrap();
+        preflight.arranged(&marker(&host).unwrap(), false);
+
+        let why = preflight
+            .unmet(&Needs::A_PAIR)
+            .expect("nothing is set aside");
+
+        assert!(why.contains("no Group is set aside"), "{why}");
+        assert!(why.contains("dogfood-setup"), "{why}");
+    }
+
+    /// Arithmetic rather than a question, and the whole of what makes walking a
+    /// real browser login safe: it happens on the machine that is behind.
+    #[test]
+    fn only_a_machine_holding_fewer_accounts_than_there_are_logins_can_prove_an_add() {
+        let spare = Needs {
+            spare_login: true,
+            ..Needs::NOTHING
+        };
+        let one_here = holding(a_bare_machine(), &[an_account("one@example.com", None)]);
+
+        let mut behind = Preflight::taken(&arranged(one_here, None, 2)).unwrap();
+        behind.arrangement = Arrangement {
+            group: None,
+            logins: 2,
+        };
+        assert_eq!(behind.unmet(&spare), None);
+
+        let mut complete = behind.clone();
+        complete.arrangement.logins = 1;
+        let why = complete.unmet(&spare).expect("this machine is not behind");
+        assert!(why.contains("no login here left to add"), "{why}");
+    }
+
+    // ---- running one phase rather than the hour of them --------------------
+
+    #[test]
+    fn a_run_narrowed_to_one_phase_is_a_run_about_one_phase() {
+        let host = marked(with_a_claude_code(with_a_perch(a_bare_machine())))
+            .with_env(PHASES_VARIABLE, "second");
+        let phases = [
+            a_phase("the first one", Needs::NOTHING),
+            a_phase("the second one", Needs::NOTHING),
+        ];
+
+        let (run, said) = a_watched_run(&host, &phases).expect("a marked machine runs");
+
+        assert_eq!(run.outcomes.len(), 1, "{run:?}");
+        assert_eq!(run.outcomes[0].0, "the second one");
+        // The figure is about what the run is about. "1 of 2" under a run that
+        // was never going to take the other one is a sentence describing a suite
+        // nobody asked for.
+        assert!(
+            said.contains("can prove up to 1 of 1 phase"),
+            "the figure counts the phases this run is about: {said}"
+        );
+        let written = host
+            .read_file(&Path::new("/tmp/reports").join(run.file_name()))
+            .expect("the report was written");
+        assert!(written.contains("Narrowed to `PERCH_DOGFOOD_PHASES=second`"));
+    }
+
+    /// The one way a filter fails quietly: a run of nothing reports "0 of 0
+    /// phases", which is the document a suite with nothing left to prove would
+    /// write. The answer to "did Windows pass?" would then be yes.
+    #[test]
+    fn a_narrowing_that_matches_no_phase_is_refused_rather_than_proving_nothing() {
+        let host = marked(with_a_claude_code(with_a_perch(a_bare_machine())))
+            .with_env(PHASES_VARIABLE, "recncile");
+        let phases = [a_phase(
+            "a Run reconciles the Profile it launches",
+            Needs::NOTHING,
+        )];
+
+        let refused = a_run(&host, &phases).expect_err("nothing matches that");
+
+        assert!(matches!(refused, PerchError::NotFound(_)));
+        assert!(
+            refused.to_string().contains("a Run reconciles"),
+            "a refusal has to name what could have been asked for: {refused}"
+        );
+    }
+
+    #[test]
+    fn an_unfiltered_run_still_means_every_phase_and_says_so() {
+        let host = marked(with_a_claude_code(with_a_perch(a_bare_machine())));
+        let phases = [a_phase("the only one", Needs::NOTHING)];
+
+        let run = a_run(&host, &phases).expect("a marked machine runs");
+
+        assert_eq!(run.filtered, None);
+        let written = host
+            .read_file(&Path::new("/tmp/reports").join(run.file_name()))
+            .unwrap();
+        assert!(written.contains("Every phase, unfiltered"), "{written}");
+    }
+
+    // ---- what the wizard asks for --------------------------------------------
+
+    /// A machine holding two Accounts, an Export it can take, and a `perch
+    /// group` that answers — everything the arrangement step needs to reach the
+    /// end of its own questions.
+    fn a_machine_to_arrange(accounts: &[crate::registry::Account], answers: &[&str]) -> FakeHost {
+        let host = with_a_perch(holding(a_bare_machine(), accounts))
+            .with_answers(answers)
+            .with_login(|_, _| crate::error::EXIT_OK);
+        let worked = Execution {
+            status: crate::error::EXIT_OK,
+            stdout: String::new(),
+            stderr: String::new(),
+        };
+        let host = host.with_exec("/build/perch", &["group", "add", "dogfood"], worked.clone());
+        accounts.iter().fold(host, |host, account| {
+            host.with_exec(
+                "/build/perch",
+                &["group", "move", account.email(), "dogfood"],
+                worked.clone(),
+            )
+        })
+    }
+
+    /// Both halves of the arrangement are things only a person knows, and the
+    /// marker is where they are written down so no run has to guess at them.
+    #[test]
+    fn the_wizard_writes_down_what_it_was_told_about_the_group_and_the_logins() {
+        let host = a_machine_to_arrange(
+            &[
+                an_account("one@example.com", None),
+                an_account("two@example.com", None),
+            ],
+            &["", "3", "y"],
+        );
+
+        let (wrote, said) = set_it_up(&host, &SetupArgs::default()).expect("it is set up");
+
+        assert_eq!(
+            wrote.arrangement,
+            Arrangement {
+                group: Some("dogfood".to_string()),
+                logins: 3,
+            }
+        );
+        assert!(
+            said.contains("one@example.com is now in `dogfood`"),
+            "{said}"
+        );
+        assert!(said.contains("3 logins held in all"), "{said}");
+    }
+
+    /// Declining costs the two Cycling phases and nothing else — a wizard that
+    /// moved somebody's Accounts anyway would be doing the thing the marker
+    /// exists to make impossible.
+    #[test]
+    fn a_group_nobody_agreed_to_is_not_declared_and_nothing_is_moved() {
+        let host = a_machine_to_arrange(
+            &[
+                an_account("one@example.com", None),
+                an_account("two@example.com", None),
+            ],
+            &["", "", "n"],
+        );
+
+        let (wrote, said) = set_it_up(&host, &SetupArgs::default()).expect("it is set up");
+
+        assert_eq!(wrote.arrangement.group, None);
+        assert_eq!(
+            wrote.arrangement.logins, 2,
+            "an empty answer is the count held, which turns the `add` phase off"
+        );
+        assert!(said.contains("The phases that Cycle will skip"), "{said}");
+    }
+
+    /// A Group already holding a pair is the obvious answer, and is offered as
+    /// one rather than declared beside it.
+    #[test]
+    fn a_group_that_already_holds_a_pair_is_the_one_offered() {
+        let host = a_machine_to_arrange(
+            &[
+                grouped("one@example.com", "work"),
+                grouped("two@example.com", "work"),
+            ],
+            &["", "2", ""],
+        );
+
+        let (wrote, said) = set_it_up(&host, &SetupArgs::default()).expect("it is set up");
+
+        assert_eq!(wrote.arrangement.group, Some("work".to_string()));
+        assert!(said.contains("Set the Group `work` aside"), "{said}");
+    }
+
+    /// A number below what is on the machine is not one `spare_login` could act
+    /// on — it is arithmetic between the two — so it is taken as the count held
+    /// and said out loud rather than stored to puzzle somebody later.
+    #[test]
+    fn a_login_count_below_what_this_machine_holds_is_taken_as_what_it_holds() {
+        let host = a_machine_to_arrange(
+            &[
+                an_account("one@example.com", None),
+                an_account("two@example.com", None),
+            ],
+            &["", "1", "n"],
+        );
+
+        let (wrote, said) = set_it_up(&host, &SetupArgs::default()).expect("it is set up");
+
+        assert_eq!(wrote.arrangement.logins, 2);
+        assert!(said.contains("is taken as 2"), "{said}");
+    }
+
+    /// CI runs the wizard on every push, and a runner has nobody to ask.
+    #[test]
+    fn an_unattended_setup_asks_nothing_and_arranges_nothing() {
+        let host = with_a_perch(a_bare_machine());
+
+        let (wrote, _) = set_it_up(
+            &host,
+            &SetupArgs {
+                unattended: true,
+                ..SetupArgs::default()
+            },
+        )
+        .expect("a runner holds nothing");
+
+        assert_eq!(wrote.arrangement, Arrangement::default());
+    }
+
     #[test]
     fn a_run_that_stopped_is_the_one_worth_having_written_down() {
-        fn stops(_: &Perch<'_>) -> Proof {
-            Err(Setback::upstream("Anthropic was slow"))
+        fn stops(_: &Perch<'_>, _: &Preflight, _: &mut dyn Write) -> Proof {
+            Err(Setback::upstream("Anthropic was slow").into())
         }
 
         let host = marked(a_bare_machine());
