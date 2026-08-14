@@ -893,7 +893,14 @@ impl Model {
             // nothing (`ask_for_a_switch` answers `Nothing` off the same
             // question), and only `←` or `Tab` got out. The same guard
             // `ask_for_a_run` already puts on `x`.
-            (Tab::Status, _) if self.status() == StatusRow::Accounts => Column::Content,
+            // And only where it has anything *in* it: `render_status` answers
+            // "this machine holds no Accounts" before it draws any page at all,
+            // so on an empty machine the Accounts page is as undrawn as the two
+            // above it and putting the keys in it is the same bug this guard
+            // was added for.
+            (Tab::Status, _) if self.status() == StatusRow::Accounts && !self.is_empty() => {
+                Column::Content
+            }
             (Tab::Status, _) => Column::Scopes,
             (Tab::Config, Column::Scopes) if self.scope_accounts().is_empty() => Column::Content,
             (Tab::Config, Column::Scopes) => Column::Accounts,
@@ -1772,12 +1779,21 @@ mod tests {
     /// keystroke reaches is a test asserting about a state nobody can be in —
     /// and `moved`, which is the whole of how a cursor gets anywhere, was
     /// exercised by no unit test at all.
+    ///
+    /// On a machine holding no Accounts there is no table to be inside: the page
+    /// is not drawn, so `→` leaves the keys on the sidebar. That is the state
+    /// this helper's own rule asks for — the one nobody can be in is the keys in
+    /// a column with nothing in it.
     fn on_the_accounts(model: &mut Model) {
         while model.status() != StatusRow::Accounts {
             let _ = model.act_on(Signal::Down);
         }
         let _ = model.act_on(Signal::Right);
-        assert_eq!(model.column, Column::Content, "inside the table");
+        let inside = match model.is_empty() {
+            true => Column::Scopes,
+            false => Column::Content,
+        };
+        assert_eq!(model.column, inside, "inside the table, where there is one");
     }
 
     #[test]
@@ -2236,6 +2252,31 @@ mod tests {
         assert_eq!(model.act_on(Signal::Run), Asked::Nothing);
         assert!(model.said.is_empty(), "{:?}", model.said);
         assert_eq!(model.leaving, None);
+    }
+
+    /// `→` on a machine holding no Accounts leaves the keys where they are.
+    ///
+    /// `render_status` answers "this machine holds no Accounts" before it draws
+    /// any of the three pages, so on an empty machine the Accounts page is as
+    /// undrawn as the Overview and Config ones the guard beside this already
+    /// covers. Moved in anyway, the frame said nothing about where the keys
+    /// were — `render_sidebar` marks its row bold rather than reversed once the
+    /// keys have left it, and nothing else was marked at all — while `↓`, `↑`,
+    /// Enter and `x` all did nothing and only `←` or Tab got out.
+    #[test]
+    fn the_keys_never_enter_a_page_that_holds_nothing_to_be_on() {
+        let mut model = model_of(&[]);
+        while model.status() != StatusRow::Accounts {
+            let _ = model.act_on(Signal::Down);
+        }
+
+        assert_eq!(model.act_on(Signal::Right), Asked::Nothing);
+
+        assert_eq!(
+            model.column,
+            Column::Scopes,
+            "there is no table drawn to be inside"
+        );
     }
 
     /// Enter on the Config tab is a move and never an edit.
