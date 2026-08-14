@@ -62,24 +62,32 @@ fn a_dogfood_run() {
     }
 }
 
-/// A report names real Accounts, which is why the directory it goes in is never
-/// committed. Asserted rather than trusted: the gitignore entry is one line
-/// somebody could drop while tidying, and the cost of it being wrong is an email
-/// address in the history of a public repository.
+/// A report names real Accounts, and an Export *is* those Accounts — so neither
+/// the directory one goes in nor the other's extension may be committable.
+/// Asserted rather than trusted: each is one line somebody could drop while
+/// tidying, and the cost is an email address in the history of a public
+/// repository at best and a working Credential at worst.
+///
+/// The Export earns its line here because `dogfood-setup` defaults to writing
+/// one in the directory it was run from, and that directory is this repository.
 ///
 /// Here rather than in `tests/publishing.rs` because it is about this suite —
 /// and because a check that runs everywhere except on the machines that make the
 /// file is a check about nothing.
 #[test]
-fn a_report_names_real_accounts_so_the_directory_it_goes_in_is_ignored() {
+fn what_a_run_leaves_behind_names_real_accounts_or_is_them_so_neither_is_committable() {
     let gitignore =
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".gitignore"))
             .expect("this repository has a .gitignore");
+    let ignored = |entry: &str| gitignore.lines().any(|line| line.trim() == entry);
 
     assert!(
-        gitignore
-            .lines()
-            .any(|line| line.trim() == format!("/{REPORTS}")),
+        ignored(&format!("/{REPORTS}")),
         "`/{REPORTS}` is not in .gitignore, and a report names real Accounts"
+    );
+    assert!(
+        ignored("*.age"),
+        "`*.age` is not in .gitignore, and an Export is a working Credential \
+         for every Account this machine holds"
     );
 }

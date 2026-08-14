@@ -650,6 +650,22 @@ impl FakeHost {
         self
     }
 
+    /// A file last written when they say, for a test about something that reads
+    /// an age rather than contents.
+    ///
+    /// Its own builder because [`FakeHost::with_file`] records no time at all,
+    /// and that is the right default: a fixture that never says how old a file
+    /// is should not have an answer invented for it. Anything comparing two ages
+    /// therefore sees nothing on an ordinary fixture, which is what leaves it
+    /// free to treat "will not say" as "nothing to report".
+    pub fn with_file_written_at(self, path: impl AsRef<Path>, at: DateTime<Utc>) -> Self {
+        self.set_file(path.as_ref(), "");
+        self.modified
+            .borrow_mut()
+            .insert(path.as_ref().to_path_buf(), at);
+        self
+    }
+
     /// A process that is running, and has been since before any session a
     /// fixture records — so a marker naming it means a Live Profile rather
     /// than one a client left behind when it died.

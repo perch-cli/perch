@@ -19,7 +19,7 @@
 //! the exit code.
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use perch::dogfood::{self, SetupArgs, phases::PHASES};
@@ -54,7 +54,9 @@ struct Cli {
 /// whatever profile and target triple built it.
 ///
 /// The sibling is named whether or not it is there, and `set_up` refuses when it
-/// is not. It deliberately does **not** fall back to whatever `perch` is on
+/// is not — and when it is there but older than the source beside it, because
+/// `cargo run --bin dogfood-setup` relinks this binary and not that one. It
+/// deliberately does **not** fall back to whatever `perch` is on
 /// `PATH`: that is very often an installed Perch of another version, and a
 /// wizard that quietly set the machine up against a different binary from the
 /// one the suite will drive is the failure the marker exists to prevent, wearing
@@ -82,6 +84,10 @@ fn main() {
     let code = match dogfood::set_up(
         &host,
         &built_beside_me().to_string_lossy(),
+        // Where this was built from, so the wizard can refuse a sibling `perch`
+        // the source has moved past — `cargo run --bin dogfood-setup` relinks
+        // this binary and leaves that one where it was.
+        Path::new(env!("CARGO_MANIFEST_DIR")),
         &SetupArgs {
             export_to: cli.export_to,
             unattended: cli.unattended,
