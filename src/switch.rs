@@ -360,7 +360,18 @@ pub struct NotLanded {
 /// from the other side, and it wants the same answer.
 pub fn already_landed(host: &dyn Host, installed: &Installed, account: &Account) -> Result<bool> {
     let store = registry::the_default_profile(host)?;
-    let named = probe::read_identity(host, &store, installed)?
+    // Read the way the Credential beside it is read, and for the same reason
+    // spelled out there. An Identity Perch cannot understand — an `oauthAccount`
+    // with no `emailAddress`, a `.claude.json` that is not JSON, an address with
+    // nothing nameable in it — is a file naming nobody, so nothing has landed,
+    // and `perch switch <the active Account>` is precisely the command that
+    // rewrites it. Propagated, it refused that repair on the strength of the
+    // file the repair exists to replace, while a Switch to any *other* Account
+    // went through: `capture` swallows the same failure and `patch_oauth_account`
+    // only needs the file to be a JSON object.
+    let named = probe::read_identity(host, &store, installed)
+        .ok()
+        .flatten()
         .is_some_and(|identity| registry::same_name(&identity.email, account.email()));
 
     // A live store holding bytes that are not a Credential has not landed

@@ -1583,6 +1583,37 @@ fn an_identity_file_that_is_not_json_leaves_a_switch_that_says_how_to_finish_it(
     assert_eq!(live_credential(&host).as_deref(), Some(SECOND_CREDENTIAL));
 }
 
+/// The same file, and the Switch that repairs it: onto the Account Perch
+/// already records as active.
+///
+/// `already_landed` asks Claude Code's own file whether the machine already says
+/// what this Switch would make it say, and it read that file with a `?`. So an
+/// `oauthAccount` with no `emailAddress` — a state `perch adopt`'s own suite
+/// shows is real — refused the one command that rewrites it, while a Switch to
+/// any *other* Account went through untroubled: `capture` swallows the identical
+/// failure and the patch only needs the file to be a JSON object. An Identity
+/// naming nobody is a Switch that has not landed, which is the answer the
+/// unreadable Credential beside it already gets.
+#[test]
+fn a_switch_onto_the_active_account_repairs_an_identity_naming_nobody() {
+    let host = machine_with_two_accounts();
+    host.set_file(IDENTITY_PATH, r#"{"oauthAccount": {"organization": "Acme"}}"#);
+
+    let (result, _) = run_switch(&host, EMAIL);
+
+    result.expect("the Switch that repairs the file is not refused by it");
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(CREDENTIAL),
+        "the Account Perch records as active is the live one"
+    );
+    let identity = host.file(IDENTITY_PATH).expect("the file is still there");
+    assert!(
+        identity.contains(EMAIL),
+        "and it now names somebody: {identity}"
+    );
+}
+
 /// A `.claude.json` that cannot be read at all is different from one that is
 /// absent: absent is a Claude Code that has never run here and is written
 /// fresh, unreadable is a file that is there and says nothing.
