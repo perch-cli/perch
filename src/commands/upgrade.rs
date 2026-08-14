@@ -284,7 +284,13 @@ fn hand_it_over(
 /// `noexec` mount.
 fn replace_it_ourselves(host: &dyn Host, wanted: &str, out: &mut dyn Write) -> Result<i32> {
     let (name, script) = upgrade::installer_for(host.platform());
-    let at = crate::registry::perch_home(host)?.join(name);
+    // Spelled with `/` for the reason `upgrade::beneath` is written down at:
+    // what this path is handed to follows the platform the Host reports, and
+    // `Path::join` would follow the build instead.
+    let at = std::path::PathBuf::from(format!(
+        "{}/{name}",
+        crate::registry::perch_home(host)?.display()
+    ));
 
     host.write_private_file(&at, script)
         .map_err(|err| PerchError::Other(format!("could not write {}: {err}", at.display())))?;

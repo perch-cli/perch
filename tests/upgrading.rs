@@ -143,14 +143,20 @@ fn an_installer_installation_runs_the_embedded_installer_at_the_tag() {
     let (outcome, said) = upgrading(&host, UpgradeArgs::default());
 
     assert_eq!(outcome.expect("it ran the installer"), EXIT_OK);
-    let script = "/Users/someone/.config/perch/perch-upgrade.sh";
+    let launched = ran(&host);
+    assert_eq!(launched.len(), 1);
+    assert_eq!(launched[0].0, "/bin/sh");
+    // As a path rather than as a string: `perch_home` is built with
+    // `Path::join`, which spells with whatever separator the build prefers, and
+    // on Windows `/` and `\` are one separator — so two spellings here are one
+    // path.
     assert_eq!(
-        ran(&host),
-        vec![(
-            "/bin/sh".to_string(),
-            vec![script.to_string()],
-            vec![("PERCH_VERSION".to_string(), format!("v{NEWER}"))]
-        )],
+        std::path::Path::new(&launched[0].1[0]),
+        std::path::Path::new("/Users/someone/.config/perch/perch-upgrade.sh")
+    );
+    assert_eq!(
+        launched[0].2,
+        vec![("PERCH_VERSION".to_string(), format!("v{NEWER}"))],
         "the tag reaches the script, because one that does not is an upgrade to \
          whatever happened to be newest"
     );

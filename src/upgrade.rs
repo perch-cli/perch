@@ -107,19 +107,38 @@ pub fn installer_dir(host: &dyn Host) -> Result<PathBuf> {
         .home_dir()
         .map_err(|err| PerchError::Other(format!("could not find your home directory: {err}")))?;
 
+    let home = home.display().to_string();
+
     Ok(match host.platform() {
         // `%LOCALAPPDATA%` is its own variable rather than a place under the
         // home directory, so it is asked for first — and derived from home only
         // where the machine will not say, which is where the installer's own
         // `Join-Path $env:LOCALAPPDATA` would have failed anyway.
-        Platform::Windows => match host.env_var("LOCALAPPDATA") {
-            Some(local) => PathBuf::from(local),
-            None => home.join("AppData").join("Local"),
+        Platform::Windows => {
+            let local = host
+                .env_var("LOCALAPPDATA")
+                .unwrap_or_else(|| [home.as_str(), "AppData", "Local"].join("/"));
+            beneath(&[&local, "Perch", "bin"])
         }
-        .join("Perch")
-        .join("bin"),
-        _ => home.join(".local").join("bin"),
+        _ => beneath(&[&home, ".local", "bin"]),
     })
+}
+
+/// A path built from its parts, spelled with `/`.
+///
+/// Rather than `Path::join`, for the reason [`crate::probe::on_path`] gives
+/// about the same choice: `join` picks the separator of whatever platform this
+/// build runs on, where every other decision in this module follows the
+/// platform the *Host* reports. The two disagree in exactly one place that
+/// matters — a Windows build driving a Host that says it is anything else, and
+/// the reverse — and there the directory Perch computed and the directory it
+/// compared against were spelled differently and never matched, so no
+/// Installation was ever the installer's.
+///
+/// Windows accepts either separator and [`segments`] reads both, so this costs
+/// nothing on the platform it looks foreign on.
+fn beneath(parts: &[&str]) -> PathBuf {
+    PathBuf::from(parts.join("/"))
 }
 
 /// Which Channel left the binary at this path, or `None` when nothing about the
@@ -356,7 +375,7 @@ pub fn notice(host: &dyn Host) -> Option<String> {
 pub fn homebrew_command(host: &dyn Host, prefix: &Path) -> Result<(PathBuf, Vec<String>)> {
     let brew = match prefix.as_os_str().is_empty() {
         true => crate::probe::on_path(host, "brew"),
-        false => Some(prefix.join("bin").join("brew")),
+        false => Some(beneath(&[&prefix.display().to_string(), "bin", "brew"])),
     };
     let brew = brew.ok_or_else(|| {
         PerchError::NotFound(
@@ -512,30 +531,33 @@ mod tests {
     fn the_installers_directory_is_the_one_that_installer_would_have_used() {
         use crate::host::FakeHost;
 
-        let unix = FakeHost::new();
-        assert_eq!(
-            installer_dir(&unix).expect("a home"),
-            PathBuf::from("/Users/someone/.local/bin")
-        );
+        // Compared as text rather than as a `PathBuf`, which is the whole
+        // point: a `PathBuf` comparison is separator-agnostic on Windows and so
+        // said nothing about *spelling*. This is built with `Path::join` and
+        // spelled with the build's separator, while `segments` reads it against
+        // the platform the Host reports — and on a Windows build driving a Host
+        // that says otherwise the two never matched, so no Installation was
+        // ever the installer's and every upgrade was refused.
+        let spelling = |host: &FakeHost| installer_dir(host).expect("a home").display().to_string();
+
+        assert_eq!(spelling(&FakeHost::new()), "/Users/someone/.local/bin");
 
         let windows = FakeHost::new()
             .with_platform(Platform::Windows)
             .with_env("LOCALAPPDATA", "C:\\Users\\someone\\AppData\\Local");
         assert_eq!(
-            installer_dir(&windows).expect("a home"),
-            PathBuf::from("C:\\Users\\someone\\AppData\\Local")
-                .join("Perch")
-                .join("bin")
+            spelling(&windows),
+            "C:\\Users\\someone\\AppData\\Local/Perch/bin",
+            "the part Perch adds is spelled the same on every build; the part \
+             Windows handed it is left as Windows spelled it, and `segments` \
+             reads both"
         );
 
         // Derived from home only where the machine will not say — which is
         // where the installer's own `Join-Path $env:LOCALAPPDATA` would have
         // failed too.
         let quiet = FakeHost::new().with_platform(Platform::Windows);
-        assert_eq!(
-            installer_dir(&quiet).expect("a home"),
-            PathBuf::from("/Users/someone/AppData/Local/Perch/bin")
-        );
+        assert_eq!(spelling(&quiet), "/Users/someone/AppData/Local/Perch/bin");
 
         for platform in [Platform::MacOs, Platform::Windows, Platform::Other] {
             let chosen = FakeHost::new()
