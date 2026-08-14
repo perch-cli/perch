@@ -37,11 +37,20 @@ pub struct UpgradeArgs {
 }
 
 pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i32> {
-    let channel = chosen_channel(host, args.channel.as_deref())?;
-
+    // A check is asked before the Channel is insisted on, because a check makes
+    // no use of one it cannot answer without. `chosen_channel` refuses a binary
+    // nothing placed — the right answer for an Upgrade, which is about to write
+    // over that binary, and the wrong one for a question that writes nothing: a
+    // hand-unpacked Perch got "Perch will not write over a file it did not put
+    // there" from `--check --json`, a sentence about an act it had not asked
+    // for, and no `installed` or `newest` at all. Answering it is success
+    // whichever way the answer went (ADR 0039).
     if args.check {
-        return check(host, &channel, args.json, out).map(|()| crate::error::EXIT_OK);
+        let channel = chosen_channel(host, args.channel.as_deref()).ok();
+        return check(host, channel.as_ref(), args.json, out).map(|()| crate::error::EXIT_OK);
     }
+
+    let channel = chosen_channel(host, args.channel.as_deref())?;
     if args.json {
         return Err(PerchError::Invalid(
             "`--json` says what a check found, so it goes with `--check`.\n\
@@ -154,7 +163,18 @@ fn chosen_channel(host: &dyn Host, named: Option<&str>) -> Result<Channel> {
 /// Exits nought either way. A check is a question, and answering it is success
 /// whichever way the answer went — every other non-zero code Perch has is a
 /// refusal, and "there is news" is not one (ADR 0039).
-fn check(host: &dyn Host, channel: &Channel, json: bool, out: &mut dyn Write) -> Result<()> {
+///
+/// The Channel is optional here alone. An Upgrade cannot proceed without one,
+/// because it is about to write over a binary and has to know whose it is; a
+/// check only reports it, and the two facts a script came for — what is
+/// installed and what is newest — are knowable whether or not the path says who
+/// put it there. `null` is the honest answer for that rather than a refusal.
+fn check(
+    host: &dyn Host,
+    channel: Option<&Channel>,
+    json: bool,
+    out: &mut dyn Write,
+) -> Result<()> {
     let installed = upgrade::installed();
     let newest = upgrade::newest(host, None)?;
     let behind = upgrade::compare(&newest, installed) == std::cmp::Ordering::Greater;
@@ -165,7 +185,7 @@ fn check(host: &dyn Host, channel: &Channel, json: bool, out: &mut dyn Write) ->
             &serde_json::json!({
                 "installed": installed,
                 "newest": newest,
-                "channel": channel.word(),
+                "channel": channel.map(Channel::word),
                 "upgradeAvailable": behind,
             }),
         );
@@ -173,12 +193,29 @@ fn check(host: &dyn Host, channel: &Channel, json: bool, out: &mut dyn Write) ->
 
     say(out, &format!("installed  {installed}"))?;
     say(out, &format!("newest     {newest}"))?;
-    say(out, &format!("channel    {}", channel.name()))?;
     say(
         out,
-        match behind {
-            true => "\nA newer Release is available. `perch upgrade` takes it.",
-            false => "\nNothing newer has been published.",
+        &format!(
+            "channel    {}",
+            channel.map_or("unknown (nothing about this binary's path says)", |channel| {
+                channel.name()
+            })
+        ),
+    )?;
+    say(
+        out,
+        match (behind, channel.is_some()) {
+            // Said only where it is true. On a binary nothing placed, `perch
+            // upgrade` refuses rather than taking anything, and a check that
+            // pointed at it would be sending somebody to the refusal it was
+            // just careful not to give them.
+            (true, true) => "\nA newer Release is available. `perch upgrade` takes it.",
+            (true, false) => {
+                "\nA newer Release is available. This Perch was placed by hand, so \
+                 `perch upgrade` needs `--channel homebrew|npm|installer` to say \
+                 which Channel should replace it."
+            }
+            (false, _) => "\nNothing newer has been published.",
         },
     )
 }

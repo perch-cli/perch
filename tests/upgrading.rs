@@ -286,6 +286,46 @@ fn a_binary_perch_did_not_place_is_refused_rather_than_written_over() {
     }
 }
 
+/// The same binary, asked a question rather than told to replace itself.
+///
+/// A check writes nothing, so the refusal that protects a hand-placed binary
+/// has nothing to protect here — and it used to fire anyway, because the Channel
+/// was resolved before `--check` was consulted. What a script got back was
+/// "Perch will not write over a file it did not put there", a sentence about an
+/// act it had not asked for, and no `installed` or `newest` at all. A check is a
+/// question and answering it is success whichever way the answer went (ADR
+/// 0039); the Channel is the one thing that cannot be answered, so it is `null`.
+#[test]
+fn a_check_answers_on_a_binary_perch_did_not_place_rather_than_refusing() {
+    let host = machine().installed_at("/usr/local/bin/perch");
+
+    let (outcome, said) = upgrading(
+        &host,
+        UpgradeArgs {
+            check: true,
+            json: true,
+            ..UpgradeArgs::default()
+        },
+    );
+
+    let code = outcome.expect("a question is answered, not refused");
+    assert_eq!(code, EXIT_OK, "{said}");
+    let answered: serde_json::Value =
+        serde_json::from_str(&said).unwrap_or_else(|_| panic!("it is a document: {said}"));
+    assert_eq!(
+        answered["installed"],
+        upgrade_installed(),
+        "the facts a script came for are there: {said}"
+    );
+    assert!(answered["newest"].is_string(), "{said}");
+    assert_eq!(
+        answered["channel"],
+        serde_json::Value::Null,
+        "and the one thing that cannot be answered says so: {said}"
+    );
+    assert!(ran(&host).is_empty(), "a check runs nothing");
+}
+
 /// The escape hatch for the machine where the path is wrong — a relocated
 /// binary, or one reached through a symlink Perch could not follow. What is
 /// named is taken as given rather than checked back against the path, because
