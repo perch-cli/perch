@@ -1061,6 +1061,43 @@ fn a_switch_takes_a_lock_a_process_died_holding_and_waits_for_one_still_held() {
     );
 }
 
+/// An abandoned lock that is a directory and simply would not go is contention,
+/// not the wedge above.
+///
+/// `clear_the_abandoned` reported every failure as "is not a lock directory",
+/// but the refusal only diagnoses one of them. A child held open on Windows is
+/// the sharing violation `rename_replacing` retries for arriving here instead,
+/// and EBUSY and EACCES are the same shape — each aborted the whole Switch on
+/// the first of five attempts, telling somebody their lock path is not a
+/// directory when it is, and to go and delete it by hand when waiting one more
+/// second would have done.
+#[test]
+fn an_abandoned_lock_that_would_not_be_cleared_is_waited_on_rather_than_declared_broken() {
+    let host = machine_with_two_accounts();
+    let long_ago = host.now() - chrono::Duration::seconds(120);
+    let host = host
+        .with_dir_held_since(REFRESH_LOCK, long_ago)
+        .with_undeletable_file(REFRESH_LOCK, "Device or resource busy");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let refusal = result.expect_err("the lock never comes free");
+    let said = refusal.to_string();
+    assert!(
+        !said.contains("is not a lock directory"),
+        "a directory that would not go is not a path that is not a directory: \
+         {said}"
+    );
+    assert!(
+        host.effects()
+            .iter()
+            .any(|effect| matches!(effect, Effect::Slept { .. })),
+        "it falls through to the ordinary wait rather than ending the command \
+         on the first attempt: {:?}",
+        host.effects()
+    );
+}
+
 /// Something at a lock path that is not a lock is said, rather than reported as
 /// a Claude Code that will not let go.
 ///

@@ -40,6 +40,21 @@ strip = true
 lto = "thin"
 codegen-units = 1
 
+# scrypt is deliberately expensive, and `export.rs` pins how expensive. An
+# unoptimised build of it is that cost times twenty — which is paid by nothing a
+# user runs, and by every test that seals or opens an Export, several times each.
+# Optimising the three crates that do the arithmetic takes the suite back from
+# minutes to seconds without touching the work factor, which is the number that
+# is supposed to decide this.
+[profile.dev.package.scrypt]
+opt-level = 3
+
+[profile.dev.package.salsa20]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3
+
 [dependencies]
 # What `perch export` writes (ADR 0014). Encryption sits on neither of Perch's
 # seams — it is not an effect the Host port carries, and it is not shared with

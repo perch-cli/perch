@@ -121,9 +121,19 @@ impl Credential {
     /// A Credential that says nothing about when it expires is taken at its
     /// word: Perch has no evidence it has run out, and Rotating one that has
     /// not spends the only refresh token there is for nothing.
+    ///
+    /// Saturating, because `expiresAt` is read out of a file Claude Code and the
+    /// user own rather than one Perch writes: `i64::MIN` there is a subtraction
+    /// that overflows, which is a panic under `cargo test` and — because the
+    /// release profile sets no `overflow-checks` — a wrap in the binary somebody
+    /// downloads, where it answers `true` and reports an expired Credential as
+    /// usable. Saturating gives both builds the same answer, and it is the right
+    /// one: a time that far in the past has run out.
     pub fn usable_at(&self, now: DateTime<Utc>) -> bool {
         match self.expires_at {
-            Some(millis) => millis - now.timestamp_millis() > EXPIRY_MARGIN_SECONDS * 1_000,
+            Some(millis) => {
+                millis.saturating_sub(now.timestamp_millis()) > EXPIRY_MARGIN_SECONDS * 1_000
+            }
             None => true,
         }
     }
@@ -1697,6 +1707,32 @@ mod tests {
     fn a_credential_that_says_nothing_about_expiring_is_taken_at_its_word() {
         let credential = understood(r#"{"claudeAiOauth":{"accessToken":"a"}}"#);
         assert!(credential.usable_at(at(NOON)));
+    }
+
+    /// `expiresAt` is whatever is in a file Perch does not own, so the arithmetic
+    /// over it has to survive the whole of `i64` rather than the part of it a
+    /// Claude Code would write. Both ends: `i64::MIN` overflowed the subtraction
+    /// — a panic here and, with no `overflow-checks` in the release profile, a
+    /// wrap that answered "usable" in the binary somebody downloads.
+    #[test]
+    fn an_expiry_at_either_end_of_the_range_is_answered_rather_than_overflowed() {
+        let ran_out = understood(&format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"a","expiresAt":{}}}}}"#,
+            i64::MIN
+        ));
+        assert!(
+            !ran_out.usable_at(at(NOON)),
+            "a time that far in the past has run out"
+        );
+
+        let never = understood(&format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"a","expiresAt":{}}}}}"#,
+            i64::MAX
+        ));
+        assert!(
+            never.usable_at(at(NOON)),
+            "and one that far ahead has not, rather than wrapping into having"
+        );
     }
 
     #[test]

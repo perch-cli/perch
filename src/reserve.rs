@@ -154,8 +154,19 @@ impl<'a> Reserve<'a> {
         // because that is the weakest thing the count rests on — and on a line
         // of its own, because the sentence above is already as long as a
         // terminal is wide.
-        if self.best().is_none()
-            && let Some(oldest) = self.oldest_reading()
+        //
+        // Gated on there being no best, this said the one thing it is for only
+        // in the case where the count is nought. With a best, the only age on
+        // the line belonged to the *freshest* Account: "2 of 3 have Headroom,
+        // the best 93% left (as of 4m ago)" is a count resting on a reading
+        // eight hours old and reads as four minutes old. So it is said whenever
+        // the oldest is not the one already shown, which is also what keeps it
+        // off the line when there is nothing more to add.
+        let best_read_at = self
+            .best()
+            .and_then(|(account, _)| Some(account.observed_utilization()?.observed_at));
+        if let Some(oldest) = self.oldest_reading()
+            && best_read_at != Some(oldest)
         {
             lines.push(format!(
                 "Read {} at the oldest.",
@@ -348,6 +359,37 @@ mod tests {
                 "{pooled} is a figure no Account reported: {said}"
             );
         }
+    }
+
+    /// The count rests on every candidate's reading, so the age beside it has to
+    /// be the oldest of them rather than the best one's own.
+    ///
+    /// The line was gated on there being no best, so it said the one thing it is
+    /// for only when the count was nought. With a best, the only age on screen
+    /// belonged to the *freshest* Account: a count of two resting on a reading
+    /// eight hours old read as four minutes old, which is the direction that
+    /// matters — it overstates what Perch knows.
+    #[test]
+    fn the_age_beside_a_count_is_the_oldest_reading_it_rests_on() {
+        let mut stale = account("stale@example.com", vec![window("5-hour", 60.0)]);
+        stale.utilization.as_mut().expect("it was read").observed_at =
+            now() - chrono::Duration::hours(8);
+        let registry = holding(vec![
+            stale,
+            account("fresh@example.com", vec![window("5-hour", 7.0)]),
+        ]);
+
+        let said = reserve_of(&registry);
+
+        assert!(
+            said[0].contains("2 of 2 Accounts have Headroom") && said[0].contains("as of 4m ago"),
+            "the best Account's own figure carries its own age: {said:?}"
+        );
+        assert_eq!(
+            said.get(1).map(String::as_str),
+            Some("Read 8h ago at the oldest."),
+            "and the count says the weakest thing it rests on: {said:?}"
+        );
     }
 
     /// "None" without a reason is a Group somebody stares at wondering which.

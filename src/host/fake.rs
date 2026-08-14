@@ -1718,24 +1718,44 @@ impl Host for FakeHost {
     /// said the person watching would end it.
     fn wait(&self, millis: u64) -> Waited {
         self.record(Effect::Waited { millis });
-        let waited = *self.now.borrow() + chrono::Duration::milliseconds(millis as i64);
-        *self.now.borrow_mut() = waited;
+
+        // Decided before the clock moves, because the real one decides before
+        // it sleeps: `RealHost::wait` asks `interrupted()` ahead of the first
+        // slice and returns having spent nothing. Advancing first meant the
+        // wait that *ends* an interrupted `perch watch` spent its whole
+        // interval — 2.5 minutes, or 20 under back-off — that a real Ctrl-C
+        // never spends, so every "as of 4m ago" measured after one was measuring
+        // a duration production does not have.
+        //
+        // Nothing is interrupted where nothing is listening, for the same
+        // reason as on a real machine: Ctrl-C ends the process instead, and a
+        // process that has ended waits no more.
+        let interrupted = {
+            let mut waits = self.waits.borrow_mut();
+            *waits += 1;
+            match *self.interrupt_after.borrow() {
+                Some(after) => *self.listening.borrow() && *waits >= after,
+                None => false,
+            }
+        };
+
+        if !interrupted {
+            let waited = *self.now.borrow() + chrono::Duration::milliseconds(millis as i64);
+            *self.now.borrow_mut() = waited;
+        }
 
         // Taken out before it runs, so it can reach back into the fake without
-        // meeting a borrow this call is still holding.
+        // meeting a borrow this call is still holding. Still run either way: it
+        // is the test's scripted event, and what it stands for — another `perch`
+        // arriving — does not stop happening because this one was interrupted.
         let happens = self.while_waiting.borrow_mut().take();
         if let Some(happens) = happens {
             happens(self);
         }
 
-        let mut waits = self.waits.borrow_mut();
-        *waits += 1;
-        // Nothing is interrupted where nothing is listening, for the same
-        // reason as on a real machine: Ctrl-C ends the process instead, and a
-        // process that has ended waits no more.
-        match *self.interrupt_after.borrow() {
-            Some(after) if *self.listening.borrow() && *waits >= after => Waited::Interrupted,
-            _ => Waited::Fully,
+        match interrupted {
+            true => Waited::Interrupted,
+            false => Waited::Fully,
         }
     }
 
@@ -1755,8 +1775,21 @@ impl Host for FakeHost {
     /// onto was invisible from here.
     fn print_remarks(&self, _aloud: bool) {}
 
+    /// Sorted, because [`RealHost::remarks`] keeps them in a `BTreeSet` and
+    /// says so — "in the order a `BTreeSet` keeps".
+    ///
+    /// Insertion order here meant a frame test could assert two remarks appear
+    /// in the order the Switch made them, pass, and show them alphabetised on
+    /// the machine: `tui::act` appends `host.remarks()` straight into
+    /// `model.said`, which is drawn. [`FakeHost::notes`] is the inspector and
+    /// stays in the order they were made, which is what a test asking "what did
+    /// this command remark on" wants.
+    ///
+    /// [`RealHost::remarks`]: crate::host::RealHost
     fn remarks(&self) -> Vec<String> {
-        self.notes()
+        let mut remarks = self.notes();
+        remarks.sort();
+        remarks
     }
 
     fn read_line(&self) -> Result<Option<String>, HostError> {

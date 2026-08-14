@@ -287,6 +287,38 @@ fn status_group_from_an_ungrouped_account_shows_every_ungrouped_account() {
         printed.contains("only moves between these when you say it may"),
         "being ungrouped is not a Group, and Cycling says so (ADR 0017):\n{printed}"
     );
+    assert!(
+        printed.contains("`cycle-ungrouped` is false"),
+        "and says whether it has been said yet, rather than only stating the \
+         rule: the bare rule reads as \"you have yet to say it\" to somebody who \
+         already has:\n{printed}"
+    );
+}
+
+/// The other half of it, which nothing was asking: the same clause on a machine
+/// where the declaration *has* been made.
+///
+/// `perch group list` and the TUI both say which way the Setting is set;
+/// `perch list` printed the rule alone, so somebody who had run
+/// `perch config set cycle-ungrouped true` was still told Cycling moves between
+/// these "when you say it may".
+#[test]
+fn the_ungrouped_cycling_clause_says_so_once_cycling_has_been_allowed() {
+    let mut registry = Registry::default();
+    registry.upsert(account(EMAIL, "Acme"));
+    registry.upsert(account(THIRD_EMAIL, "Spare Ltd"));
+    registry.global.cycle_ungrouped = true;
+    registry.active = Some(EMAIL.to_string());
+    let host = machine_holding(&registry);
+
+    let (result, printed) = run_status_group(&host, false);
+
+    result.unwrap();
+    assert!(
+        printed.contains("`cycle-ungrouped` is true"),
+        "the one Setting gating the whole Scope reads off the listing that \
+         shows it:\n{printed}"
+    );
 }
 
 #[test]

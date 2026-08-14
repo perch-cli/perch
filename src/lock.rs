@@ -65,6 +65,43 @@ impl Taken {
         self.stamp = None;
         host.note(&format!("{why} {}", self.lock.lost_means));
     }
+
+    /// Ends the hold if the artifact has not been touched inside its own
+    /// staleness window, whatever the reason it was not.
+    ///
+    /// What bounds "a hiccup is not a takeover". The two branches of [`renew`]
+    /// that decline to conclude anything — the artifact there and unreadable,
+    /// and a touch that would not go through — were bounded by nothing at all,
+    /// so a filesystem that kept faltering left Perch reporting a hold it no
+    /// longer had, indefinitely. The comment that excused it argued
+    /// `update_millis` gives "a dozen more chances before the artifact goes
+    /// stale", which is true of the two Refresh locks at 60s against 5s and
+    /// false of the config lock, where `probe` sets 10s against 5s: there, one
+    /// missed renewal reaches the boundary and two are past it.
+    ///
+    /// Judged on the stamp rather than on Perch's own patience, because a
+    /// contender decides by the stamp. Once the artifact is older than
+    /// `stale_millis`, any Claude Code is entitled to clear it and take it —
+    /// so a hold Perch went on claiming past that point is one two processes
+    /// believe they have, which is the state locks exist to prevent.
+    ///
+    /// [`renew`]: Held::renew
+    fn let_go_if_stale(&mut self, host: &dyn Host, now: DateTime<Utc>) {
+        let Some(stamp) = self.stamp else { return };
+        if (now - stamp).num_milliseconds() <= self.lock.stale_millis {
+            return;
+        }
+        self.give_up(
+            host,
+            &format!(
+                "{} ({}) went {}ms without being touched, which is longer than \
+                 anything else will wait before taking it over.",
+                self.lock.name,
+                self.lock.dir.display(),
+                (now - stamp).num_milliseconds(),
+            ),
+        );
+    }
 }
 
 impl<'a> Held<'a> {
@@ -120,12 +157,15 @@ impl<'a> Held<'a> {
                 // There and unreadable. Nothing here is evidence either way, so
                 // nothing is concluded and nothing is touched — touching an
                 // artifact Perch cannot check would overwrite the one stamp
-                // that makes the check possible. The next `renew` asks again,
-                // and `update_millis` is short enough against `stale_millis`
-                // that there are a dozen more chances before the artifact goes
-                // stale. One that never becomes readable ends as a genuine
-                // takeover, which the arm above catches as one.
-                Err(_) => continue,
+                // that makes the check possible. The next `renew` asks again.
+                // One that never becomes readable ends as a genuine takeover,
+                // which the arm above catches as one — or, before that, as an
+                // artifact that has outlived its own staleness window, which
+                // `let_go_if_stale` catches here.
+                Err(_) => {
+                    taken.let_go_if_stale(host, now);
+                    continue;
+                }
             }
 
             // Ours, and the artifact would not take a fresh timestamp. On
@@ -133,8 +173,10 @@ impl<'a> Held<'a> {
             // for, arriving at a `touch_now` that does not — a hiccup rather
             // than a loss. Nothing is inconsistent in leaving the hold as it
             // was: an artifact that was not touched still carries the stamp
-            // Perch knows, so the next `renew` simply tries again.
+            // Perch knows, so the next `renew` simply tries again — for as long
+            // as that stamp is one a contender would still respect.
             if host.touch(&taken.lock.dir).is_err() {
+                taken.let_go_if_stale(host, now);
                 continue;
             }
 
@@ -467,7 +509,7 @@ fn take_over(host: &dyn Host, lock: &LockSpec) -> Result<bool> {
     // Asked again, under the claim. The answer read before it was about a
     // moment that has passed, and what it decides is a deletion.
     let cleared = match abandoned(host, lock) {
-        true => clear_the_abandoned(host, lock).map(|()| true),
+        true => clear_the_abandoned(host, lock),
         false => Ok(false),
     };
 
@@ -491,16 +533,37 @@ fn take_over(host: &dyn Host, lock: &LockSpec) -> Result<bool> {
 /// So this is a refusal of its own, naming the path and saying what is wrong
 /// with it — the one message that turns an unrecoverable state into a
 /// five-second fix.
-fn clear_the_abandoned(host: &dyn Host, lock: &LockSpec) -> Result<()> {
-    host.remove_dir_all(&lock.dir).map_err(|err| {
-        PerchError::Other(format!(
-            "{} ({}) is not a lock directory and could not be cleared: {err}.\n\
-             Nothing was changed. A lock is a directory, and nothing will be \
-             able to take this one until whatever is at that path is removed.",
-            lock.name,
-            lock.dir.display(),
-        ))
-    })
+/// `Ok(true)` when the lock was cleared, `Ok(false)` when it was not and trying
+/// again might work, and a refusal for the wedge above.
+///
+/// The two are told apart by asking whether the path is a directory at all,
+/// because that is the whole of what the refusal claims. Every failure was being
+/// reported as the wedge, and most of them are not it: a child held open on
+/// Windows is the sharing violation `rename_replacing` retries for, arriving
+/// here instead, and EBUSY and EACCES are the same shape. Each of those aborted
+/// the whole Switch on the first of five attempts — telling somebody their lock
+/// path is not a directory when it is, and to delete it by hand when waiting one
+/// more second would have done — while the state the message describes is the
+/// one it never actually diagnosed.
+fn clear_the_abandoned(host: &dyn Host, lock: &LockSpec) -> Result<bool> {
+    let Err(err) = host.remove_dir_all(&lock.dir) else {
+        return Ok(true);
+    };
+
+    // Listable is the definition of the thing the refusal says this is not. A
+    // directory that would not go is contention, so it falls through to the
+    // ordinary wait rather than ending the command.
+    if host.list_dir(&lock.dir).is_ok() {
+        return Ok(false);
+    }
+
+    Err(PerchError::Other(format!(
+        "{} ({}) is not a lock directory and could not be cleared: {err}.\n\
+         Nothing was changed. A lock is a directory, and nothing will be \
+         able to take this one until whatever is at that path is removed.",
+        lock.name,
+        lock.dir.display(),
+    )))
 }
 
 /// Whether a lock is one its holder died still holding.
@@ -762,7 +825,10 @@ mod tests {
 
         let mut still_held = false;
         let ran: Result<()> = under(&host, vec![lock.clone()], |held| {
-            host.sleep(90_000);
+            // Past the update interval so a renewal is due, and well inside the
+            // staleness window so the hiccup is the only thing under test —
+            // `let_go_if_stale` owns what happens beyond it.
+            host.sleep(10_000);
             host.set_unwritable(&lock.dir, "Permission denied");
             held.renew();
             still_held = held.still_held();
@@ -795,7 +861,9 @@ mod tests {
 
         let mut still_held = false;
         let ran: Result<()> = under(&host, vec![lock.clone()], |held| {
-            host.sleep(90_000);
+            // Inside the staleness window, for the reason the touch case above
+            // gives.
+            host.sleep(10_000);
             host.set_unreadable(&lock.dir, "Permission denied");
             held.renew();
             still_held = held.still_held();
@@ -816,6 +884,64 @@ mod tests {
             "and the stamp the check rests on is not overwritten: {:?}",
             host.effects()
         );
+    }
+
+    /// What bounds the two cases above, and the reason the bound is the stamp
+    /// rather than Perch's patience.
+    ///
+    /// Tolerating a hiccup was tolerating it for ever: neither branch compared
+    /// anything against `stale_millis`, so a filesystem that kept faltering left
+    /// Perch reporting a hold indefinitely. Meanwhile the artifact sits there
+    /// untouched, and once it is older than the staleness window every Claude
+    /// Code on the machine is entitled to clear it and take the lock — so the
+    /// hold Perch went on claiming is one two processes believe they have,
+    /// which is the whole of what a lock is for.
+    ///
+    /// The config lock is where this bites: `probe` gives it 10s against a 5s
+    /// update, so one missed renewal reaches the boundary rather than the dozen
+    /// the old comment claimed.
+    #[test]
+    fn a_hiccup_that_outlasts_the_staleness_window_is_a_hold_perch_stops_claiming() {
+        for (what, unreadable) in [("the touch", false), ("the read", true)] {
+            let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
+            let host = FakeHost::new();
+
+            let mut still_held = true;
+            let ran: Result<()> = under(&host, vec![lock.clone()], |held| {
+                if unreadable {
+                    host.set_unreadable(&lock.dir, "Permission denied");
+                } else {
+                    host.set_unwritable(&lock.dir, "Permission denied");
+                }
+                // Past the window rather than merely past the update interval,
+                // which is what tells this apart from a hiccup.
+                host.sleep(lock.stale_millis as u64 + 1_000);
+                held.renew();
+                still_held = held.still_held();
+                if unreadable {
+                    host.forget_unreadable(&lock.dir);
+                } else {
+                    host.forget_unwritable(&lock.dir);
+                }
+                Ok(())
+            });
+            ran.expect("the work finishes");
+
+            assert!(
+                !still_held,
+                "{what}: a lock anything else may now take is not one Perch \
+                 goes on reporting: {:?}",
+                host.notes()
+            );
+            assert!(
+                host.notes()
+                    .iter()
+                    .any(|note| note.contains("without being touched")),
+                "{what}: and it says which lock and why, rather than blaming a \
+                 takeover nobody made: {:?}",
+                host.notes()
+            );
+        }
     }
 
     /// The same evidence, at the moment the lock is given back rather than

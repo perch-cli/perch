@@ -504,12 +504,20 @@ pub fn choose(
         )));
     }
 
-    let here = ranked
-        .iter()
-        .find(|ranked| Some(ranked.account.email()) == leaving);
+    // `same_name` rather than `==`, for the reason `Registry::is_active` gives:
+    // an address is compared case-folded everywhere the registry answers a
+    // question about one, and this is the comparison that decides whether the
+    // Account being left is still in `landable`. Spelled differently, `here` is
+    // `None`, the Account stays a candidate, and `choose` can hand back the
+    // Account Perch is already on — the one thing its doc forbids, because
+    // landing where you already are rewrites Credentials for nothing.
+    let is_leaving = |ranked: &Ranked| {
+        leaving.is_some_and(|email| registry::same_name(ranked.account.email(), email))
+    };
+    let here = ranked.iter().find(|ranked| is_leaving(ranked));
     let landable: Vec<&Ranked> = ranked
         .iter()
-        .filter(|ranked| Some(ranked.account.email()) != leaving && !ranked.headroom.is_exhausted())
+        .filter(|ranked| !is_leaving(ranked) && !ranked.headroom.is_exhausted())
         .collect();
     let elsewhere: Vec<&Ranked> = landable
         .iter()
@@ -902,18 +910,39 @@ fn everyone_is_exhausted(
     ranked: &[Ranked],
     now: DateTime<Utc>,
 ) -> String {
+    // `> now` for the reason `ranked_on_reset` gives for the half of this that
+    // has Room: a cached figure outlives the window it describes (ADR 0015), so
+    // an elapsed `resets_at` is not a fact about when this Account comes back —
+    // it is a window that already came back, under a percentage that is stale.
+    //
+    // Taken as one, it sorted the wrong way twice over. `min_by_key` picked the
+    // *earliest* reset, so among Accounts whose windows had all come back the
+    // stalest reading won; and `reset_phrase` renders a past instant as "(any
+    // moment now)". A six-hour-old figure would announce that an Account frees
+    // up "soonest, at 07:00 (any moment now)" about a window that came back
+    // five hours ago, while a fresh figure twenty minutes from resetting went
+    // unmentioned.
     let soonest = ranked
         .iter()
         .filter_map(|ranked| match ranked.headroom {
             Headroom::Exhausted {
                 frees_at: Some(at), ..
-            } => Some((at, ranked.account)),
+            } if at > now => Some((at, ranked.account)),
             _ => None,
         })
         .min_by_key(|(at, _)| *at);
+    // An elapsed reset says as little about the wait as no reset at all, so it
+    // is counted here rather than dropped: both mean "the wait could be shorter
+    // than that", and for an elapsed one it very likely is.
     let unsaid = ranked
         .iter()
-        .filter(|ranked| matches!(ranked.headroom, Headroom::Exhausted { frees_at: None }))
+        .filter(|ranked| match ranked.headroom {
+            Headroom::Exhausted { frees_at: None } => true,
+            Headroom::Exhausted {
+                frees_at: Some(at), ..
+            } => at <= now,
+            _ => false,
+        })
         .count();
 
     let mut waiting = match soonest {
@@ -1289,6 +1318,32 @@ pub(crate) mod tests {
             ),
             "the window with the least room decides, so the number is true of \
              every window: {headroom:?}"
+        );
+    }
+
+    /// An observation carrying no windows is not an observation, and the one
+    /// thing that says so is `Account::observed_utilization`'s filter.
+    ///
+    /// Behind it, `headroom_of` calls `fullest_window(cached).expect("an
+    /// observation carries at least one window")` — reached by every Switch,
+    /// every Cycle and every watch round. `anthropic::windows_in` answers
+    /// `Ok(empty)` for a `{}` usage body and `observe::keep` stores what it is
+    /// given, so the value the `expect` forbids is one Perch can write; nothing
+    /// in `validate` refuses it either. The filter is the whole guard and no
+    /// test was holding it, so removing it read as a tidy-up.
+    #[test]
+    fn an_observation_carrying_no_windows_reads_as_never_observed_rather_than_panicking() {
+        let mut held = account("a@example.com", vec![window("5-hour", 4.0)]);
+        held.utilization = Some(CachedUtilization {
+            observed_at: now(),
+            windows: Vec::new(),
+        });
+
+        assert_eq!(held.observed_utilization(), None);
+        assert_eq!(
+            headroom_of(&held),
+            Headroom::Unobserved,
+            "a figure with nothing in it is no figure, not a full window"
         );
     }
 

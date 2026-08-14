@@ -672,15 +672,23 @@ impl Round {
 /// shape as every other line so a log stays one column of timestamps and words,
 /// with the fields it does not have said as unread rather than left blank,
 /// which is how [`Round::figure`] already says a figure that was not read.
-pub fn held_line(why: &str, retrying_in: u64, now: DateTime<Utc>) -> String {
+/// `retrying_in` is `None` where nothing here decides when the next reading is,
+/// which is a `perch watch --once`: it is exiting, and when it comes back is
+/// whatever scheduled it to say. The same distinction [`Outcome::Held`] already
+/// carries, and for the same reason — promising an interval this process has no
+/// part in would be the one thing on the line that was not true.
+pub fn held_line(why: &str, retrying_in: Option<u64>, now: DateTime<Utc>) -> String {
+    let asking_again = match retrying_in {
+        Some(millis) => format!(" Asking again in {}.", how_long(millis)),
+        None => String::new(),
+    };
     format!(
         "{}  {:<8}  unread unread; threshold unread — {}",
         now.to_rfc3339_opts(SecondsFormat::Secs, true),
         "held",
         one_line(&format!(
-            "nothing current to decide on, so nothing was decided: {why} \
-             Asking again in {}.",
-            how_long(retrying_in),
+            "nothing current to decide on, so nothing was decided: \
+             {why}{asking_again}",
         )),
     )
 }

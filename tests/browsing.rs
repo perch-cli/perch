@@ -2262,6 +2262,56 @@ fn an_account_is_moved_into_another_group_from_the_panel() {
     );
 }
 
+/// The report of a write survives the write's own effect on the cursor.
+///
+/// `Model::wrote` set `said` and then applied the registry, and applying it
+/// clears `said` whenever a cursor could not follow what it was on — the rule
+/// `moving` exists for, reached the other way. A successful write does exactly
+/// that when it empties the Scope on screen, so the one case where the panel had
+/// most to report was the case it reported nothing at all.
+///
+/// One Account rather than the two `machine_with_figures` holds, because that is
+/// what makes the Ungrouped Scope empty afterwards: with a second Account left
+/// behind, the per-Account rows survive, the cursor follows, and nothing is
+/// dropped.
+#[test]
+fn a_write_that_empties_the_scope_on_screen_still_says_what_it_did() {
+    let host = logged_in_machine();
+    declare_group(&host, "work");
+
+    let screen = browse(
+        &host,
+        at_the_config(
+            [
+                vec![Some(Signal::Down)],
+                vec![Some(Signal::Right), Some(Signal::Right)],
+                over(9, Signal::Down),
+                vec![Some(Signal::Right)],
+                // The write lands on the debounce rather than on the way out,
+                // so there is still a frame after it to read.
+                while_nobody_presses_anything(),
+                vec![Some(Signal::Leave)],
+            ]
+            .concat(),
+        ),
+    );
+
+    assert_eq!(
+        registry_of(&host)
+            .account(EMAIL)
+            .expect("an Account Perch holds")
+            .group
+            .as_deref(),
+        Some("work"),
+        "the write itself landed"
+    );
+    let frame = screen.last_frame();
+    assert!(
+        frame.contains("Moved") && frame.contains("work"),
+        "and the panel says so, on the frame drawn after it: {frame}"
+    );
+}
+
 /// An edit that cannot take the lock is refused, said where a failed Refresh is
 /// said, and the row goes back to what was actually written — because a value
 /// that was never written is not one anybody should be reading.
@@ -2401,6 +2451,46 @@ fn the_status_tab_says_which_column_the_keys_are_in() {
         "and the sidebar has given them up:\n{}",
         listing.last_frame()
     );
+}
+
+/// The other two Status pages have no column to step into, so `→` leaves the
+/// keys where the frame says they are.
+///
+/// `rightwards` moved them regardless, into a column only `Accounts` draws.
+/// From there `↓` and `↑` drove the Accounts table's cursor — not on screen —
+/// while the sidebar stopped marking its own row because the keys had left it.
+/// Nothing on the frame said where they had gone, `Enter` did nothing, and only
+/// `←` or `Tab` got back out.
+#[test]
+fn the_status_pages_with_no_column_to_enter_keep_the_keys_on_the_sidebar() {
+    let host = machine_with_figures();
+
+    // Asked of where `↓` goes rather than of a modifier, because that is the
+    // symptom: the keys landing in an undrawn column showed up as arrows that
+    // moved nothing anybody could see.
+    // `Accounts` either way, because the sidebar clamps at its ends rather than
+    // wrapping: it is the row below `Overview` and the row above `Config`.
+    for (page, reaching, moves, next) in [
+        ("Overview", 0, Signal::Down, "Accounts"),
+        ("Config", 2, Signal::Up, "Accounts"),
+    ] {
+        let screen = browse(
+            &host,
+            [
+                over(reaching, Signal::Down),
+                vec![Some(Signal::Right), Some(moves), Some(Signal::Leave)],
+            ]
+            .concat(),
+        );
+
+        assert_eq!(
+            screen.emphasis_on(next),
+            Some(Modifier::REVERSED),
+            "`→` on {page} leaves the keys on the sidebar, so `↓` moves it to \
+             {next} rather than an Accounts cursor no frame draws:\n{}",
+            screen.last_frame()
+        );
+    }
 }
 
 /// A value the model refuses is refused in the words the command would have

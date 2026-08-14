@@ -44,10 +44,39 @@ pub const CURRENT_VERSION: u32 = 1;
 /// alone. ADR 0014 wants this file to outlive the machine that wrote it, and it
 /// cannot do that while what opens it depends on the machine that opens it.
 ///
-/// 22 is where `age`'s own guidance tops out, and is comfortably above what
-/// calibration picks on any machine that can run Perch — roughly 17 to 19,
-/// since 2^22 scrypt rounds want four gigabytes to themselves.
+/// 22 is where `age`'s own guidance tops out, and is comfortably above
+/// [`WORK_FACTOR`], since 2^22 scrypt rounds want four gigabytes to themselves.
 const MAX_WORK_FACTOR: u8 = 22;
+
+/// The scrypt work [`seal`] spends writing one file, as `log2(N)`.
+///
+/// Fixed for the half of the reason [`MAX_WORK_FACTOR`] is, and for a second
+/// one that is worse. `age` calibrates a work factor by timing 2^10 rounds on
+/// the machine doing the encrypting and doubling *only while that measurement
+/// is under a second* — so the number is not merely machine-dependent, it has
+/// no floor. On anything CPU-starved enough that 2^10 rounds already take a
+/// second — a cgroup-quota'd CI container, a loaded laptop, a Pi — the loop
+/// never runs and the file is sealed at 1024 rounds, which is a GPU-hours
+/// problem for a passphrase a person chose. Nothing in the file, the report or
+/// [`unseal`] would have said so: the ceiling is checked and there was no floor
+/// to check against.
+///
+/// So the strength of an Export is decided here, once, rather than by whatever
+/// the machine happened to be doing that afternoon — which is also what the
+/// module doc means by sealing being arithmetic.
+///
+/// 19 rather than `age`'s own "roughly 1 second on a modern machine" guess of
+/// 18, because this is a file meant to outlive the machine and the cost is paid
+/// once per Export and once per Import. Slow hardware pays seconds for it; that
+/// is the right way round, and the alternative is the hardware deciding how well
+/// the backup is encrypted.
+const WORK_FACTOR: u8 = 19;
+
+/// What Perch spends sealing has to stay under what it will spend opening, or
+/// every Export it writes is one it refuses to read. Asserted where the two
+/// numbers are, and at compile time, because there is no run in which it is
+/// worth discovering.
+const _: () = assert!(WORK_FACTOR < MAX_WORK_FACTOR);
 
 /// An Export, unsealed: what one `age` file holds before it is encrypted and
 /// after it is decrypted again.
@@ -186,7 +215,7 @@ fn the_live_store(
     registry: &Registry,
     account: &Account,
 ) -> Result<Option<crate::probe::Store>> {
-    if registry.active.as_deref() != Some(account.email()) {
+    if !registry.is_active(account.email()) {
         return Ok(None);
     }
     let live = registry::the_default_profile(host)?;
@@ -291,15 +320,15 @@ pub fn unseal(sealed: &str, passphrase: &str) -> Result<Export> {
     let mut identity = age::scrypt::Identity::new(secret(passphrase));
 
     // The bound `age` picks on its own is measured on the machine doing the
-    // *decryption* — about a second of work here, plus four doublings — while
-    // `seal` picks its work factor by the same measurement on the machine doing
-    // the encryption. So an Export written on a fast desktop and opened on a
-    // slow laptop, or inside a CPU-limited container, is refused for no reason
-    // but the pair of machines it travelled between. That is the one property
-    // ADR 0014 is about: this file is meant to outlive the machine that wrote
-    // it, so what will open it cannot be a function of the machine that opens
-    // it. 22 is where `age`'s own guidance tops out, and is above anything
-    // `seal` will ever choose.
+    // *decryption* — about a second of work here, plus four doublings. So an
+    // Export written on a fast desktop and opened on a slow laptop, or inside a
+    // CPU-limited container, was refused for no reason but the pair of machines
+    // it travelled between. That is the one property ADR 0014 is about: this
+    // file is meant to outlive the machine that wrote it, so what will open it
+    // cannot be a function of the machine that opens it. 22 is where `age`'s own
+    // guidance tops out, and is above `WORK_FACTOR`, which is what `seal`
+    // spends — pinned there for the same reason, and for the floor `age`'s
+    // calibration does not have.
     identity.set_max_work_factor(MAX_WORK_FACTOR);
 
     let plain = age::decrypt(&identity, sealed.as_bytes()).map_err(would_not_open)?;
@@ -428,7 +457,9 @@ fn refuse_a_newer_perch(plain: &[u8]) -> Result<()> {
 }
 
 fn recipient(passphrase: &str) -> age::scrypt::Recipient {
-    age::scrypt::Recipient::new(secret(passphrase))
+    let mut recipient = age::scrypt::Recipient::new(secret(passphrase));
+    recipient.set_work_factor(WORK_FACTOR);
+    recipient
 }
 
 fn secret(passphrase: &str) -> SecretString {
@@ -508,6 +539,38 @@ mod tests {
             "nothing in the file is readable without the passphrase"
         );
         assert_eq!(unseal(&sealed, PASSPHRASE).expect("it opens"), export);
+    }
+
+    /// What an Export is encrypted *with*, which nothing was asserting.
+    ///
+    /// Left to `age`, the work factor is measured on the machine doing the
+    /// sealing: 2^10 rounds timed once, then doubled only while that measurement
+    /// stays under a second. A machine slow enough that 2^10 already takes a
+    /// second seals at 2^10 — and since `unseal` checks only a ceiling, such a
+    /// file opens in silence. The strength of every backup Perch writes was a
+    /// property of whatever else the CPU was doing at the time.
+    ///
+    /// Asserted through the ceiling, because that is the one place `age` will
+    /// say a number out loud: opened against a maximum one below what `seal`
+    /// spends, the refusal names the work the file actually required.
+    #[test]
+    fn an_export_is_sealed_with_the_work_perch_chose_rather_than_what_the_machine_could_spare() {
+        let sealed = seal(&an_export(), PASSPHRASE).expect("it seals");
+
+        let mut identity = age::scrypt::Identity::new(secret(PASSPHRASE));
+        identity.set_max_work_factor(WORK_FACTOR - 1);
+        let refused = age::decrypt(&identity, sealed.as_bytes())
+            .expect_err("a ceiling below what it was sealed with will not open it");
+
+        match refused {
+            age::DecryptError::ExcessiveWork { required, .. } => {
+                assert_eq!(
+                    required, WORK_FACTOR,
+                    "the work factor is pinned, not measured"
+                );
+            }
+            other => panic!("the refusal says how much work the file wants: {other}"),
+        }
     }
 
     /// The one shape in Perch carrying every Credential on the machine at once,

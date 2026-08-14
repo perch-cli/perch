@@ -246,3 +246,26 @@ pub const IN_NO_GROUP: &str = "In no Group";
 /// 0017), as a clause both surfaces that show them finish a sentence with. One
 /// sentence, because two would sooner or later say two different things.
 pub const CYCLING_AMONG_UNGROUPED: &str = "only moves between these when you say it may";
+
+/// The same rule, and then what it currently answers.
+///
+/// The constant on its own prints the same words whether the declaration has
+/// been made or not, so the one Setting gating the whole Scope is not readable
+/// from it. `perch group list` was fixed for that and the other two surfaces
+/// were not: `perch list` printed the bare rule, so somebody who had already
+/// run `perch config set cycle-ungrouped true` was still told Cycling moves
+/// between these "when you say it may" — implying they had yet to say it.
+///
+/// A function rather than a third spelling. There were three: the bare
+/// constant, "`cycle-ungrouped` is on/off", and "`cycle-ungrouped` is
+/// true/false" — and `on`/`off` is not a value the Setting takes, so a reader
+/// who typed back what they were shown was refused. What it prints is what
+/// `perch config` accepts and prints.
+/// The clause alone, without the word the three callers label it with: one of
+/// them writes it into a two-column line where "Cycling" is the label.
+pub fn cycling_among_ungrouped(registry: &crate::registry::Registry) -> String {
+    format!(
+        "{CYCLING_AMONG_UNGROUPED} — `cycle-ungrouped` is {}",
+        registry.global.cycle_ungrouped
+    )
+}

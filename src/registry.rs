@@ -790,6 +790,32 @@ impl Registry {
         self.active.as_deref().and_then(|email| self.account(email))
     }
 
+    /// Whether this address is the one the registry records as active.
+    ///
+    /// One place, and case-folded like every other way the registry is asked
+    /// about a name. A dozen call sites spelled this as
+    /// `registry.active.as_deref() == Some(account.email())`, which is the one
+    /// comparison in Perch that answered a question about an address by exact
+    /// bytes — while [`account`] beside it has always answered the same question
+    /// with [`same_name`].
+    ///
+    /// The two agree only while `active` holds the identical spelling of the
+    /// entry it names, which is true today and is nothing that guarantees it:
+    /// `upsert` matches an existing entry with `same_name` and stores the
+    /// incoming spelling, so an Identity re-read with different capitalisation
+    /// replaces the Account and leaves `active` naming it the old way. From
+    /// there `observe::holding` reads the Account's own Profile instead of the
+    /// Default Profile, finds the store empty, and records `NoCredential` — a
+    /// permanent Quarantine off a comparison every other part of the registry
+    /// makes case-insensitively.
+    ///
+    /// [`account`]: Registry::account
+    pub fn is_active(&self, email: &str) -> bool {
+        self.active
+            .as_deref()
+            .is_some_and(|active| same_name(active, email))
+    }
+
     /// Every Group name in use. A Group an Account claims is always declared
     /// too — [`load`] sees to that — so this is the declared set.
     pub fn group_names(&self) -> impl Iterator<Item = &str> {
@@ -1435,17 +1461,6 @@ pub fn lock(host: &dyn Host) -> Result<lock::Held<'_>> {
     lock::take_all(host, vec![lock_spec(host)?])
 }
 
-/// The `version` a document claims, read on its own.
-///
-/// Deliberately not a parse of the whole thing: what this exists to answer is
-/// "was this written by something newer than me", and a document from something
-/// newer is exactly the document this build cannot deserialize. A shape holding
-/// one number deserializes out of any JSON object that carries it, whatever
-/// else the object holds and whatever the rest of it means.
-///
-/// `None` is "it does not say", which is not a claim about a newer Perch: the
-/// caller goes on to read the document properly and reports what it finds
-/// there.
 /// Reads the registry, or `None` when Perch has never run here.
 pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     let path = &registry_path(host)?;
@@ -2043,9 +2058,6 @@ mod tests {
         lock(&host).expect("a lock given back can be taken again");
     }
 
-    /// The hold spans the whole command, and a command can stall for as long as
-    /// somebody takes to answer a `[y/N]`. Renewed at every write, so the
-    /// ordinary long command keeps the lock it took rather than letting it
     /// An address is a name, and is compared the way every other name here is.
     ///
     /// It was not: the lookups compared with `==` while everything feeding them
@@ -2079,6 +2091,15 @@ mod tests {
         assert!(registry.account("CAFÉ@example.com").is_some());
         assert!(registry.account_mut("CAFÉ@EXAMPLE.COM").is_some());
         assert_eq!(registry.alias_of("Café@Example.com"), Some("work"));
+
+        registry.active = Some("CAFÉ@EXAMPLE.COM".into());
+        assert!(
+            registry.is_active("café@example.com"),
+            "and which Account is active is the same question, asked the same \
+             way — a dozen call sites compared these by exact bytes, which is \
+             the one place in Perch an address was not case-folded"
+        );
+        assert!(!registry.is_active("someone@example.com"));
 
         registry.forget("CAFÉ@example.com");
         assert!(registry.accounts.is_empty(), "and it is the one that goes");
@@ -2315,6 +2336,9 @@ mod tests {
         );
     }
 
+    /// The hold spans the whole command, and a command can stall for as long as
+    /// somebody takes to answer a `[y/N]`. Renewed at every write, so the
+    /// ordinary long command keeps the lock it took rather than letting it
     /// expire silently underneath itself.
     #[test]
     fn a_command_that_takes_its_time_keeps_the_lock_it_took() {

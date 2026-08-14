@@ -1280,3 +1280,80 @@ fn nowhere_to_go_says_which_candidates_could_not_be_read() {
         "and the loop stayed where it was"
     );
 }
+
+/// A check that could not take the registry says so on standard output, like
+/// every other outcome it has.
+///
+/// The whole of what `--once` promises is that "the line goes to standard
+/// output for cron to capture, and what was decided goes into the exit code" —
+/// and the one outcome most likely to recur was the one with no line. Another
+/// `perch` holding the registry is ordinary: `perch status --refresh` holds it
+/// across every Renewal and every read it makes, comfortably longer than
+/// `lock::take` waits. Raised rather than said, it went to standard error by way
+/// of `main`, so a cron job capturing standard output got a line for every
+/// outcome except that one.
+#[test]
+fn a_check_another_perch_holds_the_registry_against_says_so_where_cron_is_reading() {
+    let host = watching(&[86.0], 5.0);
+    let _held = perch::registry::lock(&host).expect("the other `perch` has it");
+
+    let (result, printed) = run_watch_once(&host);
+
+    assert_eq!(
+        result.expect("a held round is an outcome rather than a failure"),
+        perch::error::EXIT_HELD,
+        "and the exit code a scheduler branches on is unchanged: {printed}"
+    );
+    assert!(
+        printed.contains("held"),
+        "the decision line is on standard output: {printed}"
+    );
+    assert!(
+        printed.contains("nothing was decided"),
+        "and says what came of the round: {printed}"
+    );
+    assert!(
+        !printed.contains("Asking again in"),
+        "without promising an interval a check has no part in — when it comes \
+         back is whatever scheduled it: {printed}"
+    );
+}
+
+/// The wait a Ctrl-C lands in spends nothing, because that is what the real one
+/// spends.
+///
+/// `RealHost::wait` asks `interrupted()` before its first slice and returns
+/// having slept none of the interval. The fake advanced its clock by the whole
+/// of it and only then decided, so the wait that *ends* an interrupted
+/// `perch watch` moved the clock 2.5 minutes — or 20 under back-off — that a
+/// real Ctrl-C never moves it. Every age a test measured after an interrupted
+/// watch was measuring a duration production does not have.
+#[test]
+fn the_wait_a_ctrl_c_lands_in_costs_the_clock_nothing() {
+    let host = watching(&[40.0, 45.0], 5.0);
+    let opened_at = host.now();
+
+    let (result, printed) = run_watch(&host);
+    result.expect("it was stopped");
+
+    let rounds = waits(&host).len() as i64;
+    let interrupted_wait = waits(&host)
+        .last()
+        .copied()
+        .expect("it waited at least once");
+    assert!(
+        interrupted_wait > 0,
+        "the last wait was entered with an interval, which is what makes this \
+         worth asserting: {:?}",
+        waits(&host)
+    );
+
+    // Every wait but the last one, which is the one the interrupt landed in.
+    let spent = (host.now() - opened_at).num_milliseconds();
+    let waited: i64 = waits(&host).iter().map(|millis| *millis as i64).sum();
+    assert_eq!(
+        spent,
+        waited - interrupted_wait as i64,
+        "{rounds} rounds' waits, less the one that was interrupted:\n{printed}"
+    );
+}

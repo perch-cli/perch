@@ -532,7 +532,49 @@ fn an_account_the_export_held_no_credential_for_is_restored_and_said_so() {
     assert_eq!(registry_of(&onto).accounts.len(), 3);
     assert_eq!(credential_of(&onto, THIRD_EMAIL), None);
     assert!(printed.contains(THIRD_EMAIL), "{printed}");
-    assert!(printed.contains("perch relogin"), "{printed}");
+    assert!(
+        printed.contains(&format!("perch relogin {THIRD_EMAIL}")),
+        "with one Account to name, the repair names it: {printed}"
+    );
+}
+
+/// The same with more than one, which nothing was asking.
+///
+/// The sentence agreed its noun with the whole list — "the Accounts were
+/// restored without one" — and then closed with `how_to_repair(bare[0])`, which
+/// says "`perch relogin a@example.com` logs *it* in again". So somebody who had
+/// just restored three credential-less Accounts was told to repair the first.
+/// The mirror of this in `perch export` gets it right by naming none of them.
+#[test]
+fn an_import_that_restored_several_without_credentials_does_not_name_one_of_them() {
+    let host = machine_with_three_accounts();
+    for email in [SECOND_EMAIL, THIRD_EMAIL] {
+        let store = store_of(&host, email);
+        host.forget_keychain_item(&store.keychain_service, &store.keychain_account);
+    }
+    let host = host.with_secrets(&[PASSPHRASE, PASSPHRASE]);
+    run_export(&host, AT).0.expect("the export is written");
+    let sealed = host.file(AT).expect("a file was written");
+
+    let onto = a_new_machine_holding(&sealed);
+    let (outcome, printed) = run_import(&onto, AT);
+    outcome.expect("the import lands");
+
+    assert!(
+        printed.contains(SECOND_EMAIL) && printed.contains(THIRD_EMAIL),
+        "both are named as having arrived without one: {printed}"
+    );
+    assert!(
+        printed.contains("perch relogin <target>"),
+        "and the repair is offered over either, rather than over whichever \
+         happened to be first: {printed}"
+    );
+    for email in [SECOND_EMAIL, THIRD_EMAIL] {
+        assert!(
+            !printed.contains(&format!("perch relogin {email}")),
+            "{email} is not singled out: {printed}"
+        );
+    }
 }
 
 /// Not the passphrase, and not a Credential. The prompts and one line naming

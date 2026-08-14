@@ -93,12 +93,31 @@ fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     // Nothing carried in from anywhere: the cooldown and the no-return come off
     // the registry inside the round, and a back-off would be pacing a loop this
     // process does not have. How soon to come back is the scheduler's.
-    let round = one_round(
+    let round = match one_round(
         host,
         Watcher::Check,
         &mut Recently::nothing(),
         &mut Backoff::none(),
-    )?;
+    ) {
+        Ok(round) => round,
+        // The one outcome that reached a check without a line, and the one most
+        // likely to recur: `perch status --refresh` holds the registry across
+        // every Renewal and every read it makes, comfortably longer than
+        // `lock::take` waits. Raised, it went to standard error by way of
+        // `main`, so a cron job capturing standard output got a line for every
+        // outcome except that one — while the doc above promises "the line goes
+        // to standard output for cron to capture". The loop already treats this
+        // as an ordinary held round; a check does now too, and exits `EXIT_HELD`
+        // as it always did.
+        //
+        // No interval on it, because a check is exiting and when it comes back
+        // is whatever scheduled it to say.
+        Err(PerchError::Busy(why)) => {
+            say(out, &watch::held_line(&why, None, host.now()))?;
+            return Ok(crate::error::EXIT_HELD);
+        }
+        Err(other) => return Err(other),
+    };
     say(out, &round.line(host.now()))?;
     Ok(round.outcome.exit_code())
 }
@@ -134,7 +153,7 @@ fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
             Err(PerchError::Busy(why)) => {
                 backoff.failed();
                 let waiting_for = backoff.waiting_for();
-                say(out, &watch::held_line(&why, waiting_for, host.now()))?;
+                say(out, &watch::held_line(&why, Some(waiting_for), host.now()))?;
                 if host.wait(waiting_for) == Waited::Interrupted {
                     break;
                 }

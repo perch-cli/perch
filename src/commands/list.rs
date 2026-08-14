@@ -17,7 +17,7 @@ use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
 use crate::adopt;
-use crate::commands::{CYCLING_AMONG_UNGROUPED, IN_NO_GROUP, say, say_json, write_failed};
+use crate::commands::{IN_NO_GROUP, cycling_among_ungrouped, say, say_json, write_failed};
 use crate::error::Result;
 use crate::host::Host;
 use crate::observe::Report;
@@ -228,7 +228,7 @@ fn rows(registry: &Registry, accounts: &[&Account], now: DateTime<Utc>) -> Vec<R
     accounts
         .iter()
         .map(|account| Row {
-            active: registry.active.as_deref() == Some(account.email()),
+            active: registry.is_active(account.email()),
             cells: columns(registry, account),
             figures: utilization::lines(account, now, width),
         })
@@ -328,7 +328,10 @@ fn render_human(
     }
 
     if matches!(scope, Scope::Ungrouped) {
-        say(out, &format!("Cycling {CYCLING_AMONG_UNGROUPED}."))?;
+        say(
+            out,
+            &format!("Cycling {}.", cycling_among_ungrouped(registry)),
+        )?;
     }
 
     for why in broken {
@@ -401,7 +404,7 @@ pub fn document(
         "group": account.group,
         "enabled": account.enabled,
         "quarantined": Quarantine::document(account.quarantine),
-        "active": registry.active.as_deref() == Some(account.email()),
+        "active": registry.is_active(account.email()),
         "organization": account.identity.organization_name,
         "plan": account.plan,
         "profile_dir": account.profile_dir(host)?,

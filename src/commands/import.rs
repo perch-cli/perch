@@ -137,7 +137,19 @@ fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
                     1 => "Account was",
                     _ => "Accounts were",
                 },
-                registry::how_to_repair(bare[0]),
+                // Named only where there is one to name. `how_to_repair` takes
+                // a Target and says "logs *it* in again", so over a list it
+                // told somebody who had just restored three credential-less
+                // Accounts to relogin the first — while the sentence above it
+                // had already agreed its noun with all three. The mirror of
+                // this in `export.rs` gets it right by not naming one.
+                match bare.as_slice() {
+                    [one] => registry::how_to_repair(one),
+                    _ => "`perch relogin <target>` logs one in again in place, \
+                          keeping its Alias, its Group and whether Cycling may \
+                          choose it."
+                        .to_string(),
+                },
             ),
         )?;
     }

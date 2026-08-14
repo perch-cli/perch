@@ -152,7 +152,7 @@ fn refuse_while_anything_is_running(
 }
 
 fn consequence_of(registry: &Registry, account: &Account) -> Consequence {
-    let is_active = registry.active.as_deref() == Some(account.email());
+    let is_active = registry.is_active(account.email());
     Consequence {
         is_active,
         successor: is_active

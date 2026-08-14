@@ -816,15 +816,22 @@ fn read_without_echo() -> Result<Option<String>, HostError> {
     // Installed before the echo goes off rather than after, so there is no
     // instant where it is off and nothing would put it back. A signal arriving
     // early finds a terminal that is already echoing and leaves it that way.
+    //
+    // Both signals the same terminal delivers at this prompt with a default
+    // disposition that kills. SIGINT is the one somebody means; SIGQUIT is one
+    // key over, arrives the same way, and left exactly the blind shell this
+    // function exists to prevent — the guard was written for "backing out of a
+    // passphrase prompt is a thing people do", and Ctrl-\ is that too.
     // SAFETY: the handler stores to an atomic and calls four async-signal-safe
     // functions. `signal` hands back the disposition being replaced, which is
     // put back below.
-    let previously = unsafe {
+    let guarding = [libc::SIGINT, libc::SIGQUIT];
+    let previously = guarding.map(|signal| unsafe {
         libc::signal(
-            libc::SIGINT,
+            signal,
             show_again_and_stop as *const () as libc::sighandler_t,
         )
-    };
+    });
 
     let mut hiding = showing;
     hiding.c_lflag &= !libc::ECHO;
@@ -842,11 +849,21 @@ fn read_without_echo() -> Result<Option<String>, HostError> {
     };
 
     // SAFETY: as above, restoring exactly the mode `tcgetattr` reported and the
-    // disposition `signal` reported. Both happen however the read ended, which
+    // dispositions `signal` reported. Both happen however the read ended, which
     // is the whole of what this function promises.
+    //
+    // `SIG_ERR` is not a disposition and is what `signal` answers when it could
+    // not install one. Handed straight back it installs an invalid handler over
+    // whatever was really there, so an install that failed was turned into a
+    // second, worse failure — the one case where this is reached is the one
+    // where the original disposition is still in place and wants leaving alone.
     unsafe {
         libc::tcsetattr(terminal, libc::TCSAFLUSH, &showing);
-        libc::signal(libc::SIGINT, previously);
+        for (signal, was) in guarding.into_iter().zip(previously) {
+            if was != libc::SIG_ERR {
+                libc::signal(signal, was);
+            }
+        }
     }
     typed
 }

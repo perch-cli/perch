@@ -772,11 +772,22 @@ impl Model {
     /// the registry: where the write landed that is the new value, and where it
     /// was refused it is what was actually written — because a value nobody
     /// wrote is not one anybody should be reading.
+    ///
+    /// The registry lands *first*, and the ordering is the whole of it.
+    /// [`now_holds`] clears `said` whenever a cursor could not follow what it
+    /// was on — the rule `moving` exists for, reached the other way — and that
+    /// is exactly what a successful write does when it moves an Account out of
+    /// the Scope on screen. Said first, the report of the write was set and then
+    /// dropped by the write's own effect: moving the last Ungrouped Account into
+    /// a Group emptied the Scope, the row the cursor was on stopped existing,
+    /// and the frame said nothing at all about what had just happened.
+    ///
+    /// [`now_holds`]: Model::now_holds
     pub fn wrote(&mut self, said: Vec<String>, registry: Option<Registry>) {
-        self.said = said;
         if let Some(registry) = registry {
             self.now_holds(registry);
         }
+        self.said = said;
     }
 
     /// Moves between tabs, and takes what was said with it: a report about the
@@ -871,8 +882,19 @@ impl Model {
             return self.stepped(1);
         }
         self.column = match (self.tab, self.column) {
-            // `Status` has no middle column, so one step in is the page itself.
-            (Tab::Status, _) => Column::Content,
+            // `Status` has no middle column, so one step in is the page itself
+            // — but only the `Accounts` page has anything in it to be on.
+            //
+            // Unconditionally, this put the keys in a column `Overview` and
+            // `Config` do not draw: `moved` then routed ↓ and ↑ to the Accounts
+            // table's cursor, which is not on screen, while `render_sidebar`
+            // stopped marking the sidebar row because the keys had left it. So
+            // nothing on the frame said where the keys were, `Enter` did
+            // nothing (`ask_for_a_switch` answers `Nothing` off the same
+            // question), and only `←` or `Tab` got out. The same guard
+            // `ask_for_a_run` already puts on `x`.
+            (Tab::Status, _) if self.status() == StatusRow::Accounts => Column::Content,
+            (Tab::Status, _) => Column::Scopes,
             (Tab::Config, Column::Scopes) if self.scope_accounts().is_empty() => Column::Content,
             (Tab::Config, Column::Scopes) => Column::Accounts,
             (Tab::Config, _) => Column::Content,

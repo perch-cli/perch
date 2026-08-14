@@ -51,7 +51,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // Asked before the login rather than after: a Profile Perch may not write
     // to is one no browser round trip was going to repair (ADR 0005).
     let installed = Installed::probed(host)?;
-    let repairing_the_account_you_are_on = registry.active.as_deref() == Some(account.email());
+    let repairing_the_account_you_are_on = registry.is_active(account.email());
     refuse_while_anything_is_running(host, &account, repairing_the_account_you_are_on, &installed)?;
 
     let produced = login::perform(
@@ -85,7 +85,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // Whether the Default Profile is written is asked of the registry as it is
     // now: another terminal may have switched away during the login, and then
     // this repair lands in the Account's own Profile alone.
-    let repairing_the_account_you_are_on = registry.active.as_deref() == Some(account.email());
+    let repairing_the_account_you_are_on = registry.is_active(account.email());
     refuse_while_anything_is_running(host, &account, repairing_the_account_you_are_on, &installed)?;
 
     settle_into_its_own_profile(host, &account, &produced)?;
