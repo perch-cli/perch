@@ -109,11 +109,47 @@ try {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
     $destination = Join-Path $InstallDir "perch.exe"
+    $superseded = "$destination.old"
+
+    # Windows holds a running executable open, so `perch.exe` cannot be
+    # written over while it is running — which is exactly the state `perch
+    # upgrade` runs this in, since the Perch being replaced is the one that
+    # started this script (ADR 0039). What Windows *does* allow is renaming a
+    # running executable, so the old one is moved aside and the new one takes
+    # its name.
+    #
+    # Cleared first because a rename onto an occupied name fails, and the
+    # previous upgrade will have left one: the binary was still running when it
+    # got here, so nothing could delete it at the time.
+    Remove-Item -Force $superseded -ErrorAction SilentlyContinue
+    $movedAside = $false
+    if (Test-Path $destination) {
+        try {
+            Move-Item -Force $destination $superseded
+            $movedAside = $true
+        }
+        catch {
+            Die "could not move $destination aside: $_"
+        }
+    }
+
     try {
         Move-Item -Force (Join-Path $tmp "unpacked\perch.exe") $destination
     }
     catch {
-        Die "could not write $destination — is perch running? Close it and try again."
+        # Put back the one that was working. A failed upgrade leaving the
+        # machine with no Perch at all is a worse outcome than the upgrade not
+        # happening, and this is the only window in which that is possible.
+        if ($movedAside) { Move-Item -Force $superseded $destination }
+        Die "could not write $destination — $_"
+    }
+
+    # Best effort: it is still running if this was an upgrade, in which case
+    # this fails and the next upgrade clears it above. `perch.exe.old` sitting
+    # beside the binary is the Installation's litter rather than something Perch
+    # holds, which is the side of the line ADR 0033 drew that it belongs on.
+    if ($movedAside) {
+        Remove-Item -Force $superseded -ErrorAction SilentlyContinue
     }
 
     Say "installed to $destination"
@@ -129,8 +165,9 @@ finally {
 # Both the user and the machine PATH are consulted, and each is matched a
 # segment at a time rather than as a substring: a machine-wide entry is still
 # on the PATH, and an existing `C:\foo\binary` is not a `C:\foo\bin`. Getting
-# that right is what makes a re-install — which is how Perch is updated
-# (ADR 0032) — neither ask again nor add the directory twice.
+# that right is what makes a re-install neither ask again nor add the directory
+# twice — and a re-install is exactly what `perch upgrade` performs on an
+# installer Installation, by running this script (ADR 0039).
 function Test-OnPath($directory) {
     $wanted = $directory.TrimEnd('\')
     foreach ($scope in "User", "Machine") {

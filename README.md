@@ -118,6 +118,7 @@ all of it interactively for when the choice wants making by eye.
 | `perch remove` | give up an Account | [guide](docs/guide/accounts.md#giving-up-an-account) |
 | `perch export` / `import` | back up everything to one encrypted file, and put it back | [guide](docs/guide/backup.md) |
 | `perch purge` | give the machine back the state it had before Perch | [guide](docs/guide/backup.md#giving-the-machine-back) |
+| `perch upgrade` | replace this Perch with a newer Release, through the channel that installed it | [guide](docs/guide/installing.md#upgrading) |
 
 Every command has `--help`, and the flags, the exit codes and the paths Perch
 writes are in the [reference](docs/guide/reference.md).

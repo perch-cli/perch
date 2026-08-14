@@ -64,19 +64,25 @@ fn curl_bin() -> Result<PathBuf, HostError> {
 /// is a machine-local way of receiving an `Authorization: Bearer` header,
 /// arriving through a different door than `PATH`. It can also set `output`,
 /// which diverts the body to a file and leaves Perch parsing nothing.
-const CURL_ARGS: [&str; 11] = [
+const CURL_ARGS: [&str; 7] = [
     "-q",
     "--silent",
     "--show-error",
-    "--connect-timeout",
-    "10",
-    "--max-time",
-    "30",
     "--write-out",
     "\n%{http_code}",
     "--config",
     "-",
 ];
+
+/// How long a request gets when it does not say: long enough for a Refresh
+/// somebody is waiting on, over a connection that may be slow.
+///
+/// In the configuration rather than in [`CURL_ARGS`], where both of these used
+/// to be, so that a request carrying its own bound has one place to put it —
+/// and so that every part of a request still travels the same way (see
+/// [`HttpRequest`]).
+const CONNECT_TIMEOUT_SECONDS: u64 = 10;
+const MAX_TIME_SECONDS: u64 = 30;
 
 /// The request as a `curl` configuration file, which is what goes in on stdin.
 ///
@@ -102,7 +108,18 @@ fn curl_config(request: &HttpRequest<'_>) -> Result<String, HostError> {
         super::inert("the request body", body)?;
     }
 
-    let mut config = format!("url = {}\n", quoted(request.url));
+    // Whole seconds, because that is the only unit `curl` takes here, and at
+    // least one: a bound that rounded down to zero would mean *no* bound, which
+    // is the opposite of what a caller asking for a short one wants.
+    let (connect, whole) = match request.within_millis {
+        Some(millis) => {
+            let seconds = millis.div_ceil(1000).max(1);
+            (seconds, seconds)
+        }
+        None => (CONNECT_TIMEOUT_SECONDS, MAX_TIME_SECONDS),
+    };
+    let mut config = format!("connect-timeout = {connect}\nmax-time = {whole}\n");
+    config.push_str(&format!("url = {}\n", quoted(request.url)));
     for (name, value) in request.headers {
         config.push_str(&format!(
             "header = {}\n",
@@ -348,6 +365,17 @@ impl Host for RealHost {
         } else {
             Platform::Other
         }
+    }
+
+    /// Canonicalised, because the path is read as evidence of a Channel and
+    /// the Homebrew case arrives as a symlink: `std::env::current_exe` on macOS
+    /// hands back the path the process was launched with, which for a
+    /// Homebrew install is `<prefix>/bin/perch` and says nothing about a
+    /// Cellar. A path that will not canonicalise is handed back as it came —
+    /// less informative, and better than refusing to run.
+    fn current_exe(&self) -> Result<PathBuf, HostError> {
+        let launched = std::env::current_exe()?;
+        Ok(std::fs::canonicalize(&launched).unwrap_or(launched))
     }
 
     fn read_file(&self, path: &Path) -> Result<String, HostError> {
@@ -1767,7 +1795,36 @@ mod tests {
 
         assert!(config.contains("url = \"https://example.test/token\""));
         assert!(config.contains(expected), "{config}");
-        assert_eq!(config.lines().count(), 2, "one option per line: {config}");
+        // The two bounds, the URL and the body: one option per line, and a body
+        // carrying quotes and backslashes still occupying exactly one of them.
+        assert_eq!(config.lines().count(), 4, "one option per line: {config}");
+    }
+
+    /// A request that says how long it may take gets that, and one that does
+    /// not gets the ordinary bound.
+    ///
+    /// Both in the configuration rather than in `CURL_ARGS`, which is where
+    /// they were: the upgrade check on `perch --version` is a line nobody asked
+    /// for, and thirty seconds of a black-holed network is a great deal to
+    /// spend on one (ADR 0039).
+    #[test]
+    fn a_request_may_carry_its_own_bound_and_otherwise_gets_the_ordinary_one() {
+        let ordinary = curl_config(&HttpRequest::get("https://example.test/usage", &[])).unwrap();
+        assert!(ordinary.contains("connect-timeout = 10"), "{ordinary}");
+        assert!(ordinary.contains("max-time = 30"), "{ordinary}");
+
+        let brief =
+            curl_config(&HttpRequest::get("https://example.test/latest", &[]).within(2_000))
+                .unwrap();
+        assert!(brief.contains("connect-timeout = 2"), "{brief}");
+        assert!(brief.contains("max-time = 2"), "{brief}");
+
+        // Rounded up rather than down. A bound that became zero would be `curl`
+        // reading it as no bound at all, which is the opposite of what asking
+        // for a short one means.
+        let sub_second =
+            curl_config(&HttpRequest::get("https://example.test/latest", &[]).within(200)).unwrap();
+        assert!(sub_second.contains("max-time = 1"), "{sub_second}");
     }
 
     /// The invariant `double_quoted` documents and only `security` was keeping:

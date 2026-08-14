@@ -64,6 +64,14 @@ pub struct HttpRequest<'a> {
     /// The body to send, which is what makes the request a POST. `None` is a
     /// GET.
     pub body: Option<&'a str>,
+    /// How long the whole request may take, or `None` for the ordinary bound.
+    ///
+    /// Part of the request rather than a setting on the Host for the same
+    /// reason the headers are: the two callers want different answers. A
+    /// Refresh is a figure somebody asked for and is worth waiting on; the
+    /// upgrade check on `perch --version` is a line nobody asked for, and a
+    /// black-holed network must cost it nothing (ADR 0039).
+    pub within_millis: Option<u64>,
 }
 
 impl<'a> HttpRequest<'a> {
@@ -72,6 +80,7 @@ impl<'a> HttpRequest<'a> {
             url,
             headers,
             body: None,
+            within_millis: None,
         }
     }
 
@@ -80,7 +89,14 @@ impl<'a> HttpRequest<'a> {
             url,
             headers,
             body: Some(body),
+            within_millis: None,
         }
+    }
+
+    /// The same request, given at most this long to finish.
+    pub fn within(mut self, millis: u64) -> Self {
+        self.within_millis = Some(millis);
+        self
     }
 }
 
@@ -269,6 +285,18 @@ pub trait Host {
     /// Which platform this is, which is what decides where a Credential is
     /// written (ADR 0020).
     fn platform(&self) -> Platform;
+
+    /// Where this Perch's own binary sits, with links followed.
+    ///
+    /// The only evidence there is about which Channel installed this machine's
+    /// Installation: every Channel points at the same Release and installs the
+    /// same bytes, so nothing inside the binary can say where it came from and
+    /// the path it sits at has to (ADR 0039).
+    ///
+    /// Links followed because Homebrew's is the case that matters — what a
+    /// person runs is `<prefix>/bin/perch`, which is a symlink into the Cellar,
+    /// and the Cellar is the half that names the Channel.
+    fn current_exe(&self) -> Result<PathBuf, HostError>;
 
     // ---- filesystem -----------------------------------------------------
 

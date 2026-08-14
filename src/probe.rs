@@ -240,14 +240,39 @@ pub fn claude_bin(host: &dyn Host) -> Result<PathBuf> {
         return Ok(PathBuf::from(overridden));
     }
 
-    let Some(path) = host.env_var("PATH") else {
+    if host.env_var("PATH").is_none() {
         return Err(refusal(
             assumption::INSTALLED,
             "PATH is unset, so there is nowhere to look for `claude`. \
              Point PERCH_CLAUDE_BIN at it instead",
             "not installed",
         ));
-    };
+    }
+
+    on_path(host, "claude").ok_or_else(|| {
+        refusal(
+            assumption::INSTALLED,
+            "no `claude` was found on PATH. Install Claude Code, or point \
+             PERCH_CLAUDE_BIN at it",
+            "not installed",
+        )
+    })
+}
+
+/// The first program of this name on `PATH`, or `None`.
+///
+/// Written out rather than left to `Command::new` because Rust appends only
+/// `.exe` and never consults `PATHEXT`, so `npm i -g` installing `claude.cmd`
+/// and `npm.cmd` produces two programs that work in every shell and are
+/// invisible to a bare `Command::new`. The second of those is why this is a
+/// search for any name rather than for `claude`: `perch upgrade` hands the work
+/// back to `npm` on an npm Installation (ADR 0039), and finding it is the same
+/// problem this was already solving.
+///
+/// The name is taken as given — no extension is stripped and none is required,
+/// so a caller may pass `npm.cmd` and get exactly that.
+pub fn on_path(host: &dyn Host, name: &str) -> Option<PathBuf> {
+    let path = host.env_var("PATH")?;
 
     let on_windows = host.platform() == crate::host::Platform::Windows;
     let separator = if on_windows { ';' } else { ':' };
@@ -271,19 +296,13 @@ pub fn claude_bin(host: &dyn Host) -> Result<PathBuf> {
             // separator of whatever platform this build runs on. Windows
             // accepts either, and a candidate that spells differently per
             // build would make one machine read as two.
-            let candidate = PathBuf::from(format!("{dir}/claude{extension}"));
+            let candidate = PathBuf::from(format!("{dir}/{name}{extension}"));
             if host.is_file(&candidate) {
-                return Ok(candidate);
+                return Some(candidate);
             }
         }
     }
-
-    Err(refusal(
-        assumption::INSTALLED,
-        "no `claude` was found on PATH. Install Claude Code, or point \
-         PERCH_CLAUDE_BIN at it",
-        "not installed",
-    ))
+    None
 }
 
 /// Reads the installed version, refusing when there is nothing to read.

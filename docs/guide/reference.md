@@ -24,6 +24,7 @@
 | `perch remove <target> [--yes]` | give up an Account |
 | `perch export <path>` / `perch import <path>` | write everything to one encrypted file, and put it back |
 | `perch purge [--yes]` | give the machine back the state it had before Perch |
+| `perch upgrade [--release <tag>] [--check] [--json] [--channel <name>] [--yes]` | replace this Perch with a newer Release, through the Channel that installed it |
 
 ## Exit codes
 
@@ -51,6 +52,12 @@ stops a Run before the launch — a command line without `--`, an unknown Target
 a Group, a Quarantine, a Reconcile that could not be made — is in the table
 above.
 
+`perch upgrade` is the same once it has handed the work to a Channel: what
+`brew` or `npm` exited with is what Perch exits with. `perch upgrade --check`
+exits 0 whether or not there is a newer Release — it is a question, and
+answering it is success either way, so branch on `--json`'s `upgradeAvailable`
+rather than on the code.
+
 ## Where things are
 
 - `~/.config/perch/registry.json` — Perch's own state, versioned.
@@ -65,6 +72,10 @@ above.
 - `$PERCH_CLAUDE_BIN` overrides where `claude` is found. Without it, Perch
   walks `PATH` itself — consulting `PATHEXT` on Windows, so the `claude.cmd`
   an npm install leaves works from every shell.
+- `$PERCH_NO_UPGRADE_CHECK` stops `perch --version` asking whether a newer
+  Release exists. Checked before the request, so nothing goes out (ADR 0039).
+  That check is the only place Perch looks for its own updates; `perch status`
+  never touches the network.
 
 A Credential lives wherever the installed Claude Code would put it (ADR 0020):
 the keychain on macOS, reached by driving `/usr/bin/security` (ADR 0008), and

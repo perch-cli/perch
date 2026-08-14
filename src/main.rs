@@ -17,6 +17,7 @@ use perch::commands::run::{self, RunArgs};
 use perch::commands::status::{self, StatusArgs};
 use perch::commands::switch::{self, SwitchArgs};
 use perch::commands::tui;
+use perch::commands::upgrade::{self, UpgradeArgs};
 use perch::commands::watch::{self, WatchArgs};
 use perch::error::EXIT_OK;
 use perch::host::RealHost;
@@ -287,6 +288,44 @@ enum Command {
     /// answering while it does. `q` or Ctrl-C leaves.
     Tui,
 
+    /// Replace this Perch with a newer Release.
+    ///
+    /// Through whatever Channel installed it (ADR 0039): a Homebrew
+    /// Installation is handed to `brew upgrade perch` and an npm one to `npm
+    /// update -g perch-cli`, because their binaries are theirs to replace and
+    /// writing over one is reverted or thrown away at the next thing they do.
+    /// Only a binary the installer script put where it puts them — `~/.local/bin`,
+    /// `%LOCALAPPDATA%\Perch\bin` on Windows, or `$PERCH_INSTALL_DIR` — is
+    /// replaced by Perch itself, using that same installer.
+    ///
+    /// A binary anywhere else — unpacked from the Release page by hand, most
+    /// likely — is refused rather than written over, and `--channel` says which
+    /// Channel it really is when the path does not.
+    ///
+    /// Nothing Perch holds is touched: no registry, no Credential, no Profile.
+    Upgrade {
+        /// The Release to install, with or without its leading `v`. Without
+        /// this, the newest.
+        #[arg(long, value_name = "TAG")]
+        release: Option<String>,
+
+        /// Say what is installed and what is newest, and install nothing.
+        #[arg(long)]
+        check: bool,
+
+        /// That answer as a document.
+        #[arg(long, requires = "check")]
+        json: bool,
+
+        /// Which Channel installed this Perch, for when its path does not say.
+        #[arg(long, value_name = "NAME")]
+        channel: Option<String>,
+
+        /// Agree ahead of time to a Release older than the one installed.
+        #[arg(long)]
+        yes: bool,
+    },
+
     /// Watch the Account you are on, and Cycle when it runs low.
     ///
     /// A loop in this terminal rather than a daemon (ADR 0013): it runs until
@@ -337,6 +376,17 @@ fn ended_as(outcome: perch::Result<i32>, out: &mut dyn Write) -> i32 {
     }
 }
 
+/// Whether this command line is the bare question "what is installed?".
+///
+/// Only the bare form, and deliberately: `perch --version` is what a person
+/// types, what a bug report carries and what a formula asserts on. Anything
+/// with a subcommand in it — `perch add --version` — is still clap's to answer
+/// in clap's words, and taking those over here would mean owning a parser
+/// beside the one Perch already has.
+fn version_asked_for(typed: &[String]) -> bool {
+    matches!(typed, [only] if only == "--version" || only == "-V")
+}
+
 fn main() {
     report::install_panic_hook();
 
@@ -355,8 +405,20 @@ fn main() {
         std::process::exit(ended_as(Err(refusal), &mut out));
     }
 
-    let cli = Cli::parse();
     let host = RealHost::new();
+
+    // Before the parser, because clap answers `--version` by printing and
+    // exiting, and the line underneath it has to come from somewhere with a
+    // Host to ask (ADR 0039). What it says is `upgrade::version_report`'s, so
+    // that the shape the Homebrew formula asserts on is held still somewhere a
+    // test can reach.
+    if version_asked_for(&typed) {
+        let _ = write!(out, "{}", perch::upgrade::version_report(&host));
+        let _ = out.flush();
+        std::process::exit(EXIT_OK);
+    }
+
+    let cli = Cli::parse();
 
     let outcome = match cli.command {
         Command::Add {
@@ -428,6 +490,26 @@ fn main() {
         // hand the terminal to a client, and what that client said is what a
         // script reads.
         Command::Tui => tui::run(&host, &mut out),
+        // And a fourth: what `brew` or `npm` exited with is what a script
+        // reads, because a failed `brew upgrade` is a failed upgrade and a code
+        // of Perch's own would lose which of `brew`'s failures it was.
+        Command::Upgrade {
+            release,
+            check,
+            json,
+            channel,
+            yes,
+        } => upgrade::run(
+            &host,
+            UpgradeArgs {
+                release,
+                check,
+                json,
+                channel,
+                yes,
+            },
+            &mut out,
+        ),
         // The other command whose exit code is not simply "it worked": a check
         // reports what it decided, so a scheduler can tell a Switch from a
         // figure that could not be read without parsing the line (ADR 0013).
@@ -593,6 +675,64 @@ mod tests {
                 "`{}` should not parse",
                 narrowed.join(" ")
             );
+        }
+    }
+
+    /// An Upgrade is about the Installation and never about an Account, so
+    /// nothing that would narrow it to one parses. `--json` says what a check
+    /// found, so it does not appear without one — clap enforces that rather
+    /// than the command, because a flag that parses and is then refused is a
+    /// flag the `--help` still advertises as free-standing.
+    #[test]
+    fn an_upgrade_takes_a_release_and_never_a_target() {
+        for line in [
+            &["perch", "upgrade"][..],
+            &["perch", "upgrade", "--release", "v0.2.0"],
+            &["perch", "upgrade", "--release", "0.2.0", "--yes"],
+            &["perch", "upgrade", "--check"],
+            &["perch", "upgrade", "--check", "--json"],
+            &["perch", "upgrade", "--channel", "npm"],
+        ] {
+            assert!(
+                Cli::try_parse_from(line).is_ok(),
+                "`{}` should parse",
+                line.join(" ")
+            );
+        }
+
+        for narrowed in [
+            &["perch", "upgrade", "someone@example.com"][..],
+            &["perch", "upgrade", "--account", "work"],
+            &["perch", "upgrade", "--group", "work"],
+            &["perch", "upgrade", "--json"],
+        ] {
+            assert!(
+                Cli::try_parse_from(narrowed).is_err(),
+                "`{}` should not parse",
+                narrowed.join(" ")
+            );
+        }
+    }
+
+    /// The bare question and nothing else. `perch --version` is what a person
+    /// types, what a bug report carries and what the Homebrew formula asserts
+    /// on; anything with a subcommand in it stays clap's to answer, because the
+    /// alternative is owning a second parser beside the one Perch has.
+    #[test]
+    fn only_the_bare_version_question_is_answered_here() {
+        for typed in [vec!["--version"], vec!["-V"]] {
+            let typed: Vec<String> = typed.into_iter().map(str::to_string).collect();
+            assert!(version_asked_for(&typed), "{typed:?}");
+        }
+
+        for typed in [
+            vec!["add", "--version"],
+            vec!["--version", "extra"],
+            vec!["status"],
+            vec![],
+        ] {
+            let typed: Vec<String> = typed.into_iter().map(str::to_string).collect();
+            assert!(!version_asked_for(&typed), "{typed:?}");
         }
     }
 
