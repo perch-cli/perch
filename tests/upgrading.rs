@@ -599,6 +599,61 @@ fn a_named_release_is_refused_on_homebrew_rather_than_quietly_ignored() {
     assert!(ran(&host).is_empty(), "and nothing was run");
 }
 
+/// The same refusal, for a Release older than the one installed — which is the
+/// ordering that was wrong.
+///
+/// The refusal used to sit after the downgrade agreement, so this asked "Install
+/// the older Release? [y/N]", waited for somebody to type `y`, and only then
+/// said Homebrew cannot be pointed at a Release at all. Nobody should be asked
+/// to agree to something that is going to be refused whatever they answer.
+#[test]
+fn a_named_release_older_than_this_one_is_refused_before_anybody_agrees_to_it() {
+    let host = machine()
+        .with_answers(&["y"])
+        .installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch");
+
+    let (outcome, said) = upgrading(
+        &host,
+        UpgradeArgs {
+            release: Some(OLDER.to_string()),
+            ..UpgradeArgs::default()
+        },
+    );
+
+    let refused = outcome.expect_err("Homebrew cannot be pointed at a Release");
+    assert!(refused.to_string().contains("Homebrew"), "{refused}");
+    assert!(
+        !said.contains("[y/N]"),
+        "nobody is asked to agree to something that is refused either way: {said}"
+    );
+    assert!(ran(&host).is_empty(), "and nothing was run");
+}
+
+/// The same again with no terminal to agree on, which is where the ordering
+/// gave advice that could not work: the downgrade refusal names `--yes` as the
+/// way past it, and `--yes` reached the Homebrew refusal instead.
+#[test]
+fn a_named_release_on_homebrew_is_refused_as_itself_where_there_is_no_terminal() {
+    let host = machine()
+        .without_terminal()
+        .installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch");
+
+    let (outcome, _) = upgrading(
+        &host,
+        UpgradeArgs {
+            release: Some(OLDER.to_string()),
+            ..UpgradeArgs::default()
+        },
+    );
+
+    let refused = outcome.expect_err("Homebrew cannot be pointed at a Release");
+    assert!(
+        refused.to_string().contains("Homebrew"),
+        "the refusal is the one that is actually true, rather than one naming a \
+         flag that reaches this same refusal: {refused}"
+    );
+}
+
 // ---- going backwards -----------------------------------------------------
 
 /// Named as a downgrade and told what it costs. The cost is specific and not

@@ -59,6 +59,18 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
         ));
     }
 
+    // Before anything is resolved and before anybody is asked to agree to
+    // anything. A Release Homebrew cannot be pointed at is refused whatever the
+    // Release turns out to be, so asking first put the question the wrong way
+    // round: `--release 0.0.1` on a newer build showed "Install the older
+    // Release? [y/N]", waited for a `y`, and only then said Homebrew could not
+    // take one — and with no terminal it advised `--yes`, which reaches the same
+    // refusal. A `brew` that is not on PATH answered earlier still, naming the
+    // wrong problem entirely.
+    if matches!(channel, Channel::Homebrew { .. }) {
+        refuse_a_release_homebrew_cannot_take(&args.release)?;
+    }
+
     let wanted = match &args.release {
         Some(typed) => upgrade::version_typed(typed)?,
         None => upgrade::newest(host, None)?,
@@ -81,7 +93,6 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
     match &channel {
         Channel::Homebrew { prefix } => {
             let (brew, brew_args) = upgrade::homebrew_command(host, prefix)?;
-            refuse_a_release_homebrew_cannot_take(&args.release)?;
             hand_it_over(host, &brew, &brew_args, out)
         }
         Channel::Npm => {
