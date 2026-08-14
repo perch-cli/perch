@@ -365,6 +365,22 @@ pub fn notice(host: &dyn Host) -> Option<String> {
     }
 }
 
+/// The whole of what `perch --version` says.
+///
+/// Here rather than in `main`, because `main` is the one place no test reaches:
+/// what is printed, whether the second line appears at all, and the fact that
+/// the first is spelled exactly as clap spelled it — `perch <version>`, which
+/// the Homebrew formula's test block asserts on — are the parts worth holding
+/// still, and none of them can be held still inside a function that only runs
+/// as a process.
+pub fn version_report(host: &dyn Host) -> String {
+    let installed = installed();
+    match notice(host) {
+        Some(line) => format!("perch {installed}\n{line}\n"),
+        None => format!("perch {installed}\n"),
+    }
+}
+
 /// The command that hands the work back to Homebrew, as program and arguments.
 ///
 /// The `brew` beside the Cellar rather than the first one on `PATH`, for the

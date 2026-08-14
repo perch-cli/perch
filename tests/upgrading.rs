@@ -306,6 +306,93 @@ fn a_named_channel_is_taken_over_what_the_path_says() {
     assert_eq!(ran(&host).len(), 1);
 }
 
+/// A named Homebrew carries no prefix, because somebody typing it is saying
+/// which Channel this is and not where its `brew` lives — so that half falls
+/// back to the search on `PATH`. `brew` is taken as well as `homebrew`, which
+/// is what people type.
+#[test]
+fn a_named_homebrew_finds_its_brew_on_the_path() {
+    for word in ["homebrew", "brew", "Homebrew"] {
+        let host = machine()
+            .with_file("/usr/bin/brew", "")
+            .installed_at("/opt/perch/perch");
+
+        let (outcome, _) = upgrading(
+            &host,
+            UpgradeArgs {
+                channel: Some(word.to_string()),
+                ..UpgradeArgs::default()
+            },
+        );
+
+        outcome.unwrap_or_else(|err| panic!("`--channel {word}`: {err}"));
+        assert_eq!(ran(&host)[0].0, "/usr/bin/brew", "{word}");
+    }
+}
+
+/// The Channel is known and the program that owns it is not there. Naming the
+/// command is the whole of what is useful, because the repair is to put it back
+/// on `PATH` and run exactly that.
+#[test]
+fn a_channel_whose_own_tool_is_missing_says_which_command_would_have_run() {
+    // A *named* Homebrew carries no prefix, so nothing but `PATH` can answer
+    // and nothing is on it. A detected one carries the prefix its Cellar sits
+    // under, which is an answer by construction and cannot reach this.
+    let named = machine().installed_at("/opt/perch/perch");
+    let (outcome, _) = upgrading(
+        &named,
+        UpgradeArgs {
+            channel: Some("homebrew".to_string()),
+            ..UpgradeArgs::default()
+        },
+    );
+    let refused = outcome.expect_err("there is no brew");
+    assert!(
+        refused.to_string().contains("brew upgrade perch"),
+        "{refused}"
+    );
+    assert!(ran(&named).is_empty());
+
+    let npmless = machine().installed_at(
+        "/usr/lib/node_modules/perch-cli/node_modules/@perch-cli/linux-x64/bin/perch",
+    );
+    let (outcome, _) = upgrading(&npmless, UpgradeArgs::default());
+    let refused = outcome.expect_err("there is no npm");
+    assert!(
+        refused.to_string().contains("npm update -g perch-cli"),
+        "{refused}"
+    );
+    assert!(ran(&npmless).is_empty());
+}
+
+/// The Channel a check reports is the one it would act through, named the same
+/// way `--channel` takes it.
+#[test]
+fn a_check_names_the_channel_in_the_words_the_flag_takes() {
+    for (exe, word) in [
+        ("/opt/homebrew/Cellar/perch/0.1.1/bin/perch", "homebrew"),
+        (
+            "/usr/lib/node_modules/perch-cli/node_modules/@perch-cli/linux-x64/bin/perch",
+            "npm",
+        ),
+        ("/Users/someone/.local/bin/perch", "installer"),
+    ] {
+        let host = machine().installed_at(exe);
+        let (outcome, said) = upgrading(
+            &host,
+            UpgradeArgs {
+                check: true,
+                json: true,
+                ..UpgradeArgs::default()
+            },
+        );
+
+        outcome.expect("a check succeeded");
+        let document: serde_json::Value = serde_json::from_str(&said).expect("a document");
+        assert_eq!(document["channel"], word, "{exe}");
+    }
+}
+
 #[test]
 fn a_channel_that_is_not_one_is_refused_by_name() {
     let host = machine().installed_at("/Users/someone/.local/bin/perch");
@@ -501,6 +588,29 @@ fn an_older_release_is_named_as_one_and_says_what_it_costs() {
     assert_eq!(ran(&host).len(), 1);
 }
 
+/// Both spellings of yes, and everything else is a no. A question answered
+/// `yes` that installed nothing would be the worst of the three outcomes.
+#[test]
+fn the_agreement_takes_both_spellings_of_yes_and_nothing_else() {
+    for (answer, expected) in [("y", 1), ("yes", 1), ("Y", 1), ("sure", 0), ("", 0)] {
+        let host = machine()
+            .with_answers(&[answer])
+            .installed_at("/Users/someone/.local/bin/perch");
+
+        // Whether it ended in a refusal is the answer's business; what is
+        // asserted is whether anything was installed.
+        let (_outcome, _said) = upgrading(
+            &host,
+            UpgradeArgs {
+                release: Some(OLDER.to_string()),
+                ..UpgradeArgs::default()
+            },
+        );
+
+        assert_eq!(ran(&host).len(), expected, "answered {answer:?}");
+    }
+}
+
 #[test]
 fn an_older_release_declined_installs_nothing() {
     let host = machine()
@@ -599,6 +709,27 @@ fn a_newer_release_is_mentioned_under_the_version() {
         line.contains("perch upgrade"),
         "it names what to do about it: {line}"
     );
+}
+
+/// The shape `perch --version` prints, held still here because `main` is the
+/// one place no test reaches. The first line is spelled exactly as clap spelled
+/// it — the Homebrew formula's test block asserts on `perch #{version}` — and
+/// the second appears only when there is something to say.
+#[test]
+fn the_version_report_is_the_version_and_at_most_one_line_more() {
+    let quiet =
+        machine_with_claude_code().with_reply(LATEST_URL, 200, &latest(upgrade_installed()));
+    assert_eq!(
+        perch::upgrade::version_report(&quiet),
+        format!("perch {}\n", upgrade_installed())
+    );
+
+    let behind = perch::upgrade::version_report(&machine());
+    let lines: Vec<&str> = behind.lines().collect();
+    assert_eq!(lines.len(), 2, "{behind}");
+    assert_eq!(lines[0], format!("perch {}", upgrade_installed()));
+    assert!(lines[1].contains(NEWER), "{behind}");
+    assert!(behind.ends_with('\n'), "{behind:?}");
 }
 
 #[test]

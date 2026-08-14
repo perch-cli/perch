@@ -409,14 +409,11 @@ fn main() {
 
     // Before the parser, because clap answers `--version` by printing and
     // exiting, and the line underneath it has to come from somewhere with a
-    // Host to ask (ADR 0039). The version itself is spelled exactly as clap
-    // spelled it — `perch <version>` — because Homebrew's formula asserts on
-    // that shape and a script somewhere is parsing it.
+    // Host to ask (ADR 0039). What it says is `upgrade::version_report`'s, so
+    // that the shape the Homebrew formula asserts on is held still somewhere a
+    // test can reach.
     if version_asked_for(&typed) {
-        let _ = writeln!(out, "perch {}", perch::upgrade::installed());
-        if let Some(line) = perch::upgrade::notice(&host) {
-            let _ = writeln!(out, "{line}");
-        }
+        let _ = write!(out, "{}", perch::upgrade::version_report(&host));
         let _ = out.flush();
         std::process::exit(EXIT_OK);
     }
