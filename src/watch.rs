@@ -346,15 +346,25 @@ impl Recently {
     /// "the last Switch was -55 minutes ago" while it did. `age_phrase` already
     /// refuses to make that claim about a reading; this is the same refusal
     /// about a Switch.
+    ///
+    /// Floored for the sentence alone. How much is *left* is arithmetic about
+    /// what the loop will actually do, and the loop will in fact go on holding
+    /// for the skew plus the cooldown — so computing it from the floored span
+    /// promised a wait a fraction as long as the one being served. A cron
+    /// `--once` after an NTP step backwards mailed "so nothing moves for another
+    /// 15 minutes" every five minutes for an hour and a quarter, each one true
+    /// of a clock nobody has. The module doc calls this line the whole of the
+    /// evidence that the policy works; a number that is not the policy's is not
+    /// evidence of it.
     fn left_of_the_cooldown(
         &self,
         policy: &Policy,
         now: DateTime<Utc>,
     ) -> Option<(&Switched, Duration, Duration)> {
         let switched = self.switched.as_ref()?;
-        let since = (now - switched.at).max(Duration::zero());
-        let left = policy.cooldown() - since;
-        (left > Duration::zero()).then_some((switched, since, left))
+        let elapsed = now - switched.at;
+        let left = policy.cooldown() - elapsed;
+        (left > Duration::zero()).then_some((switched, elapsed.max(Duration::zero()), left))
     }
 }
 
@@ -1187,6 +1197,16 @@ mod tests {
             recently.resting(&policy(), now() + Duration::minutes(75)),
             None,
             "and the hold still ends, a cooldown after the stamp"
+        );
+
+        // What the line promises has to be the wait it is actually serving. The
+        // elapsed span is floored so the sentence never runs backwards; the span
+        // *left* was floored with it, so it quoted the cooldown alone — 15
+        // minutes, against the 75 the hold above proves. Every five minutes for
+        // an hour and a quarter, a cron mailbox got the same wrong number.
+        assert!(
+            waiting.contains("another 75 minutes"),
+            "the wait it promises is the wait it is serving: {waiting}"
         );
     }
 
