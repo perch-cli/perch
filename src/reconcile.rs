@@ -22,7 +22,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::{PerchError, Result};
-use crate::host::{Host, HostError, Link, Platform};
+use crate::host::{self, Host, HostError, Link, Platform};
 use crate::{probe, profile};
 
 /// The entries that stay behind, for the two different reasons there are to
@@ -93,7 +93,16 @@ pub fn reconcile(host: &dyn Host, shared: &Path, into: &Path) -> Result<()> {
         // below it. Compared for equality the two are different paths, so the
         // link was made — and its subtree held the Profile it was made in, so
         // every walk through that Profile afterwards recurses without bottom.
-        let Some(name) = entry.file_name().filter(|_| !into.starts_with(&entry)) else {
+        // And anything that *resolves* to somewhere containing the Profile, not
+        // only anything spelled that way. A `~/.claude/perch` that is a link to
+        // `~/.config/perch` passes the textual test — the two are different
+        // strings — and linking it into a Profile under `~/.config/perch` makes
+        // the same bottomless subtree by a route the comparison could not see.
+        // One hop is what a dotfile manager makes, and what `through_any_link`
+        // already resolves for the other reader of somebody else's links.
+        let holds_the_profile =
+            into.starts_with(&entry) || into.starts_with(host::through_any_link(host, &entry));
+        let Some(name) = entry.file_name().filter(|_| !holds_the_profile) else {
             continue;
         };
         establish(host, &entry, &into.join(name))?;
