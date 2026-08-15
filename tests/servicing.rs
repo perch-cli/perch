@@ -450,3 +450,282 @@ fn a_mac_gets_a_launchagent_in_its_own_place_bootstrapped_into_its_own_session()
         "and the install says where it is: {printed}"
     );
 }
+
+// ---- what an Upgrade owes a running Service -------------------------------
+
+/// A machine whose newest published Release is newer than this build, installed
+/// by Homebrew — the Channel `perch upgrade` hands the work to (ADR 0039).
+fn upgradable() -> FakeHost {
+    mac()
+        .with_reply(
+            perch::upgrade::LATEST_URL,
+            200,
+            r#"{"tag_name":"v999.0.0","name":"whatever"}"#,
+        )
+        .installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch")
+}
+
+fn upgrading(host: &FakeHost) -> (perch::Result<i32>, String) {
+    let mut out = Vec::new();
+    let outcome = perch::commands::upgrade::run(
+        host,
+        perch::commands::upgrade::UpgradeArgs::default(),
+        &mut out,
+    );
+    (outcome, String::from_utf8(out).expect("it said text"))
+}
+
+/// **The failure A7 was written to prevent, arriving through a different door.**
+///
+/// `brew` and `npm` have never heard of a unit file, and on Unix the running
+/// Service keeps the inode of the binary it started with — so an Upgrade nobody
+/// followed up leaves a Service running yesterday's Perch until the next login.
+/// The Upgrade re-points the unit and restarts it onto the new binary.
+#[test]
+fn an_upgrade_restarts_the_service_onto_the_binary_it_just_moved() {
+    let host = upgradable();
+    run_service(&host, ServiceCommand::Install)
+        .0
+        .expect("a Service is installed before the Upgrade");
+    let before = ran(&host).len();
+
+    let (outcome, said) = upgrading(&host);
+
+    outcome.expect("the Upgrade ran");
+    let after: Vec<String> = ran(&host).into_iter().skip(before).collect();
+    assert!(
+        after.contains(&format!("launchctl bootstrap gui/501 {PLIST}")),
+        "the Service is started again, onto the binary that is there now: \
+         {after:?}"
+    );
+    assert!(
+        said.contains("The Service was restarted"),
+        "and it says so, because a Service silently left on the old binary is \
+         the thing this exists to prevent: {said}"
+    );
+}
+
+/// The Upgrade is what succeeded; the Service is a follow-up. A refresh that
+/// fails is a warning with a one-command repair rather than a reason to report
+/// an Upgrade that did happen as one that did not.
+#[test]
+fn a_service_that_will_not_restart_is_a_warning_rather_than_a_failed_upgrade() {
+    let host = upgradable();
+    run_service(&host, ServiceCommand::Install)
+        .0
+        .expect("a Service is installed before the Upgrade");
+    // The service manager stops answering between the install and the Upgrade,
+    // which is what a `launchctl` refusing a GUI domain over SSH looks like.
+    let host = host.with_exec(
+        "launchctl",
+        &["bootstrap", "gui/501", PLIST],
+        failed("Bootstrap failed: 5: Input/output error"),
+    );
+
+    let (outcome, said) = upgrading(&host);
+
+    assert_eq!(
+        outcome.expect("the binary really is newer, so the Upgrade succeeded"),
+        EXIT_OK
+    );
+    assert!(said.contains("could not be restarted"), "{said}");
+    assert!(
+        said.contains("perch service install"),
+        "and the repair is one command: {said}"
+    );
+}
+
+/// Most machines have no Service, and an Upgrade on one must not go looking for
+/// a service manager or say anything about one.
+#[test]
+fn an_upgrade_with_no_service_installed_says_nothing_about_one() {
+    let host = upgradable();
+
+    let (outcome, said) = upgrading(&host);
+
+    outcome.expect("the Upgrade ran");
+    assert!(!said.contains("Service"), "{said}");
+    assert!(
+        !ran(&host).iter().any(|line| line.starts_with("launchctl")),
+        "nothing asked the service manager anything: {:?}",
+        ran(&host)
+    );
+}
+
+// ---- reading back what was written ----------------------------------------
+
+/// **A round trip through Perch's own plist.** `status` reads the binary back
+/// out of the installed unit rather than recomputing it, because the question it
+/// answers is whether the unit and the machine have come apart — and a value
+/// worked out again from the machine agrees with the machine by construction.
+///
+/// Both halves are hand-rolled: Perch writes the XML and Perch parses it. A path
+/// holding an `&` is escaped on the way in and has to survive the way out, or
+/// `status` reports a binary that is missing when it is not.
+#[test]
+fn the_binary_is_read_back_out_of_a_plist_that_had_to_be_escaped_to_write() {
+    let awkward = "/Users/some & one/bin/perch";
+    let host = mac()
+        .with_file(awkward, "")
+        .installed_at(awkward)
+        .with_exec("launchctl", &["print", "gui/501/cli.perch.watch"], worked());
+
+    run_service(&host, ServiceCommand::Install)
+        .0
+        .expect("installed");
+
+    let plist = host
+        .read_file(std::path::Path::new(PLIST))
+        .expect("the plist is readable");
+    assert!(
+        plist.contains("/Users/some &amp; one/bin/perch"),
+        "escaped on the way in: {plist}"
+    );
+
+    let (_, said) = run_service(&host, ServiceCommand::Status { json: true });
+    let reported: serde_json::Value = serde_json::from_str(&said).expect("it is JSON");
+
+    assert_eq!(
+        reported["binary"], awkward,
+        "and unescaped on the way out, or a path with an ampersand in it reads \
+         as a binary that has gone: {said}"
+    );
+    assert_eq!(
+        reported["binaryExists"], true,
+        "which is what the answer turns on: {said}"
+    );
+}
+
+/// The same question on the platform that keeps no file at all. Windows holds
+/// the task itself, so there is nothing to read a binary back out of, and
+/// `status` says what it knows rather than guessing.
+#[test]
+fn windows_keeps_the_task_itself_so_status_reads_no_unit_file() {
+    let host = watched().with_platform(Platform::Windows).with_exec(
+        "schtasks",
+        &["/Query", "/TN", r"Perch\Watch"],
+        worked(),
+    );
+
+    let (result, said) = run_service(&host, ServiceCommand::Status { json: true });
+
+    assert_eq!(result.expect("a question"), EXIT_OK);
+    let reported: serde_json::Value = serde_json::from_str(&said).expect("it is JSON");
+    assert_eq!(
+        reported["unit"],
+        serde_json::Value::Null,
+        "there is no file to name: {said}"
+    );
+    assert_eq!(
+        reported["installed"], true,
+        "and what is installed is what the task scheduler says is: {said}"
+    );
+}
+
+/// What the service manager said is what the user needs, and some of them say it
+/// on standard output rather than standard error.
+#[test]
+fn a_service_manager_that_explains_itself_on_stdout_is_still_quoted() {
+    let host = watched().with_platform(Platform::Other).with_exec(
+        "systemctl",
+        &["--user", "daemon-reload"],
+        Execution {
+            status: 1,
+            stdout: "Failed to connect to bus: No such file or directory".to_string(),
+            stderr: String::new(),
+        },
+    );
+
+    let (result, _) = run_service(&host, ServiceCommand::Install);
+
+    let refusal = result.expect_err("the service manager refused");
+    assert!(
+        refusal.to_string().contains("No such file or directory"),
+        "a refusal that quoted an empty stderr would say nothing at all: \
+         {refusal}"
+    );
+}
+
+/// A machine Perch holds nothing on yet is one `service status` still answers
+/// about — it is a question, and "no Service, and no registry either" is an
+/// answer.
+#[test]
+fn status_answers_on_a_machine_perch_holds_nothing_on() {
+    let host = FakeHost::new();
+
+    let (result, said) = run_service(&host, ServiceCommand::Status { json: false });
+
+    assert_eq!(result.expect("a question"), EXIT_OK);
+    assert!(said.contains("No Service is installed"), "{said}");
+    assert!(
+        !said.contains("watcher-may-act"),
+        "and it says nothing about a grant on a machine with no registry to \
+         hold one: {said}"
+    );
+}
+
+/// The prose `status` prints, which is what a person reads — the JSON tests
+/// above assert the same facts for a script, and the two renderers can disagree.
+#[test]
+fn status_in_prose_names_the_binary_the_watcher_and_the_missing_grant() {
+    // A binary that is actually there, so this exercises the arm that names it
+    // rather than the one that reports it gone — which
+    // `status_says_when_the_unit_names_a_binary_that_is_no_longer_there` covers.
+    let host = mac()
+        .with_file("/usr/local/bin/perch", "")
+        .installed_at("/usr/local/bin/perch")
+        .with_exec("launchctl", &["print", "gui/501/cli.perch.watch"], worked());
+    run_service(&host, ServiceCommand::Install)
+        .0
+        .expect("installed");
+    config_set(&host, &["work", "watcher-may-act", "false"])
+        .0
+        .expect("the Group takes the permission back");
+
+    // Somebody is watching — a `perch watch` in another terminal, or the
+    // Service having got as far as taking the lock.
+    let _held = perch::lock::take_all(
+        &host,
+        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+    )
+    .expect("the lock is free");
+
+    let (result, said) = run_service(&host, ServiceCommand::Status { json: false });
+
+    assert_eq!(result.expect("a question"), EXIT_OK);
+    assert!(said.contains("It runs "), "the binary it will run: {said}");
+    assert!(
+        said.contains("A Watcher is running on this machine"),
+        "and that one is running, which is a different fact from the Service \
+         being installed: {said}"
+    );
+    assert!(
+        said.contains("watcher-may-act"),
+        "and that nothing has told it it may act, so it will hold: {said}"
+    );
+}
+
+/// A service manager that is not on `PATH` at all is a different failure from
+/// one that refused, and the message has to say which — "no such program" on its
+/// own reads as a Perch that is broken.
+#[test]
+fn a_service_manager_that_is_not_installed_says_so_rather_than_failing_blankly() {
+    // No `with_exec` for `systemctl`, so the fake has no such program.
+    let host = watched().with_platform(Platform::Other);
+
+    let (result, _) = run_service(&host, ServiceCommand::Install);
+
+    let refusal = result.expect_err("there is no systemctl here");
+    assert!(
+        refusal.to_string().contains("systemctl"),
+        "it names the program: {refusal}"
+    );
+    assert!(
+        refusal.to_string().contains("PATH"),
+        "and says where to look for it: {refusal}"
+    );
+    assert!(
+        !host.path_exists(std::path::Path::new(UNIT)),
+        "and the unit it had written is taken back"
+    );
+}

@@ -85,9 +85,20 @@ pub const PHASES: &[Phase] = &[
     },
     Phase {
         name: "a Service is installed, holds the watch, and is taken back",
+        // A service manager *and* an Account to watch. The second half is not
+        // obvious and CI proved it: with `Needs::NOTHING` this was the one phase
+        // that ran on a runner, because a runner holds no Accounts and every
+        // other phase skips itself for exactly that reason. It installed a real
+        // Service onto the runner, and what came up had no login to adopt — so
+        // `perch service status` reported it not running, correctly, about a
+        // machine that was never going to run it.
+        //
+        // What the phase asserts is not "a unit file can be written" but "the
+        // Service is Perch's own loop, and holds the watch" — and a Watcher
+        // watches the Account you are on. So it needs one, and says so.
         needs: Needs {
             service_manager: true,
-            ..Needs::NOTHING
+            ..Needs::THE_ACTIVE_ACCOUNT
         },
         prove: a_service_is_installed_and_taken_back,
     },

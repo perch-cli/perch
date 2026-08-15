@@ -76,6 +76,42 @@ pub const STOP_GRACE_SECONDS: u32 = 30;
 /// supervisor deciding what to do next about something nobody has looked at.
 pub const RESTART_SECONDS: u32 = 30;
 
+/// How many failed starts inside [`GIVE_UP_AFTER_SECONDS`] before systemd stops
+/// trying and leaves the unit failed.
+///
+/// A Watcher holds rather than exiting on everything it can hold on (ADR 0040),
+/// so a Service that will not *start* is a machine somebody has to look at: a
+/// registry that will not parse, a Claude Code that cannot be probed, a home
+/// directory that has gone. Restarting into that for ever is a loop nobody ever
+/// sees, because the only place it is visible is a log nobody is reading.
+///
+/// systemd's own defaults would never trip here — five starts inside ten
+/// seconds, against a `RestartSec` of thirty — so the window is set from the
+/// restart interval rather than left to be inherited. Five tries spans two
+/// minutes; five minutes of window catches them with room to spare, and
+/// `systemctl --user status perch-watch` then says `failed` and why.
+///
+/// launchd has no equivalent and gets `ThrottleInterval` alone, which bounds how
+/// fast it retries but not how long. That is a real difference between the two
+/// platforms rather than something worth emulating with a wrapper.
+pub const GIVE_UP_AFTER: u32 = 5;
+
+/// The window those failures have to fall inside, in seconds.
+pub const GIVE_UP_AFTER_SECONDS: u32 = 300;
+
+/// The relationship between the three that makes the limit reachable at all.
+///
+/// A compile-time assertion rather than a test, because it is a fact about three
+/// constants and nothing runs to discover it: a window narrower than the tries
+/// it is counting is a limit systemd can never reach, which is the *default*
+/// this exists to override and would be a silent return to restarting for ever.
+/// Changing `RESTART_SECONDS` without changing this fails the build, which is
+/// the whole point of putting it here.
+const _: () = assert!(
+    GIVE_UP_AFTER_SECONDS > RESTART_SECONDS * GIVE_UP_AFTER,
+    "the start-limit window has to be wider than the restarts it counts"
+);
+
 /// The environment a unit carries over from the shell that installed it.
 ///
 /// Both are read from the process environment and are typically set in a shell
@@ -271,6 +307,8 @@ impl Unit {
             "[Unit]\n\
              Description=Perch — Cycles the Claude account you are on when it runs low\n\
              Documentation=https://github.com/perch-cli/perch\n\
+             StartLimitIntervalSec={window}\n\
+             StartLimitBurst={tries}\n\
              \n\
              [Service]\n\
              Type=simple\n\
@@ -284,6 +322,8 @@ impl Unit {
             binary = self.binary.display(),
             restart = RESTART_SECONDS,
             grace = STOP_GRACE_SECONDS,
+            window = GIVE_UP_AFTER_SECONDS,
+            tries = GIVE_UP_AFTER,
         )
     }
 
@@ -576,6 +616,21 @@ mod tests {
             systemd.contains("TimeoutStopSec=30"),
             "systemd would otherwise allow ninety: {systemd}"
         );
+    }
+
+    /// A Service that cannot *start* is a machine somebody has to look at, and
+    /// restarting into that for ever is a loop nobody ever sees. systemd's own
+    /// defaults would never trip it — five starts inside ten seconds against a
+    /// `RestartSec` of thirty — so the window is derived from the restart
+    /// interval rather than inherited.
+    #[test]
+    fn a_systemd_unit_gives_up_rather_than_restarting_into_a_failure_for_ever() {
+        let systemd = a_unit()
+            .rendered(Platform::Other)
+            .expect("Linux writes a file");
+
+        assert!(systemd.contains("StartLimitBurst=5"), "{systemd}");
+        assert!(systemd.contains("StartLimitIntervalSec=300"), "{systemd}");
     }
 
     /// The two the unit carries, and nothing else. A unit that captured the
