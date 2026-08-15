@@ -529,6 +529,22 @@ pub fn means_ungrouped(name: &str) -> bool {
     same_name(name, UNGROUPED)
 }
 
+/// The word people reach for when they mean the Scope every other one falls
+/// back to.
+///
+/// Global is addressed by naming no Scope at all — `perch config set <key>
+/// <value>` — so unlike [`UNGROUPED`] this word addresses nothing. That is
+/// exactly why a Group may not take it: `perch config set global strategy …`
+/// is what somebody types when they mean Global, and a Group answering to the
+/// name would take the value silently, leaving Global untouched and the person
+/// convinced they had set it.
+pub const GLOBAL: &str = "global";
+
+/// Whether a name is the one people mean Global by.
+pub fn means_global(name: &str) -> bool {
+    same_name(name, GLOBAL)
+}
+
 /// The Switch a scheduled Check made within a Group, kept so the next one can
 /// be paced by it (ADR 0013).
 ///
@@ -692,9 +708,39 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
             kind.article()
         )));
     }
+    // The third word that already addresses something, and the one that
+    // addresses it by *absence*. `perch config set global strategy …` is what
+    // somebody types when they mean Global; today it means no Scope Perch
+    // knows, and the refusal helpfully offers `perch group add global`. Taking
+    // that offer makes every later `perch config set global …` write a Group
+    // Override while Global stays as it was — a Setting the person believes
+    // they changed and did not. Refused here so the offer can never be made.
+    if means_global(name) {
+        return Err(PerchError::Invalid(format!(
+            "`{name}` is how people say the Scope every other one falls back to, \
+             so it cannot also be {}. Global is addressed by naming no Scope at \
+             all: `perch config set <key> <value>`.",
+            kind.article()
+        )));
+    }
     if name.contains('@') {
         return Err(PerchError::Invalid(format!(
             "`{name}` looks like an email address. {} have to be tellable from one, because a Target that could be either has no single answer.",
+            kind.names()
+        )));
+    }
+    // Nothing that begins with `-` can name a program, and `perch run` is where
+    // that matters: its `command` is `last = true`, so the `--` that rescues
+    // such a Target everywhere else is already spoken for. `perch run -dev` is
+    // read as flags and `perch run -- -dev` leaves no Target at all, so a name
+    // like this is one the registry holds, `perch list` shows, `perch switch`
+    // honours — and `perch run` can never be told. Refused at the one moment
+    // somebody can still pick another.
+    if name.starts_with('-') {
+        return Err(PerchError::Invalid(format!(
+            "`{name}` begins with `-`, and {} are typed where a flag could go. \
+             `perch run` takes the program to launch after `--`, so a Target \
+             spelled like a flag is one that command could never be given.",
             kind.names()
         )));
     }
@@ -2844,6 +2890,19 @@ mod tests {
                 "Overflow Ltd",
                 "two\twords",
                 "someone@example.com",
+                // The word people mean Global by. Not a Scope anything
+                // addresses — Global is addressed by naming none — which is
+                // precisely why a Group taking the name is dangerous: `perch
+                // config set global strategy …` would land on the Group and
+                // leave Global as it was.
+                "global",
+                "Global",
+                // Spelled like a flag. `perch run`'s program goes after `--`,
+                // so a Target beginning with `-` is one that command can never
+                // be given, however it is quoted.
+                "-dev",
+                "--work",
+                "-",
             ] {
                 let refused = validate_name(kind, name)
                     .expect_err(&format!("`{name}` should not be usable as a {kind:?} name"));
