@@ -252,10 +252,12 @@ is not wasted. Each Group carries its own.
 _Avoid_: policy, mode, algorithm, preference
 
 **Watcher**:
-The foreground process that Cycles on your behalf when the Account you are on
-runs low. It acts only within a Group that has been told it may, and only above
-that Group's threshold. Either a loop you can see and kill, or a sequence of
-Checks something else runs for you — never a service running in the background.
+The process that Cycles on your behalf when the Account you are on runs low. It
+acts only within a Scope that has been told it may, and only above that Scope's
+Threshold; told otherwise it holds rather than stops, and says so. Three
+arrangements and one behaviour: a loop you can see and kill, a Service the
+machine runs for you, or a sequence of Checks something else schedules. One of
+them at a time.
 _Avoid_: daemon, monitor, background job
 
 **Check**:
@@ -265,6 +267,13 @@ its exit code rather than in a line somebody is watching. What paces it is
 recorded, because each Check is a fresh process and the sequence of them is the
 Watcher.
 _Avoid_: poll, tick, cron job
+
+**Service**:
+The Watcher, run for you by the machine's own service manager, started when you
+log in. Perch writes it and Perch takes it back — unlike an Installation, which
+a Channel left and a Purge outlives. One per person per machine, running the
+same loop under the same permission as the one you would have typed.
+_Avoid_: daemon, agent, background job, autostart
 
 **Threshold**:
 How full the Account you are on has to be before the Watcher wants to move off

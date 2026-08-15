@@ -74,7 +74,10 @@ pub fn run(host: &dyn Host, args: PurgeArgs, out: &mut dyn Write) -> Result<()> 
 
     purge::refuse_while_anything_is_running(host, &registry)?;
 
-    say(out, &what_will_go(&registry, &home))?;
+    say(
+        out,
+        &what_will_go(&registry, &home, crate::commands::service::is_there(host)),
+    )?;
     // Filled by the Export the instant its bytes land, rather than by the call
     // returning: `write_the_export` reports to the terminal after the write, and
     // a terminal that has gone away fails that — which used to lose the note
@@ -137,6 +140,14 @@ pub fn run(host: &dyn Host, args: PurgeArgs, out: &mut dyn Write) -> Result<()> 
     // was always going to refuse.
     purge::refuse_while_anything_is_running(host, &registry).map_err(and_the_export)?;
 
+    // Before anything is deleted, and refusing rather than continuing if it will
+    // not stop (ADR 0040). A Watcher is the one process on this machine that
+    // writes Credentials without being asked, and a supervised one comes
+    // straight back — so "it will be gone in a moment" is not true of it. This
+    // is ADR 0024's rule at the scale of the whole machine: land somewhere
+    // before deleting anything.
+    crate::commands::service::take_back_before_a_purge(host, out).map_err(and_the_export)?;
+
     let purged = purge::erase(host, &registry).map_err(and_the_export)?;
     report(host, out, &home, &purged)
 }
@@ -189,11 +200,24 @@ fn refuse_without_a_terminal_or_the_flag(host: &dyn Host, yes: bool) -> Result<(
 /// what is being agreed to here is the loss of the login itself — which is the
 /// address, and is what somebody would have to check against their password
 /// manager before typing the word.
-fn what_will_go(registry: &Registry, home: &Path) -> String {
+fn what_will_go(registry: &Registry, home: &Path, service: bool) -> String {
+    // Said in the same breath as the Profiles rather than left for the report,
+    // because it is the one thing a Purge takes that lives *outside* Perch's
+    // home (ADR 0040) — and consent to "everything under this directory" is not
+    // consent to a file in `~/Library/LaunchAgents`.
+    let and_the_service = match service {
+        true => {
+            "\nThe Service goes too, and goes first: nothing may be \
+                 Switching Credentials into Profiles this is deleting. Its unit \
+                 is removed, so nothing starts at your next login."
+        }
+        false => "",
+    };
+
     let accounts: Vec<&str> = registry.accounts.iter().map(Account::email).collect();
     if accounts.is_empty() {
         return format!(
-            "Perch holds no Accounts here, so {} is all there is left to take.",
+            "Perch holds no Accounts here, so {} is all there is left to take.{and_the_service}",
             home.display(),
         );
     }
@@ -204,7 +228,7 @@ fn what_will_go(registry: &Registry, home: &Path) -> String {
          holds for them, and {} itself. Nothing undoes it: only a fresh login \
          brings an Account back, and it comes back as a new one.\n\
          Claude Code goes on running as whatever it is logged in as — the live \
-         Credential is not Perch's to take away.",
+         Credential is not Perch's to take away.{and_the_service}",
         crate::commands::accounts(accounts.len()),
         accounts.join(", "),
         home.display(),

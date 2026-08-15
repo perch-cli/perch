@@ -1487,6 +1487,53 @@ pub fn lock_spec(host: &dyn Host) -> Result<LockSpec> {
     })
 }
 
+/// How long a Watcher that died holding the watcher lock keeps it.
+///
+/// Derived rather than chosen, and the derivation is the whole of the number: a
+/// Watcher renews this once a round, so the longest it can go quiet while
+/// perfectly healthy is the longest wait it ever takes between rounds — the
+/// bounded back-off — plus the round that follows it. Anything shorter would
+/// have a Watcher backed off against a failing endpoint declared dead by the
+/// next `perch watch` to come along, and two Watchers is the state this lock
+/// exists to prevent (ADR 0040).
+///
+/// It is deliberately long, and what pays for it is that nothing waits on it. A
+/// Watcher that finds the lock held **holds and comes back** rather than
+/// exiting, so a lock left behind by a `kill -9` costs a restarted Service some
+/// held rounds it prints the reason for, and costs it nothing else. Exiting
+/// would have made this number the length of a crash loop, which is the whole
+/// of why it is not one.
+const WATCHER_STALE_MILLIS: i64 =
+    (crate::watch::LONGEST_WAIT_MILLIS + crate::watch::REFRESH_INTERVAL_MILLIS) as i64;
+
+/// Comfortably inside a round, so the renewal a round makes always touches.
+const WATCHER_UPDATE_MILLIS: i64 = 60_000;
+
+/// The lock that makes a Watcher the only one on this machine (ADR 0040).
+///
+/// Two loops for one person watch the same active Account and each keeps its
+/// Cooldown in memory, where neither can see the other's — which is the
+/// ping-pong the Cooldown and the Margin exist to prevent, reintroduced by
+/// running the thing twice. A Check takes the same lock for the same reason: the
+/// in-memory Cooldown and the one in `checks` cannot see each other either.
+///
+/// This is the one artifact a Watcher leaves behind, and it repeals the promise
+/// the loop used to print on the way out. It is given back when the process
+/// ends, however it ends, because [`crate::lock::Held`] gives its locks back
+/// when it is dropped.
+pub fn watcher_lock_spec(host: &dyn Host) -> Result<LockSpec> {
+    Ok(LockSpec {
+        name: "the Perch watcher lock",
+        held_by: "another `perch watch`",
+        dir: perch_home(host)?.join(".watch.lock"),
+        stale_millis: WATCHER_STALE_MILLIS,
+        update_millis: WATCHER_UPDATE_MILLIS,
+        lost_means: "Another Watcher has taken over watching this machine, so \
+                     this one is no longer the only one deciding. It stops \
+                     rather than deciding alongside it.",
+    })
+}
+
 /// Shuts every other Perch out of the registry until the returned hold is
 /// dropped.
 ///

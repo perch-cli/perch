@@ -15,6 +15,7 @@
 | `perch switch <target>` | make an Account active everywhere |
 | `perch switch [<group>]` | Cycle to the best Account in a Group |
 | `perch watch [--once]` | Cycle automatically when the Account you are on runs low |
+| `perch service install\|uninstall\|status [--json]` | have the machine run the watcher for you, starting at login |
 | `perch run <target> [-- <command>]` | launch Claude Code as an Account, in this terminal alone |
 | `perch tui` | the interactive view |
 | `perch group add\|move\|rename\|remove\|list` | declare Groups and move Accounts between them |
@@ -58,9 +59,28 @@ exits 0 whether or not there is a newer Release — it is a question, and
 answering it is success either way, so branch on `--json`'s `upgradeAvailable`
 rather than on the code.
 
+`perch service status` is the same shape of question and exits 0 whether or not
+a Service is installed — branch on `--json`'s `installed`, `running` and
+`watching`, which are three different facts. `perch service uninstall` exits 15
+when there was nothing to take back, and a Check or a Watcher that finds another
+Watcher holding the lock exits 20.
+
 ## Where things are
 
 - `~/.config/perch/registry.json` — Perch's own state, versioned.
+- `~/.config/perch/.watch.lock` — held for as long as a Watcher runs, which is
+  what makes it the only one on the machine. Given back however the process
+  ends; a second Watcher says who holds it and waits rather than deciding
+  alongside them.
+- `~/.config/perch/watch.log` — where a Service's decisions go on macOS and
+  Windows, whose service managers keep no log of their own. On Linux there is no
+  such file: systemd captures standard output into the journal, so
+  `journalctl --user -u perch-watch -f` is the line.
+- The unit a Service is installed as, which is the one thing Perch writes
+  *outside* `$PERCH_HOME` — `~/Library/LaunchAgents/cli.perch.watch.plist` on
+  macOS, `~/.config/systemd/user/perch-watch.service` on Linux, and a Scheduled
+  Task named `Perch\Watch` on Windows, which Windows keeps rather than Perch.
+  `perch service uninstall` removes it, and so does `perch purge`.
 - `~/.config/perch/profiles/<account>/` — one directory per Account. Its path is what
   gives that Account a private Credential Store (ADR 0001).
 - `$PERCH_HOME` overrides `~/.config/perch`. Home is `$USERPROFILE` on Windows and

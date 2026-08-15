@@ -350,6 +350,15 @@ pub struct Preflight {
     /// Both halves, and neither alone (ADR 0038): the variable is what opts in,
     /// and the terminal is what makes the opting-in honourable.
     pub attended: bool,
+    /// Why this machine has no service manager Perch could drive, where it has
+    /// not.
+    ///
+    /// Asked of the machine rather than inferred from the platform, which is the
+    /// Preflight's whole discipline: a Linux container with no session bus has a
+    /// `systemctl` on `PATH` that answers nothing, and a run that counted it in
+    /// would fail a Service phase over the machine rather than over Perch (ADR
+    /// 0037).
+    pub no_service_manager: Option<String>,
 }
 
 /// What a phase needs of a machine before it can prove anything.
@@ -393,6 +402,15 @@ pub struct Needs {
     /// behind rather than a person having a spare — across a matrix of four
     /// machines, the one that can prove `add` is the one that is out of date.
     pub spare_login: bool,
+    /// A service manager Perch can drive — launchd, `systemd --user`, or the
+    /// Windows task scheduler.
+    ///
+    /// Its own need rather than a platform check, because having one is not the
+    /// same as being on a platform that usually does: a container with no
+    /// session bus and a `systemd --user` that will not answer is exactly the
+    /// machine a Service phase must be counted *out* of rather than fail on
+    /// (ADR 0037 — a run proves only what the machine it is on holds).
+    pub service_manager: bool,
 }
 
 impl Needs {
@@ -405,6 +423,7 @@ impl Needs {
         active: false,
         attended: false,
         spare_login: false,
+        service_manager: false,
     };
 
     /// A phase that reads what Perch holds, and so needs it to hold something
@@ -453,6 +472,7 @@ impl Preflight {
             in_group: Vec::new(),
             arrangement: Arrangement::default(),
             attended: false,
+            no_service_manager: why_no_service_manager(host),
         };
         preflight.read_the_registry(host)?;
         Ok(preflight)
@@ -630,6 +650,11 @@ impl Preflight {
                 ));
             }
         }
+        if needs.service_manager
+            && let Some(why) = &self.no_service_manager
+        {
+            return Some(why.clone());
+        }
         if needs.spare_login && !self.has_a_spare_login() {
             return Some(format!(
                 "this machine already holds {}, and the wizard was told there are \
@@ -775,6 +800,34 @@ fn or_none(names: &[String]) -> String {
 /// The variables first, because they are what WSL sets for its own sake and are
 /// there whether or not `/proc` is mounted the way it usually is; `/proc/version`
 /// after, since a shell that scrubbed its environment still leaves that.
+/// Why this machine has no service manager Perch could drive, or `None` where it
+/// has one.
+///
+/// The question a Service phase is counted by, and it is asked by *running* the
+/// thing that would have to answer rather than by reading the platform.
+/// `systemctl --user` on a box with no logind session, and `launchctl` inside a
+/// runner with no GUI domain, both exist on `PATH` and both refuse — so a
+/// Preflight that read the platform would count the phase in and then fail it
+/// over the machine rather than over Perch (ADR 0037).
+///
+/// Asked with the harmless half of the interface. `is-active` on a unit that is
+/// not installed, and `print` on a label that is not loaded, are questions that
+/// change nothing whatever they answer; what is read is whether the service
+/// manager was reachable at all, which is a different thing from what it said.
+/// So a non-zero exit is fine and only a program that would not run at all is
+/// not.
+fn why_no_service_manager(host: &dyn Host) -> Option<String> {
+    let asking = crate::service::asking(host.platform(), host.user_id())?;
+    let args: Vec<&str> = asking.args.iter().map(String::as_str).collect();
+    match host.exec(&asking.program, &args) {
+        Ok(_) => None,
+        Err(why) => Some(format!(
+            "`{}` would not run here, so this machine has no service manager              Perch could install a Service into: {why}",
+            asking.program,
+        )),
+    }
+}
+
 fn is_wsl(host: &dyn Host) -> bool {
     if host.env_var("WSL_DISTRO_NAME").is_some() || host.env_var("WSL_INTEROP").is_some() {
         return true;

@@ -83,7 +83,7 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
         std::cmp::Ordering::Greater => {}
     }
 
-    match &channel {
+    let replaced = match &channel {
         Channel::Homebrew { prefix } => {
             let (brew, brew_args) = upgrade::homebrew_command(host, prefix)?;
             hand_it_over(host, &brew, &brew_args, out)
@@ -114,7 +114,22 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
             hand_it_over(host, &npm, &npm_args, out)
         }
         Channel::Installer => replace_it_ourselves(host, &wanted, out),
+    }?;
+
+    // The Channel has moved the binary, and neither `brew` nor `npm` has ever
+    // heard of a unit file (ADR 0039, ADR 0040). On Unix the Service is still
+    // running the *old* binary out of an inode nothing can see any more, and the
+    // path its unit names may not exist at all — so the unit is written again
+    // against the binary that is there now, and restarted onto it.
+    //
+    // Said rather than raised however it goes. The Upgrade itself succeeded: the
+    // binary really is newer, and a Service that could not be refreshed is a
+    // warning with a one-command repair rather than a reason to report an
+    // Upgrade that did not happen.
+    if let Some(said) = crate::commands::service::refreshed_after_an_upgrade(host) {
+        say(out, &said)?;
     }
+    Ok(replaced)
 }
 
 /// The Channel a person named, or the one the path says, or a refusal.

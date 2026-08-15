@@ -1,16 +1,28 @@
 //! `perch watch` — the watcher that Cycles on your behalf when the Account you
 //! are on runs low.
 //!
-//! A loop in a terminal you can see and kill, and deliberately not a daemon
-//! (ADR 0013): no service to install, no lifecycle to manage on three
-//! platforms, and nothing left behind when it stops. What it decides and why is
-//! [`crate::watch`]; the round it takes to decide it is here.
+//! A loop you can see and kill. What it decides and why is [`crate::watch`];
+//! the round it takes to decide it is here.
 //!
-//! `perch watch --once` is one of those rounds, for cron or a systemd timer to
-//! run: the same policy and the same decision line, with what was decided in
-//! the exit code because nobody is reading a terminal. Scheduling is the
-//! operating system's job, and the whole of the difference between the two is
-//! [`Watcher`].
+//! Three arrangements and one behaviour (ADR 0040). Typed at a terminal it is
+//! this loop. Run by the machine's own service manager — a Service, which
+//! [`crate::service`] installs — it is *the same loop*, supervised, which is the
+//! whole of why there is no second policy to keep in agreement with this one.
+//! `perch watch --once` is one round of it for a scheduler, with what was
+//! decided in the exit code because nobody is reading a terminal; the difference
+//! between that and the loop is [`Watcher`] and nothing else.
+//!
+//! Perch never backgrounds itself. Scheduling and supervision are the operating
+//! system's job, which is ADR 0013's line and is not one ADR 0040 repealed —
+//! what it repealed is the idea that Perch may not hand the operating system a
+//! unit file to do it with.
+//!
+//! Two things follow from a loop nobody may be watching, and both are here. It
+//! **holds rather than stops** when the machine is not arranged for watching, so
+//! a supervisor is never handed a deliberate exit to respawn; and an unchanged
+//! hold is **said once an hour rather than every round**, so a log nobody reads
+//! until something is wrong is not five hundred identical lines a day deep by
+//! the time they read it.
 //!
 //! One round is: Refresh the active Account, from Anthropic rather than from
 //! cache; say what that came to against the Group's threshold; and where it is
@@ -34,11 +46,18 @@
 //! Profile's token is never Renewed (ADR 0005). Running while Claude Code is
 //! working is the normal case rather than the exception.
 //!
-//! Nothing is held across the wait — not the registry lock, not Claude Code's
-//! locks, not a session marker. That is what makes Ctrl-C safe: the loop spends
-//! nearly all of its life in the one place where being killed costs nothing,
-//! and the interrupt it takes over from the default handler is only there so
-//! that a Ctrl-C arriving mid-Switch lets that Switch finish first.
+//! Nothing a *round* takes is held across the wait — not the registry lock, not
+//! Claude Code's locks, not a session marker. That is what makes Ctrl-C safe:
+//! the loop spends nearly all of its life in the one place where being killed
+//! costs nothing, and the interrupt it takes over from the default handler
+//! (Ctrl-C, and the `SIGTERM` a service manager sends) is only there so that a
+//! stop arriving mid-Switch lets that Switch finish first.
+//!
+//! The one thing held for the whole of the process is the watcher lock, which
+//! is what makes this the only Watcher on the machine (ADR 0040). It is the
+//! single artifact a Watcher leaves behind, it is given back however the process
+//! ends, and a second Watcher that finds it held says so and comes back rather
+//! than exiting — because exiting is what a supervisor turns into a crash loop.
 //!
 //! A Ctrl-C typed at a terminal reaches the whole foreground process group, so
 //! the `curl` or `security` a round happens to be waiting on dies with it. That
@@ -56,11 +75,14 @@ use crate::commands::say;
 use crate::cycle::{self, Scope};
 use crate::error::{EXIT_OK, PerchError, Result};
 use crate::host::{Host, Waited};
+use crate::lock;
 use crate::observe::{self, Attempt};
 use crate::probe;
-use crate::registry::{Account, Registry, UNGROUPED};
+use crate::registry::{self, Account, Registry, UNGROUPED};
 use crate::switch;
-use crate::watch::{self, Backoff, Considered, Fullest, Outcome, Policy, Recently, Round};
+use crate::watch::{
+    self, Backoff, Considered, Fullest, Holding, Outcome, Policy, Recently, Round, Speak,
+};
 
 /// How the watcher was asked for: as the loop, or as one check.
 #[derive(Debug, Default, Clone, Copy)]
@@ -90,16 +112,34 @@ pub fn run(host: &dyn Host, args: WatchArgs, out: &mut dyn Write) -> Result<i32>
 fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     host.listen_for_interrupts();
 
+    // The same lock a loop takes, and refused the same way (ADR 0040). A Check
+    // firing while a Service runs is the double-switch the lock exists for: the
+    // loop keeps its Cooldown in memory and a Check reads the one in `checks`,
+    // and neither can see the other's — so a Check inside a loop's cooldown
+    // would move an Account the loop had just decided not to move.
+    //
+    // Held rather than refused outright, and `20` is already the code that says
+    // so: a scheduler reading it comes back at the next Check, which is exactly
+    // right for a lock somebody else is holding now.
+    let _watching_alone = match lock::take_all(host, vec![registry::watcher_lock_spec(host)?]) {
+        Ok(held) => held,
+        Err(PerchError::Busy(why)) => {
+            say(out, &watch::held_line(&why, None, host.now()))?;
+            return Ok(crate::error::EXIT_HELD);
+        }
+        Err(other) => return Err(other),
+    };
+
     // Nothing carried in from anywhere: the cooldown and the no-return come off
     // the registry inside the round, and a back-off would be pacing a loop this
     // process does not have. How soon to come back is the scheduler's.
-    let round = match one_round(
+    let turn = match one_round(
         host,
         Watcher::Check,
         &mut Recently::nothing(),
         &mut Backoff::none(),
     ) {
-        Ok(round) => round,
+        Ok(turn) => turn,
         // The one outcome that reached a check without a line, and the one most
         // likely to recur: `perch status --refresh` holds the registry across
         // every Renewal and every read it makes, comfortably longer than
@@ -118,79 +158,247 @@ fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         }
         Err(other) => return Err(other),
     };
+    // A Check keeps `14` and `18` exactly as ADR 0013 promised them. Only the
+    // loop's exits were repealed, and only because a supervisor crash-loops on
+    // one (ADR 0040): a Check is one process reporting to a scheduler, and a
+    // scheduler has to be told that this machine is not arranged for what it
+    // was asked to do.
+    let round = match turn {
+        Turn::Decided(round) => round,
+        Turn::NotArranged(why) => return Err(why),
+    };
     say(out, &round.line(host.now()))?;
     Ok(round.outcome.exit_code())
 }
 
 fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
-    // Before the first round, so that a Ctrl-C during it is a request to stop
-    // rather than a process killed in the middle of a Switch.
+    // Before anything else, so that a Ctrl-C — or the `SIGTERM` a service
+    // manager stops this with — is a request to finish rather than a process
+    // killed in the middle of a Switch.
     host.listen_for_interrupts();
 
-    let watching = opening(host)?;
-    say(out, &watching)?;
-
-    // The two things carried from one round to the next, and the reason the
-    // cooldown is the loop's rather than the machine's (ADR 0013). Both are in
-    // memory and nowhere else, which is what "writes no file of its own" means.
+    // The three things carried from one round to the next (ADR 0013, ADR 0040).
+    // All in memory and nowhere else: what paces this loop, and what this loop
+    // has already said, belong to the loop rather than to the machine.
     let mut recently = Recently::nothing();
     let mut backoff = Backoff::none();
+    let mut holding = Holding::nothing();
+
+    // Exactly one Watcher per person per machine. Taken before the opening line
+    // rather than after it, so a second `perch watch` never claims to be
+    // watching anything.
+    let Some(_watching_alone) = take_the_watch(host, out, &mut backoff, &mut holding)? else {
+        return stopped(out);
+    };
+
+    say(out, &opening(host)?)?;
 
     loop {
-        let round = match one_round(host, Watcher::Loop, &mut recently, &mut backoff) {
-            Ok(round) => round,
-            // Another `perch` holding the registry is an ordinary event, not a
-            // fault: this loop runs for hours beside the commands a person
-            // types, and `perch status --refresh` holds the lock across every
-            // Renewal and every read it makes — comfortably longer than the few
-            // seconds `lock::take` waits. Ending the watcher over that would
-            // mean a `perch status` could stop it, silently, and the machine
-            // would go unwatched until somebody noticed.
-            //
-            // So it is held like any other round that could not read: counted
-            // against the back-off, said out loud with when it will try again,
-            // and gone round again (ADR 0013, ADR 0018).
-            Err(PerchError::Busy(why)) => {
-                backoff.failed();
-                let waiting_for = backoff.waiting_for();
-                say(out, &watch::held_line(&why, Some(waiting_for), host.now()))?;
-                if host.wait(waiting_for) == Waited::Interrupted {
-                    break;
+        let (waiting_for, spoken) =
+            match one_round(host, Watcher::Loop, &mut recently, &mut backoff) {
+                Ok(Turn::Decided(round)) => {
+                    let waiting_for = round.waiting_for();
+                    let line = round.line(host.now());
+                    match round.held_because() {
+                        // The wait this round announced *is* what it will do next,
+                        // so it is what the coalescing compares: a back-off that has
+                        // doubled has changed the line, and a changed line is said.
+                        Some(why) => (waiting_for, Spoken::held(why, Some(waiting_for), line)),
+                        None => (waiting_for, Spoken::Decided(line)),
+                    }
                 }
-                continue;
-            }
-            Err(other) => return Err(other),
-        };
-        say(out, &round.line(host.now()))?;
+                // The machine is not arranged for watching: no active Account, an
+                // ungrouped one nobody has declared interchangeable, or a Scope that
+                // has not said the watcher may act. ADR 0013 stopped the loop on
+                // these; ADR 0040 holds it instead, because a supervisor respawns a
+                // deliberate exit until it gives up on the unit, and launchd cannot
+                // be told otherwise.
+                //
+                // Nothing is charged to the back-off, and the ordinary interval is
+                // waited: this round asked the registry rather than Anthropic, and
+                // pacing a loop on a question that costs nothing would be pacing it
+                // on nothing. Nothing was read and nothing was decided, which is
+                // exactly what a hold is.
+                Ok(Turn::NotArranged(why)) => {
+                    let why = why.to_string();
+                    let line =
+                        watch::held_line(&why, Some(watch::REFRESH_INTERVAL_MILLIS), host.now());
+                    (
+                        watch::REFRESH_INTERVAL_MILLIS,
+                        Spoken::held(&why, Some(watch::REFRESH_INTERVAL_MILLIS), line),
+                    )
+                }
+                // Another `perch` holding the registry is an ordinary event, not a
+                // fault: this loop runs for hours beside the commands a person
+                // types, and `perch status --refresh` holds the lock across every
+                // Renewal and every read it makes — comfortably longer than the few
+                // seconds `lock::take` waits. Ending the watcher over that would
+                // mean a `perch status` could stop it, silently, and the machine
+                // would go unwatched until somebody noticed.
+                //
+                // So it is held like any other round that could not read: counted
+                // against the back-off, said out loud with when it will try again,
+                // and gone round again (ADR 0013, ADR 0018).
+                Err(PerchError::Busy(why)) => {
+                    backoff.failed();
+                    let waiting_for = backoff.waiting_for();
+                    let line = watch::held_line(&why, Some(waiting_for), host.now());
+                    (waiting_for, Spoken::held(&why, Some(waiting_for), line))
+                }
+                Err(other) => return Err(other),
+            };
 
-        // The one place the loop holds nothing, and therefore the only place it
-        // is asked whether to go round again: a stop asked for during a round
-        // is answered here, once that round has finished cleanly.
+        say_it(out, &mut holding, spoken, host.now())?;
+
+        // The one place the loop holds nothing it took this round, and
+        // therefore the only place it is asked whether to go round again: a
+        // stop asked for during a round is answered here, once that round has
+        // finished cleanly.
         //
         // How long is the round's to say rather than a constant, because a
         // round that could not read anything is followed by the back-off it
         // printed. Read off the round rather than worked out again here, so the
         // wait the line promised and the wait taken cannot come to differ.
-        if host.wait(round.waiting_for()) == Waited::Interrupted {
+        if host.wait(waiting_for) == Waited::Interrupted {
             break;
         }
     }
 
+    stopped(out)
+}
+
+/// What the loop says on the way out.
+///
+/// It no longer promises that nothing was left behind. A Watcher holds the
+/// watcher lock for as long as it runs (ADR 0040), and that promise was written
+/// when there was nothing to hold — so it says what is true instead: the lock is
+/// given back, and everything else is as it was.
+fn stopped(out: &mut dyn Write) -> Result<()> {
     say(
         out,
-        "Stopped. Nothing was left behind: the watcher holds no lock, writes no \
-         file of its own, and the Account you are on is the one it last \
-         Switched to.",
+        "Stopped. The watcher lock is given back, no file of its own was \
+         written, and the Account you are on is the one it last Switched to.",
     )
+}
+
+/// Becomes the only Watcher on this machine, holding and coming back for as
+/// long as somebody else is one.
+///
+/// `None` where the person — or the service manager — asked it to stop while it
+/// was waiting.
+///
+/// Held rather than refused, and this is the whole reason the watcher lock can
+/// be given a staleness window measured in tens of minutes. A `perch watch` that
+/// exited here would be a Service that exits at every start until a lock left
+/// behind by a `kill -9` goes stale, which is the crash loop ADR 0040 repealed
+/// the permission exits to avoid — arriving through the thing that enforces
+/// single-instance. So it says who has it and comes back, and the machine heals
+/// itself.
+fn take_the_watch<'a>(
+    host: &'a dyn Host,
+    out: &mut dyn Write,
+    backoff: &mut Backoff,
+    holding: &mut Holding,
+) -> Result<Option<crate::lock::Held<'a>>> {
+    loop {
+        match crate::lock::take_all(host, vec![registry::watcher_lock_spec(host)?]) {
+            Ok(held) => return Ok(Some(held)),
+            Err(PerchError::Busy(why)) => {
+                backoff.failed();
+                let waiting_for = backoff.waiting_for();
+                let line = watch::held_line(&why, Some(waiting_for), host.now());
+                say_it(
+                    out,
+                    holding,
+                    Spoken::held(&why, Some(waiting_for), line),
+                    host.now(),
+                )?;
+                if host.wait(waiting_for) == Waited::Interrupted {
+                    return Ok(None);
+                }
+            }
+            Err(other) => return Err(other),
+        }
+    }
+}
+
+/// A round's line, and whether it was a hold — which is the only thing the
+/// coalescing needs to know about it.
+enum Spoken {
+    /// Held, by `why`, coming back in `retrying_in`, and this is the line that
+    /// says both in full. The two travel together because a hold that has
+    /// changed either of them is one the log has to say again.
+    Held {
+        why: String,
+        retrying_in: Option<u64>,
+        in_full: String,
+    },
+    /// Decided something, and this is the line.
+    Decided(String),
+}
+
+impl Spoken {
+    fn held(why: &str, retrying_in: Option<u64>, in_full: String) -> Spoken {
+        Spoken::Held {
+            why: why.to_string(),
+            retrying_in,
+            in_full,
+        }
+    }
+}
+
+/// Says a round, as much of it as is worth saying (ADR 0040).
+///
+/// A hold repeats until whatever holds it changes, and a Service writes to a log
+/// nobody reads until something is wrong — so an unchanged hold is said in full
+/// when it starts, as a duration once an hour while it lasts, and as what it
+/// cost when it ends. A round that decided something is always said in full,
+/// whatever came before it: the decisions are what the log is for.
+fn say_it(
+    out: &mut dyn Write,
+    holding: &mut Holding,
+    spoken: Spoken,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    match spoken {
+        Spoken::Held {
+            why,
+            retrying_in,
+            in_full,
+        } => match holding.holding(&why, retrying_in, now) {
+            Speak::InFull => say(out, &in_full),
+            Speak::StillHolding { since } => say(out, &watch::still_holding_line(since, now)),
+            Speak::Nothing => Ok(()),
+        },
+        Spoken::Decided(line) => {
+            // The way out of a hold is always said, which is the half of ADR
+            // 0013's rule that survives untouched — and it is said before the
+            // decision rather than after it, so a log reads in the order the
+            // things happened.
+            if let Some(held_for) = holding.released(now) {
+                say(out, &watch::released_line(held_for, now))?;
+            }
+            say(out, &line)
+        }
+    }
 }
 
 /// What the loop is about to start doing, said before it does it.
 ///
-/// It is also where a watcher that may not act says so and exits rather than
-/// idling forever having decided nothing.
+/// A machine that is not arranged for watching is no longer a refusal here (ADR
+/// 0040). The loop starts anyway and holds, so this says what it *would* be
+/// doing and leaves the reason it is not to the first round's held line — which
+/// is the line that will repeat, and the one that says when it will ask again.
 fn opening(host: &dyn Host) -> Result<String> {
     let registry = adopt::ensure_adopted(host)?;
-    let watching = permitted(&registry)?;
+    let Ok(watching) = permitted(&registry) else {
+        return Ok(
+            "Started. Nothing is being decided yet — the next line says what is \
+             holding it, and the watcher takes over the moment that changes. \
+             Ctrl-C stops."
+                .to_string(),
+        );
+    };
     Ok(format!(
         "Watching {} {}. Reading how full it is every {}, and Switching \
          within that Scope when its fullest Quota Window reaches {}% — to an \
@@ -283,9 +491,21 @@ struct Watching {
 /// Asked every round rather than only at the start, because the answer can stop
 /// being yes underneath it: an Account can be moved out of its Group, and a
 /// Group can be told to stop letting the watcher act, while the loop is
-/// sleeping. A loop still running on permission that has been withdrawn is the
+/// sleeping. A loop still *acting* on permission that has been withdrawn is the
 /// exact thing "nothing changes underneath you unless you said it could" is
 /// about.
+///
+/// Acting, rather than existing. ADR 0013 stopped the loop on a `no` here and
+/// ADR 0040 holds it instead, which changes nothing about the grant: a holding
+/// Watcher does not Refresh, does not rank and does not Switch. What it changes
+/// is that a Service whose permission was withdrawn on Tuesday is watching again
+/// the moment it is granted on Wednesday, rather than being a unit somebody has
+/// to remember to start.
+///
+/// Every failure it can give is that same "not arranged yet" — no active
+/// Account, an ungrouped one nobody has declared interchangeable, a Scope that
+/// has not said the watcher may act — which is what lets the caller hold on all
+/// of them without sorting them from the failures that mean something is broken.
 fn permitted(registry: &Registry) -> Result<Watching> {
     let account = registry.active_account().cloned().ok_or_else(|| {
         PerchError::NotFound(
@@ -355,9 +575,22 @@ fn one_round(
     watcher: Watcher,
     recently: &mut Recently,
     backoff: &mut Backoff,
-) -> Result<Round> {
+) -> Result<Turn> {
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
-    let watching = permitted(&registry)?;
+    // Handed back rather than raised, so the two callers can answer it
+    // differently without this one having to know which is asking (ADR 0040).
+    // A loop holds on it and a Check exits on it, and the difference is
+    // *whether there is a process left to hold* rather than anything about what
+    // was found.
+    //
+    // Carried as the failure itself rather than as its sentence, so a Check
+    // still exits `18` for an ungrouped Account and `14` for a Scope that has
+    // not said the watcher may act — the codes ADR 0013 promised a scheduler,
+    // which nothing here repeals.
+    let watching = match permitted(&registry) {
+        Ok(watching) => watching,
+        Err(not_arranged) => return Ok(Turn::NotArranged(not_arranged)),
+    };
     let email = watching.account.email().to_string();
 
     watcher.pacing(recently, &registry, &watching.scope);
@@ -385,7 +618,7 @@ fn one_round(
     // comes back rather than wondering whether it has given up.
     let mut held = |why: String| {
         backoff.failed();
-        Ok(Round {
+        Ok(Turn::Decided(Round {
             email: email.clone(),
             fullest: None,
             threshold: watching.policy.threshold,
@@ -393,7 +626,7 @@ fn one_round(
                 why,
                 retrying_in: watcher.asking_again(backoff),
             },
-        })
+        }))
     };
 
     // Never on a figure it did not just read. Acting on a cached one would be a
@@ -437,12 +670,32 @@ fn one_round(
             recently,
         )?
     };
-    Ok(Round {
+    Ok(Turn::Decided(Round {
         email,
         fullest: Some(fullest),
         threshold: watching.policy.threshold,
         outcome,
-    })
+    }))
+}
+
+/// What a round came to, before anybody has decided what to do about it.
+///
+/// The distinction ADR 0040 turns on. A round that *decided* something is the
+/// same for both watchers, and a machine that is *not arranged for watching* is
+/// not: the loop holds on it and comes back, because a supervisor respawns a
+/// deliberate exit until it gives up on the unit; a Check exits on it, because
+/// there is no process left to hold and a scheduler has to be told.
+///
+/// Kept as an enum rather than answered inside the round, so neither answer is
+/// the one the round happened to be written for. `permitted` is the only thing
+/// that produces the second, and it produces nothing else — which is why the
+/// failure travels whole rather than as a sentence: a Check's exit code is the
+/// one the failure earned.
+enum Turn {
+    /// The round read, and decided.
+    Decided(Round),
+    /// There was nothing here to watch, and this says what is missing.
+    NotArranged(PerchError),
 }
 
 /// Why the reading cannot be acted on, or `None` when it can.

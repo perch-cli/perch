@@ -14,6 +14,7 @@ use perch::commands::purge::{self, PurgeArgs};
 use perch::commands::relogin::{self, ReloginArgs};
 use perch::commands::remove::{self, RemoveArgs};
 use perch::commands::run::{self, RunArgs};
+use perch::commands::service::{self, ServiceCommand};
 use perch::commands::status::{self, StatusArgs};
 use perch::commands::switch::{self, SwitchArgs};
 use perch::commands::tui;
@@ -326,6 +327,28 @@ enum Command {
         yes: bool,
     },
 
+    /// Have this machine run the Watcher for you, starting when you log in.
+    ///
+    /// The same loop `perch watch` runs, supervised by the machine's own
+    /// service manager rather than by a terminal you have to keep open (ADR
+    /// 0040): a LaunchAgent on macOS, a `systemd --user` unit on Linux, a
+    /// Scheduled Task on Windows. Perch never backgrounds itself and there is no
+    /// `--detach` — it writes a unit and hands the job over, because scheduling
+    /// and supervision are the operating system's.
+    ///
+    /// Always yours rather than the machine's, and always at login rather than
+    /// at boot: every Profile Perch holds is under your home directory, and on
+    /// macOS there is no unlocked keychain before somebody logs in. Installing
+    /// it as root is refused for that reason.
+    ///
+    /// `install` is idempotent, and re-running it is the repair for a Service
+    /// whose binary moved — which `perch upgrade` does whenever it routes
+    /// through Homebrew or npm.
+    Service {
+        #[command(subcommand)]
+        action: ServiceCommand,
+    },
+
     /// Watch the Account you are on, and Cycle when it runs low.
     ///
     /// A loop in this terminal rather than a daemon (ADR 0013): it runs until
@@ -472,6 +495,10 @@ fn main() {
         // The one command whose exit code is not Perch's own: what the client
         // said is what a script reads.
         Command::Run { target, command } => run::run(&host, RunArgs { target, command }, &mut out),
+        // Its own exit code rather than `ok`: `status` answers a question and
+        // succeeds either way, and `uninstall` reports 15 for a machine that
+        // already had no Service.
+        Command::Service { action } => service::run(&host, action, &mut out),
         Command::Status {
             group,
             refresh,

@@ -84,6 +84,25 @@ pub const PHASES: &[Phase] = &[
         prove: a_check_decides_and_says_so_in_its_exit_code,
     },
     Phase {
+        name: "a Service is installed, holds the watch, and is taken back",
+        // A service manager *and* an Account to watch. The second half is not
+        // obvious and CI proved it: with `Needs::NOTHING` this was the one phase
+        // that ran on a runner, because a runner holds no Accounts and every
+        // other phase skips itself for exactly that reason. It installed a real
+        // Service onto the runner, and what came up had no login to adopt — so
+        // `perch service status` reported it not running, correctly, about a
+        // machine that was never going to run it.
+        //
+        // What the phase asserts is not "a unit file can be written" but "the
+        // Service is Perch's own loop, and holds the watch" — and a Watcher
+        // watches the Account you are on. So it needs one, and says so.
+        needs: Needs {
+            service_manager: true,
+            ..Needs::THE_ACTIVE_ACCOUNT
+        },
+        prove: a_service_is_installed_and_taken_back,
+    },
+    Phase {
         name: "the client accepts what Reconcile built",
         needs: Needs {
             client: true,
@@ -939,6 +958,28 @@ fn a_check_decides_and_says_so_in_its_exit_code(
     };
 
     let checked = perch.run(&["watch", "--once"]).map_err(&stopped)?;
+
+    // A Check that could not take the watch is this machine being busy rather
+    // than Perch being wrong (ADR 0036, ADR 0040): somebody has a `perch watch`
+    // running, or a Service is installed here — including one a Service phase
+    // that stopped left behind. Before ADR 0040 there was no way for a Check to
+    // exit 20 *here*, so this arrived as "exited 20 rather than 14" with an
+    // empty stderr, which reads as a defect and sends whoever is holding the
+    // report looking in the wrong place entirely.
+    //
+    // The Setting goes back first, because a phase that skips still leaves the
+    // machine as it found it.
+    if checked.status == crate::error::EXIT_HELD {
+        let _ = perch.run(&restore.split(' ').skip(1).collect::<Vec<_>>());
+        return Err(Halt::Skipped(format!(
+            "something else is watching this machine, so a Check has nothing to \
+             decide and exits {} whatever `{SETTING}` says. `perch service \
+             status` says whether it is a Service; otherwise it is a \
+             `perch watch` in another terminal",
+            crate::error::EXIT_HELD,
+        )));
+    }
+
     if checked.status != EXIT_INVALID {
         return Err(stopped(Setback::perch(format!(
             "`{group}` has been told the watcher may not act on it, and `perch \
@@ -980,6 +1021,150 @@ fn a_check_decides_and_says_so_in_its_exit_code(
             "a Check that decided nothing exits {EXIT_INVALID} rather than \
              {EXIT_NOTHING_TO_DO}, which is what a scheduler branches on"
         ),
+    ])
+}
+
+/// The one phase that cannot be proved behind a fake, because what is being
+/// asserted is that launchd, systemd or Task Scheduler do what they say (ADR
+/// 0040).
+///
+/// Unattended: every claim here is read off the machine — a file where the
+/// platform keeps one, and `perch service status --json` for what the service
+/// manager says — so nobody is asked to witness anything. The one thing a person
+/// could add is logging out and back in again, which is an *act* and belongs to
+/// an Attended phase of its own rather than to this one (ADR 0038).
+///
+/// It unwinds nothing, in the sense the module doc means: the `uninstall` is one
+/// of the phase's own steps rather than a tidy-up, and a run that stops before
+/// reaching it says so in the commands it prints. A machine left with a Service
+/// installed is a working machine, not a broken one — but it is not the machine
+/// the phase found, so it is named.
+fn a_service_is_installed_and_taken_back(
+    perch: &Perch<'_>,
+    _standing: &Preflight,
+    _out: &mut dyn Write,
+) -> Proof {
+    // Asked first, because a machine that already has one is a machine this
+    // phase must not take away: somebody may be running a Service on purpose,
+    // and a suite that uninstalled it would be a suite that cost them their
+    // rotation to prove a point about itself.
+    let before = perch.json(&["service", "status", "--json"])?;
+    if before["installed"] == serde_json::Value::Bool(true) {
+        return Err(Halt::Skipped(
+            "a Service is already installed here, and this phase will not take              away one somebody set up on purpose"
+                .to_string(),
+        ));
+    }
+
+    worked(perch, &["service", "install"])?;
+
+    // From here on the machine has a Service on it, and unlike a Setting a
+    // Service is a *process* — one that holds the watcher lock and changes what
+    // every other phase would observe. So this one does put itself back on the
+    // way out of a failure, which the Check phase's Setting does not need to:
+    // left running, it turns the next run's Check phase into an exit 20 nobody
+    // could trace back to here. The Setback still says what happened and still
+    // names the command, in case the uninstall is the thing that failed.
+    let take_it_back = |setback: Setback| -> Halt {
+        let gone = perch
+            .run(&["service", "uninstall"])
+            .is_ok_and(|it| it.succeeded());
+        let setback = match gone {
+            true => setback.leaving(&["nothing — the Service was taken back".to_string()]),
+            false => setback
+                .leaving(&["a Service is installed and running".to_string()])
+                .put_back_with(&["perch service uninstall".to_string()]),
+        };
+        Halt::Stopped(setback)
+    };
+
+    // `systemctl --user enable --now` and `launchctl bootstrap` both return once
+    // the unit is *activated*, which for a `Type=simple` service is as soon as
+    // the process is exec'd — not once it has got as far as taking the watcher
+    // lock. Asserting immediately is a race, and it is the race that made the
+    // first run of this phase report a fault that was its own.
+    //
+    // Waited for rather than slept through, and bounded: what is being waited
+    // on is a process starting, which is milliseconds, and a Service that is
+    // still not watching after this long is a real failure worth reporting.
+    let mut watching = serde_json::Value::Null;
+    for _ in 0..40 {
+        let seen = perch
+            .json(&["service", "status", "--json"])
+            .map_err(&take_it_back)?;
+        if seen["watching"] == serde_json::Value::Bool(true) {
+            watching = seen;
+            break;
+        }
+        watching = seen;
+        perch.host().sleep(250);
+    }
+
+    for (key, expected) in [("installed", true), ("running", true), ("watching", true)] {
+        if watching[key] != serde_json::Value::Bool(expected) {
+            return Err(take_it_back(Setback::perch(format!(
+                "`perch service install` reported success and then \
+                 `perch service status --json` said {key} was {} ten seconds \
+                 later: the service manager took the unit and did not get \
+                 Perch's loop running under it",
+                watching[key],
+            ))));
+        }
+    }
+
+    // The unit the service manager was given names a binary, and a unit naming
+    // one that is not there is the silent failure `status` exists to catch —
+    // asserted here because this is the only place a *real* Channel's path is
+    // in play (ADR 0039).
+    if watching["binaryExists"] == serde_json::Value::Bool(false) {
+        return Err(take_it_back(Setback::perch(format!(
+            "the unit names {}, which is not on this machine",
+            watching["binary"],
+        ))));
+    }
+
+    // Exactly one Watcher per machine, which is the property the watcher lock
+    // exists for — and the one thing here that proves the Service is not merely
+    // registered but is running Perch's own loop.
+    let second = perch.run(&["watch", "--once"]).map_err(&take_it_back)?;
+    if second.status != crate::error::EXIT_HELD {
+        return Err(take_it_back(Setback::perch(format!(
+            "a Service is watching this machine, and `perch watch --once` \
+             exited {} rather than {}: two Watchers pace themselves separately, \
+             and each keeps its Cooldown where the other cannot see it",
+            second.status,
+            crate::error::EXIT_HELD,
+        ))));
+    }
+
+    worked(perch, &["service", "uninstall"]).map_err(|_| {
+        take_it_back(Setback::perch(
+            "`perch service uninstall` did not take the Service back".to_string(),
+        ))
+    })?;
+
+    let after = perch
+        .json(&["service", "status", "--json"])
+        .map_err(&take_it_back)?;
+    if after["installed"] != serde_json::Value::Bool(false) {
+        return Err(take_it_back(Setback::perch(
+            "`perch service uninstall` succeeded and the Service is still \
+             installed"
+                .to_string(),
+        )));
+    }
+
+    Ok(vec![
+        "`perch service install` wrote a unit and the service manager started it".to_string(),
+        "`perch service status --json` said it was installed, running, and \
+         holding the watcher lock"
+            .to_string(),
+        "the unit names a binary that is on this machine".to_string(),
+        format!(
+            "`perch watch --once` exited {} while the Service held the watch,              which is one Watcher per machine",
+            crate::error::EXIT_HELD,
+        ),
+        "`perch service uninstall` took it back, and nothing is installed".to_string(),
     ])
 }
 

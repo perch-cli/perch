@@ -11,17 +11,24 @@ Watching you@example.com in Group `work`. Reading how full it is every 2m30s, an
 2026-08-04T12:00:00Z  waiting   you@example.com 40% used, fullest 5-hour; threshold 80% — under it, so nothing was wanted.
 2026-08-04T12:02:30Z  switched  you@example.com 86% used, fullest 5-hour; threshold 80% — over it. Switched — overflow@example.com has the most room: 95% headroom, which is true of every one of its Quota Windows — 5-hour is its fullest, as of just now.
 ^C
-Stopped. Nothing was left behind: the watcher holds no lock, writes no file of its own, and the Account you are on is the one it last Switched to.
+Stopped. The watcher lock is given back, no file of its own was written, and the Account you are on is the one it last Switched to.
 ```
 
 The watcher acts only where a Scope has said it may, which is off by default —
 see [`watcher-may-act`](configuration.md).
 
-It is **not a daemon** (ADR 0013). There is nothing to install, nothing to
-manage, and nothing left behind when it stops: it holds no lock and takes no
-marker across a wait, so Ctrl-C is safe wherever it lands. A Ctrl-C during a
-Switch lets that Switch finish first. Wanting it truly unattended is what
-[`--once` and your own scheduler](#watching-on-a-schedule) are for.
+**Perch never backgrounds itself.** There is no `--detach` and nothing to kill
+by pid: what the loop takes across a wait is one lock and nothing else, so
+Ctrl-C is safe wherever it lands, and a Ctrl-C during a Switch lets that Switch
+finish first. Wanting it running without a terminal open is what
+[`perch service`](#having-the-machine-run-it) is for, and wanting it on somebody
+else's schedule is what [`--once`](#watching-on-a-schedule) is for.
+
+**There is one Watcher per person per machine**, whichever way it is being run.
+A second `perch watch` says who holds the watcher lock and waits for it rather
+than deciding alongside them — two loops watch the same Account and each keeps
+its Cooldown in memory, which is the ping-pong the Cooldown exists to prevent,
+run twice.
 
 **Every decision is printed, including the ones where nothing happens** — which
 are most of them. A line names what was read, the threshold it was read
@@ -127,9 +134,60 @@ Account onto your personal subscription (ADR 0017).
 Both permissions are read every round rather than only at the first, because
 either can be taken back while the watcher is sleeping. A `perch switch` in
 another terminal that leaves an ungrouped Account active, or a
-`perch config set work watcher-may-act false`, stops a watcher that is already
-running — on the message and exit code above, the ones it would have refused to
-start on, rather than leaving it idling having decided it may do nothing.
+`perch config set work watcher-may-act false`, **holds** a watcher that is
+already running: it says what is missing and goes on asking, and starts deciding
+again the moment the grant comes back (ADR 0040). It reads nothing and moves
+nothing while it holds — a grant withdrawn is a watcher that stops *acting*,
+which is what the grant is about, rather than one that stops existing and has to
+be remembered about later.
+
+`perch watch --once` still exits on it, with the codes below, because a Check is
+one process reporting to a scheduler and the scheduler has to be told.
+
+## Having the machine run it
+
+`perch service install` has your machine run the loop for you, starting when you
+log in — a LaunchAgent on macOS, a `systemd --user` unit on Linux, a Scheduled
+Task on Windows (ADR 0040). It is the *same loop*, supervised: same interval,
+same policy, same decision log. Perch writes the unit and hands the job over.
+
+```
+$ perch service install
+Installed the Service. It runs /opt/homebrew/bin/perch as a LaunchAgent. It starts when you log in, and it is running now.
+Its decisions go to /Users/you/.config/perch/watch.log.
+
+$ perch service status
+A Service is installed as a LaunchAgent, and is running.
+Its unit is /Users/you/Library/LaunchAgents/cli.perch.watch.plist.
+It runs /opt/homebrew/bin/perch.
+Its decisions go to /Users/you/.config/perch/watch.log.
+A Watcher is running on this machine and holds the watcher lock.
+
+$ perch service uninstall
+The Service is stopped and its unit is gone. Nothing starts at login any more, and `perch watch` in a terminal is unaffected.
+```
+
+**At login, and yours rather than the machine's.** Never a system service and
+never at boot: every Profile Perch holds is under your home directory, and on
+macOS there is no unlocked keychain before somebody logs in. Installing it under
+`sudo` is refused for that reason.
+
+**Where the decisions go** differs by platform, because the log is the service
+manager's job rather than Perch's. On Linux systemd captures standard output
+into the journal — `journalctl --user -u perch-watch -f`. On macOS and Windows
+the unit points at `watch.log` inside Perch's own directory, which means
+`perch purge` sweeps it with everything else.
+
+**An unchanged hold is said once an hour**, not every round. In a terminal a
+repeated line is proof the loop is awake; in a log nobody reads until something
+is wrong, five hundred identical lines a day are what bury the one that matters.
+So a hold says itself in full when it starts, says how long it has been going
+once an hour, and says what it cost when it ends.
+
+**`install` is idempotent**, and re-running it is the repair for a Service that
+stopped coming up: `perch upgrade` moves the binary, and `perch service status`
+says when the unit names one that is no longer there. An Upgrade re-points the
+Service at the new binary by itself, and says so if it could not.
 
 ## Watching on a schedule
 
@@ -138,6 +196,9 @@ exit code. That is the whole of what an unattended watcher needs, because
 scheduling is the operating system's job (ADR 0013): cron and systemd timers
 already run things at an interval, keep them from overlapping, and capture what
 they printed.
+
+Pick this *or* a Service, not both: a Check that finds a Watcher running exits
+`20` and does nothing, so a machine with both gets a cron mailbox full of them.
 
 ```cron
 */5 * * * * perch watch --once >> ~/.local/state/perch-watch.log 2>&1

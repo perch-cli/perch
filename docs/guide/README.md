@@ -11,7 +11,7 @@ are the whole of what each command does, and why it does it that way.
 | [Accounts](accounts.md) | `add`, `alias`, `disable`, `enable`, `relogin`, `remove` — and what a Quarantine is |
 | [Seeing what you have](status.md) | `status`, `list`, reading current Utilization, the JSON |
 | [Switching, Cycling and Groups](switching.md) | `switch`, Cycling within a Group, `group` |
-| [Watching](watching.md) | `perch watch`, and `--once` under cron or a systemd timer |
+| [Watching](watching.md) | `perch watch`, `perch service`, and `--once` under cron or a systemd timer |
 | [Running one Account in one terminal](running.md) | `run`, Live Profiles, passing arguments through |
 | [Backing up and moving machines](backup.md) | `export`, `import`, `purge` |
 | [Choosing by eye](tui.md) | `perch tui` — both tabs, every key |

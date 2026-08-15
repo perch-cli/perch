@@ -86,14 +86,18 @@ $ perch switch
 ```
 
 **5. Stop being the one who notices.** `perch watch` reads how full the Account
-you are on is, prints what it made of that, and Cycles when it runs low. It is a
-loop in one terminal rather than a daemon, and Ctrl-C is safe wherever it lands.
-Nothing changes underneath you until you say it may:
+you are on is, prints what it made of that, and Cycles when it runs low. Ctrl-C
+is safe wherever it lands. Nothing changes underneath you until you say it may:
 
 ```
 $ perch config set work watcher-may-act true
 $ perch watch
 ```
+
+`perch service install` has your machine run that same loop for you, starting
+when you log in — a LaunchAgent, a `systemd --user` unit, or a Scheduled Task,
+whichever your machine has. Perch never backgrounds itself: it writes the unit
+and hands the job over, and `perch service uninstall` takes it back.
 
 Two more worth knowing early: `perch run <target>` launches Claude Code as one
 Account in one terminal without changing which is active, and `perch tui` draws
@@ -109,6 +113,7 @@ all of it interactively for when the choice wants making by eye.
 | `perch alias` | name an Account, so no command needs its email address | [guide](docs/guide/accounts.md#naming-an-account) |
 | `perch switch` | make an Account active everywhere, or Cycle within a Group | [guide](docs/guide/switching.md) |
 | `perch watch` | Cycle automatically when the Account you are on runs low | [guide](docs/guide/watching.md) |
+| `perch service` | have the machine run the watcher for you, starting at login | [guide](docs/guide/watching.md#having-the-machine-run-it) |
 | `perch run` | launch Claude Code as an Account, in this terminal alone | [guide](docs/guide/running.md) |
 | `perch tui` | the interactive view | [guide](docs/guide/tui.md) |
 | `perch group` | declare which Accounts are interchangeable | [guide](docs/guide/switching.md#managing-groups) |
@@ -161,7 +166,8 @@ it that way. The same pages, rendered and searchable, are at
 - [Seeing what you have](docs/guide/status.md) — `status`, `list`, Utilization,
   the JSON
 - [Switching, Cycling and Groups](docs/guide/switching.md)
-- [Watching](docs/guide/watching.md) — the loop, and `--once` under cron
+- [Watching](docs/guide/watching.md) — the loop, `perch service`, and `--once`
+  under cron
 - [Running one Account in one terminal](docs/guide/running.md)
 - [Backing up and moving machines](docs/guide/backup.md)
 - [Choosing by eye](docs/guide/tui.md) — `perch tui`
