@@ -629,9 +629,13 @@ fn declares(model: &Model, scope: &Scope) -> String {
 /// are a policy nothing is applying.
 fn not_in_force(model: &Model, scope: &Scope) -> String {
     match scope {
+        // `false` rather than `off`, for the reason
+        // `commands::cycling_among_ungrouped` was written down: `on`/`off` is
+        // not a value this Setting takes, and a reader who typed back what the
+        // screen showed them was refused.
         Scope::Ungrouped if !model.registry().global.cycle_ungrouped => {
             " The watcher Settings are not in force here: `cycle-ungrouped` is \
-             off, so nothing acts on these Accounts unasked (ADR 0017)."
+             false, so nothing acts on these Accounts unasked (ADR 0017)."
                 .to_string()
         }
         _ => String::new(),

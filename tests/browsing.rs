@@ -2539,7 +2539,10 @@ fn the_ungrouped_page_says_the_watcher_settings_are_not_in_force_until_the_gate_
         shut.contains("The watcher Settings are not in force here"),
         "{shut}"
     );
-    assert!(shut.contains("`cycle-ungrouped` is off"), "{shut}");
+    assert!(
+        shut.contains("`cycle-ungrouped` is false"),
+        "the value `perch config set` takes, not `on`/`off`, which it does not: {shut}"
+    );
 
     config_set(&host, &["cycle-ungrouped", "true"])
         .0
