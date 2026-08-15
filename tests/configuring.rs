@@ -283,10 +283,20 @@ fn the_watchers_fields_are_stored_and_govern_a_loop_that_has_to_be_run() {
         printed.contains("perch watch"),
         "and what now may act is named: {printed}"
     );
+    // The distinction this has always protected, and which matters more now
+    // that a Service exists rather than less: granting permission is not
+    // starting anything. Somebody who typed this and walked away has a Group
+    // that *may* be acted on and nothing acting on it.
     assert!(
-        printed.contains("not a daemon"),
-        "along with what it is not — a Group that may be acted on is not a \
-         service that has been switched on (ADR 0013): {printed}"
+        printed.contains("Nothing here starts one"),
+        "a Group that may be acted on is not a Watcher that has been switched \
+         on (ADR 0013, ADR 0040): {printed}"
+    );
+    assert!(
+        printed.contains("perch service install"),
+        "and all three ways of running one are named, because a sentence about \
+         the loop alone leaves somebody with a Service no reason to read it: \
+         {printed}"
     );
 
     config_set(&host, &["work", "watcher-threshold-percent", "50"])

@@ -891,11 +891,12 @@ fn gated(scope: &Scope) -> &'static str {
 /// about it would sooner or later say two different things: nothing here is a
 /// service that has been switched on (ADR 0013).
 ///
-/// Both ways of running one are named, because a setting that only governed the
-/// loop would be a setting somebody scheduling `--once` had no reason to read.
-const ONLY_WHILE_IT_RUNS: &str = "Only while a watcher is running — the loop in \
-     the terminal you started it in, or a `perch watch --once` your scheduler \
-     runs. It is not a daemon, and nothing here switches one on.";
+/// All three ways of running one are named, because a setting that only governed
+/// the loop would be a setting somebody with a Service, or somebody scheduling
+/// `--once`, had no reason to read (ADR 0040).
+const ONLY_WHILE_IT_RUNS: &str = "Only while a Watcher is running — the loop in \
+     the terminal you started it in, a Service `perch service install` set up, \
+     or a `perch watch --once` your scheduler runs. Nothing here starts one.";
 
 /// A key as the two-word form addresses it: any Setting, and the one thing that
 /// is Global's alone (ADR 0017).

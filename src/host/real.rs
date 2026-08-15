@@ -659,6 +659,26 @@ impl Host for RealHost {
         listen_for_interrupts();
     }
 
+    /// Linked rather than shelled out to (ADR 0021): the whole of it is one
+    /// `geteuid`, and `id -u` would be a process spawned to answer a question
+    /// the C library already holds.
+    ///
+    /// The *effective* uid rather than the real one, because that is the
+    /// identity the filesystem will judge every write by, and the one launchd
+    /// files a session under.
+    #[cfg(unix)]
+    fn user_id(&self) -> Option<u32> {
+        // SAFETY: `geteuid` takes nothing, cannot fail, and touches no memory.
+        Some(unsafe { libc::geteuid() })
+    }
+
+    /// Windows has no uid: a logon task names the user it runs as, and there is
+    /// nothing here to quote or to refuse (ADR 0040).
+    #[cfg(not(unix))]
+    fn user_id(&self) -> Option<u32> {
+        None
+    }
+
     /// In slices, checking between them, because the platforms do not agree on
     /// what a signal does to a sleeping thread and none of them can be relied
     /// on to cut one short: `nanosleep` reports how much was left and the
@@ -1186,19 +1206,30 @@ fn interrupted() -> bool {
     INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Takes Ctrl-C over from the default handler, which would kill the process
-/// where it stands.
+/// Takes Ctrl-C — and the signal a service manager stops a process with — over
+/// from the default handler, which would kill the process where it stands.
 ///
 /// Perch links the platform's own primitive rather than taking a crate for it
-/// (ADR 0021): the whole of the unix half is one `signal` call, and the whole
+/// (ADR 0021): the whole of the unix half is two `signal` calls, and the whole
 /// of the Windows half is one `SetConsoleCtrlHandler`.
 ///
-/// The handler stands down after one signal, so a **second** Ctrl-C kills the
+/// **`SIGTERM` as well as `SIGINT`, and this is what a Service rests on** (ADR
+/// 0040). `SIGINT` is what a person types; `SIGTERM` is what systemd and launchd
+/// send to stop a unit, and its default action is immediate death. Unhandled, a
+/// `systemctl --user stop` arriving mid-Switch would kill Perch between the
+/// incoming Credential reaching the Default Profile and the Identity being
+/// patched — a Landing nobody wrote down, which is the one state ADR 0006's
+/// ordering exists to make impossible. Both mean the same thing to the loop, so
+/// both set the same flag and are answered at the same place: the wait.
+///
+/// The handler stands down after one signal, so a **second** of either kills the
 /// process the way it always did. The first asks the loop to finish what it is
 /// doing, and there is no bound on how long that takes — a round waiting on a
-/// keychain prompt or on a network that has gone away could sit there — so the
-/// person watching must never be left with a program that has taken their only
-/// way of stopping it and given nothing back.
+/// keychain prompt or on a network that has gone away could sit there — so
+/// neither the person watching nor the service manager is left with a program
+/// that has taken the only way of stopping it and given nothing back. That
+/// second signal is what a service manager sends at the end of its stop grace,
+/// which `install` pins to thirty seconds on every platform.
 ///
 /// Idempotent, and safe to call more than once: installing the same handler
 /// twice installs the same handler.
@@ -1208,6 +1239,11 @@ fn listen_for_interrupts() {
         INTERRUPTED.store(true, std::sync::atomic::Ordering::Relaxed);
         // SAFETY: `signal` is async-signal-safe, and this hands the signal back
         // to the default handler rather than installing anything of Perch's.
+        //
+        // Only the signal that arrived is stood down, which is deliberate: a
+        // first Ctrl-C followed by a `systemctl stop` should still be able to
+        // kill a loop that is wedged finishing its Switch, and standing both
+        // down together would leave one of them re-arming the other's default.
         unsafe { libc::signal(signal, libc::SIG_DFL) };
     }
 
@@ -1216,6 +1252,7 @@ fn listen_for_interrupts() {
     // handler, which nothing here needs.
     unsafe {
         libc::signal(libc::SIGINT, stop as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, stop as *const () as libc::sighandler_t);
     }
 }
 

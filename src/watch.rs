@@ -125,6 +125,186 @@ impl Backoff {
     }
 }
 
+/// How long an unchanged hold goes unsaid before it says it is still there.
+///
+/// An hour, which is twenty-four ordinary rounds. Long enough that a hold
+/// lasting a working day is twenty-odd lines rather than a thousand, and short
+/// enough that a log opened at any point has recent evidence the watcher is
+/// still awake (ADR 0040).
+pub const STILL_HOLDING_MILLIS: i64 = 3_600_000;
+
+/// What to say about a hold, given what has already been said about it.
+///
+/// ADR 0013 had every held round say which failure held it, and a hold whose
+/// line said neither that nor when it would ask again "reads as a watcher that
+/// has given up". That was written about a person watching a terminal, where the
+/// repeated line *is* the proof of life. A Service writes to a log nobody reads
+/// until something is wrong, and a permission hold repeats until somebody
+/// changes a setting — possibly for weeks. At one line every two and a half
+/// minutes, what five hundred and seventy-six identical lines a day bury is the
+/// one line that matters.
+///
+/// So the proof of life moves from repetition to duration: a hold says itself in
+/// full when it starts, says how long it has been going once an hour, and says
+/// what it cost when it ends. "Held since 09:14" is better evidence of a stuck
+/// watcher than the same sentence four hundred times.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Speak {
+    /// Say the whole line. This hold is new, or it is not the one that was
+    /// being held a moment ago.
+    InFull,
+    /// Say only that it is still there, and since when.
+    StillHolding { since: DateTime<Utc> },
+    /// Say nothing: the same hold, said recently enough.
+    Nothing,
+}
+
+/// The hold a loop is currently in, and what has been said about it.
+///
+/// In memory and nowhere else, like the [`Backoff`] and the [`Recently`] beside
+/// it: what has been said is about this loop's own output, and a second loop's
+/// log is not paced by this one's. A [`Check`](crate::commands::watch) has no
+/// use for it at all — one process says its one line and leaves.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Holding {
+    said: Option<Said>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Said {
+    /// What is holding it, and when it said it would ask again — both, because
+    /// both are what ADR 0013 requires a held line to carry, and a hold that has
+    /// changed either of them has changed.
+    ///
+    /// The interval is in here rather than left out as an implementation
+    /// detail, and it is the whole reason this is a pair. Keyed on the reason
+    /// alone, a throttled endpoint said "asking again in 2m30s" once and then
+    /// went quiet while the [`Backoff`] doubled underneath it — so the log
+    /// claimed a cadence of two and a half minutes for a watcher that had
+    /// settled at twenty. A changed cadence is news, and it is said; a back-off
+    /// that has saturated stops changing and stops being said, which is the
+    /// quiet the coalescing was for.
+    said: HoldSaid,
+    since: DateTime<Utc>,
+    last_said: DateTime<Utc>,
+    /// Whether anything has gone unsaid under this hold. What decides if there
+    /// is anything worth saying when it ends: a hold that said every one of its
+    /// rounds has already told the whole story.
+    suppressed: bool,
+}
+
+/// What a held line claims: why, and when it will ask again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HoldSaid {
+    why: String,
+    retrying_in: Option<u64>,
+}
+
+impl Holding {
+    /// A loop that is holding nothing, which is how one starts.
+    pub fn nothing() -> Holding {
+        Holding::default()
+    }
+
+    /// A round that held, and what to say about it.
+    pub fn holding(&mut self, why: &str, retrying_in: Option<u64>, now: DateTime<Utc>) -> Speak {
+        let saying = HoldSaid {
+            why: why.to_string(),
+            retrying_in,
+        };
+        match &mut self.said {
+            Some(said) if said.said == saying => {
+                if (now - said.last_said).num_milliseconds() >= STILL_HOLDING_MILLIS {
+                    said.last_said = now;
+                    return Speak::StillHolding { since: said.since };
+                }
+                said.suppressed = true;
+                Speak::Nothing
+            }
+            // A different reason is a different hold, and starts its own hour.
+            // Not folded in with the one before it: a watcher that moved from a
+            // throttled endpoint to a withdrawn permission has had two things
+            // happen, and a reader who is shown one of them is being told the
+            // wrong thing about their machine.
+            // A hold that has changed either half starts its own line — but not
+            // its own clock. `since` is carried over from the hold it replaces
+            // when the *reason* is the same, because a throttled endpoint that
+            // has been refusing for two hours has been refusing for two hours
+            // however many times the back-off doubled in between, and an hourly
+            // line that reset every doubling would be saying the wrong number
+            // about the thing a reader is trying to judge.
+            was => {
+                // `suppressed` travels with `since` for the same reason: what
+                // the line at the end of a hold reports is the whole hold, and
+                // a back-off doubling in the middle of one does not un-suppress
+                // the rounds that went unsaid before it.
+                let (since, suppressed) = match was {
+                    Some(said) if said.said.why == saying.why => (said.since, said.suppressed),
+                    _ => (now, false),
+                };
+                self.said = Some(Said {
+                    said: saying,
+                    since,
+                    last_said: now,
+                    suppressed,
+                });
+                Speak::InFull
+            }
+        }
+    }
+
+    /// A round that did not hold, and how long the hold it ended had lasted —
+    /// or `None` where there was nothing to end, or where nothing went unsaid
+    /// under it.
+    ///
+    /// The way out is always said, which is the half of ADR 0013's rule that
+    /// survives untouched: the ordinary decision line prints whatever this round
+    /// decided, and this adds what the silence before it was. A hold that never
+    /// suppressed a line needs no such sentence — every round of it is already
+    /// in the log.
+    pub fn released(&mut self, now: DateTime<Utc>) -> Option<Duration> {
+        let said = self.said.take()?;
+        match said.suppressed {
+            true => Some(now - said.since),
+            false => None,
+        }
+    }
+}
+
+/// A hold that is still what it was, said as how long rather than as what.
+pub fn still_holding_line(since: DateTime<Utc>, now: DateTime<Utc>) -> String {
+    format!(
+        "{}  {:<8}  still held, since {} ({}). Nothing has changed, and nothing \
+         has been decided in that time.",
+        now.to_rfc3339_opts(SecondsFormat::Secs, true),
+        "held",
+        since.to_rfc3339_opts(SecondsFormat::Secs, true),
+        for_how_long(now - since),
+    )
+}
+
+/// A hold that is over, said before the line of the round that ended it.
+pub fn released_line(held_for: Duration, now: DateTime<Utc>) -> String {
+    format!(
+        "{}  {:<8}  the hold is over after {}, and the watcher is deciding \
+         again.",
+        now.to_rfc3339_opts(SecondsFormat::Secs, true),
+        "resumed",
+        for_how_long(held_for),
+    )
+}
+
+/// A span, as the two lines above quote one. Minutes up to an hour and then
+/// hours and minutes, because a hold is interesting at the scale it has lasted
+/// and never at the second.
+fn for_how_long(span: Duration) -> String {
+    let minutes = span.num_minutes().max(0);
+    match minutes {
+        0..=59 => format!("{minutes}m"),
+        _ => format!("{}h{:02}m", minutes / 60, minutes % 60),
+    }
+}
+
 /// The rules a Group gives the watcher for Switching within it (ADR 0013).
 ///
 /// Four numbers, and each answers a different question about the same move:
@@ -624,6 +804,23 @@ impl Round {
         }
     }
 
+    /// What held this round, or `None` where it decided something.
+    ///
+    /// What the loop keys its coalescing on (ADR 0040): two consecutive rounds
+    /// held by the same thing are one hold, and the second of them is not worth
+    /// a line. Read off the outcome rather than kept beside it, so the reason
+    /// that is compared is the reason that would have been printed.
+    pub fn held_because(&self) -> Option<&str> {
+        match &self.outcome {
+            Outcome::Held { why, .. } => Some(why),
+            Outcome::Waiting
+            | Outcome::Cooling { .. }
+            | Outcome::Switched { .. }
+            | Outcome::Nowhere { .. }
+            | Outcome::Refused { .. } => None,
+        }
+    }
+
     /// The decision line, as it is printed: one line, whatever happened.
     pub fn line(&self, now: DateTime<Utc>) -> String {
         format!(
@@ -730,6 +927,155 @@ mod tests {
             threshold: 80,
             outcome,
         }
+    }
+
+    /// A throttle, as the round that held for it words it.
+    const THROTTLED: &str = "Anthropic is rate-limiting reads of this Account's usage.";
+    /// A grant that has not been given, which is the hold that lasts for weeks.
+    const UNGRANTED: &str = "`work` has not been told the watcher may act on it.";
+
+    /// The whole of what the coalescing is for: a hold that repeats says itself
+    /// once, and the rounds that follow it are silence rather than five hundred
+    /// identical lines a day (ADR 0040).
+    #[test]
+    fn a_hold_that_has_not_changed_is_said_once_rather_than_every_round() {
+        let mut holding = Holding::nothing();
+        let start = now();
+
+        assert_eq!(
+            holding.holding(UNGRANTED, Some(REFRESH_INTERVAL_MILLIS), start),
+            Speak::InFull,
+            "the first one is said in full"
+        );
+        for round in 1..24 {
+            let later = start + Duration::milliseconds(REFRESH_INTERVAL_MILLIS as i64 * round);
+            assert_eq!(
+                holding.holding(UNGRANTED, Some(REFRESH_INTERVAL_MILLIS), later),
+                Speak::Nothing,
+                "round {round} repeats a hold already said"
+            );
+        }
+    }
+
+    /// And the proof of life the repetition used to be: an hour in, it says how
+    /// long rather than saying the same thing again. A held Watcher that said
+    /// nothing at all for a week would be indistinguishable from a dead one.
+    #[test]
+    fn an_hour_of_the_same_hold_says_how_long_it_has_been_holding() {
+        let mut holding = Holding::nothing();
+        let start = now();
+        holding.holding(UNGRANTED, Some(REFRESH_INTERVAL_MILLIS), start);
+
+        let an_hour_on = start + Duration::milliseconds(STILL_HOLDING_MILLIS);
+        assert_eq!(
+            holding.holding(UNGRANTED, Some(REFRESH_INTERVAL_MILLIS), an_hour_on),
+            Speak::StillHolding { since: start },
+            "it dates the hold from when it started rather than from the last line"
+        );
+
+        // And then goes quiet again for another hour rather than repeating.
+        let a_minute_later = an_hour_on + Duration::minutes(1);
+        assert_eq!(
+            holding.holding(UNGRANTED, Some(REFRESH_INTERVAL_MILLIS), a_minute_later),
+            Speak::Nothing,
+        );
+    }
+
+    /// **The bug this was written with and fixed.** Keyed on the reason alone, a
+    /// throttled endpoint said "asking again in 2m30s" once and then went silent
+    /// while the back-off doubled underneath it — so the log claimed a cadence
+    /// of two and a half minutes for a Watcher that had settled at twenty.
+    ///
+    /// A changed cadence is news. A back-off that has saturated stops changing,
+    /// and stops being said, which is the quiet the coalescing was for.
+    #[test]
+    fn a_back_off_that_doubles_is_said_again_because_the_line_has_changed() {
+        let mut holding = Holding::nothing();
+        let mut backoff = Backoff::none();
+        let (mut in_full, mut heartbeats) = (0, 0);
+
+        // Forty rounds at the ordinary interval is a hundred minutes, so this
+        // covers the back-off saturating *and* an hour passing afterwards.
+        for round in 0..40 {
+            backoff.failed();
+            let at = now() + Duration::milliseconds(REFRESH_INTERVAL_MILLIS as i64 * round);
+            match holding.holding(THROTTLED, Some(backoff.waiting_for()), at) {
+                Speak::InFull => in_full += 1,
+                Speak::StillHolding { .. } => heartbeats += 1,
+                Speak::Nothing => {}
+            }
+        }
+
+        // One line per distinct wait — 2m30, 5m, 10m, 20m — and then silence,
+        // because the back-off is bounded and has stopped changing.
+        assert_eq!(
+            in_full, 4,
+            "every cadence the loop settled on is on the record, and no cadence \
+             is on it twice"
+        );
+        // And the hourly line goes on firing underneath it, which is what keeps
+        // a saturated back-off from reading as a Watcher that died an hour ago.
+        assert_eq!(heartbeats, 1);
+    }
+
+    /// A hold that changes reason is a different thing happening to the machine,
+    /// and is said as one — a Watcher that moved from a throttled endpoint to a
+    /// withdrawn grant has had two things happen.
+    #[test]
+    fn a_hold_that_changes_its_reason_starts_its_own_line_and_its_own_clock() {
+        let mut holding = Holding::nothing();
+        let start = now();
+        holding.holding(THROTTLED, Some(REFRESH_INTERVAL_MILLIS), start);
+
+        let later = start + Duration::minutes(10);
+        assert_eq!(
+            holding.holding(UNGRANTED, Some(REFRESH_INTERVAL_MILLIS), later),
+            Speak::InFull,
+        );
+
+        let an_hour_on = later + Duration::milliseconds(STILL_HOLDING_MILLIS);
+        assert_eq!(
+            holding.holding(UNGRANTED, Some(REFRESH_INTERVAL_MILLIS), an_hour_on),
+            Speak::StillHolding { since: later },
+            "the new hold is dated from when it started, not from the one it \
+             replaced"
+        );
+    }
+
+    /// The way out is always said, and it is said as what the silence cost.
+    #[test]
+    fn a_hold_that_suppressed_anything_says_how_long_it_lasted_when_it_ends() {
+        let mut holding = Holding::nothing();
+        let start = now();
+        holding.holding(UNGRANTED, Some(REFRESH_INTERVAL_MILLIS), start);
+        holding.holding(
+            UNGRANTED,
+            Some(REFRESH_INTERVAL_MILLIS),
+            start + Duration::minutes(5),
+        );
+
+        let over = start + Duration::minutes(90);
+        assert_eq!(holding.released(over), Some(Duration::minutes(90)));
+        assert!(
+            released_line(Duration::minutes(90), over).contains("1h30m"),
+            "{}",
+            released_line(Duration::minutes(90), over)
+        );
+        assert_eq!(
+            holding.released(over),
+            None,
+            "and a hold that is already over ends once"
+        );
+    }
+
+    /// A hold that said every one of its rounds has already told the whole
+    /// story, so there is nothing for the way out to add.
+    #[test]
+    fn a_hold_that_suppressed_nothing_adds_no_line_when_it_ends() {
+        let mut holding = Holding::nothing();
+        holding.holding(UNGRANTED, Some(REFRESH_INTERVAL_MILLIS), now());
+
+        assert_eq!(holding.released(now() + Duration::minutes(2)), None);
     }
 
     fn at(used_percent: f64) -> Option<Fullest> {

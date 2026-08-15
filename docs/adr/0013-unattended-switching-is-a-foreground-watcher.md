@@ -1,5 +1,26 @@
 # Unattended switching is a foreground watcher, not a daemon
 
+> **Superseded in part by ADR 0040.** `perch service install` now writes a unit
+> the machine's own service manager owns, so the Watcher can be run for you at
+> login. The title is no longer true.
+>
+> Three things below were repealed and are named here so nobody implements them
+> from this record: the loop no longer **stops** when a grant is withdrawn — `14`
+> and `18` become a `Held` round, because a supervisor crash-loops on a
+> deliberate exit and launchd cannot be told otherwise; a Watcher now **takes a
+> lock** and is one per person per machine, so "it leaves nothing behind" is no
+> longer the whole truth; and an identical hold is now said **once an hour**
+> rather than every round, because in a log nobody reads, repetition is what
+> buries the line that matters. `perch watch --once` keeps `14` and `18`
+> unchanged.
+>
+> Everything else stands exactly as written, and is still the governing record
+> for it: polling only the active Account, the two-and-a-half-minute interval and
+> why it is a constant, the Back-off curve, the Cooldown, the Margin, the
+> no-return, what a Check records and why, and the whole exit-code table. ADR
+> 0040 says which of this record's arguments it kept and which one it found had
+> already been spent.
+
 Someone rotating between subscriptions wants to stop noticing that they ran out.
 That needs something watching utilization and switching when a threshold is
 crossed, without being asked.

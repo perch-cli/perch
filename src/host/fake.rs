@@ -236,11 +236,19 @@ pub struct FakeHost {
     /// nobody interrupts, which is every test but the watcher's.
     interrupt_after: RefCell<Option<u32>>,
     waits: RefCell<u32>,
+    /// Which user this Perch runs as. `Some(0)` is the one `service install`
+    /// refuses; the default is an ordinary person's.
+    user_id: RefCell<Option<u32>>,
 }
 
 /// The pid this Perch runs under, for the tests that assert on the marker a Run
 /// writes for itself. Nothing else in the fixtures wears it.
 pub const THIS_PROCESS: u32 = 700;
+
+/// The uid this Perch runs as. An ordinary person's, deliberately: `0` is the
+/// one value `perch service install` refuses, so it must never be what a test
+/// gets without asking for it.
+pub const THIS_USER: u32 = 501;
 
 impl Default for FakeHost {
     fn default() -> Self {
@@ -322,6 +330,7 @@ impl FakeHost {
             sent: RefCell::new(Vec::new()),
             effects: RefCell::new(Vec::new()),
             listening: RefCell::new(false),
+            user_id: RefCell::new(Some(THIS_USER)),
             interrupt_after: RefCell::new(None),
             waits: RefCell::new(0),
         }
@@ -673,6 +682,19 @@ impl FakeHost {
     /// is what makes a loop something that can be stopped rather than killed.
     pub fn is_listening_for_interrupts(&self) -> bool {
         *self.listening.borrow()
+    }
+
+    /// A machine where Perch was run with `sudo`, which is the one thing
+    /// `perch service install` refuses outright (ADR 0040).
+    pub fn as_superuser(self) -> FakeHost {
+        *self.user_id.borrow_mut() = Some(0);
+        self
+    }
+
+    /// A platform with no uid at all, which is Windows.
+    pub fn with_no_user_id(self) -> FakeHost {
+        *self.user_id.borrow_mut() = None;
+        self
     }
 
     /// A process that is running, for a world that is already built.
@@ -1815,6 +1837,10 @@ impl Host for FakeHost {
 
     fn listen_for_interrupts(&self) {
         *self.listening.borrow_mut() = true;
+    }
+
+    fn user_id(&self) -> Option<u32> {
+        *self.user_id.borrow()
     }
 
     /// Passes the time the same way a sleep does, and ends the way the test

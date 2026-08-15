@@ -463,12 +463,33 @@ pub trait Host {
 
     // ---- being asked to stop --------------------------------------------
 
-    /// Starts listening for the person at the terminal asking a loop to stop.
+    /// Starts listening for a loop being asked to stop — by the person at the
+    /// terminal, or by the service manager running it.
     ///
     /// `perch watch` calls this and nothing else does: every other command is
     /// over long before anybody could ask, and Ctrl-C during one of them is a
     /// process killed where it stands (ADR 0013).
+    ///
+    /// Both askings are the same request and are answered in the same place.
+    /// Ctrl-C is the person's; `SIGTERM` is what systemd and launchd send to
+    /// stop a Service, and a loop that did not claim it would be killed mid
+    /// Switch (ADR 0040).
     fn listen_for_interrupts(&self);
+
+    /// Which user this process is running as, or `None` where the platform has
+    /// no such number.
+    ///
+    /// Two things need it, and both belong to `perch service` (ADR 0040). It is
+    /// what the root refusal is read off — every Profile Perch holds is under
+    /// one person's home directory, so a Service installed by root is one
+    /// watching a registry it does not own, and on macOS one with no unlocked
+    /// keychain to read (ADR 0008). And it names the domain a LaunchAgent is
+    /// bootstrapped into: `gui/<uid>` is the logged-in session, which is the
+    /// only place a Service belongs.
+    ///
+    /// `None` on Windows, where a logon task is registered against a named user
+    /// and there is neither a uid to quote nor a root to refuse.
+    fn user_id(&self) -> Option<u32>;
 
     /// Waits up to `millis`, and stops waiting the moment that has been asked
     /// for.

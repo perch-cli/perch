@@ -14,6 +14,7 @@ pub mod purge;
 pub mod relogin;
 pub mod remove;
 pub mod run;
+pub mod service;
 pub mod status;
 pub mod switch;
 pub mod tui;

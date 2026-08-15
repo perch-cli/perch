@@ -965,19 +965,32 @@ fn an_account_in_no_group_is_not_watched_however_freely_it_may_be_cycled() {
         .0
         .expect("ungrouped Accounts are interchangeable");
 
-    let (result, _) = run_watch(&host);
+    let (result, printed) = run_watch(&host);
 
-    let refusal = result.expect_err("there is nothing here it may act on");
-    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    // The loop holds rather than stopping (ADR 0040): a supervisor respawns a
+    // deliberate exit until it gives up on the unit, and launchd cannot be told
+    // that some exits are fine. What the grant governs is untouched — a holding
+    // watcher reads nothing and moves nothing — and the moment somebody grants
+    // it, the Service that was already running takes over.
+    result.expect("a machine that is not arranged for watching is held, not failed");
     assert!(
-        refusal
-            .to_string()
-            .contains("perch config set ungrouped watcher-may-act true"),
-        "the Scope is addressed the way every other one is: {refusal}"
+        printed.contains("held")
+            && printed.contains("perch config set ungrouped watcher-may-act true"),
+        "it says what is missing, addressing the Scope the way every other one \
+         is addressed: {printed}"
     );
     assert!(
         host.sent_to(USAGE_URL).is_empty(),
-        "and it exits rather than idling forever having decided nothing"
+        "and it holds without reading anything: the question it is held by is \
+         asked of the registry, not of Anthropic"
+    );
+
+    // A Check has no process left to hold with, and a scheduler has to be told.
+    // ADR 0013 promised it `14`, and ADR 0040 repealed only the loop's exits.
+    let (once, _) = run_watch_once(&host);
+    assert_eq!(
+        once.expect_err("a Check still refuses").exit_code(),
+        EXIT_INVALID
     );
 }
 
@@ -1002,21 +1015,27 @@ fn a_watcher_turned_on_at_global_leaves_ungrouped_accounts_alone() {
         .0
         .expect("a statement about the Groups this person runs");
 
-    let (result, _) = run_watch(&host);
+    let (result, printed) = run_watch(&host);
 
-    let refusal = result.expect_err("that yes was not about these Accounts");
-    assert_eq!(refusal.exit_code(), EXIT_NOT_INTERCHANGEABLE);
+    result.expect("held rather than failed (ADR 0040)");
     assert!(
-        refusal.to_string().contains("cycle-ungrouped"),
-        "the declaration that is still missing is named: {refusal}"
+        printed.contains("cycle-ungrouped"),
+        "the declaration that is still missing is named: {printed}"
     );
     assert_eq!(
         registry_of(&host).active.as_deref(),
         Some(EMAIL),
         "and nothing moved underneath them, at 99% used with an empty Account \
-         beside it (ADR 0017)"
+         beside it (ADR 0017) — which is the whole of what the grant protects, \
+         and is exactly as true of a watcher that holds as of one that exits"
     );
     assert!(host.sent_to(USAGE_URL).is_empty());
+
+    let (once, _) = run_watch_once(&host);
+    assert_eq!(
+        once.expect_err("a Check still refuses").exit_code(),
+        EXIT_NOT_INTERCHANGEABLE
+    );
 }
 
 /// With both declarations made, the Ungrouped Scope is watched like any other —
@@ -1056,21 +1075,26 @@ fn a_group_that_has_not_said_the_watcher_may_act_is_not_watched() {
         .0
         .expect("the Group takes the permission back");
 
-    let (result, _) = run_watch(&host);
+    let (result, printed) = run_watch(&host);
 
-    let refusal = result.expect_err("nothing may be acted on");
-    assert_eq!(refusal.exit_code(), EXIT_INVALID);
-    assert!(refusal.to_string().contains("watcher-may-act"), "{refusal}");
+    result.expect("held rather than failed (ADR 0040)");
+    assert!(printed.contains("watcher-may-act"), "{printed}");
     assert!(host.sent_to(USAGE_URL).is_empty(), "and nothing was read");
+
+    let (once, _) = run_watch_once(&host);
+    assert_eq!(
+        once.expect_err("a Check still refuses").exit_code(),
+        EXIT_INVALID
+    );
 }
 
 /// Permission is asked for every round rather than only at the first, because
 /// it can stop being given while the loop is sleeping: a `perch switch` typed
 /// in another terminal can leave an ungrouped Account active, and a watcher
 /// still watching it would be watching an Account nothing carries permission to
-/// act on. It stops on the message it would have refused to start on.
+/// act on. It holds on the message it would have held at the start (ADR 0040).
 #[test]
-fn a_switch_onto_an_ungrouped_account_stops_the_loop_that_was_already_running() {
+fn a_switch_onto_an_ungrouped_account_holds_the_loop_that_was_already_running() {
     let host = watching(&[40.0, 45.0], 5.0).once_while_waiting(|host| {
         move_to_group(host, SECOND_EMAIL, "none")
             .0
@@ -1082,30 +1106,28 @@ fn a_switch_onto_an_ungrouped_account_stops_the_loop_that_was_already_running() 
 
     let (result, printed) = run_watch(&host);
 
-    let refusal = result.expect_err("the Group that said it may act is gone");
-    assert_eq!(refusal.exit_code(), EXIT_NOT_INTERCHANGEABLE);
-    assert!(
-        refusal.to_string().contains("perch group move"),
-        "{refusal}"
-    );
-    assert!(refusal.to_string().contains("watcher-may-act"), "{refusal}");
+    result.expect("the grant is gone, so the loop holds rather than failing");
+    assert!(printed.contains("perch group move"), "{printed}");
+    assert!(printed.contains("watcher-may-act"), "{printed}");
     assert_eq!(
         decisions(&printed).len(),
-        1,
-        "the round before it, and no round after: {printed}"
+        2,
+        "the round before it, and the held round that says the grant is gone: \
+         {printed}"
     );
     assert_eq!(
         asked_by(&host),
         vec![ACTIVE_TOKEN.to_string()],
-        "and it stopped before spending a read on a decision it may not take"
+        "and it read nothing for the round it may not decide: a withdrawn grant \
+         is a question for the registry, and holding costs no allowance"
     );
 }
 
 /// The other grant, withdrawn the same way: a Group can be told the watcher may
 /// no longer act on it while a watcher is acting on it, and permission taken
-/// back is a loop to be stopped rather than one to be left running.
+/// back is a loop to be held rather than one to be left deciding.
 #[test]
-fn a_group_that_takes_the_permission_back_stops_the_watcher_it_had_given_it() {
+fn a_group_that_takes_the_permission_back_holds_the_watcher_it_had_given_it() {
     let host = watching(&[40.0, 45.0], 5.0).once_while_waiting(|host| {
         config_set(host, &["work", "watcher-may-act", "false"])
             .0
@@ -1114,18 +1136,18 @@ fn a_group_that_takes_the_permission_back_stops_the_watcher_it_had_given_it() {
 
     let (result, printed) = run_watch(&host);
 
-    let refusal = result.expect_err("nothing may be acted on any more");
-    assert_eq!(refusal.exit_code(), EXIT_INVALID);
-    assert!(refusal.to_string().contains("watcher-may-act"), "{refusal}");
+    result.expect("nothing may be acted on any more, so the loop holds");
+    assert!(printed.contains("watcher-may-act"), "{printed}");
     assert_eq!(
         decisions(&printed).len(),
-        1,
-        "the round before it, and no round after: {printed}"
+        2,
+        "the round before it, and the held round that says the grant is gone: \
+         {printed}"
     );
     assert_eq!(
         asked_by(&host),
         vec![ACTIVE_TOKEN.to_string()],
-        "and it stopped before spending a read on a decision it may not take"
+        "and it read nothing for the round it may not decide"
     );
 }
 

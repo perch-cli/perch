@@ -116,8 +116,14 @@ Account you are on has to be used before it moves you;
 `watcher-margin-percent` is how far under that a candidate has to sit to be
 worth moving to; `watcher-cooldown-minutes` is the least it will leave between
 two Switches; and `watcher-no-return` keeps the Account it just left off the
-candidate list for one cooldown. None of them switches anything on: they take
-effect while the loop is running in a terminal, and not otherwise.
+candidate list for one cooldown. None of them starts a Watcher: they take effect
+while one is running — the loop in a terminal, a Service, or a scheduled Check —
+and not otherwise.
+
+Taking `watcher-may-act` back does not stop a Watcher that is already running.
+It **holds** it: it reads nothing and moves nothing, says what is missing, and
+starts deciding again the moment the grant comes back (ADR 0040). The grant is
+about whether it may *act*, and a held Watcher is not acting.
 
 How often it reads is deliberately *not* configurable. Two and a half minutes
 is derived from Anthropic's allowance of ~28-30 reads an hour rather than from
