@@ -588,3 +588,37 @@ fn a_link_at_a_held_back_name_is_taken_away_even_though_its_target_is_there() {
         entries_of(&host)
     );
 }
+
+/// A link that will not *go* is a different problem from a link that cannot be
+/// *made*, and it used to be reported with the other one's remedy.
+///
+/// What refuses a `remove_link` is the directory holding it — a Profile left
+/// root-owned by a `sudo claude` is how that happens — and Developer Mode has
+/// nothing to say about it. `refused` states the rule this breaks: "A refusal
+/// that named the wrong one would be worse than one that named none."
+#[test]
+fn a_link_that_cannot_be_taken_away_names_the_directory_rather_than_developer_mode() {
+    let stale = profile("plugins");
+    let host = machine()
+        .with_link(
+            Link::Symbolic,
+            "/Users/someone/.config/perch/profiles/somebody-else/plugins",
+            &stale,
+        )
+        .with_undeletable_file(&stale, "Permission denied (os error 13)");
+
+    let said = run_reconcile(&host)
+        .expect_err("the stale link cannot be replaced")
+        .to_string();
+
+    assert!(said.contains("could not be replaced"), "{said}");
+    assert!(
+        !said.contains("Developer Mode") && !said.contains("filesystem that carries no links"),
+        "making a link is not what failed, so it is not what the repair is \
+         about: {said}"
+    );
+    assert!(
+        said.contains("the directory holding it"),
+        "what actually refused is named: {said}"
+    );
+}
