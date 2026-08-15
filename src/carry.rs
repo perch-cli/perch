@@ -102,6 +102,24 @@ pub fn carry(
     if patched == mine {
         return;
     }
+    // What crossed was spans of text, taken from a file nothing has parsed.
+    // `json::value_at` finds a bare token by running to the `,` or the brace
+    // that ends it, and a source truncated mid-token — a client killed on its
+    // way out, a disk that filled — has no such byte to stop at, so the span it
+    // hands back is `tru` and the splice writes that. The result is a
+    // `.claude.json` that is not JSON, and it is the file holding
+    // `oauthAccount`: every later read of this Profile's Identity fails on it,
+    // while `patch_oauth_account` goes on writing into it because it never
+    // parses either.
+    //
+    // Asked of the result rather than of the source, because the result is what
+    // gets written and a source can be ill-formed in ways that splice cleanly.
+    // Doing nothing is the ordinary outcome here, so this is a quiet skip like
+    // every other reason not to write: nothing carried costs a dialog, and a
+    // broken file costs the Account.
+    if serde_json::from_str::<serde_json::Value>(&patched).is_err() {
+        return;
+    }
     // Said rather than swallowed, and said rather than raised. Somebody whose
     // Profile cannot be written will meet the onboarding questions again on
     // every Run, and a remark naming the file is what turns that from a mystery
