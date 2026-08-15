@@ -85,6 +85,26 @@ fn read_the_file(host: &dyn Host, path: &Path) -> Result<String> {
             "There is no file at {}, so there is nothing to import.",
             path.display(),
         ))),
+        // An Export is `age`'s *armored* form — its text encoding — which is
+        // what lets it go through the Host port's ordinary private write. So
+        // the read is a read of text, and a binary `age` file fails UTF-8
+        // decoding here, before `unseal` ever sees it and before any of the
+        // four refusals it distinguishes can speak.
+        //
+        // Worth naming rather than passing through as "stream did not contain
+        // valid UTF-8", because the person who reaches it is somebody who took
+        // their own backup with plain `age -p` — the binary default — and is
+        // reading this on the day the machine it would have restored is gone.
+        Err(HostError::Io(err)) if err.kind() == std::io::ErrorKind::InvalidData => {
+            Err(PerchError::Invalid(format!(
+                "{} is not text, so it is not an Export. An Export is `age`'s \
+                 armored form, which is what `perch export` writes and what \
+                 `age -a -p` writes.\n\
+                 A binary `age` file can be turned into one: `age -d <file> | \
+                 age -a -p > <armored>`.",
+                path.display(),
+            )))
+        }
         Err(err) => Err(PerchError::file_read(path.to_path_buf(), err)),
     }
 }

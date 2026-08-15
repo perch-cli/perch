@@ -168,6 +168,8 @@ pub struct FakeHost {
     modes: RefCell<BTreeMap<PathBuf, u32>>,
     notes: RefCell<Vec<String>>,
     unreadable: RefCell<BTreeMap<PathBuf, String>>,
+    /// Paths whose bytes are not text, which the fake cannot hold as one.
+    not_text: RefCell<BTreeSet<PathBuf>>,
     unwritable: RefCell<BTreeMap<PathBuf, String>>,
     /// Paths that will not give up what they hold. Distinct from an unwritable
     /// one: a store that refuses a write is routinely one a superseded copy can
@@ -284,6 +286,7 @@ impl FakeHost {
             modes: RefCell::new(BTreeMap::new()),
             notes: RefCell::new(Vec::new()),
             unreadable: RefCell::new(BTreeMap::new()),
+            not_text: RefCell::new(BTreeSet::new()),
             unwritable: RefCell::new(BTreeMap::new()),
             undeletable: RefCell::new(BTreeMap::new()),
             dirs: RefCell::new(BTreeSet::new()),
@@ -434,6 +437,21 @@ impl FakeHost {
 
     /// A path that cannot be written to, so a test can fail one step of a
     /// multi-step write and see what is left behind.
+    /// A file whose bytes are not text — the answer `read_to_string` gives for
+    /// anything binary, which is what a plain `age -p` file is.
+    ///
+    /// Held as a flag rather than as contents because the fake keeps files as
+    /// `String`, so the state cannot be spelled any other way.
+    pub fn with_a_file_that_is_not_text(self, path: impl AsRef<Path>) -> Self {
+        self.files
+            .borrow_mut()
+            .insert(path.as_ref().to_path_buf(), String::new());
+        self.not_text
+            .borrow_mut()
+            .insert(path.as_ref().to_path_buf());
+        self
+    }
+
     pub fn with_unwritable_file(self, path: impl AsRef<Path>, detail: &str) -> Self {
         self.unwritable
             .borrow_mut()
@@ -1141,6 +1159,15 @@ impl Host for FakeHost {
     fn read_file(&self, path: &Path) -> Result<String, HostError> {
         self.record(Effect::ReadFile(path.to_path_buf()));
         let at = self.through_links(path)?;
+        // The real read is `read_to_string`, so bytes that are not UTF-8 come
+        // back as `InvalidData` rather than as contents. The fake holds files
+        // as `String` and could not otherwise reach that answer at all.
+        if self.not_text.borrow().contains(&at) {
+            return Err(HostError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "stream did not contain valid UTF-8",
+            )));
+        }
         self.files
             .borrow()
             .get(&at)
