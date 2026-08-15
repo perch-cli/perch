@@ -62,7 +62,14 @@ gh attestation verify perch-v0.1.0-aarch64-apple-darwin.tar.gz --repo perch-cli/
 ```
 
 Both installers check the checksum, and check the provenance too when `gh` is
-installed and logged in — and refuse to install if that check fails.
+installed and logged in — and refuse to install if that check fails. Where `gh`
+is not there, they say so rather than passing over it quietly, so the line you
+read tells you which checks were actually made:
+
+```
+perch: checksum ok
+perch: provenance not checked — that needs 'gh' installed and logged in. The checksum above is the strongest check made.
+```
 
 ## Upgrading
 
