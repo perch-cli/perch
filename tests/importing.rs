@@ -376,6 +376,40 @@ fn a_file_that_is_not_an_export_is_refused_as_one_rather_than_as_a_bad_passphras
     assert_eq!(registry_on(&host), None);
 }
 
+/// A binary `age` file is refused as the encoding it is, not as a byte stream
+/// that would not decode.
+///
+/// An Export is `age`'s *armored* form — its text encoding — which is what lets
+/// it go through the Host port's ordinary private write. So the read is a read
+/// of text, and plain `age -p` writes binary: the file failed UTF-8 decoding
+/// before `unseal` saw it, and came back as "stream did not contain valid
+/// UTF-8". The person who meets that is somebody who took their own backup with
+/// `age -p`, reading it on the day the machine it would have restored is gone.
+#[test]
+fn a_binary_age_file_is_refused_as_one_that_has_to_be_armored() {
+    let host = machine_with_claude_code()
+        .with_a_file_that_is_not_text(AT)
+        .with_secrets(&[PASSPHRASE]);
+
+    let (outcome, _printed) = run_import(&host, AT);
+
+    let refused = outcome.expect_err("an Export is the armored form");
+    let said = refused.to_string();
+    assert!(
+        !said.contains("UTF-8"),
+        "the encoding of the bytes is not what the reader did wrong: {said}"
+    );
+    assert!(
+        said.contains("armored"),
+        "what an Export is, is said: {said}"
+    );
+    assert!(
+        said.contains("age -a -p"),
+        "and so is the way to make one from what they have: {said}"
+    );
+    assert_eq!(registry_on(&host), None);
+}
+
 /// An Import that fails part way leaves nothing behind: a machine holding some
 /// of an Export is the partial restore the file exists to prevent, wearing an
 /// accident's clothes.

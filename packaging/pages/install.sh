@@ -125,12 +125,20 @@ say "checksum ok"
 # network is up and the token works — a verification that fails from here is
 # saying something about the file, and an installer that shrugs at that is
 # doing the check for decoration.
+#
+# And said either way. On most machines `gh` is absent, so the strongest check
+# available is the one that does not happen — and a check that is skipped in
+# silence reads exactly like a check that passed. ADR 0039: "A silently skipped
+# provenance check is the single thing a tool built around being careful with
+# Credentials should not do quietly."
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
     if gh attestation verify "$tmp/$archive" --repo "$REPO" >/dev/null 2>&1; then
         say "provenance ok — built by $REPO"
     else
         die "provenance check failed for $archive. It does not appear to have been built by $REPO. Not installing."
     fi
+else
+    say "provenance not checked — that needs 'gh' installed and logged in. The checksum above is the strongest check made."
 fi
 
 # -------------------------------------------------------------------- install

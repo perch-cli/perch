@@ -229,13 +229,33 @@ pub fn version_typed(typed: &str) -> Result<String> {
         let numeric = |part: Option<&str>| {
             part.is_some_and(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
         };
-        // The third part carries any pre-release suffix — `0.2.0-rc.1` — so it
-        // is only required to *start* with digits.
+        // The third part carries any pre-release or build suffix —
+        // `0.2.0-rc.1`, `0.2.0+build.3` — so it is digits followed by an
+        // optional suffix rather than digits alone.
+        //
+        // The suffix is spelled out rather than left unchecked. Requiring only
+        // that the part *start* with a digit accepted every byte after the
+        // first: `0.2.0/../../whatever` and `0.2.0 && x` both passed, went into
+        // `PERCH_VERSION`, and came back from the installer as the
+        // 404-about-an-archive this function exists to turn into a sentence
+        // about the thing that is actually wrong.
         let major = numeric(parts.next());
         let minor = numeric(parts.next());
-        let patch = parts
-            .next()
-            .is_some_and(|part| part.chars().next().is_some_and(|c| c.is_ascii_digit()));
+        let patch = parts.next().is_some_and(|part| {
+            let (digits, suffix) = match part.find(['-', '+']) {
+                Some(at) => (&part[..at], Some(&part[at + 1..])),
+                None => (part, None),
+            };
+            let semver_ish = |part: &str| {
+                !part.is_empty()
+                    && part
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+            };
+            !digits.is_empty()
+                && digits.chars().all(|c| c.is_ascii_digit())
+                && suffix.is_none_or(semver_ish)
+        });
         major && minor && patch
     };
 
@@ -630,6 +650,10 @@ mod tests {
         assert_eq!(version_typed("0.2.0").expect("bare"), "0.2.0");
         assert_eq!(version_typed("v0.2.0").expect("tagged"), "0.2.0");
         assert_eq!(version_typed("v0.2.0-rc.1").expect("pre"), "0.2.0-rc.1");
+        assert_eq!(
+            version_typed("0.2.0+build.3").expect("build"),
+            "0.2.0+build.3"
+        );
         assert_eq!(tag_of("0.2.0"), "v0.2.0");
     }
 
@@ -637,7 +661,25 @@ mod tests {
     /// about an archive nobody asked for by name.
     #[test]
     fn something_that_is_not_a_release_is_refused_before_the_network() {
-        for typed in ["latest", "newest", "0.2", "v", "", "banana", "0.x.0"] {
+        for typed in [
+            "latest",
+            "newest",
+            "0.2",
+            "v",
+            "",
+            "banana",
+            "0.x.0",
+            // Everything after the first digit of the patch component used to
+            // go unread, so all of these were accepted, put into
+            // `PERCH_VERSION` and handed to the installer — which built an
+            // archive name and a download URL out of them and came back with
+            // the 404 this refusal exists to replace.
+            "0.2.0/../../whatever",
+            "0.2.0 && echo",
+            "0.2.0\nv0.3.0",
+            "0.2.0;rm",
+            "0.2.0 ",
+        ] {
             let refused = version_typed(typed).expect_err("{typed} is not a Release");
             assert!(
                 matches!(refused, PerchError::Invalid(_)),

@@ -453,6 +453,41 @@ fn an_unknown_global_key_is_refused_and_names_the_ones_that_belong_to_no_group()
     );
 }
 
+/// The word somebody types when they mean Global, on all three of the forms
+/// that take a Scope. Left to fall through it was answered with "No Group
+/// called `global` … Declare it with `perch group add global`" — advice that
+/// turns every later `perch config set global …` into a Group Override while
+/// Global stays exactly as it was.
+#[test]
+fn naming_global_as_a_scope_says_how_global_is_addressed_rather_than_offering_a_group() {
+    let host = three_accounts_in_one_group();
+
+    for words in [
+        vec!["global", "strategy", "soonest-reset"],
+        vec!["Global", "watcher-may-act", "true"],
+    ] {
+        let (result, _) = config_set(&host, &words);
+
+        let error = result.expect_err("Global is not addressed by naming it");
+        let message = error.to_string();
+        assert!(
+            !message.contains("perch group add"),
+            "declaring a Group by that name is the one repair that makes this \
+             worse: {message}"
+        );
+        assert!(
+            message.contains("perch config set <key> <value>"),
+            "the form that does set Global is named: {message}"
+        );
+    }
+
+    assert_eq!(
+        registry_of(&host).global.settings.strategy,
+        Strategy::MostHeadroom,
+        "and nothing was written"
+    );
+}
+
 #[test]
 fn an_invalid_value_is_refused_and_names_the_valid_ones() {
     let host = three_accounts_in_one_group();

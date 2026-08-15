@@ -498,6 +498,39 @@ fn an_entry_that_contains_the_profile_is_not_linked_into_it_however_deep_it_is()
     );
 }
 
+/// And the same refusal where the containment is only true after a link is
+/// followed, which is the route the textual comparison could not see.
+///
+/// A `~/.claude/perch` that is a *link* to `~/.config/perch` is two different
+/// strings from the Profile under `~/.config/perch`, so `starts_with` waved it
+/// through — and what got made was `<profile>/perch -> ~/.claude/perch ->
+/// ~/.config/perch`, whose subtree holds the Profile the link sits in. The
+/// sweep then keeps it, because the path it points at does resolve to something
+/// that exists. One hop is all a dotfile manager makes, and all it takes.
+#[test]
+fn an_entry_that_only_holds_the_profile_once_its_link_is_followed_is_not_linked_either() {
+    let host = machine()
+        .with_file("/Users/someone/.config/perch/registry.json", "{}")
+        .with_link(
+            Link::Symbolic,
+            "/Users/someone/.config/perch",
+            shared("perch"),
+        );
+
+    reconcile(&host, Path::new(SHARED), Path::new(PROFILE)).expect("everything else crosses");
+
+    assert_eq!(
+        host.link_at(profile("perch")),
+        None,
+        "following it lands above the Profile, so the link would hold what made it"
+    );
+    assert_eq!(
+        host.link_at(profile("CLAUDE.md")),
+        Some((Link::Symbolic, PathBuf::from(shared("CLAUDE.md")))),
+        "and the entries that are nothing to do with it still cross"
+    );
+}
+
 /// The Default Profile already holds all of it, and a directory linked into
 /// itself is a shape nothing recovers from.
 #[test]
@@ -553,5 +586,39 @@ fn a_link_at_a_held_back_name_is_taken_away_even_though_its_target_is_there() {
             .any(|entry| entry == ".credentials.json"),
         "{:?}",
         entries_of(&host)
+    );
+}
+
+/// A link that will not *go* is a different problem from a link that cannot be
+/// *made*, and it used to be reported with the other one's remedy.
+///
+/// What refuses a `remove_link` is the directory holding it — a Profile left
+/// root-owned by a `sudo claude` is how that happens — and Developer Mode has
+/// nothing to say about it. `refused` states the rule this breaks: "A refusal
+/// that named the wrong one would be worse than one that named none."
+#[test]
+fn a_link_that_cannot_be_taken_away_names_the_directory_rather_than_developer_mode() {
+    let stale = profile("plugins");
+    let host = machine()
+        .with_link(
+            Link::Symbolic,
+            "/Users/someone/.config/perch/profiles/somebody-else/plugins",
+            &stale,
+        )
+        .with_undeletable_file(&stale, "Permission denied (os error 13)");
+
+    let said = run_reconcile(&host)
+        .expect_err("the stale link cannot be replaced")
+        .to_string();
+
+    assert!(said.contains("could not be replaced"), "{said}");
+    assert!(
+        !said.contains("Developer Mode") && !said.contains("filesystem that carries no links"),
+        "making a link is not what failed, so it is not what the repair is \
+         about: {said}"
+    );
+    assert!(
+        said.contains("the directory holding it"),
+        "what actually refused is named: {said}"
     );
 }

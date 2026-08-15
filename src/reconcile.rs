@@ -22,7 +22,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::{PerchError, Result};
-use crate::host::{Host, HostError, Link, Platform};
+use crate::host::{self, Host, HostError, Link, Platform};
 use crate::{probe, profile};
 
 /// The entries that stay behind, for the two different reasons there are to
@@ -47,10 +47,11 @@ use crate::{probe, profile};
 /// Default Profile's; the Switch then finished and removed the real directory,
 /// leaving a link to nothing. `mkdir` at a dangling link fails exactly as it
 /// does when the lock is held, so that Profile's client waits on a lock nobody
-/// holds — and `clear_the_abandoned` will not clear it either, because
-/// `remove_dir_all` on a symlink is not a lock directory being cleared. Live
-/// rather than dangling is worse: two configuration directories sharing one
-/// lock, each reading the other's mtime as its own.
+/// holds — until `clear_the_abandoned` takes the link away, which it can,
+/// because a dangling link has no modification time to read as a hold. Live
+/// rather than dangling is worse, and is the case with no way out: two
+/// configuration directories sharing one lock, each reading the other's mtime
+/// as its own.
 ///
 /// So the denylist ADR 0026 wrote as two entries is four, and the last two are
 /// one rule — an entry that answers a question about *this* directory means
@@ -93,7 +94,16 @@ pub fn reconcile(host: &dyn Host, shared: &Path, into: &Path) -> Result<()> {
         // below it. Compared for equality the two are different paths, so the
         // link was made — and its subtree held the Profile it was made in, so
         // every walk through that Profile afterwards recurses without bottom.
-        let Some(name) = entry.file_name().filter(|_| !into.starts_with(&entry)) else {
+        // And anything that *resolves* to somewhere containing the Profile, not
+        // only anything spelled that way. A `~/.claude/perch` that is a link to
+        // `~/.config/perch` passes the textual test — the two are different
+        // strings — and linking it into a Profile under `~/.config/perch` makes
+        // the same bottomless subtree by a route the comparison could not see.
+        // One hop is what a dotfile manager makes, and what `through_any_link`
+        // already resolves for the other reader of somebody else's links.
+        let holds_the_profile =
+            into.starts_with(&entry) || into.starts_with(host::through_any_link(host, &entry));
+        let Some(name) = entry.file_name().filter(|_| !holds_the_profile) else {
             continue;
         };
         establish(host, &entry, &into.join(name))?;
@@ -262,15 +272,26 @@ fn make(host: &dyn Host, target: &Path, at: &Path) -> Result<()> {
 /// Takes a link away, and reports a failure the way an unmakeable link is
 /// reported: either way the entry is not reachable and the Run is not
 /// happening.
+///
+/// The remedy is its own, though, and not `no_link_here`. A link that will not
+/// *go* is nothing to do with whether this machine can make one — it is the
+/// permissions on the directory holding it, which is what a `sudo claude` that
+/// left a Profile root-owned produces. Advising Developer Mode there is the
+/// wrong-remedy case `refused` says would be worse than naming none.
 fn unlink(host: &dyn Host, at: &Path) -> Result<()> {
     host.remove_link(at).map_err(|err| {
         refused(
             at,
             &format!("the link that shares it could not be replaced ({err})"),
-            no_link_here(host),
+            WILL_NOT_GO,
         )
     })
 }
+
+/// What to do about a link that will not go: the directory it sits in is the
+/// thing refusing, and its permissions are the user's.
+const WILL_NOT_GO: &str = "That link is Perch's own and is being replaced, so what refused is the directory holding \
+     it — check that you own it and can write to it.";
 
 /// Clears away links into the Default Profile that no longer stand for
 /// anything.

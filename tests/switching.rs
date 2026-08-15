@@ -2015,3 +2015,63 @@ fn a_keychain_dialog_somebody_walked_away_from_does_not_cost_perch_its_registry_
          time(s)\n{printed}"
     );
 }
+
+/// Two addresses that differ only in characters a Profile directory does not
+/// keep apart derive one Profile, one Credential Store, and one Credential
+/// between them. `perch add` refuses to make that state and `perch remove`
+/// degrades rather than deleting into it; a Switch had no guard at all.
+///
+/// What it would have done is the one disagreement ADR 0006 exists to keep
+/// impossible: read the shared store, write whichever Credential is in it to
+/// the Default Profile, and then patch the Identity of the *other* Account over
+/// it. The machine acts as one Account, Claude Code displays the other, the
+/// registry records the other, and nothing afterwards can tell which of the two
+/// the live Credential belongs to.
+#[test]
+fn a_switch_onto_an_account_that_shares_a_profile_is_refused() {
+    let host = logged_in_machine();
+    run_list(&host, false)
+        .0
+        .expect("the first command adopts the login there already is");
+    let mut registry = registry_of(&host);
+    for email in ["some-one@example.com", "some.one@example.com"] {
+        registry.upsert(perch::registry::Account {
+            identity: probe::Identity {
+                email: email.to_string(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            enabled: true,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        });
+    }
+    common::save_registry(&host, &registry);
+    let store = store_of(&host, "some-one@example.com");
+    host.set_keychain_item(&store.keychain_service, &store.keychain_account, CREDENTIAL);
+    host.forget_effects();
+
+    let (result, printed) = run_switch(&host, "some.one@example.com");
+
+    let error = result.expect_err("that Profile is not this Account's alone");
+    assert_eq!(error.exit_code(), EXIT_CONFLICT, "{error}");
+    let said = error.to_string();
+    assert!(
+        said.contains("some.one@example.com") && said.contains("some-one@example.com"),
+        "both Accounts are named, because which two collided is the whole of \
+         what a person needs to act: {said}"
+    );
+    assert_eq!(
+        registry_of(&host).active.as_deref(),
+        Some(EMAIL),
+        "and the machine is exactly as it was: {printed}"
+    );
+    assert_eq!(
+        host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
+        Some(CREDENTIAL),
+        "with the live Credential untouched"
+    );
+}

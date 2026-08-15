@@ -476,6 +476,20 @@ fn addressed(registry: &Registry, name: &str) -> Result<Scope> {
     if registry::means_ungrouped(name) {
         return Ok(Scope::Ungrouped);
     }
+    // The one word that has to be answered here rather than left to fall
+    // through. `global` is what somebody types when they mean Global, and
+    // `no_such_group` would answer it with "Declare it with `perch group add
+    // global`" — advice the registry now refuses, and which would have been
+    // worse if it had not: a Group by that name takes every later `perch config
+    // set global …` as an Override and leaves Global untouched.
+    if registry::means_global(name) {
+        return Err(PerchError::NotFound(format!(
+            "Global is addressed by naming no Scope at all, so there is no \
+             `{name}` to name: `perch config set <key> <value>` sets its \
+             default, and `perch config get` prints it. A Scope is a Group by \
+             name, or `{UNGROUPED}` for the Accounts in no Group."
+        )));
+    }
     match registry.declared_group(name) {
         Some(declared) => Ok(Scope::Group(declared.to_string())),
         None => Err(group::no_such_group(registry, name)),
@@ -508,7 +522,8 @@ fn neither_a_key_nor_a_scope(registry: &Registry, word: &str) -> PerchError {
     };
     PerchError::NotFound(format!(
         "`{word}` is neither a Setting nor a Scope Perch holds. Settings: {}. \
-         `{UNGROUPED}` addresses the Accounts in no Group. {held}",
+         `{UNGROUPED}` addresses the Accounts in no Group, and Global is \
+         addressed by naming no Scope at all. {held}",
         Key::vocabulary(),
     ))
 }

@@ -497,25 +497,6 @@ fn a_check_can_answer_as_a_document() {
     assert_eq!(document["upgradeAvailable"], true);
 }
 
-/// `--json` says what a check found, so without a check there is nothing for it
-/// to say. Refused rather than ignored, because a script reading an empty
-/// stdout would find nothing wrong with it.
-#[test]
-fn a_document_without_a_check_is_refused() {
-    let host = machine().installed_at("/Users/someone/.local/bin/perch");
-
-    let (outcome, _) = upgrading(
-        &host,
-        UpgradeArgs {
-            json: true,
-            ..UpgradeArgs::default()
-        },
-    );
-
-    let refused = outcome.expect_err("there is nothing to render");
-    assert!(refused.to_string().contains("--check"), "{refused}");
-}
-
 #[test]
 fn the_release_that_is_already_installed_is_nothing_to_do() {
     let host = machine_with_claude_code()

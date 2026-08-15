@@ -89,6 +89,10 @@ try {
     # The same bargain as install.sh: attempted only when `gh` is installed and
     # logged in, and then binding rather than advisory. The download already
     # succeeded, so a failure from here is saying something about the file.
+    # Said either way, for the reason install.sh gives at the same place: a
+    # check skipped in silence reads like a check that passed, and on most
+    # machines this is the one that is skipped (ADR 0039).
+    $checked = $false
     $gh = Get-Command gh -ErrorAction SilentlyContinue
     if ($gh) {
         gh auth status *> $null
@@ -96,11 +100,15 @@ try {
             gh attestation verify (Join-Path $tmp $archive) --repo $Repo *> $null
             if ($LASTEXITCODE -eq 0) {
                 Say "provenance ok — built by $Repo"
+                $checked = $true
             }
             else {
                 Die "provenance check failed for $archive. It does not appear to have been built by $Repo. Not installing."
             }
         }
+    }
+    if (-not $checked) {
+        Say "provenance not checked — that needs 'gh' installed and logged in. The checksum above is the strongest check made."
     }
 
     # ---------------------------------------------------------------- install

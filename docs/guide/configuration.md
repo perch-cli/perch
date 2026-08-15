@@ -74,6 +74,13 @@ Group: a Group is a declaration somebody made, and this is the absence of one
 (ADR 0017). No Group can be called `ungrouped`, or the Scope would answer to the
 name first.
 
+**Global is addressed by naming no Scope at all** — `perch config set <key>
+<value>` — so there is no word for it to be typed as. `global` is refused as a
+Group name and as an Alias for that reason: it is the word people reach for when
+they mean Global, and a Group answering to it would take
+`perch config set global strategy soonest-reset` as an Override while Global
+stayed exactly as it was.
+
 `cycle-ungrouped` is Global's alone, because the Accounts it governs have no
 Group to carry it. It is also the one place the layering is deliberately not
 uniform: **`watcher-may-act` does not Inherit into the Ungrouped Scope.** It is

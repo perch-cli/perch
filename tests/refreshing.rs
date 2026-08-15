@@ -437,7 +437,11 @@ fn a_refresh_that_fails_for_one_account_still_reads_the_others() {
     let host = host
         .with_reply_to(PROFILE_URL, FRESH_TOKEN, 200, &profile_of(EMAIL))
         .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE)
-        .with_reply_to(PROFILE_URL, SECOND_TOKEN, 401, "");
+        // Turned away, so the Account is renewed and asked once more — and
+        // turned away again, which is where it runs out of things to try.
+        .with_reply_to(PROFILE_URL, SECOND_TOKEN, 401, "")
+        .with_reply(TOKEN_URL, 200, RENEWED)
+        .with_reply_to(PROFILE_URL, RENEWED_TOKEN, 401, "");
     host.forget_effects();
 
     let (result, printed) = run_status_group_refresh(&host, false);
@@ -448,10 +452,58 @@ fn a_refresh_that_fails_for_one_account_still_reads_the_others() {
         "the Account that could be read was read: {printed}"
     );
     assert!(
-        printed.contains(SECOND_EMAIL) && printed.contains("did not accept"),
+        printed.contains(SECOND_EMAIL) && printed.contains("would not accept"),
         "the Account that could not be read is named, with why: {printed}"
     );
     assert!(cached_windows(&host, SECOND_EMAIL).is_empty());
+    assert!(
+        !registry_of(&host)
+            .account(SECOND_EMAIL)
+            .expect("an Account Perch holds")
+            .quarantine
+            .is_some(),
+        "and a token Anthropic issued and then refused is not the Account's \
+         fault: the refresh token bought the renewal, so it is live"
+    );
+}
+
+/// A Credential that never says when it expires is one `usable_at` takes at its
+/// word for ever, so nothing ever concluded a Renewal was due — and a rejected
+/// access token was then a dead end that every later command met again.
+///
+/// Reachable rather than hypothetical: `anthropic::renew` yields no expiry for
+/// four different replies, and what is stored after one of those carries no
+/// `expiresAt` at all.
+#[test]
+fn a_credential_that_will_not_say_when_it_expires_is_renewed_once_anthropic_refuses_it() {
+    const NO_EXPIRY: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-undated","refreshToken":"sk-ant-ort01-undated","subscriptionType":"pro"}}"#;
+
+    let host = machine_with_two_accounts();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, NO_EXPIRY);
+    let host = host
+        .with_reply_to(PROFILE_URL, "sk-ant-oat01-undated", 401, "")
+        .with_reply(TOKEN_URL, 200, RENEWED)
+        .with_reply_to(PROFILE_URL, RENEWED_TOKEN, 200, &profile_of(EMAIL))
+        .with_reply_to(USAGE_URL, RENEWED_TOKEN, 200, USAGE);
+    host.forget_effects();
+
+    let (result, printed) = run_status_refresh(&host, false);
+
+    result.expect("the refusal is answered by a Renewal rather than by giving up");
+    let renewal = host.sent_to(TOKEN_URL);
+    assert_eq!(renewal.len(), 1, "renewed once, off the rejection alone");
+    assert!(
+        renewal[0]
+            .body
+            .as_ref()
+            .expect("a renewal is a POST")
+            .contains("sk-ant-ort01-undated"),
+        "with the refresh token it holds"
+    );
+    assert!(
+        printed.contains("42%"),
+        "and the figures are read: {printed}"
+    );
 }
 
 #[test]

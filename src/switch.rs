@@ -217,18 +217,22 @@ pub fn perform(
     outgoing: Option<&Account>,
     registry: &Registry,
 ) -> Landing {
+    // Nothing has been written and nothing can have moved, so either of these is
+    // a Landing that did not land — the same shape, so that the one way out is
+    // the same way out.
+    let failed = |error| Landing {
+        outcome: Err(error),
+        incoming: incoming.email().to_string(),
+        incoming_is_live: false,
+    };
+
+    if let Err(error) = refuse_a_shared_profile(incoming, registry) {
+        return failed(error);
+    }
+
     let store = match registry::the_default_profile(host) {
         Ok(ground) => ground,
-        // Nothing has been written and nothing can have moved, so this is a
-        // Landing that did not land — the same shape, so that the one way out
-        // is the same way out.
-        Err(error) => {
-            return Landing {
-                outcome: Err(error),
-                incoming: incoming.email().to_string(),
-                incoming_is_live: false,
-            };
-        }
+        Err(error) => return failed(error),
     };
 
     let mut incoming_is_live = false;
@@ -395,6 +399,41 @@ fn ground(host: &dyn Host) -> Result<(Installed, Store)> {
         Installed::probed(host)?,
         registry::the_default_profile(host)?,
     ))
+}
+
+/// Refuses a Switch onto an Account whose Profile is not its alone.
+///
+/// A Profile is `profiles/<slugged email>`, and the slug flattens every
+/// non-alphanumeric character — so `some-one@example.com` and
+/// `some.one@example.com` name one directory, one Credential Store, and one
+/// Credential between them. `perch add` refuses to make that state and `perch
+/// remove` degrades rather than deleting into it; this was the consumer with no
+/// guard at all.
+///
+/// What a Switch would do there is the one disagreement ADR 0006 exists to keep
+/// impossible. `prepare` reads the shared store and gets whichever Account's
+/// Credential is in it, `store_credential` writes *that* into the Default
+/// Profile, and `patch_identity` then writes the Identity of the Account that
+/// was asked for. The machine acts as one Account while Claude Code displays
+/// the other and the registry records the other, and nothing afterwards can
+/// tell which of the two the live Credential belongs to.
+fn refuse_a_shared_profile(incoming: &Account, registry: &Registry) -> Result<()> {
+    let Some(sharer) = registry.accounts.iter().find(|held| {
+        held.email() != incoming.email() && registry::same_profile(held.email(), incoming.email())
+    }) else {
+        return Ok(());
+    };
+    Err(PerchError::Conflict(format!(
+        "{} and {} share one Profile, so they share one Credential — their \
+         addresses differ only in characters a Profile directory does not keep \
+         apart.\n\
+         Switching would write whichever Credential that Profile holds and then \
+         name the other Account as the one it belongs to, and nothing could tell \
+         them apart afterwards. `perch remove` one of them, then `perch add` it \
+         again.",
+        incoming.email(),
+        sharer.email(),
+    )))
 }
 
 fn prepare(

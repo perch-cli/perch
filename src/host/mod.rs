@@ -608,7 +608,7 @@ pub fn write_atomically(host: &dyn Host, path: &Path, contents: &str) -> Result<
 /// stores a Credential, and following a link to decide where a *secret* lands
 /// is how a planted link redirects one. `.claude.json` is the user's own
 /// configuration and the link is theirs.
-fn through_any_link(host: &dyn Host, path: &Path) -> PathBuf {
+pub(crate) fn through_any_link(host: &dyn Host, path: &Path) -> PathBuf {
     let Ok(Some(target)) = host.link_target(path) else {
         return path.to_path_buf();
     };

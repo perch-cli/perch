@@ -49,7 +49,10 @@ pub fn run(host: &dyn Host, args: ExportArgs, out: &mut dyn Write) -> Result<()>
     refuse_an_occupied_path(host, &args.path)?;
 
     let (mut perch, registry) = adopt::ensure_adopted_exclusively(host)?;
-    write_the_export(host, &mut perch, &registry, &args.path, out)
+    // Nothing to hand back to: this command's own failure says where the file
+    // is, because the path is the argument the person typed.
+    let mut landed = None;
+    write_the_export(host, &mut perch, &registry, &args.path, &mut landed, out)
 }
 
 /// Everything an Export is, given a registry somebody else has read: the path
@@ -65,6 +68,7 @@ pub fn write_the_export(
     perch: &mut crate::lock::Held<'_>,
     registry: &Registry,
     path: &Path,
+    landed: &mut Option<PathBuf>,
     out: &mut dyn Write,
 ) -> Result<()> {
     refuse_a_directory_that_is_not_there(host, path)?;
@@ -99,6 +103,16 @@ pub fn write_the_export(
     still_ours(perch, "exported")?;
     host.write_private_file(path, &sealed)
         .map_err(|err| PerchError::file_write(path.to_path_buf(), err))?;
+
+    // Recorded the instant the bytes land, and before the one fallible thing
+    // left. `report` writes to the terminal, and a terminal that has gone away
+    // — a closed pty, a SIGHUP — fails it: the caller then saw an `Err` and
+    // concluded no Export had been written, while an armored file holding a
+    // working Credential for every Account sat at a path nothing had mentioned.
+    // The next `perch purge` offering that path then aborted before asking
+    // anything, because an Export refuses a path that is taken — which is the
+    // sequence `purge::still_standing` exists to close.
+    *landed = Some(path.to_path_buf());
 
     report(out, path, &export)
 }

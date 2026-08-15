@@ -193,6 +193,12 @@ fi" ;;
     # nothing.
     expect "installed to $install_dir/perch"
 
+    # The shim PATH deliberately has no `gh` on it, so every case here is also
+    # the skipped-provenance case — and ADR 0039 says the one check that did
+    # not happen is the one that most has to be said out loud. Silence here
+    # reads exactly like a check that passed.
+    expect "provenance not checked"
+
     # The Unix installer writes nothing but the install directory. Anything
     # else appearing under the fabricated home — a file or a directory — is the
     # whole decision undone, so this looks at both rather than at files alone.

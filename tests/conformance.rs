@@ -162,6 +162,53 @@ const CASES: &[Case] = &[
             );
         },
     },
+    // Both of these are about a lock artifact that is a dangling link, which is
+    // the state `reconcile`'s denylist exists to keep Perch out of and
+    // `lock::clear_the_abandoned` has to be able to meet anyway. The fake used
+    // to answer the opposite way on both — a modification time where the
+    // machine says `NotFound`, and `ENOTDIR` where the machine removes the link
+    // — so it modelled Perch as permanently wedged on a path the machine
+    // recovers from on the next command, and the recovery had never run.
+    Case {
+        named: "asking when a dangling link was written is not an answer",
+        asserts: |host, root, adapter| {
+            let link = root.join("points-nowhere");
+            host.link(Link::Symbolic, &root.join("was-never-there"), &link)
+                .expect("a link to nothing is still a link");
+
+            assert!(
+                matches!(host.modified_at(&link), Err(HostError::NotFound { .. })),
+                "{adapter}: a dangling link has no modification time — following \
+                 it is what `metadata` does, and there is nothing at the end of \
+                 it. This is the arm that reads a lock as free.",
+            );
+        },
+    },
+    Case {
+        named: "removing a directory tree at a link takes the link and not what it points at",
+        asserts: |host, root, adapter| {
+            let real = root.join("a-real-directory");
+            let held = real.join("held");
+            host.create_dir_all(&real).expect("it is made");
+            host.create_file_with_mode(&held, "still here", PRIVATE_FILE_MODE)
+                .expect("with something in it");
+
+            let link = root.join("points-at-it");
+            host.link(Link::Symbolic, &real, &link).expect("linked");
+
+            host.remove_dir_all(&link)
+                .expect("the last component is not followed, so the link goes");
+
+            assert!(
+                host.read_file(&held).is_ok(),
+                "{adapter}: and what it pointed at is untouched"
+            );
+            assert!(
+                matches!(host.link_target(&link), Err(HostError::NotFound { .. })),
+                "{adapter}: while the link itself is gone"
+            );
+        },
+    },
     Case {
         named: "a file is created with exactly the mode asked for",
         asserts: |host, root, adapter| {
@@ -175,6 +222,33 @@ const CASES: &[Case] = &[
                     host.file_mode(&path).ok().flatten(),
                     Some(0o600),
                     "{adapter}: the mode is the creation's, not the umask's"
+                );
+            }
+        },
+    },
+    // The case above asks for a mode no umask widens, so it answered the same
+    // whether or not the umask had been taken out of it. This one asks for a
+    // bit every ordinary umask strips — 022, 002 and 077 all clear at least one
+    // of these — so it can only pass where the mode is the creation's.
+    //
+    // What it guards is `write_atomically`, which reads the target's mode and
+    // writes the replacement with it: a `.claude.json` its owner keeps at 0644
+    // came back at 0600 from a Switch run in a shell with a tight umask, and
+    // nothing said so.
+    Case {
+        named: "the mode asked for survives a umask that would have taken bits out of it",
+        asserts: |host, root, adapter| {
+            let path = root.join("wide");
+            host.create_file_with_mode(&path, "shared", 0o666)
+                .expect("it is created");
+
+            assert_eq!(host.read_file(&path).ok().as_deref(), Some("shared"));
+            if modes_mean_something() {
+                assert_eq!(
+                    host.file_mode(&path).ok().flatten(),
+                    Some(0o666),
+                    "{adapter}: the mode is the one asked for, not the one the \
+                     shell that launched this happened to leave"
                 );
             }
         },

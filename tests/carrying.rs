@@ -390,6 +390,49 @@ fn a_profile_that_cannot_be_written_is_remarked_on_and_the_run_happens_anyway() 
     );
 }
 
+/// A source that stops mid-token leaves the destination exactly as it was.
+///
+/// Nothing parses this file — the whole point of the key-by-key splice is that
+/// it does not — so a value is found by running to the `,` or the brace that
+/// ends it. A file truncated partway through `true` has no such byte, and the
+/// span handed back is `tru`, which used to be spliced in verbatim. What that
+/// wrote was a `.claude.json` that is not JSON, in the Profile about to be
+/// launched, and it is the file holding `oauthAccount`: every later read of
+/// this Account's Identity fails on it, while the Switch path goes on writing
+/// into it because it never parses either.
+///
+/// Reachable rather than theoretical — `carry` asks whether anything is running
+/// against the *destination*, and the source is a Default Profile a client
+/// rewrites wholesale on its way out.
+#[test]
+fn a_source_that_stops_mid_value_leaves_the_destination_alone() {
+    let host = machine();
+    let before = identity_of(&host, SECOND_EMAIL);
+
+    let whole = a_file_in_use(EMAIL, 5);
+    let cut = whole
+        .find("\"hasCompletedOnboarding\": tru")
+        .expect("the fixture has the key this is about");
+    host.set_file(
+        THE_PERSONS_FILE,
+        &whole[..cut + "\"hasCompletedOnboarding\": tru".len()],
+    );
+
+    let outcome = run_run(&host, SECOND_EMAIL).0.expect("the client ran");
+
+    assert_eq!(
+        outcome, 0,
+        "a source nobody can read is not worth a refusal"
+    );
+    assert_eq!(
+        identity_of(&host, SECOND_EMAIL),
+        before,
+        "nothing crossed, rather than a half-token crossing"
+    );
+    serde_json::from_str::<serde_json::Value>(&identity_of(&host, SECOND_EMAIL))
+        .expect("and what the Profile holds is still JSON");
+}
+
 /// Nothing to copy *into* is not a failure either, and it is the first thing
 /// `carry` asks: a Profile with no `.claude.json` of its own is one there is
 /// nowhere to splice a key into. The Run is what matters, and a person who
