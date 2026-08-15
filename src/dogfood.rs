@@ -1375,6 +1375,7 @@ fn what_it_came_to(
         let attempt = repair_one(
             perch,
             &preflight.client,
+            preflight.attended,
             account,
             was_quarantined_because,
             out,
@@ -1394,6 +1395,7 @@ fn what_it_came_to(
 fn repair_one(
     perch: &Perch<'_>,
     client: &Client,
+    attended: bool,
     account: String,
     was_quarantined_because: String,
     out: &mut dyn Write,
@@ -1412,6 +1414,26 @@ fn repair_one(
             Attempt::what_was_wrong(&account, &was_quarantined_because)
         ),
     )?;
+
+    // A Repair is a browser round trip, so it is an attended act and asks the
+    // same question every attended phase asks (ADR 0038). Asked here rather
+    // than left to the Phases' own guard, because the Repair runs ahead of
+    // them: an opt-in carried in from a cron job's environment, or a run with
+    // its output piped, would otherwise open `claude /login` where nothing can
+    // be typed and block there for ever. Attendance is never assumed, and a
+    // Repair is the one part of a run that would have assumed it.
+    if !attended {
+        return Ok(attempted(
+            None,
+            Ending::StillQuarantined {
+                fault: Fault::Upstream,
+                why: format!(
+                    "nobody is at the terminal, and a Repair is a browser round \
+                     trip — a run walks those only where {ATTENDED_VARIABLE} is set"
+                ),
+            },
+        ));
+    }
 
     // `relogin` probes for a Claude Code before it starts, so a machine without
     // one records that as why this Account is Quarantined still rather than
@@ -3186,8 +3208,14 @@ mod tests {
     /// The two moving together is the whole of what makes this a machine rather
     /// than two canned documents: the Repair reads the listing through the
     /// binary under test, and the figure it changes is read off the registry.
+    ///
+    /// With somebody at the terminal, because a Repair is a browser round trip
+    /// and a run only walks those where attendance was opted into (ADR 0038).
+    /// A machine holding a Quarantined Account and nobody watching is a machine
+    /// whose Repair skips, which is what `a_bare_machine` is for.
     fn a_machine(held: &[(&str, Option<Quarantine>)], logins: &[(&str, Login)]) -> FakeHost {
-        let host = with_a_claude_code(with_a_perch(a_bare_machine()));
+        let host = with_a_claude_code(with_a_perch(a_bare_machine()))
+            .with_env(ATTENDED_VARIABLE, "1");
 
         let holds: Vec<(String, Option<Quarantine>)> = held
             .iter()
@@ -3462,6 +3490,45 @@ mod tests {
         assert!(
             said.contains("there is no Claude Code to log in with"),
             "so that somebody fixes the right thing: {said}"
+        );
+    }
+
+    /// A Repair opens a browser and waits, so it is an attended act and asks
+    /// the question every attended phase asks (ADR 0038). It runs ahead of the
+    /// Phases and so ahead of their guard, which is how it came to be the one
+    /// part of a run that assumed attendance: a cron job, or a run with its
+    /// output piped, would have had `claude /login` opened on it and blocked
+    /// there on an answer nobody was coming to give.
+    #[test]
+    fn a_repair_where_nobody_is_watching_is_skipped_rather_than_opening_a_browser() {
+        let host = with_a_claude_code(with_a_perch(a_bare_machine()));
+        now_holding(
+            &host,
+            &[(
+                "one@example.com".to_string(),
+                Some(Quarantine::RenewalRejected),
+            )],
+        );
+        let host = marked(host);
+
+        let (run, said) = a_watched_run(&host, &[]).expect("a run without a person still runs");
+
+        assert!(
+            relogins(&host).is_empty(),
+            "no browser is opened where nothing can be typed at: {said}"
+        );
+        assert_eq!(
+            run.repair.left_quarantined(),
+            vec!["one@example.com"],
+            "and the Account is reported as still Quarantined rather than as repaired"
+        );
+        assert!(
+            said.contains("nobody is at the terminal"),
+            "the skip says what is missing, and what is missing is a person: {said}"
+        );
+        assert!(
+            said.contains(ATTENDED_VARIABLE),
+            "and how to say they are there: {said}"
         );
     }
 
