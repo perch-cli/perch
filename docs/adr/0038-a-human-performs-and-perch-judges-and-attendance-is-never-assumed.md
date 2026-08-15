@@ -1,5 +1,15 @@
 # A human performs, Perch judges, and attendance is never assumed
 
+> **Superseded by ADR 0041.** Once the removal tracked at #148 lands there is no
+> Phase left to attend, so the rules below have no subject. Two of them are
+> worth more than the suite was and are
+> named in ADR 0041 as ideas deliberately released rather than overlooked: the
+> Preflight's figure, and the refusal to let a verdict be a keystroke. One thing
+> here is *not* repealed — `Host::is_interactive` survives untouched, because
+> `add`, `remove`, `purge`, `tui` and `upgrade` all use it. Left here as
+> written, because a future harness that asks a person to do anything will meet
+> both of these problems again.
+
 ADR 0037 left four things unproved and closed one of them. What is left needs a
 person: a browser round trip to log an Account in, a real Claude Code launched
 and then quit. Phase zero can already hand the terminal over — `repair` takes an
