@@ -24,8 +24,19 @@ use perch::host::{Execution, FakeHost, Host, Platform};
 /// Where a `systemd --user` unit goes on the fixture's machine.
 const UNIT: &str = "/Users/someone/.config/systemd/user/perch-watch.service";
 
-/// And where a LaunchAgent does.
-const PLIST: &str = "/Users/someone/Library/LaunchAgents/cli.perch.watch.plist";
+/// Where this platform keeps the unit, asked of the code under test rather than
+/// spelled out.
+///
+/// `PathBuf::join` renders with `\` on Windows, so a hard-coded forward-slash
+/// path matches the *file* — `FakeHost` normalises what it stores — but not the
+/// **argument** `launchctl` is handed, which is compared as a string. A fixture
+/// that spelled it out therefore passed everywhere except the Windows runner,
+/// which is the one place nobody is looking.
+fn unit_at(host: &FakeHost) -> std::path::PathBuf {
+    perch::service::unit_path(host)
+        .expect("home is known")
+        .expect("this platform keeps a unit file")
+}
 
 fn ran(host: &FakeHost) -> Vec<String> {
     host.effects()
@@ -83,13 +94,18 @@ fn linux() -> FakeHost {
 /// nothing about the Credential Store shifts under a command that empties one —
 /// which is why the Purge tests are here rather than on the Linux fixture.
 fn mac() -> FakeHost {
-    watched()
-        .with_exec(
-            "launchctl",
-            &["bootout", "gui/501/cli.perch.watch"],
-            worked(),
-        )
-        .with_exec("launchctl", &["bootstrap", "gui/501", PLIST], worked())
+    let host = watched().with_exec(
+        "launchctl",
+        &["bootout", "gui/501/cli.perch.watch"],
+        worked(),
+    );
+    let plist = unit_at(&host);
+    host.set_exec(
+        "launchctl",
+        &["bootstrap", "gui/501", &plist.to_string_lossy()],
+        worked(),
+    );
+    host
 }
 
 /// The same machine, with `systemctl is-active` answering that it is running.
@@ -434,11 +450,10 @@ fn a_mac_gets_a_launchagent_in_its_own_place_bootstrapped_into_its_own_session()
     let (result, printed) = run_service(&host, ServiceCommand::Install);
 
     assert_eq!(result.expect("launchctl answered"), EXIT_OK);
-    assert!(host.path_exists(std::path::Path::new(PLIST)), "{printed}");
+    let at = unit_at(&host);
+    assert!(host.path_exists(&at), "{printed}");
 
-    let plist = host
-        .read_file(std::path::Path::new(PLIST))
-        .expect("the plist is readable");
+    let plist = host.read_file(&at).expect("the plist is readable");
     assert!(plist.contains("<key>Label</key>"), "{plist}");
     assert!(plist.contains("cli.perch.watch"), "{plist}");
     assert!(
@@ -494,7 +509,10 @@ fn an_upgrade_restarts_the_service_onto_the_binary_it_just_moved() {
     outcome.expect("the Upgrade ran");
     let after: Vec<String> = ran(&host).into_iter().skip(before).collect();
     assert!(
-        after.contains(&format!("launchctl bootstrap gui/501 {PLIST}")),
+        after.contains(&format!(
+            "launchctl bootstrap gui/501 {}",
+            unit_at(&host).display()
+        )),
         "the Service is started again, onto the binary that is there now: \
          {after:?}"
     );
@@ -516,9 +534,10 @@ fn a_service_that_will_not_restart_is_a_warning_rather_than_a_failed_upgrade() {
         .expect("a Service is installed before the Upgrade");
     // The service manager stops answering between the install and the Upgrade,
     // which is what a `launchctl` refusing a GUI domain over SSH looks like.
-    let host = host.with_exec(
+    let plist = unit_at(&host);
+    host.set_exec(
         "launchctl",
-        &["bootstrap", "gui/501", PLIST],
+        &["bootstrap", "gui/501", &plist.to_string_lossy()],
         failed("Bootstrap failed: 5: Input/output error"),
     );
 
@@ -575,7 +594,7 @@ fn the_binary_is_read_back_out_of_a_plist_that_had_to_be_escaped_to_write() {
         .expect("installed");
 
     let plist = host
-        .read_file(std::path::Path::new(PLIST))
+        .read_file(&unit_at(&host))
         .expect("the plist is readable");
     assert!(
         plist.contains("/Users/some &amp; one/bin/perch"),
