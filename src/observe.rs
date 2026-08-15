@@ -494,15 +494,34 @@ fn renew_under_the_lock(host: &dyn Host, asked: &Asked, installed: &Installed) -
             fresh.expires_at,
             installed,
         )?;
-        // Only where Anthropic actually handed a new refresh token over is a
-        // failed write unrecoverable. A Renewal that Rotated nothing leaves the
-        // stored refresh token exactly as live as it was, so the write is worth
-        // trying again rather than worth a Quarantine (ADR 0006 is about the
-        // Rotation, not about the renewal).
-        store_it(host, store, &rotated, fresh.refresh_token.is_some())?;
+        store_it(
+            host,
+            store,
+            &rotated,
+            rotated_away(&refresh_token, fresh.refresh_token.as_deref()),
+        )?;
 
         Ok(fresh.access_token)
     })
+}
+
+/// Whether the Renewal retired the refresh token that bought it.
+///
+/// Only where Anthropic actually handed a *different* refresh token over is a
+/// failed write unrecoverable. A Renewal that Rotated nothing leaves the stored
+/// refresh token exactly as live as it was, so the write is worth trying again
+/// rather than worth a Quarantine (ADR 0006 is about the Rotation, not about
+/// the renewal).
+///
+/// Asked as "is this a different token" rather than as "did a token come back",
+/// because those are not the same question and the second one is wrong. An
+/// authorization server is free to hand back the refresh token it was given —
+/// RFC 6749 §6 permits it and plenty do — and reading that echo as a Rotation
+/// Quarantines the Account on the strength of a write that retired nothing.
+/// A Quarantine is permanent until a browser login clears it, so the cost of
+/// getting this backwards is paid by the person, not by the next command.
+fn rotated_away(sent: &str, handed_back: Option<&str>) -> bool {
+    handed_back.is_some_and(|fresh| fresh != sent)
 }
 
 /// Puts the renewed Credential back, and Quarantines the Account when what
@@ -669,5 +688,27 @@ mod tests {
         let report = Report::default();
         assert!(!report.asked());
         assert_eq!(report.document(), serde_json::Value::Null);
+    }
+
+    #[test]
+    fn a_renewal_that_hands_back_a_different_refresh_token_rotated() {
+        assert!(rotated_away("sk-ant-ort01-spent", Some("sk-ant-ort01-fresh")));
+    }
+
+    #[test]
+    fn a_renewal_that_hands_back_nothing_rotated_nothing() {
+        assert!(!rotated_away("sk-ant-ort01-spent", None));
+    }
+
+    /// The one this distinction exists for. An echoed refresh token retires
+    /// nothing, so a store that then refuses the write has cost a cached access
+    /// token and not an Account — and Quarantining there would be Perch calling
+    /// an Account unrecoverable while the refresh token it holds still works.
+    #[test]
+    fn a_renewal_that_echoes_the_refresh_token_it_was_given_rotated_nothing() {
+        assert!(!rotated_away(
+            "sk-ant-ort01-spent",
+            Some("sk-ant-ort01-spent")
+        ));
     }
 }
