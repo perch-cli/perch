@@ -53,6 +53,29 @@ case, not the exception.
 
 ## Amended: the numbers this asked for
 
+> **Superseded in full by ADR 0046.** This section — and only this section — is
+> no longer the governing record. Everything above it stands exactly as written.
+>
+> The claim that decayed is that the cooldown, the margin and the no-return are
+> "per-group configuration beside `watcher-threshold-percent`, not constants".
+> They are constants, on this section's own test: it made the interval a constant
+> because the interval is arithmetic rather than preference, and then justified
+> the cooldown's fifteen minutes with arithmetic about how fast a five-hour window
+> moves. `watcher-no-return` is gone entirely — `Recently::barred` is only ever
+> consulted in the branch where the cooldown has already returned `None`, so it
+> could never change what the watcher did. The paragraph below that calls the two
+> "a second lock on the same door" understated it.
+>
+> The margin's *mechanism* is unchanged and still described correctly here: it
+> sets candidates aside before the strategy ranks them. Its *rationale* is wrong.
+> Two Accounts do not trade places — they walk upward together, and ADR 0046 says
+> why that matters.
+>
+> Nothing else below moved. The interval and why it is a constant, the back-off
+> curve, the cooldown living in the loop while a `--once` Check records it against
+> its Group, the ungrouped refusal, both grants read every round, and the exit-code
+> table are all still this record's.
+
 This record required adaptive polling, a cooldown and a margin, and named none
 of them. They are named here so the watcher is a policy that can be argued
 with rather than a set of constants discovered in the source.
