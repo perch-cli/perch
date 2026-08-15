@@ -1,5 +1,17 @@
 # The TUI writes configuration, and reversibility is the line
 
+> **Superseded by ADR 0042.** The Config tab is to be removed — the code is
+> still here, and the removal is tracked at #150 — and `perch tui` goes back to
+> the two acts ADR 0011 gave it. The observation below is not what was found
+> wrong: a Setting really is not irreversible. Reversibility was simply the
+> wrong axis. What the panel costs is not the recoverability of what it writes
+> but the machinery that lets it write at all — the lock per edit, the refusal
+> and rollback, the debounce and its `Pending`, the one text mode — and every
+> link in that chain starts at *the panel writes*. One thing here is not
+> repealed: `perch config unset` stays, on its own merits rather than the
+> panel's, because a two-layer configuration needs a way back to Inherit
+> whoever is doing the clearing.
+
 `perch tui` acted on exactly two things, a Switch and a Run, and said why in its
 own words: `add`, `remove`, `purge` and `config` stayed out because a keystroke
 away from an irreversible act is the wrong ergonomics for the one surface being
