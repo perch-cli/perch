@@ -1,5 +1,15 @@
 # Dogfood runs on real machines and proves only what each one holds
 
+> **Superseded by ADR 0041.** The suite is to be removed entire — the code is
+> still here, and the removal is tracked at #148 — and there is no reduced
+> core: the cost was always the machinery rather than the phases, so keeping one
+> phase would have kept the whole vocabulary. Nothing below was
+> found to be wrong — what changed is that a person actually using Perch stopped
+> being hypothetical, which closes two of the four gaps named here completely
+> and a third halfway. Left here as written, because the four gaps are still the
+> right list and the rejection of a stubbed `claude` still holds: ADR 0041
+> repeals the suite, not that argument.
+
 Perch is tested three ways already, and every one of them buys its determinism
 by replacing something. The behaviour suites drive the real command code against
 `FakeHost`, so there is no filesystem. `tests/conformance.rs` asks the two
