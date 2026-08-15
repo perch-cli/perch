@@ -262,12 +262,81 @@ fn observe(host: &dyn Host, registry: &Registry, account: &Account) -> Step<Quot
 
     let installed = Installed::probed(host)?;
     let asked = holding(host, registry, account)?;
-    let token = usable_token(host, &asked, &installed).map_err(|outcome| {
+    let theirs = |outcome| {
         only_off_a_credential_that_is_theirs(host, outcome, &asked, account, &installed)
-    })?;
-    confirm(host, &token, account)?;
-    let read = anthropic::utilization(host, &token);
-    read.map_err(reading_refused)
+    };
+
+    let token = usable_token(host, &asked, &installed).map_err(theirs)?;
+    match read_off(host, &token, account) {
+        Ok(windows) => return Ok(windows),
+        Err(settled @ Turned::Settled(_)) => return Err(settled.settled()),
+        Err(Turned::Away) => {}
+    }
+
+    // Anthropic would not take the access token Perch asked with, and the
+    // Credential holding it did not think it had run out. That is the state a
+    // Credential carrying no `expiresAt` is permanently in: `usable_at` takes
+    // one at its word, so nothing here ever concluded a Renewal was due, and
+    // the reading failed the same way on every command from then on.
+    //
+    // It is reachable rather than hypothetical. `anthropic::renew` yields no
+    // expiry for four different replies, and `credential_after_rotation` then
+    // removes `expiresAt` from what it stores — so a Credential renewed once
+    // without a lifetime is one nothing will ever renew again. The comment
+    // justifying that says the Credential "is simply renewed when something
+    // else says it must be"; this is the something else.
+    //
+    // Once, and only off a rejection. A Renewal may Rotate, and Rotating a
+    // Credential that had not run out spends the only refresh token there is —
+    // which is exactly why `usable_at` will not renew on suspicion. A refusal
+    // from Anthropic is not suspicion.
+    refuse_if_live(host, &asked, &installed).map_err(theirs)?;
+    let renewed = renew_under_the_lock(host, &asked, &installed, Because::AnthropicRefusedIt)
+        .map_err(theirs)?;
+    read_off(host, &renewed, account).map_err(Turned::settled)
+}
+
+/// What one attempt at a reading came to when it did not come to figures.
+enum Turned {
+    /// Anthropic would not take the access token. Kept apart from the rest
+    /// because it is the one refusal a Renewal might answer.
+    Away,
+    /// Anything else, already in the form it will be reported in.
+    Settled(Outcome),
+}
+
+impl Turned {
+    /// The outcome to report, for an attempt that will not be tried again.
+    fn settled(self) -> Outcome {
+        match self {
+            // A token Anthropic issued a moment ago and then would not accept.
+            // Not a Quarantine: the refresh token bought a renewal, so it is
+            // live, and an Account is not unrecoverable because Anthropic
+            // contradicted itself inside one command.
+            Turned::Away => Outcome::Failed(
+                "Anthropic renewed this Account's Credential and then would not \
+                 accept the token it had just issued, so nothing about it could \
+                 be read. The cached figure is what you see."
+                    .to_string(),
+            ),
+            Turned::Settled(outcome) => outcome,
+        }
+    }
+}
+
+/// Whose the token is, and then what it says about the Account — the pair of
+/// questions one reading asks, off one access token.
+fn read_off(
+    host: &dyn Host,
+    token: &str,
+    account: &Account,
+) -> std::result::Result<QuotaWindows, Turned> {
+    confirm(host, token, account)?;
+    match anthropic::utilization(host, token) {
+        Ok(windows) => Ok(windows),
+        Err(Refused::Rejected) => Err(Turned::Away),
+        Err(why) => Err(Turned::Settled(reading_refused(why))),
+    }
 }
 
 /// Keeps a Quarantine from being recorded off a Credential that was never
@@ -373,6 +442,22 @@ fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<As
     }
 }
 
+/// Why a Renewal is being attempted, which decides whether the Credential's
+/// own account of itself gets a say.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Because {
+    /// The stored Credential says it has run out. A Credential that turns out
+    /// to be good after all — renewed by a client while Perch queued for the
+    /// lock — is left alone, because a Renewal may Rotate and Rotating one that
+    /// had not run out spends the only refresh token there is.
+    ItSaysItRanOut,
+    /// Anthropic refused the access token. Its own account of itself has been
+    /// overtaken by evidence, so it does not get a vote: this is the path that
+    /// reaches a Credential carrying no `expiresAt`, which claims to be usable
+    /// for ever.
+    AnthropicRefusedIt,
+}
+
 /// An access token that can still be asked a question, renewing the Credential
 /// when the one there is has run out.
 fn usable_token(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<String> {
@@ -385,7 +470,7 @@ fn usable_token(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<S
     // be renewed says so without queueing behind anything, and asked again
     // under them, where the answer is the one that counts.
     refuse_if_live(host, asked, installed)?;
-    renew_under_the_lock(host, asked, installed)
+    renew_under_the_lock(host, asked, installed, Because::ItSaysItRanOut)
 }
 
 /// Refuses to renew a Credential something else is holding (ADR 0005).
@@ -443,14 +528,19 @@ fn credential_in(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<
 /// Under Claude Code's own locks, in Claude Code's own order (ADR 0006), with
 /// Claude Code's own double-checked re-read: whoever was holding the lock while
 /// Perch waited for it may have renewed the very Credential Perch was about to.
-fn renew_under_the_lock(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<String> {
+fn renew_under_the_lock(
+    host: &dyn Host,
+    asked: &Asked,
+    installed: &Installed,
+    because: Because,
+) -> Step<String> {
     let store = &asked.store;
     lock::under(host, probe::locks_for(store), |held| {
         // Both of the questions asked before the locks were taken, asked again
         // now that nothing can change the answer underneath Perch.
         refuse_if_live(host, asked, installed)?;
         let credential = credential_in(host, asked, installed)?;
-        if credential.usable_at(host.now()) {
+        if because == Because::ItSaysItRanOut && credential.usable_at(host.now()) {
             return Ok(credential.access_token);
         }
 
@@ -574,16 +664,20 @@ const RATE_LIMITED: &str = "Anthropic is rate-limiting Perch, so nothing about \
 /// directly leaves Perch's record of who is active behind. Figures cached under
 /// the wrong Account would not look wrong — they would look like that Account
 /// having spent quota it never spent, which is the evidence a Cycle ranks on.
-fn confirm(host: &dyn Host, token: &str, account: &Account) -> Step<()> {
+fn confirm(host: &dyn Host, token: &str, account: &Account) -> std::result::Result<(), Turned> {
     match anthropic::whose(host, token) {
         Ok(Some(email)) if !registry::same_name(&email, account.email()) => {
-            Err(Outcome::Failed(format!(
+            Err(Turned::Settled(Outcome::Failed(format!(
                 "the Credential Perch would ask with belongs to {email} rather \
                  than to {}, so no figure was recorded against it.",
                 account.email()
-            )))
+            ))))
         }
         Ok(_) => Ok(()),
+        // The one refusal worth telling apart, because a Renewal may answer
+        // it: a token Anthropic will not take is the state a Credential that
+        // never says when it expires would otherwise stay in for good.
+        Err(Refused::Rejected) => Err(Turned::Away),
         // A profile endpoint Perch no longer recognises is no evidence either
         // way, and no reason to stop reading Utilization. ADR 0019 carves out
         // exactly this and nothing wider: *drift in a reply*.
@@ -596,7 +690,7 @@ fn confirm(host: &dyn Host, token: &str, account: &Account) -> Step<()> {
         // design cannot afford, arriving on the day Anthropic has a bad
         // afternoon.
         Err(Refused::Unrecognised(_)) => Ok(()),
-        Err(why) => Err(getting_ready_refused(why)),
+        Err(why) => Err(Turned::Settled(getting_ready_refused(why))),
     }
 }
 
