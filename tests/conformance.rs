@@ -179,6 +179,33 @@ const CASES: &[Case] = &[
             }
         },
     },
+    // The case above asks for a mode no umask widens, so it answered the same
+    // whether or not the umask had been taken out of it. This one asks for a
+    // bit every ordinary umask strips — 022, 002 and 077 all clear at least one
+    // of these — so it can only pass where the mode is the creation's.
+    //
+    // What it guards is `write_atomically`, which reads the target's mode and
+    // writes the replacement with it: a `.claude.json` its owner keeps at 0644
+    // came back at 0600 from a Switch run in a shell with a tight umask, and
+    // nothing said so.
+    Case {
+        named: "the mode asked for survives a umask that would have taken bits out of it",
+        asserts: |host, root, adapter| {
+            let path = root.join("wide");
+            host.create_file_with_mode(&path, "shared", 0o666)
+                .expect("it is created");
+
+            assert_eq!(host.read_file(&path).ok().as_deref(), Some("shared"));
+            if modes_mean_something() {
+                assert_eq!(
+                    host.file_mode(&path).ok().flatten(),
+                    Some(0o666),
+                    "{adapter}: the mode is the one asked for, not the one the \
+                     shell that launched this happened to leave"
+                );
+            }
+        },
+    },
     Case {
         named: "creating over an existing file takes the new mode",
         asserts: |host, root, adapter| {

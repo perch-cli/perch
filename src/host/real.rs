@@ -1055,7 +1055,7 @@ fn create_private_dir_all(path: &Path) -> Result<(), HostError> {
 #[cfg(unix)]
 fn create_file_with_mode(path: &Path, contents: &str, mode: u32) -> Result<(), HostError> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
     // Anything already here is what a write that died left behind, and holding
     // on to it would mean writing into a file of unknown mode.
@@ -1065,6 +1065,21 @@ fn create_file_with_mode(path: &Path, contents: &str, mode: u32) -> Result<(), H
         .create_new(true)
         .mode(mode)
         .open(path)?;
+    // `open`'s mode is what the file is created *at most* as: the kernel takes
+    // the process umask out of it, so `.mode(0o644)` under `umask 077` is a
+    // file at 0600 and the port's promise of "exactly this mode" is not kept.
+    // The direction is always narrowing, so nothing was ever exposed by it —
+    // what it broke is `write_atomically`, which reads the target's mode and
+    // writes the replacement with it: a `.claude.json` the person keeps at 0644
+    // came back at 0600 after a Switch run from a shell with a tight umask, and
+    // the conformance case asserting the mode passed or failed depending on the
+    // shell that launched the suite.
+    //
+    // Set here rather than asked for at `open`, because there is nowhere else
+    // to ask. Safe at this point and nowhere later: the file is `O_EXCL` and
+    // still empty, so the instant this widens is an instant there is nothing in
+    // it to read — which is the whole of what "at creation" was protecting.
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))?;
     file.write_all(contents.as_bytes())?;
     file.sync_all()?;
     Ok(())
