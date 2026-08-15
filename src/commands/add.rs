@@ -17,7 +17,7 @@ use crate::commands::{ask, say};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::login::{self, Produced};
-use crate::probe::Identity;
+use crate::probe::{Identity, Store};
 use crate::profile;
 use crate::registry::{self, Account, NO_GROUP, NameKind, Registry};
 
@@ -85,25 +85,36 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
         None => None,
     };
 
-    let account = settle_into_a_profile(host, pending, group.clone())?;
+    // The Store comes back with the Account, so nothing fallible sits between
+    // the Credential landing in the Profile and this being able to take it out
+    // again.
+    let (account, placed) = settle_into_a_profile(host, pending, group.clone())?;
     let email = account.email().to_string();
-    // Kept before the Account is handed to the registry, because it is what
-    // takes the Profile back out if the write below fails.
-    let placed = account.store(host)?;
-    registry.upsert(account);
-    if let Some(alias) = &args.alias {
-        // Refused before the login and again here, against the registry as it
-        // is now. Nothing has changed under the lock this holds, so this cannot
-        // fail — and a name that reached this point unchecked would be one no
-        // command could ever free.
-        registry.name_account(alias, &email)?;
-    }
+
     // A Profile that nothing records is worse than no Profile at all: it holds
     // a live refresh token, and nothing ever looks at it again. `reap_abandoned`
     // walks the pending logins and never `profiles/`, so this one would sit
     // there for good — the slow accumulation of working logins for Accounts the
     // user believes they never added. The same all-or-nothing an Import makes.
-    if let Err(error) = registry::save(host, &mut perch, &registry) {
+    //
+    // Every step from here to the save is inside it, not the save alone. The
+    // naming below is argued to be unreachable and the save is not the only
+    // thing that can fail; a discard reached by one of the two ways out and not
+    // the others is the shape this comment is about, written down and then only
+    // half applied.
+    let recorded = (|registry: &mut Registry| {
+        registry.upsert(account);
+        if let Some(alias) = &args.alias {
+            // Refused before the login and again here, against the registry as
+            // it is now. Nothing has changed under the lock this holds, so this
+            // cannot fail — and a name that reached this point unchecked would
+            // be one no command could ever free.
+            registry.name_account(alias, &email)?;
+        }
+        registry::save(host, &mut perch, registry)
+    })(&mut registry);
+
+    if let Err(error) = recorded {
         profile::discard(host, &placed);
         return Err(error.with_note(&format!(
             "Nothing was added, and the Profile this had made for {email} has \
@@ -123,13 +134,19 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
 }
 
 /// Gives the Account a Profile of its own and returns the entry that records
-/// it. A Profile that cannot be completed is discarded rather than left
-/// half-built for the next command to trip over.
+/// it, alongside the Store that Profile keeps its Credential in. A Profile that
+/// cannot be completed is discarded rather than left half-built for the next
+/// command to trip over.
+///
+/// The Store is handed back rather than derived again by the caller, because
+/// deriving it is fallible and the caller needs it precisely in order to undo
+/// this — so asking for it a second time put one more thing that can fail
+/// between the Credential landing and anything being able to take it away.
 fn settle_into_a_profile(
     host: &dyn Host,
     pending: Produced,
     group: Option<String>,
-) -> Result<Account> {
+) -> Result<(Account, Store)> {
     let dir = registry::profile_dir_for(host, &pending.identity.email)?;
     let store = profile::create(host, &dir, pending.credential.as_str())?;
 
@@ -141,14 +158,17 @@ fn settle_into_a_profile(
         return Err(err);
     }
 
-    Ok(Account {
-        identity: pending.identity,
-        plan: pending.credential.subscription_type.clone(),
-        enabled: true,
-        quarantine: None,
-        group,
-        utilization: None,
-    })
+    Ok((
+        Account {
+            identity: pending.identity,
+            plan: pending.credential.subscription_type.clone(),
+            enabled: true,
+            quarantine: None,
+            group,
+            utilization: None,
+        },
+        store,
+    ))
 }
 
 /// Refuses a login whose Credential would land in a Profile Perch already
