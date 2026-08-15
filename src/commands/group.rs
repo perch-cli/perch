@@ -290,9 +290,15 @@ fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scop
     let interchangeable = *scope != Scope::Ungrouped || registry.global.cycle_ungrouped;
     let watcher = match (settings.watcher_may_act, interchangeable) {
         (true, true) => format!("may switch unattended {acting}"),
+        // The Setting's own value, not `off`. `on`/`off` is not a value
+        // `cycle-ungrouped` takes, so a reader who typed back what they were
+        // shown was refused — which is the whole of why
+        // `commands::cycling_among_ungrouped` exists, and this line was
+        // printing the other spelling two rows below one that uses it.
         (true, false) => format!(
-            "off — `cycle-ungrouped` is off, so there is nowhere to Switch to \
-             (would act {acting})"
+            "off — `cycle-ungrouped` is {}, so there is nowhere to Switch to \
+             (would act {acting})",
+            registry.global.cycle_ungrouped
         ),
         (false, _) => format!("off (would act {acting})"),
     };

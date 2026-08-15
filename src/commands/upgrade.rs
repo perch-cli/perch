@@ -51,13 +51,6 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
     }
 
     let channel = chosen_channel(host, args.channel.as_deref())?;
-    if args.json {
-        return Err(PerchError::Invalid(
-            "`--json` says what a check found, so it goes with `--check`.\n\
-             `perch upgrade --check --json` is the line that answers."
-                .to_string(),
-        ));
-    }
 
     // Before anything is resolved and before anybody is asked to agree to
     // anything. A Release Homebrew cannot be pointed at is refused whatever the
