@@ -691,12 +691,6 @@ impl FakeHost {
         self
     }
 
-    /// A platform with no uid at all, which is Windows.
-    pub fn with_no_user_id(self) -> FakeHost {
-        *self.user_id.borrow_mut() = None;
-        self
-    }
-
     /// A process that is running, for a world that is already built.
     pub fn set_live_process(&self, pid: u32) {
         self.live_processes

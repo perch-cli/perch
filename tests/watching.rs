@@ -1379,3 +1379,67 @@ fn the_wait_a_ctrl_c_lands_in_costs_the_clock_nothing() {
         "{rounds} rounds' waits, less the one that was interrupted:\n{printed}"
     );
 }
+
+/// **One Watcher per person per machine** (ADR 0040), asked of the Check.
+///
+/// The loop keeps its Cooldown in memory and a Check reads the one in `checks`,
+/// and neither can see the other's — so a Check firing while a Service runs
+/// would move an Account the loop had just decided not to move. `20` is the
+/// code that says the machine is unchanged and to come back at the next Check.
+#[test]
+fn a_check_that_finds_a_watcher_already_running_holds_rather_than_deciding() {
+    let host = watching(&[40.0], 5.0);
+    let _watching_alone = perch::lock::take_all(
+        &host,
+        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+    )
+    .expect("nobody holds it yet");
+
+    let (result, printed) = run_watch_once(&host);
+
+    assert_eq!(
+        result.expect("a lock somebody else holds is not a failure"),
+        perch::error::EXIT_HELD
+    );
+    assert!(
+        printed.contains("held"),
+        "and it says so on the same one line every other outcome uses: {printed}"
+    );
+    assert!(
+        host.sent_to(USAGE_URL).is_empty(),
+        "a Check that may not decide spends nothing finding out"
+    );
+}
+
+/// The same contention, met by the loop — and answered differently, which is the
+/// whole of ADR 0040's reasoning about supervisors.
+///
+/// A loop that exited here would be a Service that exits at every start until a
+/// lock left behind by a `kill -9` goes stale, and the supervisor would restart
+/// it into the same exit. So it says who has it and comes back, and the machine
+/// heals itself.
+#[test]
+fn a_loop_that_finds_the_watch_held_says_so_and_comes_back_rather_than_exiting() {
+    let host = watching(&[40.0], 5.0);
+    let _watching_alone = perch::lock::take_all(
+        &host,
+        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+    )
+    .expect("nobody holds it yet");
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a Watcher that cannot take the watch holds rather than failing");
+    assert!(
+        printed.contains("held"),
+        "it says what is holding it and when it will ask again: {printed}"
+    );
+    assert!(
+        host.sent_to(USAGE_URL).is_empty(),
+        "and reads nothing while it waits for the watch"
+    );
+    assert!(
+        printed.contains("Stopped."),
+        "and a Ctrl-C while it is waiting still ends it cleanly: {printed}"
+    );
+}
