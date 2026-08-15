@@ -420,7 +420,10 @@ fn a_source_that_stops_mid_value_leaves_the_destination_alone() {
 
     let outcome = run_run(&host, SECOND_EMAIL).0.expect("the client ran");
 
-    assert_eq!(outcome, 0, "a source nobody can read is not worth a refusal");
+    assert_eq!(
+        outcome, 0,
+        "a source nobody can read is not worth a refusal"
+    );
     assert_eq!(
         identity_of(&host, SECOND_EMAIL),
         before,

@@ -614,6 +614,72 @@ fn a_purge_that_wrote_an_export_and_then_stopped_says_the_file_is_there() {
     );
 }
 
+/// The terminal going away between the write and the line about it is still an
+/// Export that exists, and it still has to be said.
+///
+/// `write_the_export` does one more fallible thing after the bytes have landed:
+/// it reports what it wrote. A closed pty, a SIGHUP, a `head` that stopped
+/// reading — any of them fails that `say`, and the caller used to conclude from
+/// the `Err` that no Export had been written. What actually sat on the disk was
+/// an armored file holding a working Credential for every Account, at a path
+/// nothing had mentioned; and the next `perch purge` offering that same path
+/// aborted before asking anything, because an Export refuses a path that is
+/// taken.
+#[test]
+fn a_terminal_that_goes_away_after_the_export_lands_does_not_lose_the_file() {
+    /// Writes until the Export's own report starts, and then is not there.
+    struct GoesAwayReporting;
+
+    impl std::io::Write for GoesAwayReporting {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            match String::from_utf8_lossy(bytes).contains("Exported") {
+                true => Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "the pipe closed",
+                )),
+                false => Ok(bytes.len()),
+            }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let host = a_machine_to_give_back()
+        .with_answers(&["y", AT, "purge"])
+        .with_secrets(&[PASSPHRASE, PASSPHRASE]);
+
+    let outcome = perch::commands::purge::run(
+        &host,
+        perch::commands::purge::PurgeArgs { yes: false },
+        &mut GoesAwayReporting,
+    );
+
+    let refused = outcome.expect_err("the report could not be written");
+    let said = refused.to_string();
+    assert!(
+        said.contains(AT),
+        "the Export that was written is still named, whatever happened after it: {said}"
+    );
+    assert!(
+        said.contains("will not write over it"),
+        "and so is what the next Purge will do about it: {said}"
+    );
+    assert_eq!(
+        export::unseal(&host.file(AT).expect("a file was written"), PASSPHRASE)
+            .expect("it opens")
+            .accounts(),
+        3,
+        "and it is the whole Export, which is what makes it worth saying"
+    );
+    assert_eq!(
+        registry_on(&host).map(|registry| registry.accounts.len()),
+        Some(3),
+        "with nothing purged"
+    );
+}
+
 /// A Purge that stopped part way is run again, and finishes. The Credentials go
 /// first and the registry naming them goes last, so what has already been
 /// deleted is found already gone rather than lost track of.

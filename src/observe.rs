@@ -262,9 +262,8 @@ fn observe(host: &dyn Host, registry: &Registry, account: &Account) -> Step<Quot
 
     let installed = Installed::probed(host)?;
     let asked = holding(host, registry, account)?;
-    let theirs = |outcome| {
-        only_off_a_credential_that_is_theirs(host, outcome, &asked, account, &installed)
-    };
+    let theirs =
+        |outcome| only_off_a_credential_that_is_theirs(host, outcome, &asked, account, &installed);
 
     let token = usable_token(host, &asked, &installed).map_err(theirs)?;
     match read_off(host, &token, account) {
@@ -786,7 +785,10 @@ mod tests {
 
     #[test]
     fn a_renewal_that_hands_back_a_different_refresh_token_rotated() {
-        assert!(rotated_away("sk-ant-ort01-spent", Some("sk-ant-ort01-fresh")));
+        assert!(rotated_away(
+            "sk-ant-ort01-spent",
+            Some("sk-ant-ort01-fresh")
+        ));
     }
 
     #[test]

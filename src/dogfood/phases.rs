@@ -1169,7 +1169,10 @@ fn an_account_is_added_on_the_machine_that_was_behind(
     .map_err(|err| {
         Fault::Upstream.because(format!("the terminal could not be written to: {err}"))
     })?;
-    if !matches!(perch.ask(out, "  Walk the login now? [y/N] ")?.as_str(), "y" | "yes") {
+    if !matches!(
+        perch.ask(out, "  Walk the login now? [y/N] ")?.as_str(),
+        "y" | "yes"
+    ) {
         return Err(Halt::not_here(
             "the login was not walked, so this machine is still behind".to_string(),
         ));

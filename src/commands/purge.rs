@@ -75,9 +75,21 @@ pub fn run(host: &dyn Host, args: PurgeArgs, out: &mut dyn Write) -> Result<()> 
     purge::refuse_while_anything_is_running(host, &registry)?;
 
     say(out, &what_will_go(&registry, &home))?;
+    // Filled by the Export the instant its bytes land, rather than by the call
+    // returning: `write_the_export` reports to the terminal after the write, and
+    // a terminal that has gone away fails that — which used to lose the note
+    // saying the file is there, on the one path where that note is the whole of
+    // what makes the Purge survivable.
     let mut exported = None;
     if !args.yes {
-        exported = offer_an_export(host, &mut perch, &registry, &home, out)?;
+        // The offer's *own* failure carries the note too, which is the one arm
+        // that could not before: `write_the_export` reports after the bytes
+        // land, so this is exactly where a terminal that has gone away leaves a
+        // whole Export behind and a refusal that does not mention it. Taken as
+        // a value first, so the borrow of `exported` the call holds is over
+        // before the note reads it.
+        let offered = offer_an_export(host, &mut perch, &registry, &home, &mut exported, out);
+        offered.map_err(|error| still_standing(error, exported.as_deref()))?;
         if !agreed(host, out)? {
             // What the machine is holding now, which is not always nothing. An
             // Export written a question ago is a file full of working
@@ -222,13 +234,14 @@ fn offer_an_export(
     perch: &mut crate::lock::Held<'_>,
     registry: &Registry,
     home: &Path,
+    landed: &mut Option<PathBuf>,
     out: &mut dyn Write,
-) -> Result<Option<PathBuf>> {
+) -> Result<()> {
     // Nothing to put in one. `perch export` refuses this too, and meeting that
     // refusal here would be a Purge failing over an offer it should not have
     // made.
     if registry.accounts.is_empty() {
-        return Ok(None);
+        return Ok(());
     }
 
     let answered = ask_a_word(host, out, "Write an Export first? [Y/n]: ")?;
@@ -236,7 +249,7 @@ fn offer_an_export(
     // this is there to type a passphrase at the two prompts that follow.
     // Everything else — including plain Return — writes one.
     if matches!(answered.as_deref(), None | Some("n" | "no")) {
-        return Ok(None);
+        return Ok(());
     }
 
     let Some(path) = ask(host, out, "Where to write it: ")?
@@ -264,13 +277,13 @@ fn offer_an_export(
     // typing `perch purge` is waiting to hear, which is whether the Purge
     // happened. Every other way this command stops says so; this was the one
     // that left them reading a sentence about a file and inferring the rest.
-    export::write_the_export(host, perch, registry, &path, out).map_err(|error| {
+    export::write_the_export(host, perch, registry, &path, landed, out).map_err(|error| {
         error.with_note(
             "Nothing was purged. Run `perch purge` again — answering `n` to the \
              offer purges without an Export.",
         )
     })?;
-    Ok(Some(path))
+    Ok(())
 }
 
 /// A path typed at a prompt, with a leading `~/` meaning what everybody who

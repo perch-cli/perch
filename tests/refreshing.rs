@@ -500,7 +500,10 @@ fn a_credential_that_will_not_say_when_it_expires_is_renewed_once_anthropic_refu
             .contains("sk-ant-ort01-undated"),
         "with the refresh token it holds"
     );
-    assert!(printed.contains("42%"), "and the figures are read: {printed}");
+    assert!(
+        printed.contains("42%"),
+        "and the figures are read: {printed}"
+    );
 }
 
 #[test]

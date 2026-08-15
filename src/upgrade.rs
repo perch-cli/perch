@@ -650,7 +650,10 @@ mod tests {
         assert_eq!(version_typed("0.2.0").expect("bare"), "0.2.0");
         assert_eq!(version_typed("v0.2.0").expect("tagged"), "0.2.0");
         assert_eq!(version_typed("v0.2.0-rc.1").expect("pre"), "0.2.0-rc.1");
-        assert_eq!(version_typed("0.2.0+build.3").expect("build"), "0.2.0+build.3");
+        assert_eq!(
+            version_typed("0.2.0+build.3").expect("build"),
+            "0.2.0+build.3"
+        );
         assert_eq!(tag_of("0.2.0"), "v0.2.0");
     }
 

@@ -3214,8 +3214,8 @@ mod tests {
     /// A machine holding a Quarantined Account and nobody watching is a machine
     /// whose Repair skips, which is what `a_bare_machine` is for.
     fn a_machine(held: &[(&str, Option<Quarantine>)], logins: &[(&str, Login)]) -> FakeHost {
-        let host = with_a_claude_code(with_a_perch(a_bare_machine()))
-            .with_env(ATTENDED_VARIABLE, "1");
+        let host =
+            with_a_claude_code(with_a_perch(a_bare_machine())).with_env(ATTENDED_VARIABLE, "1");
 
         let holds: Vec<(String, Option<Quarantine>)> = held
             .iter()
