@@ -47,10 +47,11 @@ use crate::{probe, profile};
 /// Default Profile's; the Switch then finished and removed the real directory,
 /// leaving a link to nothing. `mkdir` at a dangling link fails exactly as it
 /// does when the lock is held, so that Profile's client waits on a lock nobody
-/// holds — and `clear_the_abandoned` will not clear it either, because
-/// `remove_dir_all` on a symlink is not a lock directory being cleared. Live
-/// rather than dangling is worse: two configuration directories sharing one
-/// lock, each reading the other's mtime as its own.
+/// holds — until `clear_the_abandoned` takes the link away, which it can,
+/// because a dangling link has no modification time to read as a hold. Live
+/// rather than dangling is worse, and is the case with no way out: two
+/// configuration directories sharing one lock, each reading the other's mtime
+/// as its own.
 ///
 /// So the denylist ADR 0026 wrote as two entries is four, and the last two are
 /// one rule — an entry that answers a question about *this* directory means

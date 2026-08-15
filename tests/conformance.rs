@@ -162,6 +162,53 @@ const CASES: &[Case] = &[
             );
         },
     },
+    // Both of these are about a lock artifact that is a dangling link, which is
+    // the state `reconcile`'s denylist exists to keep Perch out of and
+    // `lock::clear_the_abandoned` has to be able to meet anyway. The fake used
+    // to answer the opposite way on both — a modification time where the
+    // machine says `NotFound`, and `ENOTDIR` where the machine removes the link
+    // — so it modelled Perch as permanently wedged on a path the machine
+    // recovers from on the next command, and the recovery had never run.
+    Case {
+        named: "asking when a dangling link was written is not an answer",
+        asserts: |host, root, adapter| {
+            let link = root.join("points-nowhere");
+            host.link(Link::Symbolic, &root.join("was-never-there"), &link)
+                .expect("a link to nothing is still a link");
+
+            assert!(
+                matches!(host.modified_at(&link), Err(HostError::NotFound { .. })),
+                "{adapter}: a dangling link has no modification time — following \
+                 it is what `metadata` does, and there is nothing at the end of \
+                 it. This is the arm that reads a lock as free.",
+            );
+        },
+    },
+    Case {
+        named: "removing a directory tree at a link takes the link and not what it points at",
+        asserts: |host, root, adapter| {
+            let real = root.join("a-real-directory");
+            let held = real.join("held");
+            host.create_dir_all(&real).expect("it is made");
+            host.create_file_with_mode(&held, "still here", PRIVATE_FILE_MODE)
+                .expect("with something in it");
+
+            let link = root.join("points-at-it");
+            host.link(Link::Symbolic, &real, &link).expect("linked");
+
+            host.remove_dir_all(&link)
+                .expect("the last component is not followed, so the link goes");
+
+            assert!(
+                host.read_file(&held).is_ok(),
+                "{adapter}: and what it pointed at is untouched"
+            );
+            assert!(
+                matches!(host.link_target(&link), Err(HostError::NotFound { .. })),
+                "{adapter}: while the link itself is gone"
+            );
+        },
+    },
     Case {
         named: "a file is created with exactly the mode asked for",
         asserts: |host, root, adapter| {

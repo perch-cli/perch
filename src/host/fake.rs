@@ -1306,13 +1306,23 @@ impl Host for FakeHost {
         if let Some(detail) = self.undeletable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
-        // A link or a plain file at the path is not a directory, and the real
-        // call says so rather than removing it — `remove_dir_all` does not
-        // follow the last component. A fake that removed it anyway would
-        // recover from the one state a real machine cannot: see the note on
+        // A link at the path is taken away and what it points at is left
+        // alone: `remove_dir_all` does not follow the last component, so it
+        // unlinks the link itself and answers `Ok`. Measured, because the
+        // opposite belief made `lock::clear_the_abandoned` unreachable in every
+        // test — a dangling artifact was modelled as wedging Perch for ever
+        // where the machine recovers on the next command.
+        if self.links.borrow_mut().remove(path).is_some() {
+            self.modified.borrow_mut().remove(path);
+            self.files.borrow_mut().remove(path);
+            self.modes.borrow_mut().remove(path);
+            return Ok(());
+        }
+        // A plain file is not a directory, and there the real call does say so
+        // rather than removing it. A fake that removed it anyway would recover
+        // from a state a real machine cannot: see the note on
         // `create_dir_exclusive` below, which is what puts Perch there.
-        let is_a_link = self.links.borrow().contains_key(path);
-        if is_a_link || self.files.borrow().contains_key(path) {
+        if self.files.borrow().contains_key(path) {
             return Err(HostError::Other(format!(
                 "{}: Not a directory (os error 20)",
                 path.display()
@@ -1512,7 +1522,15 @@ impl Host for FakeHost {
             self.set_file(at, &contents);
         }
         self.note_directories_of(at);
-        self.mark_written(at);
+        // Only a hard link, which is a real second name for the file and shares
+        // its modification time. A symbolic link has none of its own: the real
+        // `modified_at` goes through `metadata`, which follows the link — so a
+        // dangling one is `NotFound`, and that is the arm `lock::abandoned`
+        // reads as a lock nobody holds. Marking the link path here gave it a
+        // time of its own and answered `Ok`, which is the opposite arm.
+        if kind == Link::Hard {
+            self.mark_written(at);
+        }
         Ok(())
     }
 

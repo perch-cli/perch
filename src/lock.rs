@@ -523,12 +523,14 @@ fn take_over(host: &dyn Host, lock: &LockSpec) -> Result<bool> {
 /// what is in the way is not a lock at all.
 ///
 /// A lock is a directory, and `remove_dir_all` does not follow the last
-/// component — so a plain file or a dangling symlink at the path fails with
-/// `ENOTDIR`, for ever. Discarded, that failure became five attempts of no
-/// progress and then `Busy`, which says the lock "is held by Claude Code and was
-/// not given back" and advises quitting it and trying again. There is no Claude
-/// Code to quit and the advice never works: every Switch, every Run and every
-/// Renewal against that path fails that way until somebody deletes it by hand.
+/// component — so a plain file at the path fails with `ENOTDIR`, for ever. (A
+/// symlink is taken away by the same call and answers `Ok`, so it clears on the
+/// next command; it is the plain file that is permanent.) Discarded, that
+/// failure became five attempts of no progress and then `Busy`, which says the
+/// lock "is held by Claude Code and was not given back" and advises quitting it
+/// and trying again. There is no Claude Code to quit and the advice never
+/// works: every Switch, every Run and every Renewal against that path fails
+/// that way until somebody deletes it by hand.
 ///
 /// So this is a refusal of its own, naming the path and saying what is wrong
 /// with it — the one message that turns an unrecoverable state into a
