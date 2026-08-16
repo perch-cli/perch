@@ -63,11 +63,11 @@ pub struct Attempt {
     ///
     /// Carried rather than derived, because an `Attempt` has no registry and
     /// the surfaces that render one are the surfaces that show no Accounts:
-    /// `perch watch` prints a decision line and nothing else, and the TUI's
-    /// State column says an Account is Quarantined without saying why. So this
-    /// was the only sentence about that Account on the screen, and it was the
-    /// one place in Perch naming an Account by raw address while every other
-    /// surface called it ``someone@example.com (as `work`)``.
+    /// `perch watcher run` prints a decision line and nothing else, and the
+    /// TUI's State column says an Account is Quarantined without saying why. So
+    /// this was the only sentence about that Account on the screen, and it was
+    /// the one place in Perch naming an Account by raw address while every
+    /// other surface called it ``someone@example.com (as `work`)``.
     pub named: String,
     pub outcome: Outcome,
 }
@@ -158,10 +158,11 @@ impl Report {
     ///
     /// Whole, including the Quarantines. For the surfaces that show the
     /// Accounts themselves that is one sentence too many — see
-    /// [`write_notes_beside_the_accounts`] — but `perch watch` prints a decision
-    /// line and no Accounts at all, and there the Quarantine is the only thing
-    /// saying why a candidate was passed over. The TUI is the same: its State
-    /// column says an Account is Quarantined and nothing there says why.
+    /// [`write_notes_beside_the_accounts`] — but `perch watcher run` prints a
+    /// decision line and no Accounts at all, and there the Quarantine is the
+    /// only thing saying why a candidate was passed over. The TUI is the same:
+    /// its State column says an Account is Quarantined and nothing there says
+    /// why.
     ///
     /// [`write_notes_beside_the_accounts`]: Report::write_notes_beside_the_accounts
     pub fn notes(&self) -> Vec<String> {

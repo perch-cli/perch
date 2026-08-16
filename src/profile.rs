@@ -276,9 +276,9 @@ fn write_and_read_back(
 /// believes was never added, invisible to every later reap and Purge.
 ///
 /// So a store that refuses keeps the directory, and the remark says why. What
-/// is left behind is a Profile nothing names, which `perch purge` walks and
-/// which the next `perch add` can reap — untidy, and recoverable, which is the
-/// side of the trade to be on.
+/// is left behind is a Profile nothing names, which `perch holdings purge`
+/// walks and which the next `perch add` can reap — untidy, and recoverable,
+/// which is the side of the trade to be on.
 pub fn discard(host: &dyn Host, store: &Store) {
     let mut still_holding = Vec::new();
     for kept_in in credentials::stores_for(host, store) {
@@ -291,8 +291,8 @@ pub fn discard(host: &dyn Host, store: &Store) {
         host.note(&format!(
             "{} would not give up the Credential it holds for {}, so that \
              directory was left where it is: it is the only thing that can \
-             still name the store. `perch purge` empties it, and the next \
-             `perch add` reaps it.",
+             still name the store. `perch holdings purge` empties it, and the \
+             next `perch add` reaps it.",
             still_holding.join(" and "),
             store.config_dir.display(),
         ));

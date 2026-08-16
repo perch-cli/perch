@@ -202,10 +202,10 @@ appears above the keys.
 
 The exclusive lock is taken per edit and given straight back, never held for the
 life of the screen: holding it would make an open TUI a denial of service
-against `perch watch`, which takes the same lock every round. The cost is that
-an edit can be refused — by another `perch` holding the lock, or while a Refresh
-is out — and a refusal is shown where a failed Refresh is shown, with the row
-back to what was actually written rather than showing a value that never was.
+against `perch watcher run`, which takes the same lock every round. The cost is
+that an edit can be refused — by another `perch` holding the lock, or while a
+Refresh is out — and a refusal is shown where a failed Refresh is shown, with the
+row back to what was actually written rather than showing a value that never was.
 
 A Switch from the view is the same Switch as everywhere — the outgoing
 Credential Captured first, Claude Code's locks taken, the Identity patched — and

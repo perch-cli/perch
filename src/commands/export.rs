@@ -1,4 +1,5 @@
-//! `perch export <path>` — the whole machine, in one `age` file (ADR 0014).
+//! `perch holdings export <path>` — the whole machine, in one `age` file (ADR
+//! 0014).
 //!
 //! The only command that turns the Credentials in a Credential Store into a
 //! file, and the only artifact that makes a dead machine, a mistaken `perch
@@ -30,39 +31,34 @@ use crate::export::{self, Export};
 use crate::host::Host;
 use crate::registry::Registry;
 
-#[derive(Debug, Clone)]
-pub struct ExportArgs {
-    /// Where to write the `age` file.
-    pub path: PathBuf,
-}
-
-pub fn run(host: &dyn Host, args: ExportArgs, out: &mut dyn Write) -> Result<()> {
-    // Before the passphrase, because all three are refusals somebody should meet
-    // before typing one twice — and before the registry is even read, because
-    // none of them depends on what it says and reading it is what adopts the
-    // login on a machine Perch has never run on (ADR 0009). The two about the
-    // path are asked again below, where the write is: what refuses this command
-    // early has to refuse `perch purge` too, and the check that lives in only
-    // one of two callers is the check that stops being made.
-    refuse_without_a_terminal(host, "perch export")?;
-    refuse_a_directory_that_is_not_there(host, &args.path)?;
-    refuse_an_occupied_path(host, &args.path)?;
+pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
+    // Before the passphrase, because all three are refusals somebody should
+    // meet before typing one twice — and before the registry is even read,
+    // because none of them depends on what it says and reading it is what
+    // adopts the login on a machine Perch has never run on (ADR 0009). The two
+    // about the path are asked again below, where the write is: what refuses
+    // this command early has to refuse `perch holdings purge` too, and the
+    // check that lives in only one of two callers is the check that stops being
+    // made.
+    refuse_without_a_terminal(host, "perch holdings export")?;
+    refuse_a_directory_that_is_not_there(host, path)?;
+    refuse_an_occupied_path(host, path)?;
 
     let (mut perch, registry) = adopt::ensure_adopted_exclusively(host)?;
     // Nothing to hand back to: this command's own failure says where the file
     // is, because the path is the argument the person typed.
     let mut landed = None;
-    write_the_export(host, &mut perch, &registry, &args.path, &mut landed, out)
+    write_the_export(host, &mut perch, &registry, path, &mut landed, out)
 }
 
 /// Everything an Export is, given a registry somebody else has read: the path
 /// refusals, the passphrase, the gather, the seal, the file and what was
 /// written.
 ///
-/// Shared with `perch purge`, which offers to write one before it destroys
-/// anything (ADR 0014) and holds the registry lock across the offer — so it
-/// cannot go through [`run`], which would take that lock a second time and wait
-/// out its own hold.
+/// Shared with `perch holdings purge`, which offers to write one before it
+/// destroys anything (ADR 0014) and holds the registry lock across the offer —
+/// so it cannot go through [`run`], which would take that lock a second time
+/// and wait out its own hold.
 pub fn write_the_export(
     host: &dyn Host,
     perch: &mut crate::lock::Held<'_>,
@@ -87,9 +83,9 @@ pub fn write_the_export(
 
     // Asked again here, because the check above was two blocking questions ago
     // and the write below replaces whatever is at the path rather than failing
-    // on it. A second `perch export` aimed at the same path — or anything else
-    // that arrived while the passphrase was being typed — would otherwise be the
-    // one thing this refusal exists to stop, just slower.
+    // on it. A second `perch holdings export` aimed at the same path — or
+    // anything else that arrived while the passphrase was being typed — would
+    // otherwise be the one thing this refusal exists to stop, just slower.
     refuse_an_occupied_path(host, path)?;
 
     // And the hold, over the same window and for the same reason the two
@@ -109,9 +105,9 @@ pub fn write_the_export(
     // — a closed pty, a SIGHUP — fails it: the caller then saw an `Err` and
     // concluded no Export had been written, while an armored file holding a
     // working Credential for every Account sat at a path nothing had mentioned.
-    // The next `perch purge` offering that path then aborted before asking
-    // anything, because an Export refuses a path that is taken — which is the
-    // sequence `purge::still_standing` exists to close.
+    // The next `perch holdings purge` offering that path then aborted before
+    // asking anything, because an Export refuses a path that is taken — which
+    // is the sequence `purge::still_standing` exists to close.
     *landed = Some(path.to_path_buf());
 
     report(out, path, &export)
@@ -139,12 +135,12 @@ fn refuse_an_occupied_path(host: &dyn Host, path: &Path) -> Result<()> {
 ///
 /// The private write below would create it, and every directory above it, at
 /// 0700 — which is right for the ones Perch owns and presumptuous for a path
-/// somebody typed. `perch export ~/backups/2026/perch.age` on a machine with no
-/// `backups` is a typo more often than it is an instruction, and the repair is a
-/// `mkdir` they meant to type.
+/// somebody typed. `perch holdings export ~/backups/2026/perch.age` on a
+/// machine with no `backups` is a typo more often than it is an instruction,
+/// and the repair is a `mkdir` they meant to type.
 fn refuse_a_directory_that_is_not_there(host: &dyn Host, path: &Path) -> Result<()> {
-    // No parent, or an empty one, is the current directory: `perch export
-    // perch.age` names somewhere that exists by definition.
+    // No parent, or an empty one, is the current directory: `perch holdings
+    // export perch.age` names somewhere that exists by definition.
     let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) else {
         return Ok(());
     };

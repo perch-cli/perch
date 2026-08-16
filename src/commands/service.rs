@@ -1,9 +1,15 @@
-//! `perch service` — having the machine run the Watcher for you (ADR 0040).
+//! `perch watcher install`, `uninstall` and `status` — having the machine run
+//! the Watcher for you (ADR 0040).
 //!
-//! Three verbs over one noun, which is the shape `perch group` and `perch
-//! config` already have: `install` writes the unit and starts it, `uninstall`
-//! stops it and takes the unit back, and `status` says what is there. What a
-//! unit *says* is [`crate::service`]'s; putting it on the machine is here.
+//! Three of the Watcher's five verbs, and the three that are about the Service:
+//! `install` writes the unit and starts it, `uninstall` stops it and takes the
+//! unit back, and `status` says what is there. Which command line reaches which
+//! is [`crate::commands::watcher`]'s; what a unit *says* is
+//! [`crate::service`]'s; putting it on the machine is here.
+//!
+//! The Service keeps its name here because it keeps its glossary entry: it
+//! names an arrangement of the Watcher, and what lost its tree is the CLI noun
+//! rather than the concept (ADR 0047).
 //!
 //! Perch does not background itself and has no `--detach`. What `install`
 //! leaves behind is a unit file the platform's own service manager owns, and
@@ -20,48 +26,13 @@ use crate::host::{Host, Platform};
 use crate::service::{self, Driven, Unit};
 use crate::{registry, upgrade};
 
-/// What was asked of `perch service`. The help each of these is described by
-/// lives with the command line that parses it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::Subcommand)]
-pub enum ServiceCommand {
-    /// Write the unit, start it, and have it start at every login from now on.
-    ///
-    /// Idempotent: running it again rewrites the unit against the binary that
-    /// is there now, which is the repair for a Service that stopped coming up
-    /// after an Upgrade moved it.
-    Install,
-
-    /// Stop the Service and take its unit back. `perch watch` in a terminal is
-    /// unaffected, and nothing Perch holds is touched.
-    Uninstall,
-
-    /// Say whether a Service is installed, whether it is running, and whether a
-    /// Watcher holds the lock right now.
-    ///
-    /// A question, so it succeeds either way — branch on `--json` rather than
-    /// on the exit code.
-    Status {
-        /// Report as JSON for whatever is parsing this.
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-pub fn run(host: &dyn Host, command: ServiceCommand, out: &mut dyn Write) -> Result<i32> {
-    match command {
-        ServiceCommand::Install => install(host, out),
-        ServiceCommand::Uninstall => uninstall(host, out),
-        ServiceCommand::Status { json } => status(host, json, out),
-    }
-}
-
 /// Writes the unit, starts it, and says what will happen from now on.
 ///
 /// Idempotent, and that is a feature rather than a leniency: re-running it is
 /// the documented repair for a unit whose binary has moved, which `perch
 /// upgrade` does every time it routes through Homebrew or npm (ADR 0039). So a
 /// second install replaces rather than refusing, and says which it did.
-fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
+pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     refuse_as_root(host)?;
 
     let unit = describe(host)?;
@@ -93,7 +64,7 @@ fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         }
         return Err(failed.with_note(
             "Nothing was installed, and the unit file was taken back. Perch is \
-             unchanged, and `perch watch` in a terminal still works.",
+             unchanged, and `perch watcher run` in a terminal still works.",
         ));
     }
 
@@ -129,7 +100,7 @@ fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
 }
 
 /// Stops the Service and takes the unit back.
-fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
+pub fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     let at = service::unit_path(host)?;
     let installed = is_installed(host, at.as_deref())?;
 
@@ -148,8 +119,9 @@ fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         true => {
             say(
                 out,
-                "The Service is stopped and its unit is gone. Nothing starts at \
-                 login any more, and `perch watch` in a terminal is unaffected.",
+                "The Service is stopped and its unit is gone. Nothing starts \
+                 at login any more, and `perch watcher run` in a terminal is \
+                 unaffected.",
             )?;
             Ok(EXIT_OK)
         }
@@ -178,7 +150,7 @@ fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
 /// `journalctl` (ADR 0021 disfavours it) to do worse than `journalctl -f`
 /// already does, and it would fork the implementation three ways for a feature
 /// every platform already ships.
-fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
+pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
     let platform = host.platform();
     let at = service::unit_path(host)?;
     let installed = is_installed(host, at.as_deref())?;
@@ -214,7 +186,7 @@ fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
         say(
             out,
             &format!(
-                "No Service is installed. `perch service install` has this \
+                "No Service is installed. `perch watcher install` has this \
                  machine run the Watcher for you as {}, starting when you log \
                  in.",
                 service::described(platform),
@@ -239,9 +211,9 @@ fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
             (Some(binary), Some(false)) => say(
                 out,
                 &format!(
-                    "It names {}, which is not there any more — an Upgrade moves \
-                     the binary (ADR 0039). `perch service install` writes the \
-                     unit again against the one that is.",
+                    "It names {}, which is not there any more — an Upgrade \
+                     moves the binary (ADR 0039). `perch watcher install` \
+                     writes the unit again against the one that is.",
                     binary.display(),
                 ),
             )?,
@@ -259,8 +231,8 @@ fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
 
     // The Service and the Watcher are different questions, and a machine can
     // answer them differently: a Service that is installed and stopped, a
-    // `perch watch` somebody typed in a terminal, or the moment after a Service
-    // has been told to start and before it has taken the lock.
+    // `perch watcher run` somebody typed in a terminal, or the moment after a
+    // Service has been told to start and before it has taken the lock.
     say(
         out,
         match watching {
@@ -309,7 +281,7 @@ pub fn take_back_before_a_purge(host: &dyn Host, out: &mut dyn Write) -> Result<
         return Err(PerchError::Busy(format!(
             "The Service is still running, so nothing was purged.\n\
              It would go on Switching Credentials into Profiles this command is \
-             deleting. Stop it with `perch service uninstall` and run this \
+             deleting. Stop it with `perch watcher uninstall` and run this \
              again — it is {} and something is refusing to stop it.",
             service::described(host.platform()),
         )));
@@ -373,7 +345,7 @@ pub fn refreshed_after_an_upgrade(host: &dyn Host) -> Option<String> {
         // not come up at the next login.
         Err(why) => format!(
             "The Service could not be restarted against the new binary: {why}\n\
-             Perch itself upgraded. Run `perch service install` to point the \
+             Perch itself upgraded. Run `perch watcher install` to point the \
              Service at it — until then it may not come up when you log in.",
         ),
     })
@@ -459,7 +431,7 @@ fn recorded_binary(host: &dyn Host, at: Option<&std::path::Path>) -> Option<Path
         Platform::Other => text
             .lines()
             .find_map(|line| line.strip_prefix("ExecStart="))
-            .and_then(|line| line.strip_suffix(" watch"))
+            .and_then(|line| line.strip_suffix(" watcher run"))
             .map(PathBuf::from),
         // The first `<string>` inside `ProgramArguments`, which is the program.
         Platform::MacOs => {
@@ -564,7 +536,7 @@ fn refuse_as_root(host: &dyn Host) -> Result<()> {
         "A Service belongs to one person, and this is running as root.\n\
          Every Profile Perch holds is under a home directory, so a Service \
          installed this way would watch root's registry rather than yours. Run \
-         `perch service install` as yourself, without `sudo`."
+         `perch watcher install` as yourself, without `sudo`."
             .to_string(),
     ))
 }

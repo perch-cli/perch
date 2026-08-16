@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- [**breaking**] every command is now placed by the noun it is about, and the Account is the one left unsaid. The four that broke that rule move onto two nouns: `perch export`, `perch import` and `perch purge` become `perch holdings export|import|purge`, and `perch watch` becomes `perch watcher run` — taking `perch service install|uninstall|status` with it as `perch watcher install|uninstall|status`, because a Service is an arrangement of the Watcher rather than a noun of its own. `perch --help` now lists sixteen names rather than nineteen. `perch watch --once` becomes `perch watcher check`, a verb rather than a flag because it changes both the meaning of the exit code and the lifetime of the command; the exit codes themselves are untouched, and no other flag is affected. `Holdings` — everything Perch holds on this machine — is a glossary term ([#164](https://github.com/perch-cli/perch/issues/164))
+
 ### Removed
 
 - [**breaking**] the Watcher's three departing Settings — `watcher-cooldown-minutes`, `watcher-margin-percent` and `watcher-no-return`. The cooldown and the margin are arithmetic rather than anyone's taste, so they are now constants of 15 minutes and 10 points under the threshold; the no-return could never fire, because the cooldown always reached the decision first. `perch config` carries three Settings, and how full is too full is the only preference left in the loop. A scheduled Check now records only when it Switched, the no-return having been the only thing that read which Account it Switched off ([#161](https://github.com/perch-cli/perch/issues/161))

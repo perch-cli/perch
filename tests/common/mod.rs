@@ -19,17 +19,14 @@ use perch::commands::add::AddArgs;
 use perch::commands::alias::AliasCommand;
 use perch::commands::config::ConfigCommand;
 use perch::commands::enable::EnableCommand;
-use perch::commands::export::ExportArgs;
 use perch::commands::group::GroupCommand;
-use perch::commands::import::ImportArgs;
 use perch::commands::list::ListArgs;
-use perch::commands::purge::PurgeArgs;
 use perch::commands::relogin::ReloginArgs;
 use perch::commands::remove::RemoveArgs;
 use perch::commands::run::RunArgs;
 use perch::commands::status::StatusArgs;
 use perch::commands::switch::SwitchArgs;
-use perch::commands::watch::WatchArgs;
+use perch::commands::watcher::WatcherCommand;
 use perch::credentials;
 use perch::host::fake::THIS_PROCESS;
 use perch::host::{Execution, FakeHost, Host, Platform};
@@ -431,25 +428,29 @@ fn run_switch_with(host: &FakeHost, args: SwitchArgs) -> (perch::Result<()>, Str
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
-/// Runs `perch watch`, returning everything it printed alongside how it ended.
+/// Runs `perch watcher run`, returning everything it printed alongside how it
+/// ended.
 ///
 /// It only ends because somebody stopped it, so a fake Host that nobody
 /// interrupts would leave this spinning: `with_interrupt_after` is what says
 /// how many rounds the test is about.
 pub fn run_watch(host: &FakeHost) -> (perch::Result<()>, String) {
-    let (result, printed) = run_watch_with(host, WatchArgs { once: false });
+    let (result, printed) = run_watcher(host, WatcherCommand::Run);
     (result.map(|_| ()), printed)
 }
 
-/// Runs `perch watch --once`: one check, and the exit code it reports to
+/// Runs `perch watcher check`: one round, and the exit code it reports to
 /// whatever scheduled it.
 pub fn run_watch_once(host: &FakeHost) -> (perch::Result<i32>, String) {
-    run_watch_with(host, WatchArgs { once: true })
+    run_watcher(host, WatcherCommand::Check)
 }
 
-fn run_watch_with(host: &FakeHost, args: WatchArgs) -> (perch::Result<i32>, String) {
+/// Through the dispatch rather than into the loop directly, which is how
+/// `servicing.rs` drives the Watcher's other three verbs: an arm wired to the
+/// wrong half is exactly the mistake one noun over five verbs makes possible.
+fn run_watcher(host: &FakeHost, command: WatcherCommand) -> (perch::Result<i32>, String) {
     let mut written = Vec::new();
-    let result = perch::commands::watch::run(host, args, &mut written);
+    let result = perch::commands::watcher::run(host, command, &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
@@ -464,8 +465,8 @@ pub const SPARE: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-spare",
 pub const SPARE_TOKEN: &str = "sk-ant-oat01-spare";
 
 /// Two Accounts declared interchangeable, the first one active, and the Group
-/// told the watcher may act on it — the machine both `perch watch` and
-/// `perch watch --once` have something to do on.
+/// told the watcher may act on it — the machine both `perch watcher run` and
+/// `perch watcher check` have something to do on.
 pub fn watched() -> FakeHost {
     let host = logged_in_machine().with_login(login_producing(SPARE, SECOND_IDENTITY_FILE));
     // Before the first command, so adoption keeps this Credential rather than
@@ -690,41 +691,32 @@ pub fn quarantine_for(host: &FakeHost, email: &str, why: Quarantine) {
     save_registry(host, &registry);
 }
 
-/// Runs `perch export <path>`, returning what it printed alongside how it ended.
+/// Runs `perch holdings export <path>`, returning what it printed alongside how
+/// it ended.
 pub fn run_export(host: &FakeHost, path: &str) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
-    let result = perch::commands::export::run(
-        host,
-        ExportArgs {
-            path: std::path::PathBuf::from(path),
-        },
-        &mut written,
-    );
+    let result = perch::commands::export::run(host, &std::path::PathBuf::from(path), &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
-/// Runs `perch import <path>`, returning what it printed alongside how it ended.
+/// Runs `perch holdings import <path>`, returning what it printed alongside how
+/// it ended.
 pub fn run_import(host: &FakeHost, path: &str) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
-    let result = perch::commands::import::run(
-        host,
-        ImportArgs {
-            path: std::path::PathBuf::from(path),
-        },
-        &mut written,
-    );
+    let result = perch::commands::import::run(host, &std::path::PathBuf::from(path), &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
-/// Runs `perch purge`, returning what it printed alongside how it ended.
+/// Runs `perch holdings purge`, returning what it printed alongside how it
+/// ended.
 pub fn run_purge(host: &FakeHost) -> (perch::Result<()>, String) {
-    run_purge_with(host, PurgeArgs { yes: false })
+    run_purge_with(host, false)
 }
 
 /// The same, for the tests that are about the flag a script purges with.
-pub fn run_purge_with(host: &FakeHost, args: PurgeArgs) -> (perch::Result<()>, String) {
+pub fn run_purge_with(host: &FakeHost, yes: bool) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
-    let result = perch::commands::purge::run(host, args, &mut written);
+    let result = perch::commands::purge::run(host, yes, &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 

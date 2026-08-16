@@ -1,9 +1,11 @@
 # A command names the noun it is about, and the Account is the one left unsaid
 
-> **Decided, not yet carried out.** The four moves, the glossary entry and the
-> guide edits below are tracked separately. Like ADR 0041, ADR 0042, ADR 0044,
-> ADR 0045 and ADR 0046, this is the artifact of a planning effort rather than of
-> a change, so it lands ahead of the work it describes.
+> **Carried out in #164.** Like ADR 0041, ADR 0042, ADR 0044, ADR 0045 and ADR
+> 0046, this is the artifact of a planning effort rather than of a change, so it
+> landed ahead of the work it describes instead of beside it. The surface now
+> matches it: `perch --help` lists sixteen names, `holdings` and `watcher` are
+> the two new nouns, `--once` is `perch watcher check`, and `Holdings` is a
+> glossary entry.
 
 The question arrived as a choice of shapes: eighteen top-level commands in a flat
 verb list — should it stay flat, become noun-then-verb, or collapse to a small

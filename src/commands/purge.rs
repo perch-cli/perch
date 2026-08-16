@@ -1,4 +1,4 @@
-//! `perch purge` — giving the machine back (ADR 0014).
+//! `perch holdings purge` — giving the machine back (ADR 0014).
 //!
 //! Every Profile, every Credential Perch holds, and Perch's own registry, gone
 //! in one act. The exact inverse of an Import, and the command that makes moving
@@ -34,20 +34,15 @@ use crate::host::Host;
 use crate::purge::{self, Purged};
 use crate::registry::{self, Account, Registry};
 
-#[derive(Debug, Clone)]
-pub struct PurgeArgs {
-    /// Answer both questions ahead of time: purge, and write no Export.
-    pub yes: bool,
-}
-
 /// The word, typed out. A letter is what fingers answer before eyes have read
 /// anything, and this is the one command nothing undoes.
 const THE_WORD: &str = "purge";
 
-pub fn run(host: &dyn Host, args: PurgeArgs, out: &mut dyn Write) -> Result<()> {
+/// `yes` answers both questions ahead of time: purge, and write no Export.
+pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     // Before anything is read, because it is a refusal about this terminal
     // rather than about this machine.
-    refuse_without_a_terminal_or_the_flag(host, args.yes)?;
+    refuse_without_a_terminal_or_the_flag(host, yes)?;
 
     // Asked before the lock is taken, because taking it would create the very
     // directory this is looking for: Perch's home is made on the way to the lock
@@ -84,7 +79,7 @@ pub fn run(host: &dyn Host, args: PurgeArgs, out: &mut dyn Write) -> Result<()> 
     // saying the file is there, on the one path where that note is the whole of
     // what makes the Purge survivable.
     let mut exported = None;
-    if !args.yes {
+    if !yes {
         // The offer's *own* failure carries the note too, which is the one arm
         // that could not before: `write_the_export` reports after the bytes
         // land, so this is exactly where a terminal that has gone away leaves a
@@ -97,9 +92,9 @@ pub fn run(host: &dyn Host, args: PurgeArgs, out: &mut dyn Write) -> Result<()> 
             // What the machine is holding now, which is not always nothing. An
             // Export written a question ago is a file full of working
             // Credentials sitting at a path the user is about to stop thinking
-            // about — and `perch export` refuses a path that is taken, so the
-            // next Purge offering the same one aborts before it asks anything.
-            // Both are things somebody has to be told to act on.
+            // about — and `perch holdings export` refuses a path that is taken,
+            // so the next Purge offering the same one aborts before it asks
+            // anything. Both are things somebody has to be told to act on.
             return match exported {
                 Some(path) => say(
                     out,
@@ -107,8 +102,8 @@ pub fn run(host: &dyn Host, args: PurgeArgs, out: &mut dyn Write) -> Result<()> 
                         "Nothing was purged. The Export at {} was written before \
                          you declined and still stands — it holds a working \
                          Credential for every Account, so keep it somewhere you \
-                         would keep those, or delete it. `perch purge` will not \
-                         write over it.",
+                         would keep those, or delete it. `perch holdings purge` \
+                         will not write over it.",
                         path.display(),
                     ),
                 ),
@@ -120,10 +115,10 @@ pub fn run(host: &dyn Host, args: PurgeArgs, out: &mut dyn Write) -> Result<()> 
     // Every failure from here on carries the same note the declined Purge does,
     // and for the same two reasons: a file full of working Credentials is
     // sitting at a path the user is about to stop thinking about, and `perch
-    // export` refuses a path that is taken — so the next Purge offering the same
-    // one aborts before it asks anything. Reported only where the run stops
-    // before the Purge is complete: a Purge that finished says where the file is
-    // in its own report.
+    // holdings export` refuses a path that is taken — so the next Purge
+    // offering the same one aborts before it asks anything. Reported only where
+    // the run stops before the Purge is complete: a Purge that finished says
+    // where the file is in its own report.
     let and_the_export = |error: PerchError| still_standing(error, exported.as_deref());
 
     // The same guard `perch remove` takes, for the same reason and at the same
@@ -156,18 +151,18 @@ pub fn run(host: &dyn Host, args: PurgeArgs, out: &mut dyn Write) -> Result<()> 
 /// after it.
 ///
 /// Only the decline arm used to say this, so every other way a Purge can stop —
-/// a registry another Perch took over, a client started while the passphrase was
-/// being typed, a Credential Store that would not empty — left an armored file
-/// holding a working Credential for every Account at a path nothing had
-/// mentioned. The next `perch purge` then aborted on it before asking anything,
-/// because `perch export` refuses a path that is taken.
+/// a registry another Perch took over, a client started while the passphrase
+/// was being typed, a Credential Store that would not empty — left an armored
+/// file holding a working Credential for every Account at a path nothing had
+/// mentioned. The next `perch holdings purge` then aborted on it before asking
+/// anything, because `perch holdings export` refuses a path that is taken.
 fn still_standing(error: PerchError, exported: Option<&std::path::Path>) -> PerchError {
     match exported {
         Some(path) => error.with_note(&format!(
             "The Export at {} was written before this stopped and still stands \
              — it holds a working Credential for every Account, so keep it \
-             somewhere you would keep those, or delete it. `perch purge` will \
-             not write over it.",
+             somewhere you would keep those, or delete it. `perch holdings \
+             purge` will not write over it.",
             path.display(),
         )),
         None => error,
@@ -247,7 +242,8 @@ fn what_will_go(registry: &Registry, home: &Path, service: bool) -> String {
 /// An Export that fails stops the Purge rather than being asked about again. A
 /// path that is taken, a directory that is not there and a passphrase typed
 /// twice differently are all things somebody has to go and settle, and nothing
-/// has been destroyed yet — so the answer is to run `perch purge` again.
+/// has been destroyed yet — so the answer is to run `perch holdings purge`
+/// again.
 ///
 /// Returns where one was written, because the Purge it was offered for may
 /// still be declined at the next question — and a file holding every Credential
@@ -261,9 +257,9 @@ fn offer_an_export(
     landed: &mut Option<PathBuf>,
     out: &mut dyn Write,
 ) -> Result<()> {
-    // Nothing to put in one. `perch export` refuses this too, and meeting that
-    // refusal here would be a Purge failing over an offer it should not have
-    // made.
+    // Nothing to put in one. `perch holdings export` refuses this too, and
+    // meeting that refusal here would be a Purge failing over an offer it
+    // should not have made.
     if registry.accounts.is_empty() {
         return Ok(());
     }
@@ -288,23 +284,24 @@ fn offer_an_export(
         // keystroke shorter than the way forward would have been.
         return Err(PerchError::Invalid(
             "No path was typed, so no Export was written.\n\
-             Nothing was purged. Run `perch purge` again — answering `n` to the \
-             offer purges without one."
+             Nothing was purged. Run `perch holdings purge` again — answering \
+             `n` to the offer purges without one."
                 .to_string(),
         ));
     };
     refuse_a_path_the_purge_would_take(&path, home)?;
 
     // The Export's own refusals are about the Export — a path already taken, a
-    // passphrase typed twice and differently, a registry another Perch has since
-    // written. Every one of them is true and none of them says what the person
-    // typing `perch purge` is waiting to hear, which is whether the Purge
-    // happened. Every other way this command stops says so; this was the one
-    // that left them reading a sentence about a file and inferring the rest.
+    // passphrase typed twice and differently, a registry another Perch has
+    // since written. Every one of them is true and none of them says what the
+    // person typing `perch holdings purge` is waiting to hear, which is whether
+    // the Purge happened. Every other way this command stops says so; this was
+    // the one that left them reading a sentence about a file and inferring the
+    // rest.
     export::write_the_export(host, perch, registry, &path, landed, out).map_err(|error| {
         error.with_note(
-            "Nothing was purged. Run `perch purge` again — answering `n` to the \
-             offer purges without an Export.",
+            "Nothing was purged. Run `perch holdings purge` again — answering \
+             `n` to the offer purges without an Export.",
         )
     })?;
     Ok(())
@@ -314,12 +311,12 @@ fn offer_an_export(
 /// types it means.
 ///
 /// This is the one path in Perch that arrives without a shell having been over
-/// it first. `perch export ~/x.age` works because the shell expanded the tilde
-/// before Perch ever saw it; the same characters read from standard input are
-/// just a directory called `~`. Left alone, the likeliest answer to "Where to
-/// write it:" was refused with "`~` is not a directory that exists", the whole
-/// Purge stopped, and every question before it had to be answered again — a
-/// refusal that reads as a bug rather than as an instruction.
+/// it first. `perch holdings export ~/x.age` works because the shell expanded
+/// the tilde before Perch ever saw it; the same characters read from standard
+/// input are just a directory called `~`. Left alone, the likeliest answer to
+/// "Where to write it:" was refused with "`~` is not a directory that exists",
+/// the whole Purge stopped, and every question before it had to be answered
+/// again — a refusal that reads as a bug rather than as an instruction.
 ///
 /// Only a leading `~/`, and only against this machine's home. A `~` anywhere
 /// else in a path is an ordinary character and is left alone.
@@ -343,8 +340,8 @@ fn expanded(host: &dyn Host, typed: &str) -> Result<PathBuf> {
              and Perch will not read it as the name of a file — written where it \
              says, the Export would land in whatever directory you typed this \
              in.\n\
-             Nothing was purged. Run `perch purge` again and name a path, such \
-             as `~/perch.age`."
+             Nothing was purged. Run `perch holdings purge` again and name a \
+             path, such as `~/perch.age`."
         )));
     };
     match host.home_dir() {
@@ -430,7 +427,7 @@ fn report(host: &dyn Host, out: &mut dyn Write, home: &Path, purged: &Purged) ->
     say(
         out,
         "Claude Code is still logged in as whatever it was: the live Credential \
-         was not Perch's to take away. `perch import` puts an Export back on a \
-         machine like this one.",
+         was not Perch's to take away. `perch holdings import` puts an Export \
+         back on a machine like this one.",
     )
 }

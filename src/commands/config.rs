@@ -28,14 +28,14 @@
 //! Setting a Group Inherits prints as `<key> <value>`, because Global is what
 //! would set it; one it Overrides prints as `<group> <key> <value>`.
 //!
-//! The watcher's five fields say whether `perch watch` may Switch within a
-//! Scope, at what Utilization it does, how often it may, how much emptier the
-//! Account it moves to has to be, and whether the one it just left counts
-//! (ADR 0013). Every message that describes the watcher *acting* says the same
-//! thing about what it is not: a Scope that may be acted on is not a service
-//! that has been switched on, because nothing acts on it unless somebody is
-//! running the loop. The one message that need not is the one saying the
-//! watcher may not act on this Scope at all.
+//! The watcher's five fields say whether `perch watcher run` may Switch within
+//! a Scope, at what Utilization it does, how often it may, how much emptier the
+//! Account it moves to has to be, and whether the one it just left counts (ADR
+//! 0013). Every message that describes the watcher *acting* says the same thing
+//! about what it is not: a Scope that may be acted on is not a service that has
+//! been switched on, because nothing acts on it unless somebody is running the
+//! loop. The one message that need not is the one saying the watcher may not
+//! act on this Scope at all.
 
 use std::io::Write;
 
@@ -93,11 +93,11 @@ pub enum ConfigCommand {
 
 pub fn run(host: &dyn Host, command: ConfigCommand, out: &mut dyn Write) -> Result<()> {
     // The lock is taken inside the match rather than above it, so it is taken
-    // only by the halves that write. `perch config get` reads, and a reader that
-    // takes the write lock waits out whatever holds it and then fails with
-    // "another `perch` holds it" — `perch watch` takes that lock every round,
-    // and `perch status --refresh` holds it across every network read. Same
-    // rule `perch status` states for itself and `perch list` follows.
+    // only by the halves that write. `perch config get` reads, and a reader
+    // that takes the write lock waits out whatever holds it and then fails with
+    // "another `perch` holds it" — `perch watcher run` takes that lock every
+    // round, and `perch status --refresh` holds it across every network read.
+    // Same rule `perch status` states for itself and `perch list` follows.
     match command {
         ConfigCommand::Set { words } => written(host, out, |registry| set(registry, &words)),
         ConfigCommand::Unset { words } => written(host, out, |registry| unset(registry, &words)),
@@ -757,17 +757,18 @@ impl Setting {
                 ),
             },
             Setting::WatcherMayAct if settings.watcher_may_act => format!(
-                "`perch watch` may Switch {within} on your behalf when \
+                "`perch watcher run` may Switch {within} on your behalf when \
                  the Account you are on reaches its threshold.{} {ONLY_WHILE_IT_RUNS}",
                 gated(scope),
             ),
             Setting::WatcherMayAct => format!(
-                "`perch watch` will not act {within}: started on an Account \
-                 there, it says so and exits rather than watching. Nothing \
-                 only ever changes underneath you because you said it could."
+                "`perch watcher run` will not act {within}: started on an \
+                 Account there, it says so and exits rather than watching. \
+                 Nothing only ever changes underneath you because you said it \
+                 could."
             ),
             Setting::WatcherThresholdPercent => format!(
-                "`perch watch` Switches {within} once that much of the \
+                "`perch watcher run` Switches {within} once that much of the \
                  fullest Quota Window of the Account you are on has been used. \
                  {ONLY_WHILE_IT_RUNS}"
             ),
@@ -801,10 +802,10 @@ fn gated(scope: &Scope) -> &'static str {
 ///
 /// All three ways of running one are named, because a setting that only governed
 /// the loop would be a setting somebody with a Service, or somebody scheduling
-/// `--once`, had no reason to read (ADR 0040).
+/// a Check, had no reason to read (ADR 0040).
 const ONLY_WHILE_IT_RUNS: &str = "Only while a Watcher is running — the loop in \
-     the terminal you started it in, a Service `perch service install` set up, \
-     or a `perch watch --once` your scheduler runs. Nothing here starts one.";
+     the terminal you started it in, a Service `perch watcher install` set up, \
+     or a `perch watcher check` your scheduler runs. Nothing here starts one.";
 
 /// A key as the two-word form addresses it: any Setting, and the one thing that
 /// is Global's alone (ADR 0017).

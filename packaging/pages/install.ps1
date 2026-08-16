@@ -198,10 +198,10 @@ if (-not (Test-OnPath $InstallDir)) {
     if ([Environment]::UserInteractive) {
         Say ""
         $typed = Read-Host "perch: $InstallDir is not on your PATH. Add it for future sessions? [Y/n]"
-        # Everything but a plain no is a yes, including a bare Return, which is
-        # how `perch purge` asks about an Export. End of input is a no there
-        # too, and Read-Host answers $null for it — nobody was there to be
-        # asked, and this is the branch that writes.
+        # Everything but a plain no is a yes, including a bare Return, which
+        # is how `perch holdings purge` asks about an Export. End of input is a
+        # no there too, and Read-Host answers $null for it — nobody was there to
+        # be asked, and this is the branch that writes.
         $answered = if ($null -eq $typed) { "n" } else { $typed.Trim().ToLower() }
         if ($answered -eq "n" -or $answered -eq "no") {
             Say "left your PATH alone. Add it later with:"

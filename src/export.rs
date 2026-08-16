@@ -180,13 +180,13 @@ pub fn gather(host: &dyn Host, registry: &Registry) -> Result<Export> {
 /// Account's Credential *is*, and the copy in its own Profile otherwise.
 ///
 /// For the active Account the live Credential is in the Default Profile, and it
-/// is ahead of the copy in its own Profile — which only catches up when a Switch
-/// away Captures it (ADR 0006). A Renewal Rotates the live copy and Anthropic
-/// retires the refresh token it replaced, so reading the Profile copy for the
-/// one Account the user is actually working in wrote the single token in the
-/// file most likely to be dead already. `perch watch` Renews that Account every
-/// few minutes, which makes it the ordinary case rather than the unlucky one,
-/// and the user would find out on the day they needed it.
+/// is ahead of the copy in its own Profile — which only catches up when a
+/// Switch away Captures it (ADR 0006). A Renewal Rotates the live copy and
+/// Anthropic retires the refresh token it replaced, so reading the Profile copy
+/// for the one Account the user is actually working in wrote the single token
+/// in the file most likely to be dead already. `perch watcher run` Renews that
+/// Account every few minutes, which makes it the ordinary case rather than the
+/// unlucky one, and the user would find out on the day they needed it.
 ///
 /// The live copy is only taken on the evidence [`crate::switch::capture`]
 /// requires before it copies that same Credential anywhere: the Default
@@ -224,13 +224,13 @@ fn the_live_store(
     // somebody else is.
     //
     // A Claude Code that will not say its version is the same thing one step
-    // earlier: without it there is no Identity to read, so there is nothing that
-    // names somebody else. Propagated instead, it refused the whole Export —
-    // after the passphrase had been typed twice — on a machine where Claude Code
-    // had been uninstalled or a global install had been wiped, which is exactly
-    // the machine somebody is decommissioning when they run this. And it takes
-    // `perch purge` with it, because the Export it offers first is one that
-    // stops the Purge when it fails.
+    // earlier: without it there is no Identity to read, so there is nothing
+    // that names somebody else. Propagated instead, it refused the whole Export
+    // — after the passphrase had been typed twice — on a machine where Claude
+    // Code had been uninstalled or a global install had been wiped, which is
+    // exactly the machine somebody is decommissioning when they run this. And
+    // it takes `perch holdings purge` with it, because the Export it offers
+    // first is one that stops the Purge when it fails.
     let somebody_else = matches!(
         crate::probe::Installed::probed(host)
             .and_then(|installed| crate::probe::read_identity(host, &live, &installed)),

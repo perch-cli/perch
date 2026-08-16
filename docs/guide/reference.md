@@ -14,8 +14,9 @@
 | `perch alias <name> <target>` / `perch alias <name> --unset` | name an Account, or free the name |
 | `perch switch <target>` | make an Account active everywhere |
 | `perch switch [<group>]` | Cycle to the best Account in a Group |
-| `perch watch [--once]` | Cycle automatically when the Account you are on runs low |
-| `perch service install\|uninstall\|status [--json]` | have the machine run the watcher for you, starting at login |
+| `perch watcher run` | Cycle automatically when the Account you are on runs low |
+| `perch watcher check` | take one round for cron or a systemd timer, saying what it decided in the exit code |
+| `perch watcher install\|uninstall\|status [--json]` | have the machine run the watcher for you, starting at login |
 | `perch run <target> [-- <command>]` | launch Claude Code as an Account, in this terminal alone |
 | `perch tui` | the interactive view |
 | `perch group add\|move\|rename\|remove\|list` | declare Groups and move Accounts between them |
@@ -23,8 +24,8 @@
 | `perch disable <target>` / `perch enable <target>` | keep an Account out of Cycling, or put it back |
 | `perch relogin <target>` | repair an Account whose Credential stopped working |
 | `perch remove <target> [--yes]` | give up an Account |
-| `perch export <path>` / `perch import <path>` | write everything to one encrypted file, and put it back |
-| `perch purge [--yes]` | give the machine back the state it had before Perch |
+| `perch holdings export <path>` / `perch holdings import <path>` | write everything Perch holds to one encrypted file, and put it back |
+| `perch holdings purge [--yes]` | give the machine back the state it had before Perch |
 | `perch upgrade [--release <tag>] [--check] [--json] [--channel <name>] [--yes]` | replace this Perch with a newer Release, through the Channel that installed it |
 
 ## Exit codes
@@ -44,7 +45,7 @@
 | 17 | a Cycle found nowhere to land — every Account in the Group is exhausted, or none is a candidate |
 | 18 | a bare Cycle, or a watcher, on an Account nobody has declared interchangeable with anything (ADR 0017) |
 | 19 | that Account is Quarantined — its Credential no longer works, and `perch relogin` repairs it (ADR 0023) |
-| 20 | held: a lock somebody else has, or a `perch watch --once` with no current figure to decide on (ADR 0013). Nothing is wrong and nothing was changed — ask again shortly |
+| 20 | held: a lock somebody else has, or a `perch watcher check` with no current figure to decide on (ADR 0013). Nothing is wrong and nothing was changed — ask again shortly |
 
 `perch run` is the one command these do not describe once it has launched
 something: what the client exited with is what Perch exits with, so a script
@@ -59,9 +60,9 @@ exits 0 whether or not there is a newer Release — it is a question, and
 answering it is success either way, so branch on `--json`'s `upgradeAvailable`
 rather than on the code.
 
-`perch service status` is the same shape of question and exits 0 whether or not
+`perch watcher status` is the same shape of question and exits 0 whether or not
 a Service is installed — branch on `--json`'s `installed`, `running` and
-`watching`, which are three different facts. `perch service uninstall` exits 15
+`watching`, which are three different facts. `perch watcher uninstall` exits 15
 when there was nothing to take back, and a Check or a Watcher that finds another
 Watcher holding the lock exits 20.
 
@@ -80,7 +81,7 @@ Watcher holding the lock exits 20.
   *outside* `$PERCH_HOME` — `~/Library/LaunchAgents/cli.perch.watch.plist` on
   macOS, `~/.config/systemd/user/perch-watch.service` on Linux, and a Scheduled
   Task named `Perch\Watch` on Windows, which Windows keeps rather than Perch.
-  `perch service uninstall` removes it, and so does `perch purge`.
+  `perch watcher uninstall` removes it, and so does `perch holdings purge`.
 - `~/.config/perch/profiles/<account>/` — one directory per Account. Its path is what
   gives that Account a private Credential Store (ADR 0001).
 - `$PERCH_HOME` overrides `~/.config/perch`. Home is `$USERPROFILE` on Windows and

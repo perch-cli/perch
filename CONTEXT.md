@@ -34,19 +34,26 @@ Cycles to it. Always exactly one Account — giving up everything at once is a
 Purge. Only a fresh login brings the Account back, and as a new one.
 _Avoid_: delete, drop, unregister
 
+**Holdings**:
+Everything Perch holds on this machine: every Profile, every Credential Perch
+holds, the registry naming them and what each Group carries. The counterpart to
+an Installation, which is what a Channel left. What an Export writes, an Import
+puts back and a Purge gives up, and the reason none of the three takes a Target.
+_Avoid_: state, data, footprint, registry
+
 **Purge**:
-Giving the machine back every piece of state Perch holds: every Profile, every
-Credential Perch holds, and Perch's own registry, gone in one act. What Perch
-holds rather than what a Channel left — the binary stays, and taking that back
-belongs to the Installation it came from. Takes no Target, because it is never
-about one Account — that is a Remove — and offers to write an Export first,
-which is the only thing that makes it survivable.
+Giving the machine back the Holdings: every Profile, every Credential Perch
+holds, and Perch's own registry, gone in one act. What Perch holds rather than
+what a Channel left — the binary stays, and taking that back belongs to the
+Installation it came from. Takes no Target, because it is never about one
+Account — that is a Remove — and offers to write an Export first, which is the
+only thing that makes it survivable.
 _Avoid_: uninstall, reset, wipe, remove
 
 **Export**:
-Everything Perch holds, written to one file: the whole registry — every Account,
-its Alias, its Group, whether Cycling may choose it, why it is Quarantined where
-it is, and what each Group carries — alongside every Credential. Takes no Target,
+The Holdings, written to one file: the whole registry — every Account, its
+Alias, its Group, whether Cycling may choose it, why it is Quarantined where it
+is, and what each Group carries — alongside every Credential. Takes no Target,
 because a selective one is a partial restore, which is the failure it exists to
 prevent. Encrypted with a passphrase that is required rather than offered, and in
 a format something other than Perch maintains, so a backup meant to outlive the
@@ -55,13 +62,12 @@ and the word is fine for that; the thing itself is an Export.
 _Avoid_: dump, snapshot, archive
 
 **Import**:
-Putting an Export back: the whole registry and every Credential, onto a machine
-that holds no Account. The exact inverse of a Purge, and refuses rather than
-merging — the same Account on two machines one Rotation apart has no answer to
-which Credential is live. Credentials land wherever this machine's Claude Code
-keeps one, whatever store the file was written from. Nothing arrives active. A
-restore is what one is *for*, and the word is fine for that; the act itself is an
-Import.
+Putting the Holdings back from an Export, onto a machine that holds no Account.
+The exact inverse of a Purge, and refuses rather than merging — the same Account
+on two machines one Rotation apart has no answer to which Credential is live.
+Credentials land wherever this machine's Claude Code keeps one, whatever store
+the file was written from. Nothing arrives active. A restore is what one is
+*for*, and the word is fine for that; the act itself is an Import.
 _Avoid_: merge, load, adopt
 
 **Target**:
@@ -258,7 +264,7 @@ them at a time.
 _Avoid_: daemon, monitor, background job
 
 **Check**:
-One round of the Watcher taken on its own — `perch watch --once` — for a
+One round of the Watcher taken on its own — `perch watcher check` — for a
 scheduler to run. The loop's policy exactly, run once, saying what it decided in
 its exit code rather than in a line somebody is watching. What paces it is
 recorded, because each Check is a fresh process and the sequence of them is the

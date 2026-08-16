@@ -1,7 +1,8 @@
 # Backing up, moving machines, and giving the machine back
 
-Three commands, and they are each other's inverse. An export writes everything
-Perch holds to one encrypted file, an import puts it back, and a purge leaves the
+Three commands under one noun, and they are each other's inverse. Your Holdings
+are everything Perch holds on this machine: an export writes them to one
+encrypted file, an import puts them back, and a purge gives them up, leaving the
 machine as it was before Perch (ADR 0014).
 
 - [Backing up everything](#backing-up-everything)
@@ -10,14 +11,15 @@ machine as it was before Perch (ADR 0014).
 
 ## Backing up everything
 
-`perch export <path>` writes everything Perch holds to one encrypted file: the
-whole registry — every Account, its Alias, its Group, whether Cycling may choose
-it, why it is Quarantined where it is, and what each Group carries — alongside
-every Credential. A dead machine, a mistaken `perch remove` or a new laptop then
-costs you a file rather than a login for every subscription (ADR 0014).
+`perch holdings export <path>` writes everything Perch holds to one encrypted
+file: the whole registry — every Account, its Alias, its Group, whether Cycling
+may choose it, why it is Quarantined where it is, and what each Group carries —
+alongside every Credential. A dead machine, a mistaken `perch remove` or a new
+laptop then costs you a file rather than a login for every subscription
+(ADR 0014).
 
 ```
-$ perch export ~/perch-backup.age
+$ perch holdings export ~/perch-backup.age
 This file holds a working Credential for every Account Perch has. It is encrypted with a passphrase you choose, and there is no way into it without one.
 Passphrase:
 Again:
@@ -65,26 +67,26 @@ permissions you did not choose.
 
 ## Moving to another machine
 
-`perch import <path>` is the exact inverse: it puts the whole registry and every
-Credential back, so a new laptop arrives with the setup the old one had rather
-than a pile of nameless logins.
+`perch holdings import <path>` is the exact inverse: it puts the whole registry
+and every Credential back, so a new laptop arrives with the setup the old one
+had rather than a pile of nameless logins.
 
 ```
-$ perch import ~/perch-backup.age
+$ perch holdings import ~/perch-backup.age
 This file is encrypted with the passphrase it was written with. Nothing is restored until it opens.
 Passphrase:
 Imported 3 Accounts from /Users/someone/perch-backup.age, with everything the registry said about them: their Aliases, their Groups, whether Cycling may choose them, and what each Group carries.
 Nothing is active: an Import restores what Perch holds and does not touch what Claude Code is logged in as. `perch switch <target>` makes one of them active.
 ```
 
-**It refuses a Perch that already holds an Account**, and names `perch purge` as
-the way to make room. Merging is where every hard case lives — the same Account
-on both sides one Rotation apart, with no way to tell which Credential is live;
-an Alias meaning different Accounts on two machines; a Group that exists in both
-with different members. That is a real feature and it is not this one. Refusing
-keeps an import the exact inverse of a purge, and that pair is what makes moving
-machines true. There is no `--force`, because a flag would be the merge wearing a
-shortcut's clothes.
+**It refuses a Perch that already holds an Account**, and names
+`perch holdings purge` as the way to make room. Merging is where every hard case
+lives — the same Account on both sides one Rotation apart, with no way to tell
+which Credential is live; an Alias meaning different Accounts on two machines; a
+Group that exists in both with different members. That is a real feature and it
+is not this one. Refusing keeps an import the exact inverse of a purge, and that
+pair is what makes moving machines true. There is no `--force`, because a flag
+would be the merge wearing a shortcut's clothes.
 
 **Credentials land where this machine keeps one.** The file records a Credential
 against an email address and nothing about the store it came out of, so an export
@@ -99,8 +101,8 @@ it is left exactly where it is, to switch onto or to ignore.
 
 The passphrase is required and prompted once — a wrong one fails before anything
 at all is written, and is told apart from a file that is not an export. Without a
-terminal it is refused for the same reason `perch export` is, and there is no
-flag.
+terminal it is refused for the same reason `perch holdings export` is, and there
+is no flag.
 
 An import that fails part way leaves nothing behind: every Profile it made comes
 back out, so there is no half-populated registry and no orphaned Profile, and the
@@ -111,13 +113,13 @@ which — `perch relogin` is what ends that.
 
 ## Giving the machine back
 
-`perch purge` is the other half of that pair: every Profile, every Credential
-Perch holds and Perch's own registry, gone in one act, so the machine is the one
-you had before you installed it. It is what makes room for an import, and what
-you run on the laptop you are handing on.
+`perch holdings purge` is the other half of that pair: every Profile, every
+Credential Perch holds and Perch's own registry, gone in one act, so the machine
+is the one you had before you installed it. It is what makes room for an import,
+and what you run on the laptop you are handing on.
 
 ```
-$ perch purge
+$ perch holdings purge
 Perch holds 3 Accounts: someone@example.com, overflow@example.com, spare@example.com.
 A Purge deletes every one of their Profiles, every Credential Perch holds for them, and /Users/someone/.config/perch itself. Nothing undoes it: only a fresh login brings an Account back, and it comes back as a new one.
 Claude Code goes on running as whatever it is logged in as — the live Credential is not Perch's to take away.
@@ -130,7 +132,7 @@ Exported 3 Accounts to /Users/someone/perch-backup.age, with everything the regi
 Keep the passphrase somewhere that is not beside the file. Without it there is nothing in there, and nothing Perch holds can get it back.
 Type `purge` to give the machine back: purge
 Purged 3 Accounts. Every Profile, every Credential Perch held and /Users/someone/.config/perch are gone, and Perch is holding nothing on this machine.
-Claude Code is still logged in as whatever it was: the live Credential was not Perch's to take away. `perch import` puts an Export back on a machine like this one.
+Claude Code is still logged in as whatever it was: the live Credential was not Perch's to take away. `perch holdings import` puts an Export back on a machine like this one.
 ```
 
 **It takes no target.** Giving up one Account is `perch remove`, which is

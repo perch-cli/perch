@@ -236,7 +236,7 @@ pub struct FakeHost {
     /// nobody interrupts, which is every test but the watcher's.
     interrupt_after: RefCell<Option<u32>>,
     waits: RefCell<u32>,
-    /// Which user this Perch runs as. `Some(0)` is the one `service install`
+    /// Which user this Perch runs as. `Some(0)` is the one `watcher install`
     /// refuses; the default is an ordinary person's.
     user_id: RefCell<Option<u32>>,
 }
@@ -246,7 +246,7 @@ pub struct FakeHost {
 pub const THIS_PROCESS: u32 = 700;
 
 /// The uid this Perch runs as. An ordinary person's, deliberately: `0` is the
-/// one value `perch service install` refuses, so it must never be what a test
+/// one value `perch watcher install` refuses, so it must never be what a test
 /// gets without asking for it.
 pub const THIS_USER: u32 = 501;
 
@@ -684,8 +684,8 @@ impl FakeHost {
         *self.listening.borrow()
     }
 
-    /// A machine where Perch was run with `sudo`, which is the one thing
-    /// `perch service install` refuses outright (ADR 0040).
+    /// A machine where Perch was run with `sudo`, which is the one thing `perch
+    /// watcher install` refuses outright (ADR 0040).
     pub fn as_superuser(self) -> FakeHost {
         *self.user_id.borrow_mut() = Some(0);
         self
@@ -1820,10 +1820,10 @@ impl Host for FakeHost {
         // Decided before the clock moves, because the real one decides before
         // it sleeps: `RealHost::wait` asks `interrupted()` ahead of the first
         // slice and returns having spent nothing. Advancing first meant the
-        // wait that *ends* an interrupted `perch watch` spent its whole
+        // wait that *ends* an interrupted `perch watcher run` spent its whole
         // interval — 2.5 minutes, or 20 under back-off — that a real Ctrl-C
-        // never spends, so every "as of 4m ago" measured after one was measuring
-        // a duration production does not have.
+        // never spends, so every "as of 4m ago" measured after one was
+        // measuring a duration production does not have.
         //
         // Nothing is interrupted where nothing is listening, for the same
         // reason as on a real machine: Ctrl-C ends the process instead, and a

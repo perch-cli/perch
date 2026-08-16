@@ -1,4 +1,4 @@
-//! `perch export` — the whole machine in one `age` file (ADR 0014).
+//! `perch holdings export` — the whole machine in one `age` file (ADR 0014).
 //!
 //! The command that makes a dead machine, a mistaken `perch remove` and a new
 //! laptop cost something less than a login for every subscription. Everything
@@ -276,8 +276,8 @@ fn the_file_is_created_readable_by_its_owner_alone() {
 /// output": nothing the file *holds* goes there, and the passphrase never does
 /// either. What does go there is the prompts and one line naming what was
 /// written — because every other Perch command reports what it did, and a
-/// `perch purge` offering to export first (#53) has to be able to say the export
-/// happened.
+/// `perch holdings purge` offering to export first (#53) has to be able to say
+/// the export happened.
 #[test]
 fn nothing_the_export_holds_reaches_standard_output() {
     let host = a_machine_worth_backing_up();
@@ -392,8 +392,8 @@ fn an_export_is_never_written_over_anything() {
 
 /// The refusal above is checked before the prompts and again after them. The
 /// window in between is two questions long, and what closes it is a second
-/// `perch export` aimed at the same path finishing while this one is still being
-/// typed at — the write itself replaces rather than fails.
+/// `perch holdings export` aimed at the same path finishing while this one is
+/// still being typed at — the write itself replaces rather than fails.
 #[test]
 fn a_file_that_arrives_while_the_passphrase_is_typed_is_not_written_over_either() {
     let host = a_machine_worth_backing_up();
@@ -456,10 +456,10 @@ fn a_machine_holding_no_accounts_is_told_so_rather_than_given_an_empty_file() {
 }
 
 /// The passphrase is asked for twice, and the registry was read before either
-/// prompt. That is the same unbounded wait `perch purge` and `perch remove`
-/// re-check their hold across, and `perch export` was the one that did not:
-/// it re-asked whether the *path* was still free and never whether the registry
-/// was still its own.
+/// prompt. That is the same unbounded wait `perch holdings purge` and `perch
+/// remove` re-check their hold across, and `perch holdings export` was the one
+/// that did not: it re-asked whether the *path* was still free and never
+/// whether the registry was still its own.
 ///
 /// An Account added by another `perch` while somebody was typing is an Account
 /// the copy being sealed does not hold — so the file would present itself as
@@ -576,9 +576,9 @@ const ROTATED: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-rotated",
 /// Rotates it there — the copy in its own Profile only catches up when a Switch
 /// away Captures it (ADR 0006). Read from the Profile, the one Account the user
 /// is actually working in travels as a refresh token Anthropic has already
-/// retired, and `perch watch` Renews that Account every few minutes. A restore
-/// would then bring back every Account but the one they used most, and they
-/// would find out on the day they needed it.
+/// retired, and `perch watcher run` Renews that Account every few minutes. A
+/// restore would then bring back every Account but the one they used most, and
+/// they would find out on the day they needed it.
 #[test]
 fn the_active_accounts_credential_is_the_live_one_rather_than_the_copy_in_its_profile() {
     let host = machine_with_three_accounts();
@@ -639,9 +639,9 @@ fn a_live_credential_belonging_to_somebody_else_is_not_exported_as_the_active_ac
 /// reading the Default Profile's Identity — which is not evidence against the
 /// active Account when it is absent or unreadable, and is no more so when there
 /// is no Claude Code to ask. Propagated, it refused the whole command after the
-/// passphrase had been typed twice, and took `perch purge` with it, because the
-/// Export that offers to save you first is one that stops the Purge when it
-/// fails.
+/// passphrase had been typed twice, and took `perch holdings purge` with it,
+/// because the Export that offers to save you first is one that stops the Purge
+/// when it fails.
 #[test]
 fn an_export_is_written_by_a_machine_that_no_longer_has_claude_code_on_it() {
     let host = machine_with_three_accounts();

@@ -487,7 +487,7 @@ const NO_LOGIN_NAME: &str = "(no keychain)";
 /// watcher belongs — made every Perch command on the machine fail over a value
 /// nothing on that machine would ever read, naming a keychain the platform does
 /// not have. Every `Store` is derived through here, so that was `perch status`,
-/// `perch list` and `perch watch --once` alike.
+/// `perch list` and `perch watcher check` alike.
 fn keychain_account_name(host: &dyn Host) -> Result<String> {
     if let Some(name) = host.env_var("USER").or_else(|| host.env_var("USERNAME")) {
         return Ok(name);
@@ -607,14 +607,14 @@ pub fn credential_after_rotation(
     }
     // Taken out rather than left alone when the renewal gave no lifetime, which
     // is the only way `None` means what `anthropic::renew` decided it should.
-    // Four replies yield one — no `expires_in`, a zero, a negative, and one that
-    // overflows — and the reason given for all four is that an `expires_at` in
-    // the past "reads as already expired and renews on every command forever".
-    // Inserting only on `Some` left exactly that value in place: a Credential is
-    // renewed *because* its `expiresAt` had passed, so the stale one survived
-    // the write and the next command renewed again. Under `perch watch` that is
-    // a refresh-token Rotation every round, each one a window in which a failed
-    // write is an unrecoverable Quarantine.
+    // Four replies yield one — no `expires_in`, a zero, a negative, and one
+    // that overflows — and the reason given for all four is that an
+    // `expires_at` in the past "reads as already expired and renews on every
+    // command forever". Inserting only on `Some` left exactly that value in
+    // place: a Credential is renewed *because* its `expiresAt` had passed, so
+    // the stale one survived the write and the next command renewed again.
+    // Under `perch watcher run` that is a refresh-token Rotation every round,
+    // each one a window in which a failed write is an unrecoverable Quarantine.
     //
     // Removing it says what happened instead: this Credential does not say when
     // it expires, which `usable_at` already takes at its word.
@@ -1366,7 +1366,7 @@ mod tests {
     /// The name is only load-bearing where there is a keychain to store an item
     /// in. Off macOS every `Store` still has to be derivable without it, or a
     /// container with no `USER` cannot run a single Perch command — including
-    /// the `perch watch --once` a systemd timer fires, which is where ADR 0013
+    /// the `perch watcher check` a systemd timer fires, which is where ADR 0013
     /// says an unattended watcher belongs.
     #[test]
     fn a_machine_with_no_keychain_needs_no_login_name() {

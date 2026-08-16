@@ -85,19 +85,20 @@ nothing, because it is what you type mid-task when quota just ran out.
 $ perch switch
 ```
 
-**5. Stop being the one who notices.** `perch watch` reads how full the Account
-you are on is, prints what it made of that, and Cycles when it runs low. Ctrl-C
-is safe wherever it lands. Nothing changes underneath you until you say it may:
+**5. Stop being the one who notices.** `perch watcher run` reads how full the
+Account you are on is, prints what it made of that, and Cycles when it runs low.
+Ctrl-C is safe wherever it lands. Nothing changes underneath you until you say it
+may:
 
 ```
 $ perch config set work watcher-may-act true
-$ perch watch
+$ perch watcher run
 ```
 
-`perch service install` has your machine run that same loop for you, starting
+`perch watcher install` has your machine run that same loop for you, starting
 when you log in — a LaunchAgent, a `systemd --user` unit, or a Scheduled Task,
 whichever your machine has. Perch never backgrounds itself: it writes the unit
-and hands the job over, and `perch service uninstall` takes it back.
+and hands the job over, and `perch watcher uninstall` takes it back.
 
 Two more worth knowing early: `perch run <target>` launches Claude Code as one
 Account in one terminal without changing which is active, and `perch tui` draws
@@ -112,8 +113,7 @@ all of it interactively for when the choice wants making by eye.
 | `perch add` | gain an Account by logging in, without disturbing the active one | [guide](docs/guide/accounts.md#adding-an-account) |
 | `perch alias` | name an Account, so no command needs its email address | [guide](docs/guide/accounts.md#naming-an-account) |
 | `perch switch` | make an Account active everywhere, or Cycle within a Group | [guide](docs/guide/switching.md) |
-| `perch watch` | Cycle automatically when the Account you are on runs low | [guide](docs/guide/watching.md) |
-| `perch service` | have the machine run the watcher for you, starting at login | [guide](docs/guide/watching.md#having-the-machine-run-it) |
+| `perch watcher` | Cycle automatically when the Account you are on runs low, in a terminal or as a Service | [guide](docs/guide/watching.md) |
 | `perch run` | launch Claude Code as an Account, in this terminal alone | [guide](docs/guide/running.md) |
 | `perch tui` | the interactive view | [guide](docs/guide/tui.md) |
 | `perch group` | declare which Accounts are interchangeable | [guide](docs/guide/switching.md#managing-groups) |
@@ -121,8 +121,8 @@ all of it interactively for when the choice wants making by eye.
 | `perch disable` / `enable` | keep an Account out of Cycling, or put it back | [guide](docs/guide/accounts.md#reserving-an-account) |
 | `perch relogin` | repair an Account whose Credential stopped working | [guide](docs/guide/accounts.md#when-an-account-breaks) |
 | `perch remove` | give up an Account | [guide](docs/guide/accounts.md#giving-up-an-account) |
-| `perch export` / `import` | back up everything to one encrypted file, and put it back | [guide](docs/guide/backup.md) |
-| `perch purge` | give the machine back the state it had before Perch | [guide](docs/guide/backup.md#giving-the-machine-back) |
+| `perch holdings export` / `import` | back up everything Perch holds to one encrypted file, and put it back | [guide](docs/guide/backup.md) |
+| `perch holdings purge` | give the machine back the state it had before Perch | [guide](docs/guide/backup.md#giving-the-machine-back) |
 | `perch upgrade` | replace this Perch with a newer Release, through the channel that installed it | [guide](docs/guide/installing.md#upgrading) |
 
 Every command has `--help`, and the flags, the exit codes and the paths Perch
@@ -166,8 +166,8 @@ it that way. The same pages, rendered and searchable, are at
 - [Seeing what you have](docs/guide/status.md) — `status`, `list`, Utilization,
   the JSON
 - [Switching, Cycling and Groups](docs/guide/switching.md)
-- [Watching](docs/guide/watching.md) — the loop, `perch service`, and `--once`
-  under cron
+- [Watching](docs/guide/watching.md) — the loop, `perch watcher install`, and
+  `perch watcher check` under cron
 - [Running one Account in one terminal](docs/guide/running.md)
 - [Backing up and moving machines](docs/guide/backup.md)
 - [Choosing by eye](docs/guide/tui.md) — `perch tui`

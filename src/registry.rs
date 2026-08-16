@@ -475,10 +475,10 @@ pub fn means_global(name: &str) -> bool {
 /// be paced by it (ADR 0013).
 ///
 /// The one thing about the watcher that is written down, and only because
-/// `perch watch --once` is a fresh process every time: the cooldown is measured
-/// from the last Switch, and a check that could not remember one would be a
-/// check with no policy but the threshold. The loop carries the same fact in
-/// memory and records nothing, because a loop is one process and a person
+/// `perch watcher check` is a fresh process every time: the cooldown is
+/// measured from the last Switch, and a check that could not remember one would
+/// be a check with no policy but the threshold. The loop carries the same fact
+/// in memory and records nothing, because a loop is one process and a person
 /// watching it — two of them would otherwise pace each other's decisions.
 ///
 /// Per Group rather than per machine: a cooldown paces the Switches made within
@@ -704,9 +704,9 @@ pub struct Registry {
     /// The Config every other Scope falls back to.
     #[serde(default)]
     pub global: GlobalConfig,
-    /// What the last scheduled Check did in each Group. Written by
-    /// `perch watch --once` and by nothing else, and absent from the file until
-    /// one of them Switches.
+    /// What the last scheduled Check did in each Group. Written by `perch
+    /// watcher check` and by nothing else, and absent from the file until one
+    /// of them Switches.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub checks: BTreeMap<String, Checked>,
 }
@@ -1420,8 +1420,8 @@ pub fn lock_spec(host: &dyn Host) -> Result<LockSpec> {
 /// perfectly healthy is the longest wait it ever takes between rounds — the
 /// bounded back-off — plus the round that follows it. Anything shorter would
 /// have a Watcher backed off against a failing endpoint declared dead by the
-/// next `perch watch` to come along, and two Watchers is the state this lock
-/// exists to prevent (ADR 0040).
+/// next `perch watcher run` to come along, and two Watchers is the state this
+/// lock exists to prevent (ADR 0040).
 ///
 /// It is deliberately long, and what pays for it is that nothing waits on it. A
 /// Watcher that finds the lock held **holds and comes back** rather than
@@ -1449,7 +1449,10 @@ const WATCHER_UPDATE_MILLIS: i64 = 60_000;
 pub fn watcher_lock_spec(host: &dyn Host) -> Result<LockSpec> {
     Ok(LockSpec {
         name: "the Perch watcher lock",
-        held_by: "another `perch watch`",
+        // The Watcher rather than one of its three arrangements: whoever holds
+        // this is a loop, a Check or a Service, and which of them it is neither
+        // changes what to do about it nor is knowable from here (ADR 0047).
+        held_by: "another Watcher",
         dir: perch_home(host)?.join(".watch.lock"),
         stale_millis: WATCHER_STALE_MILLIS,
         update_millis: WATCHER_UPDATE_MILLIS,
@@ -1590,10 +1593,11 @@ fn no_such_account(email: &str) -> PerchError {
 /// caller is holding a registry that came from nowhere but Perch.
 ///
 /// Public because an Import writes a registry without reading one first, and
-/// was running a narrower check of its own — so a file `perch import` accepted
-/// could be one every later command refused to read, which leaves a machine
-/// with no working command on it and no `perch purge` either. One function, so
-/// what an Import will accept and what a load will accept cannot differ.
+/// was running a narrower check of its own — so a file `perch holdings import`
+/// accepted could be one every later command refused to read, which leaves a
+/// machine with no working command on it and no `perch holdings purge` either.
+/// One function, so what an Import will accept and what a load will accept
+/// cannot differ.
 pub fn validate(registry: &Registry) -> Result<()> {
     // Global's own values as well as every Scope's Overrides. Global is where a
     // Setting nobody has Overridden is read from, so a range it breaks is one
@@ -1958,10 +1962,11 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) ->
     perch.renew();
     if !perch.still_held() {
         // A general failure rather than `Busy`, and deliberately (ADR 0036).
-        // `Busy` promises that nothing was changed, and `perch watch` branches
-        // on that promise by going round again — but this save is reached after
-        // a Switch has already moved a Credential as often as before anything
-        // has been written, and from here there is no telling which.
+        // `Busy` promises that nothing was changed, and `perch watcher run`
+        // branches on that promise by going round again — but this save is
+        // reached after a Switch has already moved a Credential as often as
+        // before anything has been written, and from here there is no telling
+        // which.
         return Err(PerchError::Other(
             "Another `perch` took the registry lock over while this command was \
              working, and has changed the registry since this one read it. \
@@ -1975,12 +1980,12 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) ->
     //
     // Eight invariants were enforced on the way in and none on the way out, so
     // a command could write a file every later command declined to read — which
-    // leaves a machine with no working `perch` on it and no `perch purge`
-    // either. That gap has been found twice from the other side: `perch import`
-    // ran a narrower check of its own until `validate` was made public for it,
-    // and `used_percent` was range-checked in one of the two places a figure can
-    // enter the registry. Both repairs added an obligation to a caller. This one
-    // removes the need for it.
+    // leaves a machine with no working `perch` on it and no `perch holdings
+    // purge` either. That gap has been found twice from the other side: `perch
+    // holdings import` ran a narrower check of its own until `validate` was
+    // made public for it, and `used_percent` was range-checked in one of the
+    // two places a figure can enter the registry. Both repairs added an
+    // obligation to a caller. This one removes the need for it.
     //
     // Nothing reachable trips it today — the whole suite is green without this
     // line — which is what it is for: the failure it catches is a bug in Perch,

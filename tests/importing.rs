@@ -1,4 +1,4 @@
-//! `perch import` — a whole machine, put back (ADR 0014).
+//! `perch holdings import` — a whole machine, put back (ADR 0014).
 //!
 //! The other half of the pair that makes "I can move to a new machine" true.
 //! Everything here is about the two ways it could quietly fail somebody: by
@@ -196,9 +196,9 @@ fn nothing_is_made_active_by_an_import() {
 
 /// The same rule, for the other claim a registry makes about right now.
 ///
-/// `checks` is what a `perch watch --once` on the *other* machine did — when it
-/// Switched — and the cooldown is measured from it. Carried across, an Export
-/// taken this morning has the first check on the new machine reporting
+/// `checks` is what a `perch watcher check` on the *other* machine did — when
+/// it Switched — and the cooldown is measured from it. Carried across, an
+/// Export taken this morning has the first check on the new machine reporting
 /// `cooling` on the strength of something that happened somewhere else.
 #[test]
 fn no_watcher_has_run_here_yet_however_recently_one_ran_where_the_export_was_taken() {
@@ -271,7 +271,10 @@ fn a_machine_that_already_holds_an_account_is_refused_and_told_about_purge() {
 
     let refused = outcome.expect_err("Perch already holds Accounts here");
     assert_eq!(refused.exit_code(), EXIT_CONFLICT, "{refused}");
-    assert!(refused.to_string().contains("perch purge"), "{refused}");
+    assert!(
+        refused.to_string().contains("perch holdings purge"),
+        "{refused}"
+    );
     assert_eq!(
         registry_of(&host),
         before,
@@ -576,7 +579,8 @@ fn an_account_the_export_held_no_credential_for_is_restored_and_said_so() {
 /// restored without one" — and then closed with `how_to_repair(bare[0])`, which
 /// says "`perch relogin a@example.com` logs *it* in again". So somebody who had
 /// just restored three credential-less Accounts was told to repair the first.
-/// The mirror of this in `perch export` gets it right by naming none of them.
+/// The mirror of this in `perch holdings export` gets it right by naming none
+/// of them.
 #[test]
 fn an_import_that_restored_several_without_credentials_does_not_name_one_of_them() {
     let host = machine_with_three_accounts();

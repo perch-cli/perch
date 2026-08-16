@@ -267,7 +267,8 @@ impl Unit {
 	<key>ProgramArguments</key>
 	<array>
 		<string>{binary}</string>
-		<string>watch</string>
+		<string>watcher</string>
+		<string>run</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
@@ -312,7 +313,7 @@ impl Unit {
              \n\
              [Service]\n\
              Type=simple\n\
-             ExecStart={binary} watch\n\
+             ExecStart={binary} watcher run\n\
              Restart=always\n\
              RestartSec={restart}\n\
              TimeoutStopSec={grace}\n\
@@ -346,7 +347,7 @@ impl Unit {
             None => String::new(),
         };
         format!(
-            "cmd /c {environment}\"{binary}\" watch{log}",
+            "cmd /c {environment}\"{binary}\" watcher run{log}",
             binary = self.binary.display(),
         )
     }
@@ -727,6 +728,39 @@ mod tests {
                 .count(),
             2,
             "one file, named twice: {plist}"
+        );
+    }
+
+    /// What every unit format is told to run, asserted on all three at once.
+    ///
+    /// The one string a Service is for, and the one no platform's own test was
+    /// claiming: the plist carries it as a second `<string>`, systemd as the
+    /// tail of `ExecStart`, and Windows inside a `cmd /c`. Three spellings of
+    /// one fact is how two of them come to name a verb the binary stopped
+    /// answering to (ADR 0047), which is a Service that installs cleanly and
+    /// then fails at every login.
+    #[test]
+    fn every_unit_format_runs_the_watcher_loop_by_the_name_the_binary_answers_to() {
+        let unit = a_unit();
+
+        let plist = unit.rendered(Platform::MacOs).expect("macOS writes a file");
+        assert!(
+            plist.contains("<string>watcher</string>\n\t\t<string>run</string>"),
+            "the two words are two arguments, which is what a plist array is: {plist}"
+        );
+
+        let systemd = unit.rendered(Platform::Other).expect("Linux writes a file");
+        assert!(
+            systemd
+                .lines()
+                .any(|line| line.ends_with(" watcher run") && line.starts_with("ExecStart=")),
+            "{systemd}"
+        );
+
+        assert!(
+            unit.windows_command().contains(r#"" watcher run"#),
+            "{}",
+            unit.windows_command()
         );
     }
 

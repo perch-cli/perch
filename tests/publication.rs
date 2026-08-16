@@ -298,7 +298,7 @@ fn the_landing_page_shows_perch_before_it_asks_you_to_install() {
         .find("curl -fsSL")
         .expect("the landing page offers the installer");
 
-    for shown in ["perch switch", "perch watch"] {
+    for shown in ["perch switch", "perch watcher run"] {
         let at = landing
             .find(shown)
             .unwrap_or_else(|| panic!("the landing page shows `{shown}`"));

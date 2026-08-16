@@ -101,7 +101,7 @@ falls back to the room it can see and says that is what it did.
 
 ## The watcher's two
 
-The **watcher's** two fields govern [`perch watch`](watching.md) and nothing
+The **watcher's** two fields govern [`perch watcher`](watching.md) and nothing
 else. `watcher-may-act` says whether it may Switch within the Group at all, and
 is off by default because a Group only ever changes underneath you because you
 said it could. `watcher-threshold-percent` is how much of the fullest Quota

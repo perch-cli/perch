@@ -47,12 +47,12 @@ fn curl_bin() -> Result<PathBuf, HostError> {
 /// secret. Everything that is one goes in on stdin instead.
 ///
 /// The two timeouts are what make a hung endpoint a *refusal* rather than a
-/// hang. Perch has no thread it can abandon a request from: `perch watch` waits
-/// out every read in its round, and `perch tui` refuses Enter and `r` for as
-/// long as a Refresh is outstanding. A connection that is open and silent would
-/// otherwise stop both indefinitely — which is worse than the network being
-/// down, because ADR 0018 has an answer for that one and no answer for a loop
-/// that never comes back to be told.
+/// hang. Perch has no thread it can abandon a request from: `perch watcher run`
+/// waits out every read in its round, and `perch tui` refuses Enter and `r` for
+/// as long as a Refresh is outstanding. A connection that is open and silent
+/// would otherwise stop both indefinitely — which is worse than the network
+/// being down, because ADR 0018 has an answer for that one and no answer for a
+/// loop that never comes back to be told.
 ///
 /// Generous rather than tight: what is on the other side is a request Perch
 /// would rather complete than retry, and both numbers are far longer than a
@@ -173,13 +173,13 @@ fn run(program: &Path, args: &[&str], stdin: Option<&str>) -> std::io::Result<Ex
         // words where it has any.
         //
         // `Child::drop` neither kills nor waits, so returning straight out of
-        // here left a zombie for the life of the process — and `perch watch` is
-        // a loop that spawns `curl` every round for as long as somebody leaves
-        // it running. The likeliest failure is an `EPIPE` from a child that has
-        // already exited, which is precisely the case where its stderr says what
-        // went wrong and "Broken pipe (os error 32)" does not: the same
-        // information loss the naming above was written to fix for a spawn that
-        // failed.
+        // here left a zombie for the life of the process — and `perch watcher
+        // run` is a loop that spawns `curl` every round for as long as somebody
+        // leaves it running. The likeliest failure is an `EPIPE` from a child
+        // that has already exited, which is precisely the case where its stderr
+        // says what went wrong and "Broken pipe (os error 32)" does not: the
+        // same information loss the naming above was written to fix for a spawn
+        // that failed.
         if let Err(err) = written {
             let said = child
                 .wait_with_output()
@@ -815,14 +815,15 @@ static WAS_ECHOING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// turned it off and every shell after it types blind.
 ///
 /// "Whatever the read did" has to include Ctrl-C, which is not something the
-/// read does. Only `perch watch` takes SIGINT over ([`listen_for_interrupts`]),
-/// so at the one prompt where echo is off the signal otherwise arrives at the
-/// default disposition and kills the process in the window between the two
-/// `tcsetattr` calls — and backing out of a passphrase prompt is a thing people
-/// do, not an accident. So the window is held with a handler that repairs the
-/// terminal and then hands the signal straight back: `tcgetattr`, `tcsetattr`,
-/// `signal` and `raise` are all async-signal-safe, and re-raising rather than
-/// exiting means a parent still sees a process that died of SIGINT.
+/// read does. Only `perch watcher run` takes SIGINT over
+/// ([`listen_for_interrupts`]), so at the one prompt where echo is off the
+/// signal otherwise arrives at the default disposition and kills the process in
+/// the window between the two `tcsetattr` calls — and backing out of a
+/// passphrase prompt is a thing people do, not an accident. So the window is
+/// held with a handler that repairs the terminal and then hands the signal
+/// straight back: `tcgetattr`, `tcsetattr`, `signal` and `raise` are all
+/// async-signal-safe, and re-raising rather than exiting means a parent still
+/// sees a process that died of SIGINT.
 #[cfg(unix)]
 fn read_without_echo() -> Result<Option<String>, HostError> {
     use std::os::fd::AsRawFd;

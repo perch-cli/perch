@@ -57,9 +57,10 @@ pub struct Purged {
 /// empties rather than of the registry alone, for the reason that function
 /// argues at length: the registry is not the whole account of what Perch holds.
 /// A `perch add` sitting at the browser step in another terminal is a client
-/// running against a directory under `pending/`, and it was the one Live Profile
-/// nothing protected — `perch purge --yes` deleted the login out from under it,
-/// and the Anthropic session it had just created went with it.
+/// running against a directory under `pending/`, and it was the one Live
+/// Profile nothing protected — `perch holdings purge --yes` deleted the login
+/// out from under it, and the Anthropic session it had just created went with
+/// it.
 pub fn refuse_while_anything_is_running(host: &dyn Host, registry: &Registry) -> Result<()> {
     let mut running: Vec<String> = registry
         .accounts
@@ -158,7 +159,8 @@ pub fn erase(host: &dyn Host, registry: &Registry) -> Result<Purged> {
         PerchError::Other(format!(
             "Every Credential Perch held is deleted, but {} could not be removed: \
              {err}\n\
-             Run `perch purge` again once it can be, and it will finish.",
+             Run `perch holdings purge` again once it can be, and it will \
+             finish.",
             home.display(),
         ))
     })?;
@@ -219,8 +221,8 @@ fn forget_what_the_registry_does_not_name(host: &dyn Host) -> Result<()> {
             kept_in.forget(host).map_err(|error| {
                 error.with_note(&format!(
                     "Perch's registry is untouched and every Credential already \
-                     deleted is already gone, so `perch purge` can be run again once \
-                     {} can be written to, and it will finish.",
+                     deleted is already gone, so `perch holdings purge` can be \
+                     run again once {} can be written to, and it will finish.",
                     kept_in.describe(),
                 ))
             })?;
@@ -252,8 +254,8 @@ fn forget_the_credential(host: &dyn Host, account: &Account) -> Result<bool> {
         let forgotten = kept_in.forget(host).map_err(|error| {
             error.with_note(&format!(
                 "Perch's registry is untouched and every Credential already \
-                 deleted is already gone, so `perch purge` can be run again once \
-                 {} can be written to, and it will finish.",
+                 deleted is already gone, so `perch holdings purge` can be run \
+                 again once {} can be written to, and it will finish.",
                 kept_in.describe(),
             ))
         })?;

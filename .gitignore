@@ -3,9 +3,10 @@
 # The deep-review report this branch works through. Kept locally, not shipped.
 perch-review.html
 
-# What `perch export` writes, in whatever directory the command was typed in —
-# which may well be this one. An Export holds a working Credential for every
-# Account the machine has, so it is one `git add -A` away from a public history.
+# What `perch holdings export` writes, in whatever directory the command was
+# typed in — which may well be this one. An Export holds a working Credential
+# for every Account the machine has, so it is one `git add -A` away from a
+# public history.
 *.age
 
 # What renders the guide leaves behind: `mdbook serve docs` writes here, and

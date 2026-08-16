@@ -1,12 +1,12 @@
 # Watching
 
-`perch watch` does the Cycling for you. It is a loop in this terminal that
+`perch watcher run` does the Cycling for you. It is a loop in this terminal that
 reads how full the Account you are on is, says what it made of that, and
 Switches within the Group when the Account runs low — so you stop being the one
 who notices.
 
 ```
-$ perch watch
+$ perch watcher run
 Watching you@example.com in Group `work`. Reading how full it is every 2m30s, and Switching within the Group when its fullest Quota Window reaches 80% — to an Account at 70% or under, and never twice inside 15 minutes. Ctrl-C stops.
 2026-08-04T12:00:00Z  waiting   you@example.com 40% used, fullest 5-hour; threshold 80% — under it, so nothing was wanted.
 2026-08-04T12:02:30Z  switched  you@example.com 86% used, fullest 5-hour; threshold 80% — over it. Switched — overflow@example.com has the most room: 95% headroom, which is true of every one of its Quota Windows — 5-hour is its fullest, as of just now.
@@ -21,13 +21,14 @@ see [`watcher-may-act`](configuration.md).
 by pid: what the loop takes across a wait is one lock and nothing else, so
 Ctrl-C is safe wherever it lands, and a Ctrl-C during a Switch lets that Switch
 finish first. Wanting it running without a terminal open is what
-[`perch service`](#having-the-machine-run-it) is for, and wanting it on somebody
-else's schedule is what [`--once`](#watching-on-a-schedule) is for.
+[`perch watcher install`](#having-the-machine-run-it) is for, and wanting it on
+somebody else's schedule is what
+[`perch watcher check`](#watching-on-a-schedule) is for.
 
 **There is one Watcher per person per machine**, whichever way it is being run.
-A second `perch watch` says who holds the watcher lock and waits for it rather
-than deciding alongside them — two loops watch the same Account and each keeps
-its Cooldown in memory, which is exactly the pacing the Cooldown exists to
+A second `perch watcher run` says who holds the watcher lock and waits for it
+rather than deciding alongside them — two loops watch the same Account and each
+keeps its Cooldown in memory, which is exactly the pacing the Cooldown exists to
 impose, undone by being run twice.
 
 **Every decision is printed, including the ones where nothing happens** — which
@@ -101,9 +102,9 @@ window that is certainly full — but unasked it would be a move onto an Account
 the watcher knows nothing about, and no figure is not evidence of room.
 
 None of it survives the loop. The cooldown lives in the running process and
-nowhere else — stopping `perch watch` and starting it again is you saying "go
-on then", and it starts with nothing to wait for. A scheduled check is the one
-exception, and [it says why below](#watching-on-a-schedule).
+nowhere else — stopping `perch watcher run` and starting it again is you saying
+"go on then", and it starts with nothing to wait for. A scheduled check is the
+one exception, and [it says why below](#watching-on-a-schedule).
 
 What it does when it acts is a Switch and nothing else: the outgoing Credential
 is Captured into its own Profile first (ADR 0006), Claude Code's locks are
@@ -114,11 +115,11 @@ Two things stop it, at the first round or at any round after, because there
 would be nothing for it to do:
 
 ```
-$ perch watch
+$ perch watcher run
 you@example.com is in no Group, and nothing has said the Accounts in no Group are interchangeable at all — so there is nowhere for the watcher to Switch it to. Nothing is being watched.
 `perch config set cycle-ungrouped true` says they are, and `perch config set ungrouped watcher-may-act true` then says the watcher may act on them. [...]   # exit 18
 
-$ perch watch
+$ perch watcher run
 Group `work` has not been told the watcher may act on it, so nothing is being watched. Nothing only ever changes underneath you because you said it could.
 `perch config set work watcher-may-act true` says it may.   # exit 14
 ```
@@ -140,30 +141,30 @@ nothing while it holds — a grant withdrawn is a watcher that stops *acting*,
 which is what the grant is about, rather than one that stops existing and has to
 be remembered about later.
 
-`perch watch --once` still exits on it, with the codes below, because a Check is
-one process reporting to a scheduler and the scheduler has to be told.
+`perch watcher check` still exits on it, with the codes below, because a Check
+is one process reporting to a scheduler and the scheduler has to be told.
 
 ## Having the machine run it
 
-`perch service install` has your machine run the loop for you, starting when you
+`perch watcher install` has your machine run the loop for you, starting when you
 log in — a LaunchAgent on macOS, a `systemd --user` unit on Linux, a Scheduled
 Task on Windows (ADR 0040). It is the *same loop*, supervised: same interval,
 same policy, same decision log. Perch writes the unit and hands the job over.
 
 ```
-$ perch service install
+$ perch watcher install
 Installed the Service. It runs /opt/homebrew/bin/perch as a LaunchAgent. It starts when you log in, and it is running now.
 Its decisions go to /Users/you/.config/perch/watch.log.
 
-$ perch service status
+$ perch watcher status
 A Service is installed as a LaunchAgent, and is running.
 Its unit is /Users/you/Library/LaunchAgents/cli.perch.watch.plist.
 It runs /opt/homebrew/bin/perch.
 Its decisions go to /Users/you/.config/perch/watch.log.
 A Watcher is running on this machine and holds the watcher lock.
 
-$ perch service uninstall
-The Service is stopped and its unit is gone. Nothing starts at login any more, and `perch watch` in a terminal is unaffected.
+$ perch watcher uninstall
+The Service is stopped and its unit is gone. Nothing starts at login any more, and `perch watcher run` in a terminal is unaffected.
 ```
 
 **At login, and yours rather than the machine's.** Never a system service and
@@ -175,7 +176,7 @@ macOS there is no unlocked keychain before somebody logs in. Installing it under
 manager's job rather than Perch's. On Linux systemd captures standard output
 into the journal — `journalctl --user -u perch-watch -f`. On macOS and Windows
 the unit points at `watch.log` inside Perch's own directory, which means
-`perch purge` sweeps it with everything else.
+`perch holdings purge` sweeps it with everything else.
 
 **An unchanged hold is said once an hour**, not every round. In a terminal a
 repeated line is proof the loop is awake; in a log nobody reads until something
@@ -184,13 +185,13 @@ So a hold says itself in full when it starts, says how long it has been going
 once an hour, and says what it cost when it ends.
 
 **`install` is idempotent**, and re-running it is the repair for a Service that
-stopped coming up: `perch upgrade` moves the binary, and `perch service status`
+stopped coming up: `perch upgrade` moves the binary, and `perch watcher status`
 says when the unit names one that is no longer there. An Upgrade re-points the
 Service at the new binary by itself, and says so if it could not.
 
 ## Watching on a schedule
 
-`perch watch --once` takes one check and exits, saying what it decided in its
+`perch watcher check` takes one round and exits, saying what it decided in its
 exit code. That is the whole of what an unattended watcher needs, because
 scheduling is the operating system's job (ADR 0013): cron and systemd timers
 already run things at an interval, keep them from overlapping, and capture what
@@ -200,20 +201,20 @@ Pick this *or* a Service, not both: a Check that finds a Watcher running exits
 `20` and does nothing, so a machine with both gets a cron mailbox full of them.
 
 ```cron
-*/5 * * * * perch watch --once >> ~/.local/state/perch-watch.log 2>&1
+*/5 * * * * perch watcher check >> ~/.local/state/perch-watch.log 2>&1
 ```
 
 ```
-$ perch watch --once
+$ perch watcher check
 2026-08-04T12:00:00Z  switched  you@example.com 86% used, fullest 5-hour; threshold 80% — over it. Switched — overflow@example.com has the most room: 95% headroom.   # exit 0
 
-$ perch watch --once
+$ perch watcher check
 2026-08-04T12:05:00Z  cooling   overflow@example.com 90% used, fullest 5-hour; threshold 80% — over it, and too soon to move again: the last Switch was 5 minutes ago and the cooldown leaves at least 15 minutes between two, so nothing moves for another 10 minutes.   # exit 15
 ```
 
 It is the same policy as the loop, run once — the same threshold, cooldown and
 margin, and the same refusal to act on a figure it did not just read. **The
-cooldown survives between invocations**, because each `--once` is a fresh
+cooldown survives between invocations**, because each Check is a fresh
 process and the sequence of them is the watcher: when one check Switched is
 recorded against the Group in the registry for the next one to be paced by. That
 stamp is the one thing about the watcher that is written down, and it is why a

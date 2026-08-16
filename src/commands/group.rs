@@ -66,9 +66,9 @@ const LABEL_WIDTH: usize = 13;
 
 pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Result<()> {
     // Read-only where it reads. `perch group list` writes nothing, and taking
-    // the write lock to read it means waiting out a `perch watch` round or a
-    // `perch status --refresh` and then failing as though somebody else had
-    // done something wrong.
+    // the write lock to read it means waiting out a `perch watcher run` round
+    // or a `perch status --refresh` and then failing as though somebody else
+    // had done something wrong.
     if let GroupCommand::List = command {
         return list(out, &adopt::ensure_adopted(host)?);
     }
@@ -284,10 +284,10 @@ fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scop
     // Being allowed to act is not the whole of whether it does. Among the
     // Accounts in no Group, `cycle-ungrouped` is a separate declaration that
     // they are interchangeable at all (ADR 0017), and without it there is
-    // nowhere for the watcher to Switch to — `perch watch` refuses outright and
-    // names both. Read from `watcher-may-act` alone, this line claimed
-    // unattended switching that the watcher declines, and said the same thing
-    // whichever way the gate was set, so it was unfalsifiable in both
+    // nowhere for the watcher to Switch to — `perch watcher run` refuses
+    // outright and names both. Read from `watcher-may-act` alone, this line
+    // claimed unattended switching that the watcher declines, and said the same
+    // thing whichever way the gate was set, so it was unfalsifiable in both
     // directions. `config::scope_lines` already answers this correctly.
     let interchangeable = *scope != Scope::Ungrouped || registry.global.cycle_ungrouped;
     let watcher = match (settings.watcher_may_act, interchangeable) {
