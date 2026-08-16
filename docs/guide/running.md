@@ -21,8 +21,8 @@ storage, it is the one path that has to **Reconcile** first, every time: your
 memory, settings, plugins, past work and plans are linked into the Profile it is
 about to launch, and links that have broken or gone stale are repaired (ADR
 0026). What crosses is everything the Default Profile holds except the
-Credential, the file naming the Account, the directory of session markers and
-the refresh lock, read at Run time — so a directory a new Claude Code release
+Credential, the file naming the Account, the directory of Markers and the
+refresh lock, read at Run time — so a directory a new Claude Code release
 invents follows you without waiting for a Perch release. Never by copying,
 because a copy diverges the moment it is edited: where no link can be made, the
 Run is refused rather than served one, naming the entry and what to do about it.
@@ -66,10 +66,10 @@ Default Profile and leaves the Profile itself alone. Its Utilization is read
 without renewing anything, because an Account with a client running has a fresh
 access token already. A Run and a Switch do not lock each other out.
 
-It works by the marker Claude Code already uses to record a running client, so
-a Run that was killed rather than closed leaves nothing behind that matters: a
-marker naming a process that is gone, or a pid since taken by something younger,
-makes no Profile Live (ADR 0022).
+It works by the **Marker** Claude Code already uses to record a running client,
+so a Run that was killed rather than closed leaves nothing behind that matters:
+a Marker naming a process that is gone, or a pid since taken by something
+younger, makes no Profile Live (ADR 0022).
 
 ## Running with arguments, and running something else
 

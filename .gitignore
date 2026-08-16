@@ -3,15 +3,9 @@
 # The deep-review report this branch works through. Kept locally, not shipped.
 perch-review.html
 
-# What a Dogfood run writes: one dated report per run (ADR 0037). Never
-# committed, because a report names the real Accounts it was run against —
-# `tests/dogfood.rs` asserts this line is here rather than trusting it.
-/dogfood-reports
-
-# What `perch export` writes, and what `dogfood-setup` defaults to writing in
-# the directory it was run from — which is this one. An Export holds a working
-# Credential for every Account the machine has, so it is one `git add -A` away
-# from a public history. `tests/dogfood.rs` asserts this line too.
+# What `perch export` writes, in whatever directory the command was typed in —
+# which may well be this one. An Export holds a working Credential for every
+# Account the machine has, so it is one `git add -A` away from a public history.
 *.age
 
 # What renders the guide leaves behind: `mdbook serve docs` writes here, and

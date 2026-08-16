@@ -829,10 +829,9 @@ fn the_variable_that_switches_it_off_stops_the_request_rather_than_the_line() {
     );
 }
 
-/// Not a terminal is not a person. A script parsing `perch --version`, the
-/// Homebrew formula's test block, and the Dogfood phase that launches `perch
-/// --version` as an inner client all read this output — none of them wants a
-/// second line, and none of them should pay for a request.
+/// Not a terminal is not a person. A script parsing `perch --version` and the
+/// Homebrew formula's test block both read this output — neither wants a
+/// second line, and neither should pay for a request.
 #[test]
 fn nothing_is_said_and_nothing_is_asked_when_there_is_no_terminal() {
     let host = machine().without_terminal();

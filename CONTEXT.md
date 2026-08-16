@@ -115,21 +115,21 @@ to the Account: memory, settings, plugins, past work, plans, and whatever the
 next Claude Code release adds. Said as everything-but rather than as a list,
 because the list grows on Claude Code's schedule and one written down here goes
 quietly out of date — what it is not is the Credential, the file naming the
-Account, and the directory of session markers, which belongs to the
-configuration directory itself. A Switch leaves it untouched, so it follows you
-across Accounts without effort; only the Run path has to work to reach it.
+Account, and the directory of Markers, which belongs to the configuration
+directory itself. A Switch leaves it untouched, so it follows you across
+Accounts without effort; only the Run path has to work to reach it.
 _Avoid_: common config, global config
 
 **Reconcile**:
 The pass Perch makes before a Run, making every piece of Shared State reachable
 from the Profile it is launching by linking it there, and repairing links that
 have broken or gone stale. What crosses is everything the Default Profile holds
-except the Credential, the file naming the Account, the directory of session
-markers and the refresh lock, read at Run time rather than from a list, so an entry Perch has never
-heard of still follows you. Never by copying: a copy diverges the moment it is
-edited, which is the opposite of what Shared State promises — so where no link
-can be made the Run is refused rather than served one. A Switch needs no such
-pass.
+except the Credential, the file naming the Account, the directory of Markers and
+the refresh lock, read at Run time rather than from a list, so an entry Perch
+has never heard of still follows you. Never by copying: a copy diverges the
+moment it is edited, which is the opposite of what Shared State promises — so
+where no link can be made the Run is refused rather than served one. A Switch
+needs no such pass.
 _Avoid_: sync, merge, heal
 
 **Carry**:
@@ -202,10 +202,7 @@ _Avoid_: dead, expired, invalid
 Logging a Quarantined Account in again in place, so it keeps its Alias, its
 Group, whether Cycling may choose it and its position rather than being rebuilt.
 What `perch relogin` does, and the only thing that ends a Quarantine. One
-Account at a time, which is why a Dogfood run's Phase zero — the Repair ADR 0037
-opens every run with — is one of these per Quarantined Account in turn, each
-reported on its own: a run where one login of three was abandoned has to be
-legible as exactly that.
+Account at a time.
 _Avoid_: fix, restore, re-add, reauth
 
 ## Making an account active
@@ -313,14 +310,27 @@ Profile it launches a Live Profile for as long as it lasts.
 _Avoid_: use, session, launch
 
 **Live Profile**:
-A Profile with a client currently running against it, evidenced by a session
-marker naming a process that is still the one that wrote it. A Run makes one and
-writes that evidence itself. Writing into a Live Profile is refused — a Capture,
-a Renewal, a `.claude.json` key — because something else is holding those files;
+A Profile with a client currently running against it, evidenced by a Marker
+naming a process that is still the one that wrote it. A Run makes one and writes
+that evidence itself. Writing into a Live Profile is refused — a Capture, a
+Renewal, a `.claude.json` key — because something else is holding those files;
 reading out of one is not, so a Switch onto the Account still lands and its
-Utilization is still readable. A marker whose process is gone, or whose pid has
+Utilization is still readable. A Marker whose process is gone, or whose pid has
 been taken by something younger, makes nothing Live.
 _Avoid_: active, running, in-use
+
+**Marker**:
+The file a running client leaves in a Profile's directory of them, naming its
+process and when the session began. Claude Code's invention rather than Perch's:
+Perch reads the ones it finds, and writes its own in the shape it reads, because
+it makes Profiles Live too — a Run does, for as long as it lasts, and so does a
+login, so that nothing reaps an Account somebody is midway through logging in.
+Evidence rather than a claim — a pid alone would not be, since the operating
+system hands pids out again, so a Marker holds only while the process it names
+began no later than the session it records (ADR 0022). One a client left behind
+when it died therefore names nothing, and nobody has to remove it for that to be
+true.
+_Avoid_: lock, pid file, session file, heartbeat, sentinel
 
 ## Configuration
 
@@ -424,74 +434,3 @@ Installation the installer script left is one Perch replaces itself. Goes
 backwards when asked, which is still an Upgrade — the direction is the user's
 and the route is not.
 _Avoid_: update, self-update, bump, install
-
-## Proving it works
-
-**Dogfood**:
-Asserting that Perch works by using it as a person does: the real binary, on a
-machine somebody works on, against Accounts they actually hold. Named for who
-runs it rather than for what it checks, because that is what distinguishes it —
-every other suite holds something still, and this one holds nothing still. The
-Credentials are live, the network is Anthropic's, and a failure costs real
-state. Run a phase at a time by somebody watching, never unattended (ADR 0037).
-_Avoid_: e2e, smoke test, manual test, acceptance test
-
-**Preflight**:
-What a Dogfood run establishes about the machine before it acts: which Claude
-Code is installed, whether the network answers, how many Accounts are held and
-which are Quarantined — and, from those, how much of the suite this machine can
-prove. Said as a figure and said first, because a run that quietly proved a
-third of what it was asked to and a run that proved all of it look identical
-once they are over. A Quarantined Account does not count toward the figure: it
-is one nothing could be proved with.
-_Avoid_: setup, precondition, capability check, sanity check
-
-**Phase zero**:
-The Repair every Dogfood run opens with, before any Phase acts. There are more
-machines than Accounts, so a run on one may retire what the others hold — and
-phase zero hands the terminal to `perch relogin` for each Quarantined Account in
-turn rather than making somebody quit, repair by hand and start again. It is not
-a Phase, is not on the phase list, and can never fail a run: a Quarantine
-somebody else's run caused is the ordinary starting state (ADR 0037). All it
-changes is the figure, and an Account it could not clear is one the Phases
-needing a usable Account then skip over.
-_Avoid_: setup phase, phase 0, bootstrap, fixup
-
-**Marker**:
-The receipt `dogfood-setup` writes beside the registry once it has taken an
-Export, and the thing a Dogfood run refuses to act without. Named for what it
-records rather than for what it permits: it is not a switch anybody may set, it
-is the wizard saying that every Account on this machine is in a file. A machine
-somebody only meant to connect to should not be able to start Switching
-Accounts around because a command was recalled from history (ADR 0037). It also
-records what this machine was deliberately arranged to prove — which Group is
-set aside for the Phases needing a pair, and how many logins the person holds,
-so a machine that is behind can be told from one that is complete.
-_Avoid_: flag, opt-in, sentinel, consent file
-
-**Phase**:
-One step of a Dogfood run, declaring what it needs of a machine before it runs
-so the Preflight can count it. It steers policy and never figures, reads
-`list --json`, `status --json` and exit codes, and never unwinds itself — one
-that stops says what is now true and what puts it back, and says whether it is a
-fault in Perch or news about something upstream (ADR 0037). One that discovers
-only as it runs that this machine can prove nothing with it says that instead of
-passing hollow, so what the Preflight counts is a ceiling rather than a promise.
-_Avoid_: step, stage, scenario, case
-
-**Attended**:
-A Phase that hands the terminal to a person: a login to walk, a client to quit.
-Asked for rather than inferred — a run takes them on only where it has been told
-somebody is there, and refuses the telling on a terminal that could not carry a
-question anyway. What a person may be asked for is an act, never a verdict:
-whether the Phase passed is Perch's to judge, from what is on disk once the
-person is done (ADR 0038).
-_Avoid_: interactive, manual, supervised, human phase
-
-**Attestation**:
-A line in a report a person vouched for rather than one Perch established, kept
-for the little a Phase structurally cannot see for itself. Said as attested, so
-that it and an assertion never read alike a week later, and never the whole of
-what a Phase came to — a pass that is a keystroke is a pass somebody can type
-away on the fourth login of the evening (ADR 0038).
-_Avoid_: confirmation, sign-off, manual check, verification

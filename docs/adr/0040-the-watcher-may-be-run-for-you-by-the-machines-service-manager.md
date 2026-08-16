@@ -266,3 +266,8 @@ They are proved by a Dogfood phase that declares a service manager as what it
 needs of a machine, so the Preflight counts it only where there is one — and by
 one Attended phase, because logging out and back in again is an act only a person
 can perform (ADR 0038).
+
+> **Amended by ADR 0041.** Both phases went with the Dogfood suite (#148), so
+> nothing automated proves the three arrangements now — the paragraph above
+> records what proved them, not what does. Nothing else here is repealed: the
+> decision, the exit codes and the three arrangements all stand.
