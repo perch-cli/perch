@@ -14,13 +14,6 @@ pub mod carry;
 pub mod commands;
 pub mod credentials;
 pub mod cycle;
-
-/// The Dogfood harness (ADR 0037), held back the way the fakes are: it exists
-/// so a suite can ask a real machine what it can prove, and none of it belongs
-/// in the binary somebody downloads.
-#[cfg(feature = "dogfood")]
-pub mod dogfood;
-
 pub mod error;
 pub mod export;
 pub mod host;
