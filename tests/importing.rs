@@ -197,10 +197,10 @@ fn nothing_is_made_active_by_an_import() {
 /// The same rule, for the other claim a registry makes about right now.
 ///
 /// `checks` is what a `perch watch --once` on the *other* machine did — a
-/// Switch it made, and when — and the cooldown and the no-return are measured
-/// from it. Carried across, an Export taken this morning has the first check on
-/// the new machine reporting `cooling`, and bars the Account that machine last
-/// left, on the strength of something that happened somewhere else.
+/// Switch it made, and when — and the cooldown is measured from it. Carried
+/// across, an Export taken this morning has the first check on the new machine
+/// reporting `cooling` on the strength of something that happened somewhere
+/// else.
 #[test]
 fn no_watcher_has_run_here_yet_however_recently_one_ran_where_the_export_was_taken() {
     // A machine whose scheduled check Switched a moment ago, exported.

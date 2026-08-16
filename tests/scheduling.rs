@@ -9,8 +9,8 @@
 //!
 //! Two properties are what this mode is for, and each has tests here that fail
 //! if it stops holding: the policy is the loop's policy run once, and the
-//! cooldown and no-return that pace it survive between invocations, because
-//! every one of them is a fresh process.
+//! cooldown that paces it survives between invocations, because every one of
+//! them is a fresh process.
 
 mod common;
 
@@ -311,7 +311,8 @@ fn a_check_switches_among_ungrouped_accounts_once_both_declarations_are_made() {
 #[test]
 fn a_check_among_ungrouped_accounts_paces_the_next_one() {
     // The Account being watched fills up, the check moves off it, and the one
-    // it moved to fills up in turn — the trace that would ping-pong if nothing
+    // it moved to fills up in turn — the trace that would move every round if
+    // nothing
     // paced it across invocations.
     let host = checked(&[99.0, 20.0], &[1.0, 90.0]);
     for email in [EMAIL, SECOND_EMAIL] {
@@ -357,7 +358,8 @@ fn a_check_on_a_group_that_has_not_said_the_watcher_may_act_names_the_setting() 
 #[test]
 fn the_cooldown_holds_between_one_check_and_the_next() {
     // The Account being watched fills up, the check moves off it, and the one
-    // it moved to fills up in turn — the trace that would ping-pong if nothing
+    // it moved to fills up in turn — the trace that would move every round if
+    // nothing
     // paced it across invocations.
     let host = checked(&[86.0, 20.0], &[5.0, 90.0]);
 
@@ -397,10 +399,10 @@ fn the_cooldown_holds_between_one_check_and_the_next() {
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
 }
 
-/// What one check leaves for the next: when it Switched, and off which Account
-/// — the two things the cooldown and the no-return are measured from. Only a
-/// Switch that happened writes one, because a check that changed nothing has
-/// nothing to pace.
+/// What one check leaves for the next: when it Switched, which is what the
+/// cooldown is measured from, and off which Account, which nothing reads today
+/// and is kept against ADR 0046's guard. Only a Switch that happened writes one,
+/// because a check that changed nothing has nothing to pace.
 #[test]
 fn a_check_records_when_it_switched_and_what_it_switched_off() {
     // Under the threshold, and then over it: two checks, of which only the
@@ -548,9 +550,9 @@ fn figures_that_were_read_but_could_not_be_kept_are_said_rather_than_swallowed()
 ///
 /// The Credential moved, so the check moved — and the pacing has to survive the
 /// process, because every check is a fresh one. Without that record the next
-/// scheduled check saw no cooldown and no no-return, and was free to move
-/// straight back: "a check that moved and let the next one move straight back",
-/// which is what ADR 0013 says the persisted record exists to prevent.
+/// scheduled check saw no cooldown at all, and was free to move straight back:
+/// "a check that moved and let the next one move straight back", which is what
+/// ADR 0013 says the persisted record exists to prevent.
 #[test]
 fn a_check_that_switched_and_then_failed_still_paces_the_next_one() {
     let host = checked(&[86.0], &[5.0]);

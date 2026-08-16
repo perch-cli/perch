@@ -31,13 +31,12 @@
 //! [`act`]'s to explain; how often the active one is read is
 //! [`crate::watch::REFRESH_INTERVAL_MILLIS`]'s.
 //!
-//! Being over the threshold is not on its own a reason to move. The rest of the
-//! Group's [`Policy`](crate::watch::Policy) is what stops two Accounts either
-//! side of it from trading places every few minutes: a cooldown under how often
-//! a Switch may happen at all, checked here before anything is read, and a
-//! margin under where one may land, applied by setting candidates aside for the
-//! ranking in [`act`]. The one thing carried between rounds is a
-//! [`Recently`](crate::watch::Recently), which is what those two are measured
+//! Being over the threshold is not on its own a reason to move. Two constants
+//! pace the rest of it (ADR 0046): a cooldown under how often a Switch may
+//! happen at all, checked here before anything is read, and a margin under where
+//! one may land, applied by setting candidates aside for the ranking in [`act`].
+//! The one thing carried between rounds is a
+//! [`Recently`](crate::watch::Recently), which is what the cooldown is measured
 //! from — in memory for the loop, and on the registry for a check, which has no
 //! memory of the one before it.
 //!
@@ -130,9 +129,9 @@ fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         Err(other) => return Err(other),
     };
 
-    // Nothing carried in from anywhere: the cooldown and the no-return come off
-    // the registry inside the round, and a back-off would be pacing a loop this
-    // process does not have. How soon to come back is the scheduler's.
+    // Nothing carried in from anywhere: the cooldown comes off the registry
+    // inside the round, and a back-off would be pacing a loop this process does
+    // not have. How soon to come back is the scheduler's.
     let turn = match one_round(
         host,
         Watcher::Check,
@@ -409,17 +408,17 @@ fn opening(host: &dyn Host) -> Result<String> {
         watch::how_often(),
         watching.policy.threshold,
         watching.policy.ceiling(),
-        watching.policy.cooldown_minutes,
+        watch::COOLDOWN_MINUTES,
     ))
 }
 
 /// Which watcher a round belongs to.
 ///
 /// One difference, and every part of it is here rather than as a test of this
-/// enum scattered through the round: where the cooldown and the no-return are
-/// kept between rounds, and who decides when the next reading is (ADR 0013).
-/// Both follow from the same thing — a loop is one process a person is
-/// watching, and a check is one of a sequence of processes nobody is.
+/// enum scattered through the round: where the cooldown is kept between rounds,
+/// and who decides when the next reading is (ADR 0013). Both follow from the
+/// same thing — a loop is one process a person is watching, and a check is one
+/// of a sequence of processes nobody is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Watcher {
     /// `perch watch`: rounds separated by a wait this process takes, so what
@@ -656,7 +655,7 @@ fn one_round(
 
     let outcome = if !fullest.at_or_over(watching.policy.threshold) {
         Outcome::Waiting
-    } else if let Some(why) = recently.resting(&watching.policy, host.now()) {
+    } else if let Some(why) = recently.resting(host.now()) {
         // Before the candidates are read, so a round that may not act spends
         // nothing finding out where it would have gone.
         Outcome::Cooling { why }
@@ -798,17 +797,11 @@ fn act(
         Err(other) => return Err(other),
     }
 
-    // The Account this watcher just came off is not read and not landed on
-    // (ADR 0013). Coming straight back is the second half of a ping-pong, and
-    // an Account nothing could be Switched to is an allowance spent on nothing.
-    let barred = recently
-        .barred(&watching.policy, host.now())
-        .map(str::to_string);
     let read = observe::refresh(
         host,
         perch,
         registry,
-        &worth_reading(&considered(registry, watching), barred.as_deref()),
+        &addresses_of(&considered(registry, watching)),
     );
     // What could not be read, carried into the sentence that says where the
     // watcher went: an Account ranked on a figure from an hour ago is the one
@@ -822,7 +815,6 @@ fn act(
         &watching.policy,
         &watching.scope,
         &considered(registry, watching),
-        barred.as_deref(),
     );
 
     let choice = match cycle::choose(
@@ -865,7 +857,7 @@ fn act(
     // than the outcome is what makes the two cases one.
     let moved = landing.moved();
     if moved {
-        recently.switched(outgoing.email(), host.now());
+        recently.switched(host.now());
         watcher.remember(registry, &watching.scope, outgoing.email(), host.now());
     }
 
@@ -939,17 +931,16 @@ fn considered(registry: &Registry, watching: &Watching) -> Vec<Considered> {
         .collect()
 }
 
-/// Which of them are worth spending a read of the network on: all but the one
-/// no-return has barred, because a read for a choice that cannot be made is an
-/// allowance spent on nothing.
+/// Their addresses, which is all a Refresh takes.
 ///
-/// The barred Account stays in [`considered`] even though it is not read — it
-/// has to be set aside by name, and leaving it out of that list would leave it
-/// a candidate.
-fn worth_reading(considered: &[Considered], barred: Option<&str>) -> Vec<String> {
+/// Every one of them, and that is the whole of the rule now: the Account this
+/// watcher just came off used to be dropped here as well, because no-return
+/// could not be Switched back to and a read for a choice that cannot be made is
+/// an allowance spent on nothing. It never dropped anything — the cooldown had
+/// already ended the round before this was reached (ADR 0046).
+fn addresses_of(considered: &[Considered]) -> Vec<String> {
     considered
         .iter()
-        .filter(|candidate| Some(candidate.email.as_str()) != barred)
         .map(|candidate| candidate.email.clone())
         .collect()
 }

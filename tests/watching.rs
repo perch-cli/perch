@@ -9,8 +9,8 @@
 //! Four properties are what this command is for, and each has a test that
 //! fails if it stops holding: only the Account you are on is Refreshed, every
 //! decision is printed including the ones where nothing happens, nothing is
-//! ever acted on but a figure that was just read, and two Accounts either side
-//! of the threshold never trade places with each other (ADR 0013).
+//! ever acted on but a figure that was just read, and no Switch lands on an
+//! Account nearly as full as the one being left (ADR 0046).
 
 mod common;
 
@@ -541,7 +541,7 @@ fn nowhere_to_go_is_a_decision_and_the_loop_goes_on_watching() {
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
 }
 
-/// The margin (ADR 0013). At an 80% threshold nothing is moved to unless it is
+/// The margin (ADR 0046). At an 80% threshold nothing is moved to unless it is
 /// at 70% or better, so an Account that is only just emptier than the one you
 /// are on is passed over — moving there would buy a few minutes and cost a
 /// Capture, a Credential write, and the same decision again shortly.
@@ -570,12 +570,13 @@ fn a_candidate_only_just_emptier_than_the_threshold_is_never_switched_to() {
     );
 }
 
-/// The whole of what the margin is for. Two Accounts hovering either side of
-/// the threshold, watched for as long as anyone would: without a margin this is
-/// a Switch every round, each one a Capture and a Credential write, and a
-/// client logged out at the end of it.
+/// The whole of what the margin is for (ADR 0046). Usage climbs on the Account
+/// you are on and stands still on the one you are not, so without a margin the
+/// two walk upward together — a Switch every round, each one a Capture and a
+/// Credential write, and every landing on an Account with almost nothing left.
+/// The margin makes the round say there is nowhere better to go, which is true.
 #[test]
-fn two_accounts_hovering_either_side_of_the_threshold_do_not_ping_pong() {
+fn a_destination_nearly_as_full_as_the_account_being_left_is_refused() {
     let host = watching_both(&[82.0, 79.0, 83.0, 81.0, 84.0, 80.0], &[78.0], 6);
 
     let (result, printed) = run_watch(&host);
@@ -584,8 +585,8 @@ fn two_accounts_hovering_either_side_of_the_threshold_do_not_ping_pong() {
     assert_eq!(
         printed.matches("switched").count(),
         0,
-        "nothing here is worth moving to, and doing it anyway is the ping-pong: \
-         {printed}"
+        "nothing here is worth moving to, and doing it anyway is the walk \
+         upward: {printed}"
     );
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
     assert_eq!(
@@ -597,7 +598,7 @@ fn two_accounts_hovering_either_side_of_the_threshold_do_not_ping_pong() {
 
 /// A machine where the Account being watched fills up, the watcher moves off
 /// it, and the Account it moved to fills up in turn — the trace that would
-/// ping-pong if nothing paced it.
+/// move every round if nothing paced it.
 ///
 /// The Account left behind is roomy again by then, so the only thing standing
 /// between the two Switches is the cooldown.
@@ -646,16 +647,15 @@ fn two_switches_never_happen_closer_together_than_the_cooldown() {
     }
 }
 
-/// No return (ADR 0013): the Account a Switch just left is no candidate until
-/// the cooldown has passed, and it is not read either.
+/// The cooldown is checked before anything is read, so a round that may not act
+/// spends no allowance finding out what it would have done (ADR 0046).
 ///
-/// What this trace shows is the pair working — nothing is read of the Account
-/// just left while the cooldown holds, and it is landed on again the first
-/// round after. It cannot separate the two rules, because the cooldown always
-/// reaches the decision first; `Recently::barred` is pinned on its own by a
-/// unit test in `src/watch.rs`.
+/// And once it has run out, the Account the watcher came off is a candidate like
+/// any other. Coming straight back is barred by the cooldown having to pass
+/// first, which is the whole of the rule — a second one saying where not to go
+/// could never fire.
 #[test]
-fn the_account_just_left_is_no_candidate_until_the_cooldown_has_passed() {
+fn the_account_just_left_is_returned_to_once_the_cooldown_has_run_out() {
     let host = filling_up_one_after_the_other();
 
     let (result, printed) = run_watch(&host);
@@ -713,33 +713,28 @@ fn the_loop_carries_its_cooldown_in_memory_and_records_nothing() {
     );
 }
 
-/// A Group is free to say the watcher may act as often as the figures warrant,
-/// and the settings that say so are its own.
+/// The margin holds for every Group, because there is no longer a Group that
+/// can be told otherwise (ADR 0046). A candidate at 79% under an 80% threshold
+/// was the arrangement a `watcher-margin-percent 0` used to buy, and the loop
+/// now refuses it whatever else has been set.
+///
+/// That the three keys are refused is `configuring.rs`'s claim; this is what
+/// the loop does with the numbers nobody can move.
 #[test]
-fn a_group_that_asks_for_no_cooldown_and_no_margin_may_move_every_round() {
+fn the_margin_refuses_a_barely_emptier_candidate_for_every_group() {
     let host = watching_both(&[86.0, 20.0], &[79.0, 86.0], 3);
-    for (key, value) in [
-        ("watcher-cooldown-minutes", "0"),
-        ("watcher-margin-percent", "0"),
-        ("watcher-no-return", "false"),
-    ] {
-        config_set(&host, &["work", key, value])
-            .0
-            .expect("all three are the Group's to set");
-    }
 
     let (result, printed) = run_watch(&host);
 
     result.expect("it was stopped");
     assert_eq!(
         printed.matches("switched").count(),
-        2,
-        "with nothing pacing it, it moves whenever the ranking says to: {printed}"
+        0,
+        "79% is not 70% or better, and no Setting can say otherwise: {printed}"
     );
-    assert_eq!(
-        active(&host).as_deref(),
-        Some(EMAIL),
-        "there and straight back: {printed}"
+    assert!(
+        printed.contains("nothing over 70% is worth moving to"),
+        "and the round says which figure it was judged against: {printed}"
     );
 }
 

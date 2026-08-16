@@ -56,9 +56,8 @@ pub enum ConfigCommand {
     /// Set one Setting, and say what it now means.
     ///
     /// Every Setting exists at Global — `strategy`, and the watcher's
-    /// `watcher-may-act`, `watcher-threshold-percent`,
-    /// `watcher-cooldown-minutes`, `watcher-margin-percent` and
-    /// `watcher-no-return` (ADR 0013) — where it is the value that applies
+    /// `watcher-may-act` and `watcher-threshold-percent` (ADR 0046) — where it
+    /// is the value that applies
     /// until something narrower is said. Naming a Scope first sets that Scope's
     /// Override instead: a Group by name, or `ungrouped` for the Accounts in no
     /// Group. `cycle-ungrouped` is Global's alone.
@@ -578,19 +577,13 @@ pub enum Setting {
     Strategy,
     WatcherMayAct,
     WatcherThresholdPercent,
-    WatcherCooldownMinutes,
-    WatcherMarginPercent,
-    WatcherNoReturn,
 }
 
 /// Every Setting there is, in the order every surface offers them.
-pub const SETTINGS: [Setting; 6] = [
+pub const SETTINGS: [Setting; 3] = [
     Setting::Strategy,
     Setting::WatcherMayAct,
     Setting::WatcherThresholdPercent,
-    Setting::WatcherCooldownMinutes,
-    Setting::WatcherMarginPercent,
-    Setting::WatcherNoReturn,
 ];
 
 /// What a value can be stepped through, for the surface that has arrow keys
@@ -616,9 +609,6 @@ impl Setting {
             Setting::Strategy => "strategy",
             Setting::WatcherMayAct => "watcher-may-act",
             Setting::WatcherThresholdPercent => "watcher-threshold-percent",
-            Setting::WatcherCooldownMinutes => "watcher-cooldown-minutes",
-            Setting::WatcherMarginPercent => "watcher-margin-percent",
-            Setting::WatcherNoReturn => "watcher-no-return",
         }
     }
 
@@ -646,17 +636,12 @@ impl Setting {
                     .map(|strategy| strategy.as_str().to_string())
                     .collect(),
             ),
-            Setting::WatcherMayAct | Setting::WatcherNoReturn => Shape::YesOrNo,
+            Setting::WatcherMayAct => Shape::YesOrNo,
             // Five at a time, so crossing a useful range is a dozen keystrokes
             // rather than eighty.
-            Setting::WatcherThresholdPercent | Setting::WatcherMarginPercent => Shape::Range {
+            Setting::WatcherThresholdPercent => Shape::Range {
                 least: 0,
                 most: registry::MAX_PERCENTAGE as u32,
-                step: 5,
-            },
-            Setting::WatcherCooldownMinutes => Shape::Range {
-                least: 0,
-                most: registry::MAX_WATCHER_COOLDOWN_MINUTES,
                 step: 5,
             },
         }
@@ -668,9 +653,6 @@ impl Setting {
             Setting::Strategy => settings.strategy.as_str().to_string(),
             Setting::WatcherMayAct => settings.watcher_may_act.to_string(),
             Setting::WatcherThresholdPercent => settings.watcher_threshold_percent.to_string(),
-            Setting::WatcherCooldownMinutes => settings.watcher_cooldown_minutes.to_string(),
-            Setting::WatcherMarginPercent => settings.watcher_margin_percent.to_string(),
-            Setting::WatcherNoReturn => settings.watcher_no_return.to_string(),
         }
     }
 
@@ -684,13 +666,6 @@ impl Setting {
             Setting::WatcherThresholdPercent => overrides
                 .watcher_threshold_percent
                 .map(|held| held.to_string()),
-            Setting::WatcherCooldownMinutes => overrides
-                .watcher_cooldown_minutes
-                .map(|held| held.to_string()),
-            Setting::WatcherMarginPercent => overrides
-                .watcher_margin_percent
-                .map(|held| held.to_string()),
-            Setting::WatcherNoReturn => overrides.watcher_no_return.map(|held| held.to_string()),
         }
     }
 
@@ -737,15 +712,6 @@ impl Setting {
             Setting::WatcherThresholdPercent => {
                 overrides.watcher_threshold_percent = Some(percentage(self.as_str(), value)?)
             }
-            Setting::WatcherCooldownMinutes => {
-                overrides.watcher_cooldown_minutes = Some(minutes(self.as_str(), value)?)
-            }
-            Setting::WatcherMarginPercent => {
-                overrides.watcher_margin_percent = Some(percentage(self.as_str(), value)?)
-            }
-            Setting::WatcherNoReturn => {
-                overrides.watcher_no_return = Some(yes_or_no(self.as_str(), value)?)
-            }
         }
         Ok(())
     }
@@ -769,9 +735,6 @@ impl Setting {
             Setting::Strategy => overrides.strategy = None,
             Setting::WatcherMayAct => overrides.watcher_may_act = None,
             Setting::WatcherThresholdPercent => overrides.watcher_threshold_percent = None,
-            Setting::WatcherCooldownMinutes => overrides.watcher_cooldown_minutes = None,
-            Setting::WatcherMarginPercent => overrides.watcher_margin_percent = None,
-            Setting::WatcherNoReturn => overrides.watcher_no_return = None,
         }
     }
 
@@ -807,61 +770,6 @@ impl Setting {
                 "`perch watch` Switches {within} once that much of the \
                  fullest Quota Window of the Account you are on has been used. \
                  {ONLY_WHILE_IT_RUNS}"
-            ),
-            Setting::WatcherCooldownMinutes if settings.watcher_cooldown_minutes == 0 => format!(
-                "`perch watch` will Switch {within} as often as the \
-                 figures say to, with no wait between one Switch and the next — \
-                 and `watcher-no-return` goes with it, because a no-return of no \
-                 minutes bars nothing. The margin is then all that stands \
-                 between two Accounts either side of the threshold and a \
-                 ping-pong. {ONLY_WHILE_IT_RUNS}"
-            ),
-            Setting::WatcherCooldownMinutes => format!(
-                "`perch watch` leaves at least that long between two Switches \
-                 {within}, however the figures move in between. \
-                 {}{ONLY_WHILE_IT_RUNS}",
-                match settings.watcher_no_return {
-                    true =>
-                        "It is also how long the Account it just left stays \
-                             barred from being Switched back to. ",
-                    false => "",
-                },
-            ),
-            Setting::WatcherMarginPercent => format!(
-                "`perch watch` Switches {within} only to an Account with \
-                 no more than {}% of its fullest Quota Window used — that much \
-                 clear of the {}% it moves you at. A candidate barely emptier \
-                 than the Account you are on is what a ping-pong is made of. \
-                 {ONLY_WHILE_IT_RUNS}",
-                crate::watch::Policy::of(settings).ceiling(),
-                settings.watcher_threshold_percent,
-            ),
-            // A no-return is measured in cooldowns, so a Scope with no cooldown
-            // has no no-return either however this reads. Said rather than left
-            // for somebody to find out, because "will not Switch back until the
-            // cooldown of 0 minutes has passed" is a sentence that means the
-            // opposite of what it appears to promise.
-            Setting::WatcherNoReturn
-                if settings.watcher_no_return && settings.watcher_cooldown_minutes == 0 =>
-            {
-                format!(
-                    "`perch watch` bars nothing {within}: no-return lasts \
-                     one cooldown, and `watcher-cooldown-minutes` is 0. Setting a \
-                     cooldown is what gives this something to measure. \
-                     {ONLY_WHILE_IT_RUNS}"
-                )
-            }
-            Setting::WatcherNoReturn if settings.watcher_no_return => format!(
-                "`perch watch` will not Switch back to the Account it just left \
-                 {within} until the cooldown of {} minutes has passed, \
-                 whatever the figures say in between. {ONLY_WHILE_IT_RUNS}",
-                settings.watcher_cooldown_minutes,
-            ),
-            Setting::WatcherNoReturn => format!(
-                "`perch watch` may Switch straight back to the Account it just \
-                 left {within}. Only the cooldown and the margin then \
-                 stand between two Accounts either side of the threshold and a \
-                 ping-pong. {ONLY_WHILE_IT_RUNS}"
             ),
         }
     }
@@ -1037,15 +945,6 @@ fn percentage(key: &str, value: &str) -> Result<u8> {
         .ok_or_else(|| not_a_value(key, value, &registry::a_percentage()))
 }
 
-/// A count of minutes, refused the same way.
-fn minutes(key: &str, value: &str) -> Result<u32> {
-    value
-        .parse::<u32>()
-        .ok()
-        .filter(|minutes| *minutes <= registry::MAX_WATCHER_COOLDOWN_MINUTES)
-        .ok_or_else(|| not_a_value(key, value, &registry::a_cooldown()))
-}
-
 /// A value refused for the value it is, said to somebody who just typed it —
 /// which is why it is not the registry's `out_of_range`, whose reader is
 /// somebody looking at a file and needs to be told which Scope it is in.
@@ -1085,34 +984,28 @@ mod tests {
     ///
     /// `Shape`'s own doc says why this has to hold — "a second statement of it
     /// in the view is how the panel comes to offer a value `set` would refuse"
-    /// — and the bound was stated five times: in `shape`'s step range, twice in
+    /// — and the bound was stated in four places: in `shape`'s step range, in
     /// `Overrides::validate`, in the parser here, and inside the sentence all
-    /// of them quote. The cooldown beside each of them read a named bound; the
-    /// percentage did not.
+    /// of them quote.
     #[test]
     fn every_surface_agrees_what_a_percentage_is() {
         let most = registry::MAX_PERCENTAGE;
         let past_it = u32::from(most) + 1;
 
-        for setting in [
-            Setting::WatcherThresholdPercent,
-            Setting::WatcherMarginPercent,
-        ] {
-            // What the arrow keys will walk to.
-            assert_eq!(
-                setting.shape(),
-                Shape::Range {
-                    least: 0,
-                    most: u32::from(most),
-                    step: 5,
-                },
-                "{setting:?}"
-            );
+        let setting = Setting::WatcherThresholdPercent;
+        // What the arrow keys will walk to.
+        assert_eq!(
+            setting.shape(),
+            Shape::Range {
+                least: 0,
+                most: u32::from(most),
+                step: 5,
+            },
+        );
 
-            // What `perch config set` accepts.
-            percentage(setting.as_str(), &most.to_string()).expect("the top of the range");
-            percentage(setting.as_str(), &past_it.to_string()).expect_err("and one past it");
-        }
+        // What `perch config set` accepts.
+        percentage(setting.as_str(), &most.to_string()).expect("the top of the range");
+        percentage(setting.as_str(), &past_it.to_string()).expect_err("and one past it");
 
         // And what a registry somebody edited by hand is refused for.
         let scope = registry::Scope::Group("work".to_string());
@@ -1262,7 +1155,7 @@ mod tests {
         set(&mut registry, &words(&["watcher-threshold-percent", "90"])).unwrap();
         set(
             &mut registry,
-            &words(&["ungrouped", "watcher-cooldown-minutes", "45"]),
+            &words(&["ungrouped", "watcher-may-act", "true"]),
         )
         .unwrap();
 
@@ -1295,8 +1188,8 @@ mod tests {
             "an Override names the Scope, because that is what would set it again"
         );
         assert_eq!(
-            get(&registry, &words(&["work", "watcher-no-return"])).unwrap(),
-            vec!["watcher-no-return true".to_string()],
+            get(&registry, &words(&["work", "watcher-threshold-percent"])).unwrap(),
+            vec!["watcher-threshold-percent 80".to_string()],
             "and an Inheritance does not, because Global is what would"
         );
     }
@@ -1312,20 +1205,6 @@ mod tests {
             Settings::default(),
             Settings {
                 watcher_may_act: true,
-                ..Settings::default()
-            },
-            // The two settings that read differently at zero, and the one that
-            // reads differently when no-return is off.
-            Settings {
-                watcher_cooldown_minutes: 0,
-                ..Settings::default()
-            },
-            Settings {
-                watcher_margin_percent: 0,
-                ..Settings::default()
-            },
-            Settings {
-                watcher_no_return: false,
                 ..Settings::default()
             },
         ];
@@ -1366,36 +1245,6 @@ mod tests {
                 .what_that_means(&granted, &work())
                 .contains("cycle-ungrouped"),
             "a named Group needs no second yes",
-        );
-    }
-
-    /// A no-return is measured in cooldowns, so a Scope with no cooldown has no
-    /// no-return. Saying otherwise would be a promise the loop does not keep.
-    #[test]
-    fn no_return_without_a_cooldown_says_it_bars_nothing() {
-        let mut registry = holding_a_group();
-        set(
-            &mut registry,
-            &words(&["work", "watcher-cooldown-minutes", "0"]),
-        )
-        .unwrap();
-
-        let said = set(
-            &mut registry,
-            &words(&["work", "watcher-no-return", "true"]),
-        )
-        .unwrap();
-
-        assert!(
-            said.iter().any(|line| line.contains("bars nothing")),
-            "{said:?}"
-        );
-        assert!(
-            !said
-                .iter()
-                .any(|line| line.contains("will not Switch back")),
-            "a sentence promising it will not Switch back is one the loop does \
-             not keep at a cooldown of zero: {said:?}"
         );
     }
 

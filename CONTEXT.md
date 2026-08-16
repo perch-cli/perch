@@ -279,14 +279,12 @@ _Avoid_: limit, cap, trigger
 
 **Margin**:
 How far under the Threshold a candidate has to sit before moving to it is worth
-doing. What stops two Accounts either side of the Threshold from trading places
-every few minutes.
+doing. What refuses a destination nearly as full as the Account being left.
 _Avoid_: buffer, hysteresis, gap, slack
 
 **Cooldown**:
 The least wall-clock the Watcher leaves between one Switch and the next,
-whatever the figures do in between. It also names how long the Account a Switch
-just left stays off the candidate list. It belongs to the Watcher rather than to
+whatever the figures do in between. It belongs to the Watcher rather than to
 the machine: the loop carries it in memory and forgets it when it stops, and a
 Check records it against its Group, because there is no loop for it to live in
 and the Check after it would otherwise be paced by nothing.
@@ -296,8 +294,7 @@ _Avoid_: backoff, debounce, rate limit, throttle
 How much longer the Watcher leaves it before asking again after a Refresh it
 could not read — doubling with each failure, bounded, and dropped entirely by
 the first Refresh that works. Not a Cooldown: a Cooldown paces Switches the
-Watcher may make and is the Group's to set, and a Back-off paces questions
-nobody is answering and is arithmetic about Anthropic's allowance.
+Watcher makes, and a Back-off paces questions nobody is answering.
 _Avoid_: cooldown, retry delay, throttle
 
 **Run**:

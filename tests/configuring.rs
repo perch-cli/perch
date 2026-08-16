@@ -331,54 +331,8 @@ fn the_watchers_may_act_field_is_off_until_it_is_asked_for() {
     );
 }
 
-/// The rest of the watcher's policy: how often it may act, how much emptier the
-/// Account it moves to has to be, and whether coming straight back is allowed
-/// (ADR 0013). All three are the Group's, in the vocabulary the other settings
-/// already use.
-#[test]
-fn the_watchers_cooldown_margin_and_no_return_are_the_groups_to_set() {
-    let host = three_accounts_in_one_group();
-
-    let (result, printed) = config_set(&host, &["work", "watcher-cooldown-minutes", "30"]);
-    result.expect("a cooldown is a count of minutes");
-    assert_eq!(group_config(&host, "work").watcher_cooldown_minutes, 30);
-    assert!(
-        printed.contains("at least"),
-        "and what it now means: {printed}"
-    );
-
-    let (result, printed) = config_set(&host, &["work", "watcher-margin-percent", "25"]);
-    result.expect("a margin is a percentage");
-    assert_eq!(group_config(&host, "work").watcher_margin_percent, 25);
-    assert!(
-        printed.contains("55%"),
-        "the margin is only meaningful beside the threshold, so the figure a \
-         candidate now has to clear is worked out rather than left to the \
-         reader: {printed}"
-    );
-
-    let (result, printed) = config_set(&host, &["work", "watcher-no-return", "false"]);
-    result.expect("no-return is a yes or a no");
-    assert!(!group_config(&host, "work").watcher_no_return);
-    assert!(printed.contains("ping-pong"), "{printed}");
-
-    for (key, value) in [
-        ("watcher-cooldown-minutes", "30"),
-        ("watcher-margin-percent", "25"),
-        ("watcher-no-return", "false"),
-    ] {
-        let (result, printed) = config_get(&host, &["work", key]);
-        result.expect("what was set can be read");
-        assert_eq!(
-            printed.trim(),
-            format!("work {key} {value}"),
-            "reading `{key}` back"
-        );
-    }
-}
-
-/// The defaults ADR 0013 names, as `perch config get` reports them. A default
-/// is a promise, and this is where it is kept.
+/// The default ADR 0046 names, as `perch config get` reports it. A default is a
+/// promise, and this is where it is kept.
 #[test]
 fn a_group_starts_with_the_watcher_policy_the_adr_names() {
     let host = three_accounts_in_one_group();
@@ -386,18 +340,14 @@ fn a_group_starts_with_the_watcher_policy_the_adr_names() {
     let (result, printed) = config_get(&host, &["work"]);
 
     result.expect("naming a Group asks about everything in force for it");
-    for expected in [
-        "watcher-threshold-percent 80",
-        "watcher-cooldown-minutes 15",
-        "watcher-margin-percent 10",
-        "watcher-no-return true",
-    ] {
-        assert!(printed.contains(expected), "{expected} — got: {printed}");
-    }
+    assert!(
+        printed.contains("watcher-threshold-percent 80"),
+        "got: {printed}"
+    );
     assert!(
         !printed.contains("work watcher"),
-        "and every one of them Inherited from Global, said by the line being \
-         the two-word `set` that would restore it: {printed}"
+        "and Inherited from Global, said by the line being the two-word `set` \
+         that would restore it: {printed}"
     );
 }
 
@@ -408,12 +358,9 @@ fn a_watcher_number_out_of_range_is_refused_with_the_range_it_accepts() {
     let host = three_accounts_in_one_group();
 
     for (key, value, accepted) in [
-        ("watcher-margin-percent", "101", "100"),
-        ("watcher-margin-percent", "-5", "100"),
-        ("watcher-margin-percent", "a tenth", "100"),
-        ("watcher-cooldown-minutes", "10081", "10080"),
-        ("watcher-cooldown-minutes", "-1", "10080"),
-        ("watcher-cooldown-minutes", "quarter of an hour", "10080"),
+        ("watcher-threshold-percent", "101", "100"),
+        ("watcher-threshold-percent", "-5", "100"),
+        ("watcher-threshold-percent", "four fifths", "100"),
     ] {
         let (result, _) = config_set(&host, &["work", key, value]);
 
@@ -425,9 +372,46 @@ fn a_watcher_number_out_of_range_is_refused_with_the_range_it_accepts() {
         );
     }
 
-    let config = group_config(&host, "work");
-    assert_eq!(config.watcher_margin_percent, 10, "refused, so unchanged");
-    assert_eq!(config.watcher_cooldown_minutes, 15, "refused, so unchanged");
+    assert_eq!(
+        group_config(&host, "work").watcher_threshold_percent,
+        80,
+        "refused, so unchanged"
+    );
+}
+
+/// The three the Watcher shed (ADR 0046). A departed Setting is refused in the
+/// same words any other unknown key is — there is no half-life in which it is
+/// still typed and quietly ignored.
+#[test]
+fn the_settings_the_watcher_shed_are_no_longer_keys_a_scope_carries() {
+    let host = three_accounts_in_one_group();
+
+    for (key, value) in [
+        ("watcher-cooldown-minutes", "30"),
+        ("watcher-margin-percent", "25"),
+        ("watcher-no-return", "false"),
+    ] {
+        let (result, _) = config_set(&host, &["work", key, value]);
+        let error = result.expect_err("not a Setting any more");
+        assert_eq!(error.exit_code(), EXIT_INVALID, "{error}");
+        assert!(error.to_string().contains(key), "{error}");
+
+        let (result, _) = config_get(&host, &["work", key]);
+        result.expect_err("and there is nothing to read back either");
+    }
+
+    let (result, printed) = config_get(&host, &["work"]);
+    result.expect("the Settings that are left still read back");
+    for gone in [
+        "watcher-cooldown-minutes",
+        "watcher-margin-percent",
+        "watcher-no-return",
+    ] {
+        assert!(
+            !printed.contains(gone),
+            "and none of the three is on the listing either: {printed}"
+        );
+    }
 }
 
 #[test]
@@ -443,9 +427,6 @@ fn an_unknown_key_is_refused_and_names_the_ones_a_group_carries() {
     assert!(message.contains("strategy"), "{message}");
     assert!(message.contains("watcher-may-act"), "{message}");
     assert!(message.contains("watcher-threshold-percent"), "{message}");
-    assert!(message.contains("watcher-cooldown-minutes"), "{message}");
-    assert!(message.contains("watcher-margin-percent"), "{message}");
-    assert!(message.contains("watcher-no-return"), "{message}");
 }
 
 #[test]
@@ -862,9 +843,8 @@ fn a_group_overrides_the_one_setting_it_wants_different_and_inherits_the_rest() 
         group_config(&host, "personal").watcher_threshold_percent,
         60
     );
-    assert_eq!(
-        group_config(&host, "work").watcher_cooldown_minutes,
-        15,
+    assert!(
+        !group_config(&host, "work").watcher_may_act,
         "and everything it did not Override still comes from Global"
     );
 }
@@ -960,10 +940,10 @@ fn reading_a_setting_back_says_which_scope_the_value_came_from() {
         .expect("it takes");
 
     let (_, overridden) = config_get(&host, &["work", "strategy"]);
-    let (_, inherited) = config_get(&host, &["work", "watcher-no-return"]);
+    let (_, inherited) = config_get(&host, &["work", "watcher-may-act"]);
 
     assert_eq!(overridden.trim(), "work strategy soonest-reset");
-    assert_eq!(inherited.trim(), "watcher-no-return true");
+    assert_eq!(inherited.trim(), "watcher-may-act false");
     assert_eq!(
         overridden.split_whitespace().count(),
         3,
@@ -973,7 +953,7 @@ fn reading_a_setting_back_says_which_scope_the_value_came_from() {
     assert_eq!(
         inherited.split_whitespace().count(),
         2,
-        "and two is `perch config set watcher-no-return true`, which is Global's"
+        "and two is `perch config set watcher-may-act false`, which is Global's"
     );
 }
 
@@ -984,15 +964,15 @@ fn reading_a_setting_back_says_which_scope_the_value_came_from() {
 fn an_override_equal_to_globals_value_still_reads_as_an_override() {
     let host = three_accounts_in_one_group();
 
-    let (result, printed) = config_set(&host, &["work", "watcher-no-return", "true"]);
+    let (result, printed) = config_set(&host, &["work", "watcher-may-act", "false"]);
 
     result.expect("setting a Setting to what it already resolved to is not a failure");
     assert!(
         printed.contains("Override rather than Inherited"),
         "the difference is the whole of what changed, so it is said: {printed}"
     );
-    let (_, read_back) = config_get(&host, &["work", "watcher-no-return"]);
-    assert_eq!(read_back.trim(), "work watcher-no-return true");
+    let (_, read_back) = config_get(&host, &["work", "watcher-may-act"]);
+    assert_eq!(read_back.trim(), "work watcher-may-act false");
 }
 
 /// The Accounts in no Group are a Scope now (ADR 0017, amended), so Cycling
@@ -1068,7 +1048,7 @@ fn a_group_cannot_take_the_name_that_addresses_the_ungrouped_scope() {
 #[test]
 fn the_ungrouped_scopes_overrides_read_back_in_the_form_that_would_set_them() {
     let host = machine_with_two_accounts();
-    config_set(&host, &["ungrouped", "watcher-cooldown-minutes", "45"])
+    config_set(&host, &["ungrouped", "watcher-threshold-percent", "45"])
         .0
         .expect("it takes");
 
@@ -1076,7 +1056,7 @@ fn the_ungrouped_scopes_overrides_read_back_in_the_form_that_would_set_them() {
 
     result.expect("naming nothing asks about everything");
     assert!(
-        printed.contains("ungrouped watcher-cooldown-minutes 45"),
+        printed.contains("ungrouped watcher-threshold-percent 45"),
         "{printed}"
     );
 }

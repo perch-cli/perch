@@ -368,9 +368,9 @@ enum Command {
         ///
         /// For cron or a systemd timer, which is where an unattended watcher
         /// belongs: scheduling is the operating system's job. The policy is the
-        /// loop's, run once — and the cooldown and no-return that pace it
-        /// survive between invocations, so a check every minute still switches
-        /// no more often than the Group allows.
+        /// loop's, run once — and the cooldown that paces it survives between
+        /// invocations, so a check every minute still switches no more often
+        /// than the cooldown allows.
         #[arg(long)]
         once: bool,
     },

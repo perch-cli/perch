@@ -409,10 +409,10 @@ struct Ranked<'a> {
 /// Accounts this Cycle may not land on, whatever the ranking makes of them, and
 /// the one sentence that says why.
 ///
-/// The Cycle has no opinion about them. The watcher's margin and its no-return
-/// (ADR 0013) are policy about *when* a move is worth making, which is a
-/// different question from which Account is best, and answering both here would
-/// put a watcher's clock inside the ranking that every `perch switch` uses.
+/// The Cycle has no opinion about them. The watcher's margin (ADR 0046) is
+/// policy about *when* a move is worth making, which is a different question
+/// from which Account is best, and answering both here would put a watcher's
+/// clock inside the ranking that every `perch switch` uses.
 /// They arrive as a list so that the ranking never lands on one, and with a
 /// sentence so that the refusal — when they turn out to be all of them — says
 /// what set them aside rather than claiming the Group is empty.

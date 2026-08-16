@@ -1637,7 +1637,7 @@ fn the_status_tab_says_what_governs_you_and_where_each_rule_came_from() {
          style — so it survives a pipe and a colour-blind palette: {said}"
     );
     assert!(
-        said.contains("watcher-no-return true from Global"),
+        said.contains("watcher-may-act false from Global"),
         "and an Inheritance says it came from Global — and shows Global's value \
          rather than a blank: {said}"
     );
@@ -1851,10 +1851,10 @@ fn a_strategy_steps_between_its_readings_and_a_number_jumps_to_the_ends_of_its_r
             [vec![Some(Signal::Right)], over(1, Signal::Down)]
                 .concat()
                 .into_iter()
-                // The `strategy` row, then the cooldown, then its far end.
+                // The `strategy` row, then the threshold, then its far end.
                 .chain([Some(Signal::Right)])
                 .chain(while_nobody_presses_anything())
-                .chain(over(3, Signal::Down))
+                .chain(over(2, Signal::Down))
                 .chain([Some(Signal::Most)])
                 .chain(while_nobody_presses_anything())
                 .chain([Some(Signal::Leave)])
@@ -1865,7 +1865,7 @@ fn a_strategy_steps_between_its_readings_and_a_number_jumps_to_the_ends_of_its_r
     let settings = registry_of(&host).global.settings;
     assert_eq!(settings.strategy, perch::registry::Strategy::SoonestReset);
     assert_eq!(
-        settings.watcher_cooldown_minutes, 10080,
+        settings.watcher_threshold_percent, 100,
         "`End` is the far end of the range the Setting itself states, so the \
          panel cannot offer a value `perch config set` would refuse"
     );
@@ -1881,12 +1881,12 @@ fn stepping_another_row_before_the_first_settles_writes_both() {
     browse(
         &host,
         at_the_config(
-            [vec![Some(Signal::Right)], over(3, Signal::Down)]
+            [vec![Some(Signal::Right)], over(2, Signal::Down)]
                 .concat()
                 .into_iter()
-                // The threshold, then straight down to the margin with no wait
+                // The grant, then straight down to the threshold with no wait
                 // in between.
-                .chain([Some(Signal::Right), Some(Signal::Down), Some(Signal::Down)])
+                .chain([Some(Signal::Right), Some(Signal::Down)])
                 .chain([Some(Signal::Right)])
                 .chain(while_nobody_presses_anything())
                 .chain([Some(Signal::Leave)])
@@ -1895,11 +1895,11 @@ fn stepping_another_row_before_the_first_settles_writes_both() {
     );
 
     let settings = registry_of(&host).global.settings;
-    assert_eq!(
-        settings.watcher_threshold_percent, 85,
+    assert!(
+        settings.watcher_may_act,
         "the first change was not lost to the second"
     );
-    assert_eq!(settings.watcher_margin_percent, 15);
+    assert_eq!(settings.watcher_threshold_percent, 85);
 }
 
 /// And walking away mid-adjustment writes it anyway: a deferred write is not a
@@ -1930,7 +1930,7 @@ fn leaving_mid_adjustment_writes_what_the_keys_had_not_got_round_to() {
 #[test]
 fn a_group_page_shows_an_inherited_value_rather_than_a_blank() {
     let host = machine_with_a_group();
-    config_set(&host, &["watcher-cooldown-minutes", "45"])
+    config_set(&host, &["watcher-threshold-percent", "45"])
         .0
         .expect("Global carries every Setting");
 
@@ -1951,7 +1951,7 @@ fn a_group_page_shows_an_inherited_value_rather_than_a_blank() {
         "and says so, so the dimming has a sentence to be read against: {said}"
     );
     assert!(
-        said.contains("watcher-cooldown-minutes 45"),
+        said.contains("watcher-threshold-percent 45"),
         "with Global's value on the row rather than a blank: {said}"
     );
 }
@@ -2333,7 +2333,7 @@ fn stepping_an_account_out_of_a_scope_does_not_leave_the_cursor_on_a_setting() {
         over(2, Signal::Down),     // sidebar: Global, Ungrouped, work
         vec![Some(Signal::Right)], // into the Accounts column
         vec![Some(Signal::Right)], // into the content column
-        over(8, Signal::Down),     // six Settings, then alias, cycling, group
+        over(5, Signal::Down),     // three Settings, then alias, cycling, group
     ]
     .concat();
 
@@ -2359,7 +2359,7 @@ fn stepping_an_account_out_of_a_scope_does_not_leave_the_cursor_on_a_setting() {
         registry
             .group("work")
             .expect("the Group is still declared")
-            .watcher_no_return,
+            .watcher_threshold_percent,
         None,
         "and the second press did not write an Override on a Setting the \
          cursor was moved onto"
@@ -2381,7 +2381,7 @@ fn holding_an_arrow_on_an_account_row_is_one_write_once_the_keys_stop() {
     let to_the_cycling_row = [
         over(2, Signal::Down),
         vec![Some(Signal::Right), Some(Signal::Right)],
-        over(7, Signal::Down), // six Settings, then alias, then cycling
+        over(4, Signal::Down), // three Settings, then alias, then cycling
     ]
     .concat();
 
@@ -2422,7 +2422,7 @@ fn an_account_is_given_an_alias_from_the_panel() {
             [
                 vec![Some(Signal::Down)],
                 vec![Some(Signal::Right), Some(Signal::Right)],
-                over(7, Signal::Down),
+                over(4, Signal::Down),
             ]
             .concat()
             .into_iter()
@@ -2436,7 +2436,7 @@ fn an_account_is_given_an_alias_from_the_panel() {
     assert_eq!(
         registry_of(&host).alias_of(EMAIL),
         Some("main"),
-        "the `alias` row is the seventh on the Ungrouped page"
+        "the `alias` row is the fifth on the Ungrouped page"
     );
 }
 
@@ -2452,7 +2452,7 @@ fn an_account_is_taken_out_of_cycling_from_the_panel() {
             [
                 vec![Some(Signal::Down)],
                 vec![Some(Signal::Right), Some(Signal::Right)],
-                over(8, Signal::Down),
+                over(5, Signal::Down),
             ]
             .concat()
             .into_iter()
@@ -2466,7 +2466,7 @@ fn an_account_is_taken_out_of_cycling_from_the_panel() {
             .account(EMAIL)
             .expect("an Account Perch holds")
             .enabled,
-        "the `cycling-may-choose` row is the eighth on the Ungrouped page"
+        "the `cycling-may-choose` row is the sixth on the Ungrouped page"
     );
 }
 
@@ -2482,7 +2482,7 @@ fn an_account_is_moved_into_another_group_from_the_panel() {
             [
                 vec![Some(Signal::Down)],
                 vec![Some(Signal::Right), Some(Signal::Right)],
-                over(9, Signal::Down),
+                over(6, Signal::Down),
             ]
             .concat()
             .into_iter()
@@ -2524,7 +2524,7 @@ fn a_write_that_empties_the_scope_on_screen_still_says_what_it_did() {
             [
                 vec![Some(Signal::Down)],
                 vec![Some(Signal::Right), Some(Signal::Right)],
-                over(9, Signal::Down),
+                over(6, Signal::Down),
                 vec![Some(Signal::Right)],
                 // The write lands on the debounce rather than on the way out,
                 // so there is still a frame after it to read.
@@ -2895,7 +2895,7 @@ fn a_group_page_says_how_many_settings_it_declares_of_its_own() {
     config_set(&host, &["work", "strategy", "soonest-reset"])
         .0
         .expect("one Override");
-    config_set(&host, &["work", "watcher-no-return", "false"])
+    config_set(&host, &["work", "watcher-may-act", "true"])
         .0
         .expect("and a second");
 

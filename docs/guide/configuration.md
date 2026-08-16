@@ -11,9 +11,6 @@ complete over SSH and in CI (ADR 0011).
 | `strategy` | Global, any Scope | `most-headroom`, `soonest-reset` | `most-headroom` |
 | `watcher-may-act` | Global, any Scope | `true`, `false` | `false` |
 | `watcher-threshold-percent` | Global, any Scope | 0–100 | `80` |
-| `watcher-cooldown-minutes` | Global, any Scope | 0–10080 | `15` |
-| `watcher-margin-percent` | Global, any Scope | 0–100 | `10` |
-| `watcher-no-return` | Global, any Scope | `true`, `false` | `true` |
 | `cycle-ungrouped` | Global only | `true`, `false` | `false` |
 
 ## Two layers, and which one you meant
@@ -45,9 +42,6 @@ cycle-ungrouped true
 strategy most-headroom
 watcher-may-act false
 watcher-threshold-percent 70
-watcher-cooldown-minutes 15
-watcher-margin-percent 10
-watcher-no-return true
 work strategy soonest-reset
 
 $ perch config unset work strategy
@@ -58,8 +52,8 @@ $ perch config unset work strategy
 there is. `perch config get <scope>` prints every Setting in force for one
 Scope, each as the tail of the `set` that would restore it — so **the layer a
 value came from is the number of words that would set it again**. A Setting a
-Group Inherits reads back as `watcher-no-return true`; one it Overrides reads
-back as `work watcher-no-return false`.
+Group Inherits reads back as `watcher-threshold-percent 80`; one it Overrides
+reads back as `work watcher-threshold-percent 95`.
 
 Inherit is a state and not an absence. A Scope that Inherits tracks Global as
 Global changes; a Scope holding an Override that happens to equal Global's does
@@ -105,34 +99,40 @@ whose figure does not above nothing at all: an Account that says when it comes
 back is preferred to one that does not, and where none of them says, the Cycle
 falls back to the room it can see and says that is what it did.
 
-## The watcher's five
+## The watcher's two
 
-The **watcher's** five fields govern [`perch watch`](watching.md) and nothing
+The **watcher's** two fields govern [`perch watch`](watching.md) and nothing
 else. `watcher-may-act` says whether it may Switch within the Group at all, and
 is off by default because a Group only ever changes underneath you because you
-said it could. The other four are its policy:
-`watcher-threshold-percent` is how much of the fullest Quota Window of the
-Account you are on has to be used before it moves you;
-`watcher-margin-percent` is how far under that a candidate has to sit to be
-worth moving to; `watcher-cooldown-minutes` is the least it will leave between
-two Switches; and `watcher-no-return` keeps the Account it just left off the
-candidate list for one cooldown. None of them starts a Watcher: they take effect
-while one is running — the loop in a terminal, a Service, or a scheduled Check —
-and not otherwise.
+said it could. `watcher-threshold-percent` is how much of the fullest Quota
+Window of the Account you are on has to be used before it moves you. Neither of
+them starts a Watcher: they take effect while one is running — the loop in a
+terminal, a Service, or a scheduled Check — and not otherwise.
 
 Taking `watcher-may-act` back does not stop a Watcher that is already running.
 It **holds** it: it reads nothing and moves nothing, says what is missing, and
 starts deciding again the moment the grant comes back (ADR 0040). The grant is
 about whether it may *act*, and a held Watcher is not acting.
 
-How often it reads is deliberately *not* configurable. Two and a half minutes
-is derived from Anthropic's allowance of ~28-30 reads an hour rather than from
-anyone's taste, and a Group configured to read every ten seconds would be a
-Group configured to spend that allowance and be refused.
+**How full is too full is the only preference in the loop** (ADR 0046). The
+three numbers beside it are arithmetic, so they are fixed rather than offered:
 
-A margin at or above the threshold is not refused — it is a Group that will only
-move onto an Account with nothing used at all. Refusing it would make the order
-you type two `perch config set`s in matter.
+- How often it **reads** — two and a half minutes, derived from Anthropic's
+  allowance of ~28-30 reads an hour rather than from anyone's taste. A Group
+  configured to read every ten seconds would be a Group configured to spend that
+  allowance and be refused.
+- The **margin** — 10 points under the threshold — which is what a candidate has
+  to be clear of the threshold by to be worth moving to. Nobody wants the low
+  end, where a destination barely emptier than the Account you are on is
+  accepted; the high end is already reachable by moving the threshold.
+- The **cooldown** — 15 minutes — which is the least it leaves between two
+  Switches. A five-hour window moves slowly enough that fifteen minutes never
+  misses a real crossing, which is arithmetic about the window rather than a
+  taste.
+
+A threshold under the margin is not refused — it is a Group that will only move
+onto an Account with nothing used at all, which is a coherent thing to ask for.
+The margin does not get to veto the one Setting that is a preference.
 
 ## Reading it back
 
