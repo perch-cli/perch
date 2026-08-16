@@ -1,10 +1,9 @@
 # The binary is driven to prove its surface, and never the behaviour behind it
 
-> **Decided, not yet carried out.** The suite described below does not exist
-> yet; it is tracked at #155. Like ADR 0041 and ADR 0042, this is the artifact
-> of a planning effort rather than of a change, so it lands ahead of the work it
-> describes. Read it as a decision that has been taken, not as a report of the
-> tree's current shape.
+> **Carried out in #155.** Like ADR 0041 and ADR 0042, this is the artifact of
+> a planning effort rather than of a change, so it landed ahead of the work it
+> describes instead of beside it. The tree now matches it: `tests/invoking.rs`
+> is there, and it holds the line drawn below.
 
 ADR 0041 removed the Dogfood suite, and named one thing that went with it and
 did not close: *argv, exit codes and rendered lines do not close at all — nobody
