@@ -16,6 +16,8 @@
 //! navigated with a cursor and a dimmed value reads as "not set here" — and the
 //! row it sits on is one keystroke from saying so in words.
 
+use std::ops::Range;
+
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -91,15 +93,39 @@ pub fn render(frame: &mut Frame, model: &Model) {
     );
     frame.render_widget(
         Paragraph::new(
-            Line::from(match (&model.prompt, model.tab) {
-                (Some(_), _) => NAMING_KEYS,
-                (None, Tab::Status) => STATUS_KEYS,
-                (None, Tab::Config) => CONFIG_KEYS,
-            })
+            Line::from(keys_that_fit(
+                match (&model.prompt, model.tab) {
+                    (Some(_), _) => NAMING_KEYS,
+                    (None, Tab::Status) => STATUS_KEYS,
+                    (None, Tab::Config) => CONFIG_KEYS,
+                },
+                keys.width as usize,
+            ))
             .style(Style::new().add_modifier(Modifier::DIM)),
         ),
         keys,
     );
+}
+
+/// As many whole key hints as the row has room for.
+///
+/// Two spaces separate one hint from the next, and a row too narrow for all of
+/// them gives up whole ones from the right rather than being cut wherever the
+/// edge falls: `Enter swi` is not a key anybody can press. `q quit` comes
+/// first, so the way out is the last thing to go.
+fn keys_that_fit(keys: &str, width: usize) -> String {
+    let mut said = String::new();
+    for hint in keys.split("  ") {
+        let with = match said.is_empty() {
+            true => hint.to_string(),
+            false => format!("{said}  {hint}"),
+        };
+        if list::cells(&with) > width {
+            break;
+        }
+        said = with;
+    }
+    said
 }
 
 /// The tab bar, and the one fact that belongs to no tab: which Account is
@@ -173,7 +199,7 @@ fn render_sidebar(frame: &mut Frame, area: Rect, labels: &[String], at: usize, h
             }
         })
         .collect();
-    render_scrolled(frame, area, rows, at);
+    render_scrolled(frame, area, rows, at..at + 1);
 }
 
 // ---- The Status tab ----
@@ -221,17 +247,15 @@ fn render_overview(frame: &mut Frame, model: &Model, area: Rect) {
     let registry = model.registry();
     let Some(account) = registry.active_account() else {
         // One line rather than an empty frame, pointing at the page that has
-        // something to do about it.
-        return frame.render_widget(
-            Paragraph::new(vec![
-                Line::from(""),
-                Line::from(
-                    "  Perch holds no active Account. The Accounts page lists what it \
-                     holds — Enter on one makes it active.",
-                ),
-            ]),
-            area,
-        );
+        // something to do about it — and wrapped, because the clause that names
+        // the page is the end of the sentence.
+        let mut lines = vec![Line::from("")];
+        lines.extend(wrapped(
+            "Perch holds no active Account. The Accounts page lists what it \
+             holds — Enter on one makes it active.",
+            area.width as usize,
+        ));
+        return frame.render_widget(Paragraph::new(lines), area);
     };
 
     // Everything on this page is wrapped at whatever the terminal is rather
@@ -241,24 +265,14 @@ fn render_overview(frame: &mut Frame, model: &Model, area: Rect) {
     // clause, which is the half naming what to do. The figures are wrapped for
     // the same reason a note is: a Reserve that lost "(as of 4m ago)" would be
     // a figure with no age on it, which is the one thing ADR 0015 will not have.
-    let room = (area.width as usize).saturating_sub(LABEL + 2).max(20);
-    let mut lines = vec![Line::from("")];
-    let mut labelled = |label: &str, value: String| {
-        for (at, part) in broken(&value, room).into_iter().enumerate() {
-            lines.push(Line::from(format!(
-                "  {:<LABEL$}{part}",
-                if at == 0 { label } else { "" }
-            )));
-        }
-    };
-    labelled("Account", account.email().to_string());
+    let mut facts: Vec<(&str, String)> = vec![("Account", account.email().to_string())];
     if let Some(alias) = registry.alias_of(account.email()) {
-        labelled("Alias", alias.to_string());
+        facts.push(("Alias", alias.to_string()));
     }
     if let Some(plan) = &account.plan {
-        labelled("Plan", plan.clone());
+        facts.push(("Plan", plan.clone()));
     }
-    labelled(
+    facts.push((
         "Group",
         match &account.group {
             Some(group) => format!("{group} — a bare Switch Cycles within it"),
@@ -267,20 +281,23 @@ fn render_overview(frame: &mut Frame, model: &Model, area: Rect) {
                 crate::commands::cycling_among_ungrouped(registry)
             ),
         },
-    );
+    ));
     // Above the figures where there is a Quarantine, because a Quarantined
     // Account's figures describe quota it cannot currently spend: the state is
     // the news and the numbers are the detail — and the repair is what somebody
     // reading it needs next.
     match account.quarantine {
         Some(why) => {
-            labelled("Quarantine", why.because().to_string());
-            labelled("Repair", registry::how_to_repair(account.email()));
+            facts.push(("Quarantine", why.because().to_string()));
+            facts.push(("Repair", registry::how_to_repair(account.email())));
         }
         None => {
-            labelled("Headroom", cycle::headroom_in_full(account, model.now));
+            facts.push(("Headroom", cycle::headroom_in_full(account, model.now)));
         }
     }
+
+    let mut lines = vec![Line::from("")];
+    lines.extend(labelled(&facts, area.width as usize));
 
     if account.observed_utilization().is_some() {
         lines.push(Line::from(""));
@@ -307,10 +324,10 @@ fn render_overview(frame: &mut Frame, model: &Model, area: Rect) {
         figures.extend(reserve.window_lines(model.now));
         if !figures.is_empty() {
             lines.push(Line::from(""));
-            lines.push(
-                Line::from(format!("  Across {}:", scope.described()))
-                    .style(Style::new().add_modifier(Modifier::BOLD)),
-            );
+            lines.extend(heading(
+                &format!("Across {}:", scope.described()),
+                area.width as usize,
+            ));
             for figure in figures {
                 lines.extend(wrapped(&figure, area.width as usize));
             }
@@ -323,6 +340,60 @@ fn render_overview(frame: &mut Frame, model: &Model, area: Rect) {
 /// How wide the labels down the left of the Overview are.
 const LABEL: usize = 14;
 
+/// How far a value indented under its own label is, where there is no room for
+/// the two to sit side by side.
+const STACKED_INDENT: usize = 4;
+
+/// A heading over whatever it is a heading for: bold, and broken between words
+/// like everything else on the page rather than cut at the edge.
+fn heading<'a>(text: &str, width: usize) -> Vec<Line<'a>> {
+    wrapped(text, width)
+        .into_iter()
+        .map(|line| line.style(Style::new().add_modifier(Modifier::BOLD)))
+        .collect()
+}
+
+/// The head of the Overview: each fact about the active Account behind the
+/// label saying which fact it is.
+///
+/// Two columns while the value column can hold the longest word that goes in
+/// it, and the label on a line of its own with the value under it once it
+/// cannot. The long words here are an email address and a Group name, and
+/// [`broken`] leaves a word whole rather than splitting it — so a value column
+/// narrower than one of them is a column the terminal cuts that word off in,
+/// and giving the value the whole width is the most that can be done about it.
+///
+/// A rule rather than a width, because the width it would take is a fact about
+/// the Account: `Account` against `a@b.co` and `Account` against a
+/// forty-character address want different layouts on the same terminal.
+fn labelled<'a>(facts: &[(&str, String)], width: usize) -> Vec<Line<'a>> {
+    let room = width.saturating_sub(LABEL + 2);
+    let longest = facts
+        .iter()
+        .flat_map(|(_, value)| value.split_whitespace())
+        .map(list::cells)
+        .max()
+        .unwrap_or(0);
+
+    let mut lines = Vec::new();
+    for (label, value) in facts {
+        if longest <= room {
+            for (at, part) in broken(value, room).into_iter().enumerate() {
+                lines.push(Line::from(format!(
+                    "  {:<LABEL$}{part}",
+                    if at == 0 { label } else { "" }
+                )));
+            }
+            continue;
+        }
+        lines.push(Line::from(format!("  {label}")));
+        for part in broken(value, width.saturating_sub(STACKED_INDENT)) {
+            lines.push(Line::from(format!("{}{part}", " ".repeat(STACKED_INDENT))));
+        }
+    }
+    lines
+}
+
 /// One line of the Overview, broken between words rather than cut at the width,
 /// with what runs over indented under it.
 ///
@@ -333,8 +404,14 @@ const LABEL: usize = 14;
 /// for — so every line that wrapped was two cells too wide and ratatui cut the
 /// tail off it. A Reserve that lost "(as of 4m ago)" and read "(as of ago)" is
 /// a figure with no age on it, which is the one thing ADR 0015 will not have.
+///
+/// The room it works out is the room there is, with no floor under it. A floor
+/// is the same defect from the other side: told there were twenty columns to
+/// break at where the area had eleven, it broke at twenty and ratatui cut nine
+/// cells off every line — so the widths that most needed the wrapping were the
+/// ones that got none of it.
 fn wrapped<'a>(text: &str, width: usize) -> Vec<Line<'a>> {
-    broken(text, width.saturating_sub(CONTINUATION_INDENT).max(20))
+    broken(text, width.saturating_sub(CONTINUATION_INDENT))
         .into_iter()
         .enumerate()
         .map(|(at, part)| Line::from(format!("  {}{part}", if at == 0 { "" } else { "  " })))
@@ -368,43 +445,50 @@ fn render_accounts(frame: &mut Frame, model: &Model, area: Rect) {
         })
         .collect();
     let headers: [&str; ACCOUNT_COLUMNS] = with_headroom(list::HEADERS, HEADROOM);
-    let widths = list::widths(&headers, &cells);
+    let table = Table::laid_out(
+        list::widths(&headers, &cells).to_vec(),
+        list::cells(MARKERS),
+        area.width as usize,
+    );
 
-    let rows: Vec<Line<'_>> = cells
-        .iter()
-        .enumerate()
-        .map(|(index, cells)| {
-            let line = Line::from(format!(
-                "{}{}",
-                markers(model, accounts[index], index),
-                row(cells, &widths)
-            ));
+    let mut rows: Vec<Line<'_>> = Vec::new();
+    for (index, cells) in cells.iter().enumerate() {
+        for said in table.lines(cells, &markers(model, accounts[index], index)) {
+            let line = Line::from(said);
             // The same pair `render_sidebar` draws, and for the same reason:
             // reversed while the keys are here, bold while they are in the
             // sidebar. The `>` in `markers` says which row either way.
-            match (index == model.cursor, model.column == Column::Content) {
-                (true, true) => line.style(Style::new().add_modifier(Modifier::REVERSED)),
-                (true, false) => line.style(Style::new().add_modifier(Modifier::BOLD)),
-                (false, _) => line,
-            }
-        })
-        .collect();
+            rows.push(
+                match (index == model.cursor, model.column == Column::Content) {
+                    (true, true) => line.style(Style::new().add_modifier(Modifier::REVERSED)),
+                    (true, false) => line.style(Style::new().add_modifier(Modifier::BOLD)),
+                    (false, _) => line,
+                },
+            );
+        }
+    }
 
     // A row of its own, outside the scrolled area, because a column somebody
-    // has to scroll up to read is a column that goes unread.
-    let [heading, listing] =
-        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
-    frame.render_widget(
-        Paragraph::new(
-            Line::from(format!(
-                "{MARKERS}{}",
-                row(&headers.map(str::to_string), &widths)
-            ))
-            .style(Style::new().add_modifier(Modifier::BOLD)),
-        ),
-        heading,
-    );
-    render_scrolled(frame, listing, rows, model.cursor);
+    // has to scroll up to read is a column that goes unread. However many lines
+    // the columns take, which on a terminal with room for them is the one.
+    let named: Vec<Line<'_>> = table
+        .lines(&headers.map(str::to_string), MARKERS)
+        .into_iter()
+        .map(|said| Line::from(said).style(Style::new().add_modifier(Modifier::BOLD)))
+        .collect();
+    // Never the whole area, however many lines the columns took: a heading that
+    // pushed the last Account off a short terminal would be a listing that
+    // listed nothing, and the columns are only worth naming while there is
+    // something under them to read.
+    let [heading, listing] = Layout::vertical([
+        Constraint::Length((named.len() as u16).min(area.height.saturating_sub(1))),
+        Constraint::Min(0),
+    ])
+    .areas(area);
+    frame.render_widget(Paragraph::new(named), heading);
+
+    let at = model.cursor * table.tall();
+    render_scrolled(frame, listing, rows, at..at + table.tall());
 }
 
 /// What governs the active Account: every Setting in force for the Scope it is
@@ -415,47 +499,46 @@ fn render_accounts(frame: &mut Frame, model: &Model, area: Rect) {
 /// question they did not ask.
 fn render_governing(frame: &mut Frame, model: &Model, area: Rect) {
     let scope = model.governing_scope();
-    let mut lines = vec![
-        Line::from(""),
-        Line::from(format!("  In force for {}:", scope.described()))
-            .style(Style::new().add_modifier(Modifier::BOLD)),
-        Line::from(""),
-    ];
+    let mut lines = vec![Line::from("")];
+    lines.extend(heading(
+        &format!("In force for {}:", scope.described()),
+        area.width as usize,
+    ));
+    lines.push(Line::from(""));
 
-    let mut rows: Vec<(String, String, String)> = Vec::new();
+    let mut rows: Vec<[String; GOVERNING_COLUMNS]> = Vec::new();
     if scope == Scope::Ungrouped {
         // Through the model rather than off the registry, for the reason every
         // row below it goes that way: a write the arrow keys have made and the
         // debounce has not landed yet is what the row is showing, and this line
         // used to be the one that said what was still on disk.
-        rows.push((
+        rows.push([
             "cycle-ungrouped".to_string(),
             model.shown(&scope, &Row::CycleUngrouped).0,
             sourced(&Scope::Global),
-        ));
+        ]);
     }
     for setting in crate::commands::config::SETTINGS {
         let (value, source) = model.value_of(&scope, setting);
-        rows.push((setting.as_str().to_string(), value, sourced(&source)));
+        rows.push([setting.as_str().to_string(), value, sourced(&source)]);
     }
 
-    let key_width = rows
-        .iter()
-        .map(|(key, ..)| list::cells(key))
-        .max()
-        .unwrap_or(0);
-    let value_width = rows
-        .iter()
-        .map(|(_, value, _)| list::cells(value))
-        .max()
-        .unwrap_or(0);
-    lines.extend(rows.iter().map(|(key, value, source)| {
-        Line::from(format!(
-            "  {}  {}  {source}",
-            list::padded(key, key_width),
-            list::padded(value, value_width),
-        ))
-    }));
+    // Three columns, carried onto as many lines as the terminal leaves room
+    // for: where a Setting came from is the half of the row saying whether the
+    // value beside it is this Scope's own doing, and a row cut at the edge is a
+    // value with no provenance.
+    let widths: Vec<usize> = (0..GOVERNING_COLUMNS)
+        .map(|column| {
+            rows.iter()
+                .map(|row| list::cells(&row[column]))
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let table = Table::laid_out(widths, PLAIN_INDENT, area.width as usize);
+    for cells in &rows {
+        lines.extend(table.lines(cells, "").into_iter().map(Line::from));
+    }
 
     // And the one place the layering is deliberately not uniform, said here as
     // well as on the panel. Without it this page reads `watcher-may-act false
@@ -588,15 +671,12 @@ fn render_content(frame: &mut Frame, model: &Model, area: Rect) {
     // Wrapped rather than cut, and the room it takes measured from the wrap:
     // the sentence above the rows is what the dimming below is read against,
     // and half of it says nothing.
-    let mut said = vec![
-        Line::from(format!("  {}", scope.described()))
-            .style(Style::new().add_modifier(Modifier::BOLD)),
-    ];
+    let mut said = heading(&scope.described(), area.width as usize);
     said.extend(wrapped(&declares(model, &scope), area.width as usize));
-    let [heading, body] =
+    let [named, body] =
         Layout::vertical([Constraint::Length(said.len() as u16), Constraint::Min(0)]).areas(area);
-    frame.render_widget(Paragraph::new(said), heading);
-    render_scrolled(frame, body, lines, model.content_row);
+    frame.render_widget(Paragraph::new(said), named);
+    render_scrolled(frame, body, lines, model.content_row..model.content_row + 1);
 }
 
 /// What a Scope declares of its own, said above its rows so the dimming below
@@ -648,35 +728,38 @@ fn not_in_force(model: &Model, scope: &Scope) -> String {
 /// empty table — in the sentence `perch list` says it in, because it is the
 /// same news and names the same way out of it.
 fn render_nothing_held(frame: &mut Frame, area: Rect) {
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::from(""),
-            Line::from(format!(
-                "  {}",
-                list::nothing_here(&list::Scope::Everything)
-            )),
-        ]),
-        area,
-    );
+    let mut lines = vec![Line::from("")];
+    lines.extend(wrapped(
+        &list::nothing_here(&list::Scope::Everything),
+        area.width as usize,
+    ));
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
-/// Draws what fits, keeping the line the cursor is on in view.
-fn render_scrolled(frame: &mut Frame, area: Rect, lines: Vec<Line<'_>>, cursor_line: usize) {
-    let offset = scrolled_to(cursor_line, area.height as usize, lines.len());
+/// Draws what fits, keeping the row the cursor is on in view.
+fn render_scrolled(frame: &mut Frame, area: Rect, lines: Vec<Line<'_>>, cursor: Range<usize>) {
+    let offset = scrolled_to(cursor, area.height as usize, lines.len());
     frame.render_widget(Paragraph::new(lines).scroll((offset as u16, 0)), area);
 }
 
-/// Which line the listing starts at, so the one the cursor is on is on screen
+/// Which line the listing starts at, so the row the cursor is on is on screen
 /// with as much of what is around it as will fit.
 ///
 /// Still a function of the model alone: nothing is remembered between frames, so
 /// the same model drawn twice is the same picture both times. Centred, and
 /// clamped to the end of the listing so the last screenful is a full one rather
 /// than the tail padded with blanks.
-fn scrolled_to(cursor_line: usize, height: usize, lines: usize) -> usize {
+///
+/// A row rather than a line, because a terminal too narrow for the columns
+/// carries one row onto several lines ([`Table`]) — and centring on the first
+/// of them would leave the line below the cursor being the cursor's own second
+/// line, which is not the next Account and is the thing being on screen with
+/// what is around it is for. Centred on the last line of the row and never
+/// scrolled past its first, so what is under the cursor is the row under it.
+fn scrolled_to(cursor: Range<usize>, height: usize, lines: usize) -> usize {
     let height = height.max(1);
-    let centred = cursor_line.saturating_sub(height / 2);
-    centred.min(lines.saturating_sub(height))
+    let centred = cursor.end.saturating_sub(1).saturating_sub(height / 2);
+    centred.min(cursor.start).min(lines.saturating_sub(height))
 }
 
 /// The width of the two markers every row starts with, and the blank the
@@ -705,16 +788,108 @@ fn with_headroom<T>(shared: [T; COLUMNS], headroom: T) -> [T; ACCOUNT_COLUMNS] {
     std::array::from_fn(|_| taking.next().expect("one more than the shared columns"))
 }
 
-/// One row of the listing, padded to the columns it shares with `perch list`.
-fn row<const N: usize>(cells: &[String; N], widths: &[usize; N]) -> String {
+/// One row of a table, or the part of one that goes on this line, padded to the
+/// columns `perch list` pads to.
+fn row(cells: &[String], widths: &[usize]) -> String {
     cells
         .iter()
         .zip(widths)
         .map(|(cell, width)| list::padded(cell, *width))
         .collect::<Vec<String>>()
-        .join("  ")
+        .join(GAP)
         .trim_end()
         .to_string()
+}
+
+/// What separates one column from the next.
+const GAP: &str = "  ";
+
+/// How far a table with no markers down its left is indented.
+const PLAIN_INDENT: usize = 2;
+
+/// How much further in the lines a row ran onto sit, so that a row that ran on
+/// reads as one rather than as another row. Every row is indented the same, so
+/// the columns still line up all the way down.
+const RAN_ON: usize = 2;
+
+/// How many columns a row of what governs you has: the Setting, its value, and
+/// where the value came from.
+const GOVERNING_COLUMNS: usize = 3;
+
+/// A table on the `Status` tab, laid out for the terminal it is going in.
+///
+/// A column is as wide as the widest thing in it and a terminal is however wide
+/// it is, so the question a table has to answer is what to do when the second
+/// is smaller than the first. Cutting the row at the edge is the one answer
+/// that is not allowed: `93%` cut to `9` is not a figure that went missing, it
+/// is a different figure, and half an email address is not an Account anybody
+/// can act on. So a row that does not fit is carried onto the line under it,
+/// and the line under that, until every column has been said.
+struct Table {
+    widths: Vec<usize>,
+    /// Which columns go on which line.
+    breaks: Vec<Range<usize>>,
+    /// What the first line of every row sits behind: the markers on the
+    /// listing, and a plain indent on the page that has none.
+    indent: usize,
+}
+
+impl Table {
+    fn laid_out(widths: Vec<usize>, indent: usize, width: usize) -> Table {
+        let breaks = across(&widths, width.saturating_sub(indent + RAN_ON));
+        Table {
+            widths,
+            breaks,
+            indent,
+        }
+    }
+
+    /// How many lines a row of this table takes, which on a terminal with room
+    /// for the columns is the one.
+    fn tall(&self) -> usize {
+        self.breaks.len()
+    }
+
+    /// One row as the lines it takes, the first of them behind whatever marks
+    /// it out.
+    fn lines(&self, cells: &[String], marked: &str) -> Vec<String> {
+        self.breaks
+            .iter()
+            .enumerate()
+            .map(|(at, chunk)| {
+                format!(
+                    "{}{}",
+                    match at {
+                        0 => list::padded(marked, self.indent),
+                        _ => " ".repeat(self.indent + RAN_ON),
+                    },
+                    row(&cells[chunk.clone()], &self.widths[chunk.clone()])
+                )
+            })
+            .collect()
+    }
+}
+
+/// Which columns go on which line of a table, at this width.
+///
+/// One chunk per line, in order, each holding as many columns as there is room
+/// for and never fewer than one. Where the breaks fall is worked out from the
+/// column widths alone, so every row breaks in the same places and a column
+/// stays in one place down the page.
+fn across(widths: &[usize], room: usize) -> Vec<Range<usize>> {
+    let gap = list::cells(GAP);
+    let mut breaks = Vec::new();
+    let mut at = 0;
+    while at < widths.len() {
+        let (mut end, mut taken) = (at + 1, widths[at]);
+        while end < widths.len() && taken + gap + widths[end] <= room {
+            taken += gap + widths[end];
+            end += 1;
+        }
+        breaks.push(at..end);
+        at = end;
+    }
+    breaks
 }
 
 /// As much of that as there is room for, broken between words and with what is
@@ -797,11 +972,16 @@ fn notes(model: &Model) -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// One row of a listing on a terminal with room for its columns.
+    fn at(line: usize) -> Range<usize> {
+        line..line + 1
+    }
+
     /// The whole listing on a screen with room for it does not scroll at all.
     #[test]
     fn a_listing_that_fits_is_not_scrolled() {
-        assert_eq!(scrolled_to(0, 10, 10), 0);
-        assert_eq!(scrolled_to(9, 10, 10), 0);
+        assert_eq!(scrolled_to(at(0), 10, 10), 0);
+        assert_eq!(scrolled_to(at(9), 10, 10), 0);
     }
 
     /// Past the fold, the cursor is brought into view with what is around it
@@ -809,10 +989,10 @@ mod tests {
     /// one rather than the tail padded with blanks.
     #[test]
     fn a_cursor_below_the_fold_is_shown_with_what_is_around_it() {
-        assert_eq!(scrolled_to(10, 10, 40), 5, "centred");
-        assert_eq!(scrolled_to(25, 10, 40), 20);
+        assert_eq!(scrolled_to(at(10), 10, 40), 5, "centred");
+        assert_eq!(scrolled_to(at(25), 10, 40), 20);
         assert_eq!(
-            scrolled_to(39, 10, 40),
+            scrolled_to(at(39), 10, 40),
             30,
             "at the end it stops rather than scrolling into blank space"
         );
@@ -825,7 +1005,7 @@ mod tests {
     fn there_is_always_something_below_the_cursor_to_see() {
         let (height, lines) = (10, 40);
         for cursor in 0..lines - 1 {
-            let offset = scrolled_to(cursor, height, lines);
+            let offset = scrolled_to(at(cursor), height, lines);
             assert!(
                 offset <= cursor && cursor < offset + height,
                 "the cursor is on screen at {cursor}"
@@ -837,11 +1017,31 @@ mod tests {
         }
     }
 
+    /// And it stays the property where a terminal too narrow for the columns
+    /// has carried each row onto three lines: what is under the cursor is then
+    /// the next Account rather than the cursor's own second line.
+    #[test]
+    fn a_row_that_took_three_lines_still_has_the_next_row_under_it() {
+        let (height, lines, tall) = (10, 39, 3);
+        for row in 0..(lines / tall) - 1 {
+            let cursor = row * tall..row * tall + tall;
+            let offset = scrolled_to(cursor.clone(), height, lines);
+            assert!(
+                offset <= cursor.start,
+                "the whole of the row is on screen at {row}"
+            );
+            assert!(
+                cursor.end < offset + height,
+                "and the first line of the row under it, at {row}"
+            );
+        }
+    }
+
     /// A terminal squeezed to nothing is one row rather than a division by
     /// zero.
     #[test]
     fn a_screen_with_no_room_still_shows_the_row_the_cursor_is_on() {
-        assert_eq!(scrolled_to(4, 0, 10), 4);
+        assert_eq!(scrolled_to(at(4), 0, 10), 4);
     }
 
     const WIDE: usize = 80;
@@ -931,5 +1131,85 @@ mod tests {
         assert_eq!(sourced(&Scope::Global), "from Global");
         assert!(sourced(&Scope::Group("work".to_string())).contains("work"));
         assert!(sourced(&Scope::Ungrouped).contains("here"));
+    }
+
+    /// The columns of the Accounts page against a terminal with room for them.
+    const LISTING: [usize; 5] = [20, 5, 5, 7, 8];
+
+    #[test]
+    fn a_table_that_fits_is_one_line_a_row() {
+        assert_eq!(across(&LISTING, 80), vec![0..LISTING.len()]);
+    }
+
+    /// And one that does not is broken between columns, in the same places on
+    /// every row, rather than cut wherever the edge falls.
+    #[test]
+    fn a_table_too_wide_for_the_terminal_is_broken_between_its_columns() {
+        assert_eq!(across(&LISTING, 24), [0..1, 1..4, 4..5]);
+        assert_eq!(
+            across(&LISTING, 47),
+            [0..4, 4..5],
+            "the last column is one gap short of fitting"
+        );
+    }
+
+    /// A column wider than the terminal is a cell the terminal cuts and no
+    /// arrangement saves — but it is still a line of its own rather than the
+    /// start of one carrying three more columns nobody will ever see.
+    #[test]
+    fn a_column_wider_than_the_terminal_is_still_a_line_of_its_own() {
+        assert_eq!(across(&LISTING, 4), [0..1, 1..2, 2..3, 3..4, 4..5]);
+    }
+
+    /// `Enter swi` is not a key anybody can press.
+    #[test]
+    fn a_row_with_no_room_for_every_key_gives_up_whole_ones() {
+        assert_eq!(keys_that_fit(STATUS_KEYS, 80), STATUS_KEYS);
+        assert_eq!(
+            keys_that_fit(STATUS_KEYS, 38),
+            "q quit  Tab view  arrows move",
+            "and never half of one"
+        );
+        assert_eq!(
+            keys_that_fit(STATUS_KEYS, 6),
+            "q quit",
+            "the way out is first, so it is the last to go"
+        );
+    }
+
+    fn about_an_account() -> Vec<(&'static str, String)> {
+        vec![
+            ("Account", "someone@example.com".to_string()),
+            (
+                "Headroom",
+                "58% (5-hour is its fullest, as of 4m ago)".to_string(),
+            ),
+        ]
+    }
+
+    #[test]
+    fn a_terminal_with_room_for_a_label_column_gets_one() {
+        let lines = labelled(&about_an_account(), 60);
+
+        assert!(
+            lines[0].to_string().contains("Account       someone@"),
+            "{lines:?}"
+        );
+    }
+
+    /// Below that the label goes on a line of its own, because a value column
+    /// too narrow for the address in it is one the address is cut in.
+    #[test]
+    fn a_terminal_with_no_room_for_one_puts_the_value_under_its_label() {
+        let lines = labelled(&about_an_account(), 27);
+
+        assert_eq!(lines[0].to_string(), "  Account");
+        assert_eq!(lines[1].to_string(), "    someone@example.com");
+        assert!(
+            lines
+                .iter()
+                .all(|line| list::cells(&line.to_string()) <= 27),
+            "and nothing runs over the edge: {lines:?}"
+        );
     }
 }
