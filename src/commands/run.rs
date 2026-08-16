@@ -265,11 +265,6 @@ fn quoted_for_a_shell(word: &str) -> String {
 /// so it carries the same exit code: no amount of re-running repairs it, and
 /// `perch relogin` does. Without this the user finds out by being asked to log
 /// in by a Claude Code that has already taken the terminal.
-///
-/// Reached by the TUI as well, which refuses the keystroke while it still has
-/// the terminal: a Run from the picker gives the screen back before it launches
-/// anything, and a refusal arriving after that is one the user reads with the
-/// view they were choosing in already gone.
 pub(crate) fn refuse_a_quarantined_account(registry: &Registry, email: &str) -> Result<()> {
     crate::commands::refuse_a_quarantined_account(
         registry,

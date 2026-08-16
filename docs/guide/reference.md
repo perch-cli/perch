@@ -9,7 +9,7 @@
 | Command | What it does |
 | ------- | ------------ |
 | `perch status [--group] [--refresh] [--json]` | the active Account and how full it is |
-| `perch list [--json]` | every Account, its Alias, Group, state and Utilization |
+| `perch list [--json]` | every Account, its Alias, Group, state, Headroom and Utilization, in the order a Cycle ranks them |
 | `perch add [--group <name>\|--no-group] [--alias <name>]` | gain an Account by logging in, without disturbing the active one |
 | `perch alias <name> <target>` / `perch alias <name> --unset` | name an Account, or free the name |
 | `perch switch <target>` | make an Account active everywhere |
@@ -18,7 +18,6 @@
 | `perch watcher check` | take one round for cron or a systemd timer, saying what it decided in the exit code |
 | `perch watcher install\|uninstall\|status [--json]` | have the machine run the watcher for you, starting at login |
 | `perch run <target> [-- <command>]` | launch Claude Code as an Account, in this terminal alone |
-| `perch tui` | the interactive view |
 | `perch group add\|move\|rename\|remove\|list` | declare Groups and move Accounts between them |
 | `perch config set\|unset\|get` | the rules Perch chooses Accounts by |
 | `perch disable <target>` / `perch enable <target>` | keep an Account out of Cycling, or put it back |

@@ -54,5 +54,5 @@ jobs:
             exit 0
           fi
           echo "got: $TITLE"
-          echo "::error::A pull request title is the commit message, and release-plz reads it to pick the version. Write it as a Conventional Commit: 'feat: run a client against a Group', 'fix(tui): ...', or 'feat!: ...' for a breaking change."
+          echo "::error::A pull request title is the commit message, and release-plz reads it to pick the version. Write it as a Conventional Commit: 'feat: run a client against a Group', 'fix(watcher): ...', or 'feat!: ...' for a breaking change."
           exit 1

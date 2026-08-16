@@ -255,7 +255,7 @@ fn status_json_says_no_switch_is_in_flight_rather_than_leaving_the_field_out() {
 /// command, and one written against either could not be pointed at the other.
 ///
 /// What each *document* answers still differs — one Account under `active`, a
-/// set under `accounts` — and that is the difference worth having.
+/// set under `sections` — and that is the difference worth having.
 #[test]
 fn the_account_status_describes_has_the_same_keys_the_listing_gives_one() {
     let host = adopted_machine(OBSERVED_THREE_MINUTES_AGO);
@@ -266,7 +266,7 @@ fn the_account_status_describes_has_the_same_keys_the_listing_gives_one() {
     let status: serde_json::Value = serde_json::from_str(&from_status).expect("valid JSON");
     let list: serde_json::Value = serde_json::from_str(&from_list).expect("valid JSON");
     let active = &status["active"];
-    let listed = &list["accounts"][0];
+    let listed = &list["sections"][0]["accounts"][0];
 
     assert_eq!(active["email"], EMAIL, "the same Account: {status}");
     let keys = |value: &serde_json::Value| -> Vec<String> {

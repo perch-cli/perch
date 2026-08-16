@@ -68,19 +68,41 @@ while every other Account is still read. `--json` carries the same under
 ## Every Account
 
 `perch list` is the one place that answers it: every Account with its Alias, its
-Group, whether it is a Cycle candidate, and how full it is.
+Group, whether it is a Cycle candidate, how much Headroom it has left and how
+full each of its Quota Windows is.
 
 ```
 $ perch list
-  Account               Alias     Group  State                 Utilization
-* someone@example.com   -         work   enabled               5-hour    42%  (as of 3m ago)
-                                                               7-day     18%  (as of 3m ago)
-  overflow@example.com  overflow  work   enabled, quarantined  never observed
-  spare@example.com     -         none   disabled              5-hour    91%  (as of 2h ago)
+  Account               Alias     Group  State                 Headroom        Utilization
+* someone@example.com   -         work   enabled               58%             5-hour  42%  (as of 3m ago)
+                                                                               7-day   18%  (as of 3m ago)
+  overflow@example.com  overflow  work   enabled, quarantined  never observed  never observed
+  spare@example.com     -         none   disabled              9%              5-hour  91%  (as of 2h ago)
 
 * is the active Account.
 overflow@example.com (as `overflow`) is Quarantined: Anthropic would not renew its Credential. `perch relogin overflow@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
 ```
+
+**Headroom** is what is left in the Account's *worst* Quota Window, which is the
+one honest measure of how much of it you can still spend: being blocked by any
+window blocks you completely (ADR 0012). It is a different figure from the
+Utilization beside it — Utilization is every window, one line each, and Headroom
+is the single number a Cycle sorts on. The Account above has 42% of its 5-hour
+window and 18% of its 7-day one spent, so 58% is left in every one of them.
+
+**The rows come out in the order a Cycle ranks them**, Group by Group, with the
+Group you are standing in first — so the top row of your Group is where a bare
+`perch switch` would land, and the listing and the Switch cannot come to
+disagree about which Account is better (ADR 0049). An Account a Cycle would
+never choose — Disabled, or Quarantined — sorts below every one it would,
+whatever its Headroom says, because where it sits is what says it is out of the
+running.
+
+The Accounts in no Group are the exception: they are listed in the order they
+were added rather than ranked, because nothing has declared them
+interchangeable and a bare `perch switch` refuses among them (ADR 0017). Their
+Headroom is still shown as the figure it is. `perch config set cycle-ungrouped
+true` is the declaration, and once it is made they are ranked like any Group.
 
 An Account nobody has ever read a figure for says `never observed` rather than
 `0%` — no figure and plenty of room are opposite pieces of advice. A
@@ -101,6 +123,41 @@ same answer it always did and now gets the reason with it.
 
 `--group` changes the question, so it changes the document: `perch status --json`
 answers about one Account under `active`, while the listings answer about a set
-under `accounts`, with the active one named under `active_account`. An Account
+under `sections`, with the active one named under `active_account`. An Account
 itself is described the same way in both — the same keys, the same answers — so a
 script written against one can be pointed at the other.
+
+**A document says what its order is, or it does not have one.** The listing is
+ranked and it is ranked per Scope, so its Accounts arrive in `sections` rather
+than in one flat array: each section carries the `scope` it is of, an `order` of
+either `ranked` or `held`, and its `accounts` in that order.
+
+```json
+{
+  "scope": { "kind": "all", "name": null },
+  "active_account": "someone@example.com",
+  "sections": [
+    {
+      "scope": { "kind": "group", "name": "work" },
+      "order": "ranked",
+      "accounts": [ … ]
+    },
+    {
+      "scope": { "kind": "ungrouped", "name": null },
+      "order": "held",
+      "accounts": [ … ]
+    }
+  ],
+  "refresh": null
+}
+```
+
+So `.sections[0].accounts[0]` is the Account a bare `perch switch` would land on,
+and a section whose `order` is `held` is saying that its Accounts are in no
+meaningful order at all — a flat array would have let a script read a ranking out
+of that, which is the one claim this listing exists not to make.
+
+Every Account carries `headroom` beside its `utilization`: a `state` of `room`,
+`exhausted` or `never-observed`, and a `percent` that is a number under `room`
+and `null` under the other two. Unrounded, unlike the column — no figure and
+plenty of room are opposite pieces of advice, and neither of them is `0`.

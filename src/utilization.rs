@@ -4,9 +4,9 @@
 //! figure with its age so a stale number is visibly stale rather than quietly
 //! wrong (ADR 0015). Only `perch status --refresh` fetches, and it fetches
 //! before rendering rather than while: nothing here reaches the network.
-//! `status`, `list` and eventually `tui` all have to say the same thing about
-//! the same figure, so how a figure reads lives here rather than being spelled
-//! out again by each of them.
+//! `status` and `list` both have to say the same thing about the same figure,
+//! so how a figure reads lives here rather than being spelled out again by each
+//! of them.
 
 use std::io::Write;
 

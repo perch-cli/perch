@@ -1868,28 +1868,6 @@ impl Host for FakeHost {
         }
     }
 
-    /// Nothing to turn off: a fake never prints a remark, it only keeps them —
-    /// which is why the alternate screen a real `perch tui` was writing them
-    /// onto was invisible from here.
-    fn print_remarks(&self, _aloud: bool) {}
-
-    /// Sorted, because [`RealHost::remarks`] keeps them in a `BTreeSet` and
-    /// says so — "in the order a `BTreeSet` keeps".
-    ///
-    /// Insertion order here meant a frame test could assert two remarks appear
-    /// in the order the Switch made them, pass, and show them alphabetised on
-    /// the machine: `tui::act` appends `host.remarks()` straight into
-    /// `model.said`, which is drawn. [`FakeHost::notes`] is the inspector and
-    /// stays in the order they were made, which is what a test asking "what did
-    /// this command remark on" wants.
-    ///
-    /// [`RealHost::remarks`]: crate::host::RealHost
-    fn remarks(&self) -> Vec<String> {
-        let mut remarks = self.notes();
-        remarks.sort();
-        remarks
-    }
-
     fn read_line(&self) -> Result<Option<String>, HostError> {
         self.record(Effect::Asked);
         self.while_they_answer();

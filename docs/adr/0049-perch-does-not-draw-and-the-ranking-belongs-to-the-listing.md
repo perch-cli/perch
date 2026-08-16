@@ -1,10 +1,5 @@
 # Perch does not draw, and the ranking belongs to the listing
 
-> **Decided, not yet carried out.** `perch tui` is still in the tree; the
-> removal is tracked at #169, which subsumes #150. Like ADR 0041 and ADR 0042,
-> this is the artifact of a planning effort rather than of a change, so it lands
-> ahead of the work it describes.
-
 ADR 0042 cut the Config tab and left the picker standing, saying in as many
 words that whether `perch tui` should exist at all was not decidable from the
 source: "whether a person wants to choose an account by eye is not legible

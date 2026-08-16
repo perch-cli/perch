@@ -1,9 +1,16 @@
 # The TUI does not write, and reversibility was the wrong line
 
-> **Decided, not yet carried out.** The tab repealed below is still in the tree;
-> the removal is tracked at #150. Like ADR 0041, this is the artifact of a
-> planning effort rather than of a change, so it lands ahead of the work it
-> describes instead of beside it.
+> **Superseded by ADR 0049.** Both halves of the decision below are void:
+> `perch tui` is removed entire, so the tab this document repealed goes with the
+> view it preserved, and the Config tab's removal never had to happen on its own.
+> The reasoning is not what was found wrong — the machinery really is what the
+> panel cost, and reversibility really was the wrong axis. It simply did not go
+> far enough: the frame loop underneath both tabs is the same kind of cost, and
+> nothing was found that wanted what it bought. One sentence here outlives the
+> panel and is carried forward by 0049 rather than buried with it — "a surface
+> which writes at all pulls in locking, deferral, refusal and rollback, and a
+> surface that only reads and acts does not". ADR 0034 stays superseded by this
+> document; a chain is fine, and the route is worth as much as the destination.
 
 ADR 0034 moved a line. ADR 0011 had said `perch tui` acts on exactly two things,
 a Switch and a Run, because "a keystroke away from an irreversible act is the

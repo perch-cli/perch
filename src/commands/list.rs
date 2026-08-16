@@ -1,10 +1,20 @@
-//! `perch list` — the one place that answers "what do I have".
+//! `perch list` — the one place that answers "what do I have", and the only
+//! place that shows what a Cycle would make of it.
 //!
-//! Every Account with the four things that decide whether it is any use to you
-//! — the name you reach it by, the Group that says what it is interchangeable
-//! with, whether it is a Cycle candidate at all, and how full it is. Like every
-//! surface that shows Utilization it renders from cache and never blocks on the
-//! network (ADR 0015).
+//! Every Account with the things that decide whether it is any use to you — the
+//! name you reach it by, the Group that says what it is interchangeable with,
+//! whether it is a Cycle candidate at all, how much Headroom it has left and
+//! how full each of its Quota Windows is. Like every surface that shows
+//! Utilization it renders from cache and never blocks on the network (ADR
+//! 0015).
+//!
+//! The rows come out in the order a Cycle ranks them (ADR 0012), always and not
+//! behind a flag: the ranking `perch switch` makes should be visible rather
+//! than hidden, so the two surfaces cannot come to disagree about which Account
+//! is better (ADR 0049). Where nothing has declared a set of Accounts
+//! interchangeable they are shown held rather than ranked (ADR 0017) — a
+//! ranking of Accounts Perch would refuse to choose between is a claim nothing
+//! backs.
 //!
 //! `perch status --group` is the same view narrowed to one Group, so it lands
 //! here rather than in `status`: showing a set of Accounts is one job whether
@@ -18,6 +28,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::adopt;
 use crate::commands::{IN_NO_GROUP, cycling_among_ungrouped, say, say_json, write_failed};
+use crate::cycle;
 use crate::error::Result;
 use crate::host::Host;
 use crate::observe::Report;
@@ -51,11 +62,36 @@ pub enum Scope {
 
 impl Scope {
     /// The Accounts a listing covers, which is also the set `--refresh` reads.
+    ///
+    /// Membership alone, and asked of the registry directly. What order they
+    /// come out in is [`Scope::ranked`], which answers a question a Refresh does
+    /// not have — it spends its budget on the Accounts about to be shown (ADR
+    /// 0015) and has no opinion about which of them is best.
     pub fn accounts<'a>(&self, registry: &'a Registry) -> Vec<&'a Account> {
         match self {
             Scope::Everything => registry.accounts.iter().collect(),
             Scope::Group(name) => registry.accounts_in(name),
             Scope::Ungrouped => registry.ungrouped_accounts(),
+        }
+    }
+
+    /// The same Accounts, in the order the listing shows them, and in the
+    /// sections that order was made within.
+    ///
+    /// The same Accounts is the load-bearing half. A Cycle never leaves the
+    /// scope it started in (ADR 0002), so there is no one ranking over every
+    /// Account Perch holds: each Group ranks its own by its own Strategy, and
+    /// the Accounts in no Group rank among themselves when anything has said
+    /// they may. The whole listing is those rankings one after another — which
+    /// is why the Group is a column rather than a sort key nobody can see, and
+    /// which is only a listing of everything because an Account is in exactly
+    /// one of those scopes (see [`scopes`]).
+    fn sections<'a>(&self, registry: &'a Registry, now: DateTime<Utc>) -> Vec<Section<'a>> {
+        let of = |scope| Section::of(registry, scope, now);
+        match self {
+            Scope::Everything => scopes(registry).into_iter().map(of).collect(),
+            Scope::Group(name) => vec![of(cycle::Scope::Group(name.clone()))],
+            Scope::Ungrouped => vec![of(cycle::Scope::Ungrouped)],
         }
     }
 
@@ -80,12 +116,125 @@ impl Scope {
 
 /// One Group, said as the line above the Accounts in it.
 ///
-/// Shared with the TUI ([`crate::cycle::Scope::heading`]), which heads the same
-/// set of Accounts and would otherwise name it in a second place: the two
-/// surfaces are the same listing drawn twice (ADR 0011), and a Group that read
-/// one way in a line and another in a frame would read as two Groups.
+/// Shared with [`crate::cycle::Scope::described`], which names the same set of
+/// Accounts in the middle of a sentence and would otherwise name it in a second
+/// place: a Group that read one way over a listing and another in the sentence
+/// explaining a Cycle would read as two Groups.
 pub fn group_heading(name: &str) -> String {
     format!("Group `{name}`")
+}
+
+/// One scope's Accounts as the listing shows them: in order, and with what that
+/// order *is*.
+///
+/// Ranked where a Cycle could happen in the scope, and in the order they were
+/// added where one could not. Being in no Group is the absence of a declaration
+/// that Accounts are interchangeable rather than a weaker form of one (ADR
+/// 0017), so until `cycle-ungrouped` says otherwise a bare `perch switch`
+/// refuses there instead of choosing. Ordering those Accounts by Headroom would
+/// show a ranking Perch would not make — the one thing this listing exists not
+/// to do — so they are held in the order they were added, with the Headroom
+/// still beside each of them as the figure it is.
+///
+/// Which of the two it is travels *with* the Accounts rather than being asked
+/// again by each renderer. A table shows the difference by not sorting; a
+/// document has to say it in a word (ADR 0053), and two answers to "was this
+/// ranked?" is how the two come to disagree about the distinction ADR 0049
+/// called its weightiest.
+struct Section<'a> {
+    scope: cycle::Scope,
+    ranked: bool,
+    accounts: Vec<&'a Account>,
+}
+
+impl<'a> Section<'a> {
+    fn of(registry: &'a Registry, scope: cycle::Scope, now: DateTime<Utc>) -> Section<'a> {
+        let ranked = cycle::may_cycle_within(registry, &scope);
+        let accounts = match ranked {
+            true => cycle::ranked(registry, &scope, now),
+            false => scope.accounts(registry),
+        };
+        Section {
+            scope,
+            ranked,
+            accounts,
+        }
+    }
+
+    /// What the order is, in the word the decision that drew the distinction
+    /// uses (ADR 0049) — so a script branches on the same term the guide
+    /// explains.
+    fn order(&self) -> &'static str {
+        match self.ranked {
+            true => "ranked",
+            false => "held",
+        }
+    }
+
+    fn document(
+        &self,
+        host: &dyn Host,
+        registry: &Registry,
+        now: DateTime<Utc>,
+    ) -> Result<serde_json::Value> {
+        let listed: Vec<serde_json::Value> = self
+            .accounts
+            .iter()
+            .map(|account| document(host, registry, account, now))
+            .collect::<Result<_>>()?;
+        Ok(json!({
+            // The same shape the document's own `scope` key carries, because it
+            // is the same question asked of a narrower set: a script that reads
+            // one should not have to learn a second spelling to read the other.
+            "scope": Scope::from(&self.scope).json(),
+            "order": self.order(),
+            "accounts": listed,
+        }))
+    }
+}
+
+/// The Accounts of a Cycle's scope, said as a listing's.
+///
+/// Only this direction. [`Scope`]'s own doc gives the reason the two types are
+/// separate — a Cycle must not be handed "every Account" — and widening a
+/// Cycle's scope into a listing's cannot express that, since nothing here can
+/// produce [`Scope::Everything`] and no Cycle is ever handed one of these.
+impl From<&cycle::Scope> for Scope {
+    fn from(scope: &cycle::Scope) -> Scope {
+        match scope {
+            cycle::Scope::Group(name) => Scope::Group(name.clone()),
+            cycle::Scope::Ungrouped => Scope::Ungrouped,
+        }
+    }
+}
+
+/// Every scope, with the one the active Account is in first.
+///
+/// Every Group and the Accounts in no Group, so an Account is in exactly one of
+/// them and the listing holds all of them — the invariant
+/// [`crate::registry::Registry::group_names`] states and `load` enforces, since
+/// an Account claiming a Group nothing declared would be in none of these and
+/// so in no listing at all.
+///
+/// The active Account's scope leads, because it is where you are and, wherever
+/// a Cycle happens at all, the one a bare `perch switch` looks in.
+fn scopes(registry: &Registry) -> Vec<cycle::Scope> {
+    let mut every: Vec<cycle::Scope> = registry
+        .group_names()
+        .map(|name| cycle::Scope::Group(name.to_string()))
+        .collect();
+    every.push(cycle::Scope::Ungrouped);
+
+    let Some(active) = registry.active_account() else {
+        return every;
+    };
+    let here = match &active.group {
+        Some(name) => cycle::Scope::Group(name.clone()),
+        None => cycle::Scope::Ungrouped,
+    };
+    let mut ordered = vec![here.clone()];
+    ordered.extend(every.into_iter().filter(|scope| *scope != here));
+    ordered
 }
 
 pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
@@ -117,11 +266,11 @@ pub fn render(
     json: bool,
     report: &Report,
 ) -> Result<()> {
-    let accounts = scope.accounts(registry);
+    let sections = scope.sections(registry, now);
     if json {
-        render_json(host, out, registry, &scope, &accounts, now, report)
+        render_json(host, out, registry, &scope, &sections, now, report)
     } else {
-        render_human(out, registry, &scope, &accounts, now, report)
+        render_human(out, registry, &scope, &sections, now, report)
     }
 }
 
@@ -129,22 +278,23 @@ pub fn render(
 /// array the rows are measured against, so a renamed column cannot drift from
 /// the width it was measured at.
 ///
-/// Read by the TUI's Accounts view as well as by `perch list`, because they are
-/// the same listing drawn twice — once in a line and once in a frame (ADR
-/// 0011). Two copies of these columns is how the two surfaces come to disagree
-/// about what an Account is called or what state it is in.
-pub const HEADERS: [&str; 4] = ["Account", "Alias", "Group", "State"];
+/// **Headroom** is the figure the order was made on: an Account's *worst* Quota
+/// Window (ADR 0012), which is a different question from the Utilization
+/// printed beside it. Utilization is every window, one line each; Headroom is
+/// the one of them that decides whether a Cycle would come here, said as the
+/// single number the ranking sorted on. Without it the order is a claim the
+/// table gives no way of checking.
+const HEADERS: [&str; 5] = ["Account", "Alias", "Group", "State", "Headroom"];
 
-/// How many there are, for the callers that have to name the array's length in
-/// a type.
-pub const COLUMNS: usize = HEADERS.len();
+/// How many there are, for the arrays measured against them.
+const COLUMNS: usize = HEADERS.len();
 
 /// Where the Group sits, for the listings narrow enough to leave it out.
 const GROUP_COLUMN: usize = 2;
 
 /// What those columns hold for one Account: the name you reach it by, what it
-/// is interchangeable with, and whether it is any use.
-pub fn columns(registry: &Registry, account: &Account) -> [String; COLUMNS] {
+/// is interchangeable with, whether it is any use, and how much of it is left.
+fn columns(registry: &Registry, account: &Account) -> [String; COLUMNS] {
     [
         account.email().to_string(),
         registry
@@ -153,6 +303,7 @@ pub fn columns(registry: &Registry, account: &Account) -> [String; COLUMNS] {
             .to_string(),
         account.group.clone().unwrap_or_else(|| "none".to_string()),
         state_of(account),
+        cycle::headroom_phrase(account),
     ]
 }
 
@@ -164,10 +315,10 @@ pub fn columns(registry: &Registry, account: &Account) -> [String; COLUMNS] {
 /// every row, one such name puts every column after it out of line for the whole
 /// table. What a column is measured in has to be what a terminal draws in.
 ///
-/// `unicode-width` was already in the tree by way of ratatui, which draws every
-/// frame with it, so this costs no crate and no seam (ADR 0025) — and it means
-/// the two surfaces that show the same listing measure it the same way.
-pub fn cells(text: &str) -> usize {
+/// `unicode-width` sits on no seam — the width of a string is a pure function
+/// of it — which is the test ADR 0025 actually sets, and a hand-rolled table of
+/// East Asian widths would be the same data kept by hand, going wrong quietly.
+fn cells(text: &str) -> usize {
     UnicodeWidthStr::width(text)
 }
 
@@ -176,27 +327,22 @@ pub fn cells(text: &str) -> usize {
 /// `format!("{text:width$}")` pads to a count of characters, which is
 /// [`cells`]'s mistake from the other side: it would take the right width and
 /// then fill it wrongly.
-pub fn padded(text: &str, width: usize) -> String {
+fn padded(text: &str, width: usize) -> String {
     format!("{text}{}", " ".repeat(width.saturating_sub(cells(text))))
 }
 
-/// Each column as wide as the widest thing in it, header included, measured in
-/// the cells a terminal draws them in — see [`cells`].
+/// Each column as wide as the widest thing in it, [`HEADERS`] included,
+/// measured in the cells a terminal draws them in — see [`cells`].
 ///
-/// Written over however many columns there are rather than over these four,
-/// because the TUI's Accounts view shows the same listing with the figure its
-/// order was made on beside it. Measuring a column is the same arithmetic
-/// whatever the columns are, and two copies of it is how two surfaces come to
-/// pad differently.
-pub fn widths<'a, const N: usize>(
-    headers: &[&str; N],
-    rows: impl IntoIterator<Item = &'a [String; N]> + Clone,
-) -> [usize; N] {
+/// The headers are not a parameter, because there is one set of them and a
+/// column measured against anything else is a column padded to a width its own
+/// heading does not fit in.
+fn widths<'a>(rows: impl IntoIterator<Item = &'a [String; COLUMNS]> + Clone) -> [usize; COLUMNS] {
     std::array::from_fn(|column| {
         rows.clone()
             .into_iter()
             .map(|row| cells(&row[column]))
-            .chain(std::iter::once(cells(headers[column])))
+            .chain(std::iter::once(cells(HEADERS[column])))
             .max()
             .unwrap_or_default()
     })
@@ -278,7 +424,7 @@ fn render_human(
     out: &mut dyn Write,
     registry: &Registry,
     scope: &Scope,
-    accounts: &[&Account],
+    sections: &[Section<'_>],
     now: DateTime<Utc>,
     report: &Report,
 ) -> Result<()> {
@@ -288,6 +434,11 @@ fn render_human(
         say(out, &heading)?;
     }
 
+    // One table rather than one per section. What a section is shows in the
+    // Group column and in the order, and a table that broke for a heading every
+    // few rows would put a blank line between Accounts the eye is running down
+    // a column of.
+    let accounts = &flattened(sections);
     let rows = rows(registry, accounts, now);
     if rows.is_empty() {
         return say(out, &nothing_here(scope));
@@ -297,7 +448,7 @@ fn render_human(
     // one, every row would carry the same answer to a question the heading has
     // already answered.
     let show_group = matches!(scope, Scope::Everything);
-    let widths = widths(&HEADERS, rows.iter().map(|row| &row.cells));
+    let widths = widths(rows.iter().map(|row| &row.cells));
 
     write_row(out, ' ', HEADERS, "Utilization", &widths, show_group)?;
     for row in &rows {
@@ -374,9 +525,8 @@ fn write_row(
 }
 
 /// A listing with nothing in it, said as the state it is rather than as an
-/// empty table. The TUI draws the same sentence, for the same reason it draws
-/// the same columns.
-pub fn nothing_here(scope: &Scope) -> String {
+/// empty table.
+fn nothing_here(scope: &Scope) -> String {
     match scope {
         Scope::Everything => {
             "No Accounts yet. `perch add` logs into one in a Profile of its own.".to_string()
@@ -417,25 +567,47 @@ pub fn document(
         "organization": account.identity.organization_name,
         "plan": account.plan,
         "profile_dir": account.profile_dir(host)?,
+        // The figure the section's order was made on, beside the windows it was
+        // taken from. A section saying it is `ranked` and not carrying the
+        // number it ranked on would be a claim with no way of checking it —
+        // which is what the Headroom column exists to prevent on the surface a
+        // person reads (ADR 0049).
+        "headroom": cycle::headroom_document(account),
         "utilization": utilization::document(account, now),
     }))
 }
 
+/// A document says what its order is, or it does not have one (ADR 0053).
+///
+/// So the Accounts arrive in `sections` rather than in one `accounts` array.
+/// The order is load-bearing — `accounts[0]` of the first section is the
+/// Account a bare `perch switch` would land on — and a flat array states that
+/// nowhere: a script reading it would be relying on a ranking the document
+/// never claimed to be making. Worse, the held-versus-ranked distinction ADR
+/// 0049 called its weightiest piece would be invisible, and a `--json` showing
+/// a ranking of Accounts Perch would refuse to choose between is the
+/// two-surfaces-disagreeing failure reached through a different renderer.
+///
+/// One `accounts` array beside the sections was the other option and is the
+/// same mistake twice: a shape that makes no claim, kept for scripts, next to
+/// the shape that makes it.
 fn render_json(
     host: &dyn Host,
     out: &mut dyn Write,
     registry: &Registry,
     scope: &Scope,
-    accounts: &[&Account],
+    sections: &[Section<'_>],
     now: DateTime<Utc>,
     report: &Report,
 ) -> Result<()> {
-    let listed: Vec<serde_json::Value> = accounts
+    let sectioned: Vec<serde_json::Value> = sections
         .iter()
-        .map(|account| document(host, registry, account, now))
+        .map(|section| section.document(host, registry, now))
         .collect::<Result<_>>()?;
 
     let document = json!({
+        // What was asked for. Each section says what it holds and how it is
+        // ordered, which is what came back.
         "scope": scope.json(),
         // Named apart from `status --json`'s `active`, which is an object: one
         // command answers two questions under `--group`, and a script that
@@ -447,11 +619,19 @@ fn render_json(
         // Account you are standing on is not a fact that stops being worth
         // qualifying because the question widened to where you could land.
         "landing": registry.active.document(),
-        "accounts": listed,
+        "sections": sectioned,
         "refresh": report.document(),
     });
 
     say_json(out, &document)
+}
+
+/// Every section's Accounts end to end, for the renderer that draws one table.
+fn flattened<'a>(sections: &[Section<'a>]) -> Vec<&'a Account> {
+    sections
+        .iter()
+        .flat_map(|section| section.accounts.iter().copied())
+        .collect()
 }
 
 #[cfg(test)]
@@ -459,15 +639,12 @@ mod tests {
     use super::*;
 
     fn row(email: &str, alias: &str) -> [String; COLUMNS] {
-        [email, alias, "none", "enabled"].map(str::to_string)
+        [email, alias, "none", "enabled", "40%"].map(str::to_string)
     }
 
     #[test]
     fn a_column_is_as_wide_as_its_widest_value_or_its_header() {
-        let widths = widths(
-            &HEADERS,
-            &[row("a@b.com", "overflow"), row("someone@b.com", "-")],
-        );
+        let widths = widths(&[row("a@b.com", "overflow"), row("someone@b.com", "-")]);
         assert_eq!(widths[0], "someone@b.com".len());
         assert_eq!(widths[1], "overflow".len());
         assert_eq!(widths[2], "Group".len(), "the header is the floor");
@@ -477,7 +654,7 @@ mod tests {
     fn a_column_is_measured_in_characters_rather_than_bytes() {
         // A name a terminal draws in eight columns pads to eight, not to the
         // eleven bytes it happens to occupy.
-        let widths = widths(&HEADERS, &[row("a@b.com", "øverfløw")]);
+        let widths = widths(&[row("a@b.com", "øverfløw")]);
         assert_eq!(widths[1], 8);
     }
 
@@ -498,11 +675,56 @@ mod tests {
             [row]
         };
         assert_eq!(
-            widths(&HEADERS, &in_group("作業"))[2],
+            widths(&in_group("作業"))[2],
             "Group".len(),
             "the header is still the floor"
         );
-        assert_eq!(widths(&HEADERS, &in_group("作業作業"))[2], 8);
+        assert_eq!(widths(&in_group("作業作業"))[2], 8);
+    }
+
+    /// The sections between them hold the same Accounts the scope does, or
+    /// `perch list` shows fewer Accounts than Perch holds.
+    ///
+    /// The listing is built scope by scope — every declared Group, then the
+    /// Accounts in none of them — so it lists everything only because those
+    /// scopes partition the registry. An Account that fell between them would
+    /// simply not be printed, with no error anywhere to say so.
+    ///
+    /// What holds the partition up is `load` declaring any Group an Account
+    /// claims, and nothing else. That is `registry`'s own invariant and is
+    /// asserted there, including for a claim spelled in another case; this
+    /// asserts only that the listing depends on it.
+    #[test]
+    fn the_sections_hold_every_account_the_scope_covers() {
+        use crate::registry::Active;
+
+        let mut registry = Registry::default();
+        registry.declare_group("work").expect("the name is free");
+        registry.declare_group("play").expect("the name is free");
+        for (email, group) in [
+            ("a@example.com", Some("work")),
+            ("b@example.com", Some("play")),
+            ("c@example.com", None),
+            ("d@example.com", Some("work")),
+        ] {
+            let mut account = crate::cycle::tests::account(email, vec![]);
+            account.group = group.map(str::to_string);
+            registry.upsert(account);
+        }
+        registry.active = Active::settled_on(Some("c@example.com".to_string()));
+
+        let named = |mut accounts: Vec<&Account>| -> Vec<String> {
+            accounts.sort_by_key(|account| account.email().to_string());
+            accounts
+                .into_iter()
+                .map(|account| account.email().to_string())
+                .collect()
+        };
+        let sections = Scope::Everything.sections(&registry, crate::cycle::tests::now());
+        assert_eq!(
+            named(flattened(&sections)),
+            named(Scope::Everything.accounts(&registry)),
+        );
     }
 
     /// Padding fills the width the same way it was measured, or the right

@@ -328,8 +328,11 @@ fn the_reason_is_shown_by_list_and_by_status() {
     let (as_json, document) = run_list(&host, true);
     as_json.expect("the listing renders as JSON");
     let document: serde_json::Value = serde_json::from_str(&document).expect("valid JSON");
-    let overflow = &document["accounts"][1];
-    assert_eq!(overflow["quarantined"]["reason"], "rotation-lost");
+    let overflow = &document["sections"][0]["accounts"][1];
+    assert_eq!(
+        overflow["quarantined"]["reason"], "rotation-lost",
+        "{document}"
+    );
 
     // And about the Account you are on, which is where `perch status` answers.
     quarantine_for(&host, EMAIL, Quarantine::RenewalRejected);

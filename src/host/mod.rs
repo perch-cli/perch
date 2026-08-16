@@ -533,24 +533,6 @@ pub trait Host {
     /// Accounts teaches nobody anything the first one did not.
     fn note(&self, line: &str);
 
-    /// Whether a remark is printed as it is made, or only kept.
-    ///
-    /// `perch tui` turns it off while it owns the screen and back on when it
-    /// gives it back, and nothing else calls it. A remark goes to stderr, which
-    /// is exactly where a frame is: a line about a Credential written to a store
-    /// Perch would rather not have used would land in the middle of the display
-    /// and stay there until something redrew over it. ADR 0016 settled that for
-    /// the Refresh thread, which runs against a Host of its own; the Switch the
-    /// picker performs runs against this one and was missed.
-    ///
-    /// On the port rather than on [`RealHost`] because it is the picker that has
-    /// to say it, and the picker holds a `&dyn Host`.
-    fn print_remarks(&self, aloud: bool);
-
-    /// Every remark made so far, each of them once — for a caller that has to
-    /// show them itself.
-    fn remarks(&self) -> Vec<String>;
-
     // ---- network --------------------------------------------------------
 
     /// Sends one request and reads the whole reply. The only way out to

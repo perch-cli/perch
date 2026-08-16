@@ -10,7 +10,8 @@
 //! With no Target the Account is chosen rather than named — a Cycle within the
 //! current Account's Group ([`crate::cycle`]), which is the command someone
 //! types mid-task when quota just ran out. It asks nothing, under any
-//! circumstances (ADR 0011): the interactive picker is a separate command.
+//! circumstances (ADR 0011). What it chose is what `perch list` shows: the
+//! ranking is made once and printed rather than drawn (ADR 0049).
 
 use std::io::Write;
 
@@ -143,12 +144,6 @@ fn decide(
 /// The refusal is a code of its own because the answer is one of its own: no other
 /// refusal in Perch is answered by logging in again, and none of them is
 /// answered by trying the same command a second time.
-///
-/// Reached by the TUI as well, which refuses the keystroke in the frame rather
-/// than letting the Switch below discover it: the picker names the Account by
-/// cursor, so the refusal has to be the one the command would have given —
-/// character for character, from here, rather than a second sentence about the
-/// same state.
 pub(crate) fn refuse_a_quarantined_account(registry: &Registry, incoming: &Account) -> Result<()> {
     crate::commands::refuse_a_quarantined_account(
         registry,
