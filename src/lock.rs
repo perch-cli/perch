@@ -309,6 +309,22 @@ impl<'a, 'one, 'other> Holds<'a, 'one, 'other> {
         done
     }
 
+    /// The same, for the one step that has to *use* a hold rather than only be
+    /// protected by it: writing the registry down mid-Switch (ADR 0048), which
+    /// is a save and therefore takes the hold it is being renewed with.
+    ///
+    /// It is handed the second of the two, and that is not a coincidence to be
+    /// generalised away: Claude Code's locks protect files Perch writes through
+    /// the Host and are never passed to anything, and Perch's own registry lock
+    /// is the one a `save` asks for. Named for the write rather than for the
+    /// hold, so nothing reaches for it to borrow a lock for something else.
+    pub fn around_a_registry_write<T>(&mut self, write: impl FnOnce(&mut Held<'other>) -> T) -> T {
+        self.renew();
+        let done = write(self.other);
+        self.renew();
+        done
+    }
+
     fn renew(&mut self) {
         self.one.renew();
         self.other.renew();

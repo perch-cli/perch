@@ -9,7 +9,7 @@ use common::*;
 use perch::host::FakeHost;
 use perch::probe::Identity;
 use perch::registry::{
-    Account, CachedUtilization, Overrides, Quarantine, Registry, WindowUtilization,
+    Account, Active, CachedUtilization, Overrides, Quarantine, Registry, WindowUtilization,
 };
 
 fn at(hour: u32, minute: u32) -> DateTime<Utc> {
@@ -66,7 +66,7 @@ fn machine_holding_three_accounts() -> FakeHost {
     spare.utilization = Some(observed(at(10, 0), &[("5-hour", 91.0)]));
     registry.upsert(spare);
 
-    registry.active = Some(EMAIL.to_string());
+    registry.active = Active::Settled(EMAIL.to_string());
     registry
         .groups
         .insert("work".to_string(), Overrides::default());
@@ -268,7 +268,7 @@ fn status_group_from_an_ungrouped_account_shows_every_ungrouped_account() {
     registry
         .groups
         .insert("work".to_string(), Overrides::default());
-    registry.active = Some(EMAIL.to_string());
+    registry.active = Active::Settled(EMAIL.to_string());
     let host = machine_holding(&registry);
 
     let (result, printed) = run_status_group(&host, false);
@@ -308,7 +308,7 @@ fn the_ungrouped_cycling_clause_says_so_once_cycling_has_been_allowed() {
     registry.upsert(account(EMAIL, "Acme"));
     registry.upsert(account(THIRD_EMAIL, "Spare Ltd"));
     registry.global.cycle_ungrouped = true;
-    registry.active = Some(EMAIL.to_string());
+    registry.active = Active::Settled(EMAIL.to_string());
     let host = machine_holding(&registry);
 
     let (result, printed) = run_status_group(&host, false);
@@ -341,7 +341,7 @@ fn status_group_json_says_which_group_it_narrowed_to() {
 fn status_group_json_from_an_ungrouped_account_says_it_narrowed_to_no_group() {
     let mut registry = Registry::default();
     registry.upsert(account(EMAIL, "Acme"));
-    registry.active = Some(EMAIL.to_string());
+    registry.active = Active::Settled(EMAIL.to_string());
     let host = machine_holding(&registry);
 
     let (result, printed) = run_status_group(&host, true);
@@ -431,7 +431,7 @@ fn the_utilization_figures_line_up_down_the_column_across_unalike_accounts() {
     ));
     registry.upsert(per_model);
 
-    registry.active = Some(EMAIL.to_string());
+    registry.active = Active::Settled(EMAIL.to_string());
     let host = machine_holding(&registry);
 
     let (result, printed) = run_list(&host, false);

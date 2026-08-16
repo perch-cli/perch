@@ -13,7 +13,7 @@ use chrono::Duration;
 use perch::commands::list;
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
-use perch::registry::Registry;
+use perch::registry::{Active, Registry};
 use perch::tui::fake::{FakeRefresher, FakeScreen};
 use perch::tui::refresh::Refreshed;
 use perch::tui::{Left, Signal};
@@ -283,7 +283,7 @@ fn a_quarantined_active_account_shows_why_and_what_ends_it() {
 fn a_machine_with_no_active_account_gets_one_line_and_a_way_out_of_it() {
     let host = machine_with_figures();
     let mut nobody = registry_of(&host);
-    nobody.active = None;
+    nobody.active = Active::Nobody;
 
     let screen = browse_holding(&host, nobody, vec![Some(Signal::Leave)]);
 
@@ -913,7 +913,7 @@ fn every_account_keeps_its_identity_and_its_figure_at_a_width_that_cuts() {
 fn a_sentence_that_names_the_way_out_is_whole_at_a_width_that_cuts() {
     let host = machine_with_figures();
     let mut nobody = registry_of(&host);
-    nobody.active = None;
+    nobody.active = Active::Nobody;
 
     for (registry, expected) in [
         (
@@ -1275,7 +1275,7 @@ fn enter_switches_to_the_account_under_the_cursor() {
         at_the_accounts(vec![Some(Signal::Switch), None, Some(Signal::Leave)]),
     );
 
-    assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
     assert_eq!(
         credential_of(&host, EMAIL),
         was_live,
@@ -1393,7 +1393,7 @@ fn switching_to_the_account_that_is_already_active_says_there_is_nothing_to_do()
     let frame = screen.last_frame();
     assert!(frame.contains("already the active Account"), "{frame}");
     assert!(frame.contains("Nothing was changed"), "{frame}");
-    assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
 }
 
 /// A Quarantine is never a statement that the Account is gone, so it stays
@@ -1423,7 +1423,7 @@ fn choosing_a_quarantined_account_names_perch_relogin() {
             "{key:?}\n{frame}"
         );
         assert_eq!(
-            registry_of(&host).active.as_deref(),
+            registry_of(&host).active.whose(),
             Some(EMAIL),
             "{key:?} changed nothing"
         );
@@ -1503,7 +1503,7 @@ fn a_run_the_view_was_left_for_hands_the_terminal_over_and_reports_what_it_said(
     );
     assert!(said.contains("in this terminal alone"), "{said}");
     assert_eq!(
-        registry_of(&host).active.as_deref(),
+        registry_of(&host).active.whose(),
         Some(EMAIL),
         "a Run is not a Switch",
     );
@@ -1547,7 +1547,7 @@ fn a_view_left_alone_hands_nothing_over_and_ends_well() {
         "and nothing was said about a Run that did not happen"
     );
     assert_eq!(
-        registry_of(&host).active.as_deref(),
+        registry_of(&host).active.whose(),
         Some(EMAIL),
         "nor was anything switched"
     );

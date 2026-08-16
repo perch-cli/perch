@@ -5,6 +5,7 @@ mod common;
 use chrono::{TimeZone, Utc};
 use common::*;
 use perch::host::FakeHost;
+use perch::registry::Active;
 
 /// A machine where Perch has already adopted the login, with whatever
 /// Utilization the test wants in the cache.
@@ -12,7 +13,7 @@ fn adopted_machine(utilization: &str) -> FakeHost {
     let registry = format!(
         r#"{{
   "version": 1,
-  "active": "someone@example.com",
+  "active": {{"settled": "someone@example.com"}},
   "accounts": [
     {{
       "identity": {{
@@ -123,6 +124,126 @@ fn json_carries_an_observation_time_on_every_utilization_figure() {
         assert!(window["used_percent"].is_number());
     }
     assert_eq!(windows[0]["observed_seconds_ago"], 180);
+}
+
+/// A machine mid-Landing is indistinguishable from a healthy one, which is half
+/// of why the hazard survived: nobody looks (ADR 0048). So status says a Switch
+/// was in flight and not recorded — as a line and as a `--json` field — and it
+/// **exits 0**, because status reports what it found rather than judging it
+/// (ADR 0018) and a state the next Switch settles by itself should not fail
+/// somebody's shell prompt.
+#[test]
+fn status_says_a_switch_was_in_flight_and_not_recorded_and_still_exits_zero() {
+    let host = machine_with_two_accounts();
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+
+    let (result, printed) = run_status(&host, false);
+
+    result.expect("a Switch in flight is a state to report rather than a failure");
+    assert!(
+        printed.contains("A Switch was in flight and was not recorded"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains(EMAIL) && printed.contains(SECOND_EMAIL),
+        "it names both Accounts the live Credential could belong to: {printed}"
+    );
+
+    let (result, as_json) = run_status(&host, true);
+
+    result.expect("and the same in --json");
+    let document: serde_json::Value = serde_json::from_str(&as_json).expect("valid JSON");
+    assert_eq!(document["landing"]["leaving"], EMAIL, "{as_json}");
+    assert_eq!(document["landing"]["arriving"], SECOND_EMAIL, "{as_json}");
+}
+
+/// A Landing that left nobody behind is the one shape with no Account under it
+/// to describe — Perch was on nobody when the Switch started — and it is still
+/// a state to report rather than an absence to fail on. So the line and the
+/// field are said alone, and the command exits 0.
+///
+/// Before, `perch status` answered this machine with "Perch holds no active
+/// Account" and a non-zero exit: true, unhelpful, and silent about the one
+/// thing that explains it.
+#[test]
+fn a_switch_in_flight_from_nobody_is_still_reported_and_still_exits_zero() {
+    let host = machine_with_two_accounts();
+    let mut registry = registry_of(&host);
+    registry.active = Active::Nobody;
+    save_registry(&host, &registry);
+    a_switch_died_mid_flight(&host, None, SECOND_EMAIL);
+
+    let (result, printed) = run_status(&host, false);
+
+    result.expect("a Switch in flight is a state to report rather than a failure");
+    assert!(
+        printed.contains("A Switch was in flight and was not recorded"),
+        "{printed}"
+    );
+    assert!(printed.contains("Perch was on no Account"), "{printed}");
+
+    let (result, as_json) = run_status(&host, true);
+
+    result.expect("and the same in --json");
+    let document: serde_json::Value = serde_json::from_str(&as_json).expect("valid JSON");
+    assert!(document["landing"]["leaving"].is_null(), "{as_json}");
+    assert_eq!(document["landing"]["arriving"], SECOND_EMAIL, "{as_json}");
+    assert!(
+        document["active"].is_null(),
+        "there is no Account established to describe: {as_json}"
+    );
+}
+
+/// `--group` widens the question to "where would I land", and which Account you
+/// are standing on is not a fact that stops being worth qualifying because of
+/// it: the `*` a listing draws is on the Account Perch was on rather than one it
+/// can establish is live.
+///
+/// The listing is what answers `--group` (ADR 0053), so it says it — which
+/// means `perch list` says it too, off the one sentence and the one field both
+/// documents share.
+#[test]
+fn a_switch_in_flight_is_said_by_the_listing_that_answers_group_as_well() {
+    let host = machine_with_two_accounts();
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+
+    for (what, printed, as_json) in [
+        (
+            "status --group",
+            run_status_group(&host, false),
+            run_status_group(&host, true),
+        ),
+        ("list", run_list(&host, false), run_list(&host, true)),
+    ] {
+        let (result, printed) = printed;
+        result.unwrap_or_else(|error| panic!("{what}: {error}"));
+        assert!(
+            printed.contains("A Switch was in flight and was not recorded"),
+            "{what}: {printed}"
+        );
+
+        let (result, as_json) = as_json;
+        result.unwrap_or_else(|error| panic!("{what} --json: {error}"));
+        let document: serde_json::Value = serde_json::from_str(&as_json).expect("valid JSON");
+        assert_eq!(document["landing"]["leaving"], EMAIL, "{what}: {as_json}");
+        assert_eq!(
+            document["landing"]["arriving"], SECOND_EMAIL,
+            "{what}: {as_json}"
+        );
+    }
+}
+
+/// And on the ordinary machine the field is there and empty, so a script may
+/// read it rather than test for its absence.
+#[test]
+fn status_json_says_no_switch_is_in_flight_rather_than_leaving_the_field_out() {
+    let host = adopted_machine("");
+
+    let (result, printed) = run_status(&host, true);
+
+    result.unwrap();
+    let document: serde_json::Value = serde_json::from_str(&printed).expect("valid JSON");
+    assert!(document["landing"].is_null(), "{printed}");
 }
 
 /// One Account is one shape, whichever command is describing it.
@@ -237,7 +358,7 @@ fn status_with_no_active_account_names_the_remedy_that_applies() {
     run_remove(&host, EMAIL)
         .0
         .expect("the active one is given up");
-    assert_eq!(registry_of(&host).active, None);
+    assert_eq!(registry_of(&host).active, Active::Nobody);
 
     let (result, _) = run_status(&host, false);
 

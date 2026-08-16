@@ -28,7 +28,7 @@ use crate::lock::Held;
 use crate::login::{self, Produced};
 use crate::probe::{Identity, Installed};
 use crate::profile;
-use crate::registry::{self, Account, Registry};
+use crate::registry::{self, Account, Active, Registry};
 use crate::switch;
 use crate::target;
 
@@ -51,13 +51,13 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // Asked before the login rather than after: a Profile Perch may not write
     // to is one no browser round trip was going to repair (ADR 0005).
     let installed = Installed::probed(host)?;
-    let repairing_the_account_you_are_on = registry.is_active(account.email());
-    refuse_while_anything_is_running(host, &account, repairing_the_account_you_are_on, &installed)?;
+    let landing_in_the_default_profile = will_land_in_the_default_profile(&registry, &account);
+    refuse_while_anything_is_running(host, &account, landing_in_the_default_profile, &installed)?;
 
     let produced = login::perform(
         host,
         out,
-        &announcement(&registry, &account, repairing_the_account_you_are_on),
+        &announcement(&registry, &account, landing_in_the_default_profile),
     )?;
     refuse_a_different_account(&registry, &account, &produced.identity)?;
     drop(registry);
@@ -66,6 +66,29 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // out: the copy read before the login is however many commands out of date,
     // and writing it back would revert them.
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
+
+    // Repairing the Account you are on reaches `make_live`, which writes the
+    // Default Profile — so this is a Switch path, and a Switch path resolves a
+    // Landing before it reads which Account is active (ADR 0048). Asked of the
+    // registry as it is now rather than of the copy read before the login, for
+    // the reason everything below this line is.
+    //
+    // The refusal is the one failure this command may not be stopped by. A
+    // Landing nothing accounts for is the state ADR 0048 offers `perch relogin`
+    // as the way out of — "either one replaces whatever is live with a fresh
+    // login for the Account you meant" — so refusing here would be Perch
+    // turning away the remedy it had just told the user to run, after the
+    // browser round trip it costs. The fresh Credential below is what answers
+    // the question the reading could not.
+    if let Err(unresolved) = switch::resolve_a_landing(host, &mut perch, &mut registry)
+        && !matches!(unresolved, PerchError::Conflict(_))
+    {
+        // Anything else is a store that would not answer rather than evidence
+        // that disagrees with itself, and a repair decided on a Profile nobody
+        // could read is not one to go through with.
+        return Err(unresolved);
+    }
+
     if registry.account(account.email()).is_none() {
         return Err(PerchError::NotFound(format!(
             "{} was removed while that login was happening, so there is nothing \
@@ -85,8 +108,8 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // Whether the Default Profile is written is asked of the registry as it is
     // now: another terminal may have switched away during the login, and then
     // this repair lands in the Account's own Profile alone.
-    let repairing_the_account_you_are_on = registry.is_active(account.email());
-    refuse_while_anything_is_running(host, &account, repairing_the_account_you_are_on, &installed)?;
+    let landing_in_the_default_profile = will_land_in_the_default_profile(&registry, &account);
+    refuse_while_anything_is_running(host, &account, landing_in_the_default_profile, &installed)?;
 
     settle_into_its_own_profile(host, &account, &produced)?;
 
@@ -95,7 +118,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // own Profile, which is the whole of what a Quarantine said it did not have.
     let was_quarantined = record(&mut registry, &account, produced)?;
     registry::save(host, &mut perch, &registry)
-        .map_err(|error| unrecorded(&account, repairing_the_account_you_are_on, error))?;
+        .map_err(|error| unrecorded(&account, landing_in_the_default_profile, error))?;
 
     report(out, &registry, &account, was_quarantined)?;
 
@@ -104,12 +127,13 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // somebody else's now, and putting this one over it without a Capture would
     // destroy theirs (ADR 0006). Reading it twice is how the Profile that gets
     // written comes to be one that was never checked.
-    if !repairing_the_account_you_are_on {
+    if !landing_in_the_default_profile {
         return Ok(());
     }
     let landed = switch::make_live(
         host,
         &mut perch,
+        &mut registry,
         &account,
         "the Default Profile, which is where this Account's repaired Credential \
          has to land",
@@ -166,13 +190,13 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
 fn refuse_while_anything_is_running(
     host: &dyn Host,
     account: &Account,
-    repairing_the_account_you_are_on: bool,
+    landing_in_the_default_profile: bool,
     installed: &Installed,
 ) -> Result<()> {
     switch::refuse_if_live_anywhere(
         host,
         account,
-        repairing_the_account_you_are_on.then_some(
+        landing_in_the_default_profile.then_some(
             "the Default Profile, which is where this Account's repaired \
              Credential has to land",
         ),
@@ -291,11 +315,11 @@ fn not_made_live(account: &Account, error: PerchError) -> PerchError {
 /// about it; `add`, `remove`, `import` and `switch` all note theirs.
 fn unrecorded(
     account: &Account,
-    repairing_the_account_you_are_on: bool,
+    landing_in_the_default_profile: bool,
     error: PerchError,
 ) -> PerchError {
     let email = account.email();
-    if !repairing_the_account_you_are_on {
+    if !landing_in_the_default_profile {
         return error.with_note(&format!(
             "The login itself worked and its Credential is in {email}'s own \
              Profile, so nothing was lost — only the record of it is behind. \
@@ -329,7 +353,7 @@ fn no_longer_on_anybody(
     account: &Account,
     error: PerchError,
 ) -> PerchError {
-    registry.active = None;
+    registry.active = Active::Nobody;
     let recorded = match registry::save(host, perch, registry) {
         Ok(()) => format!(
             "Perch holds no active Account now, so nothing will Capture the \
@@ -349,17 +373,38 @@ fn no_longer_on_anybody(
     error.with_note(&recorded)
 }
 
-fn announcement(registry: &Registry, account: &Account, is_the_active_one: bool) -> String {
+/// Whether this repair writes the Default Profile as well as the Account's own.
+///
+/// The Account you are on, and the one state where Perch cannot say which
+/// Account that is: a Landing names two, and repairing **either** of them lands
+/// (ADR 0048). A Landing that resolved is a settled registry by the time this is
+/// asked the second time, so the second clause only ever decides the corner the
+/// resolution refused — the corner whose refusal names this very command as the
+/// way through. Repairing any *third* Account touches nothing live, and the
+/// Landing has no bearing on it.
+fn will_land_in_the_default_profile(registry: &Registry, account: &Account) -> bool {
+    registry.is_active(account.email()) || registry.active.names(account.email())
+}
+
+fn announcement(registry: &Registry, account: &Account, landing_here: bool) -> String {
     let repairing = format!("Logging in again to repair {}.", account.email());
-    if is_the_active_one {
+    if !landing_here {
+        return format!(
+            "{repairing}{}",
+            login::leaving_the_active_account_alone(registry.active.whose())
+        );
+    }
+    // Which of the two it is, said apart, because "the Account you are on" is
+    // exactly what Perch cannot claim about half of a Landing.
+    if registry.is_active(account.email()) {
         return format!(
             "{repairing} It is the Account you are on, so its fresh Credential \
              becomes the live one."
         );
     }
     format!(
-        "{repairing}{}",
-        login::leaving_the_active_account_alone(registry.active.as_deref())
+        "{repairing} A Switch to it was left in flight, so its fresh Credential \
+         becomes the live one and settles which Account is active."
     )
 }
 

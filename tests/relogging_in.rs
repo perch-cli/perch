@@ -20,7 +20,7 @@ use perch::commands::add::AddArgs;
 use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROFILE_LIVE};
 use perch::host::fake::{Effect, THIS_PROCESS};
 use perch::host::{FakeHost, Host};
-use perch::registry::Quarantine;
+use perch::registry::{Active, Quarantine};
 
 /// What a repairing login produces for the second Account: the same person,
 /// with a Credential that works.
@@ -115,7 +115,7 @@ fn a_repaired_account_is_a_cycle_candidate_again() {
 
     cycled.expect("the Account with all the room works again");
     assert_eq!(
-        registry_of(&host).active.as_deref(),
+        registry_of(&host).active.whose(),
         Some(SECOND_EMAIL),
         "{printed}"
     );
@@ -136,7 +136,7 @@ fn the_account_you_are_working_in_is_untouched_by_repairing_another() {
          does not notice: {printed}"
     );
     assert_eq!(host.file(IDENTITY_PATH).as_deref(), Some(before.as_str()));
-    assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
     assert_eq!(
         credential_of(&host, EMAIL).as_deref(),
         Some(CREDENTIAL),
@@ -270,7 +270,7 @@ fn repairing_the_account_you_are_on_makes_its_fresh_credential_the_live_one() {
     assert_eq!(credential_of(&host, EMAIL).as_deref(), Some(REPAIRED));
     assert_eq!(quarantine_of(&host, EMAIL), None);
     assert_eq!(
-        registry_of(&host).active.as_deref(),
+        registry_of(&host).active.whose(),
         Some(EMAIL),
         "and it is still the active Account: this was a repair, not a Switch"
     );
@@ -278,6 +278,118 @@ fn repairing_the_account_you_are_on_makes_its_fresh_credential_the_live_one() {
         credential_of(&host, SECOND_EMAIL).as_deref(),
         Some(SECOND_CREDENTIAL),
         "no other Account's Profile is written on the way"
+    );
+}
+
+/// A Landing nothing can account for is the one state ADR 0048 names this
+/// command as the way out of: *"`perch relogin {arriving}` finishes that Switch
+/// and `perch relogin {leaving}` abandons it"*. So it is the one failure the
+/// command may not be stopped by — refusing here would be Perch turning away
+/// the remedy it had just told the user to run, and doing it after the browser
+/// round trip that remedy costs.
+///
+/// Either half of the Landing lands: what settles the question the reading
+/// could not is the fresh Credential going live.
+#[test]
+fn a_landing_nothing_accounts_for_is_repaired_rather_than_refused() {
+    for (what, repairing, fresh, identity) in [
+        (
+            "the Account the Switch was leaving, which abandons it",
+            EMAIL,
+            REPAIRED,
+            IDENTITY_FILE,
+        ),
+        (
+            "the Account it was switching to, which finishes it",
+            SECOND_EMAIL,
+            SECOND_REPAIRED,
+            SECOND_IDENTITY_FILE,
+        ),
+    ] {
+        let host = machine_with_two_accounts().with_login(login_producing(fresh, identity));
+        a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+        // A Rotation after the interruption: the corner Perch refuses to guess
+        // at, and the refusal that names this command.
+        host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SECOND_REPAIRED);
+        run_switch(&host, SECOND_EMAIL)
+            .0
+            .expect_err("a Switch cannot tell whose the live Credential is");
+
+        let (result, printed) = run_relogin(&host, repairing);
+
+        result.unwrap_or_else(|error| panic!("{what}: {error}"));
+        assert_eq!(
+            host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
+            Some(fresh),
+            "{what}: the fresh Credential is live, which is what answers the \
+             question nothing else could: {printed}"
+        );
+        assert_eq!(
+            registry_of(&host).active,
+            Active::Settled(repairing.to_string()),
+            "{what}: and the Landing is gone, because the Account repaired is \
+             the one the machine is now on"
+        );
+    }
+}
+
+/// The refusal above is the *only* one this command steps past, and the reason
+/// is that Perch weighed the evidence and could not choose. A store that would
+/// not answer is not that: nothing was weighed, so nothing is known — including
+/// whether the Default Profile this repair may be about to write is somebody
+/// else's. Repairing on it would be deciding by not looking.
+#[test]
+fn a_store_that_will_not_answer_stops_the_repair_rather_than_being_stepped_past() {
+    // Off macOS, where a Profile keeps its Credential in a file (ADR 0020) —
+    // the only way to make the live store alone refuse to answer.
+    let host = logged_in_machine_off_macos().with_login(login_producing(REPAIRED, IDENTITY_FILE));
+    run_list(&host, false)
+        .0
+        .expect("adoption holds the login it finds");
+    a_switch_died_mid_flight(&host, Some(EMAIL), EMAIL);
+    host.set_unreadable(CREDENTIALS_PATH, "Permission denied");
+
+    let (result, _) = run_relogin(&host, EMAIL);
+
+    let said = result
+        .expect_err("nothing on the machine could be read")
+        .to_string();
+    assert!(
+        said.contains("Make that store readable"),
+        "it says what to put right rather than repairing blind: {said}"
+    );
+}
+
+/// Repairing a *third* Account while a Landing is unaccounted for is an
+/// ordinary repair. It writes that Account's own Profile and nothing else, so
+/// the Landing has no bearing on it — and a command refused for a state it
+/// cannot possibly disturb is a command that stops working on a machine that
+/// needs it.
+#[test]
+fn a_landing_nothing_accounts_for_does_not_stop_an_unrelated_repair() {
+    let host = machine_with_three_accounts()
+        .with_login(login_producing(THIRD_CREDENTIAL, THIRD_IDENTITY_FILE));
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SECOND_REPAIRED);
+
+    let (result, printed) = run_relogin(&host, THIRD_EMAIL);
+
+    result.expect("an Account the Landing does not name is repaired as ever");
+    assert_eq!(
+        credential_of(&host, THIRD_EMAIL).as_deref(),
+        Some(THIRD_CREDENTIAL),
+        "its own Profile holds the fresh Credential: {printed}"
+    );
+    assert_eq!(
+        host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
+        Some(SECOND_REPAIRED),
+        "and the live Credential is untouched, because this repair was never \
+         about the Default Profile"
+    );
+    assert!(
+        matches!(registry_of(&host).active, Active::Landing { .. }),
+        "so the Landing is still there, still unresolved, and still nobody's \
+         business but a Switch's"
     );
 }
 
@@ -623,7 +735,7 @@ fn a_repair_whose_identity_patch_failed_is_live_and_still_recorded_as_active() {
         "the fresh Credential really is the live one"
     );
     assert_eq!(
-        registry_of(&host).active.as_deref(),
+        registry_of(&host).active.whose(),
         Some(EMAIL),
         "so Perch goes on recording the Account it is really on, and a Switch \
          away from it Captures whatever this session Rotates"
@@ -677,7 +789,7 @@ fn a_repair_that_could_not_be_made_live_leaves_nothing_to_capture_into() {
     );
     assert_eq!(
         registry_of(&host).active,
-        None,
+        Active::Nobody,
         "and Perch is on nobody, so nothing can Capture over it"
     );
 

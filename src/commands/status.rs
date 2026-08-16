@@ -50,7 +50,19 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
         }
         false => (None, adopt::ensure_adopted(host)?),
     };
-    let active = active_email(&registry)?;
+    // Perch on nobody *because* a Switch was in flight and never recorded is
+    // not an absence to report — it is the answer to why the absence is there,
+    // and it exits 0 like every other way of saying one (ADR 0048). A Landing
+    // that left nobody behind is the one shape with no Account under it to
+    // describe, so what it gets is the line and the field alone.
+    let active = match (
+        active_email(&registry),
+        registry.active.a_switch_in_flight(),
+    ) {
+        (Ok(active), _) => active,
+        (Err(_), Some(said)) => return the_switch_alone(out, &registry, args.json, &said),
+        (Err(nobody), None) => return Err(nobody),
+    };
 
     // Being in no Group is not a Group (ADR 0017), so from an ungrouped Account
     // the answer to "where would I land" is every ungrouped Account together
@@ -70,13 +82,16 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
 
     let now = host.now();
     match scope {
+        // A Switch in flight is said by the listing, which is what answers
+        // `--group` (ADR 0053) and which has its own line about which Account
+        // is active for it to qualify.
         Some(scope) => list::render(host, out, &registry, scope, now, args.json, &report),
         None => {
             let account = registry.held(&active)?;
             if args.json {
                 render_json(host, out, &registry, account, now, &report)
             } else {
-                render_human(out, account, now, &report)
+                render_human(out, &registry, account, now, &report)
             }
         }
     }
@@ -131,11 +146,21 @@ fn to_refresh(registry: &Registry, scope: &Option<Scope>, active: &str) -> Vec<S
 
 fn render_human(
     out: &mut dyn Write,
+    registry: &Registry,
     account: &Account,
     now: DateTime<Utc>,
     report: &Report,
 ) -> Result<()> {
     report.write_notes_beside_the_accounts(out)?;
+
+    // Above the Account line, because it is what qualifies it: with a Switch in
+    // flight, the Account named below is the one Perch was on rather than the
+    // one it can establish is live. A note rather than a labelled row, as the
+    // Refresh's own notes above it are — the column is for facts about the
+    // Account, and this is a fact about whether Perch can name one.
+    if let Some(said) = registry.active.a_switch_in_flight() {
+        crate::commands::say(out, &said)?;
+    }
 
     utilization::write_labelled(out, "Account", account.email())?;
     if let Some(organization) = &account.identity.organization_name {
@@ -184,9 +209,39 @@ fn render_json(
 ) -> Result<()> {
     let document = json!({
         "active": list::document(host, registry, account, now)?,
+        "landing": registry.active.document(),
         "utilization": utilization::document(account, now),
         "refresh": report.document(),
     });
 
     say_json(out, &document)
+}
+
+/// The whole of the report where a Landing left nobody behind: the Switch that
+/// was in flight, and no Account section, because there is no Account
+/// established to put in one.
+///
+/// The `--json` document keeps every key the ordinary one has, with the ones it
+/// cannot answer left empty. A script reaching for `.utilization` on this
+/// machine is asking about an Account Perch cannot name, and `null` is that
+/// answer — where a document missing the key is a script's `jq` failing for
+/// what reads like a different reason.
+fn the_switch_alone(
+    out: &mut dyn Write,
+    registry: &Registry,
+    json: bool,
+    said: &str,
+) -> Result<()> {
+    if !json {
+        return crate::commands::say(out, said);
+    }
+    say_json(
+        out,
+        &json!({
+            "active": serde_json::Value::Null,
+            "landing": registry.active.document(),
+            "utilization": serde_json::Value::Null,
+            "refresh": Report::default().document(),
+        }),
+    )
 }

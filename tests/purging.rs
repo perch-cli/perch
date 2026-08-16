@@ -16,7 +16,7 @@ use perch::error::{EXIT_INVALID, EXIT_NOTHING_TO_DO, EXIT_PROFILE_LIVE};
 use perch::export;
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
-use perch::registry::{Quarantine, Registry};
+use perch::registry::{Active, Quarantine, Registry};
 
 const PERCH_HOME: &str = "/Users/someone/.config/perch";
 const DEFAULT_PROFILE: &str = "/Users/someone/.claude";
@@ -417,7 +417,7 @@ fn what_a_purge_gives_back_an_import_puts_back() {
         let mut registry = registry_of(&host);
         // The one thing that deliberately does not travel: being active is a
         // claim about which Credential is in this machine's Default Profile.
-        registry.active = None;
+        registry.active = Active::Nobody;
         registry
     };
 

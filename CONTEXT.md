@@ -225,12 +225,13 @@ so a Rotation that happened while it was active is not lost when you Switch away
 _Avoid_: backup, save, snapshot
 
 **Landing**:
-A Switch that has happened and is not yet written down. The state exists because
-the Credential reaches the Default Profile one step before the Identity is
-patched, so a Switch can move the machine and then fail: what is live and what
-Perch records as active disagree until the Landing is recorded. Never read for
-its outcome before then — the next Switch Captures into whichever Profile the
-registry names, and that is the one mistake this design cannot recover from
+A Switch under way and not yet finished. Perch records one before it moves the
+Credential and clears it when the Switch is recorded, so the window in which
+what is live and what Perch records as active could disagree is a window Perch
+has said out loud it is in. A Perch that finds one knows the live Credential is
+one of two Accounts' — the one being left, or the one being switched to — which
+is what it can settle a Landing from. Never read for its outcome before it is
+recorded: the next Switch Captures into whichever Profile the registry names
 (ADR 0006). Only whether it *moved* is answerable earlier, because a Switch that
 happened paces the Watcher whether or not it finished.
 _Avoid_: result, outcome, attempt

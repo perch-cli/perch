@@ -1,9 +1,13 @@
 # A Switch is written down before it moves anything, and the Landing is what it writes
 
-> **Decided, not yet carried out.** The field, the resolution step and the one
-> glossary edit below are tracked separately. Like ADR 0041, ADR 0042, ADR 0044,
-> ADR 0045, ADR 0046 and ADR 0047, this is the artifact of a planning effort
-> rather than of a change, so it lands ahead of the work it describes.
+> **Carried out in #167.** Like ADR 0041, ADR 0042, ADR 0044, ADR 0045, ADR 0046
+> and ADR 0047, this is the artifact of a planning effort rather than of a
+> change, so it landed ahead of the work it describes instead of beside it.
+> `registry.active` is now one field with three states, `switch::perform` and
+> `switch::make_live` both write a Landing before the Credential moves,
+> `switch::resolve_a_landing` is the step every Switch path takes first, `perch
+> status` says a Switch was in flight, and the Watcher holds where the settling
+> refuses.
 
 The question arrived as an accusation `CONTEXT.md` makes against itself. The
 **Landing** entry describes a window in which what is live and what Perch records

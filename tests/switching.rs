@@ -20,7 +20,7 @@ use perch::error::{
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
 use perch::probe;
-use perch::registry::Quarantine;
+use perch::registry::{Active, Quarantine};
 
 const REFRESH_LOCK: &str = "/Users/someone/.claude/.oauth_refresh.lock";
 const LEGACY_LOCK: &str = "/Users/someone/.claude.lock";
@@ -71,7 +71,7 @@ fn assert_the_switch_captured_and_landed(host: &FakeHost, why: &str) {
         Some(SECOND_CREDENTIAL),
         "and the incoming Credential is the live one: {why}"
     );
-    assert_eq!(registry_of(host).active.as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(host).active.whose(), Some(SECOND_EMAIL));
 }
 
 fn stored_credential(host: &FakeHost, email: &str) -> Option<String> {
@@ -173,7 +173,7 @@ fn a_switch_that_cannot_place_the_default_profile_changes_nothing() {
         "it names the assumption that failed: {refused}"
     );
     assert_eq!(
-        registry_of(&host).active.as_deref(),
+        registry_of(&host).active.whose(),
         Some(EMAIL),
         "and nothing moved: the Account that was active still is"
     );
@@ -196,7 +196,7 @@ fn switching_by_email_makes_that_account_the_one_every_client_reads() {
         "the incoming Credential is the live one"
     );
     assert!(identity_file(&host).contains(SECOND_EMAIL));
-    assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
     assert!(
         printed.contains(&format!("Switched to {SECOND_EMAIL}")),
         "{printed}"
@@ -562,7 +562,7 @@ fn a_sessions_directory_that_will_not_be_read_stops_the_switch_rather_than_readi
         Some(CREDENTIAL),
         "and nothing was written, because the doubt is resolved towards Live"
     );
-    assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
 }
 
 /// An absent one is the ordinary case and still means nothing is running: a
@@ -575,7 +575,7 @@ fn a_profile_that_never_ran_a_client_has_no_sessions_directory_and_switches() {
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
     result.expect("nowhere to look is not the same as something to worry about");
-    assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
 }
 
 /// The Capture is the write, and it writes into the *outgoing* Account's own
@@ -596,7 +596,7 @@ fn switching_away_from_a_profile_a_client_is_running_against_is_refused() {
         Some(CREDENTIAL),
         "nothing was written"
     );
-    assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
 }
 
 /// A live store holding bytes that are not a Credential is the state a
@@ -648,7 +648,7 @@ fn a_live_credential_perch_cannot_read_does_not_stop_a_switch_to_another_account
         Some(SECOND_CREDENTIAL),
         "{printed}"
     );
-    assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
     assert_eq!(
         credential_of(&host, EMAIL).as_deref(),
         Some(CREDENTIAL),
@@ -686,7 +686,7 @@ fn a_live_store_that_will_not_answer_stops_the_switch_rather_than_being_written_
         "the live store still holds what it held"
     );
     assert_eq!(
-        registry_of(&host).active.as_deref(),
+        registry_of(&host).active.whose(),
         Some(EMAIL),
         "and nothing moved"
     );
@@ -735,7 +735,7 @@ fn switching_onto_a_profile_a_client_is_running_against_lands() {
         Some(SECOND_CREDENTIAL),
         "the incoming Account's Credential is the live one"
     );
-    assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
 }
 
 /// A `~/.claude.json` managed by stow, chezmoi or yadm, switched over.
@@ -983,7 +983,7 @@ fn a_switch_that_cannot_patch_the_identity_says_what_it_left_where() {
     // only measure that matters — whose Credential a client would read.
     assert_eq!(live_credential(&host).as_deref(), Some(SECOND_CREDENTIAL));
     assert_eq!(stored_credential(&host, EMAIL).as_deref(), Some(CREDENTIAL));
-    assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
     assert_eq!(
         host.file(perch::host::temp_beside(&host, Path::new(IDENTITY_PATH))),
         None,
@@ -1188,7 +1188,7 @@ fn something_at_a_lock_path_that_is_not_a_lock_is_named_rather_than_blamed_on_cl
         !said.contains("quit it"),
         "and does not send somebody looking for a Claude Code to quit: {said}"
     );
-    assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
 }
 
 /// A takeover on the last attempt gets the lock it just freed.
@@ -1210,7 +1210,7 @@ fn a_lock_abandoned_on_the_last_attempt_is_taken_rather_than_reported_as_held() 
         .0
         .expect("the lock was free by the time the last attempt asked");
 
-    assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
 }
 
 #[test]
@@ -1230,7 +1230,7 @@ fn a_lock_somebody_is_holding_stops_the_switch_without_changing_anything() {
     );
     assert!(error.to_string().contains("Nothing was changed"), "{error}");
     assert_eq!(live_credential(&host).as_deref(), Some(CREDENTIAL));
-    assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
     assert!(
         host.effects()
             .iter()
@@ -1361,7 +1361,7 @@ fn a_switch_finishes_against_a_claude_json_that_has_no_identity_block_yet() {
         "with every other member of it untouched (ADR 0001): {identity}"
     );
     assert_eq!(
-        registry_of(&host).active.as_deref(),
+        registry_of(&host).active.whose(),
         Some(SECOND_EMAIL),
         "{printed}"
     );
@@ -1375,7 +1375,7 @@ fn a_switch_finishes_against_a_claude_json_that_has_no_identity_block_yet() {
 fn switching_with_no_active_account_recorded_says_there_was_nothing_to_capture() {
     let host = machine_with_two_accounts();
     let mut registry = registry_of(&host);
-    registry.active = None;
+    registry.active = Active::Nobody;
     save_registry(&host, &registry);
 
     let (result, printed) = run_switch(&host, SECOND_EMAIL);
@@ -1390,7 +1390,7 @@ fn switching_with_no_active_account_recorded_says_there_was_nothing_to_capture()
         Some(SECOND_CREDENTIAL),
         "and the Switch itself still happened"
     );
-    assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
 }
 
 /// Switching away from a Claude Code that is logged out. Worth saying rather
@@ -1417,28 +1417,60 @@ fn switching_from_a_logged_out_claude_code_says_there_was_nothing_live_to_captur
     );
 }
 
-/// The Switch is three writes to the machine and one to Perch's own record, and
-/// only the last of them can fail without the machine having moved. When it
-/// does, the note has to say that the Switch worked — otherwise the obvious
-/// reading of the failure is that it did not, and the obvious next step is to
-/// run it again against a machine that is already there.
+/// Perch does not move the live Credential until it has written down that it is
+/// about to (ADR 0048), so a registry that will not take a write is a Switch
+/// that never starts.
+///
+/// This is the path the whole decision rests on, and it needs no crash to
+/// reach: the registry hold goes stale in ninety seconds, a keychain that stops
+/// to ask the user for permission runs that out during the Capture, and the
+/// save afterwards then cannot happen. Before, the machine had already moved by
+/// then and Perch could only narrate it. Now the failure arrives one step
+/// earlier, with nothing moved, which is an ordinary refusal.
 #[test]
-fn a_switch_that_worked_but_could_not_be_recorded_says_the_machine_did_move() {
+fn a_switch_perch_cannot_write_down_moves_nothing_at_all() {
     let host = machine_with_two_accounts().with_unwritable_file(REGISTRY_PATH, "read-only");
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
-    let failed = result.expect_err("the record could not be written");
-    let said = failed.to_string();
+    let said = result
+        .expect_err("the Landing could not be written")
+        .to_string();
     assert!(
-        said.contains("The Switch itself worked"),
-        "the machine moved even though the record did not: {said}"
+        said.contains("has written down that it is about to"),
+        "it says why nothing moved: {said}"
     );
-    assert!(said.contains(SECOND_EMAIL), "{said}");
     assert_eq!(
         live_credential(&host).as_deref(),
-        Some(SECOND_CREDENTIAL),
-        "and that is what the note claims"
+        Some(CREDENTIAL),
+        "the outgoing Credential is still the live one: {said}"
+    );
+    assert_eq!(
+        registry_of(&host).active.whose(),
+        Some(EMAIL),
+        "and Perch is on the Account it was on"
+    );
+}
+
+/// A Switch that wrote its Landing down and then moved nothing takes it back,
+/// so the ordinary failure at step two does not leave `perch status` announcing
+/// a Switch in flight that the failure in front of the user says never started.
+///
+/// Nothing is lost either way — a Landing left behind is settled by the next
+/// Switch off the two Credentials it names — which is why the take-back is best
+/// effort. What it buys is that the registry agrees with the sentence.
+#[test]
+fn a_switch_that_moves_nothing_takes_its_landing_back() {
+    let host = two_accounts_off_macos().with_unwritable_file(CREDENTIALS_PATH, "read-only file");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    result.expect_err("the Default Profile could not be written");
+    assert_eq!(
+        registry_of(&host).active,
+        Active::Settled(EMAIL.to_string()),
+        "nothing moved, so Perch is settled on the Account it was on rather \
+         than in flight"
     );
 }
 
@@ -1493,7 +1525,7 @@ fn a_switch_that_cannot_capture_says_nothing_moved_and_moves_nothing() {
         Some(CREDENTIAL),
         "the live Credential is the outgoing Account's, untouched"
     );
-    assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
 }
 
 /// The live write failing with no active Account recorded. There is no
@@ -1505,7 +1537,7 @@ fn a_switch_that_cannot_capture_says_nothing_moved_and_moves_nothing() {
 fn a_live_write_that_fails_with_nothing_active_names_the_account_that_did_not_land() {
     let host = two_accounts_off_macos();
     let mut registry = registry_of(&host);
-    registry.active = None;
+    registry.active = Active::Nobody;
     save_registry(&host, &registry);
     let host = host.with_unwritable_file(CREDENTIALS_PATH, "read-only file");
 
@@ -1551,7 +1583,7 @@ fn a_switch_that_captured_but_could_not_go_live_says_nothing_was_lost() {
         "and it says the Switch did not happen: {said}"
     );
     assert_eq!(
-        registry_of(&host).active.as_deref(),
+        registry_of(&host).active.whose(),
         Some(EMAIL),
         "the machine never moved"
     );
@@ -1590,7 +1622,7 @@ fn a_live_write_that_fails_with_nothing_captured_says_the_profile_is_unchanged()
 fn an_identity_that_cannot_be_patched_with_nothing_active_still_says_what_to_run() {
     let host = machine_with_two_accounts().with_unwritable_file(IDENTITY_PATH, "read-only file");
     let mut registry = registry_of(&host);
-    registry.active = None;
+    registry.active = Active::Nobody;
     save_registry(&host, &registry);
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
@@ -1727,7 +1759,7 @@ fn a_stored_credential_that_cannot_be_understood_stops_the_switch_before_it_writ
         Some(CREDENTIAL),
         "nothing was written: the Credential is read before the first write"
     );
-    assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
 }
 
 /// A client launched by a Run hands `CLAUDE_CONFIG_DIR` on to everything it
@@ -1842,7 +1874,7 @@ fn a_machine_on_an_accented_account() -> FakeHost {
 #[test]
 fn a_rotation_is_captured_however_the_identity_file_cases_a_non_ascii_address() {
     let host = a_machine_on_an_accented_account();
-    assert_eq!(registry_of(&host).active.as_deref(), Some(ACCENTED));
+    assert_eq!(registry_of(&host).active.whose(), Some(ACCENTED));
     // Claude Code renewed, Rotated, and rewrote its own file with the other
     // spelling of the same address.
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
@@ -1879,54 +1911,243 @@ fn a_switch_onto_the_account_already_active_is_recognised_whatever_the_case() {
     );
 }
 
-/// A Switch that could not record itself must not send the next one to file the
-/// Credential it just made live into somebody else's Profile.
+/// A Perch that died mid-Switch must not send the next one to file the
+/// Credential it made live into somebody else's Profile.
 ///
-/// The half-state is the one `perform`'s own doc names: the incoming Credential
-/// is live while Perch still records the outgoing Account as active and
-/// `.claude.json` still names it too. Re-running the same `perch switch` — the
-/// obvious thing to do, and what the failure asks for — then reads that stale
-/// Identity as evidence that the live Credential belongs to the outgoing
-/// Account, and Captures it into that Account's Profile: the incoming Account's
-/// Credential written over the outgoing Account's only copy, which is the one
-/// loss ADR 0006 exists to prevent.
+/// This is the hole the Landing exists to close, and it is not the one you
+/// would guess: a Switch interrupted after the Credential moved, followed by a
+/// Switch to a **third** Account. `.claude.json` names the Account being left,
+/// the registry named it too, the two agree — and both are wrong. That evidence
+/// is indistinguishable from an ordinary Capture of a Rotation, which is the
+/// case ADR 0006 exists to serve, so no rule reading only that evidence can
+/// separate them: the Capture files the *incoming* Account's Credential into
+/// the *outgoing* Account's Profile, over the copy the interrupted Switch had
+/// just correctly saved there.
 ///
-/// What settles it is the bytes, ahead of the Identity. A live Credential
-/// identical to the one the Switch is about to write is the incoming Account's
-/// by construction, so there is nothing in it for any Capture to save.
+/// What separates them is the Landing, written down before the Credential moved
+/// and settled before this Switch decides anything (ADR 0048).
 #[test]
-fn a_switch_that_could_not_record_itself_does_not_cost_the_outgoing_account_its_credential() {
-    let host = machine_with_two_accounts()
-        .with_unwritable_file(IDENTITY_PATH, "read-only file")
-        .with_unwritable_file(REGISTRY_PATH, "read-only file");
+fn a_landing_left_behind_by_a_death_does_not_cost_the_outgoing_account_its_credential() {
+    let host = machine_with_three_accounts();
+    // What a Perch killed between step two and its own record leaves behind: the
+    // Landing, the incoming Credential live, and `.claude.json` still naming the
+    // Account that Switch was leaving.
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SECOND_CREDENTIAL);
 
-    run_switch(&host, SECOND_EMAIL)
-        .0
-        .expect_err("neither the Identity nor the registry could be written");
-    assert_eq!(
-        live_credential(&host).as_deref(),
-        Some(SECOND_CREDENTIAL),
-        "the incoming Credential is live all the same"
-    );
-    assert_eq!(
-        registry_of(&host).active.as_deref(),
-        Some(EMAIL),
-        "while Perch is still recording the Account it was leaving"
-    );
+    let (result, printed) = run_switch(&host, THIRD_EMAIL);
 
-    // The user does what the failure told them to: the same command again.
-    let (result, printed) = run_switch(&host, SECOND_EMAIL);
-
-    result.expect_err("the Identity is still read-only");
+    result.expect("the Landing is settled and the Switch goes through");
     assert_eq!(
         credential_of(&host, EMAIL).as_deref(),
         Some(CREDENTIAL),
-        "the outgoing Account keeps its own Credential: {printed}"
+        "the Account the interrupted Switch left keeps its own Credential: \
+         {printed}"
     );
     assert_eq!(
         credential_of(&host, SECOND_EMAIL).as_deref(),
         Some(SECOND_CREDENTIAL),
-        "and nothing was moved anywhere else either"
+        "and so does the one it had landed on"
+    );
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(THIRD_CREDENTIAL),
+        "while the Switch that was asked for happened"
+    );
+    assert_eq!(
+        registry_of(&host).active,
+        Active::Settled(THIRD_EMAIL.to_string()),
+        "and nothing is left in flight"
+    );
+}
+
+/// The four readings a Landing can be settled from, in the order they are
+/// asked (ADR 0048). Each is a machine holding one Credential and a registry
+/// holding one Landing, and what settles it is byte-equality against copies
+/// Perch already holds — the live Credential carries no owner, so there is
+/// nothing else it could be.
+///
+/// Asserted through a command that settles and then leaves who is active alone
+/// — `perch remove` of an Account nobody is on. A `perch switch` settles too,
+/// and then moves the very answer under test.
+#[test]
+fn a_landing_is_settled_onto_whoever_the_live_credential_belongs_to() {
+    struct Case {
+        what: &'static str,
+        live: Option<&'static str>,
+        settles_on: &'static str,
+        /// An Account this case is not about, given up to make the settling
+        /// visible without disturbing it.
+        and_removes: &'static str,
+    }
+
+    let cases = [
+        Case {
+            what: "the Account being switched to, so the Switch had finished",
+            live: Some(SECOND_CREDENTIAL),
+            settles_on: SECOND_EMAIL,
+            and_removes: THIRD_EMAIL,
+        },
+        Case {
+            what: "the Account being left, so the Switch had not moved anything",
+            live: Some(CREDENTIAL),
+            settles_on: EMAIL,
+            and_removes: THIRD_EMAIL,
+        },
+        Case {
+            what: "a third Account Perch holds, which is the fallback",
+            live: Some(THIRD_CREDENTIAL),
+            settles_on: THIRD_EMAIL,
+            and_removes: SECOND_EMAIL,
+        },
+        Case {
+            what: "nothing at all, which is nothing a later Capture could destroy",
+            live: None,
+            settles_on: EMAIL,
+            and_removes: THIRD_EMAIL,
+        },
+    ];
+
+    for case in cases {
+        let host = machine_with_three_accounts();
+        a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+        match case.live {
+            Some(credential) => host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, credential),
+            None => host
+                .keychain_delete(DEFAULT_SERVICE, LOGIN_NAME)
+                .expect("the login is given up"),
+        }
+
+        run_remove_with(
+            &host,
+            perch::commands::remove::RemoveArgs {
+                target: case.and_removes.to_string(),
+                yes: true,
+            },
+        )
+        .0
+        .unwrap_or_else(|error| panic!("{}: nobody is on it: {error}", case.what));
+
+        assert_eq!(
+            registry_of(&host).active,
+            Active::Settled(case.settles_on.to_string()),
+            "{}: the Landing is settled rather than left in flight",
+            case.what
+        );
+    }
+}
+
+/// The live Credential is the whole of the evidence a Landing is resolved from,
+/// so a store that will not answer settles nothing.
+///
+/// Refused for the reason the Capture refuses the same silence: a store that
+/// would not answer says nothing about what it holds, and "the keychain was
+/// locked" is not evidence that it is safe to write over a refresh token. A
+/// Switch that has to be run again after a `chmod` is recoverable where a lost
+/// refresh token is not.
+#[test]
+fn a_live_store_that_will_not_answer_resolves_no_landing() {
+    let host = two_accounts_off_macos();
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    host.set_unreadable(CREDENTIALS_PATH, "Permission denied");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let said = result
+        .expect_err("nothing on the machine can say whether that Switch happened")
+        .to_string();
+    assert!(
+        said.contains("was in flight and was not recorded"),
+        "it says what could not be settled: {said}"
+    );
+    assert!(said.contains("Nothing was changed"), "{said}");
+
+    host.forget_unreadable(CREDENTIALS_PATH);
+    assert_eq!(
+        host.file(CREDENTIALS_PATH).as_deref(),
+        Some(CREDENTIAL),
+        "the live store still holds what it held"
+    );
+    assert!(
+        matches!(registry_of(&host).active, Active::Landing { .. }),
+        "and the Landing is still there to be resolved once the store answers"
+    );
+}
+
+/// The same undecidable corner, from a machine that was on nobody: there is no
+/// second reading to name, because there was no Account to go back to.
+///
+/// Worth its own case because the refusal has to stay a sentence rather than
+/// become one with a hole where an address should be — this is the state a
+/// `perch switch` from a machine Perch had never Switched leaves behind.
+#[test]
+fn a_landing_that_left_nobody_behind_is_refused_without_naming_one() {
+    let host = machine_with_two_accounts();
+    let mut registry = registry_of(&host);
+    registry.active = Active::Nobody;
+    save_registry(&host, &registry);
+    a_switch_died_mid_flight(&host, None, SECOND_EMAIL);
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("nothing on the machine says whose that Credential is");
+    let said = error.to_string();
+    assert_eq!(error.exit_code(), EXIT_CONFLICT, "{said}");
+    assert!(said.contains("on no Account before it"), "{said}");
+    assert!(
+        said.contains(&format!("perch relogin {SECOND_EMAIL}")),
+        "and names the one way through: {said}"
+    );
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(ROTATED),
+        "with nothing written over: {said}"
+    );
+}
+
+/// The corner that stays undecidable: a Landing in flight, and a live Credential
+/// matching nobody's stored copy — a Rotation after the interruption, and
+/// nothing on the machine to say whose.
+///
+/// Refused, naming both readings, with `perch relogin` as the way through
+/// either way. Not a Quarantine: nothing is lost in that state and the live
+/// Credential very likely works. The bar is *never silently*, not *never*.
+#[test]
+fn a_landing_nothing_accounts_for_is_refused_naming_both_readings() {
+    let host = machine_with_two_accounts();
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    // A Rotation made after the interruption, by whichever of the two the
+    // machine was actually acting as.
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("Perch cannot tell whose that Credential is");
+    let said = error.to_string();
+    assert_eq!(error.exit_code(), EXIT_CONFLICT, "{said}");
+    assert!(
+        said.contains(EMAIL) && said.contains(SECOND_EMAIL),
+        "{said}"
+    );
+    assert!(
+        said.contains("perch relogin"),
+        "it says the way through: {said}"
+    );
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(ROTATED),
+        "and nothing was written over: {said}"
+    );
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(CREDENTIAL),
+        "in either Profile"
+    );
+    assert_eq!(
+        credential_of(&host, SECOND_EMAIL).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "in either Profile"
     );
 }
 
@@ -1948,7 +2169,7 @@ fn repairing_an_interrupted_switch_never_writes_over_a_rotation_it_declined_to_s
         .0
         .expect_err("the Identity could not be patched");
     assert_eq!(
-        registry_of(&host).active.as_deref(),
+        registry_of(&host).active.whose(),
         Some(SECOND_EMAIL),
         "the incoming Account is live, so Perch records it as active"
     );
@@ -2065,7 +2286,7 @@ fn a_switch_onto_an_account_that_shares_a_profile_is_refused() {
          what a person needs to act: {said}"
     );
     assert_eq!(
-        registry_of(&host).active.as_deref(),
+        registry_of(&host).active.whose(),
         Some(EMAIL),
         "and the machine is exactly as it was: {printed}"
     );

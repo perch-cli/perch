@@ -1706,7 +1706,9 @@ fn scopes(registry: &Registry) -> Vec<cycle::Scope> {
 mod tests {
     use super::*;
     use crate::probe::Identity;
-    use crate::registry::{CachedUtilization, Quarantine, Registry, Strategy, WindowUtilization};
+    use crate::registry::{
+        Active, CachedUtilization, Quarantine, Registry, Strategy, WindowUtilization,
+    };
     use chrono::TimeZone;
 
     fn at(hour: u32) -> DateTime<Utc> {
@@ -1945,7 +1947,7 @@ mod tests {
             in_group(used(account("here@example.com"), 60.0), "work"),
             in_group(used(account("spare@example.com"), 20.0), "work"),
         ]);
-        registry.active = Some("here@example.com".to_string());
+        registry.active = Active::Settled("here@example.com".to_string());
 
         let model = Model::new(registry, at(12));
 

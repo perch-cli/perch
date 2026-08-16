@@ -320,11 +320,20 @@ fn render_human(
     }
 
     let broken = why_they_are_quarantined(registry, accounts);
-    if rows.iter().any(|row| row.active) || !broken.is_empty() {
+    // Said whether or not the `*` is in this listing: with a Switch in flight
+    // the marker is on the Account Perch was on rather than one it can
+    // establish is live, and a listing narrowed to a Group that Switch was
+    // leaving may carry no marker at all (ADR 0048).
+    let in_flight = registry.active.a_switch_in_flight();
+    if rows.iter().any(|row| row.active) || !broken.is_empty() || in_flight.is_some() {
         say(out, "")?;
     }
     if rows.iter().any(|row| row.active) {
         say(out, "* is the active Account.")?;
+    }
+    // Straight after the line it qualifies.
+    if let Some(said) = in_flight {
+        say(out, &said)?;
     }
 
     if matches!(scope, Scope::Ungrouped) {
@@ -431,7 +440,13 @@ fn render_json(
         // Named apart from `status --json`'s `active`, which is an object: one
         // command answers two questions under `--group`, and a script that
         // reaches for the wrong one should not find a plausible value there.
-        "active_account": registry.active,
+        "active_account": registry.active.whose(),
+        // What qualifies the key above, under the same name and the same shape
+        // it has in `status --json` (ADR 0048). Here as well as there because
+        // `perch status --group` is answered by this document, and which
+        // Account you are standing on is not a fact that stops being worth
+        // qualifying because the question widened to where you could land.
+        "landing": registry.active.document(),
         "accounts": listed,
         "refresh": report.document(),
     });

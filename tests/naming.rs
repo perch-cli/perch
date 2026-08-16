@@ -323,7 +323,7 @@ fn an_alias_command_on_a_registry_from_before_aliases_finds_nothing() {
     // hold is a state `validate` refuses rather than a machine anybody had.
     let host = logged_in_machine().with_file(
         REGISTRY_PATH,
-        r#"{"version":1,"active":"someone@example.com","accounts":[{"identity":{"email":"someone@example.com"},"enabled":true}]}"#,
+        r#"{"version":1,"active":{"settled":"someone@example.com"},"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true}]}"#,
     );
 
     let (result, _) = run_alias(
@@ -405,7 +405,7 @@ fn a_switch_accepts_the_spelling_every_other_command_accepts() {
     let (result, printed) = run_switch(&host, &SECOND_EMAIL.to_uppercase());
 
     result.expect("that is the Account, typed loudly");
-    assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
     assert!(printed.contains(SECOND_EMAIL), "{printed}");
 }
 
