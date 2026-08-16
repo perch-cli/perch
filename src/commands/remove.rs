@@ -28,7 +28,7 @@ use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::lock::Held;
 use crate::probe::Installed;
-use crate::registry::{self, Account, Registry};
+use crate::registry::{self, Account, Active, Registry};
 use crate::switch;
 use crate::target;
 
@@ -65,6 +65,13 @@ impl Consequence {
 
 pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()> {
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
+
+    // Removing the active Account lands somewhere first (ADR 0024), which
+    // reaches `make_live` — so this is a Switch path, and it resolves a Landing
+    // before anything reads which Account is active (ADR 0048). Before the
+    // question rather than after it, because who is active is half of what the
+    // user is being asked to agree to.
+    switch::resolve_a_landing(host, &mut perch, &mut registry)?;
 
     let found = target::resolve_account(&registry, &args.target)?;
     say(out, &found.matched)?;
@@ -297,6 +304,7 @@ fn land_on(
     let landed = switch::make_live(
         host,
         perch,
+        registry,
         successor,
         "the Default Profile, which is where the Account Perch would land on has \
          to be written",
@@ -304,7 +312,7 @@ fn land_on(
     let is_live = landed.as_ref().err().is_none_or(|stopped| stopped.is_live);
 
     if is_live {
-        registry.active = Some(successor.email().to_string());
+        registry.active = Active::Settled(successor.email().to_string());
         registry::save(host, perch, registry).map_err(|error| {
             error.with_note(&format!(
                 "Nothing was removed. {}'s Credential is the live one now, so \

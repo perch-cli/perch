@@ -92,7 +92,7 @@ fn asked_by(host: &FakeHost) -> Vec<String> {
 }
 
 fn active(host: &FakeHost) -> Option<String> {
-    registry_of(host).active
+    registry_of(host).active.whose().map(str::to_string)
 }
 
 /// A client that starts during the lock wait is a refusal the loop survives.
@@ -990,6 +990,45 @@ fn an_account_in_no_group_is_not_watched_however_freely_it_may_be_cycled() {
     );
 }
 
+/// The Watcher is a Switch path, so it settles a Landing — and where it cannot,
+/// it **holds rather than stops** (ADR 0048).
+///
+/// An unresolved Landing is a reason it may not act, indistinguishable in kind
+/// from being under Threshold or inside a Cooldown, and it gets the same
+/// treatment: nobody is there to answer, and stopping would turn a state one
+/// `perch relogin` clears into a dead Watcher somebody finds hours later. A
+/// Check has no process left to hold with, so it exits with the code the
+/// refusal earned.
+#[test]
+fn a_landing_the_watcher_cannot_settle_holds_the_loop_rather_than_stopping_it() {
+    let host = watching(&[99.0], 1.0);
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    // A Rotation after the interruption: the corner nothing on the machine can
+    // account for.
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a Switch left in flight is held on, not stopped on");
+    assert!(
+        printed.contains("held") && printed.contains("perch relogin"),
+        "it says what is holding it and the way through: {printed}"
+    );
+    assert!(
+        host.sent_to(USAGE_URL).is_empty(),
+        "and it holds without reading anything: a Watcher that may not act \
+         spends nothing finding out where it would have gone"
+    );
+
+    // A scheduler has to be told, which is the one difference between the two
+    // arrangements (ADR 0040).
+    let (once, _) = run_watch_once(&host);
+    assert_eq!(
+        once.expect_err("a Check exits on it").exit_code(),
+        perch::error::EXIT_CONFLICT
+    );
+}
+
 /// **ADR 0017, amended.** `watcher-may-act` deliberately does not Inherit into
 /// the Ungrouped Scope: it is gated behind `cycle-ungrouped`, so the watcher
 /// acts on ungrouped Accounts only where both are on.
@@ -1019,7 +1058,7 @@ fn a_watcher_turned_on_at_global_leaves_ungrouped_accounts_alone() {
         "the declaration that is still missing is named: {printed}"
     );
     assert_eq!(
-        registry_of(&host).active.as_deref(),
+        registry_of(&host).active.whose(),
         Some(EMAIL),
         "and nothing moved underneath them, at 99% used with an empty Account \
          beside it (ADR 0017) — which is the whole of what the grant protects, \
@@ -1056,7 +1095,7 @@ fn a_watcher_acts_among_ungrouped_accounts_once_both_declarations_are_made() {
     result.expect("a watcher that switched is not a failure");
     assert!(printed.contains("switched"), "{printed}");
     assert_eq!(
-        registry_of(&host).active.as_deref(),
+        registry_of(&host).active.whose(),
         Some(SECOND_EMAIL),
         "{printed}"
     );

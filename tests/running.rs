@@ -112,7 +112,7 @@ fn the_active_account_and_the_default_profile_are_untouched() {
 
     run_run(&host, SECOND_EMAIL).0.expect("the client ran");
 
-    assert_eq!(registry_of(&host).active.as_deref(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
     assert_eq!(
         host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
         Some(CREDENTIAL),
@@ -671,7 +671,7 @@ fn a_capture_into_the_profile_a_run_is_against_is_refused() {
     assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
     assert!(error.to_string().contains(EMAIL), "{error}");
     assert_eq!(
-        registry_of(&host).active.as_deref(),
+        registry_of(&host).active.whose(),
         Some(EMAIL),
         "nothing moved"
     );
@@ -698,7 +698,7 @@ fn switching_onto_the_account_a_run_is_against_succeeds() {
         .take()
         .expect("a Switch was attempted while the Run was live")
         .expect("a Run does not close an Account to a Switch");
-    assert_eq!(registry_of(&host).active.as_deref(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
 }
 
 /// A Run is killed often — closing the terminal is how a session usually ends —

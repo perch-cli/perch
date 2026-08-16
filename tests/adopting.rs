@@ -39,7 +39,7 @@ fn the_adopted_account_is_recorded_as_active() {
     let registry = registry::load(&host)
         .unwrap()
         .expect("a registry is written");
-    assert_eq!(registry.active.as_deref(), Some(EMAIL));
+    assert_eq!(registry.active.whose(), Some(EMAIL));
     assert_eq!(registry.accounts.len(), 1);
     assert_eq!(registry.accounts[0].plan.as_deref(), Some("pro"));
     assert_eq!(

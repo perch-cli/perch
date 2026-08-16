@@ -29,7 +29,7 @@ use crate::host::Host;
 use crate::login;
 use crate::probe::{self, Store};
 use crate::profile;
-use crate::registry::{self, Registry};
+use crate::registry::{self, Active, Registry};
 
 /// Refuses to import onto a machine that is already holding Accounts, and names
 /// the one command that makes room.
@@ -100,7 +100,7 @@ pub fn restored(export: &Export, path: &std::path::Path) -> Result<Registry> {
         .map_err(|refusal| refusal.with_note(&registry::the_file_to_edit(path)))?;
 
     Ok(Registry {
-        active: None,
+        active: Active::Nobody,
         checks: BTreeMap::new(),
         ..export.registry.clone()
     })
@@ -327,7 +327,7 @@ mod tests {
             quarantine: Some(Quarantine::RenewalRejected),
             ..account("two@example.com")
         });
-        registry.active = Some("one@example.com".into());
+        registry.active = Active::Settled("one@example.com".into());
 
         Export {
             version: CURRENT_VERSION,
@@ -392,7 +392,7 @@ mod tests {
         let restored =
             restored(&export, std::path::Path::new(REGISTRY)).expect("this build understands it");
 
-        assert_eq!(restored.active, None);
+        assert_eq!(restored.active, Active::Nobody);
         assert_eq!(restored.accounts.len(), 2);
         assert_eq!(
             restored.account("two@example.com").unwrap().quarantine,

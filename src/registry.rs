@@ -678,13 +678,94 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Which Account is active — and, while a Switch is under way, that Perch
+/// cannot yet say (ADR 0048).
+///
+/// One field with three states rather than two fields, so a registry naming
+/// both a settled active Account and a different in-flight one cannot be
+/// written at all. The registry already carries one dangling-pointer check for
+/// what this names; a second field would need a second, held by nothing but
+/// care.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Active {
+    /// Perch is on nobody: a machine that has never Switched, one a removal
+    /// left with nowhere to land, or one a repair took off the Account it could
+    /// not make live.
+    #[default]
+    Nobody,
+    /// One Account is active, nothing is in flight, and the live Credential is
+    /// theirs as far as anything Perch wrote is concerned.
+    Settled(String),
+    /// A **Landing**: a Switch that has been written down and not yet recorded.
+    ///
+    /// Written after the Capture and before the Credential moves, so a Perch
+    /// that finds one knows the live Credential is one of these two Accounts'
+    /// — or a Rotation of one of them — rather than knowing nothing at all.
+    /// Every Switch path settles one before it acts.
+    Landing {
+        /// The Account being left. `None` where Perch was on nobody, which is a
+        /// Switch with no Capture to lose.
+        leaving: Option<String>,
+        /// The Account being switched to.
+        arriving: String,
+    },
+}
+
+impl Active {
+    /// The Account to treat as active, which during a Landing is the one being
+    /// left.
+    ///
+    /// Nothing has been recorded as having moved, so the Account Perch was on
+    /// is the last thing it established — and every path that could *lose*
+    /// something by believing it settles the Landing first.
+    pub fn whose(&self) -> Option<&str> {
+        match self {
+            Active::Nobody => None,
+            Active::Settled(email) => Some(email),
+            Active::Landing { leaving, .. } => leaving.as_deref(),
+        }
+    }
+
+    /// Whether this address is named here in any role, case-folded like every
+    /// other way the registry is asked about a name.
+    pub fn names(&self, email: &str) -> bool {
+        match self {
+            Active::Nobody => false,
+            Active::Settled(held) => same_name(held, email),
+            Active::Landing { leaving, arriving } => {
+                same_name(arriving, email)
+                    || leaving
+                        .as_deref()
+                        .is_some_and(|leaving| same_name(leaving, email))
+            }
+        }
+    }
+
+    /// Being on the Account a Switch was leaving, or on nobody where it was
+    /// leaving nobody. What a Landing comes back to when nothing moved.
+    pub fn settled_on(leaving: Option<String>) -> Active {
+        match leaving {
+            Some(leaving) => Active::Settled(leaving),
+            None => Active::Nobody,
+        }
+    }
+
+    /// Absent from the file rather than written as a word, which is what the
+    /// registry of a machine that has never Switched has always looked like.
+    fn is_nobody(&self) -> bool {
+        matches!(self, Active::Nobody)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Registry {
     pub version: u32,
-    /// The email address of the active Account, if there is one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub active: Option<String>,
+    /// The active Account, or the Switch that was under way when Perch last
+    /// wrote this down.
+    #[serde(default, skip_serializing_if = "Active::is_nobody")]
+    pub active: Active,
     #[serde(default)]
     pub accounts: Vec<Account>,
     /// Alias to Account email. Empty until aliases land.
@@ -715,7 +796,7 @@ impl Default for Registry {
     fn default() -> Self {
         Registry {
             version: CURRENT_VERSION,
-            active: None,
+            active: Active::Nobody,
             accounts: Vec::new(),
             aliases: BTreeMap::new(),
             groups: BTreeMap::new(),
@@ -769,14 +850,14 @@ impl Registry {
     }
 
     pub fn active_account(&self) -> Option<&Account> {
-        self.active.as_deref().and_then(|email| self.account(email))
+        self.active.whose().and_then(|email| self.account(email))
     }
 
     /// Whether this address is the one the registry records as active.
     ///
     /// One place, and case-folded like every other way the registry is asked
     /// about a name. A dozen call sites spelled this as
-    /// `registry.active.as_deref() == Some(account.email())`, which is the one
+    /// `registry.active.whose() == Some(account.email())`, which is the one
     /// comparison in Perch that answered a question about an address by exact
     /// bytes — while [`account`] beside it has always answered the same question
     /// with [`same_name`].
@@ -794,7 +875,7 @@ impl Registry {
     /// [`account`]: Registry::account
     pub fn is_active(&self, email: &str) -> bool {
         self.active
-            .as_deref()
+            .whose()
             .is_some_and(|active| same_name(active, email))
     }
 
@@ -1225,12 +1306,12 @@ impl Registry {
         self.accounts
             .retain(|account| !same_name(account.email(), email));
         self.aliases.retain(|_, named| !same_name(named, email));
-        if self
-            .active
-            .as_deref()
-            .is_some_and(|held| same_name(held, email))
-        {
-            self.active = None;
+        // Either half of a Landing, and not only the Account being treated as
+        // active: a Landing naming an Account Perch no longer holds is a
+        // dangling pointer the registry refuses to load, and half a Switch is
+        // not a thing to keep a record of once one of its two ends is gone.
+        if self.active.names(email) {
+            self.active = Active::Nobody;
         }
     }
 
@@ -1705,13 +1786,30 @@ pub fn validate(registry: &Registry) -> Result<()> {
     //
     // Holding nothing is a state and not a fault: a machine that has never
     // switched has no active Account.
-    if let Some(active) = &registry.active
-        && registry.account(active).is_none()
-    {
-        return Err(PerchError::Invalid(format!(
-            "The registry says {active} is the active Account, which is not an \
-             Account Perch holds."
-        )));
+    //
+    // Both ends of a Landing, because both are pointers into the Accounts and
+    // resolving one reads the Credential of the other.
+    match &registry.active {
+        Active::Nobody => {}
+        Active::Settled(active) => refuse_a_dangling_pointer(
+            registry,
+            active,
+            &format!("says {active} is the active Account"),
+        )?,
+        Active::Landing { leaving, arriving } => {
+            if let Some(leaving) = leaving {
+                refuse_a_dangling_pointer(
+                    registry,
+                    leaving,
+                    &format!("says a Switch away from {leaving} was under way"),
+                )?;
+            }
+            refuse_a_dangling_pointer(
+                registry,
+                arriving,
+                &format!("says a Switch to {arriving} was under way"),
+            )?;
+        }
     }
 
     // The third member of the namespace, which nothing was checking. A Target is
@@ -1818,6 +1916,18 @@ pub fn validate(registry: &Registry) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Refuses one of `active`'s pointers into the Accounts naming somebody Perch
+/// does not hold. `said` is what the registry claims about that address, so
+/// each of the three pointers a Landing can carry says which one it was.
+fn refuse_a_dangling_pointer(registry: &Registry, email: &str, said: &str) -> Result<()> {
+    if registry.account(email).is_some() {
+        return Ok(());
+    }
+    Err(PerchError::Invalid(format!(
+        "The registry {said}, which is not an Account Perch holds."
+    )))
 }
 
 /// Refuses a pair of names in one half of the namespace that only case tells
@@ -2132,7 +2242,7 @@ mod tests {
         assert!(registry.account_mut("CAFÉ@EXAMPLE.COM").is_some());
         assert_eq!(registry.alias_of("Café@Example.com"), Some("work"));
 
-        registry.active = Some("CAFÉ@EXAMPLE.COM".into());
+        registry.active = Active::Settled("CAFÉ@EXAMPLE.COM".into());
         assert!(
             registry.is_active("café@example.com"),
             "and which Account is active is the same question, asked the same \
@@ -2197,7 +2307,7 @@ mod tests {
     #[test]
     fn an_active_pointer_naming_nothing_is_refused_like_a_dangling_alias() {
         let mut registry = Registry {
-            active: Some("nobody@example.com".to_string()),
+            active: Active::Settled("nobody@example.com".to_string()),
             ..Default::default()
         };
 
@@ -2207,7 +2317,7 @@ mod tests {
             "{refused}"
         );
 
-        registry.active = None;
+        registry.active = Active::Nobody;
         validate(&registry).expect("holding nothing is a state rather than a fault");
     }
 
@@ -2416,7 +2526,7 @@ mod tests {
         let before = load(&host).expect("it reads").expect("they wrote one");
 
         let stale = Registry {
-            active: Some("someone@example.com".into()),
+            active: Active::Settled("someone@example.com".into()),
             ..Registry::default()
         };
         let refused = save(&host, &mut perch, &stale).expect_err("this one may no longer write");
@@ -2504,7 +2614,7 @@ mod tests {
             .with_unwritable_file(path, "No space left on device (os error 28)");
 
         let registry = Registry {
-            active: Some("someone@example.com".into()),
+            active: Active::Settled("someone@example.com".into()),
             ..Registry::default()
         };
         let mut perch = lock(&host).expect("the registry lock is free");
@@ -2559,7 +2669,7 @@ mod tests {
             group: None,
             utilization: None,
         });
-        registry.active = Some("someone@example.com".into());
+        registry.active = Active::Settled("someone@example.com".into());
 
         let json = serde_json::to_string(&registry).unwrap();
         let back: Registry = serde_json::from_str(&json).unwrap();

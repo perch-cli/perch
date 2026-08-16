@@ -376,6 +376,22 @@ pub fn save_registry(host: &FakeHost, registry: &perch::registry::Registry) {
     perch::registry::save(host, &mut perch, registry).expect("the registry is written");
 }
 
+/// What a Perch killed mid-Switch leaves on the registry: a Landing naming the
+/// Account it was leaving and the one it was switching to (ADR 0048).
+///
+/// The registry half only. What the *machine* holds — which Credential is live,
+/// and who `.claude.json` names — is the other half of the state, and it is the
+/// half each test arranges for itself, because that is what the Landing is
+/// settled against.
+pub fn a_switch_died_mid_flight(host: &FakeHost, leaving: Option<&str>, arriving: &str) {
+    let mut registry = registry_of(host);
+    registry.active = perch::registry::Active::Landing {
+        leaving: leaving.map(str::to_string),
+        arriving: arriving.to_string(),
+    };
+    save_registry(host, &registry);
+}
+
 /// `perch group add <name>`, for the tests that only need the Group to exist.
 pub fn declare_group(host: &FakeHost, name: &str) {
     run_group(

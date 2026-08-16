@@ -23,6 +23,7 @@ use perch::error::{
 };
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
+use perch::registry::Active;
 
 /// A machine where a check finds the active Account following `here` and the
 /// Account it could move to following `there` — one figure per reading, the
@@ -36,7 +37,7 @@ fn checked(here: &[f64], there: &[f64]) -> FakeHost {
 }
 
 fn active(host: &FakeHost) -> Option<String> {
-    registry_of(host).active
+    registry_of(host).active.whose().map(str::to_string)
 }
 
 /// Everything the check waited for, which is what a scheduled command has no
@@ -500,7 +501,7 @@ fn a_check_stopped_by_something_that_will_not_clear_itself_exits_on_it() {
 fn a_check_with_nobody_active_says_there_is_nothing_to_watch() {
     let host = checked(&[10.0], &[10.0]);
     let mut registry = registry_of(&host);
-    registry.active = None;
+    registry.active = Active::Nobody;
     save_registry(&host, &registry);
 
     let (result, printed) = run_watch_once(&host);

@@ -131,7 +131,7 @@ fn keys_that_fit(keys: &str, width: usize) -> String {
 /// The tab bar, and the one fact that belongs to no tab: which Account is
 /// active. It is on every frame because it is what the whole command is about.
 fn render_bar(frame: &mut Frame, model: &Model, area: Rect) {
-    let active = match &model.registry().active {
+    let active = match model.registry().active.whose() {
         Some(email) => format!("active: {email} "),
         None => "no active Account ".to_string(),
     };

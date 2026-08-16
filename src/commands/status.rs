@@ -22,7 +22,7 @@ use crate::commands::say_json;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::observe::{self, Report};
-use crate::registry::{self, Account, Registry};
+use crate::registry::{self, Account, Active, Registry};
 use crate::utilization;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -50,7 +50,19 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
         }
         false => (None, adopt::ensure_adopted(host)?),
     };
-    let active = active_email(&registry)?;
+    // Perch on nobody *because* a Switch was in flight and never recorded is
+    // not an absence to report — it is the answer to why the absence is there,
+    // and it exits 0 like every other way of saying one (ADR 0048). A Landing
+    // that left nobody behind is the one shape with no Account under it to
+    // describe, so what it gets is the line and the field alone.
+    let active = match (
+        active_email(&registry),
+        a_switch_in_flight(&registry.active),
+    ) {
+        (Ok(active), _) => active,
+        (Err(_), Some(said)) => return the_switch_alone(out, &registry, args.json, &said),
+        (Err(nobody), None) => return Err(nobody),
+    };
 
     // Being in no Group is not a Group (ADR 0017), so from an ungrouped Account
     // the answer to "where would I land" is every ungrouped Account together
@@ -70,13 +82,24 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
 
     let now = host.now();
     match scope {
-        Some(scope) => list::render(host, out, &registry, scope, now, args.json, &report),
+        Some(scope) => {
+            // Said before the listing rather than inside it. `--group` widens
+            // the question to "where would I land", which is the listing's to
+            // draw (ADR 0053) — but which Account you are standing on is this
+            // command's to qualify, whichever question it is answering.
+            if let Some(said) = a_switch_in_flight(&registry.active)
+                && !args.json
+            {
+                utilization::write_labelled(out, "Switch", &said)?;
+            }
+            list::render(host, out, &registry, scope, now, args.json, &report)
+        }
         None => {
             let account = registry.held(&active)?;
             if args.json {
                 render_json(host, out, &registry, account, now, &report)
             } else {
-                render_human(out, account, now, &report)
+                render_human(out, &registry, account, now, &report)
             }
         }
     }
@@ -131,11 +154,19 @@ fn to_refresh(registry: &Registry, scope: &Option<Scope>, active: &str) -> Vec<S
 
 fn render_human(
     out: &mut dyn Write,
+    registry: &Registry,
     account: &Account,
     now: DateTime<Utc>,
     report: &Report,
 ) -> Result<()> {
     report.write_notes_beside_the_accounts(out)?;
+
+    // Above the Account line, because it is what qualifies it: with a Switch in
+    // flight, the Account named below is the one Perch was on rather than the
+    // one it can establish is live.
+    if let Some(said) = a_switch_in_flight(&registry.active) {
+        utilization::write_labelled(out, "Switch", &said)?;
+    }
 
     utilization::write_labelled(out, "Account", account.email())?;
     if let Some(organization) = &account.identity.organization_name {
@@ -184,9 +215,73 @@ fn render_json(
 ) -> Result<()> {
     let document = json!({
         "active": list::document(host, registry, account, now)?,
+        "landing": the_landing(&registry.active),
         "utilization": utilization::document(account, now),
         "refresh": report.document(),
     });
 
     say_json(out, &document)
+}
+
+/// The whole of the report where a Landing left nobody behind: the Switch that
+/// was in flight, and no Account section, because there is no Account
+/// established to put in one.
+///
+/// The `--json` document keeps every key the ordinary one has, with the ones it
+/// cannot answer left empty. A script reaching for `.utilization` on this
+/// machine is asking about an Account Perch cannot name, and `null` is that
+/// answer — where a document missing the key is a script's `jq` failing for
+/// what reads like a different reason.
+fn the_switch_alone(
+    out: &mut dyn Write,
+    registry: &Registry,
+    json: bool,
+    said: &str,
+) -> Result<()> {
+    if !json {
+        return utilization::write_labelled(out, "Switch", said);
+    }
+    say_json(
+        out,
+        &json!({
+            "active": serde_json::Value::Null,
+            "landing": the_landing(&registry.active),
+            "utilization": serde_json::Value::Null,
+            "refresh": Report::default().document(),
+        }),
+    )
+}
+
+/// The Switch that was in flight, as a script reads it.
+fn the_landing(active: &Active) -> serde_json::Value {
+    match active {
+        Active::Landing { leaving, arriving } => json!({
+            "leaving": leaving,
+            "arriving": arriving,
+        }),
+        _ => serde_json::Value::Null,
+    }
+}
+
+/// What there is to say about a Switch that was in flight and never recorded,
+/// or `None` on the machines where there was not one.
+///
+/// Said at all because half of why this hazard survived is that a machine
+/// mid-Landing is indistinguishable from a healthy one, so nobody looks (ADR
+/// 0048). It does not change the exit code: status reports what it found rather
+/// than judging it (ADR 0018), and a state the next Switch resolves by itself
+/// should not fail somebody's shell prompt.
+fn a_switch_in_flight(active: &Active) -> Option<String> {
+    let Active::Landing { leaving, arriving } = active else {
+        return None;
+    };
+    let was_on = match leaving {
+        Some(leaving) => format!("Perch was on {leaving}"),
+        None => "Perch was on no Account".to_string(),
+    };
+    Some(format!(
+        "in flight and not recorded — {was_on} and was switching to {arriving}, \
+         so which Credential is live is not settled. The next Switch resolves \
+         it, and says so if it cannot."
+    ))
 }

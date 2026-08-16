@@ -583,7 +583,7 @@ const ROTATED: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-rotated",
 fn the_active_accounts_credential_is_the_live_one_rather_than_the_copy_in_its_profile() {
     let host = machine_with_three_accounts();
     assert_eq!(
-        registry_of(&host).active.as_deref(),
+        registry_of(&host).active.whose(),
         Some(EMAIL),
         "the fixture's premise"
     );

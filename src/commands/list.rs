@@ -431,7 +431,7 @@ fn render_json(
         // Named apart from `status --json`'s `active`, which is an object: one
         // command answers two questions under `--group`, and a script that
         // reaches for the wrong one should not find a plausible value there.
-        "active_account": registry.active,
+        "active_account": registry.active.whose(),
         "accounts": listed,
         "refresh": report.document(),
     });

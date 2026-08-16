@@ -44,6 +44,13 @@ struct Decision {
 pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()> {
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
+    // Before anything is decided, because everything after this reads which
+    // Account is active and a registry holding a Landing does not know (ADR
+    // 0048). A step of its own: the Cycle below picks a Scope from the Account
+    // Perch is on, `already_there` compares against it, and the Capture files
+    // the live Credential under it.
+    switch::resolve_a_landing(host, &mut perch, &mut registry)?;
+
     let Decision { incoming, caveat } = decide(&registry, args.target.as_deref(), host.now(), out)?;
     let outgoing = registry.active_account().cloned();
 
@@ -66,7 +73,7 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
         &installed,
         &incoming,
         outgoing.as_ref(),
-        &registry,
+        &mut registry,
     );
     let captured = landing.record(host, &mut perch, &mut registry)?;
 
@@ -118,7 +125,7 @@ fn decide(
     let choice = cycle::choose(
         registry,
         &scope,
-        registry.active.as_deref(),
+        registry.active.whose(),
         &cycle::SetAside::nothing(),
         now,
     )?;

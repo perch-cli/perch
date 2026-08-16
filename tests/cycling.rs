@@ -17,6 +17,7 @@ use perch::error::{
 };
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
+use perch::registry::Active;
 
 /// Turns on the global setting that says the ungrouped Accounts are
 /// interchangeable (ADR 0017), the way a user turns it on.
@@ -31,7 +32,7 @@ fn live_credential(host: &FakeHost) -> Option<String> {
 }
 
 fn active(host: &FakeHost) -> Option<String> {
-    registry_of(host).active
+    registry_of(host).active.whose().map(str::to_string)
 }
 
 #[test]
@@ -593,7 +594,7 @@ fn a_cycle_away_from_a_live_profile_is_refused() {
 fn a_bare_switch_with_nobody_active_says_there_is_no_group_to_cycle_within() {
     let host = three_accounts_in_one_group();
     let mut registry = registry_of(&host);
-    registry.active = None;
+    registry.active = Active::Nobody;
     save_registry(&host, &registry);
 
     let written_before = credentials_written(&host);

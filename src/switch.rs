@@ -3,7 +3,11 @@
 //! Making an Account active is a Capture of the outgoing Credential into its
 //! own Profile, a write of the incoming one to the Default Profile, and a patch
 //! of the Identity to match — in that order, under Claude Code's locks (ADR
-//! 0006). The order is not a preference:
+//! 0006). One precondition stands over the three: **Perch does not move the
+//! live Credential until it has written down that it is about to** (ADR 0048).
+//! That record is a [`Landing`] in the registry, written between the first step
+//! and the second, and [`resolve_a_landing`] is what a later Switch does with
+//! one it finds. The order is not a preference:
 //!
 //! - Capturing **first** is what stops a Switch poisoning the Account it
 //!   leaves. Anthropic retires a refresh token when it Rotates one, so the copy
@@ -26,7 +30,7 @@ use crate::host::{self, Host};
 use crate::lock;
 use crate::probe::{self, Credential, Installed, Store};
 use crate::profile;
-use crate::registry::{self, Account, Quarantine, Registry};
+use crate::registry::{self, Account, Active, Quarantine, Registry};
 
 /// What the Capture found, which is the part of a Switch worth saying out loud:
 /// it is the part that protects the Account being left behind.
@@ -71,14 +75,22 @@ pub enum Captured {
     NothingToSave,
 }
 
-/// A Switch that has been performed and not yet written down.
+/// A Switch under way in this process, and the registry record of it.
 ///
-/// Between [`perform`] returning and [`Landing::record`] there is a machine
-/// acting as one Account while Perch's own record names another: the write to
-/// the Default Profile is the second of the three steps, and the patch after it
-/// can fail. That gap is the whole of what ADR 0006 is about — the next Switch
-/// Captures the live Credential into the Profile the registry names, and where
-/// that is the wrong Account its only good copy is gone.
+/// Between the Landing being written down and [`Landing::record`] there is a
+/// machine that may be acting as one Account while Perch's own record names
+/// another: the write to the Default Profile is the second of the three steps,
+/// and the patch after it can fail. That gap is the whole of what ADR 0006 is
+/// about — the next Switch Captures the live Credential into the Profile the
+/// registry names, and where that is the wrong Account its only good copy is
+/// gone.
+///
+/// What closes it is that the gap is **written down before it opens** (ADR
+/// 0048). [`perform`] saves an [`Active::Landing`] naming both Accounts after
+/// the Capture and before the Credential moves, so a Perch that arrives on this
+/// state — because this process died in it, or because the registry could not
+/// be written afterwards — knows which two Accounts the live Credential could
+/// belong to instead of believing the stale answer.
 ///
 /// So there is no way to read what a Switch found without recording it first.
 /// `record` consumes the Landing and hands back the [`Captured`]; what it
@@ -93,7 +105,15 @@ pub struct Landing {
     /// The Account this Switch was to. Held rather than borrowed, so a caller
     /// may hand `record` the `&mut Registry` the Account was read out of.
     incoming: String,
+    /// The Account it was leaving, for the same reason and for one more: where
+    /// nothing moved, this is who is active, and saying so is what takes the
+    /// Landing back off the registry.
+    leaving: Option<String>,
     incoming_is_live: bool,
+    /// Whether the Landing reached the registry. False for every way a Switch
+    /// can fail before the Credential was ever going to move, which is every
+    /// way that has nothing to take back.
+    wrote_it_down: bool,
 }
 
 impl Landing {
@@ -130,32 +150,75 @@ impl Landing {
     ///
     /// Nothing here decides what a Quarantine is: the failure itself says which
     /// one, diagnosed where it was diagnosed, and this reads it off the error.
+    ///
+    /// A Switch that wrote a Landing down and then moved nothing takes it back,
+    /// which is the fourth thing and the only one that is best effort. Nothing
+    /// is lost by a take-back that does not happen: a Landing left on the
+    /// registry is settled by the next Switch off the two Credentials it names,
+    /// which is exactly the answer this line already knows. What it saves is
+    /// somebody reading `perch status` and being told a Switch is in flight
+    /// when the failure they are looking at says it never started.
     pub fn record(
         self,
         host: &dyn Host,
         perch: &mut lock::Held<'_>,
         registry: &mut Registry,
     ) -> Result<Captured> {
-        if let Err(PerchError::Quarantined { why, .. }) = &self.outcome
-            && registry.quarantine(&self.incoming, *why)
+        let Landing {
+            outcome,
+            incoming,
+            leaving,
+            incoming_is_live,
+            wrote_it_down,
+        } = self;
+
+        if let Err(PerchError::Quarantined { why, .. }) = &outcome
+            && registry.quarantine(&incoming, *why)
         {
             let _ = registry::save(host, perch, registry);
         }
 
-        match self.outcome {
+        match outcome {
             Ok(captured) => {
-                record_active(host, perch, registry, &self.incoming)?;
+                record_active(host, perch, registry, &incoming)?;
                 Ok(captured)
             }
-            Err(error) if self.incoming_is_live => {
-                match record_active(host, perch, registry, &self.incoming) {
+            Err(error) if incoming_is_live => {
+                match record_active(host, perch, registry, &incoming) {
                     Ok(()) => Err(error),
                     Err(unrecorded) => Err(error.with_note(&unrecorded.to_string())),
                 }
             }
-            Err(error) => Err(error),
+            Err(error) => {
+                if wrote_it_down {
+                    take_the_landing_back(host, perch, registry, Active::settled_on(leaving));
+                }
+                Err(error)
+            }
         }
     }
+}
+
+/// Takes a Landing back off the registry, saying who is active instead.
+///
+/// Best effort, and the one write in a Switch that is. Nothing is lost by a
+/// take-back that does not happen: a Landing left on the registry is resolved
+/// by the next Switch off the two Credentials it names, which is exactly the
+/// answer the caller has here. What it buys is that the registry agrees with
+/// the sentence the user is reading — a failure that says "nothing was
+/// switched" beside a `perch status` announcing a Switch in flight is two
+/// truths that read as a contradiction.
+///
+/// One place, because both doors write it: [`Landing::record`] where nothing
+/// moved, and [`make_live`], which has no `record` of its own to reach.
+fn take_the_landing_back(
+    host: &dyn Host,
+    perch: &mut lock::Held<'_>,
+    registry: &mut Registry,
+    settled: Active,
+) {
+    registry.active = settled;
+    let _ = registry::save(host, perch, registry);
 }
 
 /// Records which Account is active, and says what it costs when that write
@@ -167,7 +230,7 @@ fn record_active(
     registry: &mut Registry,
     incoming: &str,
 ) -> Result<()> {
-    registry.active = Some(incoming.to_string());
+    registry.active = Active::Settled(incoming.to_string());
     registry::save(host, perch, registry).map_err(|error| {
         error.with_note(&format!(
             "The Switch itself worked: {incoming}'s Credential is the live one. \
@@ -195,16 +258,23 @@ struct Prepared {
 
 /// Makes `incoming` the active Account, Capturing `outgoing` on the way out.
 ///
+/// `registry` is expected to be settled: a caller hands this the Account it
+/// found active, and [`resolve_a_landing`] is what makes that answer worth
+/// anything on a machine where a Switch was interrupted. Handed a stale
+/// `outgoing`, the Capture files the live Credential under the wrong Account,
+/// which is the one loss ADR 0006 exists to prevent.
+///
 /// `perch` is the caller's hold on the registry, renewed alongside Claude Code's
 /// locks for the same reason and against the same hazard. It is held from before
 /// the load to after the save, so every slow step below runs under it — and it
 /// goes stale in ninety seconds. A keychain that stopped to ask the user for
 /// permission ran that out, another Perch cleared the artifact and worked under
 /// it, and the [`Landing::record`] that follows this then refused: the live
-/// Credential belongs to `incoming` while the registry still names `outgoing`,
-/// so the *next* Switch Captures the live Credential into `outgoing`'s Profile
-/// and destroys its only copy (ADR 0006). Re-running the Switch does not repair
-/// that, because `already_there` answers before the recording is reached.
+/// Credential belongs to `incoming` while the registry still names `outgoing`.
+/// The Landing write below is what disarms that. It is the first thing the
+/// burned hold meets, so a Switch whose hold went stale during the Capture is
+/// refused with nothing moved rather than moving the Credential and being
+/// unable to say so.
 ///
 /// Returns a [`Landing`] rather than a `Result`, because whether a Switch
 /// succeeded is not a thing a caller may act on before it has written down what
@@ -215,15 +285,19 @@ pub fn perform(
     installed: &Installed,
     incoming: &Account,
     outgoing: Option<&Account>,
-    registry: &Registry,
+    registry: &mut Registry,
 ) -> Landing {
+    let leaving = outgoing.map(|outgoing| outgoing.email().to_string());
+
     // Nothing has been written and nothing can have moved, so either of these is
     // a Landing that did not land — the same shape, so that the one way out is
     // the same way out.
     let failed = |error| Landing {
         outcome: Err(error),
         incoming: incoming.email().to_string(),
+        leaving: leaving.clone(),
         incoming_is_live: false,
+        wrote_it_down: false,
     };
 
     if let Err(error) = refuse_a_shared_profile(incoming, registry) {
@@ -236,6 +310,7 @@ pub fn perform(
     };
 
     let mut incoming_is_live = false;
+    let mut wrote_it_down = false;
     let switched: Result<Captured> = lock::under(host, probe::locks_for(&store), |held| {
         let prepared = prepare(host, incoming, outgoing, installed.clone(), store)?;
 
@@ -248,6 +323,19 @@ pub fn perform(
         let captured = holds
             .around(|| capture(host, &prepared, incoming, outgoing, registry))
             .map_err(|error| error.with_note(&nothing_happened(outgoing)))?;
+
+        // After the Capture and before the Credential moves (ADR 0048). Later
+        // than the Capture because the Capture is safe to crash inside — it
+        // writes the live Credential into the Profile of the Account the
+        // registry already names, which is where that Credential belongs — and
+        // because a Landing written earlier would be one every refusal at step
+        // one then had to remember to take back.
+        holds
+            .around_a_registry_write(|perch| {
+                write_it_down(host, perch, registry, &leaving, incoming)
+            })
+            .map_err(|error| error.with_note(&nothing_happened(outgoing)))?;
+        wrote_it_down = true;
 
         holds
             .around(|| {
@@ -266,8 +354,44 @@ pub fn perform(
     Landing {
         outcome: switched,
         incoming: incoming.email().to_string(),
+        leaving,
         incoming_is_live,
+        wrote_it_down,
     }
+}
+
+/// Writes down that the Credential is about to move, before it moves.
+///
+/// The registry and nothing beside it. A sidecar could be written outside the
+/// perch lock, which is the only argument for one, and that argument is
+/// self-defeating: it puts two writers on one fact. The Landing exists to
+/// describe a disagreement between the registry and the machine, and the two
+/// halves of one fact should not be readable apart (ADR 0048).
+///
+/// The in-memory registry is put back where a save fails, so a caller that goes
+/// on to write it — `record`, saving a Quarantine — cannot put a Landing on
+/// disk that this call already established could not be written.
+fn write_it_down(
+    host: &dyn Host,
+    perch: &mut lock::Held<'_>,
+    registry: &mut Registry,
+    leaving: &Option<String>,
+    incoming: &Account,
+) -> Result<()> {
+    let before = registry.active.clone();
+    registry.active = Active::Landing {
+        leaving: leaving.clone(),
+        arriving: incoming.email().to_string(),
+    };
+
+    if let Err(error) = registry::save(host, perch, registry) {
+        registry.active = before;
+        return Err(error.with_note(
+            "Perch does not move the live Credential until it has written down \
+             that it is about to, so nothing was moved.",
+        ));
+    }
+    Ok(())
 }
 
 /// Makes an Account's Credential the live one without Capturing what it
@@ -296,9 +420,19 @@ pub fn perform(
 /// removal, and the refusal is read by somebody deciding which client to quit.
 /// Written in here, it told a `perch remove` about "this Account's repaired
 /// Credential" — nothing was being repaired, and what lands is the successor's.
+///
+/// It writes a Landing, as [`perform`] does and for the reason ADR 0048 gives
+/// for guarding both doors: skipping the Capture is what makes this different
+/// going in, and it makes no difference coming out. The same two writes, the
+/// same gap, and `perch remove` of the active Account is the door somebody
+/// walks through while deleting things. The caller records who is active
+/// afterwards — that is not this to sequence — but a `make_live` that moved
+/// nothing takes its own Landing back, because the caller writes nothing on
+/// that path at all.
 pub fn make_live(
     host: &dyn Host,
     perch: &mut lock::Held<'_>,
+    registry: &mut Registry,
     account: &Account,
     whose: &str,
 ) -> std::result::Result<(), NotLanded> {
@@ -306,8 +440,10 @@ pub fn make_live(
         error,
         is_live: false,
     })?;
+    let leaving = registry.active.whose().map(str::to_string);
 
     let mut is_live = false;
+    let mut wrote_it_down = false;
     let landed = lock::under(host, probe::locks_for(&store), |held| {
         // Under the locks, for the reason [`Prepared`] gives and `perch
         // relogin` had no equivalent of: the caller asked this question minutes
@@ -325,12 +461,39 @@ pub fn make_live(
         let prepared = prepare(host, account, None, installed, store)?;
         let mut holds = lock::Holds::of(held, perch);
 
+        holds.around_a_registry_write(|perch| {
+            write_it_down(host, perch, registry, &leaving, account)
+        })?;
+        wrote_it_down = true;
+
         holds.around(|| {
             profile::store_credential(host, &prepared.store, prepared.credential.as_str())
         })?;
         is_live = true;
         holds.around(|| patch_identity(host, &prepared))
     });
+
+    // However it ended, the Landing this wrote comes back off. Either the
+    // Credential moved, and this Account is active, or it did not, and the
+    // Account Perch was on still is — and both are answers this call has rather
+    // than questions it leaves behind. On every way out, because the two
+    // callers write the registry on different subsets of them: `perch remove`
+    // records the successor where the Credential went live and nowhere else,
+    // and `perch relogin` writes nothing at all on the way out of a repair that
+    // worked. Left to them, a `perch relogin` of the Account you are on
+    // finished perfectly and left `perch status` announcing a Switch in flight
+    // for ever.
+    //
+    // What the caller writes afterwards is the write whose failure is worth a
+    // sentence, which is why this one is best effort and says nothing: saying
+    // it twice would be saying it in the wrong words once.
+    if wrote_it_down {
+        let settled = match is_live {
+            true => Active::Settled(account.email().to_string()),
+            false => Active::settled_on(leaving),
+        };
+        take_the_landing_back(host, perch, registry, settled);
+    }
 
     landed.map_err(|error| NotLanded { error, is_live })
 }
@@ -346,6 +509,151 @@ pub struct NotLanded {
     pub error: PerchError,
     /// Whether the Account's Credential is the live one despite the failure.
     pub is_live: bool,
+}
+
+/// Settles a registry that holds a Landing, so that what follows runs against a
+/// registry that tells the truth.
+///
+/// A step of its own, ahead of everything else a Switch path does, and this is
+/// what keeps [`capture`] the function it was always written to be: `capture`
+/// answers *is there a Rotation to save*, and this answers *who is active*.
+/// Those are different questions, and the declines in `capture` are what it
+/// looks like when one function is made to answer both (ADR 0048).
+///
+/// The live Credential carries no owner — `claudeAiOauth` is a pair of tokens,
+/// an expiry, a scope list and a subscription type, and no address — so this is
+/// never inspection. It is byte-equality against copies Perch already holds,
+/// asked in the order that settles it most cheaply, and a Rotation since the
+/// interruption defeats it by construction. That corner is refused rather than
+/// guessed at.
+///
+/// Cheap where there is nothing to settle: a registry not holding a Landing is
+/// one enum arm and no I/O at all, which is every command on every ordinary
+/// machine.
+pub fn resolve_a_landing(
+    host: &dyn Host,
+    perch: &mut lock::Held<'_>,
+    registry: &mut Registry,
+) -> Result<()> {
+    let Active::Landing { leaving, arriving } = registry.active.clone() else {
+        return Ok(());
+    };
+
+    // A store that will not answer says nothing about what it holds, and what
+    // it holds is the whole of the evidence. Refused rather than guessed at,
+    // for the reason `capture` refuses the same silence: a Switch that has to
+    // be run again after a `chmod` is recoverable where a lost refresh token is
+    // not.
+    let store = registry::the_default_profile(host)?;
+    let live = credentials::read(host, &store).map_err(|would_not_answer| {
+        would_not_answer.with_note(&format!(
+            "A Switch to {arriving} was in flight and was not recorded, and the \
+             live Credential is the only thing that says whether it happened — \
+             so nothing was changed. Make that store readable and run this \
+             again."
+        ))
+    })?;
+
+    let settled = whose_the_live_credential_is(
+        host,
+        registry,
+        leaving.as_deref(),
+        &arriving,
+        live.as_ref().map(|held| held.credential.as_str()),
+    )
+    .ok_or_else(|| {
+        PerchError::Conflict(the_landing_is_unaccounted_for(
+            leaving.as_deref(),
+            &arriving,
+        ))
+    })?;
+
+    registry.active = settled;
+    registry::save(host, perch, registry)
+}
+
+/// Which Account the live Credential belongs to, or `None` where nothing on the
+/// machine says.
+///
+/// The two Accounts the Landing names are asked first, so the ordinary path
+/// costs two reads. Every other held Account is the **fallback**, and it is a
+/// fallback rather than a sweep: it is one keychain prompt each on macOS, and
+/// it is reached only where a Landing says a Switch was in flight.
+fn whose_the_live_credential_is(
+    host: &dyn Host,
+    registry: &Registry,
+    leaving: Option<&str>,
+    arriving: &str,
+    live: Option<&str>,
+) -> Option<Active> {
+    // Nothing live is nothing a later Capture could destroy, so this is the one
+    // reading with nothing at stake in it: the Account being left is where the
+    // registry already was, and a `claude /logout` mid-Switch is what it looks
+    // like.
+    let Some(live) = live else {
+        return Some(Active::settled_on(leaving.map(str::to_string)));
+    };
+
+    let holding = |email: &str| {
+        registry
+            .account(email)
+            .and_then(|account| held_by(host, account))
+            .is_some_and(|held| held == live)
+    };
+
+    if holding(arriving) {
+        return Some(Active::Settled(arriving.to_string()));
+    }
+    if let Some(leaving) = leaving
+        && holding(leaving)
+    {
+        return Some(Active::Settled(leaving.to_string()));
+    }
+
+    registry
+        .accounts
+        .iter()
+        .find(|account| {
+            !registry::same_name(account.email(), arriving)
+                && !leaving.is_some_and(|leaving| registry::same_name(account.email(), leaving))
+                && held_by(host, account).is_some_and(|held| held == live)
+        })
+        .map(|account| Active::Settled(account.email().to_string()))
+}
+
+/// The corner that stays undecidable: a Landing in flight, and a live Credential
+/// matching nobody's stored copy — a Rotation after the interruption, with
+/// nothing on the machine to say whose.
+///
+/// Both readings named, because the remedies are different and the user is the
+/// only one who knows which happened. Not a Quarantine: nothing is lost in that
+/// state and the live Credential very likely works, and Quarantine is for a
+/// Credential established to be unusable.
+fn the_landing_is_unaccounted_for(leaving: Option<&str>, arriving: &str) -> String {
+    let said = format!(
+        "A Switch to {arriving} was written down and never recorded, and the live \
+         Credential is not the one Perch holds for {arriving}"
+    );
+    match leaving {
+        Some(leaving) => format!(
+            "{said}, nor the one it holds for {leaving}, nor any other it holds — \
+             so Perch cannot tell whether that Switch moved anything.\n\
+             It may be {arriving}'s, Rotated since the Switch finished. It may be \
+             {leaving}'s, Rotated since the Switch failed to start. Nothing on \
+             the machine tells the two apart, and writing over the wrong one \
+             destroys the only good copy — so nothing was changed.\n\
+             `perch relogin {arriving}` finishes that Switch and `perch relogin \
+             {leaving}` abandons it: either one replaces whatever is live with a \
+             fresh login for the Account you meant."
+        ),
+        None => format!(
+            "{said}, nor any other it holds, and Perch was on no Account before it \
+             — so nothing on the machine says whose the live Credential is.\n\
+             Nothing was changed, because writing over it would destroy the only \
+             good copy there is. `perch relogin {arriving}` replaces whatever is \
+             live with a fresh login for {arriving}, which is the way through."
+        ),
+    }
 }
 
 /// Whether the machine already says what a Switch to this Account would make it
@@ -932,15 +1240,19 @@ mod tests {
                 utilization: None,
             });
         }
-        registry.active = Some(OUTGOING.to_string());
+        registry.active = Active::Settled(OUTGOING.to_string());
         registry
     }
 
+    /// A Landing as `perform` hands one back: written down, because everything
+    /// below is about what `record` does with one that was.
     fn landing(outcome: Result<Captured>, incoming_is_live: bool) -> Landing {
         Landing {
             outcome,
             incoming: INCOMING.to_string(),
+            leaving: Some(OUTGOING.to_string()),
             incoming_is_live,
+            wrote_it_down: true,
         }
     }
 
@@ -987,7 +1299,7 @@ mod tests {
                 quarantine: None,
             },
             Case {
-                what: "a Switch that failed before it wrote anything",
+                what: "a Switch that failed before the Credential moved",
                 outcome: Err(ordinary()),
                 moved: false,
                 active: OUTGOING,
@@ -1032,9 +1344,10 @@ mod tests {
                 case.what
             );
             assert_eq!(
-                registry.active.as_deref(),
-                Some(case.active),
-                "{}: which Account is active is a fact about which Credential is live",
+                registry.active,
+                Active::Settled(case.active.to_string()),
+                "{}: which Account is active is a fact about which Credential is \
+                 live, and a Landing is not left behind either way",
                 case.what
             );
             assert_eq!(

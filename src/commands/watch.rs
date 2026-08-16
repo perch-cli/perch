@@ -564,6 +564,20 @@ fn one_round(
     backoff: &mut Backoff,
 ) -> Result<Turn> {
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
+
+    // A Switch path, so it resolves a Landing before it reads anything off the
+    // registry (ADR 0048) — the Account this round watches is the Account the
+    // Capture would file the live Credential under.
+    //
+    // Where it refuses, nobody is there to answer, so it travels as the same
+    // "not arranged for watching" the permission failures do: the loop holds
+    // and comes back, because a state one `perch relogin` clears must not
+    // become a dead Watcher somebody finds hours later, and a Check exits with
+    // the code the refusal earned, because a scheduler has to be told.
+    if let Err(unsettled) = switch::resolve_a_landing(host, &mut perch, &mut registry) {
+        return Ok(Turn::NotArranged(unsettled));
+    }
+
     // Handed back rather than raised, so the two callers can answer it
     // differently without this one having to know which is asking (ADR 0040).
     // A loop holds on it and a Check exits on it, and the difference is
@@ -681,7 +695,9 @@ fn one_round(
 enum Turn {
     /// The round read, and decided.
     Decided(Round),
-    /// There was nothing here to watch, and this says what is missing.
+    /// There was nothing here the watcher may act on, and this says why —
+    /// something the machine has not been arranged for, or a Switch left in
+    /// flight that nothing here can settle (ADR 0048).
     NotArranged(PerchError),
 }
 
