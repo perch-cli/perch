@@ -106,10 +106,15 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [features]
-# The contract suite needs a real Claude Code installed and a real keychain to
-# assert against, so it is off unless asked for and `cargo test` runs everything
-# else. CI turns it on for the one step that follows the install.
-contract = []
+# A test behind this one touches state the developer owns and did not offer —
+# their login keychain, their `~/.claude`, the clients they happen to have open
+# — so its outcome is not this repository's to determine (ADR 0050). A read of
+# their real state counts as much as a write: a suite that reports green on
+# Tuesday and skipped on Wednesday, on the same machine at the same commit,
+# according to whether a client was running, is the one thing a default-on suite
+# must never be. Off unless asked for; CI turns it on for the one step that
+# follows the install.
+your-machine = []
 
 # `host::fake`, which exists so the real command code can be driven with no
 # machine.
@@ -126,25 +131,13 @@ fakes = []
 [dev-dependencies]
 perch = { path = ".", features = ["fakes"] }
 
-# Declared only so they can be held back by the feature above. Every other test
+# Declared only so it can be held back by the feature above. Every other test
 # binary is found automatically, which is the point: the list that has to be
 # maintained by hand is the short one of deliberate exclusions, not the growing
 # one of suites that must be remembered.
 [[test]]
-name = "contract"
-required-features = ["contract"]
-
-[[test]]
-name = "contract_credentials"
-required-features = ["contract"]
-
-[[test]]
-name = "contract_sessions"
-required-features = ["contract"]
-
-[[test]]
-name = "contract_links"
-required-features = ["contract"]
+name = "your_machine"
+required-features = ["your-machine"]
 
 [lib]
 name = "perch"

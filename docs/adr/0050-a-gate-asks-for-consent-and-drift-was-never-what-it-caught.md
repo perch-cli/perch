@@ -1,9 +1,12 @@
 # A gate asks for consent, and drift was never what it caught
 
-> **Decided, not yet carried out.** The re-gating, the merges and the two
-> documentation edits below are tracked separately. Like ADR 0041, ADR 0042,
-> ADR 0044 and ADR 0045, this is the artifact of a planning effort rather than
-> of a change, so it lands ahead of the work it describes.
+> **Carried out in #171.** Like ADR 0041, ADR 0042, ADR 0044 and ADR 0045, this
+> is the artifact of a planning effort rather than of a change, so it landed
+> ahead of the work it describes instead of beside it. The tree now matches it:
+> the feature is `your-machine`, the two surviving binaries are
+> `tests/your_machine.rs` and `tests/corroboration.rs` — the words this file
+> left to the carry-out — and `conformance.rs` runs thirty-two cases against
+> both adapters where it ran twenty-seven.
 
 The question arrived as a shape question: four suites, 895 lines, held back by
 the `contract` feature because they need a real Claude Code and a real keychain

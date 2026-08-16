@@ -1239,10 +1239,16 @@ mod tests {
 /// may take over from whom. Everything above checks it sequentially, which is
 /// to say it checks a claim about concurrency without any.
 ///
-/// Behind the `contract` feature with the rest of what asserts against the real
-/// machine: eight threads contending really do wait on each other, which is
-/// seconds of wall clock that should not be spent by every `cargo test`.
-#[cfg(all(test, feature = "contract"))]
+/// Runs with everything else, and the wall clock is why it nearly did not.
+/// Eight threads contending really do wait on each other, and that cost was
+/// once thought to earn a gate — but a gate asks for consent, and this works in
+/// a directory of its own in `temp_dir` and touches nothing the developer owns
+/// (ADR 0050). What settled it is what is underneath: this is
+/// the only execution of the exclusivity claim anywhere in the repository, and
+/// it had already gone unexecuted once, because naming `--test` targets in CI
+/// quietly suppressed the default set. A claim that has been silently skipped
+/// once does not go back behind a flag.
+#[cfg(test)]
 mod exclusivity {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};

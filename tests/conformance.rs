@@ -20,18 +20,21 @@
 //! terminal and the network are either the machine's own state, which a test
 //! has no business owning, or the very things a fake exists to invent: a fake
 //! clock that agreed with the real one would be no use to anybody. The keychain
-//! is asserted against the real one by `contract_credentials`, behind the
-//! feature that suite needs.
+//! is asserted against the real one by `your_machine.rs`, behind the feature
+//! that suite needs; the processes by `corroboration.rs`, which needs no
+//! feature because the only processes it reads are its own.
 //!
-//! Ungated, unlike the `contract_*` suites. Those ask whether Perch's beliefs
-//! about Claude Code are still true, and a failure there is news about upstream.
-//! This asks whether Perch's two adapters still agree with each other, and a
-//! failure here is a fault in the change that caused it — so it runs on every
-//! pull request, on every platform CI has.
+//! Ungated, unlike `your_machine.rs`. That one is held back because its outcome
+//! is not this repository's to determine (ADR 0050). This asks whether Perch's
+//! two adapters still agree with each other, in scratch directories of its own,
+//! and a failure here is a fault in the change that caused it — so it runs on
+//! every pull request, on every platform CI has.
 
 use std::path::{Path, PathBuf};
 
-use perch::host::{FakeHost, Host, HostError, Link, PRIVATE_FILE_MODE, Platform, RealHost};
+use perch::host::{
+    FakeHost, Host, HostError, Link, PRIVATE_DIR_MODE, PRIVATE_FILE_MODE, Platform, RealHost,
+};
 
 /// This machine, as the port names it — so the fake is asked to be the platform
 /// the real host is already on.
@@ -287,6 +290,44 @@ const CASES: &[Case] = &[
                     Some(PRIVATE_FILE_MODE),
                     "{adapter}: the owner and nobody else (ADR 0020)"
                 );
+                // The half this case has always been named for and never
+                // asked. A Credential at 0600 inside a directory anybody may
+                // list is a Credential whose name, size and mtime are public,
+                // and the directory here is one this very call made.
+                assert_eq!(
+                    host.file_mode(&dir).ok().flatten(),
+                    Some(PRIVATE_DIR_MODE),
+                    "{adapter}: and the directory it had to make on the way"
+                );
+            }
+        },
+    },
+    // The two steps have different owners where this is relied on: a Profile's
+    // directory is made by one module and its Credential written by another,
+    // which is exactly how a directory ends up wearing the mode of whichever of
+    // them got there first.
+    Case {
+        named: "a write into a directory already made private leaves it private",
+        asserts: |host, root, adapter| {
+            let dir = root.join("a-profile");
+            host.create_private_dir_all(&dir).expect("it is made");
+            if modes_mean_something() {
+                assert_eq!(
+                    host.file_mode(&dir).ok().flatten(),
+                    Some(PRIVATE_DIR_MODE),
+                    "{adapter}: closed from the moment it exists"
+                );
+            }
+
+            host.write_private_file(&dir.join("credential"), "a secret")
+                .expect("the Credential goes in");
+
+            if modes_mean_something() {
+                assert_eq!(
+                    host.file_mode(&dir).ok().flatten(),
+                    Some(PRIVATE_DIR_MODE),
+                    "{adapter}: and the second writer does not widen it"
+                );
             }
         },
     },
@@ -499,6 +540,25 @@ const CASES: &[Case] = &[
             }
         },
     },
+    Case {
+        named: "a lock carries the time it was taken",
+        asserts: |host, root, adapter| {
+            // The other half of what makes a directory a lock. Exclusivity says
+            // who gets it; the age is how a holder that died holding it is told
+            // from one still working, and every staleness rule in `lock.rs`
+            // reads it off the artifact rather than off a file inside.
+            let dir = root.join("the-dated-lock");
+            host.create_dir_exclusive(&dir).expect("it is taken");
+
+            let held_since = host.modified_at(&dir).unwrap_or_else(|err| {
+                panic!("{adapter}: a lock with no age is never stale: {err}")
+            });
+            assert!(
+                (host.now() - held_since).num_seconds().abs() < 60,
+                "{adapter}: taken just now, not {held_since}"
+            );
+        },
+    },
     // ---- links ------------------------------------------------------------
     Case {
         named: "link_target answers for the link and not for the file",
@@ -522,6 +582,75 @@ const CASES: &[Case] = &[
                 host.link_target(&real).expect("it is there"),
                 None,
                 "{adapter}: and a file is not a link"
+            );
+        },
+    },
+    // The property every share rests on, and the one a copy would fail: what is
+    // read through the link is what the Default Profile holds *now*, not what
+    // it held when Reconcile made it (ADR 0026). "a read follows a symbolic
+    // link" above only reads a file that was already written.
+    Case {
+        named: "a write after the link is made is read through it",
+        asserts: |host, root, adapter| {
+            let real = root.join("CLAUDE.md");
+            let link = root.join("shared-CLAUDE.md");
+            host.create_file_with_mode(&real, "remember this", PRIVATE_FILE_MODE)
+                .expect("the file");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
+            host.link(Link::Symbolic, &real, &link)
+                .expect("the link is made");
+
+            host.create_file_with_mode(&real, "remember this instead", PRIVATE_FILE_MODE)
+                .expect("and the file changes afterwards");
+
+            assert_eq!(
+                host.read_file(&link).ok().as_deref(),
+                Some("remember this instead"),
+                "{adapter}: a link is a name, not a copy taken when it was made"
+            );
+        },
+    },
+    // The same for a directory, and the part an allowlist would have got wrong:
+    // a file that appears in the Default Profile after the link was made is
+    // reachable through it without anything being told.
+    Case {
+        named: "a directory link shows what the directory gains afterwards",
+        asserts: |host, root, adapter| {
+            let real = root.join("plugins");
+            let link = root.join("shared-plugins");
+            host.create_dir_all(&real).expect("a directory to share");
+
+            // What Reconcile itself picks for a directory on this platform, so
+            // this is the junction path on a Windows without Developer Mode.
+            let kind = if cfg!(windows) {
+                Link::Junction
+            } else {
+                Link::Symbolic
+            };
+            // A junction needs no privilege. A symbolic one is the kind a
+            // machine may decline, and `can_link` is what asks it.
+            if kind == Link::Symbolic && !can_link(host, kind, root, adapter) {
+                return;
+            }
+            host.link(kind, &real, &link).expect("the link is made");
+
+            host.create_file_with_mode(&real.join("config.json"), "{}", PRIVATE_FILE_MODE)
+                .expect("something arrives in it afterwards");
+
+            assert_eq!(
+                host.read_file(&link.join("config.json")).ok().as_deref(),
+                Some("{}"),
+                "{adapter}: reached through the link, having been told nothing"
+            );
+            assert!(
+                host.link_target(&link)
+                    .expect("the link answers for itself")
+                    .is_some(),
+                "{adapter}: and a {} reads back as a link, which is how a stale \
+                 one is found",
+                kind.describe()
             );
         },
     },
@@ -626,6 +755,41 @@ const CASES: &[Case] = &[
                 host.link_target(&second).expect("it is there"),
                 None,
                 "{adapter}: and it is indistinguishable from the file's first name"
+            );
+        },
+    },
+    Case {
+        named: "a hard link stops naming a file that is replaced rather than written",
+        asserts: |host, root, adapter| {
+            // Why Reconcile re-establishes a hard link before every Run instead
+            // of trusting the one it left: it is a second name for a *file*, so
+            // the write-beside-then-rename-over an editor performs when it saves
+            // leaves the name behind on the file nobody can reach any more.
+            let real = root.join("settings.json");
+            let second = root.join("shared-settings.json");
+            host.create_file_with_mode(&real, "first", PRIVATE_FILE_MODE)
+                .expect("the file");
+            if !can_link(host, Link::Hard, root, adapter) {
+                return;
+            }
+            host.link(Link::Hard, &real, &second)
+                .expect("the hard link is made");
+
+            let beside = root.join("settings.json.new");
+            host.create_file_with_mode(&beside, "second", PRIVATE_FILE_MODE)
+                .expect("written beside");
+            host.rename(&beside, &real).expect("and renamed over");
+
+            assert_eq!(
+                host.read_file(&real).ok().as_deref(),
+                Some("second"),
+                "{adapter}: the name the editor saved through has the new file"
+            );
+            assert_eq!(
+                host.read_file(&second).ok().as_deref(),
+                Some("first"),
+                "{adapter}: and the hard link is still naming the old one, which \
+                 is the sharing silently ending"
             );
         },
     },

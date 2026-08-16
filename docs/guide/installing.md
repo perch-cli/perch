@@ -157,21 +157,21 @@ everywhere. The toolchain is pinned in `rust-toolchain.toml` — Rust 1.97.1,
 edition 2024 — so rustup will fetch the right one on first build.
 
 ```
-# touches nothing on the machine: every suite but the contract ones, which are
-# held back by a feature rather than by a list somebody has to maintain
+# touches nothing you own: every suite but `your_machine.rs`, which is held
+# back by a feature rather than by a list somebody has to maintain
 cargo test
 
-# asserts beliefs against this machine, so it wants Claude Code installed
-cargo test --features contract --test contract --test contract_credentials \
-           --test contract_sessions --test contract_links
+# reads and writes state you own — your login keychain, your ~/.claude, the
+# Claude Code you have installed — so it wants Claude Code installed
+cargo test --features your-machine --test your_machine
 
 # both
 cargo test --all-features
 ```
 
-On macOS the contract tests read and write items of their own in the login
-keychain, under `Perch contract test-*`, and delete them again. They never
-write Claude Code's item. Set `PERCH_SKIP_KEYCHAIN_CONTRACT=1` to skip them
-where the keychain cannot be unlocked — it is macOS-only, because only macOS
-compiles those tests in. The file-store contract tests need no opt-out: they
-touch only a temporary directory of their own.
+On macOS `your_machine.rs` reads and writes items of its own in the login
+keychain, under `Perch test-*`, and deletes them again. It never writes Claude
+Code's item. Set `PERCH_SKIP_KEYCHAIN=1` to skip those where the keychain
+cannot be unlocked — they are macOS-only, because only macOS compiles them in.
+The rest of the suite needs no opt-out: it touches only temporary directories
+of its own.

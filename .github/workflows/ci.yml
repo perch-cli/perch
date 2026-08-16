@@ -10,7 +10,7 @@ on:
   # somebody edited a description. It lives in `pr-title.yml` instead, which is
   # one grep and costs seconds.
   pull_request:
-  # The contract suite exists to find Claude Code drift before a user does, and
+  # `your_machine.rs` exists to find Claude Code drift before a user does, and
   # Claude Code updates continuously while this repository may not change for a
   # week. A weekly run is what turns "we would have noticed" into "we did".
   schedule:
@@ -28,11 +28,12 @@ jobs:
   check:
     # This job was macOS-only while the keychain and the `security` binary
     # were the point. Perch now claims full parity, so every platform runs
-    # everything it can: the keychain contract tests still assert only on
-    # macOS (they are compiled out elsewhere), and the file-store and session
-    # contract tests run everywhere. Windows is the one to watch — its
-    # credential store is the least-established belief in the design, which
-    # is exactly where a canary belongs.
+    # everything it can: the keychain cases in `your_machine.rs` still assert
+    # only on macOS (they carry a `cfg` each and are compiled out elsewhere),
+    # and everything about the file store, the links and the session markers
+    # runs everywhere. Windows is the one to watch — its credential store is
+    # the least-established belief in the design, which is exactly where a
+    # canary belongs.
     strategy:
       fail-fast: false
       matrix:
@@ -63,16 +64,16 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
 
-      # --all-features so the contract suite is linted too: it is held back from
+      # --all-features so `your_machine.rs` is linted too: it is held back from
       # `cargo test` by a feature, and without this it would go unlinted.
       - name: Lint
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       # Everything the default feature set builds — lib, bin, doc tests, and
-      # every tests/*.rs Cargo finds. Nothing to add here when a suite is: the
-      # contract suites are the only ones held back, and each is held back by
+      # every tests/*.rs Cargo finds. Nothing to add here when a suite is:
+      # `your_machine.rs` is the only one held back, and it is held back by
       # `required-features` in Cargo.toml rather than by being absent from a
-      # list somebody has to remember to extend. They have a step of their own
+      # list somebody has to remember to extend. It has a step of its own
       # below, so a failure there reads as what it is.
       #
       # --locked because a resolver that is free to update Cargo.lock is a CI
@@ -111,8 +112,8 @@ jobs:
       # newer language feature. Checked rather than tested: building is what the
       # promise is about.
       #
-      # --all-features for the reason the Lint step above gives: without it the
-      # contract suite and the fakes were exempt from the claim, and the
+      # --all-features for the reason the Lint step above gives: without it
+      # `your_machine.rs` and the fakes were exempt from the claim, and the
       # exemption grew every time one of them did.
       - name: Minimum supported Rust version
         if: runner.os == 'Linux'
@@ -120,12 +121,12 @@ jobs:
           rustup toolchain install 1.97 --profile minimal
           cargo +1.97 check --locked --all-targets --all-features
 
-      # Gives the contract tests a real bundle to assert against. If the install
-      # is unavailable they assert the "no Claude Code here" branch instead, so
-      # an outage upstream does not turn every pull request red.
+      # Gives the step below a real bundle to assert against. If the install
+      # is unavailable those tests assert the "no Claude Code here" branch
+      # instead, so an outage upstream does not turn every pull request red.
       #
       # The installer is pinned by checksum but the version deliberately is not:
-      # ADR 0007 wants the contract tests run against whatever Claude Code is
+      # ADR 0007 wants the beliefs asserted against whatever Claude Code is
       # current, so pinning the version would freeze the drift this job exists
       # to detect. Pin the code that runs, float the product it installs.
       #
@@ -139,14 +140,14 @@ jobs:
           # An unreachable installer is an upstream outage, not a signal about
           # this pull request: degrade to the "no Claude Code" branch.
           if ! curl -fsSL https://claude.ai/install.sh -o /tmp/install.sh; then
-            echo "::warning::installer unreachable; contract tests will assert the absent branch"
+            echo "::warning::installer unreachable; the tests below will assert the absent branch"
             exit 0
           fi
 
           # A checksum mismatch is not an outage. Fail hard rather than warn:
           # a warning here would let the install quietly stop happening, the
-          # contract tests fall back to the absent branch, and CI stay green
-          # with drift detection switched off.
+          # tests below fall back to the absent branch, and CI stay green with
+          # drift detection switched off.
           echo "$INSTALL_SHA  /tmp/install.sh" | shasum -a 256 -c -
 
           bash /tmp/install.sh latest
@@ -165,7 +166,7 @@ jobs:
           try {
             Invoke-WebRequest -Uri "https://claude.ai/install.ps1" -OutFile $installer
           } catch {
-            Write-Output "::warning::installer unreachable; contract tests will assert the absent branch"
+            Write-Output "::warning::installer unreachable; the tests below will assert the absent branch"
             exit 0
           }
 
@@ -179,23 +180,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $env:USERPROFILE ".local\bin")
 
-      # Contract tests assert the probe's beliefs against the installed Claude
-      # Code, the real filesystem, and — on macOS — the real keychain (ADR
-      # 0007), so drift is found here rather than by a user being logged out by
-      # a background auto-update. Kept as a step of its own so a failure here
-      # reads as upstream drift rather than as a fault in the pull request.
+      # The suite that is held back because it needs the developer's own machine
+      # — the installed Claude Code, the real `~/.claude`, and on macOS the real
+      # login keychain (ADR 0007, ADR 0050). A runner is the one machine that
+      # can be asked for that consent, so this is where it is asked, and drift
+      # is found here rather than by a user being logged out by a background
+      # auto-update. Kept as a step of its own so a failure here reads as
+      # upstream drift rather than as a fault in the pull request.
       #
       # --nocapture so the "skipping:" lines are visible: a suite that skipped
       # itself and a suite that asserted look identical otherwise.
       #
-      # `--lib` alongside, because naming `--test` targets suppresses the default
-      # set, so the two unit tests held back by this same feature ran nowhere at
-      # all. `lock::exclusivity` is the one that matters — its own comment says
-      # everything else "checks a claim about concurrency without any", which
-      # made it the only execution of the lock's exclusivity claim, and it had
-      # never executed.
-      - name: Contract tests
-        run: cargo test --locked --features contract --lib --test contract --test contract_credentials --test contract_sessions --test contract_links -- --nocapture
+      # No `--lib`. It was here because naming `--test` targets suppresses the
+      # default set, and two unit tests were held back by this same feature and
+      # so ran nowhere at all. Both run by default now, in the step above.
+      - name: The tests that need your machine
+        run: cargo test --locked --features your-machine --test your_machine -- --nocapture
 
   # The installers are the one part of Perch that is not Rust, so nothing else
   # in this file would notice a mistake in them — and they are the copy people
@@ -298,11 +298,11 @@ jobs:
       - name: cargo-llvm-cov
         run: cargo install cargo-llvm-cov --locked --version 0.8.7
 
-      # The default feature set, deliberately. The contract suite is held back
-      # by `required-features` because it asserts beliefs against an installed
-      # Claude Code and a real keychain, and instrumenting it here would count
-      # the lines it covers on a runner where it is compiled out — a figure that
-      # moved with the runner rather than with the tests.
+      # The default feature set, deliberately. `your_machine.rs` is held back
+      # by `required-features` because its outcome is the developer's machine's
+      # to decide rather than this repository's (ADR 0050), and instrumenting it
+      # here would count the lines it covers on a runner where it is compiled
+      # out — a figure that moved with the runner rather than with the tests.
       - name: Coverage
         run: cargo llvm-cov --locked --lcov --output-path lcov.info
 
