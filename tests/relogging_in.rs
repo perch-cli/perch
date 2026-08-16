@@ -333,6 +333,66 @@ fn a_landing_nothing_accounts_for_is_repaired_rather_than_refused() {
     }
 }
 
+/// The refusal above is the *only* one this command steps past, and the reason
+/// is that Perch weighed the evidence and could not choose. A store that would
+/// not answer is not that: nothing was weighed, so nothing is known — including
+/// whether the Default Profile this repair may be about to write is somebody
+/// else's. Repairing on it would be deciding by not looking.
+#[test]
+fn a_store_that_will_not_answer_stops_the_repair_rather_than_being_stepped_past() {
+    // Off macOS, where a Profile keeps its Credential in a file (ADR 0020) —
+    // the only way to make the live store alone refuse to answer.
+    let host = logged_in_machine_off_macos().with_login(login_producing(REPAIRED, IDENTITY_FILE));
+    run_list(&host, false)
+        .0
+        .expect("adoption holds the login it finds");
+    a_switch_died_mid_flight(&host, Some(EMAIL), EMAIL);
+    host.set_unreadable(CREDENTIALS_PATH, "Permission denied");
+
+    let (result, _) = run_relogin(&host, EMAIL);
+
+    let said = result
+        .expect_err("nothing on the machine could be read")
+        .to_string();
+    assert!(
+        said.contains("Make that store readable"),
+        "it says what to put right rather than repairing blind: {said}"
+    );
+}
+
+/// Repairing a *third* Account while a Landing is unaccounted for is an
+/// ordinary repair. It writes that Account's own Profile and nothing else, so
+/// the Landing has no bearing on it — and a command refused for a state it
+/// cannot possibly disturb is a command that stops working on a machine that
+/// needs it.
+#[test]
+fn a_landing_nothing_accounts_for_does_not_stop_an_unrelated_repair() {
+    let host = machine_with_three_accounts()
+        .with_login(login_producing(THIRD_CREDENTIAL, THIRD_IDENTITY_FILE));
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SECOND_REPAIRED);
+
+    let (result, printed) = run_relogin(&host, THIRD_EMAIL);
+
+    result.expect("an Account the Landing does not name is repaired as ever");
+    assert_eq!(
+        credential_of(&host, THIRD_EMAIL).as_deref(),
+        Some(THIRD_CREDENTIAL),
+        "its own Profile holds the fresh Credential: {printed}"
+    );
+    assert_eq!(
+        host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
+        Some(SECOND_REPAIRED),
+        "and the live Credential is untouched, because this repair was never \
+         about the Default Profile"
+    );
+    assert!(
+        matches!(registry_of(&host).active, Active::Landing { .. }),
+        "so the Landing is still there, still unresolved, and still nobody's \
+         business but a Switch's"
+    );
+}
+
 #[test]
 fn a_healthy_account_may_be_logged_in_again() {
     let host = machine_with_two_accounts()

@@ -2372,6 +2372,71 @@ mod tests {
         validate(&registry).expect("holding nothing is a state rather than a fault");
     }
 
+    /// Both ends of a Landing, because both are pointers into the Accounts and
+    /// resolving one reads the Credential of the other (ADR 0048).
+    ///
+    /// The end that dangles is named, rather than the pair reported as one
+    /// broken `active`: a hand-edited registry is what this rule is written
+    /// against, and which of the two addresses to put right is the whole of
+    /// what the person editing it needs to be told.
+    #[test]
+    fn both_ends_of_a_landing_are_refused_when_they_name_nothing() {
+        let held = "someone@example.com";
+        let mut registry = Registry::default();
+        registry.upsert(Account {
+            identity: Identity {
+                email: held.to_string(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            enabled: true,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        });
+
+        for (what, active, names, says) in [
+            (
+                "the Account it was switching to",
+                Active::Landing {
+                    leaving: Some(held.to_string()),
+                    arriving: "nobody@example.com".to_string(),
+                },
+                "nobody@example.com",
+                "a Switch to nobody@example.com was under way",
+            ),
+            (
+                "the Account it was leaving",
+                Active::Landing {
+                    leaving: Some("nobody@example.com".to_string()),
+                    arriving: held.to_string(),
+                },
+                "nobody@example.com",
+                "a Switch away from nobody@example.com was under way",
+            ),
+        ] {
+            registry.active = active;
+
+            let refused = validate(&registry).expect_err("it names an Account Perch does not hold");
+
+            assert!(refused.to_string().contains(names), "{what}: {refused}");
+            assert!(
+                refused.to_string().contains(says),
+                "{what}: and says which end of the Landing dangles: {refused}"
+            );
+        }
+
+        // A Landing naming Accounts Perch does hold is a state, not a fault: it
+        // is what every interrupted Switch leaves, and the next one resolves it.
+        registry.active = Active::Landing {
+            leaving: None,
+            arriving: held.to_string(),
+        };
+        validate(&registry).expect("a Switch left in flight is a machine to load, not to refuse");
+    }
+
     /// Every rule the shared namespace has, asked of both halves of it.
     ///
     /// A table because the rules are one fact with two spellings, and they had

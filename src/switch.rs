@@ -548,9 +548,8 @@ pub fn resolve_a_landing(
     let live = credentials::read(host, &store).map_err(|would_not_answer| {
         would_not_answer.with_note(&format!(
             "A Switch to {arriving} was in flight and was not recorded, and the \
-             live Credential is the only thing that says whether it happened — \
-             so nothing was changed. Make that store readable and run this \
-             again."
+             live Credential is the only thing that says whether it happened.\n\
+             Nothing was changed. Make that store readable and run this again."
         ))
     })?;
 

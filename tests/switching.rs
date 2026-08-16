@@ -2037,6 +2037,75 @@ fn a_landing_is_settled_onto_whoever_the_live_credential_belongs_to() {
     }
 }
 
+/// The live Credential is the whole of the evidence a Landing is resolved from,
+/// so a store that will not answer settles nothing.
+///
+/// Refused for the reason the Capture refuses the same silence: a store that
+/// would not answer says nothing about what it holds, and "the keychain was
+/// locked" is not evidence that it is safe to write over a refresh token. A
+/// Switch that has to be run again after a `chmod` is recoverable where a lost
+/// refresh token is not.
+#[test]
+fn a_live_store_that_will_not_answer_resolves_no_landing() {
+    let host = two_accounts_off_macos();
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    host.set_unreadable(CREDENTIALS_PATH, "Permission denied");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let said = result
+        .expect_err("nothing on the machine can say whether that Switch happened")
+        .to_string();
+    assert!(
+        said.contains("was in flight and was not recorded"),
+        "it says what could not be settled: {said}"
+    );
+    assert!(said.contains("Nothing was changed"), "{said}");
+
+    host.forget_unreadable(CREDENTIALS_PATH);
+    assert_eq!(
+        host.file(CREDENTIALS_PATH).as_deref(),
+        Some(CREDENTIAL),
+        "the live store still holds what it held"
+    );
+    assert!(
+        matches!(registry_of(&host).active, Active::Landing { .. }),
+        "and the Landing is still there to be resolved once the store answers"
+    );
+}
+
+/// The same undecidable corner, from a machine that was on nobody: there is no
+/// second reading to name, because there was no Account to go back to.
+///
+/// Worth its own case because the refusal has to stay a sentence rather than
+/// become one with a hole where an address should be — this is the state a
+/// `perch switch` from a machine Perch had never Switched leaves behind.
+#[test]
+fn a_landing_that_left_nobody_behind_is_refused_without_naming_one() {
+    let host = machine_with_two_accounts();
+    let mut registry = registry_of(&host);
+    registry.active = Active::Nobody;
+    save_registry(&host, &registry);
+    a_switch_died_mid_flight(&host, None, SECOND_EMAIL);
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("nothing on the machine says whose that Credential is");
+    let said = error.to_string();
+    assert_eq!(error.exit_code(), EXIT_CONFLICT, "{said}");
+    assert!(said.contains("on no Account before it"), "{said}");
+    assert!(
+        said.contains(&format!("perch relogin {SECOND_EMAIL}")),
+        "and names the one way through: {said}"
+    );
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(ROTATED),
+        "with nothing written over: {said}"
+    );
+}
+
 /// The corner that stays undecidable: a Landing in flight, and a live Credential
 /// matching nobody's stored copy — a Rotation after the interruption, and
 /// nothing on the machine to say whose.

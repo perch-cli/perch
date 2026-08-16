@@ -1095,10 +1095,8 @@ pub(crate) mod tests {
     pub(crate) fn holding(accounts: Vec<Account>) -> Registry {
         let mut registry = Registry::default();
         registry.declare_group("work").unwrap();
-        registry.active = match accounts.first() {
-            Some(first) => Active::Settled(first.email().to_string()),
-            None => Active::Nobody,
-        };
+        registry.active =
+            Active::settled_on(accounts.first().map(|first| first.email().to_string()));
         for account in accounts {
             registry.upsert(account);
         }
