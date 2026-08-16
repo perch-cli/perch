@@ -6,20 +6,17 @@ use perch::commands::add::{self, AddArgs};
 use perch::commands::alias::{self, AliasCommand};
 use perch::commands::config::{self, ConfigCommand};
 use perch::commands::enable::{self, EnableCommand};
-use perch::commands::export::{self, ExportArgs};
 use perch::commands::group::{self, GroupCommand};
-use perch::commands::import::{self, ImportArgs};
+use perch::commands::holdings::{self, HoldingsCommand};
 use perch::commands::list::{self, ListArgs};
-use perch::commands::purge::{self, PurgeArgs};
 use perch::commands::relogin::{self, ReloginArgs};
 use perch::commands::remove::{self, RemoveArgs};
 use perch::commands::run::{self, RunArgs};
-use perch::commands::service::{self, ServiceCommand};
 use perch::commands::status::{self, StatusArgs};
 use perch::commands::switch::{self, SwitchArgs};
 use perch::commands::tui;
 use perch::commands::upgrade::{self, UpgradeArgs};
-use perch::commands::watch::{self, WatchArgs};
+use perch::commands::watcher::{self, WatcherCommand};
 use perch::error::EXIT_OK;
 use perch::host::RealHost;
 use perch::report;
@@ -108,23 +105,6 @@ enum Command {
         target: String,
     },
 
-    /// Write everything Perch holds to one encrypted file.
-    ///
-    /// The registry and every Credential, in the `age` format, so a dead
-    /// machine or a new laptop does not cost a login for every subscription
-    /// (ADR 0014). There is no per-Account form: a selective export is a
-    /// partial restore.
-    ///
-    /// The passphrase is prompted and confirmed, and cannot be passed as an
-    /// argument — an argument sits in the process table for anything on this
-    /// machine to read. Without a terminal to type it at, the export is
-    /// refused.
-    Export {
-        /// Where to write the file. Nothing is written over: a path that is
-        /// already taken is refused.
-        path: std::path::PathBuf,
-    },
-
     /// Declare which Accounts are interchangeable.
     ///
     /// Cycling only ever moves between Accounts in one Group, so a Group is how
@@ -135,39 +115,16 @@ enum Command {
         action: GroupCommand,
     },
 
-    /// Put a whole machine back from a file `perch export` wrote.
+    /// Everything Perch holds on this machine: write it out, put it back, or
+    /// give it up.
     ///
-    /// The exact inverse of an export: the registry and every Credential, so a
-    /// new machine arrives with the setup the old one had rather than a pile of
-    /// nameless logins (ADR 0014). Credentials land wherever this machine's
-    /// Claude Code keeps one, whatever store the file was written from.
-    ///
-    /// It refuses a Perch that already holds an Account and names `perch purge`
-    /// as the way to make room — merging two machines is a different feature.
-    /// Nothing is made active by an import; `perch switch` is what lands.
-    Import {
-        /// The file to restore from. The passphrase is prompted, and a wrong
-        /// one fails before anything is written.
-        path: std::path::PathBuf,
-    },
-
-    /// Give the machine back the state it had before Perch.
-    ///
-    /// Every Profile, every Credential Perch holds and its own registry, gone in
-    /// one act — the exact inverse of an import, and what makes room for one
-    /// (ADR 0014). It takes no target: giving up one Account is `perch remove`.
-    ///
-    /// It offers to write an export first, lists the Accounts that will go by
-    /// email address, and wants the word `purge` typed rather than a letter.
-    /// Whatever Claude Code is logged in as is left exactly where it is.
-    Purge {
-        /// Purge without being asked, and write no export.
-        ///
-        /// An export is a path you name and a passphrase you type, neither of
-        /// which a script can be asked for — so this answers both questions at
-        /// once. Without a terminal and without this flag, a purge is refused.
-        #[arg(long)]
-        yes: bool,
+    /// Every Profile, every Credential Perch holds, the registry naming them and
+    /// what each Group carries — the counterpart to an Installation, which is
+    /// what a Channel left. None of the three takes a Target, because none of
+    /// them is about one Account (ADR 0014).
+    Holdings {
+        #[command(subcommand)]
+        action: HoldingsCommand,
     },
 
     /// Log an Account in again, in place.
@@ -327,52 +284,21 @@ enum Command {
         yes: bool,
     },
 
-    /// Have this machine run the Watcher for you, starting when you log in.
+    /// Cycle on your behalf when the Account you are on runs low.
     ///
-    /// The same loop `perch watch` runs, supervised by the machine's own
-    /// service manager rather than by a terminal you have to keep open (ADR
-    /// 0040): a LaunchAgent on macOS, a `systemd --user` unit on Linux, a
-    /// Scheduled Task on Windows. Perch never backgrounds itself and there is no
-    /// `--detach` — it writes a unit and hands the job over, because scheduling
-    /// and supervision are the operating system's.
+    /// Three arrangements and one behaviour (ADR 0040): `run` is a loop you can
+    /// see and kill, `install` hands that same loop to the machine's own service
+    /// manager, and `check` is one round for a scheduler to fire. One of them at
+    /// a time, and the policy is the same in all three.
     ///
-    /// Always yours rather than the machine's, and always at login rather than
-    /// at boot: every Profile Perch holds is under your home directory, and on
-    /// macOS there is no unlocked keychain before somebody logs in. Installing
-    /// it as root is refused for that reason.
-    ///
-    /// `install` is idempotent, and re-running it is the repair for a Service
-    /// whose binary moved — which `perch upgrade` does whenever it routes
-    /// through Homebrew or npm.
-    Service {
+    /// Only the active Account is read, and only within a Scope that has been
+    /// told the watcher may act on it — `perch config set <group>
+    /// watcher-may-act true` for a Group, or the same for `ungrouped` where
+    /// `cycle-ungrouped` is on as well, because being interchangeable at all is
+    /// its own yes (ADR 0017).
+    Watcher {
         #[command(subcommand)]
-        action: ServiceCommand,
-    },
-
-    /// Watch the Account you are on, and Cycle when it runs low.
-    ///
-    /// A loop in this terminal rather than a daemon (ADR 0013): it runs until
-    /// you stop it with Ctrl-C, and leaves nothing behind when you do. Only the
-    /// active Account is read, and only within a Scope that has been told the
-    /// watcher may act on it — `perch config set <group> watcher-may-act true`
-    /// for a Group, or the same for `ungrouped` where `cycle-ungrouped` is on
-    /// as well, because being interchangeable at all is its own yes (ADR 0017).
-    ///
-    /// Every decision is printed as it is made, including the ones where
-    /// nothing happens, which are most of them. They go to standard output, so
-    /// redirecting them to a file is yours to do — or `--once` takes a single
-    /// check for cron or a systemd timer to run, and says what it decided in
-    /// its exit code.
-    Watch {
-        /// Take one check and exit, saying what it decided in the exit code.
-        ///
-        /// For cron or a systemd timer, which is where an unattended watcher
-        /// belongs: scheduling is the operating system's job. The policy is the
-        /// loop's, run once — and the cooldown that paces it survives between
-        /// invocations, so a check every minute still switches no more often
-        /// than the cooldown allows.
-        #[arg(long)]
-        once: bool,
+        action: WatcherCommand,
     },
 }
 
@@ -483,11 +409,9 @@ fn main() {
             EnableCommand::Enable { target },
             &mut out,
         )),
-        Command::Export { path } => ok(export::run(&host, ExportArgs { path }, &mut out)),
         Command::Group { action } => ok(group::run(&host, action, &mut out)),
-        Command::Import { path } => ok(import::run(&host, ImportArgs { path }, &mut out)),
+        Command::Holdings { action } => ok(holdings::run(&host, action, &mut out)),
         Command::List { json } => ok(list::run(&host, ListArgs { json }, &mut out)),
-        Command::Purge { yes } => ok(purge::run(&host, PurgeArgs { yes }, &mut out)),
         Command::Relogin { target } => ok(relogin::run(&host, ReloginArgs { target }, &mut out)),
         Command::Remove { target, yes } => {
             ok(remove::run(&host, RemoveArgs { target, yes }, &mut out))
@@ -495,10 +419,6 @@ fn main() {
         // The one command whose exit code is not Perch's own: what the client
         // said is what a script reads.
         Command::Run { target, command } => run::run(&host, RunArgs { target, command }, &mut out),
-        // Its own exit code rather than `ok`: `status` answers a question and
-        // succeeds either way, and `uninstall` reports 15 for a machine that
-        // already had no Service.
-        Command::Service { action } => service::run(&host, action, &mut out),
         Command::Status {
             group,
             refresh,
@@ -513,11 +433,11 @@ fn main() {
             &mut out,
         )),
         Command::Switch { target } => ok(switch::run(&host, SwitchArgs { target }, &mut out)),
-        // A third whose exit code is not simply Perch's own: the picker can
+        // A second whose exit code is not simply Perch's own: the picker can
         // hand the terminal to a client, and what that client said is what a
         // script reads.
         Command::Tui => tui::run(&host, &mut out),
-        // And a fourth: what `brew` or `npm` exited with is what a script
+        // And a third: what `brew` or `npm` exited with is what a script
         // reads, because a failed `brew upgrade` is a failed upgrade and a code
         // of Perch's own would lose which of `brew`'s failures it was.
         Command::Upgrade {
@@ -537,10 +457,12 @@ fn main() {
             },
             &mut out,
         ),
-        // The other command whose exit code is not simply "it worked": a check
-        // reports what it decided, so a scheduler can tell a Switch from a
-        // figure that could not be read without parsing the line (ADR 0013).
-        Command::Watch { once } => watch::run(&host, WatchArgs { once }, &mut out),
+        // And the fourth, whose code is not simply "it worked" on two of its
+        // five arms: a `check` reports what it decided, so a scheduler can tell
+        // a Switch from a figure that could not be read without parsing the
+        // line (ADR 0013), and `uninstall` reports 15 for a machine that
+        // already had no Service.
+        Command::Watcher { action } => watcher::run(&host, action, &mut out),
     };
 
     let code = ended_as(outcome, &mut out);
@@ -634,22 +556,43 @@ mod tests {
     /// wearing a shortcut's clothes (ADR 0014).
     #[test]
     fn an_import_takes_a_path_and_nothing_else() {
-        assert!(Cli::try_parse_from(["perch", "import", "/tmp/perch.age"]).is_ok());
-        assert!(Cli::try_parse_from(["perch", "import"]).is_err());
+        assert!(Cli::try_parse_from(["perch", "holdings", "import", "/tmp/perch.age"]).is_ok());
+        assert!(Cli::try_parse_from(["perch", "holdings", "import"]).is_err());
 
         for narrowed in [
-            &["perch", "import", "/tmp/perch.age", "someone@example.com"][..],
-            &["perch", "import", "/tmp/perch.age", "--account", "work"],
-            &["perch", "import", "/tmp/perch.age", "--group", "work"],
             &[
                 "perch",
+                "holdings",
+                "import",
+                "/tmp/perch.age",
+                "someone@example.com",
+            ][..],
+            &[
+                "perch",
+                "holdings",
+                "import",
+                "/tmp/perch.age",
+                "--account",
+                "work",
+            ],
+            &[
+                "perch",
+                "holdings",
+                "import",
+                "/tmp/perch.age",
+                "--group",
+                "work",
+            ],
+            &[
+                "perch",
+                "holdings",
                 "import",
                 "/tmp/perch.age",
                 "--passphrase",
                 "hunter2",
             ],
-            &["perch", "import", "/tmp/perch.age", "--force"],
-            &["perch", "import", "/tmp/perch.age", "--merge"],
+            &["perch", "holdings", "import", "/tmp/perch.age", "--force"],
+            &["perch", "holdings", "import", "/tmp/perch.age", "--merge"],
         ] {
             assert!(
                 Cli::try_parse_from(narrowed).is_err(),
@@ -666,14 +609,14 @@ mod tests {
     /// the surface, because it is the only question a script can answer.
     #[test]
     fn a_purge_takes_no_target() {
-        assert!(Cli::try_parse_from(["perch", "purge"]).is_ok());
-        assert!(Cli::try_parse_from(["perch", "purge", "--yes"]).is_ok());
+        assert!(Cli::try_parse_from(["perch", "holdings", "purge"]).is_ok());
+        assert!(Cli::try_parse_from(["perch", "holdings", "purge", "--yes"]).is_ok());
 
         for narrowed in [
-            &["perch", "purge", "someone@example.com"][..],
-            &["perch", "purge", "work"],
-            &["perch", "purge", "--account", "work"],
-            &["perch", "purge", "--group", "work"],
+            &["perch", "holdings", "purge", "someone@example.com"][..],
+            &["perch", "holdings", "purge", "work"],
+            &["perch", "holdings", "purge", "--account", "work"],
+            &["perch", "holdings", "purge", "--group", "work"],
         ] {
             assert!(
                 Cli::try_parse_from(narrowed).is_err(),
@@ -770,15 +713,36 @@ mod tests {
     /// process table for anything on the machine to read (ADR 0014).
     #[test]
     fn an_export_takes_a_path_and_nothing_else() {
-        assert!(Cli::try_parse_from(["perch", "export", "/tmp/perch.age"]).is_ok());
-        assert!(Cli::try_parse_from(["perch", "export"]).is_err());
+        assert!(Cli::try_parse_from(["perch", "holdings", "export", "/tmp/perch.age"]).is_ok());
+        assert!(Cli::try_parse_from(["perch", "holdings", "export"]).is_err());
 
         for narrowed in [
-            &["perch", "export", "/tmp/perch.age", "someone@example.com"][..],
-            &["perch", "export", "/tmp/perch.age", "--account", "work"],
-            &["perch", "export", "/tmp/perch.age", "--group", "work"],
             &[
                 "perch",
+                "holdings",
+                "export",
+                "/tmp/perch.age",
+                "someone@example.com",
+            ][..],
+            &[
+                "perch",
+                "holdings",
+                "export",
+                "/tmp/perch.age",
+                "--account",
+                "work",
+            ],
+            &[
+                "perch",
+                "holdings",
+                "export",
+                "/tmp/perch.age",
+                "--group",
+                "work",
+            ],
+            &[
+                "perch",
+                "holdings",
                 "export",
                 "/tmp/perch.age",
                 "--passphrase",
@@ -789,6 +753,57 @@ mod tests {
                 Cli::try_parse_from(narrowed).is_err(),
                 "`{}` should not parse",
                 narrowed.join(" ")
+            );
+        }
+    }
+
+    /// The Watcher's five verbs, and the bare names its noun and Holdings took
+    /// over.
+    ///
+    /// The three Holdings forms are claimed by the three tests above, which
+    /// already say what each of them takes. What is left to claim is the tree
+    /// that did not exist before — one noun over three arrangements — and the
+    /// half of `one capability, one name, one place` that no other test can
+    /// make: that the old spelling is *gone*. Nothing is aliased, so every
+    /// command's placement is a decision that can be got wrong.
+    #[test]
+    fn the_watcher_is_five_verbs_and_the_names_they_moved_off_are_not_commands() {
+        for line in [
+            &["perch", "watcher", "run"][..],
+            &["perch", "watcher", "check"],
+            &["perch", "watcher", "install"],
+            &["perch", "watcher", "uninstall"],
+            &["perch", "watcher", "status"],
+            &["perch", "watcher", "status", "--json"],
+        ] {
+            assert!(
+                Cli::try_parse_from(line).is_ok(),
+                "`{}` should parse",
+                line.join(" ")
+            );
+        }
+
+        for moved in [
+            &["perch", "export", "/tmp/perch.age"][..],
+            &["perch", "import", "/tmp/perch.age"],
+            &["perch", "purge"],
+            &["perch", "watch"],
+            &["perch", "service", "install"],
+            // The flag `check` was promoted from, which is the one thing this
+            // move spends: it changes the meaning of the exit code and the
+            // lifetime of the command, so it is a verb and no longer a flag.
+            &["perch", "watcher", "run", "--once"],
+            // A noun on its own is not a command, and neither is a verb under
+            // the wrong one.
+            &["perch", "holdings"],
+            &["perch", "watcher"],
+            &["perch", "holdings", "run"],
+            &["perch", "watcher", "export", "/tmp/perch.age"],
+        ] {
+            assert!(
+                Cli::try_parse_from(moved).is_err(),
+                "`{}` should not parse",
+                moved.join(" ")
             );
         }
     }

@@ -22,9 +22,9 @@
 //! There is **no save button**: a change is written when it is made. The
 //! exclusive lock is taken per edit and given straight back, never held for the
 //! life of the screen — holding it would make an open TUI a denial of service
-//! against `perch watch`, which takes the same lock every round. The cost is
-//! that an edit can be refused, so a refusal is shown where a failed Refresh is
-//! shown and the row goes back to what was actually written.
+//! against `perch watcher run`, which takes the same lock every round. The cost
+//! is that an edit can be refused, so a refusal is shown where a failed Refresh
+//! is shown and the row goes back to what was actually written.
 //!
 //! Three rules shape the loop.
 //!

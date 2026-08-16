@@ -1,9 +1,9 @@
-//! Behaviour: `perch watch --once` — one check, and what it reports to
+//! Behaviour: `perch watcher check` — one check, and what it reports to
 //! whatever scheduled it.
 //!
 //! The loop is a person watching; this is a machine watching, and the
 //! difference is entirely in how the answer is delivered. Scheduling is the
-//! operating system's job (ADR 0013), so what `--once` owes cron is a decision
+//! operating system's job (ADR 0013), so what a Check owes cron is a decision
 //! line it can capture and an exit code it can branch on — nothing else, and
 //! nothing left running.
 //!
@@ -62,7 +62,7 @@ fn decision(printed: &str) -> String {
     decisions.into_iter().next().expect("the one decision")
 }
 
-/// The whole of what `--once` is: one check, one line, one exit code, and
+/// The whole of what a Check is: one round, one line, one exit code, and
 /// nothing left running.
 #[test]
 fn one_check_switches_and_reports_it_in_the_exit_code() {
@@ -172,7 +172,7 @@ fn a_check_that_could_not_read_a_current_figure_exits_twenty() {
 
 /// An Account whose Credential has stopped working is a figure that cannot be
 /// read, so a check holds on it like any other — `19` says more, and it is not
-/// in the table `--once` promises, so the Quarantine and the repair go on the
+/// in the table a Check promises, so the Quarantine and the repair go on the
 /// line instead. A scheduler could do nothing with the difference either way.
 #[test]
 fn a_check_on_a_quarantined_account_holds_and_names_the_repair() {
@@ -352,7 +352,7 @@ fn a_check_on_a_group_that_has_not_said_the_watcher_may_act_names_the_setting() 
     assert!(host.sent_to(USAGE_URL).is_empty(), "and nothing was read");
 }
 
-/// The property that makes `--once` a watcher rather than a Switch on a timer:
+/// The property that makes a Check a watcher rather than a Switch on a timer:
 /// every invocation is a fresh process, so the cooldown has to be written down
 /// somewhere it survives one.
 #[test]

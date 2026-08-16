@@ -369,10 +369,10 @@ fn removing_the_active_account_is_refused_while_a_client_is_running_against_the_
 /// Nothing about a removal needs one: whether a client is holding the Profile
 /// is answered by the session markers in it, and the version is only what a
 /// refusal quotes when those cannot be read. Asked for outright, it refused the
-/// whole removal — and `perch purge`, which gives up everything, was the only
-/// way left to give up one Account. `perch export` already tolerates exactly
-/// this machine, and for the same stated reason: it is the one somebody is
-/// decommissioning.
+/// whole removal — and `perch holdings purge`, which gives up everything, was
+/// the only way left to give up one Account. `perch holdings export` already
+/// tolerates exactly this machine, and for the same stated reason: it is the
+/// one somebody is decommissioning.
 #[test]
 fn an_account_is_given_up_on_a_machine_that_no_longer_has_claude_code_on_it() {
     let host = machine_with_two_accounts();
@@ -663,9 +663,9 @@ fn an_answer_that_arrives_after_another_perch_took_the_lock_removes_nothing() {
 /// does is delete that Profile's Credential and then the Profile itself, out
 /// from under a session mid-task.
 ///
-/// `perch purge` and `perch relogin` both ask twice over exactly this window.
-/// `perch remove` is the only command that deletes an Account's Credential, and
-/// it was the one asking once.
+/// `perch holdings purge` and `perch relogin` both ask twice over exactly this
+/// window. `perch remove` is the only command that deletes an Account's
+/// Credential, and it was the one asking once.
 #[test]
 fn a_client_that_starts_while_the_question_is_answered_stops_the_removal() {
     let host = machine_with_two_accounts()

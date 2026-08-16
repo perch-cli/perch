@@ -1,16 +1,16 @@
-//! `perch watch` — the watcher that Cycles on your behalf when the Account you
-//! are on runs low.
+//! `perch watcher run` — the watcher that Cycles on your behalf when the
+//! Account you are on runs low.
 //!
 //! A loop you can see and kill. What it decides and why is [`crate::watch`];
 //! the round it takes to decide it is here.
 //!
 //! Three arrangements and one behaviour (ADR 0040). Typed at a terminal it is
 //! this loop. Run by the machine's own service manager — a Service, which
-//! [`crate::service`] installs — it is *the same loop*, supervised, which is the
-//! whole of why there is no second policy to keep in agreement with this one.
-//! `perch watch --once` is one round of it for a scheduler, with what was
-//! decided in the exit code because nobody is reading a terminal; the difference
-//! between that and the loop is [`Watcher`] and nothing else.
+//! [`crate::service`] installs — it is *the same loop*, supervised, which is
+//! the whole of why there is no second policy to keep in agreement with this
+//! one. `perch watcher check` is one round of it for a scheduler, with what was
+//! decided in the exit code because nobody is reading a terminal; the
+//! difference between that and the loop is [`Watcher`] and nothing else.
 //!
 //! Perch never backgrounds itself. Scheduling and supervision are the operating
 //! system's job, which is ADR 0013's line and is not one ADR 0040 repealed —
@@ -72,7 +72,7 @@ use chrono::{DateTime, Utc};
 use crate::adopt;
 use crate::commands::say;
 use crate::cycle::{self, Scope};
-use crate::error::{EXIT_OK, PerchError, Result};
+use crate::error::{PerchError, Result};
 use crate::host::{Host, Waited};
 use crate::lock;
 use crate::observe::{self, Attempt};
@@ -82,20 +82,6 @@ use crate::switch;
 use crate::watch::{
     self, Backoff, Considered, Fullest, Holding, Outcome, Policy, Recently, Round, Speak,
 };
-
-/// How the watcher was asked for: as the loop, or as one check.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct WatchArgs {
-    /// Take one round and exit, reporting what it decided in the exit code.
-    pub once: bool,
-}
-
-pub fn run(host: &dyn Host, args: WatchArgs, out: &mut dyn Write) -> Result<i32> {
-    match args.once {
-        true => check(host, out),
-        false => keep_watching(host, out).map(|()| EXIT_OK),
-    }
-}
 
 /// One round, for whatever scheduled it (ADR 0013).
 ///
@@ -108,7 +94,7 @@ pub fn run(host: &dyn Host, args: WatchArgs, out: &mut dyn Write) -> Result<i32>
 /// it: what a check does when it acts is a Switch, and a signal arriving in the
 /// middle of one would leave the machine part way through it. There is no wait
 /// to answer the interrupt at afterwards, because a check is already leaving.
-fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
+pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     host.listen_for_interrupts();
 
     // The same lock a loop takes, and refused the same way (ADR 0040). A Check
@@ -170,7 +156,9 @@ fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     Ok(round.outcome.exit_code())
 }
 
-fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
+/// The loop, for the person who typed it or the Service running it for them
+/// (ADR 0013, ADR 0040).
+pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     // Before anything else, so that a Ctrl-C — or the `SIGTERM` a service
     // manager stops this with — is a request to finish rather than a process
     // killed in the middle of a Switch.
@@ -184,7 +172,7 @@ fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     let mut holding = Holding::nothing();
 
     // Exactly one Watcher per person per machine. Taken before the opening line
-    // rather than after it, so a second `perch watch` never claims to be
+    // rather than after it, so a second `perch watcher run` never claims to be
     // watching anything.
     let Some(_watching_alone) = take_the_watch(host, out, &mut backoff, &mut holding)? else {
         return stopped(out);
@@ -287,12 +275,12 @@ fn stopped(out: &mut dyn Write) -> Result<()> {
 /// was waiting.
 ///
 /// Held rather than refused, and this is the whole reason the watcher lock can
-/// be given a staleness window measured in tens of minutes. A `perch watch` that
-/// exited here would be a Service that exits at every start until a lock left
-/// behind by a `kill -9` goes stale, which is the crash loop ADR 0040 repealed
-/// the permission exits to avoid — arriving through the thing that enforces
-/// single-instance. So it says who has it and comes back, and the machine heals
-/// itself.
+/// be given a staleness window measured in tens of minutes. A `perch watcher
+/// run` that exited here would be a Service that exits at every start until a
+/// lock left behind by a `kill -9` goes stale, which is the crash loop ADR 0040
+/// repealed the permission exits to avoid — arriving through the thing that
+/// enforces single-instance. So it says who has it and comes back, and the
+/// machine heals itself.
 fn take_the_watch<'a>(
     host: &'a dyn Host,
     out: &mut dyn Write,
@@ -421,10 +409,10 @@ fn opening(host: &dyn Host) -> Result<String> {
 /// of a sequence of processes nobody is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Watcher {
-    /// `perch watch`: rounds separated by a wait this process takes, so what
-    /// paces it lives in memory and dies with it.
+    /// `perch watcher run`: rounds separated by a wait this process takes, so
+    /// what paces it lives in memory and dies with it.
     Loop,
-    /// `perch watch --once`: one round and out, so what paces it is written to
+    /// `perch watcher check`: one round and out, so what paces it is written to
     /// the registry for the next invocation to read, and how long until that
     /// one is whatever scheduled them.
     Check,
@@ -756,9 +744,9 @@ fn act(
     let outgoing = watching.account.clone();
 
     // Asked before the candidates are read rather than only by the Switch
-    // below, which is the same bargain `perch purge` makes about its questions:
-    // the first ask is what stops the command spending something on a caller it
-    // was always going to refuse.
+    // below, which is the same bargain `perch holdings purge` makes about its
+    // questions: the first ask is what stops the command spending something on
+    // a caller it was always going to refuse.
     //
     // What is spent here is an hourly allowance that does not refill early (ADR
     // 0015), one read per candidate, and the state it was being spent on is not
@@ -870,20 +858,20 @@ fn act(
         // stops holding it when it exits. The round says so and the loop goes
         // on watching.
         //
-        // Only where the next round genuinely has a different answer to give.
-        // A refusal is reported as `nothing to do now`, which is a scheduler's
+        // Only where the next round genuinely has a different answer to give. A
+        // refusal is reported as `nothing to do now`, which is a scheduler's
         // cue to come back in five minutes and expect the machine to have moved
         // on — true of a client that will exit and of an Account just
         // Quarantined, which `record` has already written down and which is
         // passed over from the next round onwards. A locked keychain, a probe
-        // that cannot find Claude
-        // Code, a Profile that will not be written: none of those clear
-        // themselves, and folding them in here had `perch watch --once` exiting
-        // 15 every five minutes forever while a cron mailbox read "nothing to
-        // do" — for a machine that needed somebody to look at it. They keep the
-        // code the failure earned (the exit-code table promises `11` for a keychain
-        // nobody can reach), and the loop stops on them rather than retrying a
-        // full Capture-and-write every two and a half minutes.
+        // that cannot find Claude Code, a Profile that will not be written:
+        // none of those clear themselves, and folding them in here had `perch
+        // watcher check` exiting 15 every five minutes forever while a cron
+        // mailbox read "nothing to do" — for a machine that needed somebody to
+        // look at it. They keep the code the failure earned (the exit-code
+        // table promises `11` for a keychain nobody can reach), and the loop
+        // stops on them rather than retrying a full Capture-and-write every two
+        // and a half minutes.
         //
         // The incoming Credential being live and something after that failing
         // is not one of them: the machine is part way through a Switch, and a

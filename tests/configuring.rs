@@ -9,9 +9,9 @@
 //! A Group's Strategy decides which Account a bare `perch switch` lands on, and
 //! the global ungrouped-Cycling setting decides whether it may land anywhere at
 //! all from an Account in no Group (ADR 0017). The watcher's fields govern
-//! `perch watch` and nothing else, which is asserted here too: setting them
-//! switches nothing on, because nothing acts on them until somebody runs the
-//! loop (ADR 0013). What the loop then does with them is `watching.rs`.
+//! `perch watcher run` and nothing else, which is asserted here too: setting
+//! them switches nothing on, because nothing acts on them until somebody runs
+//! the loop (ADR 0013). What the loop then does with them is `watching.rs`.
 
 mod common;
 
@@ -280,7 +280,7 @@ fn the_watchers_fields_are_stored_and_govern_a_loop_that_has_to_be_run() {
     result.expect("the field is the watcher's, and it is stored");
     assert!(group_config(&host, "work").watcher_may_act);
     assert!(
-        printed.contains("perch watch"),
+        printed.contains("perch watcher run"),
         "and what now may act is named: {printed}"
     );
     // The distinction this has always protected, and which matters more now
@@ -293,7 +293,7 @@ fn the_watchers_fields_are_stored_and_govern_a_loop_that_has_to_be_run() {
          on (ADR 0013, ADR 0040): {printed}"
     );
     assert!(
-        printed.contains("perch service install"),
+        printed.contains("perch watcher install"),
         "and all three ways of running one are named, because a sentence about \
          the loop alone leaves somebody with a Service no reason to read it: \
          {printed}"
@@ -311,7 +311,7 @@ fn the_watchers_fields_are_stored_and_govern_a_loop_that_has_to_be_run() {
         active(&host).as_deref(),
         Some(EMAIL),
         "permission is not a process: configuring a Group switches nothing \
-         until `perch watch` is running (ADR 0013)"
+         until `perch watcher run` is running (ADR 0013)"
     );
 }
 
@@ -735,10 +735,10 @@ fn one_scope_inheriting_is_said_in_the_singular() {
 ///
 /// The same rule `perch status` states for itself and `perch list` follows.
 /// Both halves of `perch config` took the write lock, so reading a setting
-/// while `perch watch` was between rounds — it takes that lock every round, and
-/// `perch status --refresh` holds it across every network read — waited the
-/// wait out and then failed with "another `perch` holds it", about a command
-/// that only ever reads.
+/// while `perch watcher run` was between rounds — it takes that lock every
+/// round, and `perch status --refresh` holds it across every network read —
+/// waited the wait out and then failed with "another `perch` holds it", about a
+/// command that only ever reads.
 #[test]
 fn getting_a_setting_reads_alongside_another_perch_rather_than_waiting_on_it() {
     let host = three_accounts_in_one_group();

@@ -53,13 +53,13 @@ pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Pr
         .map_err(|err| PerchError::Other(format!("could not create {}: {err}", dir.display())))?;
 
     // And Perch says so itself, before the browser opens. `reap_abandoned`
-    // protects a login somebody is in the middle of by asking whether anything is
-    // running against the directory — which reads a session marker, and the only
-    // thing that writes one is `perch run`. Nothing wrote one here, so the
-    // protection its comment describes did not exist: a `perch watch --once` from
-    // cron, firing while somebody hunted for their second factor, deleted the
-    // Credential the login had just written and left the `perch add` driving it
-    // reporting that the login did not complete.
+    // protects a login somebody is in the middle of by asking whether anything
+    // is running against the directory — which reads a session marker, and the
+    // only thing that writes one is `perch run`. Nothing wrote one here, so the
+    // protection its comment describes did not exist: a `perch watcher check`
+    // from cron, firing while somebody hunted for their second factor, deleted
+    // the Credential the login had just written and left the `perch add`
+    // driving it reporting that the login did not complete.
     //
     // Perch's own pid, because Perch is waiting on this login exactly as a Run
     // waits on its client — so ADR 0027's argument that a Run may corroborate its

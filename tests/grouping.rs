@@ -402,9 +402,9 @@ fn group_list_shows_every_group_with_its_accounts_and_its_configuration() {
 /// `watcher-may-act` is not the whole of whether the watcher acts there:
 /// `cycle-ungrouped` is a separate declaration that those Accounts are
 /// interchangeable at all (ADR 0017). Read from the permission alone, the
-/// summary announced "may switch unattended at 80%" about a Scope `perch watch`
-/// refuses outright — and it printed the same Cycling line whichever way the
-/// gate was set, so neither direction was falsifiable.
+/// summary announced "may switch unattended at 80%" about a Scope `perch
+/// watcher run` refuses outright — and it printed the same Cycling line
+/// whichever way the gate was set, so neither direction was falsifiable.
 #[test]
 fn what_group_list_says_about_ungrouped_cycling_is_what_the_watcher_does() {
     let host = machine_with_two_accounts();

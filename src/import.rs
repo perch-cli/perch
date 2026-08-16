@@ -48,9 +48,9 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
          same Account on both sides one Rotation apart has no answer to which \
          Credential is live, and an Alias can mean different Accounts on two \
          machines.\n\
-         Nothing was imported and the file was not opened. `perch purge` gives \
-         the machine back and is what makes room — it offers to write an Export \
-         first.",
+         Nothing was imported and the file was not opened. `perch holdings \
+         purge` gives the machine back and is what makes room — it offers to \
+         write an Export first.",
         crate::commands::accounts(accounts),
     )))
 }
@@ -70,7 +70,7 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
 /// whatever Claude Code was logged in as goes on running.
 ///
 /// Nothing arrives having just been checked either, and for the same reason.
-/// [`Registry::checks`] is what a `perch watch --once` on the *other* machine
+/// [`Registry::checks`] is what a `perch watcher check` on the *other* machine
 /// did — when it Switched — and the cooldown is measured from it. Carried
 /// across, an Export taken this morning has the first check on the new machine
 /// reporting `cooling` on the strength of something that happened somewhere
@@ -87,10 +87,11 @@ pub fn restored(export: &Export, path: &std::path::Path) -> Result<Registry> {
     // The check the registry gets on the way in off disk, and the same one: an
     // Import writes a registry without reading one first, so anything this
     // accepts and `load` does not is a machine with no working command left on
-    // it — including the `perch purge` that would make room to try again. This
-    // was a narrower copy that walked Group configuration alone, so an Export
-    // holding an Alias keyed by an email address, or a Group name with a space
-    // in it, imported cleanly and wedged the machine on the next command.
+    // it — including the `perch holdings purge` that would make room to try
+    // again. This was a narrower copy that walked Group configuration alone, so
+    // an Export holding an Alias keyed by an email address, or a Group name
+    // with a space in it, imported cleanly and wedged the machine on the next
+    // command.
     //
     // The path named is where the registry is about to be written rather than
     // where it came from, because that is the file the refusal tells them to
@@ -144,8 +145,8 @@ impl Placed {
     /// What is left instead is a Profile holding the Credential this Import put
     /// in it, which costs nothing that has not already been paid: the Export
     /// file still holds every Credential in it, the directory was already
-    /// unnamed before any of this started, and `perch purge` walks it and the
-    /// next `perch add` reaps it.
+    /// unnamed before any of this started, and `perch holdings purge` walks it
+    /// and the next `perch add` reaps it.
     pub fn undo(&self, host: &dyn Host) {
         for touched in &self.touched {
             if touched.was_already_there {
@@ -359,7 +360,10 @@ mod tests {
             crate::error::EXIT_CONFLICT,
             "{refused}"
         );
-        assert!(refused.to_string().contains("perch purge"), "{refused}");
+        assert!(
+            refused.to_string().contains("perch holdings purge"),
+            "{refused}"
+        );
         assert!(
             refused
                 .to_string()
@@ -419,9 +423,10 @@ mod tests {
     }
 
     /// And the rest of that check, which an Import used to skip. Anything this
-    /// accepts and `registry::load` refuses is a machine with no working command
-    /// left on it — `perch purge`, the one that would make room to try again,
-    /// reads the registry too. So an Export is held to exactly what a load is.
+    /// accepts and `registry::load` refuses is a machine with no working
+    /// command left on it — `perch holdings purge`, the one that would make
+    /// room to try again, reads the registry too. So an Export is held to
+    /// exactly what a load is.
     #[test]
     fn a_registry_no_later_command_could_read_is_refused_rather_than_restored() {
         let mut named_badly = an_export();

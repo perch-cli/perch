@@ -440,8 +440,8 @@ fn take(host: &dyn Host, lock: &LockSpec) -> Result<()> {
 
     // Busy rather than a general failure: nothing is wrong and nothing was
     // changed, and the two callers that run unattended have to tell this from a
-    // fault. `perch watch` holds the round and comes back; a scheduler reading
-    // the exit code of `perch watch --once` does the same.
+    // fault. `perch watcher run` holds the round and comes back; a scheduler
+    // reading the exit code of `perch watcher check` does the same.
     Err(PerchError::Busy(format!(
         "{} ({}) is held by {} and was not given back.\n\
          Nothing was changed. Try again in a moment; if it persists, quit it \

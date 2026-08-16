@@ -1,4 +1,5 @@
-//! Behaviour: `perch service` — having the machine run the Watcher for you.
+//! Behaviour: `perch watcher install`, `uninstall` and `status` — having the
+//! machine run the Watcher for you.
 //!
 //! The unit files themselves are argued with in `src/service.rs`'s unit tests,
 //! where three platforms' worth of quoting can be read side by side. What is
@@ -16,7 +17,7 @@
 mod common;
 
 use common::*;
-use perch::commands::service::ServiceCommand;
+use perch::commands::watcher::WatcherCommand;
 use perch::error::{EXIT_HELD, EXIT_INVALID, EXIT_NOTHING_TO_DO, EXIT_OK};
 use perch::host::fake::Effect;
 use perch::host::{Execution, FakeHost, Host, Platform};
@@ -117,9 +118,9 @@ fn and_running(host: FakeHost) -> FakeHost {
     )
 }
 
-fn run_service(host: &FakeHost, command: ServiceCommand) -> (perch::Result<i32>, String) {
+fn run_service(host: &FakeHost, command: WatcherCommand) -> (perch::Result<i32>, String) {
     let mut written = Vec::new();
-    let result = perch::commands::service::run(host, command, &mut written);
+    let result = perch::commands::watcher::run(host, command, &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
@@ -130,7 +131,7 @@ fn run_service(host: &FakeHost, command: ServiceCommand) -> (perch::Result<i32>,
 fn installing_writes_a_unit_and_starts_it_through_the_service_manager() {
     let host = linux();
 
-    let (result, printed) = run_service(&host, ServiceCommand::Install);
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
 
     assert_eq!(result.expect("the service manager answered"), EXIT_OK);
     assert!(host.path_exists(std::path::Path::new(UNIT)), "{printed}");
@@ -140,7 +141,7 @@ fn installing_writes_a_unit_and_starts_it_through_the_service_manager() {
         .expect("the unit is readable");
     assert!(unit.contains("Type=simple"), "{unit}");
     assert!(
-        unit.contains(" watch\n"),
+        unit.contains(" watcher run\n"),
         "it runs the ordinary loop: {unit}"
     );
     assert!(unit.contains("Restart=always"), "{unit}");
@@ -173,7 +174,7 @@ fn an_install_the_service_manager_refuses_leaves_no_unit_behind() {
             failed("Failed to connect to bus: No medium found"),
         );
 
-    let (result, _) = run_service(&host, ServiceCommand::Install);
+    let (result, _) = run_service(&host, WatcherCommand::Install);
 
     let refusal = result.expect_err("the service manager refused");
     assert!(
@@ -197,7 +198,7 @@ fn an_install_the_service_manager_refuses_leaves_no_unit_behind() {
 fn a_service_is_refused_to_root_rather_than_installed_for_the_wrong_person() {
     let host = linux().as_superuser();
 
-    let (result, _) = run_service(&host, ServiceCommand::Install);
+    let (result, _) = run_service(&host, WatcherCommand::Install);
 
     let refusal = result.expect_err("root is not the person this would watch");
     assert_eq!(refusal.exit_code(), EXIT_INVALID);
@@ -214,11 +215,11 @@ fn a_service_is_refused_to_root_rather_than_installed_for_the_wrong_person() {
 #[test]
 fn installing_twice_replaces_the_unit_rather_than_refusing() {
     let host = linux();
-    run_service(&host, ServiceCommand::Install)
+    run_service(&host, WatcherCommand::Install)
         .0
         .expect("the first");
 
-    let (result, printed) = run_service(&host, ServiceCommand::Install);
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
 
     assert_eq!(result.expect("the second"), EXIT_OK);
     assert!(
@@ -231,11 +232,11 @@ fn installing_twice_replaces_the_unit_rather_than_refusing() {
 #[test]
 fn uninstalling_stops_the_service_and_takes_the_unit_back() {
     let host = linux();
-    run_service(&host, ServiceCommand::Install)
+    run_service(&host, WatcherCommand::Install)
         .0
         .expect("installed");
 
-    let (result, printed) = run_service(&host, ServiceCommand::Uninstall);
+    let (result, printed) = run_service(&host, WatcherCommand::Uninstall);
 
     assert_eq!(result.expect("it came back"), EXIT_OK);
     assert!(
@@ -247,7 +248,7 @@ fn uninstalling_stops_the_service_and_takes_the_unit_back() {
         "{:?}",
         ran(&host)
     );
-    assert!(printed.contains("`perch watch`"), "{printed}");
+    assert!(printed.contains("`perch watcher run`"), "{printed}");
 }
 
 /// The existing code for a request that was already true. A machine with no
@@ -256,7 +257,7 @@ fn uninstalling_stops_the_service_and_takes_the_unit_back() {
 fn uninstalling_what_was_never_installed_is_nothing_to_do_rather_than_a_failure() {
     let host = linux();
 
-    let (result, printed) = run_service(&host, ServiceCommand::Uninstall);
+    let (result, printed) = run_service(&host, WatcherCommand::Uninstall);
 
     assert_eq!(result.expect("nothing failed"), EXIT_NOTHING_TO_DO);
     assert!(printed.contains("no Service installed"), "{printed}");
@@ -269,31 +270,31 @@ fn uninstalling_what_was_never_installed_is_nothing_to_do_rather_than_a_failure(
 fn status_succeeds_whether_or_not_anything_is_installed() {
     let host = linux();
 
-    let (before, said) = run_service(&host, ServiceCommand::Status { json: false });
+    let (before, said) = run_service(&host, WatcherCommand::Status { json: false });
     assert_eq!(before.expect("a question"), EXIT_OK);
     assert!(said.contains("No Service is installed"), "{said}");
 
-    run_service(&host, ServiceCommand::Install)
+    run_service(&host, WatcherCommand::Install)
         .0
         .expect("installed");
     let host = and_running(host);
 
-    let (after, said) = run_service(&host, ServiceCommand::Status { json: false });
+    let (after, said) = run_service(&host, WatcherCommand::Status { json: false });
     assert_eq!(after.expect("still a question"), EXIT_OK);
     assert!(said.contains("is running"), "{said}");
 }
 
 /// The two questions a machine can answer differently, and the reason `status`
-/// asks both: a Service that is installed and stopped, and a `perch watch`
-/// somebody typed in a terminal, are different states with the same shape.
+/// asks both: a Service that is installed and stopped, and a `perch watcher
+/// run` somebody typed in a terminal, are different states with the same shape.
 #[test]
 fn status_tells_an_installed_service_apart_from_a_watcher_that_is_running() {
     let host = linux();
-    run_service(&host, ServiceCommand::Install)
+    run_service(&host, WatcherCommand::Install)
         .0
         .expect("installed");
 
-    let (_, said) = run_service(&host, ServiceCommand::Status { json: true });
+    let (_, said) = run_service(&host, WatcherCommand::Status { json: true });
     let reported: serde_json::Value = serde_json::from_str(&said).expect("it is JSON");
 
     assert_eq!(reported["installed"], true);
@@ -302,15 +303,15 @@ fn status_tells_an_installed_service_apart_from_a_watcher_that_is_running() {
         "nothing holds the watcher lock: {said}"
     );
 
-    // Somebody takes the watcher lock — a `perch watch` in another terminal, or
-    // the Service having got as far as starting.
+    // Somebody takes the watcher lock — a `perch watcher run` in another
+    // terminal, or the Service having got as far as starting.
     let _held = perch::lock::take_all(
         &host,
         vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
     )
     .expect("the lock is free");
 
-    let (_, said) = run_service(&host, ServiceCommand::Status { json: true });
+    let (_, said) = run_service(&host, WatcherCommand::Status { json: true });
     let reported: serde_json::Value = serde_json::from_str(&said).expect("it is JSON");
     assert_eq!(
         reported["watching"], true,
@@ -324,7 +325,7 @@ fn status_tells_an_installed_service_apart_from_a_watcher_that_is_running() {
 #[test]
 fn status_says_when_the_unit_names_a_binary_that_is_no_longer_there() {
     let host = linux();
-    run_service(&host, ServiceCommand::Install)
+    run_service(&host, WatcherCommand::Install)
         .0
         .expect("installed");
 
@@ -336,16 +337,16 @@ fn status_says_when_the_unit_names_a_binary_that_is_no_longer_there() {
     let named = unit
         .lines()
         .find_map(|line| line.strip_prefix("ExecStart="))
-        .and_then(|line| line.strip_suffix(" watch"))
+        .and_then(|line| line.strip_suffix(" watcher run"))
         .expect("the unit names a binary");
     host.remove_file(std::path::Path::new(named))
         .expect("the Upgrade moved it");
 
-    let (_, said) = run_service(&host, ServiceCommand::Status { json: false });
+    let (_, said) = run_service(&host, WatcherCommand::Status { json: false });
 
     assert!(said.contains("not there any more"), "{said}");
     assert!(
-        said.contains("perch service install"),
+        said.contains("perch watcher install"),
         "and the repair is one command: {said}"
     );
 }
@@ -361,7 +362,7 @@ fn installing_with_no_grant_anywhere_succeeds_and_says_the_service_will_hold() {
         .0
         .expect("the Group takes the permission back");
 
-    let (result, printed) = run_service(&host, ServiceCommand::Install);
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
 
     assert_eq!(result.expect("not a refusal"), EXIT_OK);
     assert!(printed.contains("watcher-may-act"), "{printed}");
@@ -380,7 +381,7 @@ fn a_purge_stops_the_service_before_it_deletes_anything() {
     // Declining the Export and then typing the word, which is what a Purge
     // actually asks for.
     let host = mac().with_answers(&["n", "purge"]);
-    run_service(&host, ServiceCommand::Install)
+    run_service(&host, WatcherCommand::Install)
         .0
         .expect("installed");
 
@@ -408,7 +409,7 @@ fn a_purge_stops_the_service_before_it_deletes_anything() {
 #[test]
 fn a_purge_refuses_rather_than_deleting_under_a_service_that_will_not_stop() {
     let host = mac().with_answers(&["n", "purge"]);
-    run_service(&host, ServiceCommand::Install)
+    run_service(&host, WatcherCommand::Install)
         .0
         .expect("installed");
     // Told to stop, and still there afterwards: `launchctl print` answers, which
@@ -430,7 +431,7 @@ fn a_purge_refuses_rather_than_deleting_under_a_service_that_will_not_stop() {
         "nothing was changed, and trying again after stopping it works: {refusal}"
     );
     assert!(
-        refusal.to_string().contains("perch service uninstall"),
+        refusal.to_string().contains("perch watcher uninstall"),
         "{refusal}"
     );
     assert!(
@@ -447,7 +448,7 @@ fn a_purge_refuses_rather_than_deleting_under_a_service_that_will_not_stop() {
 fn a_mac_gets_a_launchagent_in_its_own_place_bootstrapped_into_its_own_session() {
     let host = mac();
 
-    let (result, printed) = run_service(&host, ServiceCommand::Install);
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
 
     assert_eq!(result.expect("launchctl answered"), EXIT_OK);
     let at = unit_at(&host);
@@ -499,7 +500,7 @@ fn upgrading(host: &FakeHost) -> (perch::Result<i32>, String) {
 #[test]
 fn an_upgrade_restarts_the_service_onto_the_binary_it_just_moved() {
     let host = upgradable();
-    run_service(&host, ServiceCommand::Install)
+    run_service(&host, WatcherCommand::Install)
         .0
         .expect("a Service is installed before the Upgrade");
     let before = ran(&host).len();
@@ -529,7 +530,7 @@ fn an_upgrade_restarts_the_service_onto_the_binary_it_just_moved() {
 #[test]
 fn a_service_that_will_not_restart_is_a_warning_rather_than_a_failed_upgrade() {
     let host = upgradable();
-    run_service(&host, ServiceCommand::Install)
+    run_service(&host, WatcherCommand::Install)
         .0
         .expect("a Service is installed before the Upgrade");
     // The service manager stops answering between the install and the Upgrade,
@@ -549,7 +550,7 @@ fn a_service_that_will_not_restart_is_a_warning_rather_than_a_failed_upgrade() {
     );
     assert!(said.contains("could not be restarted"), "{said}");
     assert!(
-        said.contains("perch service install"),
+        said.contains("perch watcher install"),
         "and the repair is one command: {said}"
     );
 }
@@ -589,7 +590,7 @@ fn the_binary_is_read_back_out_of_a_plist_that_had_to_be_escaped_to_write() {
         .installed_at(awkward)
         .with_exec("launchctl", &["print", "gui/501/cli.perch.watch"], worked());
 
-    run_service(&host, ServiceCommand::Install)
+    run_service(&host, WatcherCommand::Install)
         .0
         .expect("installed");
 
@@ -601,7 +602,7 @@ fn the_binary_is_read_back_out_of_a_plist_that_had_to_be_escaped_to_write() {
         "escaped on the way in: {plist}"
     );
 
-    let (_, said) = run_service(&host, ServiceCommand::Status { json: true });
+    let (_, said) = run_service(&host, WatcherCommand::Status { json: true });
     let reported: serde_json::Value = serde_json::from_str(&said).expect("it is JSON");
 
     assert_eq!(
@@ -626,7 +627,7 @@ fn windows_keeps_the_task_itself_so_status_reads_no_unit_file() {
         worked(),
     );
 
-    let (result, said) = run_service(&host, ServiceCommand::Status { json: true });
+    let (result, said) = run_service(&host, WatcherCommand::Status { json: true });
 
     assert_eq!(result.expect("a question"), EXIT_OK);
     let reported: serde_json::Value = serde_json::from_str(&said).expect("it is JSON");
@@ -655,7 +656,7 @@ fn a_service_manager_that_explains_itself_on_stdout_is_still_quoted() {
         },
     );
 
-    let (result, _) = run_service(&host, ServiceCommand::Install);
+    let (result, _) = run_service(&host, WatcherCommand::Install);
 
     let refusal = result.expect_err("the service manager refused");
     assert!(
@@ -665,14 +666,14 @@ fn a_service_manager_that_explains_itself_on_stdout_is_still_quoted() {
     );
 }
 
-/// A machine Perch holds nothing on yet is one `service status` still answers
+/// A machine Perch holds nothing on yet is one `watcher status` still answers
 /// about — it is a question, and "no Service, and no registry either" is an
 /// answer.
 #[test]
 fn status_answers_on_a_machine_perch_holds_nothing_on() {
     let host = FakeHost::new();
 
-    let (result, said) = run_service(&host, ServiceCommand::Status { json: false });
+    let (result, said) = run_service(&host, WatcherCommand::Status { json: false });
 
     assert_eq!(result.expect("a question"), EXIT_OK);
     assert!(said.contains("No Service is installed"), "{said}");
@@ -694,14 +695,14 @@ fn status_in_prose_names_the_binary_the_watcher_and_the_missing_grant() {
         .with_file("/usr/local/bin/perch", "")
         .installed_at("/usr/local/bin/perch")
         .with_exec("launchctl", &["print", "gui/501/cli.perch.watch"], worked());
-    run_service(&host, ServiceCommand::Install)
+    run_service(&host, WatcherCommand::Install)
         .0
         .expect("installed");
     config_set(&host, &["work", "watcher-may-act", "false"])
         .0
         .expect("the Group takes the permission back");
 
-    // Somebody is watching — a `perch watch` in another terminal, or the
+    // Somebody is watching — a `perch watcher run` in another terminal, or the
     // Service having got as far as taking the lock.
     let _held = perch::lock::take_all(
         &host,
@@ -709,7 +710,7 @@ fn status_in_prose_names_the_binary_the_watcher_and_the_missing_grant() {
     )
     .expect("the lock is free");
 
-    let (result, said) = run_service(&host, ServiceCommand::Status { json: false });
+    let (result, said) = run_service(&host, WatcherCommand::Status { json: false });
 
     assert_eq!(result.expect("a question"), EXIT_OK);
     assert!(said.contains("It runs "), "the binary it will run: {said}");
@@ -732,7 +733,7 @@ fn a_service_manager_that_is_not_installed_says_so_rather_than_failing_blankly()
     // No `with_exec` for `systemctl`, so the fake has no such program.
     let host = watched().with_platform(Platform::Other);
 
-    let (result, _) = run_service(&host, ServiceCommand::Install);
+    let (result, _) = run_service(&host, WatcherCommand::Install);
 
     let refusal = result.expect_err("there is no systemctl here");
     assert!(

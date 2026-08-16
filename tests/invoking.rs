@@ -12,8 +12,8 @@
 //! is operational: **if a case needs a real Claude Code installed, it has
 //! crossed.** Everything here runs against a scratch home on a machine with no
 //! Claude Code, no keychain consulted and no network answered, which is why
-//! `switch`, `add`, `run`, `relogin` and `watch` are absent. Those arms probe,
-//! the probe is the boundary marker rather than an obstacle, and a stub
+//! `switch`, `add`, `run`, `relogin` and `watcher run` are absent. Those arms
+//! probe, the probe is the boundary marker rather than an obstacle, and a stub
 //! `claude` on `PATH` would be working around it. Behaviour stays with the
 //! fakes.
 //!
@@ -78,7 +78,7 @@ struct Scratch {
 
 impl Scratch {
     /// A machine Perch has never run on: no home directory at all, which is
-    /// where `perch purge` finds nothing to give back.
+    /// where `perch holdings purge` finds nothing to give back.
     ///
     /// Named for the test that made it, under this process, so two of these
     /// never collide however many tests run at once.
@@ -142,9 +142,14 @@ impl Drop for Scratch {
 }
 
 /// Every command the binary dispatches, as `--help` lists them.
-const COMMANDS: [&str; 19] = [
-    "add", "alias", "config", "disable", "enable", "export", "group", "import", "purge", "relogin",
-    "remove", "run", "list", "switch", "status", "tui", "upgrade", "service", "watch",
+///
+/// Sixteen names, because a command is placed by the noun it is about and the
+/// Account is the one left unsaid (ADR 0047). The eleven that elide it, `perch`
+/// itself, and the four nouns that are written: `config`, `group`, `holdings`
+/// and `watcher`.
+const COMMANDS: [&str; 16] = [
+    "add", "alias", "config", "disable", "enable", "group", "holdings", "relogin", "remove", "run",
+    "list", "switch", "status", "tui", "upgrade", "watcher",
 ];
 
 /// The bare question, answered before the parser and exactly as the Homebrew
@@ -255,7 +260,7 @@ fn the_code_a_command_ended_as_is_what_the_process_exits_with() {
 fn a_machine_perch_holds_nothing_on_has_nothing_to_purge() {
     let machine = Scratch::untouched("purge");
 
-    let ran = perch(&machine, &["purge", "--yes"]);
+    let ran = perch(&machine, &["holdings", "purge", "--yes"]);
 
     assert_eq!(ran.code, EXIT_NOTHING_TO_DO, "{}{}", ran.out, ran.err);
     assert!(
@@ -302,9 +307,15 @@ fn a_line_the_parser_refuses_ends_the_process_at_two() {
 
     for line in [
         &["frobnicate"][..],
-        &["export", "/tmp/perch.age", "--passphrase", "hunter2"],
-        &["import", "/tmp/perch.age", "--force"],
-        &["purge", "--group", GROUP],
+        &[
+            "holdings",
+            "export",
+            "/tmp/perch.age",
+            "--passphrase",
+            "hunter2",
+        ],
+        &["holdings", "import", "/tmp/perch.age", "--force"],
+        &["holdings", "purge", "--group", GROUP],
         &["tui", "--json"],
         &["upgrade", "--json"],
     ] {

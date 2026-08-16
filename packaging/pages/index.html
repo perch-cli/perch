@@ -141,12 +141,12 @@ Utilization   5-hour    12%  (as of 4m ago)
 
     <h2>Or stop being the one who notices</h2>
     <p>
-      <code>perch watch</code> reads how full the Account you are on is, prints
-      what it made of that, and Switches when it runs low. A loop in one
+      <code>perch watcher run</code> reads how full the Account you are on is,
+      prints what it made of that, and Switches when it runs low. A loop in one
       terminal, not a daemon — nothing to install, and Ctrl-C is safe wherever it
       lands.
     </p>
-    <pre class="transcript"><code><b>$ perch watch</b>
+    <pre class="transcript"><code><b>$ perch watcher run</b>
 Watching you@example.com in Group `work`. Reading how full it is every 2m30s, and Switching within the Group when its fullest Quota Window reaches 80% — to an Account at 70% or under, and never twice inside 15 minutes. Ctrl-C stops.
 2026-08-04T12:00:00Z  waiting   you@example.com 40% used, fullest 5-hour; threshold 80% — under it, so nothing was wanted.
 2026-08-04T12:02:30Z  switched  you@example.com 86% used, fullest 5-hour; threshold 80% — over it. Switched — overflow@example.com has the most room: 95% headroom, which is true of every one of its Quota Windows — 5-hour is its fullest, as of just now.
@@ -177,8 +177,8 @@ Stopped. Nothing was left behind: the watcher holds no lock, writes no file of i
         by eye.
       </li>
       <li>
-        <code>perch export</code> — everything Perch holds, in one encrypted
-        file, readable by the standard <code>age</code> command.
+        <code>perch holdings export</code> — everything Perch holds, in one
+        encrypted file, readable by the standard <code>age</code> command.
       </li>
     </ul>
     <p>

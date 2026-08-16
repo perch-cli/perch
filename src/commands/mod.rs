@@ -8,6 +8,7 @@ pub mod config;
 pub mod enable;
 pub mod export;
 pub mod group;
+pub mod holdings;
 pub mod import;
 pub mod list;
 pub mod purge;
@@ -20,6 +21,7 @@ pub mod switch;
 pub mod tui;
 pub mod upgrade;
 pub mod watch;
+pub mod watcher;
 
 use std::io::Write;
 

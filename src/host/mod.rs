@@ -466,9 +466,9 @@ pub trait Host {
     /// Starts listening for a loop being asked to stop — by the person at the
     /// terminal, or by the service manager running it.
     ///
-    /// `perch watch` calls this and nothing else does: every other command is
-    /// over long before anybody could ask, and Ctrl-C during one of them is a
-    /// process killed where it stands (ADR 0013).
+    /// `perch watcher run` calls this and nothing else does: every other
+    /// command is over long before anybody could ask, and Ctrl-C during one of
+    /// them is a process killed where it stands (ADR 0013).
     ///
     /// Both askings are the same request and are answered in the same place.
     /// Ctrl-C is the person's; `SIGTERM` is what systemd and launchd send to
@@ -479,7 +479,7 @@ pub trait Host {
     /// Which user this process is running as, or `None` where the platform has
     /// no such number.
     ///
-    /// Two things need it, and both belong to `perch service` (ADR 0040). It is
+    /// Two things need it, and both belong to `perch watcher` (ADR 0040). It is
     /// what the root refusal is read off — every Profile Perch holds is under
     /// one person's home directory, so a Service installed by root is one
     /// watching a registry it does not own, and on macOS one with no unlocked
@@ -658,12 +658,13 @@ pub fn replace_via_tmp(
     //
     // Both failures, not only the rename. A write is `create_new`, then
     // `write_all`, then `sync_all`, and a disk that fills between the first and
-    // the last leaves a real, partially-written file at `<target>.perch-tmp.<pid>`
-    // that nothing removed: a truncated `.credentials.json` holding a fragment
-    // of a refresh token, a truncated `.claude.json`, or a truncated Export
-    // holding some of every Credential on the machine. None of them is ever
-    // mentioned, and nothing looks at that path again — `perch export` refuses
-    // an occupied path by looking at the target alone.
+    // the last leaves a real, partially-written file at
+    // `<target>.perch-tmp.<pid>` that nothing removed: a truncated
+    // `.credentials.json` holding a fragment of a refresh token, a truncated
+    // `.claude.json`, or a truncated Export holding some of every Credential on
+    // the machine. None of them is ever mentioned, and nothing looks at that
+    // path again — `perch holdings export` refuses an occupied path by looking
+    // at the target alone.
     let written = host.create_file_with_mode(&beside, contents, mode);
     match written.and_then(|()| host.rename(&beside, path)) {
         Ok(()) => Ok(()),

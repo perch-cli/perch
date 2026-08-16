@@ -1,4 +1,5 @@
-//! Behaviour: `perch watch` — the loop, the Refresh, and the decision log.
+//! Behaviour: `perch watcher run` — the loop, the Refresh, and the decision
+//! log.
 //!
 //! The tests here drive a simulated Utilization trace through the real loop
 //! against the fake Host: the figure the endpoint answers with moves from one
@@ -690,10 +691,10 @@ fn the_account_just_left_is_returned_to_once_the_cooldown_has_run_out() {
 }
 
 /// The loop's cooldown is the loop's own: it lives in the running process and
-/// is written down nowhere, so stopping `perch watch` and starting it again is
-/// a person saying "go on then". A scheduled `--once` is the other case — the
-/// sequence of invocations is the watcher there, and what paces it has to
-/// outlive any one of them (ADR 0013).
+/// is written down nowhere, so stopping `perch watcher run` and starting it
+/// again is a person saying "go on then". A scheduled Check is the other
+/// case — the sequence of invocations is the watcher there, and what paces it
+/// has to outlive any one of them (ADR 0013).
 #[test]
 fn the_loop_carries_its_cooldown_in_memory_and_records_nothing() {
     let host = filling_up_one_after_the_other();
@@ -852,7 +853,7 @@ fn an_account_the_watcher_finds_broken_is_recorded_rather_than_rediscovered() {
 
 /// And it names the Account the way the user does.
 ///
-/// `perch watch` prints a decision line and no Accounts at all, so the
+/// `perch watcher run` prints a decision line and no Accounts at all, so the
 /// Quarantine note is the only sentence on the screen about the candidate that
 /// was passed over — and it was the one place in Perch naming an Account by raw
 /// address while `perch list`, `perch status` and every refusal called it
@@ -1202,7 +1203,7 @@ fn a_switch_that_changed_something_and_then_failed_stops_the_loop() {
 }
 
 /// The loop takes the registry lock every round, waits about four seconds for
-/// it, and used to propagate the refusal — which ended `perch watch`.
+/// it, and used to propagate the refusal — which ended `perch watcher run`.
 ///
 /// That made a `perch status --refresh` in another terminal able to stop the
 /// watcher. It holds the exclusive lock across every Renewal and every read it
@@ -1301,7 +1302,7 @@ fn nowhere_to_go_says_which_candidates_could_not_be_read() {
 /// A check that could not take the registry says so on standard output, like
 /// every other outcome it has.
 ///
-/// The whole of what `--once` promises is that "the line goes to standard
+/// The whole of what a Check promises is that "the line goes to standard
 /// output for cron to capture, and what was decided goes into the exit code" —
 /// and the one outcome most likely to recur was the one with no line. Another
 /// `perch` holding the registry is ordinary: `perch status --refresh` holds it
@@ -1341,8 +1342,8 @@ fn a_check_another_perch_holds_the_registry_against_says_so_where_cron_is_readin
 ///
 /// `RealHost::wait` asks `interrupted()` before its first slice and returns
 /// having slept none of the interval. The fake advanced its clock by the whole
-/// of it and only then decided, so the wait that *ends* an interrupted
-/// `perch watch` moved the clock 2.5 minutes — or 20 under back-off — that a
+/// of it and only then decided, so the wait that *ends* an interrupted `perch
+/// watcher run` moved the clock 2.5 minutes — or 20 under back-off — that a
 /// real Ctrl-C never moves it. Every age a test measured after an interrupted
 /// watch was measuring a duration production does not have.
 #[test]

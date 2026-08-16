@@ -102,8 +102,8 @@ pub fn switch(host: &dyn Host, model: &mut Model, email: &str) {
 /// That also settles the locking. Each of those commands takes Perch's
 /// exclusive lock and gives it straight back, so the panel holds it per edit
 /// and never for the life of the screen: an open TUI is not a denial of service
-/// against `perch watch`, which takes the same lock every round. The cost is
-/// that an edit can be refused — by another `perch` holding the lock, or by
+/// against `perch watcher run`, which takes the same lock every round. The cost
+/// is that an edit can be refused — by another `perch` holding the lock, or by
 /// `registry::save` refusing to write against a hold that was lost — and the
 /// refusal is surfaced rather than swallowed.
 pub fn write(host: &dyn Host, model: &mut Model, edit: Edit) {

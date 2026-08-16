@@ -1,9 +1,9 @@
 //! The watcher's round: what it read, what it decided, and why it said so.
 //!
-//! `perch watch` is a loop in a terminal, not a daemon (ADR 0013). Everything
-//! that follows from that is here: how often it asks, what it asks about, and
-//! the one line it prints for every answer — including the answers where
-//! nothing happens, which are most of them.
+//! `perch watcher run` is a loop in a terminal, not a daemon (ADR 0013).
+//! Everything that follows from that is here: how often it asks, what it asks
+//! about, and the one line it prints for every answer — including the answers
+//! where nothing happens, which are most of them.
 //!
 //! The decision log is the whole of the evidence that the policy works. It is
 //! what makes "why did it switch just then" answerable without reading the
@@ -440,13 +440,13 @@ impl Fullest {
 ///
 /// Where it is carried is the loop's and the check's one difference (ADR 0013).
 /// The loop keeps it in memory and nowhere else, which is the whole of why
-/// `perch watch` still "writes no file of its own": a cooldown is about the loop
-/// somebody is running, not about the machine, and two watchers would be two
-/// people watching with one pacing the other's decisions. Stopping the loop and
-/// starting it again is a person saying "go on then", and it starts with
-/// nothing to wait for.
+/// `perch watcher run` still "writes no file of its own": a cooldown is about
+/// the loop somebody is running, not about the machine, and two watchers would
+/// be two people watching with one pacing the other's decisions. Stopping the
+/// loop and starting it again is a person saying "go on then", and it starts
+/// with nothing to wait for.
 ///
-/// A `perch watch --once` is a fresh process every time and the sequence of
+/// A `perch watcher check` is a fresh process every time and the sequence of
 /// them is the watcher, so there is no memory for it to be carried in and it
 /// comes back off the registry — [`Recently::recorded`], from what the check
 /// before it wrote down.
@@ -503,22 +503,22 @@ impl Recently {
     ///
     /// The elapsed span is floored at nothing, so a Switch stamped in the
     /// future is treated as one that has just happened. `checks` is read off
-    /// disk and a `--once` watcher is the only thing that writes it, so the
-    /// stamp survives a clock the machine steps backwards — and unfloored, an
-    /// hour of skew held the Group for its cooldown *plus* the hour and said
-    /// "the last Switch was -55 minutes ago" while it did. `age_phrase` already
-    /// refuses to make that claim about a reading; this is the same refusal
-    /// about a Switch.
+    /// disk and a Check is the only thing that writes it, so the stamp survives
+    /// a clock the machine steps backwards — and unfloored, an hour of skew
+    /// held the Group for its cooldown *plus* the hour and said "the last
+    /// Switch was -55 minutes ago" while it did. `age_phrase` already refuses
+    /// to make that claim about a reading; this is the same refusal about a
+    /// Switch.
     ///
     /// Floored for the sentence alone. How much is *left* is arithmetic about
     /// what the loop will actually do, and the loop will in fact go on holding
     /// for the skew plus the cooldown — so computing it from the floored span
-    /// promised a wait a fraction as long as the one being served. A cron
-    /// `--once` after an NTP step backwards mailed "so nothing moves for another
-    /// 15 minutes" every five minutes for an hour and a quarter, each one true
-    /// of a clock nobody has. The module doc calls this line the whole of the
-    /// evidence that the policy works; a number that is not the policy's is not
-    /// evidence of it.
+    /// promised a wait a fraction as long as the one being served. A Check
+    /// under cron, after an NTP step backwards, mailed "so nothing moves for
+    /// another 15 minutes" every five minutes for an hour and a quarter, each
+    /// one true of a clock nobody has. The module doc calls this line the whole
+    /// of the evidence that the policy works; a number that is not the policy's
+    /// is not evidence of it.
     fn left_of_the_cooldown(&self, now: DateTime<Utc>) -> Option<(Duration, Duration)> {
         let switched = self.switched?;
         let elapsed = now - switched;
@@ -672,10 +672,10 @@ pub enum Outcome {
     /// whose line did not say when it would try again would read as a watcher
     /// that had given up.
     ///
-    /// Absent where nothing here decides when the next reading is: a
-    /// `perch watch --once` is exiting, and when it comes back is whatever
-    /// scheduled it to say. Promising an interval it has no part in would be
-    /// the one thing on the line that was not true.
+    /// Absent where nothing here decides when the next reading is: a `perch
+    /// watcher check` is exiting, and when it comes back is whatever scheduled
+    /// it to say. Promising an interval it has no part in would be the one
+    /// thing on the line that was not true.
     Held {
         why: String,
         retrying_in: Option<u64>,
@@ -855,7 +855,7 @@ impl Round {
 /// with the fields it does not have said as unread rather than left blank,
 /// which is how [`Round::figure`] already says a figure that was not read.
 /// `retrying_in` is `None` where nothing here decides when the next reading is,
-/// which is a `perch watch --once`: it is exiting, and when it comes back is
+/// which is a `perch watcher check`: it is exiting, and when it comes back is
 /// whatever scheduled it to say. The same distinction [`Outcome::Held`] already
 /// carries, and for the same reason — promising an interval this process has no
 /// part in would be the one thing on the line that was not true.
@@ -1204,8 +1204,8 @@ mod tests {
             let code = outcome.exit_code();
             assert!(
                 [EXIT_OK, EXIT_NOTHING_TO_DO, EXIT_NO_CANDIDATE, EXIT_HELD].contains(&code),
-                "{outcome:?} exits {code}, which is not in the table `--once` \
-                 documents"
+                "{outcome:?} exits {code}, which is not in the table a Check \
+                 reports on"
             );
         }
 
@@ -1468,7 +1468,7 @@ mod tests {
 
     /// A Switch stamped ahead of the clock reading it.
     ///
-    /// `checks` is written by a `perch watch --once` and read back by the next
+    /// `checks` is written by a `perch watcher check` and read back by the next
     /// one, so the stamp outlives the clock that made it — an NTP step
     /// backwards, or a machine that was running fast, puts a Switch in the
     /// future. Unfloored, the elapsed span went negative and the line read "the

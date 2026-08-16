@@ -1,9 +1,10 @@
-//! `perch import <path>` — a whole machine, put back (ADR 0014).
+//! `perch holdings import <path>` — a whole machine, put back (ADR 0014).
 //!
-//! The exact inverse of `perch export`: the registry and every Credential, so a
-//! new laptop arrives with the setup the old one had rather than a pile of
-//! nameless logins. That pair — an Export written before a Purge, an Import
-//! after it — is the whole of what makes "I can move to a new machine" true.
+//! The exact inverse of `perch holdings export`: the registry and every
+//! Credential, so a new laptop arrives with the setup the old one had rather
+//! than a pile of nameless logins. That pair — an Export written before a
+//! Purge, an Import after it — is the whole of what makes "I can move to a new
+//! machine" true.
 //!
 //! **It refuses a machine that already holds an Account.** Merging is where
 //! every hard case lives, and refusing keeps an Import the exact inverse of a
@@ -21,7 +22,7 @@
 //! Switches afterwards.
 
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::commands::{ask_passphrase, refuse_without_a_terminal, say, still_ours};
 use crate::error::{PerchError, Result};
@@ -30,19 +31,13 @@ use crate::host::{Host, HostError};
 use crate::import;
 use crate::registry;
 
-#[derive(Debug, Clone)]
-pub struct ImportArgs {
-    /// The `age` file to restore from.
-    pub path: PathBuf,
-}
-
-pub fn run(host: &dyn Host, args: ImportArgs, out: &mut dyn Write) -> Result<()> {
+pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     // Both before the passphrase, because both are refusals somebody should meet
     // before typing one. The file comes first: a path that is a typo is answered
     // by naming the path, not by advice about a machine the user was never
     // asking about.
-    refuse_without_a_terminal(host, "perch import")?;
-    let sealed = read_the_file(host, &args.path)?;
+    refuse_without_a_terminal(host, "perch holdings import")?;
+    let sealed = read_the_file(host, path)?;
 
     let mut perch = registry::lock(host)?;
     let held = registry::load(host)?;
@@ -72,7 +67,7 @@ pub fn run(host: &dyn Host, args: ImportArgs, out: &mut dyn Write) -> Result<()>
         )
     })?;
 
-    report(out, &args.path, &export)
+    report(out, path, &export)
 }
 
 /// The file, as the text `age` wrote. Read before anything else is decided,
@@ -98,8 +93,8 @@ fn read_the_file(host: &dyn Host, path: &Path) -> Result<String> {
         Err(HostError::Io(err)) if err.kind() == std::io::ErrorKind::InvalidData => {
             Err(PerchError::Invalid(format!(
                 "{} is not text, so it is not an Export. An Export is `age`'s \
-                 armored form, which is what `perch export` writes and what \
-                 `age -a -p` writes.\n\
+                 armored form, which is what `perch holdings export` writes \
+                 and what `age -a -p` writes.\n\
                  A binary `age` file can be turned into one: `age -d <file> | \
                  age -a -p > <armored>`.",
                 path.display(),

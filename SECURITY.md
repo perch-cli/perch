@@ -51,8 +51,8 @@ with the least behind it:
 - The `security` binary invocations, and how their arguments are constructed.
 - The `curl` invocations that carry an `Authorization` header, and anything
   that could redirect or intercept one.
-- `perch export` and `perch import`: the passphrase prompt, the encryption, and
-  anything that could leave plaintext behind on either side.
+- `perch holdings export` and `perch holdings import`: the passphrase prompt,
+  the encryption, and anything that could leave plaintext behind on either side.
 
 ## What is not
 

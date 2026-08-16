@@ -82,9 +82,9 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     // Asked again, for the same reason the hold below is re-checked and over
     // the same window: somebody may have started a client while the question
     // sat there, and an answer about the machine as it was before lunch says
-    // nothing about the Profile this is about to delete. `perch purge` and
-    // `perch relogin` both ask twice; this is the only command that deletes a
-    // Credential, and it was asking once.
+    // nothing about the Profile this is about to delete. `perch holdings purge`
+    // and `perch relogin` both ask twice; this is the only command that deletes
+    // a Credential, and it was asking once.
     refuse_while_anything_is_running(host, &account, &consequence)?;
 
     // The question above is the one wait in Perch with no bound on it — somebody
@@ -134,10 +134,11 @@ fn refuse_while_anything_is_running(
     // A machine that cannot say which Claude Code it has is still a machine an
     // Account can be given up on. The version is not what answers this question
     // — session markers are, and they are read straight off the Profile — it is
-    // only what a refusal quotes when the markers cannot be read. Propagated, it
-    // refused the whole removal on a machine where Claude Code had been
-    // uninstalled, leaving `perch purge` as the only way to give up one lapsed
-    // subscription. `export::the_live_store` swallows it for the same reason.
+    // only what a refusal quotes when the markers cannot be read. Propagated,
+    // it refused the whole removal on a machine where Claude Code had been
+    // uninstalled, leaving `perch holdings purge` as the only way to give up
+    // one lapsed subscription. `export::the_live_store` swallows it for the
+    // same reason.
     let installed =
         Installed::probed(host).unwrap_or_else(|_| Installed::unknown("(not installed)"));
     switch::refuse_if_live_anywhere(

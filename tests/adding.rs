@@ -998,11 +998,12 @@ fn a_name_that_is_not_usable_is_refused_as_that_rather_than_as_a_collision() {
 ///
 /// `reap_abandoned` asks whether anything is running against the pending
 /// directory, and the answer is a session marker — which only `perch run` ever
-/// wrote. So nothing marked a login Perch was driving, and the comment promising
-/// that "a login somebody is in the middle of is a Live Profile" described
-/// something that was not happening: a `perch watch --once` from cron, or any
-/// command in another terminal, deleted the Credential the login had just written
-/// and left this `perch add` reporting that the login did not complete.
+/// wrote. So nothing marked a login Perch was driving, and the comment
+/// promising that "a login somebody is in the middle of is a Live Profile"
+/// described something that was not happening: a `perch watcher check` from
+/// cron, or any command in another terminal, deleted the Credential the login
+/// had just written and left this `perch add` reporting that the login did not
+/// complete.
 ///
 /// Perch writes the marker itself now, before the browser opens — it is waiting on
 /// this login exactly as a Run waits on its client (ADR 0027). Depending on Claude
