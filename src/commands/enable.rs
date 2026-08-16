@@ -1,4 +1,4 @@
-//! `perch disable` / `perch enable` — reserving an Account for a purpose
+//! `perch disable` / `perch enable` — keeping an Account out of Cycling
 //! without giving it up.
 //!
 //! Disabling is the narrowest thing Perch can be told about an Account: it is
@@ -62,12 +62,12 @@ fn set(registry: &mut Registry, target: &AccountTarget, command: &EnableCommand)
     let candidate = matches!(command, EnableCommand::Enable { .. });
 
     let account = registry.held_mut(&target.email)?;
-    let was = std::mem::replace(&mut account.enabled, candidate);
+    let was_disabled = std::mem::replace(&mut account.disabled, !candidate);
     let quarantine = account.quarantine;
 
-    let changed = match (was, candidate) {
-        (false, false) => format!("{named} was already disabled."),
-        (true, true) => format!("{named} was already enabled."),
+    let changed = match (was_disabled, candidate) {
+        (true, false) => format!("{named} was already disabled."),
+        (false, true) => format!("{named} was already enabled."),
         (_, false) => format!("Disabled {named}."),
         (_, true) => format!("Enabled {named}."),
     };

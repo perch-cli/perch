@@ -477,8 +477,8 @@ fn the_setting_that_lets_ungrouped_accounts_cycle_is_off_until_it_is_turned_on()
 fn a_group_with_nobody_left_to_cycle_to_says_so_rather_than_switching() {
     let host = three_accounts_in_one_group();
     observed(&host, EMAIL, vec![window("5-hour", 100.0)]);
-    for reserved in [SECOND_EMAIL, THIRD_EMAIL] {
-        disable_account(&host, reserved)
+    for held_back in [SECOND_EMAIL, THIRD_EMAIL] {
+        disable_account(&host, held_back)
             .0
             .expect("the Account leaves the pool");
     }

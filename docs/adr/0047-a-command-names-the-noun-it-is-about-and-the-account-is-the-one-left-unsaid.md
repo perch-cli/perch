@@ -208,6 +208,12 @@ neither. **No flag other than `--once` is affected.**
    goes under its noun, at depth two.
 2. **The noun must already be in `CONTEXT.md`.** A command may not invent one.
 3. **Flag or verb**, by the test above.
+4. **A reversal takes its own name.** Where a command's whole effect is to undo
+   another's, it is its own command rather than a flag on the one it undoes. The
+   flag-or-verb test does not reach the question.
+
+Clause 4 was added by ADR 0052, which amends this decision in that one clause
+and nothing else. Its decision, its table and its counts are untouched.
 
 Clause 2 is the one that will do the work. It makes growing the surface cost a
 glossary entry, which is the only price that reliably deters it — and it is

@@ -107,7 +107,7 @@ impl Scratch {
                 organization_uuid: None,
             },
             plan: None,
-            enabled: true,
+            disabled: false,
             quarantine: None,
             group: None,
             utilization: None,
@@ -542,7 +542,12 @@ fn disable_and_enable_reach_their_own_halves() {
     let ran = perch(&machine, &["list"]);
 
     let row = row_for(&ran.out, SOMEONE);
-    assert!(row.contains("enabled"), "{}", ran.out);
+    assert!(
+        !row.contains("disabled"),
+        "the state cell empties rather than naming a state with no name \
+         (ADR 0052):\n{}",
+        ran.out
+    );
 }
 
 /// An Account's line in the listing.

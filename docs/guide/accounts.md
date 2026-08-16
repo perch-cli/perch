@@ -1,12 +1,12 @@
 # Accounts
 
 An Account is one Claude login Perch holds. This is how you gain one, name one,
-reserve one, repair one and give one up.
+keep one out of Cycling, repair one and give one up.
 
 - [Adopting the login you already have](#adopting-the-login-you-already-have)
 - [Adding an Account](#adding-an-account)
 - [Naming an Account](#naming-an-account)
-- [Reserving an Account](#reserving-an-account)
+- [Keeping an Account out of Cycling](#keeping-an-account-out-of-cycling)
 - [When an Account breaks](#when-an-account-breaks)
 - [Giving up an Account](#giving-up-an-account)
 
@@ -61,7 +61,7 @@ $ perch alias overflow --unset
 Aliases and Group names share one namespace, so a name the other half already
 answers to is refused — which is what keeps a Target from ever being ambiguous.
 
-## Reserving an Account
+## Keeping an Account out of Cycling
 
 `perch disable` keeps an Account out of Cycling without giving it up — for the
 subscription you are holding for one particular thing and would rather Perch did
@@ -78,14 +78,14 @@ Enabled spare@example.com (as `spare`). It is a Cycle candidate again.
 ```
 
 A disabled Account is excluded from Cycling and from nothing else. It keeps its
-Alias, its Group and its stored Credential, `perch list` shows it as disabled,
+Alias, its Group and its stored Credential, `perch list` shows it as `disabled`,
 and naming it on `perch switch` still switches to it — so putting it back needs
 no login, only `perch enable`. Removing the Account is the blunt instrument this
 exists to avoid.
 
 Disabling every Account in a Group is allowed. A bare `perch switch` there then
 reports having no candidate (exit 17) rather than quietly landing you on
-something you had reserved.
+something you had taken out of Cycling.
 
 ## When an Account breaks
 

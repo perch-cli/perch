@@ -21,8 +21,7 @@ fn adopted_machine(utilization: &str) -> FakeHost {
         "account_uuid": "account-uuid-1",
         "organization_name": "Acme"
       }},
-      "plan": "pro",
-      "enabled": true{utilization}
+      "plan": "pro"{utilization}
     }}
   ],
   "aliases": {{}}
@@ -249,7 +248,7 @@ fn status_json_says_no_switch_is_in_flight_rather_than_leaving_the_field_out() {
 /// One Account is one shape, whichever command is describing it.
 ///
 /// `status --json` described its Account with `account_uuid` and neither
-/// `alias`, `group` nor `enabled`; `list --json` described one with those three
+/// `alias`, `group` nor `disabled`; `list --json` described one with those three
 /// and no `account_uuid`. Two non-overlapping key sets for the same thing, so a
 /// script asking which Group the Account it is on belongs to had to run a second
 /// command, and one written against either could not be pointed at the other.
@@ -286,7 +285,7 @@ fn the_account_status_describes_has_the_same_keys_the_listing_gives_one() {
         "with what only `status` used to carry: {active}"
     );
     assert_eq!(
-        active["enabled"], true,
+        active["disabled"], false,
         "and what only the listing used to: {active}"
     );
 }
@@ -354,7 +353,9 @@ fn a_registry_from_a_newer_perch_says_so_even_when_it_spells_things_this_build_c
 #[test]
 fn status_with_no_active_account_names_the_remedy_that_applies() {
     let host = machine_with_two_accounts().with_answers(&["y"]);
-    disable_account(&host, SECOND_EMAIL).0.expect("reserved");
+    disable_account(&host, SECOND_EMAIL)
+        .0
+        .expect("taken out of Cycling");
     run_remove(&host, EMAIL)
         .0
         .expect("the active one is given up");

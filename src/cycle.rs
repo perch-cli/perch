@@ -645,7 +645,7 @@ fn place(
 /// on ([`crate::reserve`]) must be the same set of Accounts, or the figure on
 /// screen describes a set the Switch does not use.
 pub fn is_a_candidate(account: &Account) -> bool {
-    account.enabled && !account.quarantined()
+    !account.disabled && !account.quarantined()
 }
 
 /// Whether anything has declared the Accounts in this Scope interchangeable.
@@ -678,7 +678,7 @@ pub fn out_of_the_running(accounts: &[&Account]) -> String {
     let quarantined = accounts.iter().filter(|a| a.quarantined()).count();
     let disabled = accounts
         .iter()
-        .filter(|a| !a.enabled && !a.quarantined())
+        .filter(|a| a.disabled && !a.quarantined())
         .count();
     let mut out = Vec::new();
     if disabled > 0 {
@@ -984,12 +984,12 @@ pub(crate) mod tests {
     #[test]
     fn an_account_that_is_both_disabled_and_quarantined_is_counted_once() {
         let mut broken = account("broken@example.com", vec![]);
-        broken.enabled = false;
+        broken.disabled = true;
         broken.quarantine = Some(Quarantine::RenewalRejected);
-        let mut reserved = account("reserved@example.com", vec![]);
-        reserved.enabled = false;
+        let mut spare = account("spare@example.com", vec![]);
+        spare.disabled = true;
 
-        let said = nobody_is_a_candidate(&Scope::Ungrouped, &[&broken, &reserved]);
+        let said = nobody_is_a_candidate(&Scope::Ungrouped, &[&broken, &spare]);
 
         assert!(said.contains("1 disabled"), "{said}");
         assert!(said.contains("1 Quarantined"), "{said}");
@@ -1004,7 +1004,7 @@ pub(crate) mod tests {
                 organization_uuid: None,
             },
             plan: None,
-            enabled: true,
+            disabled: false,
             quarantine: None,
             group: Some("work".to_string()),
             utilization: (!windows.is_empty()).then(|| CachedUtilization {
@@ -1152,7 +1152,7 @@ pub(crate) mod tests {
     #[test]
     fn an_account_no_cycle_would_choose_sorts_below_every_one_it_would() {
         let mut spared = account("spared@example.com", vec![window("5-hour", 0.0)]);
-        spared.enabled = false;
+        spared.disabled = true;
         let mut broken = account("broken@example.com", vec![window("5-hour", 0.0)]);
         broken.quarantine = Some(Quarantine::RenewalRejected);
         let registry = holding(vec![
@@ -1968,8 +1968,8 @@ pub(crate) mod tests {
             account("off@example.com", vec![window("5-hour", 1.0)]),
             account("broken@example.com", vec![window("5-hour", 1.0)]),
         ]);
-        registry.account_mut("here@example.com").unwrap().enabled = false;
-        registry.account_mut("off@example.com").unwrap().enabled = false;
+        registry.account_mut("here@example.com").unwrap().disabled = true;
+        registry.account_mut("off@example.com").unwrap().disabled = true;
         registry.quarantine("broken@example.com", Quarantine::RenewalRejected);
 
         let error = cycle(&registry).expect_err("nobody is a candidate");
@@ -2044,12 +2044,12 @@ mod properties {
                     _ => vec![window("5-hour", 100.0)],
                 };
                 let mut held = account(&email, windows);
-                held.enabled = self.next(6) > 0;
+                held.disabled = self.next(6) == 0;
                 held.quarantine = (self.next(8) == 0).then_some(Quarantine::RenewalRejected);
                 described.push_str(&format!(
-                    "\n  {email}: {:?} enabled={} quarantined={}",
+                    "\n  {email}: {:?} disabled={} quarantined={}",
                     headroom_of(&held),
-                    held.enabled,
+                    held.disabled,
                     held.quarantined(),
                 ));
                 accounts.push(held);
@@ -2089,7 +2089,7 @@ mod properties {
             let Some(won) = chosen(&arrangement, None) else {
                 continue;
             };
-            assert!(won.enabled, "{}", arrangement.described);
+            assert!(!won.disabled, "{}", arrangement.described);
             assert!(!won.quarantined(), "{}", arrangement.described);
             assert!(
                 !headroom_of(&won).is_exhausted(),
@@ -2109,7 +2109,7 @@ mod properties {
             };
             let winning = headroom_of(&won).ranking(arrangement.strategy, now());
             for held in &arrangement.registry.accounts {
-                if !held.enabled || held.quarantined() || headroom_of(held).is_exhausted() {
+                if held.disabled || held.quarantined() || headroom_of(held).is_exhausted() {
                     continue;
                 }
                 let theirs = headroom_of(held).ranking(arrangement.strategy, now());

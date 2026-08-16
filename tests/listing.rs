@@ -31,7 +31,7 @@ fn account(email: &str, organization: &str) -> Account {
             organization_uuid: None,
         },
         plan: Some("pro".to_string()),
-        enabled: true,
+        disabled: false,
         quarantine: None,
         group: None,
         utilization: None,
@@ -68,7 +68,7 @@ fn machine_holding_three_accounts() -> FakeHost {
     registry.upsert(overflow);
 
     let mut spare = account(THIRD_EMAIL, "Spare Ltd");
-    spare.enabled = false;
+    spare.disabled = true;
     spare.utilization = Some(observed(at(10, 0), &[("5-hour", 91.0)]));
     registry.upsert(spare);
 
@@ -357,14 +357,56 @@ fn list_shows_every_account_with_its_alias_group_and_state() {
     );
     assert!(printed.contains("work"), "the Group is shown:\n{printed}");
     assert!(
-        printed.contains("enabled, quarantined"),
-        "a broken Account stays listed, says so, and still says whether it is \
-         a Cycle candidate — enabling it would not repair it:\n{printed}"
+        printed.contains("quarantined"),
+        "a broken Account stays listed and says so:\n{printed}"
     );
     assert!(
         printed.contains("disabled"),
         "an Account out of the pool says so:\n{printed}"
     );
+}
+
+/// The positive state has no name (ADR 0052), so the column says nothing about
+/// the Account nobody has done anything to — the placeholder the Alias column
+/// already uses for having nothing to say. `disabled`, `quarantined` and
+/// `disabled, quarantined` are the only things it prints.
+#[test]
+fn the_state_column_is_empty_for_an_account_in_neither_state() {
+    let host = machine_holding_three_accounts();
+
+    let (result, printed) = run_list(&host, false);
+
+    result.unwrap();
+    assert!(
+        !printed.contains("enabled"),
+        "nothing prints the word `enabled` — an Account that is not disabled \
+         is not in a state with a name:\n{printed}"
+    );
+    assert_eq!(
+        state_cell(&printed, EMAIL),
+        "-",
+        "its state cell holds the nothing-to-say placeholder:\n{printed}"
+    );
+    assert_eq!(state_cell(&printed, SECOND_EMAIL), "quarantined");
+    assert_eq!(state_cell(&printed, THIRD_EMAIL), "disabled");
+}
+
+/// One Account's State cell, found by where the header puts the column rather
+/// than by counting words — the Alias cell holds the same placeholder, so a
+/// positional read would pass on the wrong one.
+fn state_cell<'a>(printed: &'a str, email: &str) -> &'a str {
+    let header = printed
+        .lines()
+        .find(|line| line.contains("State"))
+        .expect("the table is headed");
+    let at = header.find("State").expect("the State column is headed");
+    printed
+        .lines()
+        .find(|line| line.contains(email))
+        .expect("the Account is listed")[at..]
+        .split_whitespace()
+        .next()
+        .expect("its State cell holds something")
 }
 
 #[test]
@@ -461,7 +503,12 @@ fn list_json_carries_an_observation_time_on_every_figure() {
     assert_eq!(active["email"], EMAIL);
     assert_eq!(active["active"], true);
     assert_eq!(active["group"], "work");
-    assert_eq!(active["enabled"], true);
+    assert_eq!(
+        active["disabled"], false,
+        "the key follows the field's name and stays present on every Account: \
+         a script testing for a key's presence to learn a bool has a worse \
+         contract, not a truer one (ADR 0052)"
+    );
     assert!(
         active["quarantined"].is_null(),
         "an Account that works says nothing about a Quarantine, which is what a \
@@ -498,7 +545,7 @@ fn list_json_carries_an_observation_time_on_every_figure() {
     assert!(overflow["utilization"]["observed_at"].is_null());
 
     let spare = accounts[2];
-    assert_eq!(spare["enabled"], false);
+    assert_eq!(spare["disabled"], true);
     assert!(spare["group"].is_null());
 }
 

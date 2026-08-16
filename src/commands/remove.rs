@@ -186,7 +186,7 @@ fn successor<'a>(registry: &'a Registry, leaving: &Account) -> Option<&'a Accoun
         registry
             .accounts
             .iter()
-            .filter(|held| held.email() != leaving.email() && held.enabled && !held.quarantined())
+            .filter(|held| held.email() != leaving.email() && !held.disabled && !held.quarantined())
     };
     let in_its_group = leaving
         .group
