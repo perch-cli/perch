@@ -27,8 +27,8 @@ else's schedule is what [`--once`](#watching-on-a-schedule) is for.
 **There is one Watcher per person per machine**, whichever way it is being run.
 A second `perch watch` says who holds the watcher lock and waits for it rather
 than deciding alongside them — two loops watch the same Account and each keeps
-its Cooldown in memory, which is the ping-pong the Cooldown exists to prevent,
-run twice.
+its Cooldown in memory, which is exactly the pacing the Cooldown exists to
+impose, undone by being run twice.
 
 **Every decision is printed, including the ones where nothing happens** — which
 are most of them. A line names what was read, the threshold it was read
@@ -67,31 +67,32 @@ an hour instead of twenty-four. It is bounded because the endpoint coming back
 does not announce itself: the only way to find out is to ask. The first read
 that works drops the whole of it. Every held line says which failure held it
 and when it will ask again, so a hold never reads as a watcher that has given
-up. It is not the cooldown — that paces Switches you have said the watcher may
-make, and this paces questions nobody is answering — and unlike the cooldown it
-is not configurable: like the interval, it is arithmetic about Anthropic's
-allowance rather than anybody's preference.
+up. It is not the cooldown — that paces Switches the watcher makes, and this
+paces questions nobody is answering — and like the interval it is arithmetic
+about Anthropic's allowance rather than anybody's preference.
 
-**It does not ping-pong.** Two Accounts hovering either side of the threshold
-would otherwise trade places every couple of minutes, each Switch costing a
-Capture and a Credential write for a few minutes of headroom. Three rules from
-the Group's configuration stop it, and each one is printed when it is what
+**It does not move you somewhere no better.** Usage climbs on the Account you
+are on and stands still on the ones you are not, so two Accounts either side of
+the threshold do not trade places — they walk upward together, and every Switch
+costs a Capture and a Credential write to land you somewhere with almost nothing
+left. **The margin is what stops it** (ADR 0046); the cooldown paces what the
+margin has already allowed. Both are fixed, and each is printed when it is what
 decided a round:
 
-- a **margin** — `watcher-margin-percent`, 10 points by default — under the
-  threshold, which nothing is moved to unless it clears. At an 80% threshold
-  that means nothing above 70%.
-- a **cooldown** — `watcher-cooldown-minutes`, 15 by default — between one
-  Switch and the next, whatever the figures do in between. A five-hour window
-  moves slowly enough that fifteen minutes never misses a real crossing.
-- **no return** — `watcher-no-return`, on by default — which keeps the Account
-  a Switch just left off the candidate list for one cooldown. It is not even
-  read: a read for a choice that cannot be made is an allowance spent on
-  nothing.
+- a **margin** of 10 points under the threshold, which nothing is moved to
+  unless it clears. At an 80% threshold that means nothing above 70%. A round
+  with nowhere clear enough says there is nowhere better to go, which is the
+  true answer — and it is the only one of the two that can say so, because a
+  cooldown sets how often a pointless move happens and never stops it happening.
+- a **cooldown** of 15 minutes between one Switch and the next, whatever the
+  figures do in between. A five-hour window moves slowly enough that fifteen
+  minutes never misses a real crossing. It is checked before anything is read:
+  a round that may not act has no business spending an allowance on figures it
+  cannot use.
 
 ```
 2026-08-04T12:02:30Z  nowhere   you@example.com 86% used, fullest 5-hour; threshold 80% — over it, and nowhere to go: Nothing in Group `work` is worth Switching to yet — overflow@example.com is at 74% used and nothing over 70% is worth moving to. Nothing was changed.
-2026-08-04T12:05:00Z  cooling   you@example.com 86% used, fullest 5-hour; threshold 80% — over it, and too soon to move again: the last Switch was 2 minutes ago and this Group's cooldown leaves at least 15 minutes between two, so nothing moves for another 12 minutes.
+2026-08-04T12:05:00Z  cooling   you@example.com 86% used, fullest 5-hour; threshold 80% — over it, and too soon to move again: the last Switch was 2 minutes ago and the cooldown leaves at least 15 minutes between two, so nothing moves for another 12 minutes.
 ```
 
 An Account Perch has never read a figure for is set aside the same way. A
@@ -103,8 +104,6 @@ None of it survives the loop. The cooldown lives in the running process and
 nowhere else — stopping `perch watch` and starting it again is you saying "go
 on then", and it starts with nothing to wait for. A scheduled check is the one
 exception, and [it says why below](#watching-on-a-schedule).
-`watcher-no-return` is measured in cooldowns, so a Group with
-`watcher-cooldown-minutes 0` has no no-return either, whatever it is set to.
 
 What it does when it acts is a Switch and nothing else: the outgoing Credential
 is Captured into its own Profile first (ADR 0006), Claude Code's locks are
@@ -209,19 +208,19 @@ $ perch watch --once
 2026-08-04T12:00:00Z  switched  you@example.com 86% used, fullest 5-hour; threshold 80% — over it. Switched — overflow@example.com has the most room: 95% headroom.   # exit 0
 
 $ perch watch --once
-2026-08-04T12:05:00Z  cooling   overflow@example.com 90% used, fullest 5-hour; threshold 80% — over it, and too soon to move again: the last Switch was 5 minutes ago and this Group's cooldown leaves at least 15 minutes between two, so nothing moves for another 10 minutes.   # exit 15
+2026-08-04T12:05:00Z  cooling   overflow@example.com 90% used, fullest 5-hour; threshold 80% — over it, and too soon to move again: the last Switch was 5 minutes ago and the cooldown leaves at least 15 minutes between two, so nothing moves for another 10 minutes.   # exit 15
 ```
 
-It is the same policy as the loop, run once — the same threshold, cooldown,
-margin and no return, and the same refusal to act on a figure it did not just
-read. **The cooldown and the no return survive between invocations**, because
-each `--once` is a fresh process and the sequence of them is the watcher: what
-one check Switched, and when, is recorded against the Group in the registry for
-the next one to be paced by. That is the one thing about the watcher that is
-written down, and it is why a check every minute still Switches no more often
-than the Group allows. The loop keeps the same two facts in memory instead —
-two loops would be two people watching, and one pacing the other's decisions is
-not what either of them asked for.
+It is the same policy as the loop, run once — the same threshold, cooldown and
+margin, and the same refusal to act on a figure it did not just read. **The
+cooldown survives between invocations**, because each `--once` is a fresh
+process and the sequence of them is the watcher: when one check Switched is
+recorded against the Group in the registry for the next one to be paced by. That
+stamp is the one thing about the watcher that is written down, and it is why a
+check every minute still Switches no more often than the cooldown allows. The
+loop keeps the same fact in memory instead — two loops would be two people
+watching, and one pacing the other's decisions is not what either of them asked
+for.
 
 The exit codes are [the full table](reference.md#exit-codes), and a check reaches
 five of them:
@@ -237,8 +236,8 @@ five of them:
 `20` is the one code the watcher added, and it exists because a scheduler
 retrying in five minutes has to tell a figure it could not read from a Group
 with nowhere to go: the first resolves itself and the second does not. A Switch
-held back by the cooldown or the no return is `15` — there was nothing to do
-*now* — and which of the rules held it is on the line rather than in the code,
+held back by the cooldown is `15` — there was nothing to do *now* — and which of
+the rules held it is on the line rather than in the code,
 because a script can do nothing different about it and a person reading a cron
 mailbox wants to know.
 

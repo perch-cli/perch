@@ -225,29 +225,12 @@ impl Strategy {
 /// unattended Switch means the Account really is running out.
 pub const DEFAULT_WATCHER_THRESHOLD_PERCENT: u8 = 80;
 
-/// The least wall-clock between two unattended Switches, when nobody has said
-/// otherwise (ADR 0013). A five-hour window moves slowly enough that fifteen
-/// minutes never misses a real crossing, and often enough that a watcher which
-/// has just moved you is not about to move you again.
-pub const DEFAULT_WATCHER_COOLDOWN_MINUTES: u32 = 15;
-
-/// How far below the threshold a candidate has to sit before it is worth moving
-/// to, when nobody has said otherwise. This is what kills the ping-pong: at an
-/// 80% threshold nothing is Switched to unless it is at 70% or better.
-pub const DEFAULT_WATCHER_MARGIN_PERCENT: u8 = 10;
-
-/// The longest cooldown that means anything. The longest Quota Window Anthropic
-/// reports is seven days, so a cooldown past it is one that could never let a
-/// second Switch happen inside any window it is pacing.
-pub const MAX_WATCHER_COOLDOWN_MINUTES: u32 = 7 * 24 * 60;
-
 /// The most a Setting said as a share of something can be.
 ///
-/// Named for the reason [`MAX_WATCHER_COOLDOWN_MINUTES`] is, and it was the one
-/// bound that was not: `100` was written out in the sentence below, twice in
-/// the range check, and again in the step range the TUI's arrow keys walk — so
-/// what `perch config set` accepts, what a hand-edited registry is refused for,
-/// and what the panel will let you reach were three statements of one number.
+/// `100` was written out in the sentence below, twice in the range check, and
+/// again in the step range the TUI's arrow keys walk — so what `perch config
+/// set` accepts, what a hand-edited registry is refused for, and what the panel
+/// will let you reach were three statements of one number.
 ///
 /// Not the bound on a Utilization figure, which `validate` checks separately
 /// and `anthropic::understand` clamps to. That one is what a *reading* may be;
@@ -259,30 +242,22 @@ pub const MAX_PERCENTAGE: u8 = 100;
 /// What a percentage accepts, said once so that the refusal a mistyped `perch
 /// config set` gets and the one a hand-edited registry gets are the same words.
 ///
-/// Built from the bound rather than written out beside it, as
-/// [`a_cooldown`] already was.
+/// Built from the bound rather than written out beside it, so the sentence and
+/// the number it describes cannot come to disagree.
 pub fn a_percentage() -> String {
     format!("a whole number between 0 and {MAX_PERCENTAGE}")
-}
-
-/// The same for a cooldown, which is a count of minutes rather than a share of
-/// a window. Built from the bound rather than written out beside it, so the
-/// sentence and the number it describes cannot come to disagree.
-pub fn a_cooldown() -> String {
-    format!("a whole number of minutes between 0 and {MAX_WATCHER_COOLDOWN_MINUTES} (seven days)")
 }
 
 /// Every Setting there is, all of them set: what Global holds, and what any
 /// narrower Scope resolves to once its Overrides have been laid over it
 /// (ADR 0002, amended).
 ///
-/// Four of these are the watcher's policy, and they are configuration rather
-/// than constants because they are preferences rather than arithmetic: how full
-/// is too full, how often is too often, how much emptier is worth the move, and
-/// whether coming straight back is allowed (ADR 0013). The interval the loop
-/// Refreshes at is not among them — that one is derived from Anthropic's
-/// allowance rather than from anyone's taste, and lives in
-/// [`crate::watch::REFRESH_INTERVAL_MILLIS`].
+/// Two of these are the watcher's, and only one of the two is a pace: how full
+/// is too full, which is the single question in the loop that a person's
+/// appetite for risk answers rather than arithmetic (ADR 0046). The numbers the
+/// loop paces itself by are not among them — the interval it Refreshes at, the
+/// cooldown between two Switches and the margin under where one may land are
+/// all derived rather than preferred, and live in [`crate::watch`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
@@ -293,14 +268,6 @@ pub struct Settings {
     pub watcher_may_act: bool,
     /// The Utilization the watcher would act at, as a percentage.
     pub watcher_threshold_percent: u8,
-    /// The least wall-clock between two unattended Switches, in minutes.
-    pub watcher_cooldown_minutes: u32,
-    /// How far under the threshold a candidate has to be before moving to it is
-    /// worth doing, in percentage points.
-    pub watcher_margin_percent: u8,
-    /// Whether the Account a Switch just left is barred from being Switched
-    /// back to for one cooldown.
-    pub watcher_no_return: bool,
 }
 
 impl Default for Settings {
@@ -309,9 +276,6 @@ impl Default for Settings {
             strategy: Strategy::default(),
             watcher_may_act: false,
             watcher_threshold_percent: DEFAULT_WATCHER_THRESHOLD_PERCENT,
-            watcher_cooldown_minutes: DEFAULT_WATCHER_COOLDOWN_MINUTES,
-            watcher_margin_percent: DEFAULT_WATCHER_MARGIN_PERCENT,
-            watcher_no_return: true,
         }
     }
 }
@@ -319,9 +283,9 @@ impl Default for Settings {
 impl Settings {
     /// Refuses configuration that cannot mean what it says. Serde already
     /// refuses a strategy Perch does not implement, and a `true`/`false` that
-    /// is neither; what is left is the ranges the numbers have to be in.
+    /// is neither; what is left is the range the one number has to be in.
     ///
-    /// Every refusal names the numbers that would have been accepted, because
+    /// The refusal names the numbers that would have been accepted, because
     /// the script that mistyped one is the reader, and being told only that it
     /// was wrong leaves it to guess twice.
     pub fn validate(&self, scope: &Scope) -> Result<()> {
@@ -351,12 +315,6 @@ pub struct Overrides {
     pub watcher_may_act: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub watcher_threshold_percent: Option<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub watcher_cooldown_minutes: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub watcher_margin_percent: Option<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub watcher_no_return: Option<bool>,
 }
 
 impl From<Settings> for Overrides {
@@ -368,9 +326,6 @@ impl From<Settings> for Overrides {
             strategy: Some(settings.strategy),
             watcher_may_act: Some(settings.watcher_may_act),
             watcher_threshold_percent: Some(settings.watcher_threshold_percent),
-            watcher_cooldown_minutes: Some(settings.watcher_cooldown_minutes),
-            watcher_margin_percent: Some(settings.watcher_margin_percent),
-            watcher_no_return: Some(settings.watcher_no_return),
         }
     }
 }
@@ -391,17 +346,10 @@ impl Overrides {
             watcher_threshold_percent: self
                 .watcher_threshold_percent
                 .unwrap_or(global.watcher_threshold_percent),
-            watcher_cooldown_minutes: self
-                .watcher_cooldown_minutes
-                .unwrap_or(global.watcher_cooldown_minutes),
-            watcher_margin_percent: self
-                .watcher_margin_percent
-                .unwrap_or(global.watcher_margin_percent),
-            watcher_no_return: self.watcher_no_return.unwrap_or(global.watcher_no_return),
         }
     }
 
-    /// The same ranges [`Settings::validate`] states, asked of the values this
+    /// The same range [`Settings::validate`] states, asked of the value this
     /// Scope actually declares. A Setting it Inherits is Global's to be right
     /// about, and is checked there.
     pub fn validate(&self, scope: &Scope) -> Result<()> {
@@ -414,28 +362,6 @@ impl Overrides {
                 "watcher-threshold-percent",
                 self.watcher_threshold_percent.expect("just read"),
                 &a_percentage(),
-            ));
-        }
-        if self
-            .watcher_margin_percent
-            .is_some_and(|held| held > MAX_PERCENTAGE)
-        {
-            return Err(out_of_range(
-                scope,
-                "watcher-margin-percent",
-                self.watcher_margin_percent.expect("just read"),
-                &a_percentage(),
-            ));
-        }
-        if self
-            .watcher_cooldown_minutes
-            .is_some_and(|held| held > MAX_WATCHER_COOLDOWN_MINUTES)
-        {
-            return Err(out_of_range(
-                scope,
-                "watcher-cooldown-minutes",
-                self.watcher_cooldown_minutes.expect("just read"),
-                &a_cooldown(),
             ));
         }
         Ok(())
@@ -549,22 +475,27 @@ pub fn means_global(name: &str) -> bool {
 /// be paced by it (ADR 0013).
 ///
 /// The one thing about the watcher that is written down, and only because
-/// `perch watch --once` is a fresh process every time: the cooldown and the
-/// no-return are measured from the last Switch, and a check that could not
-/// remember one would be a check with no policy but the threshold. The loop
-/// carries the same two facts in memory and records nothing, because a loop is
-/// one process and a person watching it — two of them would otherwise pace each
-/// other's decisions.
+/// `perch watch --once` is a fresh process every time: the cooldown is measured
+/// from the last Switch, and a check that could not remember one would be a
+/// check with no policy but the threshold. The loop carries the same fact in
+/// memory and records nothing, because a loop is one process and a person
+/// watching it — two of them would otherwise pace each other's decisions.
 ///
-/// Per Group rather than per machine: a cooldown is a Group's setting, and a
-/// Switch within `work` has nothing to say about how soon `personal` may move.
+/// Per Group rather than per machine: a cooldown paces the Switches made within
+/// a Group, and a Switch within `work` has nothing to say about how soon
+/// `personal` may move. A constant still has to be paced somewhere (ADR 0046).
+///
+/// A stamp and nothing else. Which Account was Switched off was recorded here
+/// too, for the no-return that read it — and when that went (ADR 0046) the field
+/// was left behind, written every Check and read by nothing. It is not kept
+/// against the day ADR 0046's guard fires and a no-return comes back: breaking
+/// the registry's format is free (`CLAUDE.md`), so the day something needs to
+/// know which Account was left is the day to record it again.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Checked {
     /// When the Switch happened, which is what the cooldown counts from.
     pub switched_at: DateTime<Utc>,
-    /// The Account it Switched off, which no-return bars for one cooldown.
-    pub switched_off: String,
 }
 
 /// What Global holds: every Setting, as the value that applies until something
@@ -1108,14 +1039,9 @@ impl Registry {
     }
 
     /// Records a Switch a Check made, for the next one to be paced by.
-    pub fn record_check(&mut self, group: &str, switched_off: &str, at: DateTime<Utc>) {
-        self.checks.insert(
-            group.to_string(),
-            Checked {
-                switched_at: at,
-                switched_off: switched_off.to_string(),
-            },
-        );
+    pub fn record_check(&mut self, group: &str, at: DateTime<Utc>) {
+        self.checks
+            .insert(group.to_string(), Checked { switched_at: at });
     }
 
     pub fn account_mut(&mut self, email: &str) -> Option<&mut Account> {
@@ -1512,9 +1438,8 @@ const WATCHER_UPDATE_MILLIS: i64 = 60_000;
 /// The lock that makes a Watcher the only one on this machine (ADR 0040).
 ///
 /// Two loops for one person watch the same active Account and each keeps its
-/// Cooldown in memory, where neither can see the other's — which is the
-/// ping-pong the Cooldown and the Margin exist to prevent, reintroduced by
-/// running the thing twice. A Check takes the same lock for the same reason: the
+/// Cooldown in memory, where neither can see the other's — so the pacing the
+/// Cooldown exists to impose is undone by running the thing twice. A Check takes the same lock for the same reason: the
 /// in-memory Cooldown and the one in `checks` cannot see each other either.
 ///
 /// This is the one artifact a Watcher leaves behind, and it repeals the promise
@@ -2649,18 +2574,17 @@ mod tests {
         );
 
         let at = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
-        registry.record_check("work", "someone@example.com", at);
+        registry.record_check("work", at);
         let back: Registry =
             serde_json::from_str(&serde_json::to_string(&registry).unwrap()).unwrap();
 
         let recorded = back.checked("work").expect("the Group it Switched within");
         assert_eq!(recorded.switched_at, at);
-        assert_eq!(recorded.switched_off, "someone@example.com");
         assert_eq!(
             back.checked("personal"),
             None,
-            "a cooldown is a Group's, and a Switch within one says nothing \
-             about how soon another may move"
+            "a cooldown is paced per Group, and a Switch within one says \
+             nothing about how soon another may move"
         );
     }
 
@@ -2670,11 +2594,7 @@ mod tests {
     fn forgetting_a_group_forgets_what_a_check_recorded_against_it() {
         let mut registry = Registry::default();
         registry.declare_group("work").expect("a usable name");
-        registry.record_check(
-            "work",
-            "someone@example.com",
-            Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap(),
-        );
+        registry.record_check("work", Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap());
 
         registry.forget_group("work");
 
@@ -2833,20 +2753,13 @@ mod tests {
         );
     }
 
-    /// The three the watcher's policy grew (ADR 0013). Asserted as the numbers
-    /// rather than as the constants, because a default is a promise made in the
-    /// docs and a test that reads the constant back cannot notice it change.
+    /// The one number the watcher's policy still carries (ADR 0046). Asserted as
+    /// the number rather than as the constant, because a default is a promise
+    /// made in the docs and a test that reads the constant back cannot notice it
+    /// change.
     #[test]
-    fn the_watchers_policy_has_the_defaults_it_is_documented_with() {
-        let config = Settings::default();
-        assert_eq!(config.watcher_threshold_percent, 80);
-        assert_eq!(config.watcher_cooldown_minutes, 15);
-        assert_eq!(config.watcher_margin_percent, 10);
-        assert!(
-            config.watcher_no_return,
-            "coming straight back to the Account just left is the ping-pong the \
-             policy exists to stop, so it is barred unless somebody says otherwise"
-        );
+    fn the_watchers_policy_has_the_default_it_is_documented_with() {
+        assert_eq!(Settings::default().watcher_threshold_percent, 80);
     }
 
     /// A number a setting cannot hold is refused with the ones it can — from a
@@ -2854,32 +2767,14 @@ mod tests {
     /// readers have the same next question.
     #[test]
     fn a_number_out_of_range_is_refused_with_the_range() {
-        let cases: [(Overrides, &str, &str); 3] = [
-            (
-                Overrides {
-                    watcher_threshold_percent: Some(101),
-                    ..Overrides::default()
-                },
-                "watcher-threshold-percent",
-                "100",
-            ),
-            (
-                Overrides {
-                    watcher_margin_percent: Some(101),
-                    ..Overrides::default()
-                },
-                "watcher-margin-percent",
-                "100",
-            ),
-            (
-                Overrides {
-                    watcher_cooldown_minutes: Some(MAX_WATCHER_COOLDOWN_MINUTES + 1),
-                    ..Overrides::default()
-                },
-                "watcher-cooldown-minutes",
-                "10080",
-            ),
-        ];
+        let cases: [(Overrides, &str, &str); 1] = [(
+            Overrides {
+                watcher_threshold_percent: Some(101),
+                ..Overrides::default()
+            },
+            "watcher-threshold-percent",
+            "100",
+        )];
 
         let work = Scope::Group("work".to_string());
         for (config, key, accepted) in cases {
@@ -2897,20 +2792,6 @@ mod tests {
 
         assert!(Overrides::default().validate(&work).is_ok());
         assert!(Settings::default().validate(&Scope::Global).is_ok());
-    }
-
-    /// A margin at or over the threshold is not out of range — it is a Group
-    /// that will only move to an Account with nothing used at all, which is a
-    /// coherent thing to ask for even if few would. Refusing it would make the
-    /// order two `set`s are typed in matter.
-    #[test]
-    fn a_margin_larger_than_the_threshold_is_a_strict_policy_rather_than_a_refusal() {
-        let config = Overrides {
-            watcher_threshold_percent: Some(50),
-            watcher_margin_percent: Some(90),
-            ..Overrides::default()
-        };
-        assert!(config.validate(&Scope::Group("work".to_string())).is_ok());
     }
 
     #[test]

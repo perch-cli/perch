@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- [**breaking**] the Watcher's three departing Settings — `watcher-cooldown-minutes`, `watcher-margin-percent` and `watcher-no-return`. The cooldown and the margin are arithmetic rather than anyone's taste, so they are now constants of 15 minutes and 10 points under the threshold; the no-return could never fire, because the cooldown always reached the decision first. `perch config` carries three Settings, and how full is too full is the only preference left in the loop. A scheduled Check now records only when it Switched, the no-return having been the only thing that read which Account it Switched off ([#161](https://github.com/perch-cli/perch/issues/161))
+
 ### Fixed
 
 - a terminal too narrow for the `Status` tab cut a figure's age off, half an email address off a row, and a key hint in two — the tab now breaks between words and between columns instead ([#153](https://github.com/perch-cli/perch/issues/153))

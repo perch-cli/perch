@@ -106,9 +106,6 @@ Scope, with where each one came from.
              strategy                   most-headroom  from Global
              watcher-may-act            false          from Global
              watcher-threshold-percent  55             set on `work`
-             watcher-cooldown-minutes   15             from Global
-             watcher-margin-percent     10             from Global
-             watcher-no-return          true           from Global
 
 q quit  Tab view  arrows move  Enter switch  x run  r refresh
 ```
@@ -132,9 +129,6 @@ the Accounts it governs beside them.
   + new Group   strategy                   most-headroom
                 watcher-may-act            false
                 watcher-threshold-percent  80
-                watcher-cooldown-minutes   15
-                watcher-margin-percent     10
-                watcher-no-return          true
 
 q quit  Tab view  arrows move/step  Spc flip  Esc inherit  n name
 ```
@@ -147,9 +141,6 @@ q quit  Tab view  arrows move/step  Spc flip  Esc inherit  n name
   + new Group                         strategy                   most-headroom
                                       watcher-may-act            false
                                       watcher-threshold-percent  55
-                                      watcher-cooldown-minutes   15
-                                      watcher-margin-percent     10
-                                      watcher-no-return          true
                                       alias                      (none)
                                       cycling-may-choose         true
                                       group                      work

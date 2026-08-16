@@ -1294,7 +1294,7 @@ impl Model {
     ///
     /// One deferred write at a time, and displacing one about a *different* row
     /// writes it rather than dropping it. Stepping a threshold, moving down a
-    /// row and stepping a margin inside half a second is two changes somebody
+    /// row and granting the watcher inside half a second is two changes somebody
     /// made, and a deferred write that quietly lost the first would be exactly
     /// the save button this exists not to be.
     fn defer(&mut self, scope: Scope, key: Setting, value: String) -> Asked {
@@ -2110,7 +2110,7 @@ mod tests {
     #[test]
     fn a_deferred_write_does_not_go_out_under_a_refresh_and_is_not_dropped_either() {
         let mut model = model_of(&["one@example.com"]);
-        on_the_config_setting(&mut model, Setting::WatcherMarginPercent);
+        on_the_config_setting(&mut model, Setting::WatcherThresholdPercent);
         let _ = model.act_on(Signal::Right);
         assert_eq!(model.act_on(Signal::Refresh), Asked::ForARefresh);
 
@@ -2127,8 +2127,8 @@ mod tests {
             settled,
             Some(Edit::Setting {
                 scope: Scope::Global,
-                key: Setting::WatcherMarginPercent,
-                value: Some("15".to_string()),
+                key: Setting::WatcherThresholdPercent,
+                value: Some("85".to_string()),
             }),
             "and it lands the moment the lock is free again",
         );
@@ -2139,17 +2139,17 @@ mod tests {
     #[test]
     fn stepping_another_row_before_the_first_settles_writes_the_first() {
         let mut model = model_of(&["one@example.com"]);
-        on_the_config_setting(&mut model, Setting::WatcherThresholdPercent);
+        on_the_config_setting(&mut model, Setting::WatcherMayAct);
         let _ = model.act_on(Signal::Right);
 
-        on_the_config_setting(&mut model, Setting::WatcherMarginPercent);
+        on_the_config_setting(&mut model, Setting::WatcherThresholdPercent);
 
         assert_eq!(
             model.act_on(Signal::Right),
             Asked::ToWrite(Edit::Setting {
                 scope: Scope::Global,
-                key: Setting::WatcherThresholdPercent,
-                value: Some("85".to_string()),
+                key: Setting::WatcherMayAct,
+                value: Some("true".to_string()),
             }),
             "the one being displaced goes out now"
         );
@@ -2157,8 +2157,8 @@ mod tests {
             model.take_pending(),
             Some(Edit::Setting {
                 scope: Scope::Global,
-                key: Setting::WatcherMarginPercent,
-                value: Some("15".to_string()),
+                key: Setting::WatcherThresholdPercent,
+                value: Some("85".to_string()),
             }),
             "and the one that displaced it is still waiting"
         );
@@ -2677,7 +2677,7 @@ mod tests {
     #[test]
     fn leaving_writes_what_the_arrow_keys_had_not_got_round_to() {
         let mut model = model_of(&["one@example.com"]);
-        on_the_config_setting(&mut model, Setting::WatcherMarginPercent);
+        on_the_config_setting(&mut model, Setting::WatcherThresholdPercent);
         let _ = model.act_on(Signal::Right);
 
         let _ = model.act_on(Signal::Leave);
@@ -2686,8 +2686,8 @@ mod tests {
             model.take_pending(),
             Some(Edit::Setting {
                 scope: Scope::Global,
-                key: Setting::WatcherMarginPercent,
-                value: Some("15".to_string()),
+                key: Setting::WatcherThresholdPercent,
+                value: Some("85".to_string()),
             })
         );
     }

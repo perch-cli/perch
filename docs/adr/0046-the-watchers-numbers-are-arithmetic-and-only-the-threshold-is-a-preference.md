@@ -1,9 +1,10 @@
 # The Watcher's numbers are arithmetic, and only the Threshold is a preference
 
-> **Decided, not yet carried out.** The removals and the three glossary edits
-> below are tracked separately. Like ADR 0041, ADR 0042, ADR 0044 and ADR 0045,
-> this is the artifact of a planning effort rather than of a change, so it lands
-> ahead of the work it describes.
+> **Carried out in #161.** Like ADR 0041, ADR 0042, ADR 0044 and ADR 0045, this
+> is the artifact of a planning effort rather than of a change, so it landed
+> ahead of the work it describes instead of beside it. The tree now matches it:
+> `perch config` carries three Settings, the cooldown and the margin are
+> constants in `src/watch.rs`, and the three glossary entries read as below.
 
 The question arrived as a count: `perch config` exposes six Settings, five of
 them Watcher tuning, and `CONTEXT.md` spends four pacing concepts explaining a

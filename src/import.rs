@@ -71,11 +71,10 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
 ///
 /// Nothing arrives having just been checked either, and for the same reason.
 /// [`Registry::checks`] is what a `perch watch --once` on the *other* machine
-/// did — a Switch it made, and when — and the cooldown and the no-return are
-/// measured from it. Carried across, an Export taken this morning has the first
-/// check on the new machine reporting `cooling`, and bars the Account that
-/// machine last left, on the strength of something that happened somewhere
-/// else. Both are claims about a watcher, and no watcher has run here yet.
+/// did — when it Switched — and the cooldown is measured from it. Carried
+/// across, an Export taken this morning has the first check on the new machine
+/// reporting `cooling` on the strength of something that happened somewhere
+/// else. That is a claim about a watcher, and no watcher has run here yet.
 pub fn restored(export: &Export, path: &std::path::Path) -> Result<Registry> {
     // The registry's own version is not checked here. `export::unseal` reads
     // both versions off a shape that is only the versions, *before* the document

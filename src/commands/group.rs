@@ -271,13 +271,15 @@ fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scop
     write_line(out, "Strategy", settings.strategy.as_str())?;
     // The whole policy rather than the threshold alone: a summary that named
     // only when the watcher acts would read as the whole of what it does, and
-    // the margin is what decides where it lands (ADR 0013).
+    // the margin is what decides where it lands (ADR 0046). Two of the three
+    // are constants now, and they are still shown — what the watcher will do
+    // here should be readable without knowing which of the numbers is anyone's.
     let policy = crate::watch::Policy::of(&settings);
     let acting = format!(
         "at {}%, onto {}% or better, at most every {}m",
         policy.threshold,
         policy.ceiling(),
-        policy.cooldown_minutes,
+        crate::watch::COOLDOWN_MINUTES,
     );
     // Being allowed to act is not the whole of whether it does. Among the
     // Accounts in no Group, `cycle-ungrouped` is a separate declaration that
