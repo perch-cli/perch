@@ -464,10 +464,10 @@ impl Watcher {
     /// one move straight back. The loop's memory is the
     /// [`Recently`](crate::watch::Recently) it is holding, which the round has
     /// already told.
-    fn remember(self, registry: &mut Registry, scope: &Scope, off: &str, at: DateTime<Utc>) {
+    fn remember(self, registry: &mut Registry, scope: &Scope, at: DateTime<Utc>) {
         match self {
             Watcher::Loop => {}
-            Watcher::Check => registry.record_check(&scope.key(), off, at),
+            Watcher::Check => registry.record_check(&scope.key(), at),
         }
     }
 }
@@ -858,7 +858,7 @@ fn act(
     let moved = landing.moved();
     if moved {
         recently.switched(host.now());
-        watcher.remember(registry, &watching.scope, outgoing.email(), host.now());
+        watcher.remember(registry, &watching.scope, host.now());
     }
 
     match landing.record(host, perch, registry) {

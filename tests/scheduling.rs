@@ -400,11 +400,11 @@ fn the_cooldown_holds_between_one_check_and_the_next() {
 }
 
 /// What one check leaves for the next: when it Switched, which is what the
-/// cooldown is measured from, and off which Account, which nothing reads today
-/// and is kept against ADR 0046's guard. Only a Switch that happened writes one,
-/// because a check that changed nothing has nothing to pace.
+/// cooldown is measured from and the whole of what is recorded (ADR 0046). Only
+/// a Switch that happened writes one, because a check that changed nothing has
+/// nothing to pace.
 #[test]
-fn a_check_records_when_it_switched_and_what_it_switched_off() {
+fn a_check_records_when_it_switched() {
     // Under the threshold, and then over it: two checks, of which only the
     // second has anything to record.
     let host = checked(&[40.0, 86.0], &[5.0]);
@@ -421,7 +421,6 @@ fn a_check_records_when_it_switched_and_what_it_switched_off() {
 
     let checks = registry_of(&host).checks;
     let recorded = checks.get("work").expect("the Group it Switched within");
-    assert_eq!(recorded.switched_off, EMAIL);
     assert_eq!(recorded.switched_at, switched_at + Duration::minutes(30));
 }
 
@@ -574,6 +573,5 @@ fn a_check_that_switched_and_then_failed_still_paces_the_next_one() {
     let recorded = checks
         .get("work")
         .expect("a check that moved records that it moved");
-    assert_eq!(recorded.switched_off, EMAIL);
     assert_eq!(recorded.switched_at, switched_at);
 }

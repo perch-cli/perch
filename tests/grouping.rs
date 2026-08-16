@@ -40,7 +40,6 @@ fn paced(host: &FakeHost, group: &str) -> perch::registry::Checked {
     let mut registry = registry_of(host);
     let record = perch::registry::Checked {
         switched_at: host.now(),
-        switched_off: EMAIL.to_string(),
     };
     registry.checks.insert(group.to_string(), record.clone());
     save_registry(host, &registry);

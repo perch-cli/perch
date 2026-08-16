@@ -214,13 +214,13 @@ $ perch watch --once
 It is the same policy as the loop, run once — the same threshold, cooldown and
 margin, and the same refusal to act on a figure it did not just read. **The
 cooldown survives between invocations**, because each `--once` is a fresh
-process and the sequence of them is the watcher: what
-one check Switched, and when, is recorded against the Group in the registry for
-the next one to be paced by. That is the one thing about the watcher that is
-written down, and it is why a check every minute still Switches no more often
-than the cooldown allows. The loop keeps the same fact in memory instead —
-two loops would be two people watching, and one pacing the other's decisions is
-not what either of them asked for.
+process and the sequence of them is the watcher: when one check Switched is
+recorded against the Group in the registry for the next one to be paced by. That
+stamp is the one thing about the watcher that is written down, and it is why a
+check every minute still Switches no more often than the cooldown allows. The
+loop keeps the same fact in memory instead — two loops would be two people
+watching, and one pacing the other's decisions is not what either of them asked
+for.
 
 The exit codes are [the full table](reference.md#exit-codes), and a check reaches
 five of them:

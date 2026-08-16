@@ -463,10 +463,6 @@ impl Recently {
 
     /// What a scheduled check inherits from the one before it: when its Group
     /// last Switched, or nothing where it never has.
-    ///
-    /// Only the stamp, though [`Checked`] also records the Account that was left
-    /// — nothing paces itself on *which* Account any more (ADR 0046), and the
-    /// record is kept against the day something does.
     pub fn recorded(checked: Option<&Checked>) -> Recently {
         Recently {
             switched: checked.map(|checked| checked.switched_at),
@@ -1247,10 +1243,7 @@ mod tests {
     /// makes a sequence of them a watcher rather than a Switch on a timer.
     #[test]
     fn a_check_is_paced_by_what_the_one_before_it_recorded() {
-        let recorded = Recently::recorded(Some(&Checked {
-            switched_at: now(),
-            switched_off: "left@example.com".to_string(),
-        }));
+        let recorded = Recently::recorded(Some(&Checked { switched_at: now() }));
 
         assert!(recorded.resting(now() + Duration::minutes(4)).is_some());
         assert_eq!(

@@ -484,21 +484,18 @@ pub fn means_global(name: &str) -> bool {
 /// Per Group rather than per machine: a cooldown paces the Switches made within
 /// a Group, and a Switch within `work` has nothing to say about how soon
 /// `personal` may move. A constant still has to be paced somewhere (ADR 0046).
+///
+/// A stamp and nothing else. Which Account was Switched off was recorded here
+/// too, for the no-return that read it — and when that went (ADR 0046) the field
+/// was left behind, written every Check and read by nothing. It is not kept
+/// against the day ADR 0046's guard fires and a no-return comes back: breaking
+/// the registry's format is free (`CLAUDE.md`), so the day something needs to
+/// know which Account was left is the day to record it again.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Checked {
     /// When the Switch happened, which is what the cooldown counts from.
     pub switched_at: DateTime<Utc>,
-    /// The Account it Switched off. Nothing reads it: the no-return that did
-    /// went with ADR 0046, because the cooldown reached every decision first.
-    ///
-    /// Recorded all the same, and forward-looking rather than backward — ADR
-    /// 0046's guard is that "if the cooldown ever stops gating Switches outright
-    /// — becoming per-Account, or pacing rather than barring — a no-return has to
-    /// come back", and a record that never noted which Account was left could not
-    /// tell it where not to go. One string per Group per Switch is what that
-    /// costs.
-    pub switched_off: String,
 }
 
 /// What Global holds: every Setting, as the value that applies until something
@@ -1042,14 +1039,9 @@ impl Registry {
     }
 
     /// Records a Switch a Check made, for the next one to be paced by.
-    pub fn record_check(&mut self, group: &str, switched_off: &str, at: DateTime<Utc>) {
-        self.checks.insert(
-            group.to_string(),
-            Checked {
-                switched_at: at,
-                switched_off: switched_off.to_string(),
-            },
-        );
+    pub fn record_check(&mut self, group: &str, at: DateTime<Utc>) {
+        self.checks
+            .insert(group.to_string(), Checked { switched_at: at });
     }
 
     pub fn account_mut(&mut self, email: &str) -> Option<&mut Account> {
@@ -2582,13 +2574,12 @@ mod tests {
         );
 
         let at = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
-        registry.record_check("work", "someone@example.com", at);
+        registry.record_check("work", at);
         let back: Registry =
             serde_json::from_str(&serde_json::to_string(&registry).unwrap()).unwrap();
 
         let recorded = back.checked("work").expect("the Group it Switched within");
         assert_eq!(recorded.switched_at, at);
-        assert_eq!(recorded.switched_off, "someone@example.com");
         assert_eq!(
             back.checked("personal"),
             None,
@@ -2603,11 +2594,7 @@ mod tests {
     fn forgetting_a_group_forgets_what_a_check_recorded_against_it() {
         let mut registry = Registry::default();
         registry.declare_group("work").expect("a usable name");
-        registry.record_check(
-            "work",
-            "someone@example.com",
-            Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap(),
-        );
+        registry.record_check("work", Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap());
 
         registry.forget_group("work");
 
