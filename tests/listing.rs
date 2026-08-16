@@ -1,6 +1,7 @@
 //! Behaviour: what `perch list` answers when the question is "what do I have",
-//! and what `perch status --group` shows of the Group around the active
-//! Account. Both render from cache and neither touches the network (ADR 0015).
+//! and what it shows when it is narrowed to a Scope — a Group by name, or the
+//! Accounts in no Group (ADR 0053). Both render from cache, and neither touches
+//! the network without `--refresh` (ADR 0015).
 //!
 //! And what it answers about which Account is *best*, which is the other half
 //! of the listing (ADR 0049): the rows come out in the order a Cycle ranks
@@ -12,6 +13,7 @@ mod common;
 
 use chrono::{DateTime, TimeZone, Utc};
 use common::*;
+use perch::error::EXIT_NOT_FOUND;
 use perch::host::FakeHost;
 use perch::probe::Identity;
 use perch::registry::{
@@ -468,14 +470,58 @@ fn an_account_with_no_observed_utilization_is_not_shown_as_zero() {
 }
 
 #[test]
-fn list_never_touches_the_network() {
+fn list_without_refresh_never_touches_the_network() {
     let host = machine_holding_three_accounts().with_now(at(23, 0));
 
     let (result, printed) = run_list(&host, false);
 
     result.unwrap();
     assert!(printed.contains("11h ago"), "{printed}");
-    assert!(host.http_calls().is_empty(), "list must not fetch");
+    assert!(
+        host.http_calls().is_empty(),
+        "cheapness is a property of not passing `--refresh` (ADR 0053)"
+    );
+}
+
+/// The rule `perch status` states for itself, which the listing follows at every
+/// breadth: two of these drawing at once is the ordinary case rather than a
+/// race, and a read that took the write lock would wait out whatever holds it
+/// and then fail.
+#[test]
+fn list_reads_alongside_another_perch_rather_than_waiting_on_it() {
+    let host = machine_holding_three_accounts();
+    let held = perch::registry::lock(&host).expect("the other `perch` has it");
+
+    let (everything, listed) = run_list(&host, false);
+    let (narrowed, in_the_group) = run_list_in(&host, "work", false);
+
+    everything.expect("a read does not wait on a writer");
+    narrowed.expect("and narrowing it is still a read");
+    assert!(listed.contains(THIRD_EMAIL), "{listed}");
+    assert!(in_the_group.contains(SECOND_EMAIL), "{in_the_group}");
+    drop(held);
+}
+
+/// The other half of the same rule: `--refresh` writes what it fetched, so it
+/// takes the lock exclusively, at whatever breadth it was asked for.
+#[test]
+fn a_listing_that_refreshes_waits_for_the_other_perch_because_it_writes() {
+    let host = machine_holding_three_accounts();
+    let _held = perch::registry::lock(&host).expect("the other `perch` has it");
+
+    for (what, result) in [
+        ("list --refresh", run_list_refresh(&host, false).0),
+        (
+            "list work --refresh",
+            run_list_in_refresh(&host, "work", false).0,
+        ),
+    ] {
+        let refused = result.expect_err("a writer waits on a writer");
+        assert!(
+            refused.to_string().contains("the Perch registry lock"),
+            "{what}: {refused}"
+        );
+    }
 }
 
 #[test]
@@ -549,11 +595,13 @@ fn list_json_carries_an_observation_time_on_every_figure() {
     assert!(spare["group"].is_null());
 }
 
+/// A Scope narrows the listing to the Accounts you could Cycle between, which
+/// is where you would land before you switch (ADR 0053).
 #[test]
-fn status_group_shows_every_account_in_the_current_accounts_group() {
+fn list_in_a_group_shows_every_account_in_it() {
     let host = machine_holding_three_accounts();
 
-    let (result, printed) = run_status_group(&host, false);
+    let (result, printed) = run_list_in(&host, "work", false);
 
     result.unwrap();
     assert!(printed.contains("work"), "the Group is named:\n{printed}");
@@ -564,11 +612,36 @@ fn status_group_shows_every_account_in_the_current_accounts_group() {
         "an Account in another Group is not somewhere you would land:\n{printed}"
     );
     assert!(printed.contains("as of 3m ago"), "{printed}");
-    assert!(host.http_calls().is_empty(), "status must not fetch");
+    assert!(
+        host.http_calls().is_empty(),
+        "a listing without `--refresh` must not fetch"
+    );
 }
 
+/// The Scope is named rather than implied, so the listing answers about the one
+/// asked for rather than about wherever the active Account happens to be
+/// standing. The flag this replaced could only ever mean the latter.
 #[test]
-fn status_group_from_an_ungrouped_account_shows_every_ungrouped_account() {
+fn list_narrows_to_the_scope_named_rather_than_to_the_active_accounts_own() {
+    let host = machine_holding_three_accounts();
+
+    let (result, printed) = run_list_in(&host, "ungrouped", false);
+
+    result.unwrap();
+    assert!(
+        printed.contains(THIRD_EMAIL),
+        "the Scope asked for is the Scope shown:\n{printed}"
+    );
+    assert!(
+        !printed.contains(SECOND_EMAIL),
+        "and the Group the active Account is in is not:\n{printed}"
+    );
+}
+
+/// Being in no Group is not a Group (ADR 0017), so it is addressed by the one
+/// word reserved for it rather than by a Group name.
+#[test]
+fn list_ungrouped_shows_every_account_in_no_group() {
     let mut registry = Registry::default();
     let mut first = account(EMAIL, "Acme");
     first.utilization = Some(observed(at(11, 57), &[("5-hour", 42.0)]));
@@ -583,7 +656,7 @@ fn status_group_from_an_ungrouped_account_shows_every_ungrouped_account() {
     registry.active = Active::Settled(EMAIL.to_string());
     let host = machine_holding(&registry);
 
-    let (result, printed) = run_status_group(&host, false);
+    let (result, printed) = run_list_in(&host, "ungrouped", false);
 
     result.unwrap();
     assert!(printed.contains("In no Group"), "{printed}");
@@ -593,7 +666,7 @@ fn status_group_from_an_ungrouped_account_shows_every_ungrouped_account() {
     );
     assert!(
         !printed.contains(SECOND_EMAIL),
-        "a Group the active Account is not in is not shown:\n{printed}"
+        "an Account in a Group is not one of the ungrouped:\n{printed}"
     );
     assert!(
         printed.contains("only moves between these when you say it may"),
@@ -623,7 +696,7 @@ fn the_ungrouped_cycling_clause_says_so_once_cycling_has_been_allowed() {
     registry.active = Active::Settled(EMAIL.to_string());
     let host = machine_holding(&registry);
 
-    let (result, printed) = run_status_group(&host, false);
+    let (result, printed) = run_list_in(&host, "ungrouped", false);
 
     result.unwrap();
     assert!(
@@ -634,10 +707,10 @@ fn the_ungrouped_cycling_clause_says_so_once_cycling_has_been_allowed() {
 }
 
 #[test]
-fn status_group_json_says_which_group_it_narrowed_to() {
+fn list_in_a_group_json_says_which_group_it_narrowed_to() {
     let host = machine_holding_three_accounts();
 
-    let (result, printed) = run_status_group(&host, true);
+    let (result, printed) = run_list_in(&host, "work", true);
 
     result.unwrap();
     let document: serde_json::Value = serde_json::from_str(&printed).expect("valid JSON");
@@ -661,13 +734,13 @@ fn status_group_json_says_which_group_it_narrowed_to() {
 }
 
 #[test]
-fn status_group_json_from_an_ungrouped_account_says_it_narrowed_to_no_group() {
+fn list_ungrouped_json_says_it_narrowed_to_no_group() {
     let mut registry = Registry::default();
     registry.upsert(account(EMAIL, "Acme"));
     registry.active = Active::Settled(EMAIL.to_string());
     let host = machine_holding(&registry);
 
-    let (result, printed) = run_status_group(&host, true);
+    let (result, printed) = run_list_in(&host, "ungrouped", true);
 
     result.unwrap();
     let document: serde_json::Value = serde_json::from_str(&printed).expect("valid JSON");
@@ -675,8 +748,88 @@ fn status_group_json_from_an_ungrouped_account_says_it_narrowed_to_no_group() {
     assert!(document["scope"]["name"].is_null());
 }
 
+/// A Scope nothing declared is a mistyped name, and the answer is what *was*
+/// declared — the same answer `perch group move` gives, because it is the same
+/// mistake. An empty table would read as a Group that exists and holds nothing.
 #[test]
-fn status_without_group_still_shows_only_the_active_account() {
+fn a_scope_nothing_declared_is_refused_rather_than_listed_as_empty() {
+    let host = machine_holding_three_accounts();
+
+    let (result, printed) = run_list_in(&host, "wrok", false);
+
+    let refused = result.expect_err("there is no Group called `wrok`");
+    assert_eq!(refused.exit_code(), EXIT_NOT_FOUND);
+    let said = refused.to_string();
+    assert!(said.contains("`wrok`"), "which name: {said}");
+    assert!(said.contains("work"), "and which one was meant: {said}");
+    assert!(printed.is_empty(), "and nothing was listed: {printed}");
+}
+
+/// `global` is how people say every Scope at once, and it is refused as a Group
+/// name so that a Group can never take that word (`validate_name`). Answered as
+/// an ordinary mistyped Group it would be met with "Declare it with `perch group
+/// add global`" — an offer the registry would then refuse. Here the answer is
+/// the happy one: every Scope at once is what a bare `perch list` already shows.
+#[test]
+fn global_is_answered_with_the_listing_it_means_rather_than_offered_as_a_group() {
+    let host = machine_holding_three_accounts();
+
+    let (result, _) = run_list_in(&host, "global", false);
+
+    let refused = result.expect_err("there is no Scope called `global`");
+    assert_eq!(refused.exit_code(), EXIT_NOT_FOUND);
+    let said = refused.to_string();
+    assert!(
+        said.contains("bare `perch list`"),
+        "the listing of everything is what was meant: {said}"
+    );
+    assert!(
+        !said.contains("perch group add"),
+        "and no offer is made that the registry would refuse: {said}"
+    );
+}
+
+/// An Alias names one Account and a Scope is a set, so the two are not
+/// interchangeable here even though they share a namespace: the Account you want
+/// a row for is `perch status`'s question, or a row of the listing it is in.
+#[test]
+fn an_alias_is_not_a_scope() {
+    let host = machine_holding_three_accounts();
+
+    let (result, _) = run_list_in(&host, "overflow", false);
+
+    let refused = result.expect_err("`overflow` is an Alias rather than a Group");
+    assert!(
+        refused.to_string().contains("No Group called `overflow`"),
+        "{refused}"
+    );
+}
+
+/// `perch list` is the surface that keeps working when Perch holds no active
+/// Account — precisely the state `perch status` refuses in and sends somebody to
+/// `perch switch` to leave. A narrowing that read the active Account to know
+/// what it meant would have brought that coupling back.
+#[test]
+fn list_narrows_on_a_machine_with_no_active_account() {
+    let host = machine_holding_three_accounts();
+    let mut registry = common::registry_of(&host);
+    registry.active = Active::Nobody;
+    common::save_registry(&host, &registry);
+
+    let (result, printed) = run_list_in(&host, "work", false);
+
+    result.expect("a Scope is named rather than implied, so nothing has to be active");
+    assert!(printed.contains(EMAIL), "{printed}");
+    assert!(printed.contains(SECOND_EMAIL), "{printed}");
+
+    let (result, printed) = run_status(&host, false);
+
+    result.expect_err("while `perch status` has no Account to be about");
+    assert!(printed.is_empty(), "{printed}");
+}
+
+#[test]
+fn status_shows_only_the_active_account() {
     let host = machine_holding_three_accounts();
 
     let (result, printed) = run_status(&host, false);

@@ -1,10 +1,5 @@
 # `status` is about one Account, and every set was already the listing
 
-> **Decided, not yet carried out.** The flag move, the two documents and the
-> guide edits below are tracked separately. Like ADR 0047 through ADR 0052, this
-> is the artifact of a planning effort rather than of a change, so it lands ahead
-> of the work it describes.
-
 The question arrived as two names over one dataset. `perch status` shows the
 active Account and its cached Utilization, `--group` widens it to that Account's
 Group, and `perch list` shows every Account — all three from cache, all three

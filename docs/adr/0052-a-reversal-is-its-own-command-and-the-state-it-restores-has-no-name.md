@@ -198,10 +198,12 @@ The only edit is one word on one `_Avoid_` line.
 
 ## Consequences
 
-**The command surface does not move.** Top-level names stay at ADR 0047's
-sixteen — fifteen once `perch tui` goes — and invocable forms at twenty-eight,
-then twenty-seven. Both verbs keep their names, their placement, their exit codes
-and their output.
+**The command surface does not move.** Top-level names stay at fifteen and
+invocable forms at twenty-seven. This closed with ADR 0047's sixteen and
+twenty-eight, which were counted before ADR 0049 removed `perch tui` and took a
+name and a form with it; the arithmetic was never this decision's finding, and a
+wrong number left standing is read as a right one (ADR 0053). Both verbs keep
+their names, their placement, their exit codes and their output.
 
 **This supersedes nothing and amends ADR 0047 in one clause.** ADR 0012
 ("Cycling skips accounts that are exhausted, disabled, or quarantined") and ADR

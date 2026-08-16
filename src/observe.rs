@@ -120,9 +120,9 @@ impl Attempt {
     /// `perch status` and `perch list` show every Account they refreshed, and a
     /// Quarantined one carries the reason and the repair on its own line — so
     /// the note above put the identical sentence, `perch relogin` and all, twice
-    /// on one screen. Reached by `perch status --refresh` on any Quarantined
-    /// Account, which is not a rare shape: that command is what somebody runs
-    /// when an Account has stopped working.
+    /// on one screen. Reached by any `--refresh` over a Quarantined Account,
+    /// which is not a rare shape: a refresh is what somebody asks for when an
+    /// Account has stopped working.
     ///
     /// What is left is the part the Account's own line cannot carry — whatever
     /// the failure underneath said, where there was one worth keeping.
@@ -210,7 +210,7 @@ pub fn refresh(
 
     for email in emails {
         // A round trip to Anthropic each, over as many Accounts as a Group
-        // holds. Said between them rather than only at the write, so a `--group`
+        // holds. Said between them rather than only at the write, so a narrowed
         // refresh over a slow connection does not run past the staleness window
         // and hand another `perch` the lock this one is still working under.
         perch.renew();
@@ -626,7 +626,7 @@ fn rotated_away(sent: &str, handed_back: Option<&str>) -> bool {
 /// the write holding what it held before. Quarantining there would be Perch
 /// saying an Account is unrecoverable on the strength of a failure that cost it
 /// nothing but a cached access token — and a locked keychain during one
-/// `perch status --group --refresh` would take a whole Group out that way, each
+/// `perch list <group> --refresh` would take a whole Group out that way, each
 /// with a reason that is not true.
 fn store_it(host: &dyn Host, store: &Store, rotated: &str, rotated_away: bool) -> Step<()> {
     profile::store_credential(host, store, rotated).map_err(|error| {

@@ -408,7 +408,7 @@ mod tests {
     /// anything, so the rule is `run`'s alone.
     #[test]
     fn no_other_command_is_touched() {
-        for line in ["list --json", "status --group --refresh", "add --no-group"] {
+        for line in ["list --json", "list work --refresh", "add --no-group"] {
             assert!(
                 refuse_a_flag_without_the_separator(&typed(line)).is_ok(),
                 "{line}"

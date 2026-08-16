@@ -109,7 +109,9 @@ fn json_carries_an_observation_time_on_every_utilization_figure() {
     assert_eq!(document["active"]["organization"], "Acme");
     assert_eq!(document["active"]["plan"], "pro");
 
-    let windows = document["utilization"]["windows"].as_array().unwrap();
+    let windows = document["active"]["utilization"]["windows"]
+        .as_array()
+        .unwrap();
     assert_eq!(windows.len(), 2);
     for window in windows {
         assert_eq!(
@@ -193,26 +195,26 @@ fn a_switch_in_flight_from_nobody_is_still_reported_and_still_exits_zero() {
     );
 }
 
-/// `--group` widens the question to "where would I land", and which Account you
-/// are standing on is not a fact that stops being worth qualifying because of
-/// it: the `*` a listing draws is on the Account Perch was on rather than one it
-/// can establish is live.
+/// The listing widens the question to "where would I land", and which Account
+/// you are standing on is not a fact that stops being worth qualifying because
+/// of it: the `*` a listing draws is on the Account Perch was on rather than one
+/// it can establish is live.
 ///
-/// The listing is what answers `--group` (ADR 0053), so it says it — which
-/// means `perch list` says it too, off the one sentence and the one field both
-/// documents share.
+/// Said at every breadth the listing has (ADR 0053), off the one sentence and
+/// the one field both documents share — narrowing to a Scope narrows which
+/// Accounts are shown and not which facts are true of them.
 #[test]
-fn a_switch_in_flight_is_said_by_the_listing_that_answers_group_as_well() {
+fn a_switch_in_flight_is_said_by_the_listing_at_every_breadth() {
     let host = machine_with_two_accounts();
     a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
 
     for (what, printed, as_json) in [
-        (
-            "status --group",
-            run_status_group(&host, false),
-            run_status_group(&host, true),
-        ),
         ("list", run_list(&host, false), run_list(&host, true)),
+        (
+            "list ungrouped",
+            run_list_in(&host, "ungrouped", false),
+            run_list_in(&host, "ungrouped", true),
+        ),
     ] {
         let (result, printed) = printed;
         result.unwrap_or_else(|error| panic!("{what}: {error}"));
@@ -298,11 +300,40 @@ fn json_says_a_figure_has_never_been_observed_rather_than_reporting_zero() {
 
     result.unwrap();
     let document: serde_json::Value = serde_json::from_str(&printed).unwrap();
-    assert_eq!(document["utilization"]["never_observed"], true);
-    assert!(document["utilization"]["observed_at"].is_null());
-    assert_eq!(
-        document["utilization"]["windows"].as_array().unwrap().len(),
-        0
+    let utilization = &document["active"]["utilization"];
+    assert_eq!(utilization["never_observed"], true);
+    assert!(utilization["observed_at"].is_null());
+    assert_eq!(utilization["windows"].as_array().unwrap().len(), 0);
+}
+
+/// The Utilization is said once, under the Account it is of.
+///
+/// It was also at the top level, for the `jq .utilization` in somebody's shell
+/// prompt, and that earned its keep against a document which — under the flag
+/// that widened this command to a Group — also answered about a set: the
+/// duplicate was insurance against reaching into the wrong shape. This document
+/// answers about exactly one Account and cannot be anything else (ADR 0053), so
+/// there is no wrong shape left to reach into and the same figure written twice
+/// is two places for one answer to go stale from.
+#[test]
+fn the_document_carries_the_utilization_under_the_account_and_nowhere_else() {
+    let host = adopted_machine(OBSERVED_THREE_MINUTES_AGO);
+
+    let (result, printed) = run_status(&host, true);
+
+    result.unwrap();
+    let document: serde_json::Value = serde_json::from_str(&printed).expect("valid JSON");
+    assert!(
+        document["active"]["utilization"]["windows"][0]["used_percent"].is_number(),
+        "the figures are under the Account they describe: {printed}"
+    );
+    assert!(
+        document
+            .as_object()
+            .expect("a document is an object")
+            .get("utilization")
+            .is_none(),
+        "and the top-level duplicate is gone: {printed}"
     );
 }
 

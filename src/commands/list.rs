@@ -5,8 +5,7 @@
 //! name you reach it by, the Group that says what it is interchangeable with,
 //! whether it is a Cycle candidate at all, how much Headroom it has left and
 //! how full each of its Quota Windows is. Like every surface that shows
-//! Utilization it renders from cache and never blocks on the network (ADR
-//! 0015).
+//! Utilization it renders from cache unless it is asked to fetch (ADR 0015).
 //!
 //! The rows come out in the order a Cycle ranks them (ADR 0012), always and not
 //! behind a flag: the ranking `perch switch` makes should be visible rather
@@ -16,9 +15,14 @@
 //! ranking of Accounts Perch would refuse to choose between is a claim nothing
 //! backs.
 //!
-//! `perch status --group` is the same view narrowed to one Group, so it lands
-//! here rather than in `status`: showing a set of Accounts is one job whether
-//! the set is everything or the Group you would Cycle within.
+//! This is the listing at every breadth (ADR 0053). A Scope narrows it — a
+//! Group by name, or `ungrouped` — because showing a set of Accounts is one job
+//! whether the set is everything or the Group you would Cycle within, and
+//! "where would I land before I switch" is that job asked of one Scope.
+//!
+//! `--refresh` follows the breadth: it reads the Accounts about to be shown and
+//! no others, which is one rule rather than a capability each breadth has of
+//! its own.
 
 use std::io::Write;
 
@@ -27,16 +31,26 @@ use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
 use crate::adopt;
-use crate::commands::{IN_NO_GROUP, cycling_among_ungrouped, say, say_json, write_failed};
+use crate::commands::{IN_NO_GROUP, cycling_among_ungrouped, group, say, say_json, write_failed};
 use crate::cycle;
-use crate::error::Result;
+use crate::error::{PerchError, Result};
 use crate::host::Host;
-use crate::observe::Report;
-use crate::registry::{self, Account, Quarantine, Registry};
+use crate::observe::{self, Report};
+use crate::registry::{self, Account, Quarantine, Registry, UNGROUPED};
 use crate::utilization;
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct ListArgs {
+    /// Which Accounts to show: a Group by name, or `ungrouped` for the Accounts
+    /// in no Group. `None` is every Account Perch holds.
+    ///
+    /// The word as it was typed rather than a resolved [`Scope`], because a
+    /// name nothing was declared under is answered with what *was* declared,
+    /// and a parser that had already thrown the word away could not.
+    pub scope: Option<String>,
+    /// Read current Utilization before showing it, rather than showing what was
+    /// last observed.
+    pub refresh: bool,
     pub json: bool,
 }
 
@@ -51,7 +65,7 @@ pub struct ListArgs {
 /// across every Account is the thing ADR 0002 exists to prevent, and the
 /// difference is worth keeping in the types rather than in a check.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Scope {
+enum Scope {
     /// Every Account Perch holds.
     Everything,
     /// The Accounts in one Group, named as the Group was declared.
@@ -67,12 +81,27 @@ impl Scope {
     /// come out in is [`Scope::ranked`], which answers a question a Refresh does
     /// not have — it spends its budget on the Accounts about to be shown (ADR
     /// 0015) and has no opinion about which of them is best.
-    pub fn accounts<'a>(&self, registry: &'a Registry) -> Vec<&'a Account> {
+    fn accounts<'a>(&self, registry: &'a Registry) -> Vec<&'a Account> {
         match self {
             Scope::Everything => registry.accounts.iter().collect(),
             Scope::Group(name) => registry.accounts_in(name),
             Scope::Ungrouped => registry.ungrouped_accounts(),
         }
+    }
+
+    /// The same Accounts, as the emails a Refresh is asked for.
+    ///
+    /// Here rather than at the caller because it is the same set [`accounts`]
+    /// is: a refresh reads exactly what is about to be shown (ADR 0053), and a
+    /// second walk of the registry to work out what that is would be a second
+    /// answer to a question this type already answers.
+    ///
+    /// [`accounts`]: Scope::accounts
+    fn emails(&self, registry: &Registry) -> Vec<String> {
+        self.accounts(registry)
+            .iter()
+            .map(|account| account.email().to_string())
+            .collect()
     }
 
     /// The same Accounts, in the order the listing shows them, and in the
@@ -120,7 +149,7 @@ impl Scope {
 /// that is what names the same Group in the middle of a sentence: a Group that
 /// read one way over a listing and another in the sentence explaining a Cycle
 /// would read as two Groups.
-pub fn group_heading(name: &str) -> String {
+fn group_heading(name: &str) -> String {
     registry::Scope::Group(name.to_string()).described()
 }
 
@@ -238,26 +267,76 @@ fn scopes(registry: &Registry) -> Vec<registry::Scope> {
 }
 
 pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
-    let registry = adopt::ensure_adopted(host)?;
+    // Exclusively only when there is something to write, which is `--refresh`
+    // and nothing else — the rule `perch status` states for itself and the
+    // reason it gives holds here too: a read that took the write lock would
+    // wait out whatever holds it and then fail, and two listings drawn at the
+    // same moment are the ordinary case rather than a race.
+    let (mut perch, mut registry) = match args.refresh {
+        true => {
+            let (perch, registry) = adopt::ensure_adopted_exclusively(host)?;
+            (Some(perch), registry)
+        }
+        false => (None, adopt::ensure_adopted(host)?),
+    };
+
+    let scope = match &args.scope {
+        Some(name) => narrowed(&registry, name)?,
+        None => Scope::Everything,
+    };
+
+    // Exactly the Accounts about to be shown. Every read spends from a budget
+    // that does not refill early (ADR 0015), so narrowing the listing narrows
+    // the reads with it and nothing is spent on an Account nobody asked about.
+    let report = match &mut perch {
+        Some(perch) => {
+            let asking_about = scope.emails(&registry);
+            observe::refresh(host, perch, &mut registry, &asking_about)
+        }
+        // Nothing to report about a refresh nobody asked for: the empty report
+        // renders as "nobody asked".
+        None => Report::default(),
+    };
+
     let now = host.now();
-    // `perch list` never fetches (ADR 0015), so there is nothing to report
-    // about a refresh: the empty report renders as "nobody asked".
-    let unasked = Report::default();
-    render(
-        host,
-        out,
-        &registry,
-        Scope::Everything,
-        now,
-        args.json,
-        &unasked,
-    )
+    render(host, out, &registry, scope, now, args.json, &report)
 }
 
-/// The listing itself, so `perch status --group` shows the same Accounts the
-/// same way over a narrower set — and, when it was asked to fetch, says what
-/// came of that in the same breath.
-pub fn render(
+/// The Scope a name addresses, which is a Group by name or the Accounts in no
+/// Group.
+///
+/// An Alias or an email address is not one of them and is not accepted as one.
+/// A Target names one Account and this narrows to a set — a listing of one row
+/// is what `perch status` answers better — so a name that is somebody's Alias
+/// is answered as the Group it is not, the same way `perch config` answers it.
+fn narrowed(registry: &Registry, name: &str) -> Result<Scope> {
+    if registry::means_ungrouped(name) {
+        return Ok(Scope::Ungrouped);
+    }
+    // The one word that has to be answered here rather than left to fall
+    // through, and for the reason `validate_name` refuses it as a name: fallen
+    // through it is answered with "Declare it with `perch group add global`",
+    // which is an offer the registry refuses to honour. `perch config` answers
+    // it with there being no Scope every other one falls back to; a listing has
+    // the happier answer, because every Scope at once is precisely what it
+    // shows when it is asked for no Scope at all.
+    if registry::means_global(name) {
+        return Err(PerchError::NotFound(format!(
+            "There is no Scope called `{name}` — it is how people say every \
+             Scope at once, and every Scope at once is what a bare `perch list` \
+             shows. Narrowing takes a Group by name, or `{UNGROUPED}` for the \
+             Accounts in no Group."
+        )));
+    }
+    match registry.declared_group(name) {
+        Some(declared) => Ok(Scope::Group(declared.to_string())),
+        None => Err(group::no_such_group(registry, name)),
+    }
+}
+
+/// The listing itself, at whatever breadth it was asked for — and, when it was
+/// asked to fetch, saying what came of that in the same breath.
+fn render(
     host: &dyn Host,
     out: &mut dyn Write,
     registry: &Registry,
@@ -560,7 +639,7 @@ fn nothing_here(scope: &Scope) -> String {
 /// pointed at the other.
 ///
 /// What each *document* answers still differs, and that is the part that should
-/// — `--group` asks about a set and `perch status` about one Account (see
+/// — this one asks about a set and `perch status` about one Account (see
 /// [`render_json`]). It is the Account itself that has no business being two
 /// things.
 pub fn document(
@@ -626,15 +705,15 @@ fn render_json(
         // What was asked for. Each section says what it holds and how it is
         // ordered, which is what came back.
         "scope": scope.json(),
-        // Named apart from `status --json`'s `active`, which is an object: one
-        // command answers two questions under `--group`, and a script that
-        // reaches for the wrong one should not find a plausible value there.
+        // Named apart from `status --json`'s `active`, which is an object: the
+        // two documents answer two questions, and a script that reaches for the
+        // wrong one should not find a plausible value there.
         "active_account": registry.active.whose(),
         // What qualifies the key above, under the same name and the same shape
         // it has in `status --json` (ADR 0048). Here as well as there because
-        // `perch status --group` is answered by this document, and which
-        // Account you are standing on is not a fact that stops being worth
-        // qualifying because the question widened to where you could land.
+        // which Account you are standing on is not a fact that stops being
+        // worth qualifying because the question widened from it to the set it
+        // sits in.
         "landing": registry.active.document(),
         "sections": sectioned,
         "refresh": report.document(),

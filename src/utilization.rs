@@ -2,8 +2,8 @@
 //!
 //! Every surface that shows Utilization renders it from cache, and shows each
 //! figure with its age so a stale number is visibly stale rather than quietly
-//! wrong (ADR 0015). Only `perch status --refresh` fetches, and it fetches
-//! before rendering rather than while: nothing here reaches the network.
+//! wrong (ADR 0015). Only a `--refresh` fetches — on either surface — and it
+//! fetches before rendering rather than while: nothing here reaches the network.
 //! `status` and `list` both have to say the same thing about the same figure,
 //! so how a figure reads lives here rather than being spelled out again by each
 //! of them.
