@@ -253,7 +253,7 @@ jobs:
   # chapter pointing at a file nobody wrote fails here rather than being
   # invented as an empty page. The rest of what could go quietly wrong — a page
   # missing from SUMMARY.md, a link to a heading that has been reworded — is
-  # `tests/publishing.rs`, which runs with the other suites.
+  # `tests/publication.rs`, which runs with the other suites.
   guide:
     runs-on: ubuntu-latest
     timeout-minutes: 10
