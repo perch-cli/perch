@@ -108,7 +108,7 @@ Account in one terminal without changing which is active.
 | Command | What it does | More |
 | ------- | ------------ | ---- |
 | `perch status` | the active Account and how full it is | [guide](docs/guide/status.md) |
-| `perch list` | every Account, its Alias, Group, state, Headroom and Utilization, ranked as a Cycle would | [guide](docs/guide/status.md#every-account) |
+| `perch list` | every Account — or one Scope of them — with its Alias, Group, state, Headroom and Utilization, ranked as a Cycle would | [guide](docs/guide/status.md#every-account) |
 | `perch add` | gain an Account by logging in, without disturbing the active one | [guide](docs/guide/accounts.md#adding-an-account) |
 | `perch alias` | name an Account, so no command needs its email address | [guide](docs/guide/accounts.md#naming-an-account) |
 | `perch switch` | make an Account active everywhere, or Cycle within a Group | [guide](docs/guide/switching.md) |
@@ -132,8 +132,8 @@ A few things are worth knowing before the details, because most of Perch follows
 from them:
 
 - **Utilization is served from cache**, with the age of every figure shown.
-  `perch status --refresh` is the one command that fetches, so `status` is cheap
-  enough to sit in a shell prompt (ADR 0015).
+  `--refresh` is the one thing that fetches, so both `perch status` and
+  `perch list` are cheap enough to sit in a shell prompt (ADR 0015).
 - **A Group is a declaration that Accounts are interchangeable.** Cycling never
   leaves the Group it started in, so a work subscription running dry does not
   land you on your personal Account (ADR 0002).

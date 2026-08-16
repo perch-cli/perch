@@ -175,9 +175,26 @@ enum Command {
 
     /// Show every Account with its Alias, Group, state and cached Utilization.
     ///
-    /// The one place that answers "what do I have". Renders from cache and
-    /// never touches the network.
+    /// The one place that answers "what do I have", at every breadth (ADR
+    /// 0053): bare it is every Account Perch holds, and a Scope narrows it to
+    /// the Accounts you could Cycle between — where you would land before you
+    /// switch. Renders from cache unless you ask it to fetch.
     List {
+        /// Which Accounts to show: a Group by name, or `ungrouped` for the
+        /// Accounts in no Group. Without one, every Account Perch holds.
+        #[arg(value_name = "SCOPE")]
+        scope: Option<String>,
+
+        /// Read current Utilization from Anthropic first.
+        ///
+        /// Exactly the Accounts about to be shown and no others, so narrowing
+        /// the listing narrows the reads with it. Roughly 28-30 reads an hour
+        /// are allowed per Account and the allowance does not refill early, so
+        /// a figure that cannot be read falls back to the cached one rather
+        /// than failing.
+        #[arg(long)]
+        refresh: bool,
+
         /// Emit machine-readable output, with an observation time on every
         /// Utilization figure.
         #[arg(long)]
@@ -201,20 +218,17 @@ enum Command {
 
     /// Show the active Account and its cached Utilization.
     ///
-    /// Renders from cache unless you ask it to fetch, so it is cheap enough for
-    /// a shell prompt.
+    /// The Account you are on and nothing else (ADR 0053) — a set of Accounts
+    /// is `perch list`, at whatever breadth. Renders from cache unless you ask
+    /// it to fetch, so it is cheap enough for a shell prompt.
     Status {
-        /// Show every Account in the active Account's Group, so you can see
-        /// where you would land before switching.
-        #[arg(long)]
-        group: bool,
-
         /// Read current Utilization from Anthropic first.
         ///
-        /// The only thing in Perch that touches the network. Roughly 28-30
-        /// reads an hour are allowed per Account and the allowance does not
-        /// refill early, so a figure that cannot be read falls back to the
-        /// cached one rather than failing.
+        /// The one Account this command is about, and no others. Asking for a
+        /// refresh is the only thing in Perch that touches the network, here or
+        /// on a listing. Roughly 28-30 reads an hour are allowed per Account
+        /// and the allowance does not refill early, so a figure that cannot be
+        /// read falls back to the cached one rather than failing.
         #[arg(long)]
         refresh: bool,
 
@@ -389,7 +403,19 @@ fn main() {
         )),
         Command::Group { action } => ok(group::run(&host, action, &mut out)),
         Command::Holdings { action } => ok(holdings::run(&host, action, &mut out)),
-        Command::List { json } => ok(list::run(&host, ListArgs { json }, &mut out)),
+        Command::List {
+            scope,
+            refresh,
+            json,
+        } => ok(list::run(
+            &host,
+            ListArgs {
+                scope,
+                refresh,
+                json,
+            },
+            &mut out,
+        )),
         Command::Relogin { target } => ok(relogin::run(&host, ReloginArgs { target }, &mut out)),
         Command::Remove { target, yes } => {
             ok(remove::run(&host, RemoveArgs { target, yes }, &mut out))
@@ -397,19 +423,9 @@ fn main() {
         // The one command whose exit code is not Perch's own: what the client
         // said is what a script reads.
         Command::Run { target, command } => run::run(&host, RunArgs { target, command }, &mut out),
-        Command::Status {
-            group,
-            refresh,
-            json,
-        } => ok(status::run(
-            &host,
-            StatusArgs {
-                group,
-                refresh,
-                json,
-            },
-            &mut out,
-        )),
+        Command::Status { refresh, json } => {
+            ok(status::run(&host, StatusArgs { refresh, json }, &mut out))
+        }
         Command::Switch { target } => ok(switch::run(&host, SwitchArgs { target }, &mut out)),
         // The other whose exit code is not simply Perch's own: what `brew` or
         // `npm` exited with is what a script reads, because a failed `brew

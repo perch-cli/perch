@@ -244,7 +244,7 @@ fn send(host: &dyn Host, request: &HttpRequest<'_>) -> Result<HttpResponse, Refu
 /// only a browser login clears. Reading a malformed request, a proxy's own
 /// error page, or a `client_id` Anthropic has changed its mind about as "log in
 /// again" would walk a whole Group and Quarantine every Account in it — which a
-/// single `perch status --group --refresh` does in one pass.
+/// single `perch list <group> --refresh` does in one pass.
 const REVOKED: &str = "invalid_grant";
 
 /// The statuses the token endpoint refuses with, every one of them held to
@@ -943,7 +943,7 @@ mod tests {
     /// browser login clears. So the status alone is not enough — a proxy's
     /// error page, or a request Anthropic changed its mind about the shape of,
     /// would otherwise Quarantine every Account in a Group in one pass of
-    /// `perch status --group --refresh`.
+    /// `perch list <group> --refresh`.
     #[test]
     fn a_bad_request_that_does_not_say_the_token_is_retired_is_not_terminal() {
         let refused = |body: &str| {
@@ -979,7 +979,7 @@ mod tests {
     /// a 401, and `invalid_client` is about the `client_id` in the request —
     /// Perch's own, the same in every renewal it sends. Read as "this Account's
     /// refresh token is retired", one such 401 Quarantines every Account in a
-    /// Group in a single `perch status --group --refresh`, and only a login for
+    /// Group in a single `perch list <group> --refresh`, and only a login for
     /// each clears it.
     #[test]
     fn a_renewal_refused_without_saying_the_token_is_retired_is_never_terminal() {

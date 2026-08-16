@@ -100,7 +100,7 @@ you@example.com frees up soonest, at 2026-08-04 15:00 UTC (in 3h).   # exit 17
 
 $ perch switch
 Cycling within Group `work`.
-you@example.com is already the best Account in Group `work`, with 90% headroom, which is true of every one of its Quota Windows — 5-hour is its fullest, as of 4m ago. Nothing was changed — `perch status --group --refresh` reads current figures.   # exit 15
+you@example.com is already the best Account in Group `work`, with 90% headroom, which is true of every one of its Quota Windows — 5-hour is its fullest, as of 4m ago. Nothing was changed — `perch list work --refresh` reads current figures.   # exit 15
 
 $ perch switch
 you@example.com is in no Group, so nothing has declared which Accounts it is interchangeable with. Nothing was changed.

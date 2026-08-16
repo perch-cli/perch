@@ -239,38 +239,13 @@ pub fn run_status(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
     )
 }
 
-/// `perch status --group`: the same cached view, narrowed to the Group the
-/// active Account is in.
-pub fn run_status_group(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
-    run_status_with(
-        host,
-        StatusArgs {
-            json,
-            group: true,
-            ..StatusArgs::default()
-        },
-    )
-}
-
-/// `perch status --refresh`: the one command that fetches (ADR 0015).
+/// `perch status --refresh`: the one command that fetches about the Account you
+/// are on (ADR 0015).
 pub fn run_status_refresh(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
     run_status_with(
         host,
         StatusArgs {
             json,
-            refresh: true,
-            ..StatusArgs::default()
-        },
-    )
-}
-
-/// `perch status --group --refresh`: fetch for every Account you could land on.
-pub fn run_status_group_refresh(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
-    run_status_with(
-        host,
-        StatusArgs {
-            json,
-            group: true,
             refresh: true,
         },
     )
@@ -285,8 +260,60 @@ pub fn run_status_with(host: &FakeHost, args: StatusArgs) -> (perch::Result<()>,
 
 /// Runs `perch list`, returning what it printed alongside how it ended.
 pub fn run_list(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
+    run_list_with(
+        host,
+        ListArgs {
+            json,
+            ..ListArgs::default()
+        },
+    )
+}
+
+/// `perch list --refresh`: fetch for every Account Perch holds.
+pub fn run_list_refresh(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
+    run_list_with(
+        host,
+        ListArgs {
+            json,
+            refresh: true,
+            ..ListArgs::default()
+        },
+    )
+}
+
+/// `perch list <scope>`: the same cached view, narrowed to one Group or to the
+/// Accounts in no Group.
+pub fn run_list_in(host: &FakeHost, scope: &str, json: bool) -> (perch::Result<()>, String) {
+    run_list_with(
+        host,
+        ListArgs {
+            json,
+            scope: Some(scope.to_string()),
+            ..ListArgs::default()
+        },
+    )
+}
+
+/// `perch list <scope> --refresh`: fetch for every Account you could land on.
+pub fn run_list_in_refresh(
+    host: &FakeHost,
+    scope: &str,
+    json: bool,
+) -> (perch::Result<()>, String) {
+    run_list_with(
+        host,
+        ListArgs {
+            json,
+            scope: Some(scope.to_string()),
+            refresh: true,
+        },
+    )
+}
+
+/// `perch list` with whatever breadth and flags the test is about.
+pub fn run_list_with(host: &FakeHost, args: ListArgs) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
-    let result = perch::commands::list::run(host, ListArgs { json }, &mut written);
+    let result = perch::commands::list::run(host, args, &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 

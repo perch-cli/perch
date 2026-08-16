@@ -354,11 +354,16 @@ fn a_flag_that_could_be_either_is_refused_before_the_parser() {
     );
 }
 
-/// The listing arm, and the flag that is the only thing on it. A table for a
-/// person and a document for a script are the two renderings ADR 0011 requires
-/// to both exist.
+/// The listing arm, whose surface is a positional Scope and two flags. A table
+/// for a person and a document for a script are the two renderings ADR 0011
+/// requires to both exist, and the argument is the breadth: a Scope that
+/// arrived where `--json` was read would answer a script about everything.
+///
+/// `--refresh` is the one flag this suite cannot press — it is the only thing
+/// in Perch that touches the network — so what is claimed is that nothing else
+/// on the arm is it.
 #[test]
-fn the_listing_arm_renders_a_table_and_the_json_flag_a_document() {
+fn the_listing_arm_takes_a_scope_and_renders_a_table_or_a_document() {
     let machine = Scratch::holding_an_account("list");
 
     let ran = perch(&machine, &["list"]);
@@ -366,6 +371,20 @@ fn the_listing_arm_renders_a_table_and_the_json_flag_a_document() {
     assert_eq!(ran.code, EXIT_OK, "{}", ran.err);
     assert!(ran.out.contains(SOMEONE), "{}", ran.out);
     assert!(ran.out.contains("Utilization"), "{}", ran.out);
+    assert!(
+        !ran.out.contains("In no Group"),
+        "a listing of everything is under no heading:\n{}",
+        ran.out
+    );
+
+    let ran = perch(&machine, &["list", "ungrouped"]);
+
+    assert_eq!(ran.code, EXIT_OK, "{}", ran.err);
+    assert!(
+        ran.out.contains("In no Group"),
+        "and a Scope narrows it to the one named:\n{}",
+        ran.out
+    );
 
     let ran = perch(&machine, &["list", "--json"]);
 
@@ -373,17 +392,14 @@ fn the_listing_arm_renders_a_table_and_the_json_flag_a_document() {
     let document: serde_json::Value =
         serde_json::from_str(&ran.out).unwrap_or_else(|_| panic!("a document:\n{}", ran.out));
     assert_eq!(document["active_account"], SOMEONE, "{}", ran.out);
+    assert_eq!(document["scope"]["kind"], "all", "{}", ran.out);
 }
 
-/// The status arm, whose args struct carries three booleans of one type: a
-/// `--group` that arrived where `--refresh` was read would fetch, and one that
-/// arrived where `--json` was read would answer a script.
-///
-/// `--refresh` is the one flag this suite cannot press — it is the only thing
-/// in Perch that touches the network — so what is claimed is that neither other
-/// flag is it.
+/// The status arm, which is about the Account you are on and cannot be widened
+/// to anything else (ADR 0053). A Scope typed here is a line the parser refuses
+/// rather than one that quietly lists a Group.
 #[test]
-fn the_status_arm_answers_about_one_account_and_each_flag_is_its_own() {
+fn the_status_arm_answers_about_one_account_and_takes_no_scope() {
     let machine = Scratch::holding_an_account("status");
 
     let ran = perch(&machine, &["status"]);
@@ -392,18 +408,22 @@ fn the_status_arm_answers_about_one_account_and_each_flag_is_its_own() {
     assert!(ran.out.contains(SOMEONE), "{}", ran.out);
     assert!(
         !ran.out.contains("In no Group"),
-        "the bare question is about one Account:\n{}",
+        "the question is about one Account:\n{}",
         ran.out
     );
 
-    let ran = perch(&machine, &["status", "--group"]);
+    for widened in [&["status", "--group"][..], &["status", "ungrouped"]] {
+        let ran = perch(&machine, widened);
 
-    assert_eq!(ran.code, EXIT_OK, "{}", ran.err);
-    assert!(
-        ran.out.contains("In no Group"),
-        "and `--group` widens it to the Scope you could land in:\n{}",
-        ran.out
-    );
+        assert_eq!(
+            ran.code,
+            EXIT_NOT_UNDERSTOOD,
+            "`perch {}` is the listing's line rather than this one:\n{}{}",
+            widened.join(" "),
+            ran.out,
+            ran.err
+        );
+    }
 
     let ran = perch(&machine, &["status", "--json"]);
 

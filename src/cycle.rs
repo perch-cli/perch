@@ -239,7 +239,17 @@ impl Headroom {
 
 /// What reads a figure Perch has not got, said the same way wherever the
 /// absence of one is the reason for the answer.
-const HOW_TO_GET_FIGURES: &str = "`perch status --group --refresh` reads current figures.";
+///
+/// Named against the Scope the Cycle was looking in, because that is where the
+/// missing figures are: a refresh reads the Accounts it is about to show and no
+/// others (ADR 0053), so the listing narrowed to this Scope is the one that
+/// reads exactly the Accounts this sentence is about.
+fn how_to_get_figures(scope: &Scope) -> String {
+    format!(
+        "`perch list {} --refresh` reads current figures.",
+        scope.word()
+    )
+}
 
 /// The Quota Window that decides how full an Account is: its fullest (ADR
 /// 0012), or `None` for one nothing has ever been observed of.
@@ -501,15 +511,16 @@ pub fn choose(
         let alone = here.expect("something unexhausted is here or elsewhere");
         return Err(PerchError::NothingToDo(format!(
             "{} is the only Account in {} that is not exhausted, and Perch has \
-             never observed how full it is. Nothing was changed — {HOW_TO_GET_FIGURES}",
+             never observed how full it is. Nothing was changed — {}",
             registry.named_for_the_user(alone.account.email()),
             scope.place(),
+            how_to_get_figures(scope),
         )));
     };
 
     Ok(Choice {
         account: best.account.clone(),
-        because: chosen_because(registry, best, strategy, now),
+        because: chosen_because(registry, scope, best, strategy, now),
         caveat: staleness(registry, best),
     })
 }
@@ -791,15 +802,17 @@ pub fn headroom_in_full(account: &Account, now: DateTime<Utc>) -> String {
 /// on before they wonder why it filled up so fast.
 fn chosen_because(
     registry: &Registry,
+    scope: &Scope,
     best: &Ranked,
     strategy: Strategy,
     now: DateTime<Utc>,
 ) -> String {
     let named = registry.named_for_the_user(best.account.email());
+    let how_to_get_figures = how_to_get_figures(scope);
     let Some(figure) = best.headroom.as_a_clause(strategy, now) else {
         return format!(
             "Perch has never observed how full {named} is, so this was not a \
-             ranked choice — {HOW_TO_GET_FIGURES}"
+             ranked choice — {how_to_get_figures}"
         );
     };
     match strategy {
@@ -820,7 +833,7 @@ fn chosen_because(
         Strategy::SoonestReset => format!(
             "{named} has the most room: {figure}. Nothing that could be moved to \
              has a reset still to come, so there was no reset time to prefer one \
-             on — {HOW_TO_GET_FIGURES}"
+             on — {how_to_get_figures}"
         ),
     }
 }
@@ -902,7 +915,10 @@ fn everyone_is_exhausted(
         ),
         // Every figure predates the recording of reset times, or none of them
         // carried one. Saying nothing would read as "never".
-        None => format!("No cached figure says when any of them frees up — {HOW_TO_GET_FIGURES}"),
+        None => format!(
+            "No cached figure says when any of them frees up — {}",
+            how_to_get_figures(scope)
+        ),
     };
     // An Account whose full window carries no reset time cannot be ranked for
     // how soon it comes back, and could well come back first. Leaving it out
@@ -911,7 +927,8 @@ fn everyone_is_exhausted(
     if unsaid > 0 && soonest.is_some() {
         waiting.push_str(&format!(
             " {unsaid} of them cache no reset time, so the wait could be \
-             shorter than that — {HOW_TO_GET_FIGURES}"
+             shorter than that — {}",
+            how_to_get_figures(scope)
         ));
     }
 
@@ -947,6 +964,7 @@ fn already_the_best(
     now: DateTime<Utc>,
 ) -> String {
     let named = registry.named_for_the_user(here.account.email());
+    let how_to_get_figures = how_to_get_figures(scope);
     let scope = scope.place();
     // Said of the comparison Perch actually made. Under soonest-reset it has
     // only compared the Accounts whose figures carry a reset time, so claiming
@@ -960,7 +978,7 @@ fn already_the_best(
         format!("{named} is already the best Account in {scope}")
     };
     format!(
-        "{standing}, with {}. Nothing was changed — {HOW_TO_GET_FIGURES}",
+        "{standing}, with {}. Nothing was changed — {how_to_get_figures}",
         here.headroom
             .as_a_clause(strategy, now)
             .expect("staying put is only said of a figure that says to"),
@@ -1095,8 +1113,9 @@ pub(crate) mod tests {
             "and why staying put is not a comparison Perch made: {said}"
         );
         assert!(
-            said.contains("perch status --group --refresh"),
-            "and how to get a figure so it can be one: {said}"
+            said.contains("perch list work --refresh"),
+            "and how to get a figure so it can be one, over exactly the Scope \
+             the missing figures are in: {said}"
         );
     }
 

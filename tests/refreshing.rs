@@ -141,7 +141,9 @@ fn json_carries_an_observation_time_on_every_figure_it_just_read() {
 
     result.expect("the read works");
     let document: serde_json::Value = serde_json::from_str(&printed).expect("valid JSON");
-    let windows = document["utilization"]["windows"].as_array().unwrap();
+    let windows = document["active"]["utilization"]["windows"]
+        .as_array()
+        .unwrap();
     assert_eq!(windows.len(), 3);
     for window in windows {
         assert_eq!(window["observed_seconds_ago"], 0);
@@ -176,7 +178,9 @@ fn no_command_but_refresh_makes_a_network_call() {
     run_status(&host, false).0.expect("status renders");
     run_status(&host, true).0.expect("status renders as JSON");
     run_list(&host, false).0.expect("list renders");
-    run_status_group(&host, false).0.expect("the group renders");
+    run_list_in(&host, "ungrouped", false)
+        .0
+        .expect("the ungrouped listing renders");
 
     assert!(
         host.http_calls().is_empty(),
@@ -299,7 +303,7 @@ fn a_credential_a_run_is_holding_is_never_renewed_either() {
         .with_reply(TOKEN_URL, 200, RENEWED);
     host.forget_effects();
 
-    let (result, printed) = run_status_group_refresh(&host, false);
+    let (result, printed) = run_list_in_refresh(&host, "work", false);
 
     result.expect("a Credential Perch may not touch is not a failed command");
     assert!(
@@ -368,7 +372,7 @@ fn utilization_for_a_live_account_is_read_without_a_renewal() {
         "the Account this is about has a Run against it"
     );
 
-    run_status_group_refresh(&host, false)
+    run_list_in_refresh(&host, "work", false)
         .0
         .expect("the reads work");
 
@@ -421,7 +425,7 @@ fn a_throttle_is_named_as_one_in_json() {
     let document: serde_json::Value = serde_json::from_str(&printed).expect("valid JSON");
     assert_eq!(document["refresh"]["accounts"][0]["outcome"], "throttled");
     assert_eq!(
-        document["utilization"]["windows"][0]["used_percent"], 42.0,
+        document["active"]["utilization"]["windows"][0]["used_percent"], 42.0,
         "the figure that is shown is the one that was cached"
     );
 }
@@ -444,7 +448,7 @@ fn a_refresh_that_fails_for_one_account_still_reads_the_others() {
         .with_reply_to(PROFILE_URL, RENEWED_TOKEN, 401, "");
     host.forget_effects();
 
-    let (result, printed) = run_status_group_refresh(&host, false);
+    let (result, printed) = run_list_in_refresh(&host, "work", false);
 
     result.expect("one Account Perch cannot read is not a failed command");
     assert!(
@@ -506,6 +510,11 @@ fn a_credential_that_will_not_say_when_it_expires_is_renewed_once_anthropic_refu
     );
 }
 
+/// One rule at every breadth rather than a capability each command has of its
+/// own: a refresh reads the Accounts it is about to show and no others (ADR
+/// 0053). Every read spends from an allowance that does not refill early (ADR
+/// 0015), so a listing that narrowed what it showed without narrowing what it
+/// read would spend somebody's budget on Accounts they did not ask about.
 #[test]
 fn a_refresh_reads_only_the_accounts_it_is_about_to_show() {
     let host = machine_with_two_accounts();
@@ -528,15 +537,31 @@ fn a_refresh_reads_only_the_accounts_it_is_about_to_show() {
         "`perch status --refresh` is about the Account you are on"
     );
 
-    run_status_group_refresh(&host, false)
+    run_list_in_refresh(&host, "work", false)
         .0
         .expect("the reads work");
     assert_eq!(
         host.sent_to(USAGE_URL).len(),
         3,
-        "`--group` reads every Account it offers as a landing place"
+        "a Scope reads every Account it offers as a landing place"
     );
     assert_eq!(cached_windows(&host, SECOND_EMAIL).len(), 3);
+
+    run_list_in_refresh(&host, "ungrouped", false)
+        .0
+        .expect("a Scope holding nothing is still a listing");
+    assert_eq!(
+        host.sent_to(USAGE_URL).len(),
+        3,
+        "and a Scope with nothing to show spends nothing"
+    );
+
+    run_list_refresh(&host, false).0.expect("the reads work");
+    assert_eq!(
+        host.sent_to(USAGE_URL).len(),
+        5,
+        "while the whole listing reads the whole of what it shows"
+    );
 }
 
 #[test]
@@ -682,7 +707,7 @@ fn a_refresh_that_failed_is_named_as_one_in_json_with_the_reason() {
         "a failure with no reason is one nobody can act on: {printed}"
     );
     assert_eq!(
-        document["utilization"]["windows"][0]["used_percent"], 42.0,
+        document["active"]["utilization"]["windows"][0]["used_percent"], 42.0,
         "and the figure shown is the one that was cached"
     );
 }

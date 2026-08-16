@@ -7,9 +7,11 @@
 //! is visibly stale rather than quietly wrong, and `--refresh` is how one stops
 //! being stale.
 //!
-//! `--group` widens the question from "where am I" to "where would I land",
-//! which is the listing [`crate::commands::list`] already draws — so it is
-//! answered there, over the Accounts the active one may be Cycled to.
+//! One Account in detail, and that is the whole of it (ADR 0053). "Where would
+//! I land" is a question about a set, which is the listing
+//! [`crate::commands::list`] draws at whatever breadth it is asked for — so it
+//! is asked there, and this command answers about the Account you are on and
+//! cannot be anything else.
 
 use std::io::Write;
 
@@ -17,7 +19,7 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 
 use crate::adopt;
-use crate::commands::list::{self, Scope};
+use crate::commands::list;
 use crate::commands::say_json;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
@@ -28,9 +30,6 @@ use crate::utilization;
 #[derive(Debug, Default, Clone, Copy)]
 pub struct StatusArgs {
     pub json: bool,
-    /// Show every Account the active one shares a Group with, rather than the
-    /// active Account alone.
-    pub group: bool,
     /// Read current Utilization before showing it, rather than showing what
     /// was last observed.
     pub refresh: bool,
@@ -64,36 +63,21 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
         (Err(nobody), None) => return Err(nobody),
     };
 
-    // Being in no Group is not a Group (ADR 0017), so from an ungrouped Account
-    // the answer to "where would I land" is every ungrouped Account together
-    // with what Cycling will not do with them unasked.
-    let scope = args.group.then(|| match group_of(&registry, &active) {
-        Some(group) => Scope::Group(group),
-        None => Scope::Ungrouped,
-    });
-
+    // Every read spends from a budget that does not refill early (ADR 0015),
+    // and this command shows one Account, so it reads one Account. A refresh
+    // reads exactly what it is about to show, which is the rule `perch list`
+    // follows at its own breadths.
     let report = match &mut perch {
-        Some(perch) => {
-            let asking_about = to_refresh(&registry, &scope, &active);
-            observe::refresh(host, perch, &mut registry, &asking_about)
-        }
+        Some(perch) => observe::refresh(host, perch, &mut registry, std::slice::from_ref(&active)),
         None => Report::default(),
     };
 
     let now = host.now();
-    match scope {
-        // A Switch in flight is said by the listing, which is what answers
-        // `--group` (ADR 0053) and which has its own line about which Account
-        // is active for it to qualify.
-        Some(scope) => list::render(host, out, &registry, scope, now, args.json, &report),
-        None => {
-            let account = registry.held(&active)?;
-            if args.json {
-                render_json(host, out, &registry, account, now, &report)
-            } else {
-                render_human(out, &registry, account, now, &report)
-            }
-        }
+    let account = registry.held(&active)?;
+    if args.json {
+        render_json(host, out, &registry, account, now, &report)
+    } else {
+        render_human(out, &registry, account, now, &report)
     }
 }
 
@@ -120,28 +104,6 @@ fn active_email(registry: &Registry) -> Result<String> {
             }
         )
     }))
-}
-
-fn group_of(registry: &Registry, email: &str) -> Option<String> {
-    registry
-        .account(email)
-        .and_then(|account| account.group.clone())
-}
-
-/// Which Accounts a refresh covers: exactly the ones about to be shown.
-///
-/// Every read spends from a budget that does not refill early (ADR 0015), so
-/// `perch status --refresh` reads the Account you are on, and `--group` reads
-/// the ones being offered as landing places — never the whole registry.
-fn to_refresh(registry: &Registry, scope: &Option<Scope>, active: &str) -> Vec<String> {
-    match scope {
-        Some(scope) => scope
-            .accounts(registry)
-            .iter()
-            .map(|account| account.email().to_string())
-            .collect(),
-        None => vec![active.to_string()],
-    }
 }
 
 fn render_human(
@@ -194,11 +156,16 @@ fn render_human(
 /// so a script asking which Group the active Account is in had to run a second
 /// command, and one written against `perch list --json` could not be pointed at
 /// this. The Account is the same Account; only the question the document answers
-/// differs, and `active` against `accounts` is what says which was asked.
+/// differs, and `active` against `sections` is what says which was asked.
 ///
-/// `utilization` stays at the top level as well as inside `active`, because it
-/// is what this command is *for*: `perch status --json | jq .utilization` is the
-/// line in somebody's shell prompt.
+/// The Utilization is under `active` and nowhere else. It sat at the top level
+/// too — `perch status --json | jq .utilization` being the line in somebody's
+/// shell prompt — and that earned its keep against a document which, under the
+/// flag that once widened this command to a Group, also answered about a set:
+/// the duplicate was insurance against reaching into the wrong shape. This
+/// document answers about exactly one Account and cannot be anything else (ADR
+/// 0053), so the insurance has nothing left to cover and `jq
+/// .active.utilization` is one word longer.
 fn render_json(
     host: &dyn Host,
     out: &mut dyn Write,
@@ -210,7 +177,6 @@ fn render_json(
     let document = json!({
         "active": list::document(host, registry, account, now)?,
         "landing": registry.active.document(),
-        "utilization": utilization::document(account, now),
         "refresh": report.document(),
     });
 
@@ -222,10 +188,10 @@ fn render_json(
 /// established to put in one.
 ///
 /// The `--json` document keeps every key the ordinary one has, with the ones it
-/// cannot answer left empty. A script reaching for `.utilization` on this
-/// machine is asking about an Account Perch cannot name, and `null` is that
-/// answer — where a document missing the key is a script's `jq` failing for
-/// what reads like a different reason.
+/// cannot answer left empty. A script reaching for `.active` on this machine is
+/// asking about an Account Perch cannot name, and `null` is that answer — where
+/// a document missing the key is a script's `jq` failing for what reads like a
+/// different reason.
 fn the_switch_alone(
     out: &mut dyn Write,
     registry: &Registry,
@@ -240,7 +206,6 @@ fn the_switch_alone(
         &json!({
             "active": serde_json::Value::Null,
             "landing": registry.active.document(),
-            "utilization": serde_json::Value::Null,
             "refresh": Report::default().document(),
         }),
     )

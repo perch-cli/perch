@@ -131,7 +131,7 @@ fn a_rotation_that_could_not_be_stored_quarantines_rather_than_reading_as_a_fail
 /// token over, the one Perch holds is untouched and still buys a token, so the
 /// write that failed cost a cached access token and nothing else. Quarantining
 /// there would take an Account out for good over a keychain somebody had
-/// locked for the afternoon — and a `perch status --group --refresh` would take
+/// locked for the afternoon — and a `perch list <group> --refresh` would take
 /// the whole Group out that way, each with a reason that is not true.
 #[test]
 fn a_renewal_that_rotated_nothing_is_a_failed_reading_rather_than_a_quarantine() {
@@ -192,7 +192,7 @@ fn a_profile_that_holds_no_credential_at_all_quarantines_its_account() {
         .with_reply_to(PROFILE_URL, FRESH_TOKEN, 200, &profile_naming(EMAIL))
         .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE);
 
-    let (result, printed) = run_status_group_refresh(&host, false);
+    let (result, printed) = run_list_in_refresh(&host, "work", false);
 
     result.expect("one Account Perch cannot read is not a failed command");
     assert_eq!(
@@ -263,7 +263,7 @@ fn a_renewal_refused_over_something_other_than_the_token_quarantines_nobody() {
     );
     let host = host.with_reply(TOKEN_URL, 401, r#"{"error":"invalid_client"}"#);
 
-    let (result, printed) = run_status_group_refresh(&host, false);
+    let (result, printed) = run_list_in_refresh(&host, "work", false);
 
     result.expect("a refresh degrades the display rather than failing it");
     for email in [EMAIL, SECOND_EMAIL] {
@@ -401,7 +401,7 @@ fn an_account_quarantined_by_a_refresh_leaves_the_cycling_pool_from_that_moment(
         .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE)
         .with_reply(TOKEN_URL, 401, RETIRED);
 
-    run_status_group_refresh(&host, false)
+    run_list_in_refresh(&host, "work", false)
         .0
         .expect("a refresh degrades the display rather than failing it");
     assert_eq!(

@@ -42,7 +42,7 @@ pub struct WindowUtilization {
 }
 
 /// Cached Utilization for one Account. What every surface renders, and what
-/// only `perch status --refresh` ever goes and fetches (ADR 0015).
+/// only a `--refresh` ever goes and fetches (ADR 0015).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CachedUtilization {
@@ -728,8 +728,8 @@ impl Active {
     ///
     /// Here rather than in the command, beside [`document`], because two
     /// commands say it and both have to say the same thing — `perch status`
-    /// about the Account you are on, and the listing under it, which is what
-    /// `perch status --group` is answered by (ADR 0053). What it qualifies is
+    /// about the Account you are on, and `perch list` about the set it sits in,
+    /// at whatever breadth that was asked for (ADR 0053). What it qualifies is
     /// whichever line says which Account is active, and there is one of those
     /// in each.
     ///
