@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- a terminal too narrow for the `Status` tab cut a figure's age off, half an email address off a row, and a key hint in two — the tab now breaks between words and between columns instead ([#153](https://github.com/perch-cli/perch/issues/153))
+
 ## [0.2.0](https://github.com/perch-cli/perch/compare/v0.1.1...v0.2.0) - 2026-08-14
 
 ### Added

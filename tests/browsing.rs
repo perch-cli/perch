@@ -64,6 +64,12 @@ fn browse_holding(host: &FakeHost, registry: Registry, doing: Vec<Option<Signal>
 /// — a figure that lost `(as of 4m ago)` to the right-hand edge would be a
 /// figure with no age on it (ADR 0015) — so where a whole sentence is what is
 /// under test, the line breaks the terminal put in are not.
+///
+/// Which makes every assertion written through it blind to that same figure
+/// losing its age: the words are read back in whatever order they landed and a
+/// clause that went over the edge is simply not among them. That is claimed
+/// directly instead, at the hostile widths further down this file, rather than
+/// by holding a frame against a baseline (ADR 0043).
 fn said(frame: &str) -> String {
     frame.split_whitespace().collect::<Vec<&str>>().join(" ")
 }
@@ -699,6 +705,239 @@ fn a_narrow_terminal_keeps_the_views_legible_and_drops_the_label() {
     assert!(bar.contains("Status"), "{bar}");
     assert!(bar.contains("Config"), "{bar}");
     assert!(!bar.contains("active:"), "there is no room for it: {bar}");
+}
+
+// ---- A terminal too narrow for what is on it (ADR 0043) ----
+
+/// A width every sentence on the `Status` tab has to be broken to fit on, and
+/// the tables with it.
+const WRAPS: u16 = 50;
+
+/// And the narrowest width the tab can be drawn at all at.
+///
+/// The widest single word it ever shows is the Setting key
+/// `watcher-threshold-percent`, and 38 columns is the sidebar, the indent and
+/// that word. A terminal narrower than its own longest word is one no layout
+/// saves, so the claim these tests make is bounded: nothing load-bearing is
+/// lost down to the width at which the datum itself still fits, and below that
+/// there is nothing to claim.
+const CUTS: u16 = 38;
+
+/// Rows enough that nothing goes off the bottom, because a terminal with too
+/// few of them is a different claim about a different mechanism — the Overview
+/// is one paragraph and does not scroll — and narrowing a terminal is what
+/// makes everything on it taller. These are about the width.
+const TALL: u16 = 40;
+
+/// The `Status` tab's sidebar is as wide as its widest label and no wider, and
+/// holds the same three labels at every width.
+const SIDEBAR: usize = 11;
+
+/// What a frame said, in two parts: the sidebar down the left, and the page
+/// beside it.
+///
+/// Split rather than read straight across, because a line of the page beside a
+/// row the sidebar has no label on is still a line of the page, and reading the
+/// two together makes wrapping look like words out of order.
+///
+/// Neither part is the tab bar or the row of keys, which are the two rows a
+/// narrow terminal is deliberately allowed to change: the bar gives up the
+/// active Account's label rather than sharing the row out, and the keys give up
+/// whole hints from the right. Each of those is asserted where it is decided.
+fn page(frame: &str) -> (String, String) {
+    let lines: Vec<&str> = frame.lines().collect();
+    let (mut sidebar, mut body) = (Vec::new(), Vec::new());
+    for line in &lines[1..lines.len() - 1] {
+        sidebar.push(line.chars().take(SIDEBAR).collect::<String>());
+        body.push(line.chars().skip(SIDEBAR).collect::<String>());
+    }
+    (said(&sidebar.join(" ")), said(&body.join(" ")))
+}
+
+/// The `Status` tab drawn at this width, as the words of it.
+fn page_at(host: &FakeHost, width: u16, doing: Vec<Option<Signal>>) -> (String, String) {
+    let mut screen = FakeScreen::sized(width, TALL, doing);
+    browse_with(host, &mut screen, &mut FakeRefresher::out_for_ever());
+    page(screen.last_frame())
+}
+
+/// A hostile width moves the words about. It does not lose any of them.
+///
+/// `said()` reflows a frame into one run of words so that a sentence can be
+/// asserted across the breaks a terminal put in, which makes every assertion
+/// written through it blind to a clause lost off the right-hand edge — the
+/// defect its own doc comment names, and the one ADR 0043 left to be claimed
+/// directly rather than caught by a baseline. This is the claim: each of the
+/// three `Status` pages, at a width that wraps and at a width that cuts, says
+/// the same words as it says on a terminal with room for them.
+#[test]
+fn a_width_that_wraps_or_cuts_loses_no_word_of_the_status_tab() {
+    let host = machine_with_a_group();
+    observed(
+        &host,
+        EMAIL,
+        vec![window("5-hour", 42.0), window("7-day", 88.0)],
+    );
+    set_alias(&host, "main", EMAIL).0.expect("it is named");
+    config_set(&host, &["work", "watcher-threshold-percent", "55"])
+        .0
+        .expect("the Group Overrides one Setting");
+
+    for (named, doing) in [
+        ("the Overview", vec![Some(Signal::Leave)]),
+        (
+            "the Accounts page",
+            at_the_accounts(vec![Some(Signal::Leave)]),
+        ),
+        (
+            "what governs me",
+            at_what_governs_me(vec![Some(Signal::Leave)]),
+        ),
+    ] {
+        let roomy = page_at(&host, 80, doing.clone());
+        for width in [WRAPS, CUTS] {
+            assert_eq!(
+                page_at(&host, width, doing.clone()),
+                roomy,
+                "{named} at {width} columns"
+            );
+        }
+    }
+}
+
+/// ADR 0015: a figure is shown with its age, so a stale number is visibly stale
+/// rather than quietly wrong. A figure whose age went over the right-hand edge
+/// reads `(as of ago)`, or reads as having no age at all — which is the same
+/// number with the one thing that qualifies it taken off.
+#[test]
+fn every_figure_keeps_its_age_at_a_width_that_cuts() {
+    let host = machine_with_a_group();
+    observed(
+        &host,
+        EMAIL,
+        vec![window("5-hour", 42.0), window("7-day", 88.0)],
+    );
+
+    let mut screen = FakeScreen::sized(CUTS, TALL, vec![Some(Signal::Leave)]);
+    browse_with(&host, &mut screen, &mut FakeRefresher::out_for_ever());
+    let frame = screen.last_frame();
+    let cut = page(frame).1;
+    let roomy = page_at(&host, 80, vec![Some(Signal::Leave)]).1;
+
+    let ages = roomy.matches("as of 4m ago").count();
+    assert!(ages >= 4, "the Overview quotes figures at all\n{roomy}");
+    assert_eq!(
+        cut.matches("as of 4m ago").count(),
+        ages,
+        "each of the {ages} figures a roomy terminal ages still has its age\n{frame}"
+    );
+    assert_eq!(
+        cut.matches("as of").count(),
+        ages,
+        "and none of them is left with the front half of one\n{frame}"
+    );
+    assert!(
+        cut.contains("Reserve: 2 of 2 Accounts have Headroom, the best 93% left (as of 4m ago)"),
+        "{frame}"
+    );
+}
+
+/// An Account is identified by its email address and chosen on its Headroom,
+/// and the listing is columns rather than sentences — so what a narrow terminal
+/// does to it is cut a cell rather than drop a clause. `93%` cut to `9` is not
+/// a figure that went missing, it is a different figure; half an email address
+/// is not an Account anybody can act on.
+///
+/// Three Accounts rather than two, because a row carried onto three lines and
+/// the row under it are only telling apart while something says where one ends:
+/// with two, the last line of the listing is the end of it whatever went wrong.
+#[test]
+fn every_account_keeps_its_identity_and_its_figure_at_a_width_that_cuts() {
+    let host = machine_with_three_accounts();
+    observed(&host, EMAIL, vec![window("5-hour", 42.0)]);
+    observed(&host, SECOND_EMAIL, vec![window("5-hour", 7.0)]);
+    observed(&host, THIRD_EMAIL, vec![window("5-hour", 80.0)]);
+    disable_account(&host, SECOND_EMAIL)
+        .0
+        .expect("it is spared");
+
+    let mut screen = FakeScreen::sized(CUTS, TALL, at_the_accounts(vec![Some(Signal::Leave)]));
+    browse_with(&host, &mut screen, &mut FakeRefresher::out_for_ever());
+
+    let frame = screen.last_frame();
+    for said in ["Account", "Alias", "Group", "State", "Headroom"] {
+        assert!(
+            frame.contains(said),
+            "the column {said} is named in\n{frame}"
+        );
+    }
+    // Each Account's own row: the line its address is on, and the lines carried
+    // on from it, which are the ones indented past where a row begins.
+    let listed: Vec<&str> = frame.lines().skip(1).collect();
+    for (email, headroom, state) in [
+        (EMAIL, "58%", "enabled"),
+        (SECOND_EMAIL, "93%", "disabled"),
+        (THIRD_EMAIL, "20%", "enabled"),
+    ] {
+        let at = listed
+            .iter()
+            .position(|line| line.contains(email))
+            .unwrap_or_else(|| panic!("{email} is listed whole in\n{frame}"));
+        let mut row = listed[at..at + 1].to_vec();
+        row.extend(
+            listed[at + 1..]
+                .iter()
+                .take_while(|line| line.starts_with(&" ".repeat(SIDEBAR + 5))),
+        );
+        let row = said(&row.join(" "));
+        assert!(
+            row.contains(headroom),
+            "{email} is the Account {headroom} belongs to: {row}\n{frame}"
+        );
+        assert!(
+            row.contains(state),
+            "and the one that is {state}: {row}\n{frame}"
+        );
+    }
+    assert!(
+        frame
+            .lines()
+            .any(|line| line.contains("* ") && line.contains(EMAIL)),
+        "and which of them is the active Account\n{frame}"
+    );
+}
+
+/// The two pages that are one sentence say the whole of it, because the half of
+/// one that would go over the edge is the half naming what to do about it.
+#[test]
+fn a_sentence_that_names_the_way_out_is_whole_at_a_width_that_cuts() {
+    let host = machine_with_figures();
+    let mut nobody = registry_of(&host);
+    nobody.active = None;
+
+    for (registry, expected) in [
+        (
+            nobody,
+            "Perch holds no active Account. The Accounts page lists what it holds — Enter on one \
+             makes it active.",
+        ),
+        (
+            Registry::default(),
+            "No Accounts yet. `perch add` logs into one in a Profile of its own.",
+        ),
+    ] {
+        let mut screen = FakeScreen::sized(CUTS, TALL, vec![Some(Signal::Leave)]);
+        perch::tui::browse(
+            &host,
+            registry,
+            &mut screen,
+            &mut FakeRefresher::out_for_ever(),
+        )
+        .expect("the TUI leaves cleanly");
+
+        let frame = screen.last_frame();
+        assert!(page(frame).1.contains(expected), "{frame}");
+    }
 }
 
 /// ADR 0018 wants what could not be read said by name, and the clause naming
