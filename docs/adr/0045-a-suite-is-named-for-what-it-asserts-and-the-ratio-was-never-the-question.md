@@ -1,9 +1,10 @@
 # A suite is named for what it asserts, and the ratio was never the question
 
-> **Decided, not yet carried out.** The renames and the two documentation edits
-> below are tracked separately. Like ADR 0041, ADR 0042 and ADR 0044, this is the
-> artifact of a planning effort rather than of a change, so it lands ahead of the
-> work it describes.
+> **Carried out in #158.** Like ADR 0041, ADR 0042 and ADR 0044, this is the
+> artifact of a planning effort rather than of a change, so it landed ahead of
+> the work it describes instead of beside it. The tree now matches it: the three
+> files carry the names below, and the rule about where a test lives is in
+> `tests/common/mod.rs`'s header.
 
 The question arrived as a size question: `tests/` is 24,565 lines against 47,980
 of `src`, a ratio of one to two, and is that too much harness for a tool one

@@ -52,7 +52,7 @@ None of this fails loudly on its own. mdBook drops a page nobody listed in
 somebody else finds; an installer URL that moves is a command already pasted
 into shells that now downloads nothing. So each of those is asserted:
 `create-missing = false` and a book build in CI catch a chapter pointing at
-nothing, and `tests/publishing.rs` catches the rest — a guide page missing from
+nothing, and `tests/publication.rs` catches the rest — a guide page missing from
 `SUMMARY.md`, a relative link that leaves the guide and would 404 on the site, a
 cross-page anchor that no longer names a heading, an installer URL that is not
 the versionless one, and a landing page that asks for an install before it shows
@@ -69,7 +69,7 @@ others — they are three audiences, and mdBook will not accept a generated
 answer for.
 
 Three lists kept in step by hand is what this ADR says not to do. They are kept
-in step by `tests/publishing.rs` instead: adding a page and forgetting one index
+in step by `tests/publication.rs` instead: adding a page and forgetting one index
 fails on the next run, and names which index and what it would have cost. That
 is the compromise — the duplication is real, and nothing silently tolerates it.
 

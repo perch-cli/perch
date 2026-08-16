@@ -1,5 +1,12 @@
 //! Fixtures for the behaviour tests: a machine with a Claude Code login on it.
 
+// Where a test lives is decided by what it names (ADR 0045). A `mod tests` in
+// `src` asserts a module's own vocabulary through the module's own API. A
+// binary in `tests/` asserts what a *command* does. The fake is not the
+// discriminator, and anybody who assumes it is draws the line in the wrong
+// place on their first try: `src/lock.rs` and `src/registry.rs` both drive
+// `FakeHost` from inside their own `mod tests`.
+
 // Each test binary gets its own copy of this module and uses the part of it
 // that it needs, so unused fixtures here are the normal case rather than rot.
 #![allow(dead_code)]
