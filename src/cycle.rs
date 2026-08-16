@@ -15,10 +15,11 @@
 //! the measurement rules out, so an exhausted Account is never chosen however
 //! soon it comes back.
 //!
-//! A Cycle never leaves the scope it started in (ADR 0002). A work subscription
-//! running dry must not land on a personal Account, so the scope is a Group —
+//! A Cycle never leaves the Scope it started in (ADR 0002). A work subscription
+//! running dry must not land on a personal Account, so the Scope is a Group —
 //! the declaration that a set of Accounts is interchangeable — or the ungrouped
-//! Accounts, which are a scope only when a global setting says so (ADR 0017).
+//! Accounts, which are a Scope only when they have been declared
+//! interchangeable (ADR 0017).
 //!
 //! The three honest non-outcomes matter as much as the choice. Every Account
 //! exhausted, already on the best one, and nobody having declared these
@@ -32,101 +33,19 @@
 use chrono::{DateTime, Utc};
 
 use crate::error::{PerchError, Result};
-use crate::registry::{self, Account, CachedUtilization, Registry, Strategy, WindowUtilization};
+use crate::registry::{
+    self, Account, CachedUtilization, Registry, Scope, Strategy, WindowUtilization,
+};
 use crate::utilization;
 
-/// Where a Cycle may look for a landing place.
+/// Which Account a Scope prefers when more than one would serve.
 ///
-/// Deliberately not [`crate::commands::list::Scope`], which is the same idea
-/// for a listing and carries an `Everything` besides. A Cycle never leaves the
-/// scope it started in (ADR 0002): a work subscription running dry must not
-/// land on a personal Account. Sharing the type would make "every Account" a
-/// thing a Cycle could be handed, and the rule that stops it would move from
-/// the type into a runtime check somebody has to remember to write. Two small
-/// enums that cannot express each other's mistakes are the cheaper pair.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Scope {
-    /// The Accounts in one Group, named as the Group was declared.
-    Group(String),
-    /// The Accounts in no Group at all — a scope only because a global setting
-    /// says those Accounts are interchangeable (ADR 0017).
-    Ungrouped,
-}
-
-impl Scope {
-    /// The Accounts this scope holds, ranked or not.
-    ///
-    /// Public because a Group is also something to *look* at rather than only
-    /// something to Cycle within: what a Group has left to draw on
-    /// ([`crate::reserve`]) is measured over exactly the Accounts a Cycle could
-    /// land on, and a second idea of which Accounts those are is how the figure
-    /// on screen comes to describe a different set from the one that gets
-    /// chosen.
-    pub fn accounts<'a>(&self, registry: &'a Registry) -> Vec<&'a Account> {
-        match self {
-            Scope::Group(name) => registry.accounts_in(name),
-            Scope::Ungrouped => registry.ungrouped_accounts(),
-        }
-    }
-
-    /// The Scope this one is at the Config layer: the same set of Accounts,
-    /// said at the level a Setting means something (ADR 0002, amended).
-    pub fn config(&self) -> registry::Scope {
-        match self {
-            Scope::Group(name) => registry::Scope::Group(name.clone()),
-            Scope::Ungrouped => registry::Scope::Ungrouped,
-        }
-    }
-
-    /// The word that names this scope wherever a Setting belonging to it is
-    /// recorded against it — what the last scheduled Check did, for one.
-    ///
-    /// A Group cannot be called `ungrouped` ([`registry::validate_name`]), so
-    /// the two never collide.
-    pub fn key(&self) -> String {
-        match self {
-            Scope::Group(name) => name.clone(),
-            Scope::Ungrouped => registry::UNGROUPED.to_string(),
-        }
-    }
-
-    /// Which Account this scope prefers when more than one would serve.
-    ///
-    /// Read from the Config in force for the scope: the Scope's own Override
-    /// where it holds one, and Global's otherwise (ADR 0002, amended). The
-    /// Accounts in no Group are still not a Group — they hold no Strategy of
-    /// their own until somebody sets one — but they are a Scope now, so what
-    /// they Cycle by is finally something a person can say rather than a
-    /// constant compiled into Perch (ADR 0017, amended).
-    fn strategy(&self, registry: &Registry) -> Strategy {
-        registry.in_force(&self.config()).strategy
-    }
-
-    /// The scope as an adverbial phrase: "Nothing {} is worth Switching to".
-    ///
-    /// The Config layer's, because it is the same phrase about the same set of
-    /// Accounts ([`registry::Scope::within`]) — and not [`Scope::described`],
-    /// which is the middle of "every Account in {}" and reads as "in no Group",
-    /// true there and ungrammatical the moment anything else is said around it.
-    pub fn within(&self) -> String {
-        self.config().within()
-    }
-
-    /// What the Cycle is about to do, said before it does it.
-    pub fn announcement(&self) -> String {
-        match self {
-            Scope::Group(name) => format!("Cycling within Group `{name}`."),
-            Scope::Ungrouped => "Cycling among the Accounts in no Group.".to_string(),
-        }
-    }
-
-    /// The scope as the middle of a sentence: "every Account in {}".
-    pub fn described(&self) -> String {
-        match self {
-            Scope::Group(name) => crate::commands::list::group_heading(name),
-            Scope::Ungrouped => "no Group".to_string(),
-        }
-    }
+/// Read from the Settings the Scope itself holds — there is nothing above it to
+/// fall back to (ADR 0051). The Accounts in no Group are still not a Group, but
+/// they are a Scope, so what they Cycle by is something a person can say rather
+/// than a constant compiled into Perch (ADR 0017, amended).
+fn strategy(registry: &Registry, scope: &Scope) -> Strategy {
+    registry.settings(scope).strategy
 }
 
 /// Where a bare `perch switch` may look, given the Account it would be leaving.
@@ -137,13 +56,13 @@ impl Scope {
 pub fn scope_for(registry: &Registry, leaving: &Account) -> Result<Scope> {
     match &leaving.group {
         Some(group) => Ok(Scope::Group(group.clone())),
-        None if registry.global.cycle_ungrouped => Ok(Scope::Ungrouped),
+        None if registry.ungrouped.interchangeable => Ok(Scope::Ungrouped),
         None => Err(PerchError::NotInterchangeable(format!(
             "{} is in no Group, so nothing has declared which Accounts it is \
              interchangeable with. Nothing was changed.\n\
              Either put it in a Group with `perch group move {} <group>`, or \
              declare that every ungrouped Account is interchangeable with \
-             `perch config set cycle-ungrouped true`.",
+             `perch config set ungrouped interchangeable true`.",
             registry.named_for_the_user(leaving.email()),
             leaving.email(),
         ))),
@@ -466,13 +385,13 @@ pub fn choose(
     set_aside: &SetAside,
     now: DateTime<Utc>,
 ) -> Result<Choice> {
-    let strategy = scope.strategy(registry);
+    let strategy = strategy(registry, scope);
     let accounts = scope.accounts(registry);
     if accounts.is_empty() {
         return Err(PerchError::NoCandidate(format!(
             "{} holds no Accounts, so there is nowhere to Cycle to. Nothing was \
              changed.",
-            scope.described(),
+            scope.place(),
         )));
     }
 
@@ -584,7 +503,7 @@ pub fn choose(
             "{} is the only Account in {} that is not exhausted, and Perch has \
              never observed how full it is. Nothing was changed — {HOW_TO_GET_FIGURES}",
             registry.named_for_the_user(alone.account.email()),
-            scope.described(),
+            scope.place(),
         )));
     };
 
@@ -644,7 +563,7 @@ fn worth_leaving_for(
 /// ranking over every Account Perch holds: this is per scope, and a listing
 /// spanning several is those rankings one after another.
 pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> Vec<&'a Account> {
-    let strategy = scope.strategy(registry);
+    let strategy = strategy(registry, scope);
     let accounts = scope.accounts(registry);
     // The Account a Cycle would be leaving, measured exactly as [`choose`]
     // measures it — the same `leaving` every caller passes it, and only when it
@@ -729,18 +648,18 @@ pub fn is_a_candidate(account: &Account) -> bool {
     account.enabled && !account.quarantined()
 }
 
-/// Whether anything has declared the Accounts in this scope interchangeable.
+/// Whether anything has declared the Accounts in this Scope interchangeable.
 ///
 /// Always true of a Group, which is that declaration (ADR 0002). The Accounts in
-/// no Group are a scope only because a global setting says so (ADR 0017), and
-/// until it does, every surface has to decline the same things about them —
-/// ranking them, and saying what they have left between them. Asked in one place
-/// so the listing and the figures above it cannot end up disagreeing about
-/// whether they are a set.
+/// no Group are a Scope only because somebody declared them interchangeable
+/// (ADR 0017), and until they do, every surface has to decline the same things
+/// about them — ranking them, and saying what they have left between them. Asked
+/// in one place so the listing and the figures above it cannot end up
+/// disagreeing about whether they are a set.
 pub fn may_cycle_within(registry: &Registry, scope: &Scope) -> bool {
     match scope {
         Scope::Group(_) => true,
-        Scope::Ungrouped => registry.global.cycle_ungrouped,
+        Scope::Ungrouped => registry.ungrouped.interchangeable,
     }
 }
 
@@ -925,7 +844,7 @@ fn nobody_is_a_candidate(scope: &Scope, accounts: &[&Account]) -> String {
     format!(
         "No Account in {} is a Cycle candidate ({}), so there is nowhere to \
          Switch to. Nothing was changed.",
-        scope.described(),
+        scope.place(),
         out_of_the_running(accounts),
     )
 }
@@ -1014,7 +933,7 @@ fn everyone_is_exhausted(
     format!(
         "Every Account in {}{every} is exhausted, so there is nowhere useful \
          to Switch. Nothing was changed.{also}\n{waiting}",
-        scope.described(),
+        scope.place(),
     )
 }
 
@@ -1028,7 +947,7 @@ fn already_the_best(
     now: DateTime<Utc>,
 ) -> String {
     let named = registry.named_for_the_user(here.account.email());
-    let scope = scope.described();
+    let scope = scope.place();
     // Said of the comparison Perch actually made. Under soonest-reset it has
     // only compared the Accounts whose figures carry a reset time, so claiming
     // it beat the ones that do not would be claiming a comparison it could not
@@ -1126,7 +1045,7 @@ pub(crate) mod tests {
         mut registry: Registry,
         strategy: crate::registry::Strategy,
     ) -> Registry {
-        registry.groups.get_mut("work").expect("declared").strategy = Some(strategy);
+        registry.groups.get_mut("work").expect("declared").strategy = strategy;
         registry
     }
 

@@ -48,12 +48,11 @@ fn active(host: &FakeHost) -> Option<String> {
     registry_of(host).active.whose().map(str::to_string)
 }
 
-/// The Settings actually in force for a Group: Global's, with whatever that
-/// Group Overrides laid over them (ADR 0002, amended). What a Cycle would
-/// follow, which is what these tests are about — `overrides_of` is for the ones
-/// about the layering itself.
+/// The Settings a Group holds, which are the whole of what a Cycle there
+/// follows: there is nothing above a Scope for a value to have come from
+/// (ADR 0051).
 fn group_config(host: &FakeHost, name: &str) -> perch::registry::Settings {
-    registry_of(host).in_force(&perch::registry::Scope::Group(name.to_string()))
+    registry_of(host).settings(&perch::registry::Scope::Group(name.to_string()))
 }
 
 #[test]
@@ -78,19 +77,21 @@ fn a_groups_setting_is_set_from_a_script_and_read_back() {
     );
 }
 
+/// The one key one Scope carries. It is said about the Accounts in no Group
+/// like every other Setting, because that is the Scope it governs (ADR 0051).
 #[test]
-fn a_global_setting_is_set_and_read_back_without_naming_a_group() {
+fn the_declaration_the_ungrouped_accounts_carry_is_set_and_read_back() {
     let host = machine_with_two_accounts();
 
-    let (result, _) = config_set(&host, &["cycle-ungrouped", "true"]);
+    let (result, _) = config_set(&host, &["ungrouped", "interchangeable", "true"]);
 
-    result.expect("an ungrouped Account has no Group to carry this (ADR 0017)");
-    assert!(registry_of(&host).global.cycle_ungrouped);
+    result.expect("`interchangeable` is the Ungrouped Scope's to carry (ADR 0017)");
+    assert!(registry_of(&host).ungrouped.interchangeable);
 
-    let (result, printed) = config_get(&host, &["cycle-ungrouped"]);
+    let (result, printed) = config_get(&host, &["ungrouped", "interchangeable"]);
 
     result.expect("what was set can be read");
-    assert_eq!(printed.trim(), "cycle-ungrouped true");
+    assert_eq!(printed.trim(), "ungrouped interchangeable true");
 }
 
 #[test]
@@ -104,23 +105,27 @@ fn every_setting_reads_back_in_the_form_that_would_set_it_again() {
 
     result.expect("naming nothing asks about everything");
     assert!(
-        printed.contains("cycle-ungrouped false"),
-        "the setting that belongs to no Group is shown too: {printed}"
+        printed.contains("ungrouped interchangeable false"),
+        "the declaration only the Accounts in no Group carry is shown against \
+         them: {printed}"
     );
     assert!(
-        printed.contains("strategy most-headroom"),
-        "and every Setting at Global, which is where a Scope that says nothing \
-         reads it from: {printed}"
+        printed.contains("ungrouped strategy most-headroom"),
+        "every Scope's Config in full, each line naming its Scope: {printed}"
     );
     assert!(
         printed.contains("work watcher-threshold-percent 90"),
-        "and every Override there is, named by the Scope holding it: {printed}"
+        "including the one that was set: {printed}"
     );
     assert!(
-        !printed.contains("work strategy"),
-        "and nothing else of that Group's, because it Overrides nothing else — \
-         a three-word line for an Inheritance would assert an Override that is \
-         not there, and replaying this output would plant it: {printed}"
+        printed.contains("work strategy most-headroom"),
+        "and the ones nobody has said anything about, because a Scope holds \
+         every Setting there is rather than falling back for them: {printed}"
+    );
+    assert!(
+        !printed.contains("work interchangeable"),
+        "and no line a Group could not take back: a Group is the declaration \
+         that its Accounts are interchangeable (ADR 0051): {printed}"
     );
     for line in printed.lines().filter(|line| !line.trim().is_empty()) {
         let words: Vec<&str> = line.split_whitespace().collect();
@@ -244,7 +249,7 @@ fn turning_on_ungrouped_cycling_changes_what_a_bare_switch_does() {
     assert_eq!(error.exit_code(), EXIT_NOT_INTERCHANGEABLE);
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
 
-    config_set(&host, &["cycle-ungrouped", "true"])
+    config_set(&host, &["ungrouped", "interchangeable", "true"])
         .0
         .expect("that is the declaration the refusal named");
 
@@ -258,12 +263,12 @@ fn turning_on_ungrouped_cycling_changes_what_a_bare_switch_does() {
 fn cycling_among_ungrouped_accounts_is_off_until_it_is_turned_on() {
     let host = machine_with_two_accounts();
 
-    let (result, printed) = config_get(&host, &["cycle-ungrouped"]);
+    let (result, printed) = config_get(&host, &["ungrouped", "interchangeable"]);
 
     result.expect("a setting nobody has touched still reads back");
     assert_eq!(
         printed.trim(),
-        "cycle-ungrouped false",
+        "ungrouped interchangeable false",
         "being ungrouped is the absence of a declaration that Accounts are \
          interchangeable, not a weaker form of one (ADR 0017)"
     );
@@ -324,10 +329,9 @@ fn the_watchers_may_act_field_is_off_until_it_is_asked_for() {
     result.expect("a field nobody has touched still reads back");
     assert_eq!(
         printed.trim(),
-        "watcher-may-act false",
+        "work watcher-may-act false",
         "a Group only ever changes underneath someone because they said it \
-         could (ADR 0002) — and the two words say the `false` is Global's \
-         default rather than something this Group declared"
+         could (ADR 0002), and the line says which Group that is"
     );
 }
 
@@ -339,15 +343,10 @@ fn a_group_starts_with_the_watcher_policy_the_adr_names() {
 
     let (result, printed) = config_get(&host, &["work"]);
 
-    result.expect("naming a Group asks about everything in force for it");
+    result.expect("naming a Group asks about every Setting it holds");
     assert!(
-        printed.contains("watcher-threshold-percent 80"),
-        "got: {printed}"
-    );
-    assert!(
-        !printed.contains("work watcher"),
-        "and Inherited from Global, said by the line being the two-word `set` \
-         that would restore it: {printed}"
+        printed.contains("work watcher-threshold-percent 80"),
+        "the default, said as the `set` that would restore it: {printed}"
     );
 }
 
@@ -424,33 +423,75 @@ fn an_unknown_key_is_refused_and_names_the_ones_a_group_carries() {
     assert_eq!(error.exit_code(), EXIT_INVALID);
     let message = error.to_string();
     assert!(message.contains("stratagem"), "{message}");
+    assert!(message.contains("Group `work`"), "{message}");
     assert!(message.contains("strategy"), "{message}");
     assert!(message.contains("watcher-may-act"), "{message}");
     assert!(message.contains("watcher-threshold-percent"), "{message}");
 }
 
+/// A `set` naming a key and a value and no Scope is the form that used to set a
+/// value everywhere, and there is no everywhere (ADR 0051). The refusal names
+/// the Scopes, because "name a Scope" is no use to somebody who does not know
+/// what theirs are called.
 #[test]
-fn an_unknown_global_key_is_refused_and_names_the_ones_that_belong_to_no_group() {
-    let host = machine_with_two_accounts();
+fn a_set_naming_a_key_but_no_scope_is_refused_and_names_the_scopes_there_are() {
+    let host = three_accounts_in_one_group();
 
-    let (result, _) = config_set(&host, &["cycle-everything", "true"]);
+    let (result, _) = config_set(&host, &["watcher-threshold-percent", "70"]);
 
-    let error = result.expect_err("Perch does not know that key");
-    assert_eq!(error.exit_code(), EXIT_INVALID);
+    let error = result.expect_err("there is no Scope for that to be about");
+    assert_eq!(error.exit_code(), EXIT_INVALID, "{error}");
+    let message = error.to_string();
+    assert!(message.contains("names no Scope"), "{message}");
+    assert!(message.contains("ungrouped"), "{message}");
     assert!(
-        error.to_string().contains("cycle-ungrouped"),
-        "the key that does exist is named, because two words without a Group \
-         can only be addressing a global setting: {error}"
+        message.contains("Groups Perch holds: work."),
+        "the Scopes there are to name: {message}"
+    );
+    assert_eq!(
+        group_config(&host, "work").watcher_threshold_percent,
+        80,
+        "and nothing was written"
     );
 }
 
-/// The word somebody types when they mean Global, on all three of the forms
-/// that take a Scope. Left to fall through it was answered with "No Group
-/// called `global` … Declare it with `perch group add global`" — advice that
-/// turns every later `perch config set global …` into a Group Override while
-/// Global stays exactly as it was.
+/// And a word that is no key either is a word that was meant to name a Scope,
+/// which is the mistake the three-word form is already answered for. Recast as
+/// a key it sent somebody looking for a spelling mistake in the wrong word —
+/// and, for `global`, past the one refusal written to meet it.
 #[test]
-fn naming_global_as_a_scope_says_how_global_is_addressed_rather_than_offering_a_group() {
+fn a_set_naming_neither_a_scope_nor_a_key_is_answered_about_the_scope() {
+    let host = three_accounts_in_one_group();
+
+    let (result, _) = config_set(&host, &["wrok", "strategy"]);
+
+    let refusal = result.expect_err("there is no Scope called that");
+    assert_eq!(refusal.exit_code(), EXIT_NOT_FOUND);
+    assert!(
+        refusal.to_string().contains("work"),
+        "the Group they probably meant is named, exactly as it is when they \
+         remember the value: {refusal}"
+    );
+
+    let (result, _) = config_set(&host, &["global", "watcher-may-act"]);
+
+    let refusal = result.expect_err("there is no Scope every other one falls back to");
+    assert!(
+        refusal
+            .to_string()
+            .contains("every Setting is said about the Scope it governs"),
+        "and `global` still meets the refusal written for it: {refusal}"
+    );
+}
+
+/// The word somebody types when they mean *everywhere*. There is no
+/// everywhere, and the refusal is where they find that out — a better place
+/// than a Setting that appeared to take (ADR 0051). Left to fall through it
+/// would be answered with "Declare it with `perch group add global`", after
+/// which a Group by that name takes every later `perch config set global …`
+/// quietly and leaves every other Scope as it was.
+#[test]
+fn naming_global_as_a_scope_says_there_is_no_such_scope_rather_than_offering_a_group() {
     let host = three_accounts_in_one_group();
 
     for words in [
@@ -459,7 +500,7 @@ fn naming_global_as_a_scope_says_how_global_is_addressed_rather_than_offering_a_
     ] {
         let (result, _) = config_set(&host, &words);
 
-        let error = result.expect_err("Global is not addressed by naming it");
+        let error = result.expect_err("there is no Scope every other one falls back to");
         let message = error.to_string();
         assert!(
             !message.contains("perch group add"),
@@ -467,15 +508,44 @@ fn naming_global_as_a_scope_says_how_global_is_addressed_rather_than_offering_a_
              worse: {message}"
         );
         assert!(
-            message.contains("perch config set <key> <value>"),
-            "the form that does set Global is named: {message}"
+            message.contains("every Setting is said about the Scope it governs"),
+            "the reason there is no such word is what makes the refusal useful: \
+             {message}"
         );
     }
 
     assert_eq!(
-        registry_of(&host).global.settings.strategy,
+        group_config(&host, "work").strategy,
         Strategy::MostHeadroom,
         "and nothing was written"
+    );
+}
+
+/// The same word, refused as a Group name and as an Alias, for the same reason
+/// (ADR 0051). Kept reserved because somebody typing it means something Perch
+/// does not have, and a Group quietly answering to it would take the value.
+#[test]
+fn global_is_still_a_reserved_word_and_the_refusal_says_why() {
+    let host = machine_with_two_accounts();
+
+    let (result, _) = run_group(
+        &host,
+        perch::commands::group::GroupCommand::Add {
+            name: "global".to_string(),
+        },
+    );
+
+    let refusal = result.expect_err("`global` is how people say every Scope at once");
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    let said = refusal.to_string();
+    assert!(said.contains("every Scope at once"), "{said}");
+    assert!(
+        said.contains("perch config set <scope> <key> <value>"),
+        "and the form that does exist is named: {said}"
+    );
+    assert!(
+        registry_of(&host).groups.is_empty(),
+        "and no Group was declared"
     );
 }
 
@@ -561,7 +631,7 @@ fn setting_a_value_a_group_already_has_is_not_a_failure() {
 }
 
 #[test]
-fn a_key_named_with_no_value_is_refused_with_both_forms_of_the_command() {
+fn a_key_named_with_no_value_is_refused_with_the_form_the_command_takes() {
     let host = three_accounts_in_one_group();
 
     let (result, _) = config_set(&host, &["strategy"]);
@@ -571,49 +641,49 @@ fn a_key_named_with_no_value_is_refused_with_both_forms_of_the_command() {
     let message = error.to_string();
     assert!(
         message.contains("perch config set <scope> <key> <value>"),
-        "the form that addresses a Scope is named: {message}"
+        "the one form there is, which has a subject in it: {message}"
     );
     assert!(
-        message.contains("perch config set <key> <value>"),
-        "and so is the form that addresses a setting belonging to none: {message}"
+        message.contains("Groups Perch holds: work."),
+        "and the Scopes it could be about: {message}"
     );
 }
 
-/// One word to `get` is either a key belonging to no Group or a Group name.
-/// When it is neither, the answer has to be the vocabulary rather than "not
-/// found": a mistyped setting read back as an error with no alternatives is a
-/// script that goes on believing it asked something meaningful.
+/// One word to `get` is a Scope. When it is not, the answer has to name what a
+/// Scope is rather than only "not found": a mistyped word read back as an error
+/// with no alternatives is a script that goes on believing it asked something
+/// meaningful.
 #[test]
-fn a_get_of_one_word_that_is_neither_a_key_nor_a_group_answers_with_both_vocabularies() {
+fn a_get_of_one_word_that_is_no_scope_is_refused_the_way_a_typo_always_is() {
     let host = three_accounts_in_one_group();
 
-    let (result, _) = config_get(&host, &["stratergy"]);
+    let (result, _) = config_get(&host, &["wrok"]);
 
-    let refusal = result.expect_err("`stratergy` is neither");
+    let refusal = result.expect_err("there is no Scope called that");
     assert_eq!(refusal.exit_code(), EXIT_NOT_FOUND);
     let said = refusal.to_string();
-    assert!(said.contains("`stratergy` is neither"), "{said}");
-    assert!(said.contains("Settings:"), "it names the keys: {said}");
     assert!(
-        said.contains("Groups Perch holds: work."),
-        "and the Groups: {said}"
+        said.contains("work"),
+        "the Group they probably meant is named: {said}"
     );
 }
 
-/// The same refusal before any Group has been declared. Listing the Groups
-/// Perch holds would be an empty list, which reads as though the answer were
-/// missing rather than as though there were nothing to name.
+/// A key where a Scope goes is a form mistake rather than a mistyped Group, and
+/// is answered as one: being sent to check the spelling of a Group is being
+/// sent to look for a mistake that is not the problem.
 #[test]
-fn the_same_refusal_says_so_plainly_when_no_group_has_been_declared() {
-    let host = machine_with_two_accounts();
+fn a_get_of_a_key_alone_says_a_setting_is_read_about_a_scope() {
+    let host = three_accounts_in_one_group();
 
-    let (result, _) = config_get(&host, &["nonsense"]);
+    let (result, _) = config_get(&host, &["strategy"]);
 
-    let said = result.expect_err("`nonsense` is neither").to_string();
-    assert!(said.contains("No Groups have been declared yet."), "{said}");
+    let refusal = result.expect_err("a Setting on its own is about nothing");
+    assert_eq!(refusal.exit_code(), EXIT_NOT_FOUND);
+    let said = refusal.to_string();
+    assert!(said.contains("rather than a Scope"), "{said}");
     assert!(
-        !said.contains("Groups Perch holds:"),
-        "there are none to hold: {said}"
+        said.contains("perch config get <scope> strategy"),
+        "and the form that reads it is named: {said}"
     );
 }
 
@@ -632,7 +702,7 @@ fn a_get_of_too_many_words_is_answered_with_the_forms_get_takes() {
     assert!(said.contains("was given 3 words"), "{said}");
     assert!(said.contains("perch config get <scope> <key>"), "{said}");
     assert!(
-        said.contains("reads Global and every Override there is"),
+        said.contains("reads every Scope there is"),
         "it names the bare form too: {said}"
     );
     assert!(
@@ -653,10 +723,9 @@ fn a_single_word_is_counted_as_one_word() {
     assert!(!said.contains("1 words"), "{said}");
 }
 
-/// Two words to `set` name a key and a value — unless the first is a Group, in
-/// which case what is missing is the value rather than the meaning. Being told
-/// "no such key" there would send somebody looking for a spelling mistake that
-/// is not the problem.
+/// Two words to `set` are a Scope and a key with no value — said as what is
+/// missing rather than as "no such key", which would send somebody looking for
+/// a spelling mistake that is not the problem.
 #[test]
 fn a_set_naming_a_group_and_a_key_says_the_value_is_what_is_missing() {
     let host = three_accounts_in_one_group();
@@ -708,29 +777,6 @@ fn a_set_naming_a_group_and_a_word_that_is_no_key_says_what_is_wrong_with_the_wo
     );
 }
 
-/// One Scope inheriting is one subject, and the verb has to agree with it.
-///
-/// `listed_scopes` renders a single Scope as a bare singular, and a machine with
-/// one Group is the ordinary case rather than the edge one — so the plural verb
-/// was what most people saw: "Group `work` Inherit it".
-#[test]
-fn one_scope_inheriting_is_said_in_the_singular() {
-    let host = three_accounts_in_one_group();
-    // The Ungrouped Scope is always one of them, so it takes an Override of its
-    // own to leave exactly one Scope following Global.
-    config_set(&host, &["ungrouped", "watcher-threshold-percent", "70"])
-        .0
-        .expect("the Ungrouped Scope Overrides it");
-
-    let (result, printed) = config_set(&host, &["watcher-threshold-percent", "60"]);
-
-    result.expect("Global carries every Setting");
-    assert!(
-        printed.contains("Group `work` Inherits it, and goes on following Global"),
-        "one Scope, one verb to agree with it: {printed}"
-    );
-}
-
 /// `perch config get` writes nothing, so it does not wait on a writer.
 ///
 /// The same rule `perch status` states for itself and `perch list` follows.
@@ -747,7 +793,7 @@ fn getting_a_setting_reads_alongside_another_perch_rather_than_waiting_on_it() {
     let (result, printed) = config_get(&host, &["work", "strategy"]);
 
     result.expect("a read does not wait on a writer");
-    assert_eq!(printed.trim(), "strategy most-headroom", "{printed}");
+    assert_eq!(printed.trim(), "work strategy most-headroom", "{printed}");
     drop(held);
 }
 
@@ -796,190 +842,85 @@ fn a_group_name_with_a_space_in_it_is_refused_rather_than_breaking_the_round_tri
     );
 }
 
-/// Global carries the defaults and a Group Overrides them (ADR 0002, amended).
-///
-/// The whole point of the layer: somebody running several Groups sets a
-/// threshold once rather than once per Group, and changing their mind changes
-/// it once.
+/// A Setting is said about the Scope it governs, and reaches no other
+/// (ADR 0051). There is no layer for a value to arrive by, so the Group nobody
+/// said anything about is at the compiled-in default rather than at somebody
+/// else's number.
 #[test]
-fn a_setting_at_global_reaches_every_group_that_has_not_said_otherwise() {
+fn a_setting_said_about_one_scope_reaches_no_other() {
     let host = three_accounts_in_one_group();
     declare_group(&host, "personal");
 
-    let (result, printed) = config_set(&host, &["watcher-threshold-percent", "60"]);
+    let (result, printed) = config_set(&host, &["work", "watcher-threshold-percent", "60"]);
 
-    result.expect("every Setting exists at Global now");
+    result.expect("every Setting is a Scope's");
+    assert!(printed.contains("Group `work`"), "{printed}");
     assert_eq!(group_config(&host, "work").watcher_threshold_percent, 60);
     assert_eq!(
         group_config(&host, "personal").watcher_threshold_percent,
-        60
-    );
-    assert!(
-        printed.contains("Inherit it"),
-        "and the Scopes it reached are named, because that is the thing that \\
-         was bought: {printed}"
-    );
-}
-
-/// An Override beats Global, and nothing beats an Override.
-#[test]
-fn a_group_overrides_the_one_setting_it_wants_different_and_inherits_the_rest() {
-    let host = three_accounts_in_one_group();
-    declare_group(&host, "personal");
-    config_set(&host, &["work", "watcher-threshold-percent", "95"])
-        .0
-        .expect("a Group may Override what it wants different");
-
-    config_set(&host, &["watcher-threshold-percent", "60"])
-        .0
-        .expect("and Global still moves");
-
-    assert_eq!(
-        group_config(&host, "work").watcher_threshold_percent,
-        95,
-        "the Scope that said otherwise goes on saying it"
-    );
-    assert_eq!(
-        group_config(&host, "personal").watcher_threshold_percent,
-        60
-    );
-    assert!(
-        !group_config(&host, "work").watcher_may_act,
-        "and everything it did not Override still comes from Global"
-    );
-}
-
-/// Inherit is a state and not an absence: a cleared Override goes back to
-/// following Global rather than copying whatever Global happened to say.
-#[test]
-fn clearing_an_override_makes_the_group_track_global_from_then_on() {
-    let host = three_accounts_in_one_group();
-    config_set(&host, &["work", "watcher-threshold-percent", "95"])
-        .0
-        .expect("it takes");
-
-    let (result, printed) = config_unset(&host, &["work", "watcher-threshold-percent"]);
-
-    result.expect("`unset` clears an Override");
-    assert!(printed.contains("Inherited from Global"), "{printed}");
-    assert_eq!(group_config(&host, "work").watcher_threshold_percent, 80);
-
-    config_set(&host, &["watcher-threshold-percent", "60"])
-        .0
-        .expect("and Global moves");
-    assert_eq!(
-        group_config(&host, "work").watcher_threshold_percent,
-        60,
-        "Inheriting is following rather than copying once"
-    );
-}
-
-/// Global's values are always set — there is nothing above Global to Inherit
-/// from — so clearing there is not a state that exists, and is refused rather
-/// than silently accepted.
-#[test]
-fn unset_at_global_is_refused_and_names_what_it_would_have_meant() {
-    let host = three_accounts_in_one_group();
-
-    let (result, _) = config_unset(&host, &["watcher-threshold-percent"]);
-
-    let refusal = result.expect_err("Global has nothing above it");
-    assert_eq!(refusal.exit_code(), EXIT_INVALID);
-    let said = refusal.to_string();
-    assert!(said.contains("cannot be unset at Global"), "{said}");
-    assert!(
-        said.contains("perch config set watcher-threshold-percent <value>"),
-        "the thing that does change it is named: {said}"
-    );
-    assert!(
-        said.contains("perch config unset <scope> watcher-threshold-percent"),
-        "and so is the form that does exist: {said}"
-    );
-    assert_eq!(
-        registry_of(&host).global.settings.watcher_threshold_percent,
         80,
-        "and nothing was written"
+        "the Group nobody said anything about is at the compiled-in default"
+    );
+    assert_eq!(
+        registry_of(&host)
+            .settings(&perch::registry::Scope::Ungrouped)
+            .watcher_threshold_percent,
+        80
     );
 }
 
-/// One word to `unset` names Global's key — unless it is a Scope, in which case
-/// what is missing is the key rather than the meaning. `set` has said this since
-/// it grew the mirror of the guard; `unset` reported a correctly spelled Group
-/// name as a Setting Perch does not hold, which sends somebody looking for a
-/// spelling mistake that is not the problem.
+/// The grant is the one this matters most for: consent said about one Scope
+/// authorises that Scope, and a Group declared afterwards is a Group nobody has
+/// said anything about (ADR 0051).
 #[test]
-fn an_unset_naming_only_a_scope_says_the_key_is_what_is_missing() {
+fn a_group_declared_after_a_grant_is_not_covered_by_it() {
     let host = three_accounts_in_one_group();
+    config_set(&host, &["work", "watcher-may-act", "true"])
+        .0
+        .expect("the Group may be acted on");
 
-    for word in ["work", "ungrouped"] {
-        let refusal = config_unset(&host, &[word])
-            .0
-            .expect_err("a Scope on its own clears nothing");
-        assert_eq!(refusal.exit_code(), EXIT_INVALID);
-        let said = refusal.to_string();
-        assert!(
-            !said.contains("is not a Setting Perch holds"),
-            "`{word}` is spelled correctly and is not a key: {said}"
-        );
-        assert!(said.contains("but no key"), "{said}");
-        assert!(
-            said.contains("perch config unset <scope> <key>"),
-            "and the form that does exist is named: {said}"
-        );
-    }
+    declare_group(&host, "personal");
+
+    assert!(
+        !group_config(&host, "personal").watcher_may_act,
+        "a Group that did not exist when the grant was said cannot have been \
+         included in it"
+    );
 }
 
-/// A script can tell an Override from an Inheritance without diffing against
-/// Global: the layer a value came from is the number of words that would set it
-/// again.
+/// Every line names the Scope it is about, because that is what would set it
+/// again — a script reads provenance off the line rather than off its length.
 #[test]
-fn reading_a_setting_back_says_which_scope_the_value_came_from() {
+fn every_line_names_the_scope_it_is_about() {
     let host = three_accounts_in_one_group();
     config_set(&host, &["work", "strategy", "soonest-reset"])
         .0
         .expect("it takes");
 
-    let (_, overridden) = config_get(&host, &["work", "strategy"]);
-    let (_, inherited) = config_get(&host, &["work", "watcher-may-act"]);
+    let (_, said) = config_get(&host, &["work", "strategy"]);
+    let (_, untouched) = config_get(&host, &["work", "watcher-may-act"]);
 
-    assert_eq!(overridden.trim(), "work strategy soonest-reset");
-    assert_eq!(inherited.trim(), "watcher-may-act false");
+    assert_eq!(said.trim(), "work strategy soonest-reset");
     assert_eq!(
-        overridden.split_whitespace().count(),
-        3,
-        "three words is `perch config set work strategy soonest-reset`, which \\
-         is what would restore it — so it is this Group's own"
+        untouched.trim(),
+        "work watcher-may-act false",
+        "a Setting nobody has said anything about is still this Group's, at the \
+         compiled-in default"
     );
-    assert_eq!(
-        inherited.split_whitespace().count(),
-        2,
-        "and two is `perch config set watcher-may-act false`, which is Global's"
-    );
+    for line in [said.trim(), untouched.trim()] {
+        assert_eq!(
+            line.split_whitespace().count(),
+            3,
+            "every line is the whole of the `set` that would restore it: {line}"
+        );
+    }
 }
 
-/// An Override holding the value Global happens to hold is still an Override:
-/// one tracks Global as it changes and the other does not, and the output says
-/// which.
+/// The Accounts in no Group are a Scope (ADR 0017, amended), so Cycling among
+/// them reads a Strategy somebody can set rather than one compiled into Perch —
+/// and the Scope is addressed the way every other one is.
 #[test]
-fn an_override_equal_to_globals_value_still_reads_as_an_override() {
-    let host = three_accounts_in_one_group();
-
-    let (result, printed) = config_set(&host, &["work", "watcher-may-act", "false"]);
-
-    result.expect("setting a Setting to what it already resolved to is not a failure");
-    assert!(
-        printed.contains("Override rather than Inherited"),
-        "the difference is the whole of what changed, so it is said: {printed}"
-    );
-    let (_, read_back) = config_get(&host, &["work", "watcher-may-act"]);
-    assert_eq!(read_back.trim(), "work watcher-may-act false");
-}
-
-/// The Accounts in no Group are a Scope now (ADR 0017, amended), so Cycling
-/// among them reads a Strategy somebody can set rather than one compiled into
-/// Perch — and the Scope is addressed the way every other one is.
-#[test]
-fn the_ungrouped_accounts_are_a_scope_that_can_be_addressed_and_overridden() {
+fn the_ungrouped_accounts_are_a_scope_that_can_be_addressed() {
     let host = machine_with_two_accounts();
 
     let (result, printed) = config_set(&host, &["ungrouped", "strategy", "soonest-reset"]);
@@ -988,38 +929,13 @@ fn the_ungrouped_accounts_are_a_scope_that_can_be_addressed_and_overridden() {
     assert!(printed.contains("soonest-reset"), "{printed}");
     assert_eq!(
         registry_of(&host)
-            .in_force(&perch::registry::Scope::Ungrouped)
+            .settings(&perch::registry::Scope::Ungrouped)
             .strategy,
         Strategy::SoonestReset,
     );
 
     let (_, read_back) = config_get(&host, &["ungrouped", "strategy"]);
     assert_eq!(read_back.trim(), "ungrouped strategy soonest-reset");
-}
-
-/// And where it Overrides nothing, it reads Global — which is what closes the
-/// hole this Scope exists to close: before, that Strategy was settable by no
-/// key, no Group and no command.
-#[test]
-fn the_ungrouped_scope_reads_globals_strategy_where_it_says_nothing() {
-    let host = machine_with_two_accounts();
-
-    config_set(&host, &["strategy", "soonest-reset"])
-        .0
-        .expect("Global carries every Setting now");
-
-    assert_eq!(
-        registry_of(&host)
-            .in_force(&perch::registry::Scope::Ungrouped)
-            .strategy,
-        Strategy::SoonestReset,
-    );
-    let (_, read_back) = config_get(&host, &["ungrouped", "strategy"]);
-    assert_eq!(
-        read_back.trim(),
-        "strategy soonest-reset",
-        "two words, because Global is what would set it again"
-    );
 }
 
 /// A Group cannot be called `ungrouped`, because the Scope answers to that name
@@ -1043,10 +959,10 @@ fn a_group_cannot_take_the_name_that_addresses_the_ungrouped_scope() {
     );
 }
 
-/// The Ungrouped Scope's Overrides survive a round trip through `get`, like
+/// The Ungrouped Scope's Settings survive a round trip through `get`, like
 /// every other Scope's.
 #[test]
-fn the_ungrouped_scopes_overrides_read_back_in_the_form_that_would_set_them() {
+fn the_ungrouped_scopes_settings_read_back_in_the_form_that_would_set_them() {
     let host = machine_with_two_accounts();
     config_set(&host, &["ungrouped", "watcher-threshold-percent", "45"])
         .0
@@ -1061,58 +977,51 @@ fn the_ungrouped_scopes_overrides_read_back_in_the_form_that_would_set_them() {
     );
 }
 
-/// `perch config get <scope>` on the Ungrouped Scope shows the Setting that
-/// governs whether it is Cycled within at all, because that is where it takes
-/// effect even though it lives at Global (ADR 0017).
+/// `perch config get <scope>` on the Ungrouped Scope shows the declaration
+/// only that Scope carries, beside the Settings every Scope carries.
 #[test]
-fn the_ungrouped_page_shows_the_setting_that_gates_it() {
+fn the_ungrouped_page_shows_the_declaration_it_carries() {
     let host = machine_with_two_accounts();
 
     let (result, printed) = config_get(&host, &["ungrouped"]);
 
     result.expect("`ungrouped` is a Scope");
-    assert!(printed.contains("cycle-ungrouped false"), "{printed}");
-    assert!(printed.contains("strategy most-headroom"), "{printed}");
+    assert!(
+        printed.contains("ungrouped interchangeable false"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("ungrouped strategy most-headroom"),
+        "{printed}"
+    );
 }
 
-/// The one key a Scope's page carries without carrying a form of it, asked for
-/// both ways round.
-///
-/// `cycle-ungrouped` is Global's and has no per-Scope form (ADR 0017), but
-/// `scope_lines` prints it against the Ungrouped Scope because that is where it
-/// takes effect. Two commands disagreed with that page.
-///
-/// `set` names a Scope and a key with no value, and the guard that says "you are
-/// missing the value" checked the key against *Global's* vocabulary — which
-/// accepts `cycle-ungrouped`. So it advised the three-word form, and the
-/// three-word form refuses, which is the second round trip the guard exists to
-/// save.
-///
-/// `get` printed the line and then refused to read it back by name.
+/// The one key one Scope carries, refused of the others in the words that say
+/// why — and absent from their pages, because a line `perch config set` would
+/// refuse to take back is a line `perch config get` must not print.
 #[test]
-fn the_setting_a_scope_shows_and_cannot_override_is_answered_the_way_it_is_shown() {
+fn a_group_neither_shows_nor_takes_the_declaration_that_is_a_group() {
     let host = three_accounts_in_one_group();
 
-    let refusal = config_set(&host, &["work", "cycle-ungrouped"])
+    let refusal = config_set(&host, &["work", "interchangeable", "true"])
         .0
-        .expect_err("a Group cannot carry it at all");
+        .expect_err("a Group is that declaration rather than holding one");
     assert_eq!(refusal.exit_code(), EXIT_INVALID);
     let said = refusal.to_string();
+    assert!(said.contains("only they carry it"), "{said}");
     assert!(
-        said.contains("per-Scope form"),
-        "the refusal is that there is no per-Scope form, said on the first run \
-         rather than after a value is added: {said}"
-    );
-    assert!(
-        !said.contains("nothing to set it to"),
-        "and it does not send somebody off to type a value that will be \
-         refused for a different reason: {said}"
+        said.contains("perch config set ungrouped interchangeable <value>"),
+        "and where it is said instead: {said}"
     );
 
-    let (result, printed) = config_get(&host, &["ungrouped", "cycle-ungrouped"]);
-    result.expect("the Ungrouped page shows this line, so it can be asked for");
+    let (result, printed) = config_get(&host, &["work"]);
+    result.expect("the Group's page still reads back");
     assert!(
-        printed.contains("cycle-ungrouped") && printed.contains("false"),
-        "and it reads back what the page prints: {printed}"
+        !printed.contains("interchangeable"),
+        "and carries no line it would refuse to take back: {printed}"
     );
+
+    let (result, printed) = config_get(&host, &["work", "interchangeable"]);
+    result.expect_err("nor answers for it by name");
+    assert!(printed.is_empty(), "{printed}");
 }

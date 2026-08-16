@@ -69,15 +69,17 @@ enum Command {
         unset: bool,
     },
 
-    /// Read and change how Cycling behaves, at Global or for one Scope.
+    /// Read and change how Cycling behaves, one Scope at a time.
     ///
     /// Every setting is reachable from a script, because Perch has to be
-    /// complete over SSH and in CI (ADR 0011). Config is two layers: Global is
-    /// what applies where nothing narrower is said, and a Scope — a Group by
-    /// name, or `ungrouped` for the Accounts in no Group — Overrides it.
+    /// complete over SSH and in CI (ADR 0011). A Setting is said about the
+    /// Scope it governs and there is nothing above them (ADR 0051), so a `set`
+    /// is always `<scope> <key> <value>` — where a Scope is a Group by name, or
+    /// `ungrouped` for the Accounts in no Group.
     ///
-    /// So two words set Global's default and three set one Scope's Override,
-    /// and a Scope that has been told nothing goes on Inheriting Global.
+    /// A bare `perch config get` reads every Scope there is; a `set` that names
+    /// none is refused, because a rule with no subject is a rule about
+    /// nothing.
     Config {
         #[command(subcommand)]
         action: ConfigCommand,
@@ -270,7 +272,7 @@ enum Command {
     /// Only the active Account is read, and only within a Scope that has been
     /// told the watcher may act on it — `perch config set <group>
     /// watcher-may-act true` for a Group, or the same for `ungrouped` where
-    /// `cycle-ungrouped` is on as well, because being interchangeable at all is
+    /// `interchangeable` is on as well, because being interchangeable at all is
     /// its own yes (ADR 0017).
     Watcher {
         #[command(subcommand)]

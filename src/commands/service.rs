@@ -471,15 +471,10 @@ fn nothing_may_act(host: &dyn Host) -> Result<Option<String>> {
         return Ok(None);
     };
 
-    let any = registry.global.settings.watcher_may_act
-        || registry.groups.keys().any(|group| {
-            registry
-                .in_force(&registry::Scope::Group(group.clone()))
-                .watcher_may_act
-        })
-        || registry
-            .in_force(&registry::Scope::Ungrouped)
-            .watcher_may_act;
+    let any = registry
+        .scopes()
+        .iter()
+        .any(|scope| registry.settings(scope).watcher_may_act);
     if any {
         return Ok(None);
     }

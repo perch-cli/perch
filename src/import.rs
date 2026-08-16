@@ -297,7 +297,7 @@ mod tests {
     use super::*;
     use crate::export::CURRENT_VERSION;
     use crate::probe::Identity;
-    use crate::registry::{Account, Overrides, Quarantine};
+    use crate::registry::{Account, Quarantine, Settings};
     use std::collections::BTreeMap;
 
     /// Where the restored registry would be written. It is the file a refusal
@@ -408,9 +408,9 @@ mod tests {
         let mut export = an_export();
         export.registry.groups.insert(
             "work".to_string(),
-            Overrides {
-                watcher_threshold_percent: Some(101),
-                ..Overrides::default()
+            Settings {
+                watcher_threshold_percent: 101,
+                ..Settings::default()
             },
         );
 
@@ -433,7 +433,7 @@ mod tests {
         named_badly
             .registry
             .groups
-            .insert("my work".to_string(), Overrides::default());
+            .insert("my work".to_string(), Settings::default());
         let refused = restored(&named_badly, std::path::Path::new(REGISTRY))
             .expect_err("no later command could read that");
         assert!(

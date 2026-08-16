@@ -71,13 +71,13 @@ use chrono::{DateTime, Utc};
 
 use crate::adopt;
 use crate::commands::say;
-use crate::cycle::{self, Scope};
+use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::{Host, Waited};
 use crate::lock;
 use crate::observe::{self, Attempt};
 use crate::probe;
-use crate::registry::{self, Account, Registry, UNGROUPED};
+use crate::registry::{self, Account, Registry, Scope, UNGROUPED};
 use crate::switch;
 use crate::watch::{
     self, Backoff, Considered, Fullest, Holding, Outcome, Policy, Recently, Round, Speak,
@@ -439,7 +439,7 @@ impl Watcher {
     fn pacing(self, carried: &mut Recently, registry: &Registry, scope: &Scope) {
         match self {
             Watcher::Loop => {}
-            Watcher::Check => *carried = Recently::recorded(registry.checked(&scope.key())),
+            Watcher::Check => *carried = Recently::recorded(registry.checked(scope.word())),
         }
     }
 
@@ -455,7 +455,7 @@ impl Watcher {
     fn remember(self, registry: &mut Registry, scope: &Scope, at: DateTime<Utc>) {
         match self {
             Watcher::Loop => {}
-            Watcher::Check => registry.record_check(&scope.key(), at),
+            Watcher::Check => registry.record_check(scope.word(), at),
         }
     }
 }
@@ -507,24 +507,24 @@ fn permitted(registry: &Registry) -> Result<Watching> {
         None => Scope::Ungrouped,
     };
 
-    // The one place the layering is deliberately not uniform:
-    // `watcher-may-act` does not reach the Accounts in no Group by
-    // Inheritance, and is gated behind `cycle-ungrouped` instead. The reason is
-    // the whole of ADR 0017 (amended), and is not repeated here.
+    // Two independent yeses before anything moves unasked, and they are two
+    // different statements: one declaring these Accounts interchangeable at
+    // all, one letting the watcher act on them (ADR 0017). A Group **is** the
+    // first of them, which is why it needs only the second.
     //
     // Asked before `watcher-may-act` so that somebody who has said neither is
     // told about the declaration rather than about the permission — the
     // declaration is the one that has to come first.
-    if scope == Scope::Ungrouped && !registry.global.cycle_ungrouped {
+    if scope == Scope::Ungrouped && !registry.ungrouped.interchangeable {
         return Err(PerchError::NotInterchangeable(format!(
             "{} is in no Group, and nothing has said the Accounts in no Group \
              are interchangeable at all — so there is nowhere for the watcher \
              to Switch it to. Nothing is being watched.\n\
-             `perch config set cycle-ungrouped true` says they are, and \
-             `perch config set {UNGROUPED} watcher-may-act true` then says the \
-             watcher may act on them. Both, because a `watcher-may-act` set at \
-             Global is about your Groups and must not authorise moving you onto \
-             a personal subscription (ADR 0017).\n\
+             `perch config set {UNGROUPED} interchangeable true` says they are, \
+             and `perch config set {UNGROUPED} watcher-may-act true` then says \
+             the watcher may act on them. Both, because being interchangeable \
+             is a declaration somebody makes and letting the watcher act is a \
+             grant, and neither implies the other (ADR 0017).\n\
              Putting it in a Group with `perch group move {} <group>` is the \
              narrower statement, and is what Groups are for.",
             registry.named_for_the_user(account.email()),
@@ -532,15 +532,18 @@ fn permitted(registry: &Registry) -> Result<Watching> {
         )));
     }
 
-    let settings = registry.in_force(&scope.config());
+    // The Scope's own grant, and there is nowhere else it could come from
+    // (ADR 0051): a `watcher-may-act` said about one Scope authorises that
+    // Scope and no other.
+    let settings = registry.settings(&scope);
     if !settings.watcher_may_act {
         return Err(PerchError::Invalid(format!(
             "{} has not been told the watcher may act on it, so nothing is \
              being watched. Nothing only ever changes underneath you because \
              you said it could.\n\
              `perch config set {} watcher-may-act true` says it may.",
-            scope.config().described(),
-            scope.key(),
+            scope.described(),
+            scope.word(),
         )));
     }
 

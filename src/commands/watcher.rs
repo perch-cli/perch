@@ -31,7 +31,7 @@ pub enum WatcherCommand {
     /// you stop it with Ctrl-C, and leaves nothing behind when you do. Only the
     /// active Account is read, and only within a Scope that has been told the
     /// watcher may act on it — `perch config set <group> watcher-may-act true`
-    /// for a Group, or the same for `ungrouped` where `cycle-ungrouped` is on
+    /// for a Group, or the same for `ungrouped` where `interchangeable` is on
     /// as well, because being interchangeable at all is its own yes (ADR 0017).
     ///
     /// Every decision is printed as it is made, including the ones where

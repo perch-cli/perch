@@ -1,9 +1,11 @@
 # A Setting is said about the Scope it governs, and the case for Overrides never defended the fallback
 
-> **Decided, not yet carried out.** The removals, the rename and the glossary
-> edits below are tracked separately. Like ADR 0041 and ADR 0046 through 0050,
-> this is the artifact of a planning effort rather than of a change, so it lands
-> ahead of the work it describes.
+> **Carried out in #173.** Like ADR 0041 and ADR 0046 through 0050, this is the
+> artifact of a planning effort rather than of a change, so it landed ahead of
+> the work it describes instead of beside it. The tree now matches it: `Global`,
+> `Override` and `Inherit` are gone, `registry::Scope` and `cycle::Scope` are one
+> type, `perch config unset` is deleted, `cycle-ungrouped` is `interchangeable`
+> and carried by the Ungrouped Scope alone, and the registry's `version` is `2`.
 
 ADR 0046 left this behind as a count: five nouns — Group, Scope, Override,
 Ungrouped, Global — serving three Settings, one of which uses none of them. The

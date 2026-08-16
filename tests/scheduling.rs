@@ -207,7 +207,7 @@ fn a_check_on_an_ungrouped_account_exits_eighteen_and_names_both_declarations() 
     let refusal = result.expect_err("there is nowhere here it may act");
     assert_eq!(refusal.exit_code(), EXIT_NOT_INTERCHANGEABLE);
     let said = refusal.to_string();
-    assert!(said.contains("cycle-ungrouped"), "{said}");
+    assert!(said.contains("interchangeable"), "{said}");
     assert!(said.contains("watcher-may-act"), "{said}");
     assert!(said.contains("perch group move"), "{said}");
     assert!(
@@ -216,35 +216,37 @@ fn a_check_on_an_ungrouped_account_exits_eighteen_and_names_both_declarations() 
     );
 }
 
-/// **ADR 0017, amended, in executable form.** `watcher-may-act` deliberately
-/// does not Inherit into the Ungrouped Scope. Somebody turning the watcher on
-/// at Global means "yes, Cycle my work Groups unattended", and Inheriting that
-/// straight through would authorise moving them off a work Account onto their
-/// personal subscription — precisely the failure Groups exist to prevent,
-/// arriving by a route nobody typed.
+/// **ADR 0051, in executable form.** A grant is said about the Scope it grants
+/// and nowhere else, so a `watcher-may-act true` said about a Group is a
+/// statement about that Group: it cannot authorise moving somebody off a work
+/// Account onto their personal subscription, because there is nowhere to write
+/// a grant that would.
 ///
-/// This is the case most likely to be "fixed" by somebody tidying the layering
-/// into uniformity, which is why it names the ADR.
+/// This used to be an exception written into a uniform layer — a Global "yes"
+/// that reached every Scope except this one — and the exception was described in
+/// four places, tested in two and enforced in none. It is structural now, which
+/// is why the case that used to leak has nothing left to assert: the words that
+/// would have said it cannot be typed.
 #[test]
-fn the_watcher_turned_on_at_global_leaves_ungrouped_accounts_alone() {
+fn a_grant_said_about_a_group_leaves_the_ungrouped_accounts_alone() {
     let host = checked(&[99.0], &[1.0]);
+    config_set(&host, &["work", "watcher-may-act", "true"])
+        .0
+        .expect("a statement about the Group this person runs");
     move_to_group(&host, EMAIL, "none")
         .0
         .expect("the Account leaves the Group");
     move_to_group(&host, SECOND_EMAIL, "none")
         .0
         .expect("and so does the other");
-    config_set(&host, &["watcher-may-act", "true"])
-        .0
-        .expect("a statement about the Groups this person runs");
 
     let (result, _) = run_watch_once(&host);
 
     let refusal = result.expect_err("that yes was not about these Accounts");
     assert_eq!(refusal.exit_code(), EXIT_NOT_INTERCHANGEABLE);
     assert!(
-        refusal.to_string().contains("cycle-ungrouped"),
-        "the second yes is named: {refusal}"
+        refusal.to_string().contains("interchangeable"),
+        "the declaration that has to come first is named: {refusal}"
     );
     assert_eq!(
         active(&host).as_deref(),
@@ -264,7 +266,7 @@ fn a_check_on_ungrouped_accounts_declared_interchangeable_still_needs_the_watche
     for email in [EMAIL, SECOND_EMAIL] {
         move_to_group(&host, email, "none").0.expect("it leaves");
     }
-    config_set(&host, &["cycle-ungrouped", "true"])
+    config_set(&host, &["ungrouped", "interchangeable", "true"])
         .0
         .expect("ungrouped Accounts are interchangeable");
 
@@ -289,7 +291,7 @@ fn a_check_switches_among_ungrouped_accounts_once_both_declarations_are_made() {
     for email in [EMAIL, SECOND_EMAIL] {
         move_to_group(&host, email, "none").0.expect("it leaves");
     }
-    config_set(&host, &["cycle-ungrouped", "true"])
+    config_set(&host, &["ungrouped", "interchangeable", "true"])
         .0
         .expect("they are interchangeable");
     config_set(&host, &["ungrouped", "watcher-may-act", "true"])
@@ -319,7 +321,9 @@ fn a_check_among_ungrouped_accounts_paces_the_next_one() {
     for email in [EMAIL, SECOND_EMAIL] {
         move_to_group(&host, email, "none").0.expect("it leaves");
     }
-    config_set(&host, &["cycle-ungrouped", "true"]).0.unwrap();
+    config_set(&host, &["ungrouped", "interchangeable", "true"])
+        .0
+        .unwrap();
     config_set(&host, &["ungrouped", "watcher-may-act", "true"])
         .0
         .unwrap();

@@ -32,7 +32,7 @@ use crate::cycle;
 use crate::error::Result;
 use crate::host::Host;
 use crate::observe::Report;
-use crate::registry::{Account, Quarantine, Registry};
+use crate::registry::{self, Account, Quarantine, Registry};
 use crate::utilization;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -46,7 +46,7 @@ pub struct ListArgs {
 /// rather than a Group with a reserved name: the two are shown differently
 /// because Cycling treats them differently.
 ///
-/// Deliberately not [`crate::cycle::Scope`], which is the same idea for a
+/// Deliberately not [`crate::registry::Scope`], which is the same idea for a
 /// Cycle and has no `Everything`. Showing every Account is ordinary; Cycling
 /// across every Account is the thing ADR 0002 exists to prevent, and the
 /// difference is worth keeping in the types rather than in a check.
@@ -90,8 +90,8 @@ impl Scope {
         let of = |scope| Section::of(registry, scope, now);
         match self {
             Scope::Everything => scopes(registry).into_iter().map(of).collect(),
-            Scope::Group(name) => vec![of(cycle::Scope::Group(name.clone()))],
-            Scope::Ungrouped => vec![of(cycle::Scope::Ungrouped)],
+            Scope::Group(name) => vec![of(registry::Scope::Group(name.clone()))],
+            Scope::Ungrouped => vec![of(registry::Scope::Ungrouped)],
         }
     }
 
@@ -116,12 +116,12 @@ impl Scope {
 
 /// One Group, said as the line above the Accounts in it.
 ///
-/// Shared with [`crate::cycle::Scope::described`], which names the same set of
-/// Accounts in the middle of a sentence and would otherwise name it in a second
-/// place: a Group that read one way over a listing and another in the sentence
-/// explaining a Cycle would read as two Groups.
+/// Taken from [`registry::Scope::described`] rather than spelled again, because
+/// that is what names the same Group in the middle of a sentence: a Group that
+/// read one way over a listing and another in the sentence explaining a Cycle
+/// would read as two Groups.
 pub fn group_heading(name: &str) -> String {
-    format!("Group `{name}`")
+    registry::Scope::Group(name.to_string()).described()
 }
 
 /// One scope's Accounts as the listing shows them: in order, and with what that
@@ -130,7 +130,7 @@ pub fn group_heading(name: &str) -> String {
 /// Ranked where a Cycle could happen in the scope, and in the order they were
 /// added where one could not. Being in no Group is the absence of a declaration
 /// that Accounts are interchangeable rather than a weaker form of one (ADR
-/// 0017), so until `cycle-ungrouped` says otherwise a bare `perch switch`
+/// 0017), so until `interchangeable` says otherwise a bare `perch switch`
 /// refuses there instead of choosing. Ordering those Accounts by Headroom would
 /// show a ranking Perch would not make — the one thing this listing exists not
 /// to do — so they are held in the order they were added, with the Headroom
@@ -142,13 +142,13 @@ pub fn group_heading(name: &str) -> String {
 /// ranked?" is how the two come to disagree about the distinction ADR 0049
 /// called its weightiest.
 struct Section<'a> {
-    scope: cycle::Scope,
+    scope: registry::Scope,
     ranked: bool,
     accounts: Vec<&'a Account>,
 }
 
 impl<'a> Section<'a> {
-    fn of(registry: &'a Registry, scope: cycle::Scope, now: DateTime<Utc>) -> Section<'a> {
+    fn of(registry: &'a Registry, scope: registry::Scope, now: DateTime<Utc>) -> Section<'a> {
         let ranked = cycle::may_cycle_within(registry, &scope);
         let accounts = match ranked {
             true => cycle::ranked(registry, &scope, now),
@@ -199,11 +199,11 @@ impl<'a> Section<'a> {
 /// separate — a Cycle must not be handed "every Account" — and widening a
 /// Cycle's scope into a listing's cannot express that, since nothing here can
 /// produce [`Scope::Everything`] and no Cycle is ever handed one of these.
-impl From<&cycle::Scope> for Scope {
-    fn from(scope: &cycle::Scope) -> Scope {
+impl From<&registry::Scope> for Scope {
+    fn from(scope: &registry::Scope) -> Scope {
         match scope {
-            cycle::Scope::Group(name) => Scope::Group(name.clone()),
-            cycle::Scope::Ungrouped => Scope::Ungrouped,
+            registry::Scope::Group(name) => Scope::Group(name.clone()),
+            registry::Scope::Ungrouped => Scope::Ungrouped,
         }
     }
 }
@@ -218,19 +218,19 @@ impl From<&cycle::Scope> for Scope {
 ///
 /// The active Account's scope leads, because it is where you are and, wherever
 /// a Cycle happens at all, the one a bare `perch switch` looks in.
-fn scopes(registry: &Registry) -> Vec<cycle::Scope> {
-    let mut every: Vec<cycle::Scope> = registry
+fn scopes(registry: &Registry) -> Vec<registry::Scope> {
+    let mut every: Vec<registry::Scope> = registry
         .group_names()
-        .map(|name| cycle::Scope::Group(name.to_string()))
+        .map(|name| registry::Scope::Group(name.to_string()))
         .collect();
-    every.push(cycle::Scope::Ungrouped);
+    every.push(registry::Scope::Ungrouped);
 
     let Some(active) = registry.active_account() else {
         return every;
     };
     let here = match &active.group {
-        Some(name) => cycle::Scope::Group(name.clone()),
-        None => cycle::Scope::Ungrouped,
+        Some(name) => registry::Scope::Group(name.clone()),
+        None => registry::Scope::Ungrouped,
     };
     let mut ordered = vec![here.clone()];
     ordered.extend(every.into_iter().filter(|scope| *scope != here));

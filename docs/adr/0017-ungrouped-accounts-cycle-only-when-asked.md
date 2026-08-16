@@ -20,7 +20,7 @@ failure Groups exist to prevent. The watcher already defaults to off for the
 same reason: nothing changes underneath someone because they did not say it
 could.
 
-The setting is global rather than per-Group. An ungrouped Account has no Group
+The setting is the Ungrouped Scope's own. An ungrouped Account has no Group
 to carry it, and modelling the ungrouped pool as a Group with a reserved name
 would make a Group mean two contradictory things — a declaration the user made,
 and one Perch made for them.
@@ -59,6 +59,20 @@ present and future — including the next one `perch add` creates. Anyone wantin
 a narrower statement than that wants a Group, which is what Groups are for.
 
 ## Amended: the Ungrouped Accounts are a Scope that reads Global
+
+> **Superseded in full by [ADR 0051](0051-a-setting-is-said-about-the-scope-it-governs-and-the-case-for-overrides-never-defended-the-fallback.md).**
+> Its core claim survives and is strengthened: the Accounts in no Group are a
+> Scope, and they now hold Settings outright rather than Overrides over
+> something else. What goes is "reads Global" and the non-uniform-layering
+> paragraph below, which describes an exception that can no longer be expressed
+> — `watcher-may-act` is said about the Scope it grants, so the two yeses this
+> ADR asks for are structural rather than hand-maintained. The declaration
+> itself survives under the name `interchangeable`, carried by this Scope alone.
+>
+> One sentence in the body above is corrected in place rather than left standing:
+> "The setting is global rather than per-Group" is now "The setting is the
+> Ungrouped Scope's own". The two sentences of reasoning under it are untouched
+> and are still why the Ungrouped Accounts are a Scope and never a Group.
 
 The setting stays exactly where this decision put it — Global, because an
 ungrouped Account has no Group to carry one. What is added is that the Ungrouped
