@@ -432,7 +432,7 @@ mod tests {
     #[test]
     fn what_a_cycle_may_not_choose_is_not_counted_as_something_the_group_has() {
         let mut spared = account("spared@example.com", vec![window("5-hour", 0.0)]);
-        spared.enabled = false;
+        spared.disabled = true;
         let mut broken = account("broken@example.com", vec![window("5-hour", 0.0)]);
         broken.quarantine = Some(Quarantine::RenewalRejected);
         let registry = holding(vec![

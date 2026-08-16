@@ -263,14 +263,16 @@ fn the_account_left_active_is_one_the_user_declared_interchangeable() {
 #[test]
 fn a_disabled_account_is_not_what_perch_lands_on() {
     let host = machine_with_two_accounts().with_answers(&["y"]);
-    disable_account(&host, SECOND_EMAIL).0.expect("reserved");
+    disable_account(&host, SECOND_EMAIL)
+        .0
+        .expect("taken out of Cycling");
 
     let (result, printed) = run_remove(&host, EMAIL);
 
     result.expect("the removal was agreed to");
     assert!(
         printed.contains("no active Account"),
-        "an Account reserved for something else is never chosen for you, so \
+        "an Account kept out of Cycling is never chosen for you, so \
          there is nowhere to land and the question says so:\n{printed}"
     );
     assert_eq!(registry_of(&host).active, Active::Nobody);
@@ -452,7 +454,7 @@ fn machine_holding_the_two_that_share_a_profile() -> FakeHost {
                 organization_uuid: None,
             },
             plan: None,
-            enabled: true,
+            disabled: false,
             quarantine: None,
             group: None,
             utilization: None,
@@ -568,7 +570,9 @@ fn the_last_account_is_confirmed_without_claiming_it_is_the_one_running() {
     let host = machine_with_two_accounts().with_answers(&["y", "y"]);
     // Nothing to land on, so giving up the active Account leaves Perch holding
     // one Account and on nobody.
-    disable_account(&host, SECOND_EMAIL).0.expect("reserved");
+    disable_account(&host, SECOND_EMAIL)
+        .0
+        .expect("taken out of Cycling");
     run_remove(&host, EMAIL)
         .0
         .expect("the active one is given up");

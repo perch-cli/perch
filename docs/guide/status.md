@@ -73,15 +73,21 @@ full each of its Quota Windows is.
 
 ```
 $ perch list
-  Account               Alias     Group  State                 Headroom        Utilization
-* someone@example.com   -         work   enabled               58%             5-hour  42%  (as of 3m ago)
-                                                                               7-day   18%  (as of 3m ago)
-  overflow@example.com  overflow  work   enabled, quarantined  never observed  never observed
-  spare@example.com     -         none   disabled              9%              5-hour  91%  (as of 2h ago)
+  Account               Alias     Group  State        Headroom        Utilization
+* someone@example.com   -         work   -            58%             5-hour  42%  (as of 3m ago)
+                                                                      7-day   18%  (as of 3m ago)
+  overflow@example.com  overflow  work   quarantined  never observed  never observed
+  spare@example.com     -         none   disabled     9%              5-hour  91%  (as of 2h ago)
 
 * is the active Account.
 overflow@example.com (as `overflow`) is Quarantined: Anthropic would not renew its Credential. `perch relogin overflow@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
 ```
+
+**State** says only what has been done to an Account, so it is empty for the one
+nothing has: `disabled`, `quarantined` and `disabled, quarantined` are the only
+things it prints. The two are separate facts with separate fixes — being out of
+the Cycling pool is a decision you made, and a Quarantine is a Credential that
+stopped working — so an Account in both says both.
 
 **Headroom** is what is left in the Account's *worst* Quota Window, which is the
 one honest measure of how much of it you can still spend: being blocked by any
@@ -108,10 +114,10 @@ like any Group.
 An Account nobody has ever read a figure for says `never observed` rather than
 `0%` — no figure and plenty of room are opposite pieces of advice. A
 Quarantined Account stays listed and named, so an Account needing attention is
-never mistaken for one that vanished; whether it is in the Cycling pool is said
-alongside, because enabling a Quarantined Account would not repair it. The
-reason it broke is written out under the table rather than squeezed into a
-column, with the one command that puts it right.
+never mistaken for one that vanished; if it has also been taken out of the
+Cycling pool the State column says both, because enabling a Quarantined Account
+would not repair it. The reason it broke is written out under the table rather
+than squeezed into a column, with the one command that puts it right.
 
 ## JSON
 

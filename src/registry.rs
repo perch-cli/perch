@@ -178,9 +178,15 @@ pub struct Account {
     /// not part of one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<String>,
-    /// Whether the Account is a Cycle candidate. Later specs toggle this.
-    #[serde(default = "enabled_by_default")]
-    pub enabled: bool,
+    /// Whether the Account has been taken out of Cycling.
+    ///
+    /// Said only when it is true, for the reason the Quarantine below gives:
+    /// the registry is something a person may open, and an Account nobody has
+    /// done anything to reads more clearly for saying nothing. The positive
+    /// state has no name to write down — it is the absence of this one
+    /// (ADR 0052).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disabled: bool,
     /// Why this Account's Credential can no longer be used, when it cannot.
     ///
     /// Absent is the ordinary case, and is left out of the file entirely rather
@@ -192,10 +198,6 @@ pub struct Account {
     pub group: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub utilization: Option<CachedUtilization>,
-}
-
-fn enabled_by_default() -> bool {
-    true
 }
 
 /// How Cycling orders the Accounts in a Group.
@@ -2225,7 +2227,7 @@ mod tests {
                 organization_uuid: None,
             },
             plan: None,
-            enabled: true,
+            disabled: false,
             quarantine: None,
             group: None,
             utilization: None,
@@ -2336,7 +2338,7 @@ mod tests {
                 organization_uuid: None,
             },
             plan: None,
-            enabled: true,
+            disabled: false,
             quarantine: None,
             group: None,
             utilization: None,
@@ -2403,7 +2405,7 @@ mod tests {
                     organization_uuid: None,
                 },
                 plan: None,
-                enabled: true,
+                disabled: false,
                 quarantine: None,
                 group: None,
                 utilization: None,
@@ -2725,7 +2727,7 @@ mod tests {
                 organization_uuid: None,
             },
             plan: Some("pro".into()),
-            enabled: true,
+            disabled: false,
             quarantine: None,
             group: None,
             utilization: None,
@@ -2797,7 +2799,7 @@ mod tests {
                 organization_uuid: None,
             },
             plan: None,
-            enabled: true,
+            disabled: false,
             quarantine: None,
             group: None,
             utilization: None,
@@ -2822,6 +2824,55 @@ mod tests {
         assert!(!back.account("someone@example.com").unwrap().quarantined());
     }
 
+    /// The positive state has no name (ADR 0052), so the file says nothing
+    /// about an Account nobody has taken out of Cycling — the same shape, and
+    /// the same reason, as the Quarantine above it.
+    #[test]
+    fn an_account_nobody_has_disabled_records_no_disable_at_all() {
+        let mut registry = Registry::default();
+        registry.upsert(Account {
+            identity: Identity {
+                email: "someone@example.com".into(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            disabled: false,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        });
+
+        let json = serde_json::to_string(&registry).unwrap();
+        assert!(!json.contains("disabled"), "{json}");
+
+        registry
+            .account_mut("someone@example.com")
+            .unwrap()
+            .disabled = true;
+        let written = serde_json::to_string(&registry).unwrap();
+        assert!(written.contains(r#""disabled":true"#), "{written}");
+
+        let back: Registry = serde_json::from_str(&written).unwrap();
+        assert!(
+            back.account("someone@example.com").unwrap().disabled,
+            "and it survives the round trip, because it is the half that was said"
+        );
+    }
+
+    /// `enabled` was the same bool spelled the other way round, and ADR 0052
+    /// renamed it rather than teaching this build to read both. A registry
+    /// carrying it is refused, which is what `deny_unknown_fields` is for.
+    #[test]
+    fn a_registry_that_still_says_enabled_is_refused_rather_than_read() {
+        let held: std::result::Result<Registry, _> = serde_json::from_str(
+            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true}]}"#,
+        );
+
+        assert!(held.is_err(), "{held:?}");
+    }
+
     #[test]
     fn nothing_about_where_a_credential_is_kept_is_written_down() {
         let mut registry = Registry::default();
@@ -2833,7 +2884,7 @@ mod tests {
                 organization_uuid: None,
             },
             plan: None,
-            enabled: true,
+            disabled: false,
             quarantine: None,
             group: None,
             utilization: None,
@@ -3156,7 +3207,7 @@ mod tests {
         let path = registry_path(&host).unwrap();
         host.set_file(
             &path,
-            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true,"group":"work"}],"groups":{}}"#,
+            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"group":"work"}],"groups":{}}"#,
         );
 
         let registry = load(&host).expect("it reads").expect("it is there");
@@ -3187,7 +3238,7 @@ mod tests {
         let path = registry_path(&host).unwrap();
         host.set_file(
             &path,
-            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true,"group":"Work"}],"groups":{"work":{"watcher_threshold_percent":65}}}"#,
+            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"group":"Work"}],"groups":{"work":{"watcher_threshold_percent":65}}}"#,
         );
 
         let registry = load(&host).expect("it reads").expect("it is there");
@@ -3234,7 +3285,7 @@ mod tests {
             host.set_file(
                 &path,
                 &format!(
-                    r#"{{"version":2,"accounts":[{{"identity":{{"email":"someone@example.com"}},"enabled":true,"group":{claimed}}}],"groups":{groups}{aliases}}}"#
+                    r#"{{"version":2,"accounts":[{{"identity":{{"email":"someone@example.com"}},"group":{claimed}}}],"groups":{groups}{aliases}}}"#
                 ),
             );
 
@@ -3399,7 +3450,7 @@ mod tests {
             host.set_file(
                 &path,
                 &format!(
-                    r#"{{"version":2,"accounts":[{{"identity":{{"email":"someone@example.com"}},"enabled":true,"utilization":{{"observed_at":"2025-01-01T00:00:00Z","windows":[{{"window":"5-hour","used_percent":{figure}}}]}}}}],"groups":{{}}}}"#
+                    r#"{{"version":2,"accounts":[{{"identity":{{"email":"someone@example.com"}},"utilization":{{"observed_at":"2025-01-01T00:00:00Z","windows":[{{"window":"5-hour","used_percent":{figure}}}]}}}}],"groups":{{}}}}"#
                 ),
             );
 
@@ -3423,7 +3474,7 @@ mod tests {
         let path = registry_path(&host).unwrap();
         host.set_file(
             &path,
-            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true,"utilization":{"observed_at":"2025-01-01T00:00:00Z","windows":[{"window":"5-hour","used_percent":0},{"window":"7-day","used_percent":100}]}}],"groups":{}}"#,
+            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"utilization":{"observed_at":"2025-01-01T00:00:00Z","windows":[{"window":"5-hour","used_percent":0},{"window":"7-day","used_percent":100}]}}],"groups":{}}"#,
         );
         load(&host).expect("0 and 100 are both percentages");
     }
@@ -3442,7 +3493,7 @@ mod tests {
         let path = registry_path(&host).unwrap();
         host.set_file(
             &path,
-            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true}],"aliases":{"overflow":"gone@example.com"}}"#,
+            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"}}],"aliases":{"overflow":"gone@example.com"}}"#,
         );
 
         let refused = load(&host).expect_err("the Alias names nobody");
@@ -3485,7 +3536,7 @@ mod tests {
             host.set_file(
                 &path,
                 &format!(
-                    r#"{{"version":2,"accounts":[{{"identity":{{"email":"someone@example.com"}},"enabled":true}},{{"identity":{{"email":"other@example.com"}},"enabled":true}}],{held}}}"#
+                    r#"{{"version":2,"accounts":[{{"identity":{{"email":"someone@example.com"}}}},{{"identity":{{"email":"other@example.com"}}}}],{held}}}"#
                 ),
             );
 
@@ -3514,7 +3565,7 @@ mod tests {
         let path = registry_path(&host).unwrap();
         host.set_file(
             &path,
-            r#"{"version":2,"accounts":[{"identity":{"email":"work"},"enabled":true},{"identity":{"email":"real@example.com"},"enabled":true}],"groups":{"work":{}}}"#,
+            r#"{"version":2,"accounts":[{"identity":{"email":"work"}},{"identity":{"email":"real@example.com"}}],"groups":{"work":{}}}"#,
         );
 
         let refused = load(&host).expect_err("that Target has two answers");
@@ -3561,9 +3612,9 @@ mod tests {
 
         for (index, (held, expected)) in cases.iter().enumerate() {
             let accounts = if index == 0 {
-                r#"[{"identity":{"email":"someone@example.com"},"enabled":true}]"#
+                r#"[{"identity":{"email":"someone@example.com"}}]"#
             } else {
-                r#"[{"identity":{"email":"someone@example.com"},"enabled":true},{"identity":{"email":"SOMEONE@example.com"},"enabled":true}]"#
+                r#"[{"identity":{"email":"someone@example.com"}},{"identity":{"email":"SOMEONE@example.com"}}]"#
             };
             let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
             let path = registry_path(&host).unwrap();

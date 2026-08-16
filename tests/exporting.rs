@@ -71,7 +71,7 @@ fn an_export_holds_every_account_every_credential_and_everything_said_about_them
         Some("work")
     );
     assert!(
-        !registry.account(THIRD_EMAIL).unwrap().enabled,
+        registry.account(THIRD_EMAIL).unwrap().disabled,
         "an Account taken out of Cycling comes back out of Cycling"
     );
     assert_eq!(

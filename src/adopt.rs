@@ -98,7 +98,7 @@ fn store_as_first_profile(
         registry.upsert(Account {
             identity: findings.identity.clone(),
             plan: findings.credential.subscription_type.clone(),
-            enabled: true,
+            disabled: false,
             quarantine: None,
             group: None,
             utilization: None,

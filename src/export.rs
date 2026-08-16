@@ -484,7 +484,7 @@ mod tests {
                 organization_uuid: None,
             },
             plan: Some("pro".into()),
-            enabled: true,
+            disabled: false,
             quarantine: Some(Quarantine::RenewalRejected),
             group: Some("work".into()),
             utilization: None,
@@ -761,7 +761,7 @@ mod tests {
     #[test]
     fn an_export_this_build_cannot_parse_is_still_refused_as_a_newer_perchs() {
         let ahead = format!(
-            r#"{{"version":{},"registry":{{"version":{},"accounts":[{{"identity":{{"email":"someone@example.com"}},"enabled":true,"quarantine":"SomethingThisBuildHasNeverHeardOf"}}]}},"credentials":{{}}}}"#,
+            r#"{{"version":{},"registry":{{"version":{},"accounts":[{{"identity":{{"email":"someone@example.com"}},"quarantine":"SomethingThisBuildHasNeverHeardOf"}}]}},"credentials":{{}}}}"#,
             CURRENT_VERSION + 1,
             crate::registry::CURRENT_VERSION + 1,
         );
@@ -809,7 +809,7 @@ mod tests {
                     organization_uuid: None,
                 },
                 plan: None,
-                enabled: true,
+                disabled: false,
                 quarantine: None,
                 group: None,
                 utilization: None,
@@ -849,7 +849,7 @@ mod tests {
                 organization_uuid: None,
             },
             plan: None,
-            enabled: true,
+            disabled: false,
             quarantine: None,
             group: None,
             utilization: None,

@@ -116,7 +116,7 @@ Account in one terminal without changing which is active.
 | `perch run` | launch Claude Code as an Account, in this terminal alone | [guide](docs/guide/running.md) |
 | `perch group` | declare which Accounts are interchangeable | [guide](docs/guide/switching.md#managing-groups) |
 | `perch config` | the rules Perch chooses Accounts by | [guide](docs/guide/configuration.md) |
-| `perch disable` / `enable` | keep an Account out of Cycling, or put it back | [guide](docs/guide/accounts.md#reserving-an-account) |
+| `perch disable` / `enable` | keep an Account out of Cycling, or put it back | [guide](docs/guide/accounts.md#keeping-an-account-out-of-cycling) |
 | `perch relogin` | repair an Account whose Credential stopped working | [guide](docs/guide/accounts.md#when-an-account-breaks) |
 | `perch remove` | give up an Account | [guide](docs/guide/accounts.md#giving-up-an-account) |
 | `perch holdings export` / `import` | back up everything Perch holds to one encrypted file, and put it back | [guide](docs/guide/backup.md) |
@@ -159,8 +159,8 @@ it that way. The same pages, rendered and searchable, are at
 [perch-cli.github.io/perch/guide](https://perch-cli.github.io/perch/guide/):
 
 - [Installing](docs/guide/installing.md)
-- [Accounts](docs/guide/accounts.md) — adding, naming, reserving, repairing,
-  giving up
+- [Accounts](docs/guide/accounts.md) — adding, naming, keeping out of Cycling,
+  repairing, giving up
 - [Seeing what you have](docs/guide/status.md) — `status`, `list`, Utilization,
   the JSON
 - [Switching, Cycling and Groups](docs/guide/switching.md)

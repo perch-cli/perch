@@ -280,7 +280,7 @@ mod tests {
                 organization_uuid: None,
             },
             plan: None,
-            enabled: true,
+            disabled: false,
             quarantine: None,
             group: None,
             utilization: None,

@@ -1,9 +1,12 @@
 # A reversal is its own command, and the state it restores has no name
 
-> **Decided, not yet carried out.** The field rename, the column, the JSON key
-> and the glossary edit below are tracked separately. Like ADR 0041 and ADR 0046
-> through 0051, this is the artifact of a planning effort rather than of a
-> change, so it lands ahead of the work it describes.
+> **Carried out in #175.** Like ADR 0041 and ADR 0046 through 0051, this is the
+> artifact of a planning effort rather than of a change, so it landed ahead of
+> the work it describes instead of beside it. The tree now matches it:
+> `Account.enabled` is `disabled` and present-only, `enabled_by_default` is
+> gone, the State column empties for an Account in neither state, `--json`
+> carries `"disabled"`, ADR 0047 has its fourth clause, and **Disabled**'s
+> `_Avoid_` line names **reserved**. The command surface did not move.
 
 ADR 0047 named this as one of the collapses it deliberately did not decide: two
 top-level verbs for one boolean. `perch disable <target>` takes an Account out of

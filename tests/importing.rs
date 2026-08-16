@@ -111,7 +111,7 @@ fn an_import_restores_every_account_credential_alias_group_and_rule() {
         Some("work")
     );
     assert!(
-        !registry.account(THIRD_EMAIL).unwrap().enabled,
+        registry.account(THIRD_EMAIL).unwrap().disabled,
         "an Account taken out of Cycling comes back out of Cycling"
     );
     assert_eq!(

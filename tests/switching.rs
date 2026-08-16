@@ -2264,7 +2264,7 @@ fn a_switch_onto_an_account_that_shares_a_profile_is_refused() {
                 organization_uuid: None,
             },
             plan: None,
-            enabled: true,
+            disabled: false,
             quarantine: None,
             group: None,
             utilization: None,

@@ -42,11 +42,11 @@ fn broken_second_account() -> FakeHost {
     host.with_login(login_producing(SECOND_REPAIRED, SECOND_IDENTITY_FILE))
 }
 
-fn is_enabled(host: &FakeHost, email: &str) -> bool {
+fn is_disabled(host: &FakeHost, email: &str) -> bool {
     registry_of(host)
         .account(email)
         .expect("an Account Perch holds")
-        .enabled
+        .disabled
 }
 
 #[test]
@@ -71,7 +71,9 @@ fn a_repair_replaces_the_credential_and_clears_the_quarantine() {
 #[test]
 fn a_repair_keeps_the_alias_the_group_the_cycling_state_and_the_place() {
     let host = broken_second_account();
-    disable_account(&host, "overflow").0.expect("reserved");
+    disable_account(&host, "overflow")
+        .0
+        .expect("taken out of Cycling");
 
     let (result, printed) = run_relogin(&host, "overflow");
 
@@ -85,7 +87,7 @@ fn a_repair_keeps_the_alias_the_group_the_cycling_state_and_the_place() {
     );
     assert_eq!(account.group.as_deref(), Some("work"));
     assert!(
-        !is_enabled(&host, SECOND_EMAIL),
+        is_disabled(&host, SECOND_EMAIL),
         "a login says nothing about whether Cycling may choose an Account, so it \
          does not quietly put one back in the pool"
     );

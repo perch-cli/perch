@@ -447,7 +447,7 @@ fn report(
     labelled(
         out,
         "Cycling",
-        if held.enabled {
+        if !held.disabled {
             "may choose it"
         } else {
             "will not choose it — it is disabled"

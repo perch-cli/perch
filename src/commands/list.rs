@@ -292,6 +292,11 @@ const COLUMNS: usize = HEADERS.len();
 /// Where the Group sits, for the listings narrow enough to leave it out.
 const GROUP_COLUMN: usize = 2;
 
+/// What a cell holds when there is nothing to say in it — no Alias, or no state
+/// worth naming. One spelling, because two columns saying nothing should not say
+/// it two ways.
+const NOTHING_TO_SAY: &str = "-";
+
 /// What those columns hold for one Account: the name you reach it by, what it
 /// is interchangeable with, whether it is any use, and how much of it is left.
 fn columns(registry: &Registry, account: &Account) -> [String; COLUMNS] {
@@ -299,7 +304,7 @@ fn columns(registry: &Registry, account: &Account) -> [String; COLUMNS] {
         account.email().to_string(),
         registry
             .alias_of(account.email())
-            .unwrap_or("-")
+            .unwrap_or(NOTHING_TO_SAY)
             .to_string(),
         account.group.clone().unwrap_or_else(|| "none".to_string()),
         state_of(account),
@@ -381,21 +386,29 @@ fn rows(registry: &Registry, accounts: &[&Account], now: DateTime<Utc>) -> Vec<R
         .collect()
 }
 
-/// Whether the Account is a Cycle candidate, and whether its Credential still
-/// works. Both are always said, because they are separate facts with separate
-/// fixes: enabling a Quarantined Account would not repair it, and a Quarantined
+/// Whether the Account has been taken out of Cycling, and whether its Credential
+/// still works. Each is said whenever it is true, and an Account both things
+/// are true of says both — they are separate facts with separate fixes:
+/// enabling a Quarantined Account would not repair it, and a Quarantined
 /// Account that is listed like any other is never mistaken for one that
 /// vanished.
+///
+/// Neither being true is not a third thing to say. The positive state has no
+/// name (ADR 0052), so the cell empties to the placeholder the Alias column
+/// already uses for having nothing to say, and `disabled`, `quarantined` and
+/// `disabled, quarantined` are the only things it prints.
 fn state_of(account: &Account) -> String {
-    let pool = if account.enabled {
-        "enabled"
+    let said: Vec<&str> = [
+        account.disabled.then_some("disabled"),
+        account.quarantined().then_some("quarantined"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if said.is_empty() {
+        NOTHING_TO_SAY.to_string()
     } else {
-        "disabled"
-    };
-    if account.quarantined() {
-        format!("{pool}, quarantined")
-    } else {
-        pool.to_string()
+        said.join(", ")
     }
 }
 
@@ -541,7 +554,7 @@ fn nothing_here(scope: &Scope) -> String {
 /// One shape rather than two. `perch status --json` described its Account under
 /// `active` and `perch list --json` described one under `accounts`, and the two
 /// key sets did not even overlap: `status` carried `account_uuid` and neither
-/// `alias`, `group` nor `enabled`, and the listing carried the reverse. So a
+/// `alias`, `group` nor `disabled`, and the listing carried the reverse. So a
 /// script that asked "which Group is the Account I am on in?" had to run a
 /// second command to find out, and one written against either could not be
 /// pointed at the other.
@@ -561,7 +574,11 @@ pub fn document(
         "account_uuid": account.identity.account_uuid,
         "alias": registry.alias_of(account.email()),
         "group": account.group,
-        "enabled": account.enabled,
+        // Present on every Account, unlike the cell above it. A machine reading
+        // a shape is not a person reading a sentence (ADR 0043): a script that
+        // had to test for a key's presence to learn a bool would have been
+        // given a worse contract, not a truer one.
+        "disabled": account.disabled,
         "quarantined": Quarantine::document(account.quarantine),
         "active": registry.is_active(account.email()),
         "organization": account.identity.organization_name,
@@ -639,7 +656,41 @@ mod tests {
     use super::*;
 
     fn row(email: &str, alias: &str) -> [String; COLUMNS] {
-        [email, alias, "none", "enabled", "40%"].map(str::to_string)
+        [email, alias, "none", NOTHING_TO_SAY, "40%"].map(str::to_string)
+    }
+
+    fn account_in(disabled: bool, quarantine: Option<Quarantine>) -> Account {
+        Account {
+            identity: crate::probe::Identity {
+                email: "someone@example.com".to_string(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            disabled,
+            quarantine,
+            group: None,
+            utilization: None,
+        }
+    }
+
+    /// Every state the cell has a word for, and the one it has none for.
+    ///
+    /// The positive state has no name (ADR 0052), so nothing is printed where
+    /// nothing has been done — and the two facts that do have names are still
+    /// said separately, because they have separate fixes.
+    #[test]
+    fn the_state_cell_says_only_what_has_been_done_to_the_account() {
+        let broken = Some(Quarantine::RenewalRejected);
+        assert_eq!(state_of(&account_in(false, None)), NOTHING_TO_SAY);
+        assert_eq!(state_of(&account_in(true, None)), "disabled");
+        assert_eq!(state_of(&account_in(false, broken)), "quarantined");
+        assert_eq!(
+            state_of(&account_in(true, broken)),
+            "disabled, quarantined",
+            "an Account both are true of says both"
+        );
     }
 
     #[test]

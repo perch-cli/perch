@@ -162,7 +162,7 @@ fn settle_into_a_profile(
         Account {
             identity: pending.identity,
             plan: pending.credential.subscription_type.clone(),
-            enabled: true,
+            disabled: false,
             quarantine: None,
             group,
             utilization: None,
