@@ -368,10 +368,9 @@ pub fn notice(host: &dyn Host) -> Option<String> {
     if host.env_var(NO_CHECK).is_some() {
         return None;
     }
-    // Not a terminal is not a person: a script parsing `perch --version`, the
-    // Homebrew formula's test block, and the Dogfood phase that launches
-    // `perch --version` as an inner client all read this output, and none of
-    // them wants a second line or a network request.
+    // Not a terminal is not a person: a script parsing `perch --version` and
+    // the Homebrew formula's test block both read this output, and neither
+    // wants a second line or a network request.
     if !host.is_interactive() {
         return None;
     }

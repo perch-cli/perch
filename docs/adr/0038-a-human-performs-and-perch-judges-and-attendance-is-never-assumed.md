@@ -1,7 +1,7 @@
 # A human performs, Perch judges, and attendance is never assumed
 
-> **Superseded by ADR 0041.** Once the removal tracked at #148 lands there is no
-> Phase left to attend, so the rules below have no subject. Two of them are
+> **Superseded by ADR 0041.** The removal landed in #148, so there is no Phase
+> left to attend and the rules below have no subject. Two of them are
 > worth more than the suite was and are
 > named in ADR 0041 as ideas deliberately released rather than overlooked: the
 > Preflight's figure, and the refusal to let a verdict be a keystroke. One thing

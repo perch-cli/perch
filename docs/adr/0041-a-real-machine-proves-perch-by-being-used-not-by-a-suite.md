@@ -1,11 +1,9 @@
 # A real machine proves Perch by being used, not by a suite
 
-> **Decided, not yet carried out.** The subsystem repealed below is still in the
-> tree; the removal is tracked at #148. This ADR is the artifact of a planning
-> effort rather than of a change, so it lands ahead of the work it describes
-> instead of beside it — a departure from this repo's habit of shipping an ADR
-> with its implementation. Read it as a decision that has been taken, not as a
-> report of the tree's current shape.
+> **Carried out in #148.** This ADR is the artifact of a planning effort rather
+> than of a change, so it landed ahead of the work it describes instead of
+> beside it — a departure from this repo's habit of shipping an ADR with its
+> implementation. The tree now matches it: the subsystem repealed below is gone.
 
 ADR 0037 built a suite that runs on real machines and proves only what each one
 holds. ADR 0038 changed what a Phase is, so a person could be asked to walk a
