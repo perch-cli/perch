@@ -183,7 +183,7 @@ pub fn a_run_against(host: &FakeHost, email: &str, began: DateTime<Utc>) {
 ///
 /// The path is `probe`'s, though. Where a marker lives — `sessions/<pid>.json`
 /// — is Claude Code's convention rather than this fixture's, and it is the one
-/// thing `tests/contract_sessions.rs` checks against a real client. Five test
+/// thing `tests/your_machine.rs` checks against a real client. Five test
 /// files spelled it out by hand.
 pub fn a_client_marker(pid: u32, began: DateTime<Utc>) -> String {
     format!(

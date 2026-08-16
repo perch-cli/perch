@@ -1716,10 +1716,13 @@ mod tests {
     /// platform split in `touch_now` (backup semantics on Windows) exists for
     /// exactly this case.
     ///
-    /// Behind the `contract` feature, because it has to outwait a coarse
-    /// filesystem timestamp and there is no faking that: a second of wall clock
-    /// in every `cargo test` is a second nobody chose to spend.
-    #[cfg(feature = "contract")]
+    /// It has to outwait a coarse filesystem timestamp, and there is no faking
+    /// that — but a second of wall clock is a price rather than a claim, and
+    /// this touches nothing outside a directory of its own in `temp_dir`, so
+    /// there is nothing here to hold back (ADR 0050). Ungated with
+    /// `lock::exclusivity`, which is the other one that was waiting on a clock:
+    /// the two together are a second or two on a six-second suite, and Cargo
+    /// parallelises within the binary.
     #[test]
     fn touch_moves_a_directorys_modification_time_forward() {
         let host = RealHost::new();

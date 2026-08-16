@@ -442,8 +442,9 @@ pub const CREDENTIALS_FILE: &str = ".credentials.json";
 /// This and [`service_name_for`] are the two halves of
 /// [`assumption::CREDENTIAL_LOCATION`], and the whole of what a Profile's
 /// privacy rests on. Neither is probed at runtime — a store that holds nothing
-/// is a logged-out Profile, not a broken belief — so what guards them is the
-/// contract suite (ADR 0007).
+/// is a logged-out Profile, not a broken belief — so what guards them is
+/// `tests/your_machine.rs`, which puts a Credential where this says one goes
+/// and asks the installed Claude Code to read it back (ADR 0007).
 pub fn credentials_file_for(config_dir: &Path) -> PathBuf {
     config_dir.join(CREDENTIALS_FILE)
 }
@@ -1392,6 +1393,66 @@ mod tests {
             "{error}"
         );
         assert!(error.to_string().contains("PERCH_CLAUDE_BIN"), "{error}");
+    }
+
+    /// What `default_store` composes, rather than any one of the derivations it
+    /// composes it from: the config directory is `~/.claude`, the identity file
+    /// sits *beside* it rather than in it, the plaintext store sits inside it,
+    /// the service name is the bare one, and the account is the login name.
+    /// `service_name_for` is asserted on its own further down, and passing
+    /// there says nothing about whether this reaches it with `is_default` the
+    /// right way round.
+    ///
+    /// Every path a Profile is ever read from is derived from these, so a drift
+    /// in any of them sends Credentials to a namespace nothing is read out of.
+    /// It reads no machine to say so — which is why it lives here, on a fake,
+    /// rather than in a suite named for the machine it does not touch (ADR
+    /// 0045, ADR 0050).
+    #[test]
+    fn the_default_store_is_where_perch_believes_it_is() {
+        let host = FakeHost::new();
+
+        let store = default_store(&host).expect("USER is set");
+
+        assert_eq!(store.config_dir, Path::new("/Users/someone/.claude"));
+        assert_eq!(
+            store.identity_file,
+            Path::new("/Users/someone/.claude.json"),
+            "beside the directory, not inside it"
+        );
+        assert_eq!(
+            store.credentials_file,
+            Path::new("/Users/someone/.claude/.credentials.json")
+        );
+        assert_eq!(
+            store.keychain_service, DEFAULT_SERVICE,
+            "the default config directory uses the bare service name"
+        );
+        assert_eq!(store.keychain_account, "someone");
+    }
+
+    /// And the other arm, which is the one every Profile takes: a config
+    /// directory Perch was pointed at derives a namespace of its own.
+    #[test]
+    fn a_config_directory_perch_was_pointed_at_derives_its_own_store() {
+        let profile = "/Users/someone/.perch/profiles/someone-example-com";
+        let host = FakeHost::new().with_env("CLAUDE_CONFIG_DIR", profile);
+
+        let store = default_store(&host).expect("USER is set");
+
+        assert_eq!(store.config_dir, Path::new(profile));
+        assert_eq!(
+            store.identity_file,
+            Path::new(profile).join(".claude.json"),
+            "inside it, where the default one's sits beside"
+        );
+        assert!(
+            store
+                .keychain_service
+                .starts_with(&format!("{DEFAULT_SERVICE}-")),
+            "a namespace of its own, not the bare name: {}",
+            store.keychain_service
+        );
     }
 
     #[test]

@@ -144,7 +144,7 @@ and always did.
 
 ## Cutting 1.0
 
-The floor is the weekly contract suite green on all three platforms for four
+The floor is the weekly scheduled CI run green on all three platforms for four
 consecutive weeks — that is the check that catches Claude Code drift, which is
 the failure that cannot be tested for in advance. Beyond the floor it is a
 judgement call. Worth revisiting at the same time: Apple notarization, which
