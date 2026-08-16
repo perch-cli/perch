@@ -7,9 +7,9 @@
 //! never quietly dropped out of one.
 //!
 //! A Group can be renamed, and the rename keeps what the Group carries: its
-//! Overrides, its Accounts, and what the last scheduled Check left behind. Doing
+//! Settings, its Accounts, and what the last scheduled Check left behind. Doing
 //! it by hand — an add, a move per Account and a remove — would lose every
-//! Override the old Group held, which is precisely the part somebody
+//! Setting the old Group held, which is precisely the part somebody
 //! deliberately said.
 //!
 //! A Group also carries the configuration that would govern Cycling within it.
@@ -19,7 +19,7 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::{IN_NO_GROUP, config, cycling_among_ungrouped, say, write_failed};
+use crate::commands::{IN_NO_GROUP, cycling_among_ungrouped, say, write_failed};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::registry::{self, NO_GROUP, Registry, Scope};
@@ -29,9 +29,9 @@ use crate::target::{self, AccountTarget};
 /// lives with the command line that parses it.
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum GroupCommand {
-    /// Declare a Group. It starts empty and Inheriting every Setting from
-    /// Global — an Override is something a Group has been told, and a new one
-    /// has been told nothing.
+    /// Declare a Group. It starts empty and at the compiled-in defaults —
+    /// nothing said about another Scope reaches it, including a grant the
+    /// watcher already holds somewhere else (ADR 0051).
     Add {
         /// The name, which shares one namespace with Aliases.
         name: String,
@@ -40,7 +40,7 @@ pub enum GroupCommand {
     /// Forget a Group. Refused while it still holds Accounts, which are named.
     Remove { name: String },
 
-    /// Rename a Group, keeping its Overrides, its Accounts and the cooldown the
+    /// Rename a Group, keeping its Settings, its Accounts and the cooldown the
     /// watcher is pacing it by. Nothing about it changes but what it is called.
     Rename {
         /// The Group as it is called now.
@@ -92,7 +92,7 @@ pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Resul
             registry::save(host, &mut perch, &registry)?;
             say(out, &renamed)?;
             // What it carries, because keeping it is the whole of what this
-            // command is for: the Overrides are the part a rename by hand loses.
+            // command is for: the Settings are the part a rename by hand loses.
             describe_configuration(out, &registry, &Scope::Group(to))
         }
         GroupCommand::Move { target, group } => {
@@ -260,14 +260,13 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
     Ok(())
 }
 
-/// The Settings in force for a Scope, and which of them it declares itself.
+/// The Settings a Scope holds, which are the rules Cycling there will follow.
 ///
-/// The values are the resolved ones — what Cycling would actually follow — with
-/// a line naming what this Scope Overrides, because an Override and an
-/// Inheritance that happens to hold the same value are different things: one
-/// tracks Global as Global changes and the other does not (ADR 0002, amended).
+/// No line naming which of them the Scope declared itself, because it declared
+/// all of them: a Scope holds its own full Settings and there is nothing above
+/// it for one to have come from (ADR 0051).
 fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scope) -> Result<()> {
-    let settings = registry.in_force(scope);
+    let settings = registry.settings(scope);
     write_line(out, "Strategy", settings.strategy.as_str())?;
     // The whole policy rather than the threshold alone: a summary that named
     // only when the watcher acts would read as the whole of what it does, and
@@ -282,40 +281,29 @@ fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scop
         crate::watch::COOLDOWN_MINUTES,
     );
     // Being allowed to act is not the whole of whether it does. Among the
-    // Accounts in no Group, `cycle-ungrouped` is a separate declaration that
-    // they are interchangeable at all (ADR 0017), and without it there is
-    // nowhere for the watcher to Switch to — `perch watcher run` refuses
-    // outright and names both. Read from `watcher-may-act` alone, this line
-    // claimed unattended switching that the watcher declines, and said the same
-    // thing whichever way the gate was set, so it was unfalsifiable in both
-    // directions. `config::scope_lines` already answers this correctly.
-    let interchangeable = *scope != Scope::Ungrouped || registry.global.cycle_ungrouped;
+    // Accounts in no Group, `interchangeable` is a separate declaration that
+    // they are a set at all (ADR 0017), and without it there is nowhere for the
+    // watcher to Switch to — `perch watcher run` refuses outright and names
+    // both. Read from `watcher-may-act` alone, this line claimed unattended
+    // switching that the watcher declines, and said the same thing whichever way
+    // the gate was set, so it was unfalsifiable in both directions.
+    // `config::scope_lines` already answers this correctly.
+    let interchangeable = *scope != Scope::Ungrouped || registry.ungrouped.interchangeable;
     let watcher = match (settings.watcher_may_act, interchangeable) {
         (true, true) => format!("may switch unattended {acting}"),
         // The Setting's own value, not `off`. `on`/`off` is not a value
-        // `cycle-ungrouped` takes, so a reader who typed back what they were
+        // `interchangeable` takes, so a reader who typed back what they were
         // shown was refused — which is the whole of why
         // `commands::cycling_among_ungrouped` exists, and this line was
         // printing the other spelling two rows below one that uses it.
         (true, false) => format!(
-            "off — `cycle-ungrouped` is {}, so there is nowhere to Switch to \
+            "off — `interchangeable` is {}, so there is nowhere to Switch to \
              (would act {acting})",
-            registry.global.cycle_ungrouped
+            registry.ungrouped.interchangeable
         ),
         (false, _) => format!("off (would act {acting})"),
     };
-    write_line(out, "Watcher", &watcher)?;
-
-    let declared: Vec<&str> = config::SETTINGS
-        .iter()
-        .filter(|setting| setting.overridden_at(registry, scope))
-        .map(|setting| setting.as_str())
-        .collect();
-    let overrides = match declared.is_empty() {
-        true => "none — every Setting Inherited from Global".to_string(),
-        false => declared.join(", "),
-    };
-    write_line(out, "Overrides", &overrides)
+    write_line(out, "Watcher", &watcher)
 }
 
 fn write_line(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {

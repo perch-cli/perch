@@ -117,19 +117,24 @@ would be nothing for it to do:
 ```
 $ perch watcher run
 you@example.com is in no Group, and nothing has said the Accounts in no Group are interchangeable at all — so there is nowhere for the watcher to Switch it to. Nothing is being watched.
-`perch config set cycle-ungrouped true` says they are, and `perch config set ungrouped watcher-may-act true` then says the watcher may act on them. [...]   # exit 18
+`perch config set ungrouped interchangeable true` says they are, and `perch config set ungrouped watcher-may-act true` then says the watcher may act on them. [...]   # exit 18
 
 $ perch watcher run
 Group `work` has not been told the watcher may act on it, so nothing is being watched. Nothing only ever changes underneath you because you said it could.
 `perch config set work watcher-may-act true` says it may.   # exit 14
 ```
 
-`cycle-ungrouped` grants the watcher nothing on its own, and neither does a
-`watcher-may-act` set at Global. Permission to Switch **when you ask** and
-permission to Switch **while nobody is looking** are different grants, and among
-the Accounts in no Group both have to be given: a Global "yes" is a statement
-about your Groups, and Inheriting it there would authorise moving you off a work
-Account onto your personal subscription (ADR 0017).
+`interchangeable` grants the watcher nothing on its own. Declaring a set of
+Accounts substitutable and letting something move between them **while nobody is
+looking** are different things, and among the Accounts in no Group both have to
+be said. A Group needs only the second, because a Group *is* the first.
+
+A `watcher-may-act` is said about the Scope it grants and reaches no other
+(ADR 0051), so letting the watcher into your work Group authorises that Group and
+nothing else — not the Accounts in no Group, and not a Group you declare
+tomorrow. The price is that there is no one command that withdraws the watcher
+everywhere: it is one per Scope. A brake that worked by blanket inheritance would
+be the wrong brake for consent.
 
 Both permissions are read every round rather than only at the first, because
 either can be taken back while the watcher is sleeping. A `perch switch` in

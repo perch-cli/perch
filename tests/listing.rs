@@ -15,7 +15,7 @@ use common::*;
 use perch::host::FakeHost;
 use perch::probe::Identity;
 use perch::registry::{
-    Account, Active, CachedUtilization, Overrides, Quarantine, Registry, WindowUtilization,
+    Account, Active, CachedUtilization, Quarantine, Registry, Settings, WindowUtilization,
 };
 
 fn at(hour: u32, minute: u32) -> DateTime<Utc> {
@@ -75,7 +75,7 @@ fn machine_holding_three_accounts() -> FakeHost {
     registry.active = Active::Settled(EMAIL.to_string());
     registry
         .groups
-        .insert("work".to_string(), Overrides::default());
+        .insert("work".to_string(), Settings::default());
     registry
         .name_account("overflow", SECOND_EMAIL)
         .expect("the name is free");
@@ -110,7 +110,7 @@ fn a_group_of(group: Option<&str>, active: &str, accounts: &[(&str, f64)]) -> Re
     if let Some(group) = group {
         registry
             .groups
-            .insert(group.to_string(), Overrides::default());
+            .insert(group.to_string(), Settings::default());
     }
     for (email, used_percent) in accounts {
         let mut held = account(email, "Acme");
@@ -216,7 +216,7 @@ fn ungrouped_accounts_are_held_rather_than_ranked() {
 #[test]
 fn ungrouped_accounts_are_ranked_once_cycling_may_move_between_them() {
     let mut registry = a_group_of(None, EMAIL, &[(EMAIL, 90.0), (SECOND_EMAIL, 10.0)]);
-    registry.global.cycle_ungrouped = true;
+    registry.ungrouped.interchangeable = true;
     let host = machine_holding(&registry);
 
     let (result, printed) = run_list(&host, false);
@@ -318,7 +318,7 @@ fn the_scope_the_active_account_is_in_comes_first() {
     for name in ["alpha", "zulu"] {
         registry
             .groups
-            .insert(name.to_string(), Overrides::default());
+            .insert(name.to_string(), Settings::default());
     }
     let mut first = account(EMAIL, "Acme");
     first.group = Some("alpha".to_string());
@@ -532,7 +532,7 @@ fn status_group_from_an_ungrouped_account_shows_every_ungrouped_account() {
     registry.upsert(account(THIRD_EMAIL, "Spare Ltd"));
     registry
         .groups
-        .insert("work".to_string(), Overrides::default());
+        .insert("work".to_string(), Settings::default());
     registry.active = Active::Settled(EMAIL.to_string());
     let host = machine_holding(&registry);
 
@@ -553,7 +553,7 @@ fn status_group_from_an_ungrouped_account_shows_every_ungrouped_account() {
         "being ungrouped is not a Group, and Cycling says so (ADR 0017):\n{printed}"
     );
     assert!(
-        printed.contains("`cycle-ungrouped` is false"),
+        printed.contains("`interchangeable` is false"),
         "and says whether it has been said yet, rather than only stating the \
          rule: the bare rule reads as \"you have yet to say it\" to somebody who \
          already has:\n{printed}"
@@ -565,14 +565,14 @@ fn status_group_from_an_ungrouped_account_shows_every_ungrouped_account() {
 ///
 /// `perch group list` and the TUI both say which way the Setting is set;
 /// `perch list` printed the rule alone, so somebody who had run
-/// `perch config set cycle-ungrouped true` was still told Cycling moves between
+/// `perch config set ungrouped interchangeable true` was still told Cycling moves between
 /// these "when you say it may".
 #[test]
 fn the_ungrouped_cycling_clause_says_so_once_cycling_has_been_allowed() {
     let mut registry = Registry::default();
     registry.upsert(account(EMAIL, "Acme"));
     registry.upsert(account(THIRD_EMAIL, "Spare Ltd"));
-    registry.global.cycle_ungrouped = true;
+    registry.ungrouped.interchangeable = true;
     registry.active = Active::Settled(EMAIL.to_string());
     let host = machine_holding(&registry);
 
@@ -580,7 +580,7 @@ fn the_ungrouped_cycling_clause_says_so_once_cycling_has_been_allowed() {
 
     result.unwrap();
     assert!(
-        printed.contains("`cycle-ungrouped` is true"),
+        printed.contains("`interchangeable` is true"),
         "the one Setting gating the whole Scope reads off the listing that \
          shows it:\n{printed}"
     );

@@ -17,11 +17,11 @@ use std::io::Write;
 
 use crate::adopt;
 use crate::commands::say;
-use crate::cycle::{self, Scope};
+use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::probe::Installed;
-use crate::registry::{Account, Registry};
+use crate::registry::{Account, Registry, Scope};
 use crate::switch::{self, Captured};
 use crate::target::{self, Target};
 use crate::utilization;

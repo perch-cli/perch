@@ -323,7 +323,7 @@ fn an_alias_command_on_a_registry_from_before_aliases_finds_nothing() {
     // hold is a state `validate` refuses rather than a machine anybody had.
     let host = logged_in_machine().with_file(
         REGISTRY_PATH,
-        r#"{"version":1,"active":{"settled":"someone@example.com"},"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true}]}"#,
+        r#"{"version":2,"active":{"settled":"someone@example.com"},"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true}]}"#,
     );
 
     let (result, _) = run_alias(

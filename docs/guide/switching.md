@@ -104,14 +104,14 @@ you@example.com is already the best Account in Group `work`, with 90% headroom, 
 
 $ perch switch
 you@example.com is in no Group, so nothing has declared which Accounts it is interchangeable with. Nothing was changed.
-Either put it in a Group with `perch group move you@example.com <group>`, or declare that every ungrouped Account is interchangeable with `perch config set cycle-ungrouped true`.   # exit 18
+Either put it in a Group with `perch group move you@example.com <group>`, or declare that every ungrouped Account is interchangeable with `perch config set ungrouped interchangeable true`.   # exit 18
 ```
 
 That last one is ADR 0017. An Account need not be in a Group — adoption leaves
 the first one ungrouped — but being ungrouped is the *absence* of a declaration
 that Accounts are interchangeable, not a weaker form of one. So bare `perch
-switch` Cycles among ungrouped Accounts only when a global setting says it may,
-and that setting is off until you turn it on.
+switch` Cycles among ungrouped Accounts only once that Scope has been declared
+`interchangeable`, and it is off until you say so.
 
 ## Managing Groups
 
@@ -122,22 +122,21 @@ group list` shows every Group with its Accounts and the rules in force for it.
 Accounts rather than quietly orphaning them.
 
 `perch group rename <old> <new>` changes what a Group is called and **keeps
-everything it carries**: its Overrides, the Accounts in it, and the cooldown the
+everything it carries**: its Settings, the Accounts in it, and the cooldown the
 watcher is pacing it by. Doing it by hand would be an add, a move per Account
-and a remove — and a freshly declared Group declares nothing, so every rule you
-had set on the old one would have to be typed again.
+and a remove — and a freshly declared Group starts at the compiled-in defaults,
+so every rule you had set on the old one would have to be typed again.
 
 ```
 $ perch group rename work day-job
 Renamed the Group `work` to `day-job`, which still holds 3 Accounts.
   Strategy     soonest-reset
   Watcher      off (would act at 55%, onto 45% or better, at most every 15m)
-  Overrides    strategy, watcher-threshold-percent
 ```
 
-The `Overrides` line is the point: those two Settings were said about this Group,
-and they are still said about it afterwards. A rename by hand would have left
-them behind on a Group that no longer exists.
+The rules printed under it are the point: they were said about this Group, and
+they are still said about it afterwards. A rename by hand would have left them
+behind on a Group that no longer exists.
 
 A name that an Alias or another Group already answers to is refused before
 anything is written, because Aliases and Group names share one namespace.

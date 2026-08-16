@@ -632,17 +632,6 @@ pub fn config_set(host: &FakeHost, words: &[&str]) -> (perch::Result<()>, String
     )
 }
 
-/// `perch config unset <words...>` — a Scope and a key, which clears that
-/// Scope's Override so it Inherits Global again.
-pub fn config_unset(host: &FakeHost, words: &[&str]) -> (perch::Result<()>, String) {
-    run_config(
-        host,
-        ConfigCommand::Unset {
-            words: worded(words),
-        },
-    )
-}
-
 /// `perch config get [<words...>]`.
 pub fn config_get(host: &FakeHost, words: &[&str]) -> (perch::Result<()>, String) {
     run_config(

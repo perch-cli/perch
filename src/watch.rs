@@ -592,7 +592,7 @@ pub struct Considered {
 /// on the decision line instead.
 pub fn set_aside(
     policy: &Policy,
-    scope: &crate::cycle::Scope,
+    scope: &crate::registry::Scope,
     considered: &[Considered],
 ) -> crate::cycle::SetAside {
     let mut emails = Vec::new();
@@ -1401,8 +1401,8 @@ mod tests {
         Policy::of(&Settings::default())
     }
 
-    fn work() -> crate::cycle::Scope {
-        crate::cycle::Scope::Group("work".to_string())
+    fn work() -> crate::registry::Scope {
+        crate::registry::Scope::Group("work".to_string())
     }
 
     /// The Group's default, and the two constants read off it (ADR 0046).

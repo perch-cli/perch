@@ -19,7 +19,7 @@
 | `perch watcher install\|uninstall\|status [--json]` | have the machine run the watcher for you, starting at login |
 | `perch run <target> [-- <command>]` | launch Claude Code as an Account, in this terminal alone |
 | `perch group add\|move\|rename\|remove\|list` | declare Groups and move Accounts between them |
-| `perch config set\|unset\|get` | the rules Perch chooses Accounts by |
+| `perch config set\|get` | the rules Perch chooses Accounts by, one Scope at a time |
 | `perch disable <target>` / `perch enable <target>` | keep an Account out of Cycling, or put it back |
 | `perch relogin <target>` | repair an Account whose Credential stopped working |
 | `perch remove <target> [--yes]` | give up an Account |

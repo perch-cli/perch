@@ -19,10 +19,10 @@ use perch::host::fake::Effect;
 use perch::host::{FakeHost, Host};
 use perch::registry::Active;
 
-/// Turns on the global setting that says the ungrouped Accounts are
-/// interchangeable (ADR 0017), the way a user turns it on.
+/// Declares the ungrouped Accounts interchangeable (ADR 0017), the way a user
+/// declares it.
 fn ungrouped_declared_interchangeable(host: &FakeHost) {
-    config_set(host, &["cycle-ungrouped", "true"])
+    config_set(host, &["ungrouped", "interchangeable", "true"])
         .0
         .expect("the ungrouped Accounts are declared interchangeable");
 }
@@ -467,7 +467,7 @@ fn the_setting_that_lets_ungrouped_accounts_cycle_is_off_until_it_is_turned_on()
     let host = machine_with_two_accounts();
 
     assert!(
-        !registry_of(&host).global.cycle_ungrouped,
+        !registry_of(&host).ungrouped.interchangeable,
         "being ungrouped is the absence of a declaration that Accounts are \
          interchangeable, not a weaker form of one (ADR 0017)"
     );
@@ -636,7 +636,7 @@ fn credentials_written(host: &FakeHost) -> usize {
 /// the only behaviour in Perch a person could not configure, and this is the
 /// test that it has stopped being one.
 #[test]
-fn cycling_among_ungrouped_accounts_reads_the_strategy_global_carries() {
+fn cycling_among_ungrouped_accounts_reads_the_strategy_that_scope_holds() {
     let host = machine_with_three_accounts();
     ungrouped_declared_interchangeable(&host);
     // Where the two Strategies disagree: the emptiest Account is not the one
@@ -662,12 +662,12 @@ fn cycling_among_ungrouped_accounts_reads_the_strategy_global_carries() {
     assert_eq!(
         active(&host).as_deref(),
         Some(THIRD_EMAIL),
-        "Global's default is still the most room left: {printed}"
+        "the compiled-in default is still the most room left: {printed}"
     );
 
-    config_set(&host, &["strategy", "soonest-reset"])
+    config_set(&host, &["ungrouped", "strategy", "soonest-reset"])
         .0
-        .expect("every Setting exists at Global");
+        .expect("`ungrouped` addresses the Scope, like every other one");
     run_switch(&host, EMAIL).0.expect("back to the full one");
 
     let (result, printed) = run_cycle(&host);
@@ -675,36 +675,6 @@ fn cycling_among_ungrouped_accounts_reads_the_strategy_global_carries() {
     assert_eq!(
         active(&host).as_deref(),
         Some(SECOND_EMAIL),
-        "and the Accounts in no Group follow it: {printed}"
+        "and the Scope Cycles by what it was told: {printed}"
     );
-}
-
-/// And the Scope may say otherwise, like any other.
-#[test]
-fn the_ungrouped_scope_may_override_the_strategy_it_cycles_by() {
-    let host = machine_with_three_accounts();
-    ungrouped_declared_interchangeable(&host);
-    observed(&host, EMAIL, vec![window("5-hour", 96.0)]);
-    observed(
-        &host,
-        SECOND_EMAIL,
-        vec![resetting(
-            "5-hour",
-            70.0,
-            host.now() + Duration::minutes(20),
-        )],
-    );
-    observed(
-        &host,
-        THIRD_EMAIL,
-        vec![resetting("5-hour", 10.0, host.now() + Duration::hours(4))],
-    );
-    config_set(&host, &["ungrouped", "strategy", "soonest-reset"])
-        .0
-        .expect("`ungrouped` addresses the Scope");
-
-    let (result, printed) = run_cycle(&host);
-
-    result.expect("there is somewhere to go");
-    assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL), "{printed}");
 }

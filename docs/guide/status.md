@@ -101,8 +101,9 @@ running.
 The Accounts in no Group are the exception: they are listed in the order they
 were added rather than ranked, because nothing has declared them
 interchangeable and a bare `perch switch` refuses among them (ADR 0017). Their
-Headroom is still shown as the figure it is. `perch config set cycle-ungrouped
-true` is the declaration, and once it is made they are ranked like any Group.
+Headroom is still shown as the figure it is. `perch config set ungrouped
+interchangeable true` is the declaration, and once it is made they are ranked
+like any Group.
 
 An Account nobody has ever read a figure for says `never observed` rather than
 `0%` — no figure and plenty of room are opposite pieces of advice. A

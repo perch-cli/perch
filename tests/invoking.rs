@@ -31,7 +31,7 @@ use perch::error::{
     EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_NOT_UNDERSTOOD, EXIT_NOTHING_TO_DO, EXIT_OK,
 };
 use perch::probe::Identity;
-use perch::registry::{Account, Active, Overrides, Registry};
+use perch::registry::{Account, Active, Registry, Settings};
 
 /// The Account every scratch machine holds, and the Group declared beside it.
 const SOMEONE: &str = "someone@example.com";
@@ -115,7 +115,7 @@ impl Scratch {
         registry.active = Active::Settled(SOMEONE.to_string());
         registry
             .groups
-            .insert(GROUP.to_string(), Overrides::default());
+            .insert(GROUP.to_string(), Settings::default());
 
         fs::create_dir_all(machine.home()).expect("a scratch home can be made");
         fs::write(
@@ -233,12 +233,12 @@ fn the_code_a_command_ended_as_is_what_the_process_exits_with() {
         (&["group", "add", GROUP], EXIT_CONFLICT),
         (&["alias", GROUP, SOMEONE], EXIT_CONFLICT),
         (
-            &["config", "set", "watcher-threshold-percent", "500"],
+            &["config", "set", GROUP, "watcher-threshold-percent", "500"],
             EXIT_INVALID,
         ),
         (
             &["config", "set", "nothing-of-the-sort", "true"],
-            EXIT_INVALID,
+            EXIT_NOT_FOUND,
         ),
     ] {
         let ran = perch(&machine, line);
@@ -413,18 +413,19 @@ fn the_status_arm_answers_about_one_account_and_each_flag_is_its_own() {
     assert_eq!(document["active"]["email"], SOMEONE, "{}", ran.out);
 }
 
-/// The three Config arms, which are told apart by what they do to a Scope's
-/// Override: a `set` that reached `get` would change nothing, and an `unset`
-/// that reached `set` would leave the Override it was asked to clear.
+/// The two Config arms, which are told apart by what they do to a Scope: a
+/// `set` that reached `get` would change nothing, and a `get` that reached
+/// `set` would report a value nobody asked for.
 #[test]
-fn the_config_arms_read_a_setting_change_one_and_clear_one() {
+fn the_config_arms_read_a_setting_and_change_one() {
     let machine = Scratch::holding_an_account("config");
 
     let ran = perch(&machine, &["config", "get"]);
 
     assert_eq!(ran.code, EXIT_OK, "{}", ran.err);
     assert!(
-        ran.out.contains("watcher-threshold-percent 80"),
+        ran.out
+            .contains(&format!("{GROUP} watcher-threshold-percent 80")),
         "{}",
         ran.out
     );
@@ -440,20 +441,8 @@ fn the_config_arms_read_a_setting_change_one_and_clear_one() {
 
     assert_eq!(ran.code, EXIT_OK, "{}", ran.err);
     assert!(
-        ran.out.contains("watcher-may-act true"),
-        "the Group Overrides Global:\n{}",
-        ran.out
-    );
-
-    let ran = perch(&machine, &["config", "unset", GROUP, "watcher-may-act"]);
-
-    assert_eq!(ran.code, EXIT_OK, "{}", ran.err);
-
-    let ran = perch(&machine, &["config", "get", GROUP]);
-
-    assert!(
-        ran.out.contains("watcher-may-act false"),
-        "and Inherits it again once the Override is cleared:\n{}",
+        ran.out.contains(&format!("{GROUP} watcher-may-act true")),
+        "the Group holds what was said about it:\n{}",
         ran.out
     );
 }

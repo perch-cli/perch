@@ -59,22 +59,18 @@ fn a_declared_group_survives_a_restart() {
     assert!(result.is_ok(), "{:?}", result.err());
     assert!(printed.contains("work"), "{printed}");
 
-    let config = registry_of(&host)
+    let config = *registry_of(&host)
         .group("work")
-        .expect("the Group is written down, not derived from the Accounts in it")
-        .clone();
+        .expect("the Group is written down, not derived from the Accounts in it");
     assert_eq!(
-        config.strategy, None,
-        "a fresh Group Inherits every Setting"
-    );
-    assert!(
-        config.is_empty(),
-        "a fresh Group declares nothing of its own and Inherits Global — so a \
-         threshold set at Global afterwards reaches it too (ADR 0002, amended)"
+        config,
+        perch::registry::Settings::default(),
+        "a fresh Group holds the compiled-in defaults, and nothing said about \
+         another Scope reaches it (ADR 0051)"
     );
     assert!(
         !registry_of(&host)
-            .in_force(&perch::registry::Scope::Group("work".to_string()))
+            .settings(&perch::registry::Scope::Group("work".to_string()))
             .watcher_may_act,
         "unattended switching is off until the user says otherwise (ADR 0002)"
     );
@@ -400,8 +396,8 @@ fn group_list_shows_every_group_with_its_accounts_and_its_configuration() {
 /// about them, asserted together so the two cannot drift apart again.
 ///
 /// `watcher-may-act` is not the whole of whether the watcher acts there:
-/// `cycle-ungrouped` is a separate declaration that those Accounts are
-/// interchangeable at all (ADR 0017). Read from the permission alone, the
+/// `interchangeable` is a separate declaration that those Accounts are a set at
+/// all (ADR 0017). Read from the permission alone, the
 /// summary announced "may switch unattended at 80%" about a Scope `perch
 /// watcher run` refuses outright — and it printed the same Cycling line
 /// whichever way the gate was set, so neither direction was falsifiable.
@@ -420,7 +416,7 @@ fn what_group_list_says_about_ungrouped_cycling_is_what_the_watcher_does() {
         "nothing may claim unattended switching the watcher declines:\n{printed}"
     );
     assert!(
-        printed.contains("cycle-ungrouped"),
+        printed.contains("`interchangeable` is false"),
         "and the one Setting gating the whole Scope is readable:\n{printed}"
     );
 
@@ -434,7 +430,7 @@ fn what_group_list_says_about_ungrouped_cycling_is_what_the_watcher_does() {
     );
 
     // And the other way, so the line is falsifiable in both directions.
-    config_set(&host, &["cycle-ungrouped", "true"])
+    config_set(&host, &["ungrouped", "interchangeable", "true"])
         .0
         .expect("they are declared interchangeable");
     let (_, now) = run_group(&host, GroupCommand::List);
@@ -461,7 +457,7 @@ fn group_list_says_so_when_nothing_has_been_declared() {
 fn a_stored_configuration_outside_its_range_is_refused_rather_than_read_as_something_else() {
     let host = logged_in_machine().with_file(
         REGISTRY_PATH,
-        r#"{"version":1,"accounts":[],"groups":{"work":{"strategy":"most-headroom","watcher_may_act":true,"watcher_threshold_percent":150}}}"#,
+        r#"{"version":2,"accounts":[],"groups":{"work":{"strategy":"most-headroom","watcher_may_act":true,"watcher_threshold_percent":150}}}"#,
     );
 
     let (result, _) = run_group(&host, GroupCommand::List);
@@ -479,7 +475,7 @@ fn a_stored_configuration_outside_its_range_is_refused_rather_than_read_as_somet
 fn a_stored_strategy_perch_does_not_know_is_refused() {
     let host = logged_in_machine().with_file(
         REGISTRY_PATH,
-        r#"{"version":1,"accounts":[],"groups":{"work":{"strategy":"whatever-is-cheapest"}}}"#,
+        r#"{"version":2,"accounts":[],"groups":{"work":{"strategy":"whatever-is-cheapest"}}}"#,
     );
 
     let (result, _) = run_group(&host, GroupCommand::List);
@@ -611,14 +607,14 @@ fn a_rename_keeps_the_cooldown_the_watcher_is_pacing_by() {
     );
 }
 
-/// The Overrides are the whole point: what a rename by hand loses is precisely
+/// The Settings are the whole point: what a rename by hand loses is precisely
 /// the part somebody deliberately said.
 #[test]
-fn a_rename_keeps_the_overrides_the_group_declared() {
+fn a_rename_keeps_the_settings_the_group_holds() {
     let host = three_accounts_in_one_group();
     config_set(&host, &["work", "watcher-threshold-percent", "55"])
         .0
-        .expect("the Override is set");
+        .expect("the Setting is said about the Group");
 
     let (result, printed) = rename_group(&host, "work", "day-job");
 
@@ -629,7 +625,7 @@ fn a_rename_keeps_the_overrides_the_group_declared() {
             .group("day-job")
             .expect("the Group is there under its new name")
             .watcher_threshold_percent,
-        Some(55),
+        55,
         "the rules somebody set came with the name"
     );
     assert!(
@@ -745,7 +741,7 @@ fn recapitalising_a_group_is_a_rename_rather_than_a_collision_with_itself() {
             .group("Work")
             .expect("the Group is there")
             .watcher_threshold_percent,
-        Some(55),
+        55,
         "and it kept what it carries"
     );
     assert_eq!(

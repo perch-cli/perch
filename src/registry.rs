@@ -17,9 +17,16 @@ use crate::host::{Host, HostError};
 use crate::lock;
 use crate::probe::{Identity, LockSpec};
 
-/// The version this build writes, and the only one there has ever been. A
-/// registry from the future is refused rather than silently misread.
-pub const CURRENT_VERSION: u32 = 1;
+/// The version this build writes. A registry from the future is refused rather
+/// than silently misread; one from the past is not read at all, because nobody
+/// is running Perch yet and there is nothing to migrate.
+///
+/// Moved to `2` when every Scope came to hold its own Settings (ADR 0051):
+/// `groups` stopped being a map of Overrides, `ungrouped` absorbed the record
+/// that was `global`, and `cycle_ungrouped` became `interchangeable`. The guard
+/// that refuses a newer registry is only worth having if the number moves when
+/// the shape does.
+pub const CURRENT_VERSION: u32 = 2;
 
 /// One Quota Window's Utilization, as observed at a point in time (ADR 0015).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -247,9 +254,12 @@ pub fn a_percentage() -> String {
     format!("a whole number between 0 and {MAX_PERCENTAGE}")
 }
 
-/// Every Setting there is, all of them set: what Global holds, and what any
-/// narrower Scope resolves to once its Overrides have been laid over it
-/// (ADR 0002, amended).
+/// Every Setting there is, all of them set: what one Scope holds (ADR 0051).
+///
+/// A Scope — each Group, and the Accounts in no Group taken together — holds
+/// its own full set. There is nothing above it for a value to fall back to, so
+/// a Setting nobody has said anything about is the compiled-in default rather
+/// than somebody else's value.
 ///
 /// Two of these are the watcher's, and only one of the two is a pace: how full
 /// is too full, which is the single question in the loop that a person's
@@ -257,13 +267,17 @@ pub fn a_percentage() -> String {
 /// loop paces itself by are not among them — the interval it Refreshes at, the
 /// cooldown between two Switches and the margin under where one may land are
 /// all derived rather than preferred, and live in [`crate::watch`].
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
     pub strategy: Strategy,
     /// Whether the watcher may Switch within this Scope unattended. Off unless
     /// the user says otherwise: nothing changes underneath someone because they
     /// did not say it could (ADR 0002).
+    ///
+    /// Said about the Scope it grants and nowhere else (ADR 0051). A grant that
+    /// reached a Scope by falling through from somewhere wider would authorise
+    /// Groups nobody had said anything about — including ones not yet declared.
     pub watcher_may_act: bool,
     /// The Utilization the watcher would act at, as a percentage.
     pub watcher_threshold_percent: u8,
@@ -288,78 +302,11 @@ impl Settings {
     /// the script that mistyped one is the reader, and being told only that it
     /// was wrong leaves it to guess twice.
     pub fn validate(&self, scope: &Scope) -> Result<()> {
-        Overrides::from(self.clone()).validate(scope)
-    }
-}
-
-/// What one narrower Scope declares for itself: an Override per Setting it
-/// wants different, and nothing at all for the ones it Inherits.
-///
-/// Absent is Inherit, and Inherit is a state rather than an absence — a Scope
-/// holding no Override tracks Global as Global changes, which is what
-/// distinguishes it from an Override that happens to equal Global's value
-/// today. The two look identical until the display says which, so every field
-/// here is an `Option` rather than a value with a flag beside it: there is no
-/// way to spell "Overridden, but with nothing in it".
-///
-/// Exactly one layer deep. An Account carries none of these, because every
-/// Setting there is describes how Perch chooses *between* Accounts and a rule
-/// for choosing has nothing to say to a set of one.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct Overrides {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub strategy: Option<Strategy>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub watcher_may_act: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub watcher_threshold_percent: Option<u8>,
-}
-
-impl From<Settings> for Overrides {
-    /// Every Setting Overridden at once, for the one caller that has values
-    /// rather than choices: checking Global's own numbers against the same
-    /// ranges a Scope's Overrides are checked against.
-    fn from(settings: Settings) -> Overrides {
-        Overrides {
-            strategy: Some(settings.strategy),
-            watcher_may_act: Some(settings.watcher_may_act),
-            watcher_threshold_percent: Some(settings.watcher_threshold_percent),
-        }
-    }
-}
-
-impl Overrides {
-    /// Whether this Scope declares nothing of its own — Inheriting every
-    /// Setting there is.
-    pub fn is_empty(&self) -> bool {
-        *self == Overrides::default()
-    }
-
-    /// Global's values with this Scope's Overrides laid over them: the Settings
-    /// actually in force.
-    pub fn over(&self, global: &Settings) -> Settings {
-        Settings {
-            strategy: self.strategy.unwrap_or(global.strategy),
-            watcher_may_act: self.watcher_may_act.unwrap_or(global.watcher_may_act),
-            watcher_threshold_percent: self
-                .watcher_threshold_percent
-                .unwrap_or(global.watcher_threshold_percent),
-        }
-    }
-
-    /// The same range [`Settings::validate`] states, asked of the value this
-    /// Scope actually declares. A Setting it Inherits is Global's to be right
-    /// about, and is checked there.
-    pub fn validate(&self, scope: &Scope) -> Result<()> {
-        if self
-            .watcher_threshold_percent
-            .is_some_and(|held| held > MAX_PERCENTAGE)
-        {
+        if self.watcher_threshold_percent > MAX_PERCENTAGE {
             return Err(out_of_range(
                 scope,
                 "watcher-threshold-percent",
-                self.watcher_threshold_percent.expect("just read"),
+                self.watcher_threshold_percent,
                 &a_percentage(),
             ));
         }
@@ -380,18 +327,18 @@ fn out_of_range(
     ))
 }
 
-/// The set of Accounts a Setting governs: Global, the Ungrouped Accounts, or
-/// one Group.
+/// The set of Accounts a Setting governs, and the set a Cycle may look within:
+/// one Group, or the Accounts in no Group taken together.
 ///
-/// The only levels at which a Setting means anything. Deliberately not
-/// [`crate::cycle::Scope`], which is the narrower idea a Cycle is taken within
-/// and must never be handed a "every Account there is" — sharing the type would
-/// put Global within reach of the ranking, which is the one thing ADR 0002 is
-/// about.
+/// The only levels at which a Setting means anything. One type for both ideas,
+/// because they are one idea: a Cycle never leaves the Scope it started in
+/// (ADR 0002), and a Setting is said about exactly the Scope it governs
+/// (ADR 0051). They were two types while a Config had a layer above every
+/// Scope, on the grounds that sharing one would put "every Account there is"
+/// within reach of the ranking. There is no such value to be handed any more,
+/// so that is a mistake nobody can make.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Scope {
-    /// Every Account there is, and the Config every other Scope falls back to.
-    Global,
     /// The Accounts in no Group, taken as one Scope (ADR 0017, amended). Not a
     /// Group and never one: a Group is a declaration somebody made, and this is
     /// the absence of one.
@@ -401,24 +348,29 @@ pub enum Scope {
 }
 
 impl Scope {
-    /// What the Scope is called on screen and in a refusal — the words
-    /// `CONTEXT.md` gives them.
-    pub fn title(&self) -> &str {
+    /// The word that addresses this Scope on a command line, and the word it is
+    /// recorded under wherever something is kept per Scope — what the last
+    /// scheduled Check did, for one.
+    ///
+    /// A Group cannot be called `ungrouped` ([`validate_name`]), so the two can
+    /// never collide.
+    pub fn word(&self) -> &str {
         match self {
-            Scope::Global => "Global",
-            Scope::Ungrouped => "Ungrouped",
+            Scope::Ungrouped => UNGROUPED,
             Scope::Group(name) => name,
         }
     }
 
-    /// The word that addresses this Scope on a command line, or `None` for
-    /// Global — which is addressed by naming no Scope at all, because that is
-    /// what makes the number of words the layer a value belongs to.
-    pub fn word(&self) -> Option<&str> {
+    /// The Accounts this Scope holds.
+    ///
+    /// The same set whoever is asking: what a Cycle may land on, and what a
+    /// Group has left to draw on ([`crate::reserve`]) is measured over. A second
+    /// idea of which Accounts those are is how the figure on screen comes to
+    /// describe a different set from the one that gets chosen.
+    pub fn accounts<'a>(&self, registry: &'a Registry) -> Vec<&'a Account> {
         match self {
-            Scope::Global => None,
-            Scope::Ungrouped => Some(UNGROUPED),
-            Scope::Group(name) => Some(name),
+            Scope::Ungrouped => registry.ungrouped_accounts(),
+            Scope::Group(name) => registry.accounts_in(name),
         }
     }
 
@@ -428,7 +380,6 @@ impl Scope {
     /// come to name the same set differently.
     pub fn within(&self) -> String {
         match self {
-            Scope::Global => "in any Scope that Inherits this".to_string(),
             Scope::Ungrouped => "among the Accounts in no Group".to_string(),
             Scope::Group(name) => format!("within Group `{name}`"),
         }
@@ -437,9 +388,29 @@ impl Scope {
     /// The Scope as the subject of a sentence about what it holds.
     pub fn described(&self) -> String {
         match self {
-            Scope::Global => "Global".to_string(),
             Scope::Ungrouped => "The Ungrouped Scope".to_string(),
             Scope::Group(name) => format!("Group `{name}`"),
+        }
+    }
+
+    /// The Scope as the middle of a sentence about the Accounts in it: "every
+    /// Account in {}".
+    ///
+    /// Not [`Scope::described`], which is a subject and reads as "The Ungrouped
+    /// Scope" — true standing alone and ungrammatical the moment "in" is said
+    /// before it.
+    pub fn place(&self) -> String {
+        match self {
+            Scope::Ungrouped => "no Group".to_string(),
+            Scope::Group(_) => self.described(),
+        }
+    }
+
+    /// What a Cycle is about to do, said before it does it.
+    pub fn announcement(&self) -> String {
+        match self {
+            Scope::Ungrouped => "Cycling among the Accounts in no Group.".to_string(),
+            Scope::Group(name) => format!("Cycling within Group `{name}`."),
         }
     }
 }
@@ -454,18 +425,19 @@ pub fn means_ungrouped(name: &str) -> bool {
     same_name(name, UNGROUPED)
 }
 
-/// The word people reach for when they mean the Scope every other one falls
-/// back to.
+/// The word people reach for when they mean every Scope at once.
 ///
-/// Global is addressed by naming no Scope at all — `perch config set <key>
-/// <value>` — so unlike [`UNGROUPED`] this word addresses nothing. That is
-/// exactly why a Group may not take it: `perch config set global strategy …`
-/// is what somebody types when they mean Global, and a Group answering to the
-/// name would take the value silently, leaving Global untouched and the person
-/// convinced they had set it.
+/// There is no such Scope: every Setting is said about the one Scope it governs
+/// and there is nothing above them (ADR 0051). So unlike [`UNGROUPED`] this
+/// word addresses nothing, and a Group may not take it — `perch config set
+/// global watcher-may-act true` is somebody saying *everywhere*, and a Group
+/// answering to the name would take that quietly and leave every other Scope as
+/// it was. Kept reserved so the refusal is where they find out Perch has no
+/// everywhere-layer, which is a better place to learn it than from a Setting
+/// that appeared to take.
 pub const GLOBAL: &str = "global";
 
-/// Whether a name is the one people mean Global by.
+/// Whether a name is the one people mean every Scope at once by.
 pub fn means_global(name: &str) -> bool {
     same_name(name, GLOBAL)
 }
@@ -497,27 +469,27 @@ pub struct Checked {
     pub switched_at: DateTime<Utc>,
 }
 
-/// What Global holds: every Setting, as the value that applies until something
-/// narrower is said, and the one Setting that has no narrower form.
+/// What the Ungrouped Scope holds: the declaration that those Accounts are
+/// interchangeable at all, and the Settings governing how they are Cycled.
 ///
-/// Global's own values are always set. There is nothing above Global to Inherit
-/// from, so clearing here is not a state that exists — which is why this is
-/// [`Settings`] rather than [`Overrides`].
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+/// The one Scope whose record is not a bare [`Settings`], because it is the one
+/// Scope that has to say it is a Scope at all. A Group carries no such line: a
+/// Group **is** that declaration (ADR 0002), and printing one against it would
+/// be a line `perch config set` could not take back.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub struct GlobalConfig {
-    /// Whether bare `perch switch` may Cycle among the Accounts in no Group.
+pub struct UngroupedConfig {
+    /// Whether the Accounts in no Group have been declared interchangeable —
+    /// what a bare `perch switch` and the watcher both need before either may
+    /// move between them.
     ///
     /// Off unless the user says otherwise, and deliberately so: being ungrouped
     /// is the absence of a declaration that Accounts are interchangeable, not a
     /// weaker form of one. Cycling freely here would move someone from their
     /// work subscription onto their personal one without their ever having said
-    /// the two were substitutable.
-    ///
-    /// Global's alone, with no per-Scope form, because the Accounts it governs
-    /// have no Group to carry one (ADR 0017).
-    pub cycle_ungrouped: bool,
-    /// The defaults every other Scope falls back to.
+    /// the two were substitutable (ADR 0017).
+    pub interchangeable: bool,
+    /// The Settings this Scope holds, like every other Scope.
     pub settings: Settings,
 }
 
@@ -638,18 +610,20 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
             kind.article()
         )));
     }
-    // The third word that already addresses something, and the one that
-    // addresses it by *absence*. `perch config set global strategy …` is what
-    // somebody types when they mean Global; today it means no Scope Perch
-    // knows, and the refusal helpfully offers `perch group add global`. Taking
-    // that offer makes every later `perch config set global …` write a Group
-    // Override while Global stays as it was — a Setting the person believes
-    // they changed and did not. Refused here so the offer can never be made.
+    // The third word that already means something, and the one that means
+    // something Perch does not have. `perch config set global watcher-may-act
+    // true` is somebody saying *everywhere* — and there is no everywhere, since
+    // every Setting is said about the one Scope it governs (ADR 0051). Left to
+    // fall through it would be answered with "Declare it with `perch group add
+    // global`", and a Group by that name would then take every later `perch
+    // config set global …` quietly, leaving every other Scope as it was.
+    // Refused here so the offer can never be made, and so the refusal is where
+    // somebody learns there is no such layer.
     if means_global(name) {
         return Err(PerchError::Invalid(format!(
-            "`{name}` is how people say the Scope every other one falls back to, \
-             so it cannot also be {}. Global is addressed by naming no Scope at \
-             all: `perch config set <key> <value>`.",
+            "`{name}` is how people say every Scope at once, so it cannot also \
+             be {}. There is no such Scope: every Setting is said about the one \
+             it governs, and `perch config set <scope> <key> <value>` says it.",
             kind.article()
         )));
     }
@@ -821,20 +795,18 @@ pub struct Registry {
     /// Alias to Account email. Empty until aliases land.
     #[serde(default)]
     pub aliases: BTreeMap<String, String>,
-    /// The Groups the user has declared, with the Overrides each one holds. A
+    /// The Groups the user has declared, with the Settings each one holds. A
     /// Group exists here even when it holds no Accounts: it is a statement the
     /// user made, not a summary of where the Accounts happen to be — and it
-    /// exists here holding nothing, which is a Group that Inherits everything.
+    /// exists here holding the compiled-in defaults, which is a Group nobody
+    /// has said anything about yet.
     #[serde(default)]
-    pub groups: BTreeMap<String, Overrides>,
-    /// What the Accounts in no Group declare for themselves, taken as one Scope
-    /// (ADR 0017, amended). Not a Group and never one; it is here rather than
-    /// under a reserved key in `groups` so that nothing can walk it as one.
-    #[serde(default, skip_serializing_if = "Overrides::is_empty")]
-    pub ungrouped: Overrides,
-    /// The Config every other Scope falls back to.
+    pub groups: BTreeMap<String, Settings>,
+    /// What the Accounts in no Group hold, taken as one Scope (ADR 0017,
+    /// amended). Not a Group and never one; it is here rather than under a
+    /// reserved key in `groups` so that nothing can walk it as one.
     #[serde(default)]
-    pub global: GlobalConfig,
+    pub ungrouped: UngroupedConfig,
     /// What the last scheduled Check did in each Group. Written by `perch
     /// watcher check` and by nothing else, and absent from the file until one
     /// of them Switches.
@@ -850,8 +822,7 @@ impl Default for Registry {
             accounts: Vec::new(),
             aliases: BTreeMap::new(),
             groups: BTreeMap::new(),
-            ungrouped: Overrides::default(),
-            global: GlobalConfig::default(),
+            ungrouped: UngroupedConfig::default(),
             checks: BTreeMap::new(),
         }
     }
@@ -935,15 +906,14 @@ impl Registry {
         self.groups.keys().map(String::as_str)
     }
 
-    pub fn group(&self, name: &str) -> Option<&Overrides> {
+    pub fn group(&self, name: &str) -> Option<&Settings> {
         self.groups.get(name)
     }
 
-    /// Every Scope a Setting can be said at, in the order they are offered:
-    /// Global first because it is what the rest fall back to, then the
+    /// Every Scope a Setting can be said at, in the order they are offered: the
     /// Ungrouped Accounts, then each Group as it was declared.
     pub fn scopes(&self) -> Vec<Scope> {
-        let mut every = vec![Scope::Global, Scope::Ungrouped];
+        let mut every = vec![Scope::Ungrouped];
         every.extend(
             self.group_names()
                 .map(|name| Scope::Group(name.to_string())),
@@ -951,36 +921,25 @@ impl Registry {
         every
     }
 
-    /// What a Scope declares for itself, or `None` for Global — which declares
-    /// nothing, because it holds values rather than Overrides, and for a Group
-    /// Perch does not hold.
-    pub fn overrides(&self, scope: &Scope) -> Option<&Overrides> {
+    /// The Settings a Scope holds (ADR 0051).
+    ///
+    /// A lookup rather than a cascade: there is nothing above a Scope, so this
+    /// walks no chain — there is no chain. A Group Perch does not hold is not a
+    /// Scope at all, and answers with the compiled-in defaults rather than with
+    /// somebody else's values.
+    pub fn settings(&self, scope: &Scope) -> Settings {
         match scope {
-            Scope::Global => None,
-            Scope::Ungrouped => Some(&self.ungrouped),
-            Scope::Group(name) => self.groups.get(name),
+            Scope::Ungrouped => self.ungrouped.settings,
+            Scope::Group(name) => self.groups.get(name).copied().unwrap_or_default(),
         }
     }
 
     /// The same, to write through. A Group Perch does not hold has nothing to
     /// write to: declaring one is `declare_group`'s.
-    pub fn overrides_mut(&mut self, scope: &Scope) -> Option<&mut Overrides> {
+    pub fn settings_mut(&mut self, scope: &Scope) -> Option<&mut Settings> {
         match scope {
-            Scope::Global => None,
-            Scope::Ungrouped => Some(&mut self.ungrouped),
+            Scope::Ungrouped => Some(&mut self.ungrouped.settings),
             Scope::Group(name) => self.groups.get_mut(name),
-        }
-    }
-
-    /// The Settings actually in force for a Scope: Global's, with whatever that
-    /// Scope Overrides laid over them (ADR 0002, amended).
-    ///
-    /// Exactly two layers deep, so this is one lookup and one lay-over rather
-    /// than a walk up a chain — there is no chain.
-    pub fn in_force(&self, scope: &Scope) -> Settings {
-        match self.overrides(scope) {
-            Some(overrides) => overrides.over(&self.global.settings),
-            None => self.global.settings.clone(),
         }
     }
 
@@ -1025,10 +984,12 @@ impl Registry {
     /// something else.
     pub fn declare_group(&mut self, name: &str) -> Result<()> {
         self.refuse_a_name_nothing_may_answer_to(NameKind::Group, name, None)?;
-        // Holding nothing, which is a Group that Inherits every Setting there
-        // is. A freshly declared Group tracks Global rather than copying it, so
-        // a threshold set at Global afterwards reaches it too.
-        self.groups.insert(name.to_string(), Overrides::default());
+        // At the compiled-in defaults, which is what every Setting means until
+        // somebody says otherwise about this Group. Nothing said elsewhere
+        // reaches it — including a `watcher-may-act true` said about another
+        // Scope, which is the whole point of a grant being said about the Scope
+        // it grants (ADR 0051).
+        self.groups.insert(name.to_string(), Settings::default());
         Ok(())
     }
 
@@ -1112,7 +1073,7 @@ impl Registry {
     /// that knows it.
     ///
     /// Three things move with the name, and they are the whole of the change:
-    /// the Overrides the Group declares, the Accounts that claim it, and what
+    /// the Settings the Group holds, the Accounts that claim it, and what
     /// the last scheduled Check left behind. That last one is the difference
     /// between this and a remove and an add — [`forget_group`](Self::forget_group)
     /// drops the Check record because a Group declared under the same name later
@@ -1122,11 +1083,11 @@ impl Registry {
     pub fn rename_group(&mut self, held: &str, to: &str) -> Result<()> {
         self.refuse_a_name_nothing_may_answer_to(NameKind::Group, to, Some(held))?;
 
-        let overrides = self
+        let settings = self
             .groups
             .remove(held)
             .expect("the caller established the Group is declared");
-        self.groups.insert(to.to_string(), overrides);
+        self.groups.insert(to.to_string(), settings);
         for account in &mut self.accounts {
             if account.group.as_deref() == Some(held) {
                 account.group = Some(to.to_string());
@@ -1730,26 +1691,11 @@ fn no_such_account(email: &str) -> PerchError {
 /// One function, so what an Import will accept and what a load will accept
 /// cannot differ.
 pub fn validate(registry: &Registry) -> Result<()> {
-    // Global's own values as well as every Scope's Overrides. Global is where a
-    // Setting nobody has Overridden is read from, so a range it breaks is one
-    // every Scope in the registry inherits — the widest way in, and the one
-    // that was not being checked at all while Global held a single bool.
-    let declared = std::iter::once((
-        Scope::Global,
-        Overrides::from(registry.global.settings.clone()),
-    ))
-    .chain(std::iter::once((
-        Scope::Ungrouped,
-        registry.ungrouped.clone(),
-    )))
-    .chain(
-        registry
-            .groups
-            .iter()
-            .map(|(name, held)| (Scope::Group(name.clone()), held.clone())),
-    );
-    for (scope, held) in declared {
-        held.validate(&scope)?;
+    // Every Scope, and every Scope is all of them: with no layer above, a
+    // Setting is read from the Scope that holds it and nowhere else, so one
+    // walk over the Scopes is the whole of the check.
+    for scope in registry.scopes() {
+        registry.settings(&scope).validate(&scope)?;
     }
 
     // The Group *names* an Account claims, for the same reason.
@@ -2095,7 +2041,7 @@ fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
             }
             Some(_) => {}
             None => {
-                registry.groups.insert(name, Overrides::default());
+                registry.groups.insert(name, Settings::default());
             }
         }
     }
@@ -2540,7 +2486,7 @@ mod tests {
             .insert("work".to_string(), "someone@example.com".to_string());
         registry
             .groups
-            .insert("Work".to_string(), Overrides::default());
+            .insert("Work".to_string(), Settings::default());
 
         let refused = registry
             .refuse_a_name_nothing_may_answer_to(NameKind::Alias, "Work", Some("work"))
@@ -2680,10 +2626,10 @@ mod tests {
     /// Every other way of getting this file wrong by hand has a named refusal —
     /// a bad version, a bad Strategy, a percentage out of range, a dangling
     /// Alias, an address with no `@`. A transposed letter had neither a refusal
-    /// nor an effect: `watcher_treshold_percent` deserialised as
-    /// `Overrides::default()`, so the Group went on taking Global's threshold,
-    /// and the next command that wrote the file re-serialised the Group as `{}`
-    /// — the edit gone, with nothing said at any point in between.
+    /// nor an effect: `watcher_treshold_percent` deserialised as the default,
+    /// so the Group went on running at a threshold nobody set, and the next
+    /// command that wrote the file re-serialised the Group without it — the
+    /// edit gone, with nothing said at any point in between.
     #[test]
     fn a_key_the_registry_does_not_know_is_refused_rather_than_ignored() {
         let path = "/Users/someone/.config/perch/registry.json";
@@ -2907,7 +2853,7 @@ mod tests {
     fn a_group_carries_its_configuration_through_json() {
         let mut registry = Registry::default();
         registry.declare_group("work").unwrap();
-        registry.groups.get_mut("work").unwrap().strategy = Some(Strategy::SoonestReset);
+        registry.groups.get_mut("work").unwrap().strategy = Strategy::SoonestReset;
 
         let json = serde_json::to_string(&registry).unwrap();
         assert!(json.contains("soonest-reset"), "{json}");
@@ -2917,28 +2863,26 @@ mod tests {
 
     #[test]
     fn cycling_among_ungrouped_accounts_is_off_until_it_is_asked_for() {
-        assert!(!Registry::default().global.cycle_ungrouped);
+        assert!(!Registry::default().ungrouped.interchangeable);
         let says_nothing_about_it: Registry =
-            serde_json::from_str(r#"{"version":1}"#).expect("a registry with no settings in it");
+            serde_json::from_str(&format!("{{\"version\":{CURRENT_VERSION}}}"))
+                .expect("a registry with no settings in it");
         assert!(
-            !says_nothing_about_it.global.cycle_ungrouped,
+            !says_nothing_about_it.ungrouped.interchangeable,
             "a registry that says nothing about it reads as off, not as a \
              declaration nobody made (ADR 0017)"
         );
     }
 
-    /// A freshly declared Group declares nothing of its own, and what it
-    /// resolves to is Global's — which is what makes a threshold set once at
-    /// Global reach it too (ADR 0002, amended).
+    /// A freshly declared Group holds the compiled-in defaults, and nothing
+    /// said about another Scope reaches it (ADR 0051).
     #[test]
-    fn a_new_group_inherits_everything_and_leaves_the_watcher_alone() {
+    fn a_new_group_holds_the_defaults_and_leaves_the_watcher_alone() {
         let mut registry = Registry::default();
         registry.declare_group("work").unwrap();
         let work = Scope::Group("work".to_string());
 
-        assert!(registry.group("work").expect("declared").is_empty());
-
-        let settings = registry.in_force(&work);
+        let settings = registry.settings(&work);
         assert!(!settings.watcher_may_act);
         assert_eq!(settings.strategy, Strategy::MostHeadroom);
         assert_eq!(
@@ -2946,40 +2890,36 @@ mod tests {
             DEFAULT_WATCHER_THRESHOLD_PERCENT
         );
 
-        registry.global.settings.watcher_threshold_percent = 55;
+        registry.ungrouped.settings.watcher_threshold_percent = 55;
         assert_eq!(
-            registry.in_force(&work).watcher_threshold_percent,
-            55,
-            "Inherit is a state and not an absence: it follows Global as Global \
-             changes"
-        );
-        assert_eq!(
-            registry
-                .in_force(&Scope::Ungrouped)
-                .watcher_threshold_percent,
-            55,
-            "and the Accounts in no Group are a Scope that follows it too"
+            registry.settings(&work).watcher_threshold_percent,
+            DEFAULT_WATCHER_THRESHOLD_PERCENT,
+            "a Setting said about one Scope is said about that Scope: there is \
+             no layer for it to arrive at another by"
         );
     }
 
-    /// An Override that happens to equal Global's value is not an Inheritance:
-    /// one tracks and the other does not, and the display says which.
+    /// The grant that has to be said about the Scope it grants: a Group
+    /// declared after somebody let the watcher into another one is a Group
+    /// nobody has said anything about (ADR 0051).
     #[test]
-    fn an_override_equal_to_globals_value_still_stops_following_it() {
+    fn a_group_declared_later_is_not_reached_by_a_grant_made_earlier() {
         let mut registry = Registry::default();
         registry.declare_group("work").unwrap();
-        let work = Scope::Group("work".to_string());
         registry
-            .groups
-            .get_mut("work")
-            .unwrap()
-            .watcher_threshold_percent = Some(DEFAULT_WATCHER_THRESHOLD_PERCENT);
+            .settings_mut(&Scope::Group("work".to_string()))
+            .expect("declared")
+            .watcher_may_act = true;
+        registry.ungrouped.settings.watcher_may_act = true;
 
-        registry.global.settings.watcher_threshold_percent = 55;
+        registry.declare_group("personal").unwrap();
 
-        assert_eq!(
-            registry.in_force(&work).watcher_threshold_percent,
-            DEFAULT_WATCHER_THRESHOLD_PERCENT
+        assert!(
+            !registry
+                .settings(&Scope::Group("personal".to_string()))
+                .watcher_may_act,
+            "a Group nobody has said anything about is not one the watcher may \
+             act on"
         );
     }
 
@@ -2997,10 +2937,10 @@ mod tests {
     /// readers have the same next question.
     #[test]
     fn a_number_out_of_range_is_refused_with_the_range() {
-        let cases: [(Overrides, &str, &str); 1] = [(
-            Overrides {
-                watcher_threshold_percent: Some(101),
-                ..Overrides::default()
+        let cases: [(Settings, &str, &str); 1] = [(
+            Settings {
+                watcher_threshold_percent: 101,
+                ..Settings::default()
             },
             "watcher-threshold-percent",
             "100",
@@ -3020,8 +2960,8 @@ mod tests {
             );
         }
 
-        assert!(Overrides::default().validate(&work).is_ok());
-        assert!(Settings::default().validate(&Scope::Global).is_ok());
+        assert!(Settings::default().validate(&work).is_ok());
+        assert!(Settings::default().validate(&Scope::Ungrouped).is_ok());
     }
 
     #[test]
@@ -3216,7 +3156,7 @@ mod tests {
         let path = registry_path(&host).unwrap();
         host.set_file(
             &path,
-            r#"{"version":1,"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true,"group":"work"}],"groups":{}}"#,
+            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true,"group":"work"}],"groups":{}}"#,
         );
 
         let registry = load(&host).expect("it reads").expect("it is there");
@@ -3228,7 +3168,7 @@ mod tests {
         );
         assert_eq!(
             registry.group("work"),
-            Some(&Overrides::default()),
+            Some(&Settings::default()),
             "carrying what a freshly declared Group carries"
         );
         assert_eq!(registry.accounts_in("work").len(), 1);
@@ -3247,7 +3187,7 @@ mod tests {
         let path = registry_path(&host).unwrap();
         host.set_file(
             &path,
-            r#"{"version":1,"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true,"group":"Work"}],"groups":{"work":{"watcher_threshold_percent":65}}}"#,
+            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true,"group":"Work"}],"groups":{"work":{"watcher_threshold_percent":65}}}"#,
         );
 
         let registry = load(&host).expect("it reads").expect("it is there");
@@ -3261,7 +3201,7 @@ mod tests {
         );
         assert_eq!(
             registry.group("work").unwrap().watcher_threshold_percent,
-            Some(65),
+            65,
             "the declared Group keeps the policy it was declared with"
         );
     }
@@ -3294,7 +3234,7 @@ mod tests {
             host.set_file(
                 &path,
                 &format!(
-                    r#"{{"version":1,"accounts":[{{"identity":{{"email":"someone@example.com"}},"enabled":true,"group":{claimed}}}],"groups":{groups}{aliases}}}"#
+                    r#"{{"version":2,"accounts":[{{"identity":{{"email":"someone@example.com"}},"enabled":true,"group":{claimed}}}],"groups":{groups}{aliases}}}"#
                 ),
             );
 
@@ -3338,7 +3278,7 @@ mod tests {
         for (held, expected) in holdings {
             let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
             let path = registry_path(&host).unwrap();
-            host.set_file(&path, &format!(r#"{{"version":1,"accounts":[],{held}}}"#));
+            host.set_file(&path, &format!(r#"{{"version":2,"accounts":[],{held}}}"#));
 
             let refused = load(&host).expect_err("that is not a name Perch would have given");
             let said = refused.to_string();
@@ -3413,7 +3353,7 @@ mod tests {
     #[test]
     fn a_registry_that_is_json_and_still_unreadable_is_not_called_bad_json() {
         let files = [
-            r#"{"version":1,"accounts":[],"groups":{"work":{"strategy":"round-robin"}}}"#,
+            r#"{"version":2,"accounts":[],"groups":{"work":{"strategy":"round-robin"}}}"#,
             r#"{"accounts":[],"groups":{}}"#,
         ];
 
@@ -3459,7 +3399,7 @@ mod tests {
             host.set_file(
                 &path,
                 &format!(
-                    r#"{{"version":1,"accounts":[{{"identity":{{"email":"someone@example.com"}},"enabled":true,"utilization":{{"observed_at":"2025-01-01T00:00:00Z","windows":[{{"window":"5-hour","used_percent":{figure}}}]}}}}],"groups":{{}}}}"#
+                    r#"{{"version":2,"accounts":[{{"identity":{{"email":"someone@example.com"}},"enabled":true,"utilization":{{"observed_at":"2025-01-01T00:00:00Z","windows":[{{"window":"5-hour","used_percent":{figure}}}]}}}}],"groups":{{}}}}"#
                 ),
             );
 
@@ -3483,7 +3423,7 @@ mod tests {
         let path = registry_path(&host).unwrap();
         host.set_file(
             &path,
-            r#"{"version":1,"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true,"utilization":{"observed_at":"2025-01-01T00:00:00Z","windows":[{"window":"5-hour","used_percent":0},{"window":"7-day","used_percent":100}]}}],"groups":{}}"#,
+            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true,"utilization":{"observed_at":"2025-01-01T00:00:00Z","windows":[{"window":"5-hour","used_percent":0},{"window":"7-day","used_percent":100}]}}],"groups":{}}"#,
         );
         load(&host).expect("0 and 100 are both percentages");
     }
@@ -3502,7 +3442,7 @@ mod tests {
         let path = registry_path(&host).unwrap();
         host.set_file(
             &path,
-            r#"{"version":1,"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true}],"aliases":{"overflow":"gone@example.com"}}"#,
+            r#"{"version":2,"accounts":[{"identity":{"email":"someone@example.com"},"enabled":true}],"aliases":{"overflow":"gone@example.com"}}"#,
         );
 
         let refused = load(&host).expect_err("the Alias names nobody");
@@ -3545,7 +3485,7 @@ mod tests {
             host.set_file(
                 &path,
                 &format!(
-                    r#"{{"version":1,"accounts":[{{"identity":{{"email":"someone@example.com"}},"enabled":true}},{{"identity":{{"email":"other@example.com"}},"enabled":true}}],{held}}}"#
+                    r#"{{"version":2,"accounts":[{{"identity":{{"email":"someone@example.com"}},"enabled":true}},{{"identity":{{"email":"other@example.com"}},"enabled":true}}],{held}}}"#
                 ),
             );
 
@@ -3574,7 +3514,7 @@ mod tests {
         let path = registry_path(&host).unwrap();
         host.set_file(
             &path,
-            r#"{"version":1,"accounts":[{"identity":{"email":"work"},"enabled":true},{"identity":{"email":"real@example.com"},"enabled":true}],"groups":{"work":{}}}"#,
+            r#"{"version":2,"accounts":[{"identity":{"email":"work"},"enabled":true},{"identity":{"email":"real@example.com"},"enabled":true}],"groups":{"work":{}}}"#,
         );
 
         let refused = load(&host).expect_err("that Target has two answers");
@@ -3629,7 +3569,7 @@ mod tests {
             let path = registry_path(&host).unwrap();
             host.set_file(
                 &path,
-                &format!(r#"{{"version":1,"accounts":{accounts},{held}}}"#),
+                &format!(r#"{{"version":2,"accounts":{accounts},{held}}}"#),
             );
 
             let refused = load(&host).expect_err("one Account reached twice over");
@@ -3654,7 +3594,7 @@ mod tests {
         let path = registry_path(&host).unwrap();
         host.set_file(
             &path,
-            r#"{"version":1,"accounts":[],"groups":{"work":{"watcher_threshold_percent":101}}}"#,
+            r#"{"version":2,"accounts":[],"groups":{"work":{"watcher_threshold_percent":101}}}"#,
         );
 
         let refused = load(&host).expect_err("101 is not a percentage");

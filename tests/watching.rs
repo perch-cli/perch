@@ -947,17 +947,17 @@ fn the_decision_log_is_standard_output_and_no_file_is_written() {
     );
 }
 
-/// `cycle-ungrouped` lets a bare `perch switch` Cycle among the Accounts in no
-/// Group. It grants the watcher nothing on its own: permission to Switch when
-/// you ask and permission to Switch while nobody is looking are different
-/// grants, and the second one has to be given here too.
+/// `interchangeable` lets a bare `perch switch` Cycle among the Accounts in no
+/// Group. It grants the watcher nothing on its own: declaring a set of Accounts
+/// substitutable and letting something move between them while nobody is
+/// looking are different things, and the second has to be said here too.
 #[test]
 fn an_account_in_no_group_is_not_watched_however_freely_it_may_be_cycled() {
     let host = watching(&[40.0], 5.0);
     move_to_group(&host, EMAIL, "none")
         .0
         .expect("the Account leaves the Group");
-    config_set(&host, &["cycle-ungrouped", "true"])
+    config_set(&host, &["ungrouped", "interchangeable", "true"])
         .0
         .expect("ungrouped Accounts are interchangeable");
 
@@ -1029,32 +1029,31 @@ fn a_landing_the_watcher_cannot_settle_holds_the_loop_rather_than_stopping_it() 
     );
 }
 
-/// **ADR 0017, amended.** `watcher-may-act` deliberately does not Inherit into
-/// the Ungrouped Scope: it is gated behind `cycle-ungrouped`, so the watcher
-/// acts on ungrouped Accounts only where both are on.
+/// **ADR 0051 and ADR 0017 together.** The watcher acts on the Accounts in no
+/// Group only where both things have been said about *that* Scope: they are
+/// interchangeable at all, and something may act on them.
 ///
-/// A Global "yes" is somebody saying "Cycle my work Groups unattended", and
-/// Inheriting it straight through would authorise moving them onto their
-/// personal subscription — the failure Groups exist to prevent, arriving by a
-/// route nobody typed. This is the case most likely to be "fixed" by somebody
-/// tidying the layering into uniformity, which is why it names the ADR.
+/// A grant said about a Group is a statement about that Group and reaches
+/// nothing else, so a person who has let the watcher into their work Group has
+/// not authorised moving them onto their personal subscription — and there is
+/// nowhere to write a grant that would.
 #[test]
-fn a_watcher_turned_on_at_global_leaves_ungrouped_accounts_alone() {
+fn a_grant_said_about_a_group_leaves_ungrouped_accounts_alone() {
     let host = watching(&[99.0], 1.0);
+    config_set(&host, &["work", "watcher-may-act", "true"])
+        .0
+        .expect("a statement about the Group this person runs");
     for email in [EMAIL, SECOND_EMAIL] {
         move_to_group(&host, email, "none")
             .0
             .expect("the Account leaves the Group");
     }
-    config_set(&host, &["watcher-may-act", "true"])
-        .0
-        .expect("a statement about the Groups this person runs");
 
     let (result, printed) = run_watch(&host);
 
     result.expect("held rather than failed (ADR 0040)");
     assert!(
-        printed.contains("cycle-ungrouped"),
+        printed.contains("interchangeable"),
         "the declaration that is still missing is named: {printed}"
     );
     assert_eq!(
@@ -1083,7 +1082,7 @@ fn a_watcher_acts_among_ungrouped_accounts_once_both_declarations_are_made() {
             .0
             .expect("the Account leaves the Group");
     }
-    config_set(&host, &["cycle-ungrouped", "true"])
+    config_set(&host, &["ungrouped", "interchangeable", "true"])
         .0
         .expect("they are interchangeable");
     config_set(&host, &["ungrouped", "watcher-may-act", "true"])

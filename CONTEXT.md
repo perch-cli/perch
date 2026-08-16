@@ -105,12 +105,12 @@ Group, and a Group carries the settings that govern when it may do so unasked.
 _Avoid_: flock, team, org, pool
 
 **Rename**:
-Changing what a Group is called and nothing else about it: its Overrides, the
+Changing what a Group is called and nothing else about it: its Settings, the
 Accounts in it and the Cooldown pacing its next Check all come with the name. The
 same Group under another name, which is what separates it from declaring one and
-forgetting another — that loses every Override the first held. Only a Group is
-Renamed: Global and the Ungrouped Accounts are not Groups, and the name an
-Account answers to is its Alias.
+forgetting another — that loses every Setting the first held. Only a Group is
+Renamed: the Ungrouped Accounts are not a Group, and the name an Account answers
+to is its Alias.
 _Avoid_: move, retitle, relabel, re-declare
 
 ## What belongs to whom
@@ -352,36 +352,19 @@ set anything in it.
 _Avoid_: preferences, options, prefs, settings file
 
 **Scope**:
-The set of Accounts a Setting governs: a Group, the Ungrouped Accounts, or
-Global. The only levels at which a Setting means anything — an Account never
-carries one, because every Setting there is describes how Perch chooses *between*
-Accounts, and a rule for choosing has nothing to say to a set of one.
+A Group, or the Accounts in no Group taken together. The only levels at which a
+Setting means anything — an Account never carries one, because every Setting
+there is describes how Perch chooses *between* Accounts, and a rule for choosing
+has nothing to say to a set of one.
 _Avoid_: level, tier, context, namespace
-
-**Global**:
-The Scope covering every Account there is, and the Config every other Scope falls
-back to. Not a Group and not a place — the value that applies where nothing
-narrower has been said.
-_Avoid_: default, root, system, top-level, base
 
 **Ungrouped**:
 The Accounts in no Group, taken as one Scope. A Scope so that there is somewhere
 to say how they are Cycled, and never a Group: a Group is a declaration somebody
-made, and this is the absence of one.
+made, and this is the absence of one. The one Scope that carries the declaration
+that its Accounts are interchangeable at all, because a Group *is* that
+declaration and has no need to hold one.
 _Avoid_: none, unassigned, orphans, default group, implicit group
-
-**Override**:
-A value a Group or the Ungrouped Scope holds for itself, in place of the one it
-would otherwise take from Global. Exactly two layers deep — an Override beats
-Global and nothing beats an Override.
-_Avoid_: local value, custom value, per-group setting
-
-**Inherit**:
-What a Scope does with a Setting it holds no Override for: takes Global's, and
-goes on taking it as Global changes. The ordinary state, and distinct from
-holding an Override that happens to equal Global's — one tracks and the other
-does not.
-_Avoid_: default, fall back, unset, empty
 
 ## Getting Perch onto a machine
 
