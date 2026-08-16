@@ -18,7 +18,6 @@ pub mod run;
 pub mod service;
 pub mod status;
 pub mod switch;
-pub mod tui;
 pub mod upgrade;
 pub mod watch;
 pub mod watcher;
@@ -224,9 +223,9 @@ pub fn a_store_that_held_nothing(host: &dyn Host) -> &'static str {
 /// in whether they were handed an email address or an `Account` and in the
 /// sentence about what did not happen — and [`Quarantine::refusal`] already
 /// takes that sentence as a parameter. Two copies is how the shape of the
-/// refusal comes to differ between two commands that meet the same state, and
-/// the picker calls both: it names an Account by cursor, so what it says has to
-/// be the refusal the command would have given, character for character.
+/// refusal comes to differ between two commands that meet the same state —
+/// `perch run` and `perch switch` meet it over the same Account and should not
+/// describe it in two ways.
 ///
 /// `consequence` is what did not happen and why it would have been worse than
 /// nothing.

@@ -126,8 +126,8 @@ impl<'a> Reserve<'a> {
             // is nought as well, so the parenthetical saying which way each of
             // them left the running comes out empty and the sentence asserts
             // something about nobody. A declared Group with no members is the
-            // ordinary way to reach it — `perch group add spare`, then the
-            // picker.
+            // ordinary way to reach it — `perch group add spare`, and nothing
+            // moved into it yet.
             None if self.candidates.is_empty() && self.not_candidates == 0 => {
                 "Reserve: none — no Account is in this Group yet".to_string()
             }

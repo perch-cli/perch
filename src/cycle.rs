@@ -632,13 +632,13 @@ fn worth_leaving_for(
 /// Every Account in a scope, in the order a Cycle ranks them: the ones it could
 /// land on first, best first, and the ones it would never choose after them.
 ///
-/// [`choose`] needs only the winner and refuses where there is none. A picker
+/// [`choose`] needs only the winner and refuses where there is none. A listing
 /// needs the whole order, and needs it over Accounts a Cycle would not touch —
 /// a Disabled Account is still shown, and where it sits is what says it is out
 /// of the running. So the two share the measurement and the Strategy rather
 /// than each sorting on its own idea of which Account is better, because two
 /// orders would be a listing that put one Account at the top and a `perch
-/// switch` that landed on another.
+/// switch` that landed on another (ADR 0049).
 ///
 /// A Cycle never leaves the scope it started in (ADR 0002), so there is no
 /// ranking over every Account Perch holds: this is per scope, and a listing
@@ -653,7 +653,7 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
     // Without it, the two orders disagreed. `choose` gained the staying-put veto
     // and this did not, so under `soonest-reset` the top row of the listing was
     // an Account a bare `perch switch` would not land on, and the one it does
-    // land on could be the bottom row. The picker exists to make the ranking
+    // land on could be the bottom row. The listing exists to make the ranking
     // visible; showing a different one is worse than showing none.
     // `same_name` rather than `==`, for the reason [`choose`] gives at its own
     // reading of this value: `upsert` matches an Account with `same_name` but
@@ -677,9 +677,7 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
     // Measured once each rather than inside the comparator, which is the shape
     // [`choose`] already uses. `place` computes two `Headroom`s — each of which
     // clones the fullest window's name — and asks `is_a_candidate` and
-    // `worth_leaving_for`, and a comparator runs O(n log n) times: `perch tui`
-    // calls this on every frame, four times a second, for as long as the picker
-    // is open.
+    // `worth_leaving_for`, and a comparator runs O(n log n) times.
     //
     // Stable, so Accounts that rank identically stay in the order they were
     // added — the same tie-break the choice itself has.
@@ -812,6 +810,26 @@ pub fn how_much_is_left(account: &Account) -> HowMuchIsLeft {
         Headroom::Exhausted { .. } => HowMuchIsLeft::Exhausted,
         Headroom::Unobserved => HowMuchIsLeft::NeverObserved,
     }
+}
+
+/// The same three answers as a script reads them.
+///
+/// Two keys rather than a bare number, because only one of the three answers is
+/// a number and the other two are not nought. A `percent` of `null` under a
+/// `state` naming which absence it is keeps "no figure" and "plenty of room"
+/// from arriving as the same value — the mistake [`headroom_phrase`] refuses in
+/// the same words on the surface a person reads.
+///
+/// Unrounded, like every other percentage in a document (`utilization::document`
+/// emits `used_percent` as it was read): rounding is what a column does to fit,
+/// and a script that wants two decimal places should not have to ask twice.
+pub fn headroom_document(account: &Account) -> serde_json::Value {
+    let (state, percent) = match how_much_is_left(account) {
+        HowMuchIsLeft::Room(percent) => ("room", Some(percent)),
+        HowMuchIsLeft::Exhausted => ("exhausted", None),
+        HowMuchIsLeft::NeverObserved => ("never-observed", None),
+    };
+    serde_json::json!({ "state": state, "percent": percent })
 }
 
 /// How much of an Account is left to spend, with the Quota Window the figure was
@@ -1163,8 +1181,8 @@ pub(crate) mod tests {
         );
     }
 
-    /// The order a picker shows is the order the choice makes, so the Account
-    /// at the top is the one a bare `perch switch` would land on.
+    /// The order the listing shows is the order the choice makes, so the
+    /// Account at the top is the one a bare `perch switch` would land on.
     #[test]
     fn the_order_is_the_one_the_choice_would_make() {
         let registry = holding(vec![
@@ -1770,8 +1788,8 @@ pub(crate) mod tests {
     /// `most-headroom` with no reset times, where the Strategy's ranking and the
     /// room ranking are the same ordering and the veto collapses to the identity.
     /// Under `soonest-reset` they differ, and the veto only lived in `choose` —
-    /// so the picker showed `worse@` at the top of the Accounts to land on while
-    /// a bare `perch switch` landed on `roomiest@`, the bottom row.
+    /// so the listing showed `worse@` at the top of the Accounts to land on
+    /// while a bare `perch switch` landed on `roomiest@`, the bottom row.
     #[test]
     fn the_top_of_the_listing_is_where_the_cycle_goes_under_either_strategy() {
         let accounts = || {
@@ -1797,8 +1815,8 @@ pub(crate) mod tests {
                 chosen.account.email(),
                 "{strategy:?}: the highest Account the listing offers to land on \
                  has to be the one a bare `perch switch` lands on, or the \
-                 ranking the picker exists to make visible is not the one Perch \
-                 uses — listed {listed:?}"
+                 ranking the listing exists to make visible is not the one \
+                 Perch uses — listed {listed:?}"
             );
         }
     }
@@ -1812,7 +1830,8 @@ pub(crate) mod tests {
     /// `Registry::is_active`'s doc describes and every other reader of an address
     /// compares for. `ranked` compared by bytes, found no `here`, and dropped the
     /// staying-put veto from the listing alone: `choose` still refused to move,
-    /// and the picker showed the Account it would not have moved to at the top.
+    /// and the listing showed the Account it would not have moved to at the
+    /// top.
     #[test]
     fn the_listing_agrees_with_the_cycle_however_the_active_address_is_capitalised() {
         let registry = preferring(

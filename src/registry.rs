@@ -227,10 +227,9 @@ pub const DEFAULT_WATCHER_THRESHOLD_PERCENT: u8 = 80;
 
 /// The most a Setting said as a share of something can be.
 ///
-/// `100` was written out in the sentence below, twice in the range check, and
-/// again in the step range the TUI's arrow keys walk — so what `perch config
-/// set` accepts, what a hand-edited registry is refused for, and what the panel
-/// will let you reach were three statements of one number.
+/// `100` was written out in the sentence below and twice in the range check —
+/// so what `perch config set` accepts and what a hand-edited registry is
+/// refused for were two statements of one number.
 ///
 /// Not the bound on a Utilization figure, which `validate` checks separately
 /// and `anthropic::understand` clamps to. That one is what a *reading* may be;
@@ -1038,8 +1037,8 @@ impl Registry {
     /// of the shared namespace holds.
     ///
     /// One function for both halves. Every way a name enters the registry asks
-    /// this — `perch group add`, `perch group rename`, `perch alias`, `perch
-    /// add` and both of the TUI's typed fields — so what the two halves accept
+    /// this — `perch group add`, `perch group rename`, `perch alias` and
+    /// `perch add` — so what the two halves accept
     /// cannot come apart, and a caller cannot get the order wrong. The order is
     /// load-bearing: shape before collision, because `refuse_taken_names` opens
     /// by asking whether the Alias and the Group are the same name, and with it
@@ -2062,10 +2061,10 @@ fn refuse_a_name_nothing_would_have_accepted(
 ///
 /// The invariant `group_names` states — "a Group an Account claims is always
 /// declared too, `load` sees to that" — and which nothing was enforcing. An
-/// Account claiming an undeclared Group falls out of the TUI's sections
-/// entirely, because those are built from the declared set, so it becomes an
-/// Account the picker cannot reach with the arrow keys; and `perch switch
-/// <that group>` refuses while `perch list` shows the Group.
+/// Account claiming an undeclared Group falls out of `perch list` entirely,
+/// because the listing walks the declared Groups and then the Accounts in none
+/// of them (ADR 0049), so it becomes an Account nothing shows; and `perch
+/// switch <that group>` refuses while `perch list` shows the Group.
 ///
 /// Declared rather than refused, because the Group's settings are what is
 /// missing and the defaults are what a freshly declared Group carries anyway.
@@ -2076,7 +2075,7 @@ fn refuse_a_name_nothing_would_have_accepted(
 /// name — [`same_name`] is what `declare_group` refuses on and what
 /// [`Registry::ensure_group`] returns the held spelling for — so a second key
 /// here would be a Group nothing but this function believes in: an empty
-/// section in the picker, an `accounts_in` that matches nobody, and a
+/// section in the listing, an `accounts_in` that matches nobody, and a
 /// `declared_group` answering with whichever the map happened to order first.
 fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
     let claimed: Vec<String> = registry
@@ -3207,10 +3206,10 @@ mod tests {
 
     /// The invariant `group_names` states, now that something holds it.
     ///
-    /// An Account claiming a Group nothing declared falls out of the TUI's
-    /// sections — they are built from the declared set — which makes it an
-    /// Account the picker cannot reach with the arrow keys, while `perch list`
-    /// goes on showing the Group and `perch switch <that group>` refuses.
+    /// An Account claiming a Group nothing declared falls out of `perch list`
+    /// entirely — the listing walks the declared Groups and then the Accounts
+    /// in none of them (ADR 0049) — which makes it an Account nothing shows,
+    /// while `perch switch <that group>` refuses.
     #[test]
     fn a_group_an_account_claims_is_declared_by_the_time_anything_reads_it() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
@@ -3239,7 +3238,7 @@ mod tests {
     /// than a bare insert: two names differing only in case are one name
     /// everywhere else in this module, so a claim spelled `Work` against a
     /// declared `work` must join it rather than become a second Group nothing
-    /// else believes in — an empty section in the picker, an `accounts_in` that
+    /// else believes in — an empty section in the listing, an `accounts_in` that
     /// matches nobody, and a `declared_group` answering with whichever the map
     /// ordered first.
     #[test]

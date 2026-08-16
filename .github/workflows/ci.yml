@@ -81,11 +81,11 @@ jobs:
         run: cargo test --locked
 
       # The binary somebody downloads, built with the feature set it ships with
-      # — which is the one the fakes are held back from. `cargo test` turns
+      # — which is the one the fake is held back from. `cargo test` turns
       # `fakes` on through the dev-dependency, so it is the only thing that
-      # proves nothing outside a test reaches for `FakeHost` or `FakeScreen`:
-      # a single stray reference fails here and nowhere else.
-      - name: The shipped binary carries no fakes
+      # proves nothing outside a test reaches for `FakeHost`: a single stray
+      # reference fails here and nowhere else.
+      - name: The shipped binary carries no fake
         run: cargo build --locked --bin perch
 
       # A dependency that nothing imports is compile time and audit surface for

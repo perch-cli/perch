@@ -1,6 +1,6 @@
 //! The Host implementation that actually touches the machine.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -48,9 +48,8 @@ fn curl_bin() -> Result<PathBuf, HostError> {
 ///
 /// The two timeouts are what make a hung endpoint a *refusal* rather than a
 /// hang. Perch has no thread it can abandon a request from: `perch watcher run`
-/// waits out every read in its round, and `perch tui` refuses Enter and `r` for
-/// as long as a Refresh is outstanding. A connection that is open and silent
-/// would otherwise stop both indefinitely — which is worse than the network
+/// waits out every read in its round. A connection that is open and silent
+/// would otherwise stop it indefinitely — which is worse than the network
 /// being down, because ADR 0018 has an answer for that one and no answer for a
 /// loop that never comes back to be told.
 ///
@@ -278,10 +277,6 @@ pub struct RealHost {
     /// What has already been said, so a remark about the machine is made once
     /// however many Accounts provoke it.
     noted: RefCell<BTreeSet<String>>,
-    /// Whether a remark is printed as it is made, or only kept. A cell because
-    /// `perch tui` turns it off for as long as it holds the screen and back on
-    /// afterwards, through a `&dyn Host` (see [`Host::print_remarks`]).
-    aloud: Cell<bool>,
 }
 
 impl Default for RealHost {
@@ -294,23 +289,6 @@ impl RealHost {
     pub fn new() -> Self {
         RealHost {
             noted: RefCell::new(BTreeSet::new()),
-            aloud: Cell::new(true),
-        }
-    }
-
-    /// A Host that keeps its remarks instead of printing them, for the one
-    /// caller that owns the screen.
-    ///
-    /// A remark goes to stderr, which is exactly where `perch tui` is drawing:
-    /// a line about a Credential written to a store Perch would rather not have
-    /// used would land in the middle of a frame and stay there until something
-    /// redrew over it. So the Refresh the TUI runs collects them from
-    /// [`RealHost::remarks`] and shows them where it shows everything else it
-    /// could not do.
-    pub fn keeping_its_remarks() -> Self {
-        RealHost {
-            aloud: Cell::new(false),
-            ..RealHost::new()
         }
     }
 }
@@ -716,21 +694,11 @@ impl Host for RealHost {
     }
 
     /// To stderr, so a note never lands in the middle of the JSON a script is
-    /// reading off stdout — unless this is a Host built to keep them, whose
-    /// caller has the screen and will say them itself.
+    /// reading off stdout — and once each, however many Accounts provoke it.
     fn note(&self, line: &str) {
-        if self.noted.borrow_mut().insert(line.to_string()) && self.aloud.get() {
+        if self.noted.borrow_mut().insert(line.to_string()) {
             eprintln!("perch: {line}");
         }
-    }
-
-    fn print_remarks(&self, aloud: bool) {
-        self.aloud.set(aloud);
-    }
-
-    /// In the order a `BTreeSet` keeps, and each of them once.
-    fn remarks(&self) -> Vec<String> {
-        self.noted.borrow().iter().cloned().collect()
     }
 
     fn read_line(&self) -> Result<Option<String>, HostError> {

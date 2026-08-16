@@ -1,5 +1,20 @@
 # `perch switch` chooses for you, and the picker is a separate command
 
+> **Superseded by ADR 0049.** The picker is gone — `perch tui` is removed
+> entire, and Perch has no interactive surface left. What is void is the half
+> this document could not argue for: it ruled the picker out of every moment it
+> named, then gave it a command anyway "for when the choice wants making by eye
+> rather than by rule", and never said when that moment was. Two halves are
+> carried forward rather than repealed. The first is the decision in the title —
+> bare `perch switch` Cycles and `perch switch <target>` names, which 0049
+> leaves as the whole of choosing. The second is the job the listing below
+> describes, which outlived its surface: the ranking a Cycle makes is shown
+> group by group with the Headroom it was made on beside it, and the Accounts in
+> no Group are held rather than ranked (ADR 0017) — all of it now in
+> `perch list`, always and not behind a flag. The constraint this document
+> imposed is what made that cheap: every interactive capability had to exist
+> non-interactively too, so removing the picker removed a name and no surface.
+
 Switching accounts happens when quota runs out, which is mid-task and under
 mild frustration. The shortest command should therefore do the whole job:
 `perch switch` picks an account within the current account's group — by the

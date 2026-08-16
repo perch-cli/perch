@@ -14,7 +14,6 @@ are the whole of what each command does, and why it does it that way.
 | [Watching](watching.md) | `perch watcher run`, `perch watcher install`, and `perch watcher check` under cron or a systemd timer |
 | [Running one Account in one terminal](running.md) | `run`, Live Profiles, passing arguments through |
 | [Backing up and moving machines](backup.md) | `holdings export`, `holdings import`, `holdings purge` |
-| [Choosing by eye](tui.md) | `perch tui` — both tabs, every key |
 | [Configuration](configuration.md) | `config`, the two layers, every Setting |
 | [Reference](reference.md) | every command, every exit code, every path and environment variable |
 

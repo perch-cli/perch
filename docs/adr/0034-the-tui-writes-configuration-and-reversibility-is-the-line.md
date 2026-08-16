@@ -1,10 +1,10 @@
 # The TUI writes configuration, and reversibility is the line
 
-> **Superseded by ADR 0042.** The Config tab is to be removed — the code is
-> still here, and the removal is tracked at #150 — and `perch tui` goes back to
-> the two acts ADR 0011 gave it. The observation below is not what was found
-> wrong: a Setting really is not irreversible. Reversibility was simply the
-> wrong axis. What the panel costs is not the recoverability of what it writes
+> **Superseded by ADR 0042.** The Config tab is removed — and `perch tui` with
+> it, since ADR 0049 took the whole view before the tab had to come out on its
+> own. The observation below is not what was found wrong: a Setting really is
+> not irreversible. Reversibility was simply the wrong axis. What the panel
+> costs is not the recoverability of what it writes
 > but the machinery that lets it write at all — the lock per edit, the refusal
 > and rollback, the debounce and its `Pending`, the one text mode — and every
 > link in that chain starts at *the panel writes*. One thing here is not

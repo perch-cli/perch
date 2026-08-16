@@ -586,23 +586,6 @@ pub const SETTINGS: [Setting; 3] = [
     Setting::WatcherThresholdPercent,
 ];
 
-/// What a value can be stepped through, for the surface that has arrow keys
-/// rather than a keyboard full of digits.
-///
-/// Here rather than in the TUI because it is a fact about the Setting — a bool
-/// has two readings, a Strategy has the ones Perch implements, and a percentage
-/// has a range — and a second statement of it in the view is how the panel
-/// comes to offer a value `set` would refuse.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Shape {
-    /// `true` or `false`.
-    YesOrNo,
-    /// One of the readings [`Strategy::ALL`] holds.
-    OneOf(Vec<String>),
-    /// A whole number between the two, stepped by the third.
-    Range { least: u32, most: u32, step: u32 },
-}
-
 impl Setting {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -625,26 +608,6 @@ impl Setting {
                     Key::CycleUngrouped.as_str(),
                 ))
             })
-    }
-
-    /// What this Setting can be stepped through.
-    pub fn shape(self) -> Shape {
-        match self {
-            Setting::Strategy => Shape::OneOf(
-                Strategy::ALL
-                    .iter()
-                    .map(|strategy| strategy.as_str().to_string())
-                    .collect(),
-            ),
-            Setting::WatcherMayAct => Shape::YesOrNo,
-            // Five at a time, so crossing a useful range is a dozen keystrokes
-            // rather than eighty.
-            Setting::WatcherThresholdPercent => Shape::Range {
-                least: 0,
-                most: registry::MAX_PERCENTAGE as u32,
-                step: 5,
-            },
-        }
     }
 
     /// The value as `get` prints it and `set` would take it back.
@@ -983,27 +946,16 @@ mod tests {
 
     /// Every surface agrees what a percentage is.
     ///
-    /// `Shape`'s own doc says why this has to hold — "a second statement of it
-    /// in the view is how the panel comes to offer a value `set` would refuse"
-    /// — and the bound was stated in four places: in `shape`'s step range, in
-    /// `Overrides::validate`, in the parser here, and inside the sentence all
-    /// of them quote.
+    /// The bound is stated in three places — in `Overrides::validate`, in the
+    /// parser here, and inside the sentence both of them quote — and a value
+    /// one of them takes and another refuses is a Setting somebody can write
+    /// and then not be allowed to keep.
     #[test]
     fn every_surface_agrees_what_a_percentage_is() {
         let most = registry::MAX_PERCENTAGE;
         let past_it = u32::from(most) + 1;
 
         let setting = Setting::WatcherThresholdPercent;
-        // What the arrow keys will walk to.
-        assert_eq!(
-            setting.shape(),
-            Shape::Range {
-                least: 0,
-                most: u32::from(most),
-                step: 5,
-            },
-        );
-
         // What `perch config set` accepts.
         percentage(setting.as_str(), &most.to_string()).expect("the top of the range");
         percentage(setting.as_str(), &past_it.to_string()).expect_err("and one past it");

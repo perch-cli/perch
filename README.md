@@ -100,22 +100,20 @@ when you log in — a LaunchAgent, a `systemd --user` unit, or a Scheduled Task,
 whichever your machine has. Perch never backgrounds itself: it writes the unit
 and hands the job over, and `perch watcher uninstall` takes it back.
 
-Two more worth knowing early: `perch run <target>` launches Claude Code as one
-Account in one terminal without changing which is active, and `perch tui` draws
-all of it interactively for when the choice wants making by eye.
+One more worth knowing early: `perch run <target>` launches Claude Code as one
+Account in one terminal without changing which is active.
 
 ## Commands
 
 | Command | What it does | More |
 | ------- | ------------ | ---- |
 | `perch status` | the active Account and how full it is | [guide](docs/guide/status.md) |
-| `perch list` | every Account, its Alias, Group, state and Utilization | [guide](docs/guide/status.md#every-account) |
+| `perch list` | every Account, its Alias, Group, state, Headroom and Utilization, ranked as a Cycle would | [guide](docs/guide/status.md#every-account) |
 | `perch add` | gain an Account by logging in, without disturbing the active one | [guide](docs/guide/accounts.md#adding-an-account) |
 | `perch alias` | name an Account, so no command needs its email address | [guide](docs/guide/accounts.md#naming-an-account) |
 | `perch switch` | make an Account active everywhere, or Cycle within a Group | [guide](docs/guide/switching.md) |
 | `perch watcher` | Cycle automatically when the Account you are on runs low, in a terminal or as a Service | [guide](docs/guide/watching.md) |
 | `perch run` | launch Claude Code as an Account, in this terminal alone | [guide](docs/guide/running.md) |
-| `perch tui` | the interactive view | [guide](docs/guide/tui.md) |
 | `perch group` | declare which Accounts are interchangeable | [guide](docs/guide/switching.md#managing-groups) |
 | `perch config` | the rules Perch chooses Accounts by | [guide](docs/guide/configuration.md) |
 | `perch disable` / `enable` | keep an Account out of Cycling, or put it back | [guide](docs/guide/accounts.md#reserving-an-account) |
@@ -150,9 +148,9 @@ from them:
   mid-task (ADR 0005, ADR 0027).
 - **An Account that breaks is Quarantined, never dropped.** It stays listed and
   named with the reason, and `perch relogin` repairs it in place (ADR 0023).
-- **Everything is reachable from a script.** Perch has to be complete over SSH
-  and in CI, so the interactive view is one command among several rather than the
-  primary surface (ADR 0011).
+- **Nothing is interactive.** Every command reads its arguments, does its work
+  and exits, so Perch is complete over SSH, in scripts and in CI — and the
+  ranking a Cycle makes is shown by `perch list` rather than drawn (ADR 0049).
 
 ## Guides
 
@@ -170,7 +168,6 @@ it that way. The same pages, rendered and searchable, are at
   `perch watcher check` under cron
 - [Running one Account in one terminal](docs/guide/running.md)
 - [Backing up and moving machines](docs/guide/backup.md)
-- [Choosing by eye](docs/guide/tui.md) — `perch tui`
 - [Configuration](docs/guide/configuration.md)
 - [Reference](docs/guide/reference.md) — commands, exit codes, paths
 

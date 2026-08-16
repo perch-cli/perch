@@ -143,13 +143,13 @@ impl Drop for Scratch {
 
 /// Every command the binary dispatches, as `--help` lists them.
 ///
-/// Sixteen names, because a command is placed by the noun it is about and the
-/// Account is the one left unsaid (ADR 0047). The eleven that elide it, `perch`
+/// Fifteen names, because a command is placed by the noun it is about and the
+/// Account is the one left unsaid (ADR 0047). The ten that elide it, `perch`
 /// itself, and the four nouns that are written: `config`, `group`, `holdings`
 /// and `watcher`.
-const COMMANDS: [&str; 16] = [
+const COMMANDS: [&str; 15] = [
     "add", "alias", "config", "disable", "enable", "group", "holdings", "relogin", "remove", "run",
-    "list", "switch", "status", "tui", "upgrade", "watcher",
+    "list", "switch", "status", "upgrade", "watcher",
 ];
 
 /// The bare question, answered before the parser and exactly as the Homebrew
@@ -316,7 +316,6 @@ fn a_line_the_parser_refuses_ends_the_process_at_two() {
         ],
         &["holdings", "import", "/tmp/perch.age", "--force"],
         &["holdings", "purge", "--group", GROUP],
-        &["tui", "--json"],
         &["upgrade", "--json"],
     ] {
         let ran = perch(&machine, line);

@@ -1,6 +1,12 @@
 //! Behaviour: what `perch list` answers when the question is "what do I have",
 //! and what `perch status --group` shows of the Group around the active
 //! Account. Both render from cache and neither touches the network (ADR 0015).
+//!
+//! And what it answers about which Account is *best*, which is the other half
+//! of the listing (ADR 0049): the rows come out in the order a Cycle ranks
+//! them, with the Headroom that order was made on beside them, except where
+//! nothing has declared the Accounts interchangeable — there they are held
+//! rather than ranked (ADR 0017).
 
 mod common;
 
@@ -81,6 +87,258 @@ fn machine_holding(registry: &Registry) -> FakeHost {
     let host = logged_in_machine().with_now(at(12, 0));
     common::save_registry(&host, registry);
     host
+}
+
+/// The Accounts as the listing puts them, top row first.
+///
+/// Rows only. Every row starts with the marker column — `* ` on the active
+/// Account and two spaces on the rest — and the sentences under the table start
+/// at the margin, which matters because a Quarantine is written out down there
+/// with the address in it and would otherwise be counted as a row.
+fn accounts_in_order(printed: &str) -> Vec<&str> {
+    printed
+        .lines()
+        .filter(|line| line.starts_with("* ") || line.starts_with("  "))
+        .filter_map(|line| line.split_whitespace().find(|word| word.contains('@')))
+        .collect()
+}
+
+/// One Group of Accounts, each as full as it is said to be — or, with no Group
+/// named, the same Accounts in none.
+fn a_group_of(group: Option<&str>, active: &str, accounts: &[(&str, f64)]) -> Registry {
+    let mut registry = Registry::default();
+    if let Some(group) = group {
+        registry
+            .groups
+            .insert(group.to_string(), Overrides::default());
+    }
+    for (email, used_percent) in accounts {
+        let mut held = account(email, "Acme");
+        held.group = group.map(str::to_string);
+        held.utilization = Some(observed(at(11, 57), &[("5-hour", *used_percent)]));
+        registry.upsert(held);
+    }
+    registry.active = Active::Settled(active.to_string());
+    registry
+}
+
+/// The whole point of showing the ranking: the top row is where a bare
+/// `perch switch` would land, so the listing and the Switch cannot come to
+/// disagree about which Account is better (ADR 0049).
+#[test]
+fn the_rows_come_out_in_the_order_a_cycle_ranks_them() {
+    let host = machine_holding(&a_group_of(
+        Some("work"),
+        EMAIL,
+        &[(EMAIL, 90.0), (SECOND_EMAIL, 50.0), (THIRD_EMAIL, 10.0)],
+    ));
+
+    let (result, printed) = run_list(&host, false);
+
+    result.unwrap();
+    assert_eq!(
+        accounts_in_order(&printed),
+        [THIRD_EMAIL, SECOND_EMAIL, EMAIL],
+        "registry order was {EMAIL}, {SECOND_EMAIL}, {THIRD_EMAIL}:\n{printed}"
+    );
+}
+
+/// The figure the order was made on, said so the order can be checked against
+/// it rather than taken on trust.
+///
+/// Distinct from the Utilization beside it, which is every Quota Window: the
+/// Headroom is what is left in the *worst* of them (ADR 0012), and that is the
+/// one number a Cycle sorts on.
+#[test]
+fn the_headroom_the_order_was_made_on_is_a_column_of_its_own() {
+    let host = machine_holding_three_accounts();
+
+    let (result, printed) = run_list(&host, false);
+
+    result.unwrap();
+    assert!(
+        printed.contains("Headroom"),
+        "the column is named:\n{printed}"
+    );
+    let active_line = printed
+        .lines()
+        .find(|line| line.contains(EMAIL))
+        .expect("the active Account is listed");
+    assert!(
+        active_line.contains("58%"),
+        "the fullest of its two windows is 42% used, so 58% is left in every \
+         one of them:\n{printed}"
+    );
+    assert!(
+        active_line.contains("42%"),
+        "and the window that decided it is still shown as the Utilization it \
+         is:\n{printed}"
+    );
+    assert!(
+        printed
+            .lines()
+            .find(|line| line.contains(SECOND_EMAIL))
+            .is_some_and(|line| line.contains("never observed")),
+        "an Account nothing was read for has no Headroom either — no figure \
+         and plenty of room are opposite pieces of advice:\n{printed}"
+    );
+}
+
+/// Being in no Group is the absence of a declaration that Accounts are
+/// interchangeable rather than a weaker form of one (ADR 0017), so a bare
+/// `perch switch` refuses there. Ordering them by Headroom would show a ranking
+/// Perch would not make, which is the one thing this listing exists not to do.
+#[test]
+fn ungrouped_accounts_are_held_rather_than_ranked() {
+    let host = machine_holding(&a_group_of(
+        None,
+        EMAIL,
+        &[(EMAIL, 90.0), (SECOND_EMAIL, 10.0)],
+    ));
+
+    let (result, printed) = run_list(&host, false);
+
+    result.unwrap();
+    assert_eq!(
+        accounts_in_order(&printed),
+        [EMAIL, SECOND_EMAIL],
+        "the emptier Account is not promoted over one Perch would refuse to \
+         choose between:\n{printed}"
+    );
+    assert!(
+        printed.contains("10%") && printed.contains("90%"),
+        "the Headroom is still beside each of them as the figure it is:\n{printed}"
+    );
+}
+
+/// The other half of it: once somebody has said those Accounts are
+/// interchangeable, a Cycle does choose between them, so the listing ranks them.
+#[test]
+fn ungrouped_accounts_are_ranked_once_cycling_may_move_between_them() {
+    let mut registry = a_group_of(None, EMAIL, &[(EMAIL, 90.0), (SECOND_EMAIL, 10.0)]);
+    registry.global.cycle_ungrouped = true;
+    let host = machine_holding(&registry);
+
+    let (result, printed) = run_list(&host, false);
+
+    result.unwrap();
+    assert_eq!(
+        accounts_in_order(&printed),
+        [SECOND_EMAIL, EMAIL],
+        "{printed}"
+    );
+}
+
+/// A document says what its order is, or it does not have one (ADR 0053).
+///
+/// `accounts[0]` of the first section is the Account a bare `perch switch`
+/// would land on, and a flat array states that nowhere — a script reading it
+/// would be relying on a ranking the document never claimed to be making. The
+/// held-versus-ranked distinction is the half with teeth: a `--json` showing a
+/// ranking of Accounts Perch would refuse to choose between is the
+/// two-surfaces-disagreeing failure ADR 0049 exists to prevent, reached through
+/// a different renderer.
+#[test]
+fn the_json_says_which_of_its_sections_is_ranked_and_which_is_held() {
+    let mut registry = a_group_of(Some("work"), EMAIL, &[(EMAIL, 90.0), (SECOND_EMAIL, 10.0)]);
+    let mut loose = account(THIRD_EMAIL, "Spare Ltd");
+    loose.utilization = Some(observed(at(11, 57), &[("5-hour", 30.0)]));
+    registry.upsert(loose);
+    let host = machine_holding(&registry);
+
+    let (result, printed) = run_list(&host, true);
+
+    result.unwrap();
+    let document: serde_json::Value = serde_json::from_str(&printed).expect("valid JSON");
+    assert!(
+        document["accounts"].is_null(),
+        "there is no shape that makes no claim about its order: {document}"
+    );
+
+    let sections = document["sections"].as_array().unwrap();
+    assert_eq!(sections.len(), 2, "{document}");
+
+    assert_eq!(sections[0]["scope"]["kind"], "group");
+    assert_eq!(sections[0]["scope"]["name"], "work");
+    assert_eq!(sections[0]["order"], "ranked");
+    assert_eq!(
+        sections[0]["accounts"][0]["email"], SECOND_EMAIL,
+        "the top of the ranked section is where a bare `perch switch` lands: \
+         {document}"
+    );
+
+    assert_eq!(sections[1]["scope"]["kind"], "ungrouped");
+    assert_eq!(
+        sections[1]["order"], "held",
+        "nothing has declared these interchangeable, so their order is not a \
+         ranking and does not claim to be: {document}"
+    );
+}
+
+/// The figure the ranking was made on travels with it, so a section saying it
+/// is `ranked` carries the number that ranked it — and the three answers stay
+/// three, rather than an absent figure arriving as nought.
+#[test]
+fn the_json_carries_the_headroom_the_ranking_was_made_on() {
+    let host = machine_holding_three_accounts();
+
+    let (result, printed) = run_list(&host, true);
+
+    result.unwrap();
+    let document: serde_json::Value = serde_json::from_str(&printed).expect("valid JSON");
+    let of = |email: &str| -> serde_json::Value {
+        document["sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|section| section["accounts"].as_array().unwrap())
+            .find(|account| account["email"] == email)
+            .unwrap_or_else(|| panic!("{email} is listed: {document}"))["headroom"]
+            .clone()
+    };
+
+    assert_eq!(
+        of(EMAIL),
+        serde_json::json!({"state": "room", "percent": 58.0})
+    );
+    assert_eq!(
+        of(SECOND_EMAIL),
+        serde_json::json!({"state": "never-observed", "percent": null}),
+        "no figure and plenty of room are opposite pieces of advice, and a \
+         script reads them apart rather than both as nought"
+    );
+}
+
+/// A Cycle never leaves the scope it started in (ADR 0002), so a listing
+/// spanning several is those rankings one after another — and the one you are
+/// standing in leads, because it is where a bare `perch switch` would look.
+#[test]
+fn the_scope_the_active_account_is_in_comes_first() {
+    let mut registry = Registry::default();
+    for name in ["alpha", "zulu"] {
+        registry
+            .groups
+            .insert(name.to_string(), Overrides::default());
+    }
+    let mut first = account(EMAIL, "Acme");
+    first.group = Some("alpha".to_string());
+    registry.upsert(first);
+    let mut second = account(SECOND_EMAIL, "Overflow Ltd");
+    second.group = Some("zulu".to_string());
+    registry.upsert(second);
+    registry.upsert(account(THIRD_EMAIL, "Spare Ltd"));
+    registry.active = Active::Settled(SECOND_EMAIL.to_string());
+    let host = machine_holding(&registry);
+
+    let (result, printed) = run_list(&host, false);
+
+    result.unwrap();
+    assert_eq!(
+        accounts_in_order(&printed),
+        [SECOND_EMAIL, EMAIL, THIRD_EMAIL],
+        "`zulu` leads because that is where the active Account is, then the \
+         other Group, then the Accounts in none:\n{printed}"
+    );
 }
 
 #[test]
@@ -189,10 +447,17 @@ fn list_json_carries_an_observation_time_on_every_figure() {
     assert_eq!(document["scope"]["kind"], "all");
     assert_eq!(document["active_account"], EMAIL);
 
-    let accounts = document["accounts"].as_array().unwrap();
+    // Two sections — the Group the active Account is in, then the Accounts in
+    // none — and the Accounts are inside them rather than in a flat array.
+    let sections = document["sections"].as_array().unwrap();
+    assert_eq!(sections.len(), 2, "{document}");
+    let accounts: Vec<&serde_json::Value> = sections
+        .iter()
+        .flat_map(|section| section["accounts"].as_array().unwrap())
+        .collect();
     assert_eq!(accounts.len(), 3);
 
-    let active = &accounts[0];
+    let active = accounts[0];
     assert_eq!(active["email"], EMAIL);
     assert_eq!(active["active"], true);
     assert_eq!(active["group"], "work");
@@ -217,7 +482,7 @@ fn list_json_carries_an_observation_time_on_every_figure() {
         assert_eq!(window["observed_seconds_ago"], 180);
     }
 
-    let overflow = &accounts[1];
+    let overflow = accounts[1];
     assert_eq!(overflow["alias"], "overflow");
     assert_eq!(
         overflow["quarantined"]["reason"], "renewal-rejected",
@@ -232,7 +497,7 @@ fn list_json_carries_an_observation_time_on_every_figure() {
     );
     assert!(overflow["utilization"]["observed_at"].is_null());
 
-    let spare = &accounts[2];
+    let spare = accounts[2];
     assert_eq!(spare["enabled"], false);
     assert!(spare["group"].is_null());
 }
@@ -331,7 +596,18 @@ fn status_group_json_says_which_group_it_narrowed_to() {
     let document: serde_json::Value = serde_json::from_str(&printed).expect("valid JSON");
     assert_eq!(document["scope"]["kind"], "group");
     assert_eq!(document["scope"]["name"], "work");
-    let accounts = document["accounts"].as_array().unwrap();
+    let sections = document["sections"].as_array().unwrap();
+    assert_eq!(
+        sections.len(),
+        1,
+        "narrowed to one Scope, the listing is one section: {document}"
+    );
+    assert_eq!(
+        sections[0]["scope"], document["scope"],
+        "and the section says the same Scope the document was asked for, in the \
+         same shape: {document}"
+    );
+    let accounts = sections[0]["accounts"].as_array().unwrap();
     assert_eq!(accounts.len(), 2);
     assert_eq!(accounts[0]["email"], EMAIL);
     assert_eq!(accounts[1]["email"], SECOND_EMAIL);

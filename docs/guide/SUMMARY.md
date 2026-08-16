@@ -9,6 +9,5 @@
 - [Watching](watching.md)
 - [Running one Account in one terminal](running.md)
 - [Backing up and moving machines](backup.md)
-- [Choosing by eye](tui.md)
 - [Configuration](configuration.md)
 - [Reference](reference.md)

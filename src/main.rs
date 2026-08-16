@@ -14,7 +14,6 @@ use perch::commands::remove::{self, RemoveArgs};
 use perch::commands::run::{self, RunArgs};
 use perch::commands::status::{self, StatusArgs};
 use perch::commands::switch::{self, SwitchArgs};
-use perch::commands::tui;
 use perch::commands::upgrade::{self, UpgradeArgs};
 use perch::commands::watcher::{self, WatcherCommand};
 use perch::error::EXIT_OK;
@@ -223,29 +222,6 @@ enum Command {
         json: bool,
     },
 
-    /// Open the interactive view: the Accounts and their Utilization, side by
-    /// side.
-    ///
-    /// For when the choice wants making by eye rather than by rule. Nothing
-    /// here is only here — every capability has a plain command form, because
-    /// Perch has to be complete over SSH and in scripts (ADR 0011).
-    ///
-    /// Two tabs. `Status` answers "where am I and what governs me" — the active
-    /// Account, the table of Accounts in the order `perch switch` would rank
-    /// them, and the Settings in force for the Scope you are in. `Config`
-    /// answers "what does each Scope declare" and lets you change it.
-    ///
-    /// It writes what it can unwrite (ADR 0034): Settings, Aliases, whether
-    /// Cycling may choose an Account, which Group it is in, declaring a Group,
-    /// Enter to Switch and `x` to Run. `add`, `remove`, `relogin`, `purge`,
-    /// `export`, `import` and deleting a Group have no key here. There is no
-    /// save button — a change is written when it is made.
-    ///
-    /// The first frame is drawn from cache and never waits on the network, with
-    /// the age of every figure on it; `r` Refreshes, and the display keeps
-    /// answering while it does. `q` or Ctrl-C leaves.
-    Tui,
-
     /// Replace this Perch with a newer Release.
     ///
     /// Through whatever Channel installed it (ADR 0039): a Homebrew
@@ -433,13 +409,10 @@ fn main() {
             &mut out,
         )),
         Command::Switch { target } => ok(switch::run(&host, SwitchArgs { target }, &mut out)),
-        // A second whose exit code is not simply Perch's own: the picker can
-        // hand the terminal to a client, and what that client said is what a
-        // script reads.
-        Command::Tui => tui::run(&host, &mut out),
-        // And a third: what `brew` or `npm` exited with is what a script
-        // reads, because a failed `brew upgrade` is a failed upgrade and a code
-        // of Perch's own would lose which of `brew`'s failures it was.
+        // The other whose exit code is not simply Perch's own: what `brew` or
+        // `npm` exited with is what a script reads, because a failed `brew
+        // upgrade` is a failed upgrade and a code of Perch's own would lose
+        // which of `brew`'s failures it was.
         Command::Upgrade {
             release,
             check,
@@ -617,28 +590,6 @@ mod tests {
             &["perch", "holdings", "purge", "work"],
             &["perch", "holdings", "purge", "--account", "work"],
             &["perch", "holdings", "purge", "--group", "work"],
-        ] {
-            assert!(
-                Cli::try_parse_from(narrowed).is_err(),
-                "`{}` should not parse",
-                narrowed.join(" ")
-            );
-        }
-    }
-
-    /// The interactive view has no arguments at all. What it shows is every
-    /// Account, and how it shows them is a keystroke away rather than a flag —
-    /// and a `--json` here would be `perch list --json`, which is the command
-    /// ADR 0011 requires to exist anyway.
-    #[test]
-    fn the_interactive_view_takes_no_arguments() {
-        assert!(Cli::try_parse_from(["perch", "tui"]).is_ok());
-
-        for narrowed in [
-            &["perch", "tui", "work"][..],
-            &["perch", "tui", "--json"],
-            &["perch", "tui", "--refresh"],
-            &["perch", "tui", "--group", "work"],
         ] {
             assert!(
                 Cli::try_parse_from(narrowed).is_err(),
