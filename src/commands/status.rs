@@ -22,7 +22,7 @@ use crate::commands::say_json;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::observe::{self, Report};
-use crate::registry::{self, Account, Active, Registry};
+use crate::registry::{self, Account, Registry};
 use crate::utilization;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -57,7 +57,7 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
     // describe, so what it gets is the line and the field alone.
     let active = match (
         active_email(&registry),
-        a_switch_in_flight(&registry.active),
+        registry.active.a_switch_in_flight(),
     ) {
         (Ok(active), _) => active,
         (Err(_), Some(said)) => return the_switch_alone(out, &registry, args.json, &said),
@@ -82,18 +82,10 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
 
     let now = host.now();
     match scope {
-        Some(scope) => {
-            // Said before the listing rather than inside it. `--group` widens
-            // the question to "where would I land", which is the listing's to
-            // draw (ADR 0053) — but which Account you are standing on is this
-            // command's to qualify, whichever question it is answering.
-            if let Some(said) = a_switch_in_flight(&registry.active)
-                && !args.json
-            {
-                utilization::write_labelled(out, "Switch", &said)?;
-            }
-            list::render(host, out, &registry, scope, now, args.json, &report)
-        }
+        // A Switch in flight is said by the listing, which is what answers
+        // `--group` (ADR 0053) and which has its own line about which Account
+        // is active for it to qualify.
+        Some(scope) => list::render(host, out, &registry, scope, now, args.json, &report),
         None => {
             let account = registry.held(&active)?;
             if args.json {
@@ -163,9 +155,11 @@ fn render_human(
 
     // Above the Account line, because it is what qualifies it: with a Switch in
     // flight, the Account named below is the one Perch was on rather than the
-    // one it can establish is live.
-    if let Some(said) = a_switch_in_flight(&registry.active) {
-        utilization::write_labelled(out, "Switch", &said)?;
+    // one it can establish is live. A note rather than a labelled row, as the
+    // Refresh's own notes above it are — the column is for facts about the
+    // Account, and this is a fact about whether Perch can name one.
+    if let Some(said) = registry.active.a_switch_in_flight() {
+        crate::commands::say(out, &said)?;
     }
 
     utilization::write_labelled(out, "Account", account.email())?;
@@ -215,7 +209,7 @@ fn render_json(
 ) -> Result<()> {
     let document = json!({
         "active": list::document(host, registry, account, now)?,
-        "landing": the_landing(&registry.active),
+        "landing": registry.active.document(),
         "utilization": utilization::document(account, now),
         "refresh": report.document(),
     });
@@ -239,49 +233,15 @@ fn the_switch_alone(
     said: &str,
 ) -> Result<()> {
     if !json {
-        return utilization::write_labelled(out, "Switch", said);
+        return crate::commands::say(out, said);
     }
     say_json(
         out,
         &json!({
             "active": serde_json::Value::Null,
-            "landing": the_landing(&registry.active),
+            "landing": registry.active.document(),
             "utilization": serde_json::Value::Null,
             "refresh": Report::default().document(),
         }),
     )
-}
-
-/// The Switch that was in flight, as a script reads it.
-fn the_landing(active: &Active) -> serde_json::Value {
-    match active {
-        Active::Landing { leaving, arriving } => json!({
-            "leaving": leaving,
-            "arriving": arriving,
-        }),
-        _ => serde_json::Value::Null,
-    }
-}
-
-/// What there is to say about a Switch that was in flight and never recorded,
-/// or `None` on the machines where there was not one.
-///
-/// Said at all because half of why this hazard survived is that a machine
-/// mid-Landing is indistinguishable from a healthy one, so nobody looks (ADR
-/// 0048). It does not change the exit code: status reports what it found rather
-/// than judging it (ADR 0018), and a state the next Switch resolves by itself
-/// should not fail somebody's shell prompt.
-fn a_switch_in_flight(active: &Active) -> Option<String> {
-    let Active::Landing { leaving, arriving } = active else {
-        return None;
-    };
-    let was_on = match leaving {
-        Some(leaving) => format!("Perch was on {leaving}"),
-        None => "Perch was on no Account".to_string(),
-    };
-    Some(format!(
-        "in flight and not recorded — {was_on} and was switching to {arriving}, \
-         so which Credential is live is not settled. The next Switch resolves \
-         it, and says so if it cannot."
-    ))
 }

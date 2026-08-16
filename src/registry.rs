@@ -742,6 +742,57 @@ impl Active {
         }
     }
 
+    /// The Switch that was in flight and never recorded, said out loud, or
+    /// `None` on the machines where there was not one.
+    ///
+    /// Said at all because half of why this hazard survived is that a machine
+    /// mid-Landing is indistinguishable from a healthy one, so nobody looks
+    /// (ADR 0048). It never changes an exit code: Perch reports what it found
+    /// rather than judging it (ADR 0018), and a state the next Switch resolves
+    /// by itself should not fail somebody's shell prompt.
+    ///
+    /// Here rather than in the command, beside [`document`], because two
+    /// commands say it and both have to say the same thing — `perch status`
+    /// about the Account you are on, and the listing under it, which is what
+    /// `perch status --group` is answered by (ADR 0053). What it qualifies is
+    /// whichever line says which Account is active, and there is one of those
+    /// in each.
+    ///
+    /// [`document`]: Active::document
+    pub fn a_switch_in_flight(&self) -> Option<String> {
+        let Active::Landing { leaving, arriving } = self else {
+            return None;
+        };
+        let was_on = match leaving {
+            Some(leaving) => format!("Perch was on {leaving}"),
+            None => "Perch was on no Account".to_string(),
+        };
+        Some(format!(
+            "A Switch was in flight and was not recorded — {was_on} and was \
+             switching to {arriving}, so which Credential is live is not \
+             settled. The next Switch resolves it, and says so if it cannot."
+        ))
+    }
+
+    /// The Switch that was in flight and never recorded, as a script reads it,
+    /// and `null` on every machine that is not mid-Landing.
+    ///
+    /// Beside whichever key a document already uses for who is active rather
+    /// than folded into it, and the same shape in every document that carries
+    /// one. The two answer different questions — *which Account* against
+    /// *whether Perch can say* — and a script that only ever wanted the first
+    /// should not have to learn what a Landing is to go on getting it (ADR
+    /// 0048). Absent reads as false wherever a script asks whether it is set,
+    /// which is how [`Quarantine::document`] beside it is read.
+    pub fn document(&self) -> serde_json::Value {
+        match self {
+            Active::Landing { leaving, arriving } => {
+                serde_json::json!({"leaving": leaving, "arriving": arriving})
+            }
+            Active::Nobody | Active::Settled(_) => serde_json::Value::Null,
+        }
+    }
+
     /// Being on the Account a Switch was leaving, or on nobody where it was
     /// leaving nobody. What a Landing comes back to when nothing moved.
     pub fn settled_on(leaving: Option<String>) -> Active {

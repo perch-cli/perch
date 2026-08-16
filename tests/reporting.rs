@@ -140,7 +140,10 @@ fn status_says_a_switch_was_in_flight_and_not_recorded_and_still_exits_zero() {
     let (result, printed) = run_status(&host, false);
 
     result.expect("a Switch in flight is a state to report rather than a failure");
-    assert!(printed.contains("in flight and not recorded"), "{printed}");
+    assert!(
+        printed.contains("A Switch was in flight and was not recorded"),
+        "{printed}"
+    );
     assert!(
         printed.contains(EMAIL) && printed.contains(SECOND_EMAIL),
         "it names both Accounts the live Credential could belong to: {printed}"
@@ -173,7 +176,10 @@ fn a_switch_in_flight_from_nobody_is_still_reported_and_still_exits_zero() {
     let (result, printed) = run_status(&host, false);
 
     result.expect("a Switch in flight is a state to report rather than a failure");
-    assert!(printed.contains("in flight and not recorded"), "{printed}");
+    assert!(
+        printed.contains("A Switch was in flight and was not recorded"),
+        "{printed}"
+    );
     assert!(printed.contains("Perch was on no Account"), "{printed}");
 
     let (result, as_json) = run_status(&host, true);
@@ -186,6 +192,45 @@ fn a_switch_in_flight_from_nobody_is_still_reported_and_still_exits_zero() {
         document["active"].is_null(),
         "there is no Account established to describe: {as_json}"
     );
+}
+
+/// `--group` widens the question to "where would I land", and which Account you
+/// are standing on is not a fact that stops being worth qualifying because of
+/// it: the `*` a listing draws is on the Account Perch was on rather than one it
+/// can establish is live.
+///
+/// The listing is what answers `--group` (ADR 0053), so it says it — which
+/// means `perch list` says it too, off the one sentence and the one field both
+/// documents share.
+#[test]
+fn a_switch_in_flight_is_said_by_the_listing_that_answers_group_as_well() {
+    let host = machine_with_two_accounts();
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+
+    for (what, printed, as_json) in [
+        (
+            "status --group",
+            run_status_group(&host, false),
+            run_status_group(&host, true),
+        ),
+        ("list", run_list(&host, false), run_list(&host, true)),
+    ] {
+        let (result, printed) = printed;
+        result.unwrap_or_else(|error| panic!("{what}: {error}"));
+        assert!(
+            printed.contains("A Switch was in flight and was not recorded"),
+            "{what}: {printed}"
+        );
+
+        let (result, as_json) = as_json;
+        result.unwrap_or_else(|error| panic!("{what} --json: {error}"));
+        let document: serde_json::Value = serde_json::from_str(&as_json).expect("valid JSON");
+        assert_eq!(document["landing"]["leaving"], EMAIL, "{what}: {as_json}");
+        assert_eq!(
+            document["landing"]["arriving"], SECOND_EMAIL,
+            "{what}: {as_json}"
+        );
+    }
 }
 
 /// And on the ordinary machine the field is there and empty, so a script may
