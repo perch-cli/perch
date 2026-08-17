@@ -1,7 +1,7 @@
 # A Run makes a Profile Live, and a Switch reads through it
 
 A Profile with a Run against it is a Live Profile. Perch already knows how to
-recognise one — a session marker naming a process that is still the one that
+recognize one — a session marker naming a process that is still the one that
 wrote it (ADR 0022) — and already refuses to write into one. What it did not do
 was produce that evidence for the sessions it launches itself, so a Run got the
 protection only when Claude Code happened to write a marker of its own, and a
@@ -40,7 +40,7 @@ writes *into* the Profile, under a client that holds those files open and
 rewrites them on its way out.
 
 They are refused in the three different registers those paths already have, and
-deliberately not levelled to one. A Capture stops the Switch with exit code 16,
+deliberately not leveled to one. A Capture stops the Switch with exit code 16,
 because a Switch that cannot Capture must not proceed. A Renewal degrades to the
 cached figure and the command still exits 0, which is ADR 0018 — a refresh
 reports what it could not read rather than failing. A `.claude.json` key simply

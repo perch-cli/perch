@@ -6,7 +6,7 @@
 [![npm](https://img.shields.io/npm/v/perch-cli?label=npm)](https://www.npmjs.com/package/perch-cli)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-blue)](docs/guide/installing.md)
 [![Rust](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fperch-cli%2Fperch%2Fmain%2Frust-toolchain.toml&query=%24.toolchain.channel&label=rust&prefix=v)](rust-toolchain.toml)
-[![Licence](https://img.shields.io/badge/licence-MIT%20OR%20Apache--2.0-blue)](#licence)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
 Run Claude Code as whichever Claude account you want, without going through the
 login flow again.
@@ -176,7 +176,7 @@ it that way. The same pages, rendered and searchable, are at
 [`CONTEXT.md`](CONTEXT.md) for the vocabulary, [`docs/adr/`](docs/adr/) for the
 decisions.
 
-## Licence
+## License
 
 Two of them, at your option, which is the Rust ecosystem's convention and not an
 accident. MIT is the shorter and better-known of the pair but says nothing at all

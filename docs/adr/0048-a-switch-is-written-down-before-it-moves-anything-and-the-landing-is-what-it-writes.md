@@ -166,7 +166,7 @@ script.
 
 **The Watcher holds rather than stops.** It is a Switch path, so it resolves; and
 where resolution refuses, nobody is there to answer. Its own entry already
-describes the behaviour this wants: *"told otherwise it holds rather than stops,
+describes the behavior this wants: *"told otherwise it holds rather than stops,
 and says so."* An unresolved Landing is a reason it may not act, indistinguishable
 in kind from being under Threshold or inside a Cooldown, and it gets the same
 treatment. Stopping would turn a state one `perch relogin` clears into a dead
@@ -228,7 +228,7 @@ answer lived in a glossary entry, as a confession.
 The carry-out is not chained behind the sweep's other removals. It is a small
 deep change to `switch.rs` and `registry.rs`, where ADR 0047's rename is broad and
 shallow across `main.rs` and the commands; the two files that overlap, `watch.rs`
-and `commands/status.rs`, are cheaper to rebase a rename over than a behaviour
+and `commands/status.rs`, are cheaper to rebase a rename over than a behavior
 change. Sequencing a data-safety change behind three renames would be sequencing
 by convenience rather than by cost.
 

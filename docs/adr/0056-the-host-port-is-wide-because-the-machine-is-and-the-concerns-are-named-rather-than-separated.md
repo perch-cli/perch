@@ -174,7 +174,7 @@ the machine* beats *`Network`* — and inexpressible, because the roles overlap 
 overlapping supertraits are ambiguous at the call site. Generic bounds
 (`H: Network + Clock + Terminal + ?Sized`) would express it, at the price of
 turning `&dyn Host` into a type parameter at the two call sites that would use it
-and monomorphising the rest. Not worth it for two consumers, neither of which is
+and monomorphizing the rest. Not worth it for two consumers, neither of which is
 short of tests.
 
 **A narrow stub for `anthropic.rs`.** Covered above. The rule taken from it is
@@ -203,7 +203,7 @@ process concern even inside the port that owns both.
 and worth recording because it is the sort of thing this cut appears to buy. An
 adapter at this port must also answer `platform`, `read_file` and `note` —
 `credentials.rs` needs all of them to decide where a Credential lives. A second
-backend is composition inside `RealHost`, which is #205's neighbourhood and not
+backend is composition inside `RealHost`, which is #205's neighborhood and not
 this one.
 
 ## The glossary

@@ -278,7 +278,7 @@ pub struct Settings {
     /// did not say it could (ADR 0002).
     ///
     /// Said about the Scope it grants and nowhere else (ADR 0051). A grant that
-    /// reached a Scope by falling through from somewhere wider would authorise
+    /// reached a Scope by falling through from somewhere wider would authorize
     /// Groups nobody had said anything about — including ones not yet declared.
     pub watcher_may_act: bool,
     /// The Utilization the watcher would act at, as a percentage.
@@ -536,7 +536,7 @@ impl NameKind {
 
 /// Whether two names the user chose are the same name.
 ///
-/// Case-insensitively, because nobody remembers which way they capitalised a
+/// Case-insensitively, because nobody remembers which way they capitalized a
 /// Group months ago — and over the whole of Unicode, because
 /// [`validate_name`] accepts the whole of Unicode. Comparing only ASCII would
 /// make `café` and `CAFÉ` two different Groups while making `work` and `Work`
@@ -640,7 +640,7 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
     // such a Target everywhere else is already spoken for. `perch run -dev` is
     // read as flags and `perch run -- -dev` leaves no Target at all, so a name
     // like this is one the registry holds, `perch list` shows, `perch switch`
-    // honours — and `perch run` can never be told. Refused at the one moment
+    // honors — and `perch run` can never be told. Refused at the one moment
     // somebody can still pick another.
     if name.starts_with('-') {
         return Err(PerchError::Invalid(format!(
@@ -951,7 +951,7 @@ impl Registry {
     /// The two agree only while `active` holds the identical spelling of the
     /// entry it names, which is true today and is nothing that guarantees it:
     /// `upsert` matches an existing entry with `same_name` and stores the
-    /// incoming spelling, so an Identity re-read with different capitalisation
+    /// incoming spelling, so an Identity re-read with different capitalization
     /// replaces the Account and leaves `active` naming it the old way. From
     /// there `observe::holding` reads the Account's own Profile instead of the
     /// Default Profile, finds the store empty, and records `NoCredential` — a
@@ -1034,7 +1034,7 @@ impl Registry {
             .collect()
     }
 
-    /// The Group declared under a name, whatever it was capitalised as. Two
+    /// The Group declared under a name, whatever it was capitalized as. Two
     /// names that differ only in case are one name here (see
     /// [`refuse_taken_names`](Self::refuse_taken_names)), so this is how a
     /// Group typed in passing is matched to the one that exists.
@@ -1075,10 +1075,10 @@ impl Registry {
     /// `instead_of` is the name this one is replacing, where it is replacing
     /// one: the Group's current name, or the Alias the Account already answers
     /// to. A name renaming itself does not collide with itself, and that
-    /// includes recapitalising it.
+    /// includes recapitalizing it.
     ///
     /// Nothing else is waived by it. The shared namespace is still checked, so
-    /// a recapitalisation cannot walk into the other half — which the Group
+    /// a recapitalization cannot walk into the other half — which the Group
     /// path has always done and the two Alias paths did not: both returned `Ok`
     /// on a self-rename without asking anything. That was sound, but only by an
     /// argument about what `declare_group` would have refused earlier, and an
@@ -1108,7 +1108,7 @@ impl Registry {
         match kind {
             NameKind::Group => self.refuse_taken_names(None, Some(name)),
             NameKind::Alias => match renaming_itself {
-                // An Account keeping its own Alias under another capitalisation
+                // An Account keeping its own Alias under another capitalization
                 // cannot collide with the Alias it is giving up, and
                 // `refuse_taken_names` would find exactly that.
                 true => self.refuse_a_group_of_this_name(name),
@@ -1216,7 +1216,7 @@ impl Registry {
     /// naming an Account that is not there is refused on the way in and, since
     /// `save` validates too, on the way out.
     ///
-    /// So this is the same defence in depth `save` keeps: the state cannot
+    /// So this is the same defense in depth `save` keeps: the state cannot
     /// happen, and if it does the answer is a refusal naming what could not be
     /// found rather than a panic. Nothing a person can act on — which is why it
     /// says so — but a wedged machine is worse than a bad sentence.
@@ -1249,7 +1249,7 @@ impl Registry {
         }
     }
 
-    /// The Alias held under a name, whatever it was capitalised as, and the
+    /// The Alias held under a name, whatever it was capitalized as, and the
     /// Account it reaches.
     pub fn declared_alias(&self, name: &str) -> Option<(&str, &str)> {
         self.aliases
@@ -1267,7 +1267,7 @@ impl Registry {
     /// collision it is meant to prevent.
     ///
     /// Two names that differ only in case are the same name. Nobody remembers
-    /// which way they capitalised a Group months ago, so `work` and `Work`
+    /// which way they capitalized a Group months ago, so `work` and `Work`
     /// reaching different Accounts is the ambiguity this exists to prevent
     /// even though a lookup could tell them apart.
     pub fn refuse_taken_names(&self, alias: Option<&str>, group: Option<&str>) -> Result<()> {
@@ -1443,7 +1443,7 @@ pub fn profiles_dir(host: &dyn Host) -> Result<PathBuf> {
 /// The Default Profile, as everything that reads or writes the live Credential
 /// means it: the directory Claude Code falls back to, and never a Profile.
 ///
-/// `CLAUDE_CONFIG_DIR` is honoured, because somebody who moved their
+/// `CLAUDE_CONFIG_DIR` is honored, because somebody who moved their
 /// configuration directory moved the live Credential along with it — but never
 /// when it names a Profile, and pointing it at one is exactly what a Run does.
 /// The client a Run launches passes that variable on to everything it starts,
@@ -1679,12 +1679,12 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
         ));
     }
 
-    // Strictly, so a key nobody recognises is a refusal naming it rather than a
+    // Strictly, so a key nobody recognizes is a refusal naming it rather than a
     // value that quietly did nothing. Every type here is Perch's own — Claude
     // Code's `.claude.json` is read through `probe`'s own lenient shapes, which
     // have to tolerate whatever Anthropic adds — so there is nothing upstream
     // for this to be brittle about. What it catches is a hand edit: one
-    // transposed letter in `watcher_threshold_percent` used to deserialise as
+    // transposed letter in `watcher_threshold_percent` used to deserialize as
     // Global's value, run the watcher at a threshold nobody set, and then be
     // erased by the next command that wrote the file, with nothing said at any
     // point. The version guard above runs first, so a genuinely newer Perch is
@@ -2183,7 +2183,7 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) ->
         version: CURRENT_VERSION,
         ..registry.clone()
     })
-    .map_err(|err| PerchError::Other(format!("could not serialise the registry: {err}")))?;
+    .map_err(|err| PerchError::Other(format!("could not serialize the registry: {err}")))?;
     write(host, &path, &format!("{body}\n"))
 }
 
@@ -2281,7 +2281,7 @@ mod tests {
     /// the way out, so inside a registry Perch will load there is never more
     /// than one to find.
     #[test]
-    fn an_account_is_found_however_its_address_is_capitalised() {
+    fn an_account_is_found_however_its_address_is_capitalized() {
         let mut registry = Registry::default();
         registry.upsert(Account {
             identity: Identity {
@@ -2457,7 +2457,7 @@ mod tests {
     /// Every rule the shared namespace has, asked of both halves of it.
     ///
     /// A table because the rules are one fact with two spellings, and they had
-    /// come apart: the Group half funnelled through a single private check and
+    /// come apart: the Group half funneled through a single private check and
     /// the Alias half was three primitives reassembled at each of its three
     /// call sites, in an order one of them had already got wrong. Asked here of
     /// the one function all four callers now go through, so a fifth cannot
@@ -2505,7 +2505,7 @@ mod tests {
                 None,
                 Some("already a Group name"),
             ),
-            // Renaming itself is not colliding with itself, recapitalisation
+            // Renaming itself is not colliding with itself, recapitalization
             // included — the same waiver on both halves, which is new for the
             // Alias one.
             (NameKind::Group, "Personal", Some("personal"), None),
@@ -2551,7 +2551,7 @@ mod tests {
     /// reachable can produce it. It is what a third way of making a name would
     /// walk into, and it now has one answer rather than an inference.
     #[test]
-    fn recapitalising_an_alias_still_cannot_walk_into_a_group() {
+    fn recapitalizing_an_alias_still_cannot_walk_into_a_group() {
         let mut registry = Registry::default();
         registry
             .aliases
@@ -2692,15 +2692,15 @@ mod tests {
         );
     }
 
-    /// A key nobody recognises is a refusal naming it, rather than a value that
+    /// A key nobody recognizes is a refusal naming it, rather than a value that
     /// quietly did nothing and was then erased.
     ///
     /// Every other way of getting this file wrong by hand has a named refusal —
     /// a bad version, a bad Strategy, a percentage out of range, a dangling
     /// Alias, an address with no `@`. A transposed letter had neither a refusal
-    /// nor an effect: `watcher_treshold_percent` deserialised as the default,
+    /// nor an effect: `watcher_treshold_percent` deserialized as the default,
     /// so the Group went on running at a threshold nobody set, and the next
-    /// command that wrote the file re-serialised the Group without it — the
+    /// command that wrote the file re-serialized the Group without it — the
     /// edit gone, with nothing said at any point in between.
     #[test]
     fn a_key_the_registry_does_not_know_is_refused_rather_than_ignored() {
@@ -3156,7 +3156,7 @@ mod tests {
         assert_eq!(
             registry.unset_alias("Work"),
             Some(("work".to_string(), "someone@example.com".to_string())),
-            "a name is freed however it is capitalised, and says how it was held"
+            "a name is freed however it is capitalized, and says how it was held"
         );
         assert!(registry.unset_alias("work").is_none());
     }

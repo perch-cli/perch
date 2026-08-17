@@ -21,7 +21,7 @@ mdBook, which is the Rust ecosystem's default and gives navigation and full-text
 search for nothing. The two costs are real and are paid: a build step in the
 deploy path, and a theme that looks like every other Rust project's docs. The
 second is answered by `docs/theme/perch.css`, which is small on purpose — it
-carries the landing page's type and its one accent colour so that moving between
+carries the landing page's type and its one accent color so that moving between
 the two is not a change of voice, and leaves the navigation and the search
 alone, since those are the reason mdBook is here.
 

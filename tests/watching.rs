@@ -1,4 +1,4 @@
-//! Behaviour: `perch watcher run` — the loop, the Refresh, and the decision
+//! Behavior: `perch watcher run` — the loop, the Refresh, and the decision
 //! log.
 //!
 //! The tests here drive a simulated Utilization trace through the real loop
@@ -1084,7 +1084,7 @@ fn a_landing_in_flight_leaves_the_opening_line_naming_nobody() {
 ///
 /// A grant said about a Group is a statement about that Group and reaches
 /// nothing else, so a person who has let the watcher into their work Group has
-/// not authorised moving them onto their personal subscription — and there is
+/// not authorized moving them onto their personal subscription — and there is
 /// nowhere to write a grant that would.
 #[test]
 fn a_grant_said_about_a_group_leaves_ungrouped_accounts_alone() {

@@ -68,7 +68,7 @@ pub enum Refused {
     /// reads for reassurance is no reason to stop reading Utilization at all" —
     /// and folding an HTTP failure in with it turned an outage into permission
     /// to skip the ownership check.
-    Unrecognised(String),
+    Unrecognized(String),
     /// The endpoint answered with a status Perch has no reading for — a 500, a
     /// 502, a 404 at a URL that used to work.
     ///
@@ -84,7 +84,7 @@ const THROTTLED: &str = "Anthropic is rate-limiting reads of this Account's \
                          Utilization — about 28-30 an hour, and the window \
                          does not refill early";
 const REJECTED: &str = "Anthropic did not accept the Credential";
-const UNRECOGNISED: &str = "Anthropic answered something Perch does not understand";
+const UNRECOGNIZED: &str = "Anthropic answered something Perch does not understand";
 const FAILED: &str = "Anthropic answered with a failure";
 const UNREACHABLE: &str = "Anthropic could not be reached";
 
@@ -93,7 +93,7 @@ impl std::fmt::Display for Refused {
         let said = match self {
             Refused::Throttled => THROTTLED.to_string(),
             Refused::Rejected => REJECTED.to_string(),
-            Refused::Unrecognised(detail) => format!("{UNRECOGNISED}: {detail}"),
+            Refused::Unrecognized(detail) => format!("{UNRECOGNIZED}: {detail}"),
             Refused::Failed(status) => format!("{FAILED} (HTTP {status})"),
             Refused::Unreachable(detail) => format!("{UNREACHABLE}: {detail}"),
         };
@@ -134,9 +134,9 @@ impl std::fmt::Debug for Fresh {
 pub fn utilization(host: &dyn Host, access_token: &str) -> Result<QuotaWindows, Refused> {
     let document = read(host, USAGE_URL, access_token)?;
     let mut said = Vec::new();
-    let windows = windows_in(&document, &mut said).map_err(Refused::Unrecognised)?;
+    let windows = windows_in(&document, &mut said).map_err(Refused::Unrecognized)?;
     if windows.is_empty() {
-        return Err(Refused::Unrecognised(
+        return Err(Refused::Unrecognized(
             "the usage endpoint named no Quota Window".to_string(),
         ));
     }
@@ -213,7 +213,7 @@ pub fn renew(host: &dyn Host, refresh_token: &str) -> Result<Fresh, Refused> {
 }
 
 fn missing(field: &str) -> Refused {
-    Refused::Unrecognised(format!("the token endpoint returned no {field}"))
+    Refused::Unrecognized(format!("the token endpoint returned no {field}"))
 }
 
 /// A read as this Account: a Bearer token, and the beta the OAuth endpoints are
@@ -283,7 +283,7 @@ fn understand(response: HttpResponse, also_rejected: &[u16]) -> Result<Value, Re
     }
     match response.status {
         200..=299 => serde_json::from_str(&response.body)
-            .map_err(|err| Refused::Unrecognised(format!("the reply is not JSON: {err}"))),
+            .map_err(|err| Refused::Unrecognized(format!("the reply is not JSON: {err}"))),
         401 | 403 => Err(Refused::Rejected),
         429 => Err(Refused::Throttled),
         status => Err(Refused::Failed(status)),

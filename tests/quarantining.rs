@@ -1,4 +1,4 @@
-//! Behaviour: what Perch does with an Account whose Credential has stopped
+//! Behavior: what Perch does with an Account whose Credential has stopped
 //! working for good.
 //!
 //! ADR 0006 makes this the terminal state of the capture design rather than a

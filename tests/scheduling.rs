@@ -1,4 +1,4 @@
-//! Behaviour: `perch watcher check` — one check, and what it reports to
+//! Behavior: `perch watcher check` — one check, and what it reports to
 //! whatever scheduled it.
 //!
 //! The loop is a person watching; this is a machine watching, and the
@@ -218,7 +218,7 @@ fn a_check_on_an_ungrouped_account_exits_eighteen_and_names_both_declarations() 
 
 /// **ADR 0051, in executable form.** A grant is said about the Scope it grants
 /// and nowhere else, so a `watcher-may-act true` said about a Group is a
-/// statement about that Group: it cannot authorise moving somebody off a work
+/// statement about that Group: it cannot authorize moving somebody off a work
 /// Account onto their personal subscription, because there is nowhere to write
 /// a grant that would.
 ///

@@ -65,7 +65,7 @@ Three interfaces were designed independently before this one was chosen.
 of the three: the two yeses, the exit-code table, the coalescing and all six
 orderings sit behind two methods, and it buys one genuinely new assertion — drive
 `a_loop()` and `a_check()` over the same registry and prove the step sequences
-differ in exactly three places, which is the "three arrangements, one behaviour"
+differ in exactly three places, which is the "three arrangements, one behavior"
 rule finally made checkable. It was rejected because the answers are not typed
 per step: replying to `Refresh` with what `SwitchTo` expects is a panic, not a
 compile error. A design whose purpose is eliminating runtime ordering failures
@@ -87,7 +87,7 @@ it: one real adapter of four one-line pass-throughs, one test-only recorder that
 re-records what `FakeHost::effects()` and `sent_to(..)` already record, and
 `cycle::choose` — a function that performs no IO — sitting behind a port. One
 adapter is a hypothetical seam. `&dyn Host` remains the only port Perch has, as
-ADR 0025 decided, and `host::fake` remains the only way behaviour is driven, as
+ADR 0025 decided, and `host::fake` remains the only way behavior is driven, as
 ADR 0044 decided.
 
 ## The glossary

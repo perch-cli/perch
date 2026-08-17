@@ -28,7 +28,7 @@ permissions:
 
 # Pages has one live deployment, so two runs racing would have one of them
 # quietly lose. Not cancel-in-progress: the loser should be the older one, and
-# that is what queueing gives.
+# that is what queuing gives.
 concurrency:
   group: pages
   cancel-in-progress: false

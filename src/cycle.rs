@@ -588,7 +588,7 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
     // `same_name` rather than `==`, for the reason [`choose`] gives at its own
     // reading of this value: `upsert` matches an Account with `same_name` but
     // stores the incoming spelling, so an Identity re-read under another
-    // capitalisation leaves `active` naming the entry the old way. Compared by
+    // capitalization leaves `active` naming the entry the old way. Compared by
     // bytes, `here` came back `None` on exactly those machines — and a `None`
     // here is the staying-put veto silently dropped from the listing while
     // `choose` keeps it, which is the disagreement this whole function exists to
@@ -1759,18 +1759,18 @@ pub(crate) mod tests {
     }
 
     /// The same agreement, on a machine where `active` and the Account it names
-    /// are capitalised differently.
+    /// are capitalized differently.
     ///
     /// `Registry::upsert` matches with `same_name` but stores the *incoming*
     /// spelling, so an Identity Claude Code re-writes under another
-    /// capitalisation leaves `active` naming the entry the old way — a state
+    /// capitalization leaves `active` naming the entry the old way — a state
     /// `Registry::is_active`'s doc describes and every other reader of an address
     /// compares for. `ranked` compared by bytes, found no `here`, and dropped the
     /// staying-put veto from the listing alone: `choose` still refused to move,
     /// and the listing showed the Account it would not have moved to at the
     /// top.
     #[test]
-    fn the_listing_agrees_with_the_cycle_however_the_active_address_is_capitalised() {
+    fn the_listing_agrees_with_the_cycle_however_the_active_address_is_capitalized() {
         let registry = preferring(
             {
                 let mut registry = holding(vec![

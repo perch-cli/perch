@@ -187,7 +187,7 @@ fn establish(host: &dyn Host, target: &Path, at: &Path) -> Result<()> {
 /// On Windows that is the ordinary case rather than an obstruction: a shared
 /// file there is routinely a hard link, which is a second name for the file and
 /// says nothing about being one. It is re-established rather than trusted, for
-/// a reason beyond not being able to recognise it — a hard link goes stale
+/// a reason beyond not being able to recognize it — a hard link goes stale
 /// silently. An editor that writes beside a file and renames it into place
 /// leaves the Default Profile with a new file and the Profile still holding the
 /// old one, which is the divergence this whole module exists to prevent. Doing

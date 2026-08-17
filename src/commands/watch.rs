@@ -4,7 +4,7 @@
 //! A loop you can see and kill. What it decides and why is [`crate::watch`];
 //! the round it takes to decide it is here.
 //!
-//! Three arrangements and one behaviour (ADR 0040). Typed at a terminal it is
+//! Three arrangements and one behavior (ADR 0040). Typed at a terminal it is
 //! this loop. Run by the machine's own service manager — a Service, which
 //! [`crate::service`] installs — it is *the same loop*, supervised, which is
 //! the whole of why there is no second policy to keep in agreement with this
@@ -562,7 +562,7 @@ fn permitted(registry: &Registry, _settled: &Settled) -> Result<Watching> {
     }
 
     // The Scope's own grant, and there is nowhere else it could come from
-    // (ADR 0051): a `watcher-may-act` said about one Scope authorises that
+    // (ADR 0051): a `watcher-may-act` said about one Scope authorizes that
     // Scope and no other.
     let settings = registry.settings(&scope);
     if !settings.watcher_may_act {

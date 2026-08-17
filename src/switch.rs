@@ -93,7 +93,7 @@ pub enum Captured {
 /// record of having moved and the next one is free to move straight back: the
 /// "cooldown that did not survive the process" ADR 0013 names. Told here rather
 /// than sequenced by the caller, that ordering stops being a comment somebody
-/// has to honour and becomes a fact of the call.
+/// has to honor and becomes a fact of the call.
 #[derive(Debug)]
 pub enum Reason {
     /// `perch switch` — somebody asked for this one.
@@ -116,7 +116,7 @@ pub enum Reason {
     /// within records the Check that did it, in the same save (ADR 0013).
     ///
     /// The one arm that makes this enum more than a sentence, and
-    /// [`record_the_switch`] is where it is honoured.
+    /// [`record_the_switch`] is where it is honored.
     Check {
         /// The Scope the Switch was taken within, which is what the record is
         /// kept per.
@@ -675,7 +675,7 @@ pub struct NotLanded {
 /// Each is the negative of a term the glossary already has — this one of a
 /// [`Landing`] — so nothing is promoted. The steps that must come after an ask
 /// take its witness as an argument, so an ordering that was a comment somebody
-/// had to honour becomes an arity they cannot skip.
+/// had to honor becomes an arity they cannot skip.
 ///
 /// Two things earn this one, and they mean the same thing: [`resolve_a_landing`]
 /// settles a Landing it found, and [`nothing_in_flight`] finds there was none to

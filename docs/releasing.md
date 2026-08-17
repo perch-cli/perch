@@ -25,7 +25,7 @@ Only the title. This repository squash-merges, so the one commit that reaches
 messages as its body, and release-plz takes the type from the subject alone:
 a `chore:` title over a body full of `* feat:` bullets is a patch release. The
 one thing the body can still do is escalate — a `BREAKING CHANGE:` footer
-anywhere in it is honoured wherever it came from, which is worth knowing when
+anywhere in it is honored wherever it came from, which is worth knowing when
 a branch commit carries one nobody put in the title.
 
 The previous version comes from the newest `v*` tag rather than from crates.io
@@ -63,7 +63,7 @@ its own, and putting Perch on a public registry waits for a person.
 ### npm
 
 The packages are `perch-cli` and five platform packages under the `@perch-cli`
-scope. The scope needs an npm **organisation** named `perch-cli`, which is free
+scope. The scope needs an npm **organization** named `perch-cli`, which is free
 for public packages.
 
 Publishing uses **trusted publishing** — the registry checks this workflow's
@@ -147,7 +147,7 @@ and always did.
 The floor is the weekly scheduled CI run green on all three platforms for four
 consecutive weeks — that is the check that catches Claude Code drift, which is
 the failure that cannot be tested for in advance. Beyond the floor it is a
-judgement call. Worth revisiting at the same time: Apple notarization, which
+judgment call. Worth revisiting at the same time: Apple notarization, which
 0.x deliberately skips.
 
 ## The site, and the installers on it

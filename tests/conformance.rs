@@ -182,7 +182,7 @@ const CASES: &[Case] = &[
     // `lock::clear_the_abandoned` has to be able to meet anyway. The fake used
     // to answer the opposite way on both — a modification time where the
     // machine says `NotFound`, and `ENOTDIR` where the machine removes the link
-    // — so it modelled Perch as permanently wedged on a path the machine
+    // — so it modeled Perch as permanently wedged on a path the machine
     // recovers from on the next command, and the recovery had never run.
     Case {
         named: "asking when a dangling link was written is not an answer",

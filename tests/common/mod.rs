@@ -1,4 +1,4 @@
-//! Fixtures for the behaviour tests: a machine with a Claude Code login on it.
+//! Fixtures for the behavior tests: a machine with a Claude Code login on it.
 
 // Where a test lives is decided by what it names (ADR 0045). A `mod tests` in
 // `src` asserts a module's own vocabulary through the module's own API. A

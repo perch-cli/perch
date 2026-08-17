@@ -1,0 +1,54 @@
+# Perch writes American English, and this is what holds it to that. CLAUDE.md
+# carries the reasoning; this file is the rule.
+#
+# `locale = "en-us"` is the whole of it, and it costs no allowlist for any of the
+# vocabulary Perch was forced into from outside — serde's derives, HTTP's
+# `Authorization` header, Anthropic's `organization_uuid` and `utilization` —
+# because en-us already wants exactly those forms.
+#
+# This file is the one thing the gate cannot see: `typos` skips any file its own
+# config could live in, which is also why Cargo.toml is exempt. CI pipes both
+# back in rather than leaving two tracked files unchecked.
+
+[files]
+# `.github/` is where the workflow that runs this check lives, and it was
+# spelling three words the British way while checking everything else. A gate
+# that exempts its own directory is a gate with a hole in it.
+ignore-hidden = false
+# But hidden means hidden, and `.git` is hidden. It has to be named here rather
+# than left to `ignore-vcs`, which excludes what git *ignores* and not git's own
+# directory. What is in there is not Perch's prose and some of it can never
+# pass: `hooks/*.sample` ships from git in British English, and `COMMIT_EDITMSG`
+# and `logs/HEAD` hold commit messages, which are exempt for the same reason
+# CHANGELOG.md is — release-plz writes it from them.
+#
+# Worth knowing if this ever looks over-careful: a checkout has a `.git`
+# directory and a worktree has a `.git` *file*, so leaving this out fails on the
+# first and passes on the second.
+extend-exclude = [".git/"]
+
+[default]
+locale = "en-us"
+# `mis-addressing`, which typos splits at the hyphen before it looks anything up.
+# Matched as the whole hyphenation rather than allowed as a bare word, so the
+# prefix on its own stays a typo everywhere else.
+extend-ignore-re = ["mis-addressing"]
+
+[default.extend-words]
+# The crate, not the dish.
+ratatui = "ratatui"
+
+# Deliberate misspellings. Each is the *fixture* of a test about misspellings — a
+# near-match suggestion, or a registry key with a transposed letter — so
+# correcting one deletes the case rather than fixes it. Named as whole
+# identifiers, so none of them is waived anywhere else.
+[default.extend-identifiers]
+overflw = "overflw"
+wrok = "wrok"
+stratgy = "stratgy"
+aliasses = "aliasses"
+watcher_treshold_percent = "watcher_treshold_percent"
+# Test names drop the apostrophe from a possessive, as every name in the suite
+# does: "a directory's modification time", "another's profile".
+touch_moves_a_directorys_modification_time_forward = "touch_moves_a_directorys_modification_time_forward"
+a_switch_never_writes_one_accounts_identity_into_anothers_profile = "a_switch_never_writes_one_accounts_identity_into_anothers_profile"

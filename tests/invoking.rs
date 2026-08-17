@@ -8,13 +8,13 @@
 //! command line reaches, and whether the code `ended_as` computed survives to a
 //! shell — `main` cannot be called from a test.
 //!
-//! So this suite claims the surface and never the behaviour behind it. The line
+//! So this suite claims the surface and never the behavior behind it. The line
 //! is operational: **if a case needs a real Claude Code installed, it has
 //! crossed.** Everything here runs against a scratch home on a machine with no
 //! Claude Code, no keychain consulted and no network answered, which is why
 //! `switch`, `add`, `run`, `relogin` and `watcher run` are absent. Those arms
 //! probe, the probe is the boundary marker rather than an obstacle, and a stub
-//! `claude` on `PATH` would be working around it. Behaviour stays with the
+//! `claude` on `PATH` would be working around it. Behavior stays with the
 //! fakes.
 //!
 //! The parser is not asserted here either. What parses and what does not is

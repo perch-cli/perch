@@ -464,7 +464,7 @@ fn usable_token(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<S
     }
 
     // Asked before the locks are taken, so an Account that was never going to
-    // be renewed says so without queueing behind anything, and asked again
+    // be renewed says so without queuing behind anything, and asked again
     // under them, where the answer is the one that counts.
     refuse_if_live(host, asked, installed)?;
     renew_under_the_lock(host, asked, installed, Because::ItSaysItRanOut)
@@ -675,7 +675,7 @@ fn confirm(host: &dyn Host, token: &str, account: &Account) -> std::result::Resu
         // it: a token Anthropic will not take is the state a Credential that
         // never says when it expires would otherwise stay in for good.
         Err(Refused::Rejected) => Err(Turned::Away),
-        // A profile endpoint Perch no longer recognises is no evidence either
+        // A profile endpoint Perch no longer recognizes is no evidence either
         // way, and no reason to stop reading Utilization. ADR 0019 carves out
         // exactly this and nothing wider: *drift in a reply*.
         //
@@ -686,7 +686,7 @@ fn confirm(host: &dyn Host, token: &str, account: &Account) -> std::result::Resu
         // under another's — the plausible wrong answer ADR 0019 says this
         // design cannot afford, arriving on the day Anthropic has a bad
         // afternoon.
-        Err(Refused::Unrecognised(_)) => Ok(()),
+        Err(Refused::Unrecognized(_)) => Ok(()),
         Err(why) => Err(Turned::Settled(getting_ready_refused(why))),
     }
 }

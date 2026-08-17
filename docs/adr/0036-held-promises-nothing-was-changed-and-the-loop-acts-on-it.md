@@ -55,7 +55,7 @@ that finds the hold lost qualifies where the save *is* the change, and does not
 where a Credential moved first.
 
 Where it does not qualify, the general failure code is the right answer, and the
-loop stopping is the right behaviour. A person has to look.
+loop stopping is the right behavior. A person has to look.
 
 `perch watch --once` inherits this. A scheduler reading 20 comes back in five
 minutes and expects the machine to have moved on; reading 1 it mails somebody.

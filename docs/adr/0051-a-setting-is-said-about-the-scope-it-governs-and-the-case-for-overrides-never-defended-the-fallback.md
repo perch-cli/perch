@@ -105,7 +105,7 @@ cases go.
 `strategy` and `watcher-threshold-percent` are taste. `watcher-may-act` is
 consent, and layering consent is what produced the hole above. It also produces a
 quieter one that has never been examined: a Global `watcher-may-act true`
-authorises **every Group, including ones not yet declared**, so
+authorizes **every Group, including ones not yet declared**, so
 `perch group declare X` yields a watcher-enabled Group nobody said anything
 about. ADR 0017 worried about exactly that shape for ungrouped Accounts and
 accepted it there deliberately; for Groups it arrived unexamined, by inheritance.
@@ -240,7 +240,7 @@ describes an exception that can no longer be expressed.
 
 **ADR 0017's body loses one sentence.** "The setting is global rather than
 per-Group" is now false. The two sentences of reasoning under it survive intact —
-an ungrouped Account has no Group to carry the declaration, and modelling the
+an ungrouped Account has no Group to carry the declaration, and modeling the
 ungrouped pool as a Group with a reserved name would make a Group mean two
 contradictory things — and both are still why the Ungrouped Accounts are a Scope
 and never a Group. The Consequences section's "the shape of that form is for the

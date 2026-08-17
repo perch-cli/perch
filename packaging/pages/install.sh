@@ -233,7 +233,7 @@ advise_about_path() {
         return
         ;;
     *)
-        # No file named, because naming one for a shell we did not recognise
+        # No file named, because naming one for a shell we did not recognize
         # would be a guess the reader has to go and check.
         say "$INSTALL_DIR is not on your PATH. Add it:"
         say "    export PATH=\"$INSTALL_DIR:\$PATH\""

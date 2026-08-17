@@ -117,7 +117,7 @@ tidying up after the panel does not remove it as debris.
 This is worth naming for its own sake: the constraint ADR 0011 imposed —
 that every interactive capability exist non-interactively too — improved the
 CLI in the one instance where it bit. That is a point in the constraint's
-favour, and it survives the panel it was applied to.
+favor, and it survives the panel it was applied to.
 
 ## ADR 0011 is re-affirmed, not rewritten
 

@@ -20,7 +20,7 @@ is the one kind of wrong answer this design cannot afford: a plausible one.
 A reply that names nobody is not evidence of anything, and does not stop the
 read — the same rule liveness already follows, where a Profile is Live because
 something says so rather than because nothing does. Nor does a profile endpoint
-Perch no longer recognises: drift in a reply Perch reads for reassurance is no
+Perch no longer recognizes: drift in a reply Perch reads for reassurance is no
 reason to stop reading Utilization at all.
 
 ## Consequences

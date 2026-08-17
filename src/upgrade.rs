@@ -185,7 +185,7 @@ pub fn channel_at(platform: Platform, installer_dir: &Path, exe: &Path) -> Optio
 /// them.
 ///
 /// Not `Path::components`, for two reasons that only show up on Windows and
-/// both of which would make an installer Installation there unrecognisable.
+/// both of which would make an installer Installation there unrecognizable.
 /// `std::fs::canonicalize` hands back a verbatim path — `\\?\C:\Users\...` —
 /// which no plain comparison against `%LOCALAPPDATA%` can match; and Windows
 /// paths are case-insensitive, so `C:\Users` and `c:\users` are one directory
@@ -607,9 +607,9 @@ mod tests {
     }
 
     /// Both of the Windows-only readings, neither of which any other platform
-    /// needs: a canonicalised path there is verbatim — `\\?\C:\Users\...` —
+    /// needs: a canonicalized path there is verbatim — `\\?\C:\Users\...` —
     /// and the filesystem does not distinguish case. Either one left alone made
-    /// every Windows installer Installation unrecognisable.
+    /// every Windows installer Installation unrecognizable.
     #[test]
     fn a_windows_path_is_read_the_way_windows_reads_it() {
         let installer = Path::new("C:\\Users\\someone\\AppData\\Local\\Perch\\bin");

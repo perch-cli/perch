@@ -1,4 +1,4 @@
-//! Behaviour tests for the `.claude.json` keys a Run copies into the Profile it
+//! Behavior tests for the `.claude.json` keys a Run copies into the Profile it
 //! is about to launch (ADR 0003).
 //!
 //! This is the one file Reconcile cannot link, because it holds the Account as

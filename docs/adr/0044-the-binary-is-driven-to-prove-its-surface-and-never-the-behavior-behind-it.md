@@ -1,4 +1,4 @@
-# The binary is driven to prove its surface, and never the behaviour behind it
+# The binary is driven to prove its surface, and never the behavior behind it
 
 > **Carried out in #155.** Like ADR 0041 and ADR 0042, this is the artifact of
 > a planning effort rather than of a change, so it landed ahead of the work it
@@ -64,7 +64,7 @@ room stay unlit because nothing has been seen in it.
 So the finding is real. What it is worth is capped by what it is: twenty match
 arms of three lines each, changing about twice a year, in a file every reviewer
 of a new command already opens. That buys an assertion that the surface exists
-and routes correctly. It does not buy a second place where Perch's behaviour is
+and routes correctly. It does not buy a second place where Perch's behavior is
 proved.
 
 ## What the suite reaches
@@ -99,20 +99,20 @@ That is refused, and refused by name, because it is Dogfood.
 
 Not something like Dogfood — the same object. A suite held back by a feature
 flag, dependent on what happens to be installed on the machine, proving
-behaviour that 24,500 lines of ungated behaviour tests already prove, at a level
+behavior that 24,500 lines of ungated behavior tests already prove, at a level
 where a failure reports an exit code and a blob of stdout instead of naming the
 assertion that broke. ADR 0041 removed exactly that shape eleven days ago, and
 the argument that removed it does not weaken for the suite being written in a
-different file. A stand-in loses to what it stands in for, and for behaviour the
+different file. A stand-in loses to what it stands in for, and for behavior the
 thing it would stand in for is the fake-driven suite, which is faster, hermetic,
 runs on every platform, and says what it means when it fails.
 
-**So the line is: this suite asserts the surface, never the behaviour behind
+**So the line is: this suite asserts the surface, never the behavior behind
 it.** The operational form of that line, the one to hold against the pressure to
 extend it, is: **if it needs a real Claude Code installed, it has crossed.** The
 probe is not an incidental obstacle to be worked around with a fixture or a stub
 binary on `PATH`. It is the boundary marker. A command that must be told what
-Claude Code is has behaviour to prove, and behaviour is proved with the fakes.
+Claude Code is has behavior to prove, and behavior is proved with the fakes.
 
 ## How
 
@@ -162,11 +162,11 @@ that section becomes is #143's.
 asserted in-process would introduce a seam to serve a test, and the binary
 proves the same arms without one.
 
-Nothing about the fakes changes. `host::fake` remains the only way behaviour is
+Nothing about the fakes changes. `host::fake` remains the only way behavior is
 driven, which is the point of refusing band (d): the `Host` port's justification
 is exactly as strong after this decision as before it.
 
 #143 — whether the harness shape is right — loses its last blocker. What this
-settles for it is the level: the fakes keep behaviour, the binary keeps the
+settles for it is the level: the fakes keep behavior, the binary keeps the
 surface. It inherits a thirty-first test binary and the naming convention
 question that comes with it, and it is free to rename all of them.

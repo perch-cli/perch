@@ -1,4 +1,4 @@
-//! Behaviour: declaring which Accounts are interchangeable.
+//! Behavior: declaring which Accounts are interchangeable.
 //!
 //! A Group is a statement the user made — that these Accounts substitute for
 //! one another — so these tests are mostly about that statement surviving:
@@ -344,7 +344,7 @@ fn adding_an_account_to_a_group_declares_that_group() {
 }
 
 #[test]
-fn a_group_named_in_passing_joins_the_one_that_exists_however_it_is_capitalised() {
+fn a_group_named_in_passing_joins_the_one_that_exists_however_it_is_capitalized() {
     let host = machine_with_two_accounts();
     declare_group(&host, "work");
     let host = host.with_login(login_producing(THIRD_CREDENTIAL, THIRD_IDENTITY_FILE));
@@ -716,7 +716,7 @@ fn renaming_to_a_name_that_would_be_ambiguous_is_refused_with_its_own_code() {
 /// `perch alias` states this rule for an Account renaming itself, and the Group
 /// half must not disagree with it.
 #[test]
-fn recapitalising_a_group_is_a_rename_rather_than_a_collision_with_itself() {
+fn recapitalizing_a_group_is_a_rename_rather_than_a_collision_with_itself() {
     let host = three_accounts_in_one_group();
     config_set(&host, &["work", "watcher-threshold-percent", "55"])
         .0
@@ -724,7 +724,7 @@ fn recapitalising_a_group_is_a_rename_rather_than_a_collision_with_itself() {
 
     let (result, _) = rename_group(&host, "work", "Work");
 
-    result.expect("changing how a Group is capitalised is a rename");
+    result.expect("changing how a Group is capitalized is a rename");
     let registry = registry_of(&host);
     assert_eq!(
         registry.groups.len(),
@@ -735,7 +735,7 @@ fn recapitalising_a_group_is_a_rename_rather_than_a_collision_with_itself() {
     assert_eq!(
         registry.declared_group("work"),
         Some("Work"),
-        "held under the capitalisation asked for"
+        "held under the capitalization asked for"
     );
     assert_eq!(
         registry

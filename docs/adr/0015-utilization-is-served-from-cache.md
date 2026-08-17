@@ -22,5 +22,5 @@ themselves whether it is fresh enough.
 
 Switching decisions inherit this. `perch switch` with no target ranks on cached
 figures, which can be minutes old — so when a cycle lands on an account that
-turns out to be fuller than the cache implied, that is expected behaviour and
+turns out to be fuller than the cache implied, that is expected behavior and
 should be reported plainly rather than treated as a bug.

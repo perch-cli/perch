@@ -1,4 +1,4 @@
-//! Behaviour: what `perch upgrade` does about this machine's Installation.
+//! Behavior: what `perch upgrade` does about this machine's Installation.
 //!
 //! The whole of the command is deciding which Channel made the Installation and
 //! handing the work back to it (ADR 0039), so most of what is asserted here is
@@ -168,7 +168,7 @@ fn an_installer_installation_runs_the_embedded_installer_at_the_tag() {
 /// read every Windows installer Installation as a binary Perch had not placed
 /// — refusing to upgrade the one Channel Perch is able to upgrade itself.
 #[test]
-fn a_windows_installer_installation_is_recognised_where_windows_puts_it() {
+fn a_windows_installer_installation_is_recognized_where_windows_puts_it() {
     let host = machine()
         .with_platform(Platform::Windows)
         .with_env("LOCALAPPDATA", "C:\\Users\\someone\\AppData\\Local")

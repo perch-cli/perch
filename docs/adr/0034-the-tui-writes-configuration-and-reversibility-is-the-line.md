@@ -67,7 +67,7 @@ having no other input shape, not about text entry being fine in general.
 
 The TUI is now the second thing that writes the registry, so it is the second
 thing that can lose a lock mid-act. `registry::save` already refuses to write
-against a lost hold, which is the behaviour the panel wants — the refusal is
+against a lost hold, which is the behavior the panel wants — the refusal is
 surfaced rather than swallowed.
 
 `perch config` grows `unset`, in both the two-word and three-word forms, so

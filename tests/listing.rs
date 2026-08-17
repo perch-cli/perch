@@ -1,4 +1,4 @@
-//! Behaviour: what `perch list` answers when the question is "what do I have",
+//! Behavior: what `perch list` answers when the question is "what do I have",
 //! and what it shows when it is narrowed to a Scope — a Group by name, or the
 //! Accounts in no Group (ADR 0053). Both render from cache, and neither touches
 //! the network without `--refresh` (ADR 0015).

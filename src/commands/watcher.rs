@@ -1,7 +1,7 @@
 //! `perch watcher` — the Watcher, in each of the arrangements it comes in (ADR
 //! 0047).
 //!
-//! Three arrangements and one behaviour (ADR 0040), which the surface used to
+//! Three arrangements and one behavior (ADR 0040), which the surface used to
 //! split three ways: a bare verb, a flag on it, and a tree of its own. One noun
 //! and five verbs is that same domain model, written down where a person types
 //! it.

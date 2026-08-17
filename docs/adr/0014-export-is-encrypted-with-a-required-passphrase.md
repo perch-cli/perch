@@ -192,7 +192,7 @@ heard of Perch. Checked by hand rather than in CI: the property is what the crat
 promises, and installing the Go tool on three runners to re-check it every push
 buys less than it costs. What CI does hold is that the file carries `age`'s armor
 header and that its recipient is scrypt, which is the pair that makes `age -d`
-recognise the file and ask for a passphrase.
+recognize the file and ask for a passphrase.
 
 The other direction holds too: `perch import` restores an armored file that `age
 -p` wrote — registry, aliases, group configuration, quarantine reason and a

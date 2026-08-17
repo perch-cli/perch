@@ -1,4 +1,4 @@
-# Ratatui drives the TUI, and colour-eyre only catches panics
+# Ratatui drives the TUI, and color-eyre only catches panics
 
 > **Superseded in part by ADR 0049.** This file is three decisions and only two
 > of them were the picker's. The ratatui-over-crossterm choice is void, and so
@@ -6,7 +6,7 @@
 > Host, and `Host::print_remarks`, which was "the one thing about frames the
 > port does know" and is now nothing the port knows at all. `perch tui` is
 > removed entire, both crates leave the dependency set, and nothing in Perch
-> touches raw mode afterwards. **What stands is the colour-eyre repeal and the
+> touches raw mode afterwards. **What stands is the color-eyre repeal and the
 > two-error-idiom rule**: expected failures are `PerchError` carrying an exit
 > code a script reads, unexpected ones are panics through the hook in
 > `report.rs`, and anything that starts as a panic and turns out to be an
@@ -24,11 +24,11 @@ two crossterm versions would each think they owned it. Both are in
 `Cargo.toml` from now, before `perch tui` exists, so the dependency set is
 settled while the surface is still small.
 
-**colour-eyre** is installed for its panic hook and nothing else. Perch's own
+**color-eyre** is installed for its panic hook and nothing else. Perch's own
 failures are typed: `PerchError` carries the exit code a script reads — 10 for
 a probe refusal, 11 for a locked keychain, 12 for a target that is not there —
 and the compiler checks that every variant has one. Routing those through a
-type-erased `Report` would trade that check for a downcast, and a coloured
+type-erased `Report` would trade that check for a downcast, and a colored
 backtrace is the wrong thing to print at a command people put in a shell
 prompt. A panic is a different animal: it is a bug rather than an outcome, and
 a bug deserves a report worth pasting.
@@ -36,7 +36,7 @@ a bug deserves a report worth pasting.
 ## Consequences
 
 Perch carries two error idioms on purpose. Expected failures are `PerchError`
-and exit codes; unexpected ones are panics with a colour-eyre report. Anything
+and exit codes; unexpected ones are panics with a color-eyre report. Anything
 that starts as a panic and turns out to be an outcome a user can act on should
 move across, not stay.
 
@@ -56,14 +56,14 @@ the largest subtree in the dependency graph, compiled on every build and
 audited on every advisory, for no call site. They come back with `perch tui`,
 at the versions named above.
 
-Colour-eyre is the same shape of cost with the code already written. Its whole
+Color-eyre is the same shape of cost with the code already written. Its whole
 use is a panic hook — `report.rs` installs that and explicitly discards the
 error hook — and it brings eyre, backtrace, owo-colors and indenter along for
 it. What a bug report actually needs is the version, the platform, where to
 send it, and how to get a backtrace; the runtime's own hook already prints the
 payload, the location and the backtrace when one is asked for. So Perch's hook
 now sits on top of the runtime's and adds those four things in a dozen lines,
-and says how to re-run with `RUST_BACKTRACE=1` — which colour-eyre's prettier
+and says how to re-run with `RUST_BACKTRACE=1` — which color-eyre's prettier
 report never did.
 
 What is given up is the span-formatted backtrace, which is genuinely nicer to

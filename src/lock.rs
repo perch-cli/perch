@@ -2,7 +2,7 @@
 //!
 //! Perch does not invent a scheme of its own: it takes the locks the process it
 //! is racing already takes, because a lock only excludes whoever agrees to
-//! honour it (ADR 0001). Under them, Claude Code's double-checked re-read of the
+//! honor it (ADR 0001). Under them, Claude Code's double-checked re-read of the
 //! credential store sees a swapped, non-expired Credential and abandons the
 //! refresh it was about to make — which is what makes swapping a live Credential
 //! safe at all.
@@ -314,7 +314,7 @@ impl<'a, 'one, 'other> Holds<'a, 'one, 'other> {
     /// is a save and therefore takes the hold it is being renewed with.
     ///
     /// It is handed the second of the two, and that is not a coincidence to be
-    /// generalised away: Claude Code's locks protect files Perch writes through
+    /// generalized away: Claude Code's locks protect files Perch writes through
     /// the Host and are never passed to anything, and Perch's own registry lock
     /// is the one a `save` asks for. Named for the write rather than for the
     /// hold, so nothing reaches for it to borrow a lock for something else.
@@ -390,7 +390,7 @@ pub fn take_all(host: &dyn Host, locks: Vec<LockSpec>) -> Result<Held<'_>> {
         // refuses to write and tells the user another `perch` took the lock
         // over when none did; and `release` will not give the artifact back, so
         // Perch's own lock leaks for the whole staleness window. There is no
-        // right behaviour left, so the directory just created goes back and the
+        // right behavior left, so the directory just created goes back and the
         // failure is reported as itself.
         let stamp = match host.modified_at(&lock.dir) {
             Ok(stamp) => stamp,
@@ -1135,7 +1135,7 @@ mod tests {
         assert!(!host.path_exists(Path::new(&first.dir)));
     }
 
-    /// A lock whose holder died is taken over, which is the behaviour every
+    /// A lock whose holder died is taken over, which is the behavior every
     /// rule below is a qualification of.
     #[test]
     fn a_lock_that_has_gone_quiet_for_longer_than_its_window_is_taken_over() {

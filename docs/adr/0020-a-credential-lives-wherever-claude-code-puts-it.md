@@ -96,14 +96,14 @@ own build, or a later one, may still bring a third backend; the composite reader
 accommodates that without redesign, and what would change is which store the
 platform names as primary.
 
-The belief that the plaintext store honours `CLAUDE_CONFIG_DIR` remains the
+The belief that the plaintext store honors `CLAUDE_CONFIG_DIR` remains the
 single assumption the whole non-macOS design rests on, and it earns the loudest
 contract test. That test plants a Credential that is not one where Perch would
 write it and asks the installed Claude Code who it is, having first watched it
 answer "nobody" for the same directory — so what is asserted is Claude Code's
-behaviour rather than Perch's own derivation restated.
+behavior rather than Perch's own derivation restated.
 
-Reading that build answered two neighbouring questions and raised one.
+Reading that build answered two neighboring questions and raised one.
 `CLAUDE_CODE_HOST_CREDS_FILE` names a credentials file supplied by whatever is
 hosting Claude Code, which it ignores "with group/other-readable mode or wrong
 owner" — a path into Claude Code rather than one out of it, and not a store Perch

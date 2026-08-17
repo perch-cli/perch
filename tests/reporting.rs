@@ -1,4 +1,4 @@
-//! Behaviour: what `perch status` shows, and what it refuses to do to get it.
+//! Behavior: what `perch status` shows, and what it refuses to do to get it.
 
 mod common;
 

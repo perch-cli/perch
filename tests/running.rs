@@ -1,4 +1,4 @@
-//! Behaviour tests for `perch run <target>`: a client against one Account's
+//! Behavior tests for `perch run <target>`: a client against one Account's
 //! Profile, and nothing else moved (ADR 0010).
 //!
 //! What every one of these is really asserting is the difference between a Run

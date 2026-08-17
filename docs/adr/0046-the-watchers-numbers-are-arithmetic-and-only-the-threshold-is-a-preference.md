@@ -50,14 +50,14 @@ sentence of **Cooldown** in `CONTEXT.md`.
 And one of those four sentences is false. `commands/config.rs:860` tells a person
 who has turned it off that "Only the cooldown and the margin then stand between
 two Accounts either side of the threshold and a ping-pong" — asserting a
-behavioural difference that does not exist. A Setting that prints a lie about
+behavioral difference that does not exist. A Setting that prints a lie about
 itself is the clearest possible failure of the yardstick this decision is taken
 by.
 
 **So it goes entire: the knob, the field, `Recently::barred`, the threading and
 all four sentences.**
 
-ADR 0013's defence was forward-looking — "a rule nobody wrote down is one that
+ADR 0013's defense was forward-looking — "a rule nobody wrote down is one that
 gets relaxed by accident the first time the other one is". `CLAUDE.md` keeps
 guards of that kind where they cost nothing, and this one does not. The guard is
 preserved here instead, at no surface at all:
@@ -136,7 +136,7 @@ as they are. A constant still has to be paced across processes.
 preference-versus-arithmetic test cleanly. How full is too full cannot be derived
 from Anthropic's allowance or from the length of a window. Someone who never
 wants to hit a wall mid-task sets 60; someone squeezing every drop sets 95; both
-are coherent, and nothing in the endpoint's behaviour prefers either. It is the
+are coherent, and nothing in the endpoint's behavior prefers either. It is the
 one place a person's appetite for risk enters the loop, and it is kept for that
 reason rather than by default.
 

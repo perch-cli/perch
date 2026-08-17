@@ -10,7 +10,7 @@
 > repeals the suite, not that argument.
 
 Perch is tested three ways already, and every one of them buys its determinism
-by replacing something. The behaviour suites drive the real command code against
+by replacing something. The behavior suites drive the real command code against
 `FakeHost`, so there is no filesystem. `tests/conformance.rs` asks the two
 adapters the same questions, so there is a filesystem and no Perch above it. The
 `contract_*` suites ask whether Perch's beliefs about Claude Code are still true,
@@ -52,7 +52,7 @@ Reconcile actually linked. No client, no quota, no human.
 
 That looks like the stub above wearing a different hat, and it is not. The stub
 is rejected for replacing *the subject*: a script printing a version string
-stands in for the very thing whose behaviour is the question, so what survives is
+stands in for the very thing whose behavior is the question, so what survives is
 a test of the harness. Here the subject is Reconcile, and Reconcile runs
 untouched, over the real filesystem, against the real Profile. What has been
 replaced is who is *watching* — and since what Reconcile does it does to disk,

@@ -1,6 +1,6 @@
 /*
  * What keeps the guide from looking like every other mdBook (ADR 0035): the
- * landing page's type and its one accent colour, and transcripts that read as
+ * landing page's type and its one accent color, and transcripts that read as
  * transcripts. Everything else is mdBook's default, deliberately — the navigation
  * and the search are the reason it is here at all.
  */
@@ -81,7 +81,7 @@ html {
   vertical-align: top;
 }
 
-/* One colour for the thing you are reading, matching the links above it. */
+/* One color for the thing you are reading, matching the links above it. */
 .chapter li.chapter-item a.active {
   color: var(--perch-accent);
   font-weight: 600;

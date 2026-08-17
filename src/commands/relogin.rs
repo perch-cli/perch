@@ -266,7 +266,7 @@ fn record(registry: &mut Registry, account: &Account, fresh: Produced) -> Result
 
     // The email is kept as Perch already holds it. It is the identifier every
     // Alias, Group and Profile path is derived from, so adopting a differently
-    // capitalised spelling of the same address would move the Account's Profile
+    // capitalized spelling of the same address would move the Account's Profile
     // out from under it to no purpose.
     held.identity = Identity {
         email: held.identity.email.clone(),
@@ -305,7 +305,7 @@ fn not_made_live(account: &Account, error: PerchError) -> PerchError {
 /// hazard [`no_longer_on_anybody`] exists for, reached one step earlier: the
 /// broken Credential is still the live one, `active` still names this Account,
 /// and the very next `perch switch` would Capture that broken copy over the
-/// fresh one (ADR 0023). The defence there is to stop recording the Account as
+/// fresh one (ADR 0023). The defense there is to stop recording the Account as
 /// active — which is a registry write, and a registry write is what just
 /// failed. So this warns in the same words that path uses when its own save
 /// fails, because it is the same state and the same thing not to do.
@@ -438,13 +438,13 @@ fn report(
     let held = registry
         .account(account.email())
         .expect("the Account was just recorded");
-    labelled(
+    labeled(
         out,
         "Alias",
         registry.alias_of(account.email()).unwrap_or("-"),
     )?;
-    labelled(out, "Group", held.group.as_deref().unwrap_or("none"))?;
-    labelled(
+    labeled(out, "Group", held.group.as_deref().unwrap_or("none"))?;
+    labeled(
         out,
         "Cycling",
         if !held.disabled {
@@ -457,6 +457,6 @@ fn report(
 
 /// The three things a repair leaves exactly as it found them, in a column of
 /// their own so they read as a list of what was kept.
-fn labelled(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {
+fn labeled(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {
     say(out, &format!("{:<9}{value}", format!("{label}:")))
 }

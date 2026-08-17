@@ -1,4 +1,4 @@
-//! Behaviour: `perch watcher install`, `uninstall` and `status` — having the
+//! Behavior: `perch watcher install`, `uninstall` and `status` — having the
 //! machine run the Watcher for you.
 //!
 //! The unit files themselves are argued with in `src/service.rs`'s unit tests,
@@ -30,7 +30,7 @@ const UNIT: &str = "/Users/someone/.config/systemd/user/perch-watch.service";
 /// spelled out.
 ///
 /// `PathBuf::join` renders with `\` on Windows, so a hard-coded forward-slash
-/// path matches the *file* — `FakeHost` normalises what it stores — but not the
+/// path matches the *file* — `FakeHost` normalizes what it stores — but not the
 /// **argument** `launchctl` is handed, which is compared as a string. A fixture
 /// that spelled it out therefore passed everywhere except the Windows runner,
 /// which is the one place nobody is looking.

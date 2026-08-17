@@ -1,4 +1,4 @@
-//! Behaviour: what happens the first time Perch runs on a machine.
+//! Behavior: what happens the first time Perch runs on a machine.
 //!
 //! These drive the real command code against the fake Host and assert only on
 //! things a user could observe — what was printed, how the command ended, and
@@ -137,7 +137,7 @@ fn a_locked_keychain_is_reported_differently_from_a_missing_account() {
 }
 
 #[test]
-fn an_unrecognised_credential_store_is_refused_and_names_the_assumption() {
+fn an_unrecognized_credential_store_is_refused_and_names_the_assumption() {
     let host = machine_with_claude_code()
         .with_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, r#"{"somethingElse":{}}"#)
         .with_file("/Users/someone/.claude.json", IDENTITY_FILE);

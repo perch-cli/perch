@@ -1,4 +1,4 @@
-//! Behaviour: what a Switch does, in what order, and what it refuses.
+//! Behavior: what a Switch does, in what order, and what it refuses.
 //!
 //! The order of the effects is asserted rather than inferred, because it is the
 //! visible contract with a Claude Code running at the same time (ADR 0006): the
@@ -318,7 +318,7 @@ fn a_live_credential_belonging_to_a_login_made_outside_perch_is_not_captured() {
 #[test]
 fn a_rotation_is_not_lost_to_an_identity_perch_itself_failed_to_patch() {
     // Three, because the Switch that loses the Rotation is the one to a *third*
-    // Account: with two, the repair path recognises the Account it is on.
+    // Account: with two, the repair path recognizes the Account it is on.
     let host = machine_with_three_accounts();
     host.set_unwritable(IDENTITY_PATH, "read-only file");
     run_switch(&host, SECOND_EMAIL)
@@ -889,7 +889,7 @@ fn a_marker_that_cannot_be_read_at_all_holds_the_profile_of_a_running_client() {
 /// file of that name — a botched restore, a name crossed by a hard link — is
 /// `ENOTDIR` on a real filesystem, which is the second answer. `FakeHost`
 /// answered `NotFound` for it, so this read as an idle Profile in every
-/// behaviour test and as a refusal on the machine: the two states this whole
+/// behavior test and as a refusal on the machine: the two states this whole
 /// probe exists to keep apart, swapped, in the direction that logs somebody out
 /// mid-task.
 #[test]
@@ -1894,11 +1894,11 @@ fn a_rotation_is_captured_however_the_identity_file_cases_a_non_ascii_address() 
 }
 
 /// The mirror: a Switch onto the Account the machine is already acting as is
-/// recognised as having landed, however the identity file cases the address. It
+/// recognized as having landed, however the identity file cases the address. It
 /// was not, so `perch switch café@example.com` re-ran the whole Switch — with
 /// the Capture above declining, which is the destructive half.
 #[test]
-fn a_switch_onto_the_account_already_active_is_recognised_whatever_the_case() {
+fn a_switch_onto_the_account_already_active_is_recognized_whatever_the_case() {
     let host = a_machine_on_an_accented_account();
     host.set_file(IDENTITY_PATH, &accented_identity(ACCENTED_UPPER));
 
