@@ -19,10 +19,10 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 
 use crate::adopt;
-use crate::commands::list;
 use crate::commands::say_json;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::listing;
 use crate::observe::{self, Report};
 use crate::registry::{self, Account, Registry};
 use crate::utilization;
@@ -151,12 +151,13 @@ fn render_human(
 
 /// What a script reads about the Account you are on.
 ///
-/// `active` is the Account object every listing uses ([`list::document`]) rather
-/// than a shape of its own: the two used to carry key sets that did not overlap,
-/// so a script asking which Group the active Account is in had to run a second
-/// command, and one written against `perch list --json` could not be pointed at
-/// this. The Account is the same Account; only the question the document answers
-/// differs, and `active` against `sections` is what says which was asked.
+/// `active` is the Account object every Listing uses ([`listing::document`])
+/// rather than a shape of its own: the two used to carry key sets that did not
+/// overlap, so a script asking which Group the active Account is in had to run a
+/// second command, and one written against `perch list --json` could not be
+/// pointed at this. The Account is the same Account; only the question the
+/// document answers differs, and `active` against `sections` is what says which
+/// was asked.
 ///
 /// The Utilization is under `active` and nowhere else. It sat at the top level
 /// too — `perch status --json | jq .utilization` being the line in somebody's
@@ -175,7 +176,7 @@ fn render_json(
     report: &Report,
 ) -> Result<()> {
     let document = json!({
-        "active": list::document(host, registry, account, now)?,
+        "active": listing::document(host, registry, account, now)?,
         "landing": registry.active().document(),
         "refresh": report.document(),
     });

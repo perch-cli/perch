@@ -422,38 +422,12 @@ fn watcher_is_running(host: &dyn Host) -> bool {
 /// whether the unit and the machine have come apart — and a value worked out
 /// again from the machine would agree with the machine by construction.
 ///
-/// `None` where there is nothing to read: Windows keeps no file, and a unit
-/// somebody has edited into a shape Perch does not recognize is one Perch
-/// declines to make claims about rather than guessing at.
+/// The reading is [`service::binary_in`]'s, beside the writing it is the
+/// inverse of. What is left here is the one effect: a file off the machine,
+/// with `None` where there is nothing to read at all.
 fn recorded_binary(host: &dyn Host, at: Option<&std::path::Path>) -> Option<PathBuf> {
     let text = host.read_file(at?).ok()?;
-    match host.platform() {
-        Platform::Other => text
-            .lines()
-            .find_map(|line| line.strip_prefix("ExecStart="))
-            .and_then(|line| line.strip_suffix(" watcher run"))
-            .map(PathBuf::from),
-        // The first `<string>` inside `ProgramArguments`, which is the program.
-        Platform::MacOs => {
-            let array = text.split("<key>ProgramArguments</key>").nth(1)?;
-            let opened = array.find("<string>")? + "<string>".len();
-            let closed = array[opened..].find("</string>")? + opened;
-            Some(PathBuf::from(unescaped(&array[opened..closed])))
-        }
-        Platform::Windows => None,
-    }
-}
-
-/// The inverse of the plist escaping, for reading a path back out of one.
-fn unescaped(value: &str) -> String {
-    value
-        .replace("&apos;", "'")
-        .replace("&quot;", "\"")
-        .replace("&gt;", ">")
-        .replace("&lt;", "<")
-        // Last, so that an `&amp;lt;` in somebody's path survives the round trip
-        // rather than becoming a `<` on the way back.
-        .replace("&amp;", "&")
+    service::binary_in(host.platform(), &text)
 }
 
 /// The line saying a Service will hold because no Scope has granted anything,

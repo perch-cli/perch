@@ -320,9 +320,14 @@ pub const CYCLING_AMONG_UNGROUPED: &str = "only moves between these when you say
 /// refused. What it prints is what `perch config` accepts and prints.
 /// The clause alone, without the word the three callers label it with: one of
 /// them writes it into a two-column line where "Cycling" is the label.
+///
+/// The key is named from [`crate::config::Setting`] rather than spelled here.
+/// It was a literal, and it has been renamed once already — so this sentence
+/// could have gone on confidently printing a word `perch config set` refuses.
 pub fn cycling_among_ungrouped(registry: &crate::registry::Registry) -> String {
     format!(
-        "{CYCLING_AMONG_UNGROUPED} — `interchangeable` is {}",
+        "{CYCLING_AMONG_UNGROUPED} — `{}` is {}",
+        crate::config::Setting::Interchangeable.as_str(),
         registry.ungrouped.interchangeable
     )
 }

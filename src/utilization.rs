@@ -12,10 +12,43 @@ use std::io::Write;
 
 use chrono::{DateTime, Utc};
 use serde_json::json;
+use unicode_width::UnicodeWidthStr;
 
 use crate::commands::write_failed;
 use crate::error::Result;
 use crate::registry::{Account, CachedUtilization};
+
+/// How many terminal cells a string is drawn in.
+///
+/// Not its bytes, and not its characters either. A CJK Group name is drawn two
+/// columns per character and a combining mark is drawn in none, so a count of
+/// characters pads to the wrong width — and because a width is shared down a
+/// column, one such name puts everything after it out of line for the whole
+/// block. What a column is measured in has to be what a terminal draws in.
+///
+/// The one measure, here because this is the module every surface that lines
+/// figures up already imports. There were three — cells for the listing's
+/// table, characters for the labeled rows, and bytes for the Quota Window names
+/// — and no input has yet reached the two that are wrong. That is what makes it
+/// worth collapsing rather than what makes it urgent: an Account whose
+/// organization name is not Latin script is an ordinary thing to hold, and it
+/// would have arrived at whichever of the three was nearest.
+///
+/// `unicode-width` sits on no seam — the width of a string is a pure function
+/// of it — which is the test ADR 0025 actually sets, and a hand-rolled table of
+/// East Asian widths would be the same data kept by hand, going wrong quietly.
+pub fn cells(text: &str) -> usize {
+    UnicodeWidthStr::width(text)
+}
+
+/// `text` with spaces after it until it fills `width` cells.
+///
+/// `format!("{text:width$}")` pads to a count of characters, which is
+/// [`cells`]'s mistake from the other side: it would take the right width and
+/// then fill it wrongly.
+pub fn padded(text: &str, width: usize) -> String {
+    format!("{text}{}", " ".repeat(width.saturating_sub(cells(text))))
+}
 
 /// How wide the label column is on the surfaces that answer about one Account —
 /// `status`, and `switch` when it says where you landed. They are read one
@@ -38,8 +71,8 @@ pub const LABEL_WIDTH: usize = 14;
 /// only short names in the column every other block puts them in.
 pub fn window_width<'a>(windows: impl Iterator<Item = &'a str>) -> usize {
     windows
-        .map(str::len)
-        .chain(std::iter::once("5-hour".len()))
+        .map(cells)
+        .chain(std::iter::once(cells("5-hour")))
         .max()
         // The floor is chained on, so there is always one. `unwrap_or_default`
         // here answered nought — a width the doc above rules out — for a case
@@ -69,7 +102,7 @@ pub fn window_width_across<'a>(accounts: impl IntoIterator<Item = &'a Account>) 
 /// Writes a label and a value in that column, for the surfaces that render an
 /// Account as labeled lines.
 pub fn write_labeled(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {
-    writeln!(out, "{label:LABEL_WIDTH$}{value}").map_err(write_failed)
+    writeln!(out, "{}{value}", padded(label, LABEL_WIDTH)).map_err(write_failed)
 }
 
 /// Writes the cached Utilization under one `Utilization` label, however many
@@ -93,8 +126,8 @@ pub fn write_figures(out: &mut dyn Write, account: &Account, now: DateTime<Utc>)
 pub fn lines(account: &Account, now: DateTime<Utc>, width: usize) -> Vec<String> {
     rows(account, now, width, |window, width| {
         format!(
-            "{:<width$} {:>3}%",
-            window.window,
+            "{} {:>3}%",
+            padded(&window.window, width),
             percentage(window.used_percent)
         )
     })
@@ -117,8 +150,8 @@ pub fn lines_with_resets(account: &Account, now: DateTime<Utc>, width: usize) ->
             // "used", because this row sits under a Headroom figure saying how
             // much is *left*: two percentages of the same window an inch apart,
             // and the reader is not asked to tell them apart by context.
-            "{:<width$} {:>3}% used  {}",
-            window.window,
+            "{} {:>3}% used  {}",
+            padded(&window.window, width),
             percentage(window.used_percent),
             // Said as its absence rather than left out, because a row with no
             // reset clause reads as a window that does not reset.
@@ -335,6 +368,53 @@ mod tests {
 
     fn at(hour: u32, minute: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 8, 4, hour, minute, 0).unwrap()
+    }
+
+    /// A width is what a terminal draws, and not in characters either — which
+    /// is the same mistake one step later.
+    ///
+    /// A CJK name is drawn two columns per character. Measured by character it
+    /// takes half the room it needs, and because one width lays out every row
+    /// beneath it, everything after it steps out of line for the whole block.
+    #[test]
+    fn a_width_is_measured_in_the_cells_a_terminal_draws_it_in() {
+        assert_eq!(cells("作業"), 4, "two characters, four columns");
+        assert_eq!(cells("øverfløw"), 8, "and a narrow one is still one each");
+        assert_eq!(
+            cells("øverfløw"),
+            8,
+            "not the ten bytes it happens to occupy"
+        );
+    }
+
+    /// Padding fills the width the same way it was measured, or the right
+    /// answer is arrived at and then spent wrongly.
+    #[test]
+    fn padding_fills_a_width_in_cells_rather_than_in_characters() {
+        assert_eq!(padded("作業", 6), "作業  ", "four cells, two to fill");
+        assert_eq!(padded("ab", 4), "ab  ");
+        assert_eq!(
+            padded("作業作業", 4),
+            "作業作業",
+            "and nothing is trimmed to fit: a cell count is a floor here"
+        );
+    }
+
+    /// The labeled surfaces line up on the same measure the table does.
+    ///
+    /// `status` is where an organization name lands, and an organization name is
+    /// whatever Anthropic holds. A label wider in cells than in characters used
+    /// to be padded to the character count and put its value one column short.
+    #[test]
+    fn a_labeled_row_is_padded_in_cells_like_every_other_column() {
+        let mut written = Vec::new();
+        write_labeled(&mut written, "作業", "Overflow Ltd").unwrap();
+        let line = String::from_utf8(written).unwrap();
+        assert_eq!(
+            line.find("Overflow").unwrap(),
+            LABEL_WIDTH - cells("作業") + "作業".len(),
+            "the value starts in the column every other labeled row starts in"
+        );
     }
 
     #[test]

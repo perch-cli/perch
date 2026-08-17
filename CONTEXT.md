@@ -368,6 +368,27 @@ that its Accounts are interchangeable at all, because a Group *is* that
 declaration and has no need to hold one.
 _Avoid_: none, unassigned, orphans, default group, implicit group
 
+## Showing what you have
+
+**Listing**:
+Every Account Perch holds, shown in the Scopes they sit in and in the order each
+Scope makes of its own — the one surface that shows what a Cycle would make of
+the Holdings. What `perch list` draws at whatever breadth it is asked for, and
+narrowing it to one Scope changes the breadth rather than the thing. `perch
+status` answers about one Account and is not a Listing of one, but the Account
+it describes is described exactly as a Listing describes it.
+_Avoid_: table, view, report, output
+
+**Section**:
+One Scope's Accounts within a Listing, carrying whether their order is a ranking
+or merely the order they were added. That distinction is the load-bearing part:
+a Scope nothing has declared interchangeable is shown held, because a ranking of
+Accounts Perch would refuse to choose between is a claim nothing backs. Saying
+what a Scope has left goes through the same answer, since a Reserve is a claim
+about a set and being held is the absence of one. Every renderer asks the
+Section rather than deciding again, so no two of them can come to disagree.
+_Avoid_: group block, segment, partition, bucket
+
 ## Getting Perch onto a machine
 
 **Release**:

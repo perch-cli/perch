@@ -308,8 +308,9 @@ fn configuration_lines(registry: &Registry, scope: &Scope) -> Vec<String> {
         // `commands::cycling_among_ungrouped` exists, and this line was
         // printing the other spelling two rows below one that uses it.
         (true, false) => format!(
-            "off — `interchangeable` is {}, so there is nowhere to Switch to \
-             (would act {acting})",
+            "off — `{}` is {}, so there is nowhere to Switch to (would act \
+             {acting})",
+            crate::config::Setting::Interchangeable.as_str(),
             registry.ungrouped.interchangeable
         ),
         (false, _) => format!("off (would act {acting})"),
