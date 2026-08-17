@@ -281,9 +281,21 @@ pub fn tag_of(version: &str) -> String {
 /// compared as text after the numbers agree, which puts `0.2.0-rc.1` before
 /// `0.2.0` — the ordering semver gives it, arrived at from the other direction:
 /// an empty suffix sorts last rather than first.
+///
+/// Build metadata is dropped before any of that, which is the other half of the
+/// same rule: semver says `+build.3` has no bearing on precedence, so `0.2.0`
+/// and `0.2.0+build.3` are one Release. Kept, it was compared as a pre-release
+/// suffix — and since `+` sorts below `-`, `--release 0.2.0+build.3` against an
+/// installed `0.2.0` took the "older" arm and asked "Install the older
+/// Release?" about the version that was already there. `version_typed` accepts
+/// the spelling deliberately, so it is reachable rather than hypothetical.
 pub fn compare(a: &str, b: &str) -> Ordering {
     let split = |version: &str| -> (Vec<u64>, String) {
-        let (numbers, suffix) = match version.find(['-', '+']) {
+        let version = match version.find('+') {
+            Some(at) => &version[..at],
+            None => version,
+        };
+        let (numbers, suffix) = match version.find('-') {
             Some(at) => (&version[..at], version[at..].to_string()),
             None => (version, String::new()),
         };
@@ -702,5 +714,21 @@ mod tests {
         assert_eq!(compare("0.2.0-rc.1", "0.2.0"), Ordering::Less);
         assert_eq!(compare("0.2.0", "0.2.0-rc.1"), Ordering::Greater);
         assert_eq!(compare("0.2.0-rc.2", "0.2.0-rc.1"), Ordering::Greater);
+    }
+
+    /// Build metadata has no bearing on precedence, which semver states and
+    /// `version_typed` deliberately accepts the spelling of.
+    ///
+    /// Compared as a suffix it was worse than ignored: `+` sorts below `-`, so
+    /// `0.2.0+build.3` came out below both `0.2.0` and `0.2.0-rc.1`, and
+    /// `perch upgrade --release 0.2.0+build.3` on an installed `0.2.0` asked
+    /// "Install the older Release?" about the version already there.
+    #[test]
+    fn build_metadata_does_not_decide_which_release_is_newer() {
+        assert_eq!(compare("0.2.0+build.3", "0.2.0"), Ordering::Equal);
+        assert_eq!(compare("0.2.0", "0.2.0+build.3"), Ordering::Equal);
+        assert_eq!(compare("0.2.0+build.3", "0.2.0-rc.1"), Ordering::Greater);
+        assert_eq!(compare("0.2.0+a", "0.2.0+b"), Ordering::Equal);
+        assert_eq!(compare("0.3.0+build.3", "0.2.0"), Ordering::Greater);
     }
 }
