@@ -87,10 +87,9 @@ enum Command {
 
     /// Keep an Account out of Cycling, without giving it up.
     ///
-    /// For reserving an Account for one purpose: it stays listed, keeps its
-    /// Alias, its Group and its Credential, and `perch switch <target>` still
-    /// switches to it. Only Cycling stops choosing it, and `perch enable` puts
-    /// it back.
+    /// It stays listed, keeps its Alias, its Group and its Credential, and
+    /// `perch switch <target>` still switches to it. Only Cycling stops
+    /// choosing it, and `perch enable` puts it back.
     Disable {
         /// The Account: its Alias, or its email address.
         target: String,
