@@ -49,13 +49,16 @@ email address.
 
 ## Naming an Account
 
-`perch alias <name> <target>` gives an Account a short name to reach it by, and
-`perch alias <name> --unset` frees the name again. Every command that takes a
-Target takes either an Alias or an email address.
+`perch alias <target> <name>` gives an Account a short name to reach it by, and
+`perch alias <target> --unset` frees the name again. The Account comes first,
+the way it does everywhere else in Perch, and both forms reach it the same way
+every command does: by the name it already answers to, or by its email address.
+So a name you have forgotten is freed by naming the Account it is on.
 
 ```
-$ perch alias overflow overflow@example.com
+$ perch alias overflow@example.com overflow
 $ perch alias overflow --unset
+$ perch alias overflow@example.com --unset
 ```
 
 Aliases and Group names share one namespace, so a name the other half already

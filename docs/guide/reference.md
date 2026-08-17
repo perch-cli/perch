@@ -11,7 +11,7 @@
 | `perch status [--refresh] [--json]` | the active Account and how full it is |
 | `perch list [<scope>] [--refresh] [--json]` | every Account, its Alias, Group, state, Headroom and Utilization, in the order a Cycle ranks them — or one Group's, or the ungrouped ones' |
 | `perch add [--group <name>\|--no-group] [--alias <name>]` | gain an Account by logging in, without disturbing the active one |
-| `perch alias <name> <target>` / `perch alias <name> --unset` | name an Account, or free the name |
+| `perch alias <target> <name>` / `perch alias <target> --unset` | name an Account, or free the name |
 | `perch switch <target>` | make an Account active everywhere |
 | `perch switch [<group>]` | Cycle to the best Account in a Group |
 | `perch watcher run` | Cycle automatically when the Account you are on runs low |

@@ -231,7 +231,7 @@ fn the_code_a_command_ended_as_is_what_the_process_exits_with() {
         (&["disable", "nobody@example.com"], EXIT_NOT_FOUND),
         (&["group", "move", SOMEONE, "nowhere"], EXIT_NOT_FOUND),
         (&["group", "add", GROUP], EXIT_CONFLICT),
-        (&["alias", GROUP, SOMEONE], EXIT_CONFLICT),
+        (&["alias", SOMEONE, GROUP], EXIT_CONFLICT),
         (
             &["config", "set", GROUP, "watcher-threshold-percent", "500"],
             EXIT_INVALID,
@@ -507,13 +507,13 @@ fn the_group_arms_declare_list_move_and_undeclare() {
 }
 
 /// Both Alias arms, which are one command line apart: `main.rs` reads the
-/// absence of a Target as `--unset`, so an arm that read it the other way would
+/// absence of a name as `--unset`, so an arm that read it the other way would
 /// free the name it was asked to give.
 #[test]
 fn the_alias_arms_name_an_account_and_free_the_name_again() {
     let machine = Scratch::holding_an_account("alias");
 
-    let ran = perch(&machine, &["alias", "dev", SOMEONE]);
+    let ran = perch(&machine, &["alias", SOMEONE, "dev"]);
 
     assert_eq!(ran.code, EXIT_OK, "{}", ran.err);
 
