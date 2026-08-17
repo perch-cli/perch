@@ -653,7 +653,7 @@ fn place(
 ///
 /// One predicate rather than the same pair of conditions written wherever the
 /// question comes up: what a Cycle may choose and what a Group has left to draw
-/// on ([`crate::reserve`]) must be the same set of Accounts, or the figure on
+/// on — its Reserve — must be the same set of Accounts, or the figure on
 /// screen describes a set the Switch does not use.
 pub fn is_a_candidate(account: &Account) -> bool {
     !account.disabled && !account.quarantined()
@@ -685,7 +685,7 @@ pub fn may_cycle_within(registry: &Registry, scope: &Scope) -> bool {
 /// says what is out of the running are the same count of the same Accounts, and
 /// two copies of it is how one comes to say "2 disabled" where the other says
 /// "1".
-pub fn out_of_the_running(accounts: &[&Account]) -> String {
+fn out_of_the_running(accounts: &[&Account]) -> String {
     let quarantined = accounts.iter().filter(|a| a.quarantined()).count();
     let disabled = accounts
         .iter()

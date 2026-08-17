@@ -366,7 +366,7 @@ impl Scope {
     /// The Accounts this Scope holds.
     ///
     /// The same set whoever is asking: what a Cycle may land on, and what a
-    /// Group has left to draw on ([`crate::reserve`]) is measured over. A second
+    /// Group has left to draw on — its Reserve — is measured over. A second
     /// idea of which Accounts those are is how the figure on screen comes to
     /// describe a different set from the one that gets chosen.
     pub fn accounts<'a>(&self, registry: &'a Registry) -> Vec<&'a Account> {
