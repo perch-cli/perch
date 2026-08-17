@@ -46,7 +46,18 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
     // for, and no `installed` or `newest` at all. Answering it is success
     // whichever way the answer went (ADR 0039).
     if args.check {
-        let channel = chosen_channel(host, args.channel.as_deref()).ok();
+        // Only the *path's* answer is allowed to be missing. A word somebody
+        // typed is a word, and `homebre` is a typo rather than a machine
+        // nothing placed — swallowed with the rest, `--check --channel homebre`
+        // dropped the refusal naming the three Channels and answered "channel
+        // unknown (nothing about this binary's path says)" with advice to pass
+        // the flag that had just been passed, on a machine whose path may say
+        // perfectly well which Channel it is.
+        let named = args.channel.as_deref().map(named_channel).transpose()?;
+        let channel = match named {
+            Some(channel) => Some(channel),
+            None => upgrade::channel(host).unwrap_or_default(),
+        };
         return check(host, channel.as_ref(), args.json, out).map(|()| crate::error::EXIT_OK);
     }
 
@@ -132,6 +143,20 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
     Ok(replaced)
 }
 
+/// The Channel a word names, or a refusal naming the three there are.
+///
+/// Apart from [`chosen_channel`] because a check needs this half without the
+/// other: what a check may go without is the answer read off the *path*, and a
+/// word somebody typed wrongly is not that.
+fn named_channel(word: &str) -> Result<Channel> {
+    Channel::spelled(word).ok_or_else(|| {
+        PerchError::Invalid(format!(
+            "`{word}` is not a Channel. They are `homebrew`, `npm` and \
+             `installer`."
+        ))
+    })
+}
+
 /// The Channel a person named, or the one the path says, or a refusal.
 ///
 /// A named Channel is taken as given and not checked against the path: the
@@ -140,12 +165,7 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
 /// a directory Perch has never heard of.
 fn chosen_channel(host: &dyn Host, named: Option<&str>) -> Result<Channel> {
     if let Some(word) = named {
-        return Channel::spelled(word).ok_or_else(|| {
-            PerchError::Invalid(format!(
-                "`{word}` is not a Channel. They are `homebrew`, `npm` and \
-                 `installer`."
-            ))
-        });
+        return named_channel(word);
     }
 
     let exe = host

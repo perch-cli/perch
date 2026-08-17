@@ -450,6 +450,36 @@ fn a_channel_that_is_not_one_is_refused_by_name() {
     assert!(refused.to_string().contains("apt"), "{refused}");
 }
 
+/// A check may go without the answer read off the *path* — that is what lets a
+/// hand-unpacked Perch ask what is newest — and a word somebody typed wrongly
+/// is not that answer.
+///
+/// Swallowed with the rest, `--check --channel homebre` dropped the refusal
+/// naming the three Channels and reported "channel unknown (nothing about this
+/// binary's path says)", with advice to pass the flag that had just been
+/// passed, on a machine whose path says perfectly well which Channel it is.
+#[test]
+fn a_check_refuses_a_channel_word_that_is_not_one_rather_than_reporting_none() {
+    let host = machine().installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch");
+
+    let (outcome, said) = upgrading(
+        &host,
+        UpgradeArgs {
+            check: true,
+            channel: Some("homebre".to_string()),
+            ..UpgradeArgs::default()
+        },
+    );
+
+    let refused = outcome.expect_err("`homebre` is a typo rather than a Channel");
+    assert!(refused.to_string().contains("homebre"), "{refused}");
+    assert!(refused.to_string().contains("`npm`"), "{refused}");
+    assert!(
+        !said.contains("unknown"),
+        "and nothing is reported about a Channel that was never resolved: {said}"
+    );
+}
+
 // ---- asking rather than installing ---------------------------------------
 
 /// A check is a question, and answering it is success whichever way the answer
