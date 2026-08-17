@@ -281,11 +281,24 @@ pub fn on_path(host: &dyn Host, name: &str) -> Option<PathBuf> {
     // extensions. Spelled lowercase because that is how npm writes
     // `claude.cmd`, and the real filesystem answers case-insensitively anyway.
     let extensions: Vec<String> = if on_windows {
+        // The bare name too, which is what makes the doc above true on this
+        // platform: built from `PATHEXT` alone, `on_path(host, "npm.cmd")`
+        // probed `npm.cmd.com`, `npm.cmd.exe`, `npm.cmd.bat` and `npm.cmd.cmd`
+        // and never `npm.cmd` itself. Every caller today passes a name with no
+        // extension, so nothing was finding the wrong file — what it was, was
+        // an invitation to be the caller that does.
+        //
+        // Last rather than first, and that ordering is the whole of what keeps
+        // it safe: npm ships `npm` and `npm.cmd` side by side in one directory,
+        // and the extensionless one is a shell script Windows cannot run. A
+        // name Windows can execute wins, and the bare spelling is what answers
+        // when none of them is there.
         host.env_var("PATHEXT")
             .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_string())
             .split(';')
             .filter(|extension| !extension.is_empty())
             .map(str::to_lowercase)
+            .chain(std::iter::once(String::new()))
             .collect()
     } else {
         vec![String::new()]
@@ -1336,6 +1349,39 @@ mod tests {
             claude_bin(&host).unwrap(),
             PathBuf::from("C:/bin/claude.exe")
         );
+    }
+
+    /// "The name is taken as given — no extension is stripped and none is
+    /// required", which was true everywhere but the one platform that has
+    /// extensions. Built from `PATHEXT` alone, `npm.cmd` was only ever probed
+    /// as `npm.cmd.com`, `npm.cmd.exe`, `npm.cmd.bat` and `npm.cmd.cmd`.
+    #[test]
+    fn windows_finds_a_name_that_already_carries_its_extension() {
+        let host = FakeHost::new()
+            .with_platform(Platform::Windows)
+            .with_env("PATH", "C:/npm")
+            .with_env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+            .with_file("C:/npm/npm.cmd", "");
+
+        assert_eq!(
+            on_path(&host, "npm.cmd"),
+            Some(PathBuf::from("C:/npm/npm.cmd"))
+        );
+    }
+
+    /// And the bare name is asked *last*, which is what keeps that safe: npm
+    /// ships `npm` and `npm.cmd` side by side, and the extensionless one is a
+    /// shell script Windows cannot run.
+    #[test]
+    fn windows_prefers_the_spelling_it_can_execute_over_the_bare_name() {
+        let host = FakeHost::new()
+            .with_platform(Platform::Windows)
+            .with_env("PATH", "C:/npm")
+            .with_env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+            .with_file("C:/npm/npm", "")
+            .with_file("C:/npm/npm.cmd", "");
+
+        assert_eq!(on_path(&host, "npm"), Some(PathBuf::from("C:/npm/npm.cmd")));
     }
 
     #[test]
