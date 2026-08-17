@@ -233,6 +233,15 @@ vocabulary exists to prevent.
 - The fake's cost is untouched, deliberately. #205 is where that is answered, and
   it is worth noting that the nine concerns partition the fake's 40 fields 38
   ways — so this ADR makes that work more mechanical without doing any of it.
+
+  > **Amended by ADR 0059.** They do not partition it 38 ways. Ten of the 40
+  > fields were read from outside their own concern, and `now` and
+  > `while_waiting` turned out to be one mechanism rather than two concerns'
+  > state. The finding above is strengthened rather than damaged: the fake's copy
+  > of the world is entangled in exactly the places this ADR found the machine's
+  > surfaces entangled, which is why `Filesystem` was minted here and why the
+  > fake's state holds all twelve filesystem fields as one struct. The work was
+  > less mechanical than this sentence promised, and it landed.
 - `fake.rs:266`'s comment is amended to say the interface is nine traits while
   the file is deliberately one, so the next reader who finds the split obvious
   finds the measurement first.
