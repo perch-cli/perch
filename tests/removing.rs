@@ -13,7 +13,8 @@ mod common;
 use common::*;
 use perch::commands::remove::RemoveArgs;
 use perch::error::{EXIT_HELD, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROFILE_LIVE};
-use perch::host::{FakeHost, Host};
+use perch::host::FakeHost;
+use perch::host::prelude::*;
 use perch::probe::Identity;
 use perch::registry::{Account, Active};
 

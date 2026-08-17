@@ -8,7 +8,8 @@
 use std::path::{Path, PathBuf};
 
 use perch::host::fake::Effect;
-use perch::host::{FakeHost, Host, Link, PRIVATE_DIR_MODE, Platform};
+use perch::host::prelude::*;
+use perch::host::{FakeHost, Link, PRIVATE_DIR_MODE, Platform};
 use perch::reconcile::reconcile;
 
 /// The Default Profile: the configuration directory Claude Code falls back to,

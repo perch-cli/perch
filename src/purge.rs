@@ -267,6 +267,7 @@ fn forget_the_credential(host: &dyn Host, account: &Account) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::prelude::*;
     use crate::host::{FakeHost, Platform};
     use crate::probe::Identity;
 

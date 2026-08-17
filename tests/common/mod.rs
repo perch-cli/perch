@@ -29,7 +29,8 @@ use perch::commands::switch::SwitchArgs;
 use perch::commands::watcher::WatcherCommand;
 use perch::credentials;
 use perch::host::fake::THIS_PROCESS;
-use perch::host::{Execution, FakeHost, Host, Platform};
+use perch::host::prelude::*;
+use perch::host::{Execution, FakeHost, Platform};
 use perch::probe;
 use perch::registry::{CachedUtilization, Quarantine, WindowUtilization};
 

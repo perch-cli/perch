@@ -2,8 +2,18 @@
 //!
 //! Commands take a `&dyn Host` and nothing else, so behavior tests drive the
 //! real command code against [`fake::FakeHost`] and assert on outcomes rather
-//! than on mocks. One trait, two implementations: [`real::RealHost`] and the
+//! than on mocks. One port, two implementations: [`real::RealHost`] and the
 //! fake that records what it was asked to do.
+//!
+//! [`Host`] declares nothing itself. It is the sum of nine traits, one per kind
+//! of effect, and a reader who wants to know what a module touches of the
+//! machine can read it off that module's signature — where one ever narrows.
+//! Today none does: every consumer of this port reaches across several
+//! concerns, because anything that touches the machine touches several of its
+//! surfaces at once. The port is 42 methods wide because the machine is, and
+//! ADR 0056 carries the table that says so, consumer by consumer. It is the
+//! answer to the next reading that counts the methods and proposes cutting them
+//! up to make somebody's signature smaller.
 
 use std::path::{Path, PathBuf};
 
@@ -252,15 +262,17 @@ pub enum HostError {
     Other(String),
 }
 
-pub trait Host {
-    // ---- clock ----------------------------------------------------------
-
+/// What time it is, as an effect like any other so that a test can arrange the
+/// age of an observation rather than wait for one.
+pub trait Clock {
     /// The current instant. Utilization is displayed as an observation with an
     /// age (ADR 0015), so the clock is an effect like any other.
     fn now(&self) -> DateTime<Utc>;
+}
 
-    // ---- environment ----------------------------------------------------
-
+/// Where this Perch is running: whose machine, which platform, and what it was
+/// told by the environment it was started in.
+pub trait Environment {
     /// The home directory, from `USERPROFILE` on Windows and `HOME` elsewhere
     /// — or an error when the platform's variable is unset, because a machine
     /// that cannot say where home is must be refused rather than quietly
@@ -298,15 +310,32 @@ pub trait Host {
     /// and the Cellar is the half that names the Channel.
     fn current_exe(&self) -> Result<PathBuf, HostError>;
 
-    // ---- filesystem -----------------------------------------------------
+    /// Which user this process is running as, or `None` where the platform has
+    /// no such number.
+    ///
+    /// Two things need it, and both belong to `perch watcher` (ADR 0040). It is
+    /// what the root refusal is read off — every Profile Perch holds is under
+    /// one person's home directory, so a Service installed by root is one
+    /// watching a registry it does not own, and on macOS one with no unlocked
+    /// keychain to read (ADR 0008). And it names the domain a LaunchAgent is
+    /// bootstrapped into: `gui/<uid>` is the logged-in session, which is the
+    /// only place a Service belongs.
+    ///
+    /// `None` on Windows, where a logon task is registered against a named user
+    /// and there is neither a uid to quote nor a root to refuse.
+    fn user_id(&self) -> Option<u32>;
+}
 
+/// The filesystem, to the resolution a Credential's mode and a lock's
+/// atomicity need of it.
+pub trait Files {
     fn read_file(&self, path: &Path) -> Result<String, HostError>;
 
     /// Writes a file created with exactly this mode, rather than with whatever
     /// the process umask happens to be.
     ///
     /// The mode belongs to the *creation* for the same reason it does in
-    /// [`Host::write_private_file`]: a file opened and then `chmod`ed is a file
+    /// [`Files::write_private_file`]: a file opened and then `chmod`ed is a file
     /// that was briefly readable. Where a mode means nothing this is an
     /// ordinary write.
     fn create_file_with_mode(
@@ -374,9 +403,12 @@ pub trait Host {
 
     /// Removes a file. A file that was not there is not a failure.
     fn remove_file(&self, path: &Path) -> Result<(), HostError>;
+}
 
-    // ---- links ----------------------------------------------------------
-
+/// How one path is made to stand for another. [`Link`] says which kinds there
+/// are and [`crate::reconcile`] chooses between them; making, reading and
+/// removing one is the machine's.
+pub trait Links {
     /// Makes `at` a link of `kind` standing for `target`.
     ///
     /// The one way Shared State reaches a Run's Profile, because it is the only
@@ -404,16 +436,33 @@ pub trait Host {
     /// a file, and `remove_dir_all` on either would be a walk into somebody
     /// else's directory.
     fn remove_link(&self, path: &Path) -> Result<(), HostError>;
+}
 
-    // ---- keychain -------------------------------------------------------
+/// The filesystem and the links into it, together.
+///
+/// The one narrowing of this port that anything takes: `tests/conformance.rs`
+/// drives both adapters through a scratch directory, and these two concerns are
+/// exactly what a scratch directory can drive — nineteen methods, against the
+/// clock, the keychain, the processes, the terminal and the network, which are
+/// either the machine's own state or the very things a fake exists to invent.
+/// That suite's table takes a `&dyn Filesystem` so its claim about its own reach
+/// is a signature rather than a paragraph, and a case there that reaches for
+/// [`Clock::now`] does not compile (ADR 0056).
+pub trait Filesystem: Files + Links {}
 
+/// The Credential Store macOS keeps, as `/usr/bin/security` presents it — which
+/// is the binary Claude Code drives, and so the one Perch has to drive too
+/// (ADR 0008).
+pub trait Keys {
     fn keychain_get(&self, service: &str, account: &str) -> Result<String, KeychainError>;
     fn keychain_set(&self, service: &str, account: &str, secret: &str)
     -> Result<(), KeychainError>;
     fn keychain_delete(&self, service: &str, account: &str) -> Result<(), KeychainError>;
+}
 
-    // ---- processes ------------------------------------------------------
-
+/// Other programs, and the processes Perch reads to find out what is holding
+/// what.
+pub trait Processes {
     fn exec(&self, program: &str, args: &[&str]) -> Result<Execution, HostError>;
 
     /// Runs a program with the terminal attached and `env` added to its
@@ -456,12 +505,19 @@ pub trait Host {
     /// says the session did, because a recycled PID necessarily belongs to a
     /// process that began after the marker was written.
     fn process_started_at(&self, pid: u32) -> Option<DateTime<Utc>>;
+}
 
+/// Time passing, and being asked to stop waiting.
+///
+/// One trait rather than two, because [`Waited::Interrupted`] means nothing
+/// until [`Waiting::listen_for_interrupts`] has been called — so either the two
+/// sit together or the ordering between them is unsayable. `sleep` is filed here
+/// rather than among the processes it used to sit with: it is [`crate::lock`]'s
+/// contention wait and has nothing to do with a process (ADR 0056).
+pub trait Waiting {
     /// Waits. Contending for a lock is the only thing Perch waits on, and it is
     /// an effect like any other so that tests do not spend the time.
     fn sleep(&self, millis: u64);
-
-    // ---- being asked to stop --------------------------------------------
 
     /// Starts listening for a loop being asked to stop — by the person at the
     /// terminal, or by the service manager running it.
@@ -476,25 +532,10 @@ pub trait Host {
     /// Switch (ADR 0040).
     fn listen_for_interrupts(&self);
 
-    /// Which user this process is running as, or `None` where the platform has
-    /// no such number.
-    ///
-    /// Two things need it, and both belong to `perch watcher` (ADR 0040). It is
-    /// what the root refusal is read off — every Profile Perch holds is under
-    /// one person's home directory, so a Service installed by root is one
-    /// watching a registry it does not own, and on macOS one with no unlocked
-    /// keychain to read (ADR 0008). And it names the domain a LaunchAgent is
-    /// bootstrapped into: `gui/<uid>` is the logged-in session, which is the
-    /// only place a Service belongs.
-    ///
-    /// `None` on Windows, where a logon task is registered against a named user
-    /// and there is neither a uid to quote nor a root to refuse.
-    fn user_id(&self) -> Option<u32>;
-
     /// Waits up to `millis`, and stops waiting the moment that has been asked
     /// for.
     ///
-    /// Its own effect rather than a [`Host::sleep`] with a check around it,
+    /// Its own effect rather than a [`Waiting::sleep`] with a check around it,
     /// because the whole of what makes a foreground watcher killable is that
     /// the wait ends when Ctrl-C arrives rather than two and a half minutes
     /// later. Nothing may be held across it: what the watcher does between
@@ -502,9 +543,10 @@ pub trait Host {
     /// holds nothing at all, so a process killed here leaves no marker, no lock
     /// and no half-written Credential.
     fn wait(&self, millis: u64) -> Waited;
+}
 
-    // ---- the person at the terminal -------------------------------------
-
+/// The person at the terminal, where there is one.
+pub trait Terminal {
     /// Whether there is someone to answer a question. Every capability is
     /// available non-interactively, so a command that would have asked has to
     /// know when it cannot.
@@ -516,7 +558,7 @@ pub trait Host {
     /// One line of input that is never shown as it is typed, or `None` at end of
     /// input.
     ///
-    /// Its own effect rather than a flag on [`Host::read_line`], because the
+    /// Its own effect rather than a flag on [`Terminal::read_line`], because the
     /// caller who forgets the flag is the caller who writes somebody's export
     /// passphrase into their scrollback — and because turning the terminal's
     /// echo off and back on again is a platform primitive, which is what this
@@ -532,12 +574,48 @@ pub trait Host {
     /// about the command, and the same remark repeated for each of five
     /// Accounts teaches nobody anything the first one did not.
     fn note(&self, line: &str);
+}
 
-    // ---- network --------------------------------------------------------
-
+/// The way out to Anthropic, and the only one.
+pub trait Network {
     /// Sends one request and reads the whole reply. The only way out to
     /// Anthropic, and reached by nothing but `--refresh` (ADR 0015).
     fn http(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, HostError>;
+}
+
+/// Every effect Perch has outside its own process.
+///
+/// The sum of the nine concerns above and nothing of its own. Commands and
+/// domain modules take a `&dyn Host`, which is the one port Perch has
+/// (ADR 0025) — the nine are names for its surfaces rather than nine ports, and
+/// a `&dyn Host` still reaches every one of them. ADR 0056 has the reasoning,
+/// including why no consumer of this port names fewer than three of the nine.
+pub trait Host:
+    Clock + Environment + Filesystem + Keys + Processes + Waiting + Terminal + Network
+{
+}
+
+/// Everything that has to be in scope to reach this port's methods on a
+/// **concrete** adapter.
+///
+/// A `&dyn Host` needs none of it. A trait object finds its supertraits' methods
+/// without them being imported, which is why nine traits cost the 233 places
+/// that hold a `&dyn Host` exactly nothing. Holding a `FakeHost` or a
+/// `RealHost` is the other case: `host.now()` on a concrete type is
+/// [`Clock::now`], and `Clock` has to be in scope to be found. That is every
+/// test in the tree and nothing else, since production builds a `RealHost` once
+/// and passes a `&dyn Host` from there on.
+///
+/// A glob rather than nine imports per file, because the list a file would write
+/// out is not a fact about the file — a test that arranges a world and reads
+/// back what happened to it touches most of the machine by definition, and
+/// spelling out which nine-tenths would be noise a reader has to check against
+/// the body (ADR 0056).
+pub mod prelude {
+    pub use super::{
+        Clock, Environment, Files, Filesystem, Host, Keys, Links, Network, Processes, Terminal,
+        Waiting,
+    };
 }
 
 /// Where the replacement for a file is written before it is moved over it.

@@ -2219,6 +2219,7 @@ fn write(host: &dyn Host, path: &Path, contents: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::prelude::*;
     use chrono::TimeZone;
 
     #[test]

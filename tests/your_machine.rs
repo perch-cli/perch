@@ -25,7 +25,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use perch::error::PerchError;
-use perch::host::{Host, RealHost};
+use perch::host::RealHost;
+use perch::host::prelude::*;
 #[cfg(target_os = "macos")]
 use perch::keychain::KeychainError;
 use perch::probe;

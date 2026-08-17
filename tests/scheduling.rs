@@ -21,8 +21,9 @@ use perch::error::{
     EXIT_HELD, EXIT_INVALID, EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NO_CANDIDATE, EXIT_NOT_FOUND,
     EXIT_NOT_INTERCHANGEABLE, EXIT_NOTHING_TO_DO, EXIT_OK,
 };
+use perch::host::FakeHost;
 use perch::host::fake::Effect;
-use perch::host::{FakeHost, Host};
+use perch::host::prelude::*;
 
 /// A machine where a check finds the active Account following `here` and the
 /// Account it could move to following `there` — one figure per reading, the

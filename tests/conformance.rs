@@ -32,8 +32,10 @@
 
 use std::path::{Path, PathBuf};
 
+use chrono::{DateTime, Utc};
 use perch::host::{
-    FakeHost, Host, HostError, Link, PRIVATE_DIR_MODE, PRIVATE_FILE_MODE, Platform, RealHost,
+    Clock, FakeHost, Files, Filesystem, HostError, Link, PRIVATE_DIR_MODE, PRIVATE_FILE_MODE,
+    Platform, RealHost,
 };
 
 /// This machine, as the port names it — so the fake is asked to be the platform
@@ -99,7 +101,7 @@ fn links_this_machine_makes() -> &'static [Link] {
 /// without Developer Mode will not make a symbolic one, which is the case the
 /// other two kinds exist for. Said out loud, because a case that skipped itself
 /// and a case that asserted look identical otherwise.
-fn can_link(host: &dyn Host, kind: Link, root: &Path, adapter: &str) -> bool {
+fn can_link(host: &dyn Filesystem, kind: Link, root: &Path, adapter: &str) -> bool {
     let target = root.join("can-link-target");
     let at = root.join("can-link-at");
     host.create_file_with_mode(&target, "x", PRIVATE_FILE_MODE)
@@ -126,14 +128,24 @@ struct Case {
     /// because the useful failure is "the fake fails this one and the real host
     /// does not".
     named: &'static str,
-    asserts: fn(&dyn Host, &Path, &str),
+    /// The adapter's own `now`, handed in rather than reached for.
+    ///
+    /// One sentence here spans two concerns: `lock.rs` reads a holder's
+    /// staleness as `now() - modified_at(artifact)`, so an adapter whose clock
+    /// and whose mtimes disagreed would break every staleness rule while
+    /// answering both questions plausibly. The table takes a `&dyn Filesystem`
+    /// because that is what a scratch directory drives, so the clock cannot be
+    /// reached from inside a case — the driver, which holds the concrete
+    /// adapter, reads it and passes it. Cases that do not need it take `_now`
+    /// (ADR 0056).
+    asserts: fn(&dyn Filesystem, &Path, &str, DateTime<Utc>),
 }
 
 const CASES: &[Case] = &[
     // ---- reading and writing --------------------------------------------
     Case {
         named: "a file that is not there reports NotFound",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let missing = root.join("nothing-here");
             match host.read_file(&missing) {
                 Err(HostError::NotFound { .. }) => {}
@@ -143,7 +155,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "a read follows a symbolic link",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let real = root.join("behind-the-link");
             let link = root.join("the-link");
             host.create_file_with_mode(&real, "what it holds", PRIVATE_FILE_MODE)
@@ -174,7 +186,7 @@ const CASES: &[Case] = &[
     // recovers from on the next command, and the recovery had never run.
     Case {
         named: "asking when a dangling link was written is not an answer",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let link = root.join("points-nowhere");
             host.link(Link::Symbolic, &root.join("was-never-there"), &link)
                 .expect("a link to nothing is still a link");
@@ -189,7 +201,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "removing a directory tree at a link takes the link and not what it points at",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let real = root.join("a-real-directory");
             let held = real.join("held");
             host.create_dir_all(&real).expect("it is made");
@@ -214,7 +226,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "a file is created with exactly the mode asked for",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let path = root.join("narrow");
             host.create_file_with_mode(&path, "secret", 0o600)
                 .expect("it is created");
@@ -240,7 +252,7 @@ const CASES: &[Case] = &[
     // nothing said so.
     Case {
         named: "the mode asked for survives a umask that would have taken bits out of it",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let path = root.join("wide");
             host.create_file_with_mode(&path, "shared", 0o666)
                 .expect("it is created");
@@ -258,7 +270,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "creating over an existing file takes the new mode",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let path = root.join("was-open");
             host.create_file_with_mode(&path, "first", 0o644)
                 .expect("it is created");
@@ -277,7 +289,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "a private write creates the file and its directory closed",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let dir = root.join("private-dir");
             let path = dir.join("credential");
             host.write_private_file(&path, "a secret")
@@ -308,7 +320,7 @@ const CASES: &[Case] = &[
     // them got there first.
     Case {
         named: "a write into a directory already made private leaves it private",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let dir = root.join("a-profile");
             host.create_private_dir_all(&dir).expect("it is made");
             if modes_mean_something() {
@@ -333,7 +345,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "a private write leaves nothing beside the file",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let path = root.join("replaced");
             host.write_private_file(&path, "first")
                 .expect("it is written");
@@ -360,7 +372,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "an existing directory keeps the mode it has",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let dir = root.join("already-here");
             host.create_dir_all(&dir).expect("it is made");
             host.create_private_dir_all(&dir)
@@ -374,7 +386,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "narrowing an existing file leaves nobody but the owner",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             // The one `chmod` Perch performs, and the place the two adapters are
             // gated differently: `RealHost::make_private` is `#[cfg(unix)]` and a
             // silent no-op elsewhere, while the fake gates on the runtime
@@ -401,14 +413,14 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "removing a file that was not there is not a failure",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             host.remove_file(&root.join("never-existed"))
                 .unwrap_or_else(|err| panic!("{adapter}: an absent file is not a failure: {err}"));
         },
     },
     Case {
         named: "a rename replaces what is at the destination",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let from = root.join("moving");
             let to = root.join("moved-over");
             host.create_file_with_mode(&from, "incoming", PRIVATE_FILE_MODE)
@@ -428,7 +440,7 @@ const CASES: &[Case] = &[
     // ---- asking about what is there --------------------------------------
     Case {
         named: "a directory is not a file",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let dir = root.join("a-directory");
             host.create_dir_all(&dir).expect("it is made");
 
@@ -441,7 +453,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "an absent directory is NotFound rather than empty",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             // Load-bearing: `probe::clients_in` is built on this distinction, so
             // a fake answering `Ok(vec![])` would silently disarm ADR 0022 —
             // "nothing is running" and "nowhere to look" are different answers.
@@ -452,8 +464,37 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "listing a file is an error, and not the absent-directory one",
+        asserts: |host, root, adapter, _now| {
+            // The other half of the sentence above, and the half nothing asked
+            // for until now. `probe::clients_in` reads `NotFound` as "no client
+            // has ever run here, so nothing is running" and lets a Switch
+            // replace the live Credential; anything else is doubt it refuses
+            // on. So a `<profile>/sessions` that is a regular file — a botched
+            // restore, a name crossed by a hard link — must not read as idle.
+            //
+            // The two adapters phrase the refusal differently, and are entitled
+            // to: the machine says `ENOTDIR` and the fake says so in a
+            // sentence. What has to agree is which side of the one distinction
+            // a caller acts on they land, so that is what is asserted.
+            let file = root.join("not-a-directory");
+            host.create_file_with_mode(&file, "x", PRIVATE_FILE_MODE)
+                .expect("a file to ask about");
+            match host.list_dir(&file) {
+                Err(HostError::NotFound { .. }) => panic!(
+                    "{adapter}: a file read as an absent directory is a Switch \
+                     replacing a Credential something else is holding"
+                ),
+                Err(_) => {}
+                Ok(listed) => {
+                    panic!("{adapter}: a file is not a directory, got {listed:?}")
+                }
+            }
+        },
+    },
+    Case {
         named: "a directory lists what it holds, as full paths",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let dir = root.join("holding-three");
             host.create_dir_all(&dir).expect("it is made");
             for name in ["one", "two", "three"] {
@@ -473,7 +514,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "an empty directory lists as empty rather than NotFound",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let dir = root.join("holding-nothing");
             host.create_dir_all(&dir).expect("it is made");
 
@@ -486,7 +527,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "removing a directory takes what is under it",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let dir = root.join("going");
             host.create_dir_all(&dir.join("nested"))
                 .expect("it is made");
@@ -501,7 +542,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "a touch leaves the contents alone",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let path = root.join("touched");
             host.create_file_with_mode(&path, "unchanged", PRIVATE_FILE_MODE)
                 .expect("it is written");
@@ -519,7 +560,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "asking when an absent path was written is NotFound",
-        asserts: |host, root, adapter| match host.modified_at(&root.join("never-written")) {
+        asserts: |host, root, adapter, _now| match host.modified_at(&root.join("never-written")) {
             Err(HostError::NotFound { .. }) => {}
             other => panic!("{adapter}: expected NotFound, got {other:?}"),
         },
@@ -527,7 +568,7 @@ const CASES: &[Case] = &[
     // ---- the whole of what makes a lock a lock ---------------------------
     Case {
         named: "only the first exclusive create succeeds",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let dir = root.join("the-lock");
             host.create_dir_exclusive(&dir)
                 .unwrap_or_else(|err| panic!("{adapter}: the first takes it: {err}"));
@@ -542,7 +583,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "a lock carries the time it was taken",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, now| {
             // The other half of what makes a directory a lock. Exclusivity says
             // who gets it; the age is how a holder that died holding it is told
             // from one still working, and every staleness rule in `lock.rs`
@@ -554,7 +595,7 @@ const CASES: &[Case] = &[
                 panic!("{adapter}: a lock with no age is never stale: {err}")
             });
             assert!(
-                (host.now() - held_since).num_seconds().abs() < 60,
+                (now - held_since).num_seconds().abs() < 60,
                 "{adapter}: taken just now, not {held_since}"
             );
         },
@@ -562,7 +603,7 @@ const CASES: &[Case] = &[
     // ---- links ------------------------------------------------------------
     Case {
         named: "link_target answers for the link and not for the file",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let real = root.join("the-file");
             let link = root.join("names-the-file");
             host.create_file_with_mode(&real, "held", PRIVATE_FILE_MODE)
@@ -591,7 +632,7 @@ const CASES: &[Case] = &[
     // link" above only reads a file that was already written.
     Case {
         named: "a write after the link is made is read through it",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let real = root.join("CLAUDE.md");
             let link = root.join("shared-CLAUDE.md");
             host.create_file_with_mode(&real, "remember this", PRIVATE_FILE_MODE)
@@ -617,7 +658,7 @@ const CASES: &[Case] = &[
     // reachable through it without anything being told.
     Case {
         named: "a directory link shows what the directory gains afterwards",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let real = root.join("plugins");
             let link = root.join("shared-plugins");
             host.create_dir_all(&real).expect("a directory to share");
@@ -656,7 +697,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "a link whose target has gone is still a link",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             // The whole of how a broken one is found and repaired
             // (`reconcile::establish` branches three ways on exactly this).
             let real = root.join("about-to-go");
@@ -679,7 +720,9 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "nothing at all is a third answer",
-        asserts: |host, root, adapter| match host.link_target(&root.join("nothing-of-any-kind")) {
+        asserts: |host, root, adapter, _now| match host
+            .link_target(&root.join("nothing-of-any-kind"))
+        {
             Err(HostError::NotFound { .. }) => {}
             other => {
                 panic!("{adapter}: absent and not-a-link are different repairs, got {other:?}")
@@ -688,7 +731,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "removing a link leaves what it points at",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let real = root.join("kept");
             let link = root.join("removed");
             host.create_file_with_mode(&real, "still here", PRIVATE_FILE_MODE)
@@ -711,7 +754,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "a kind this platform will not make is refused rather than substituted",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             // A junction is Windows' link for a directory and exists nowhere
             // else. Which kind was made decides what happens when the target is
             // replaced, so a platform that cannot make one says so rather than
@@ -735,7 +778,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "a hard link is a second name rather than a link",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             let real = root.join("first-name");
             let second = root.join("second-name");
             host.create_file_with_mode(&real, "one file", PRIVATE_FILE_MODE)
@@ -760,7 +803,7 @@ const CASES: &[Case] = &[
     },
     Case {
         named: "a hard link stops naming a file that is replaced rather than written",
-        asserts: |host, root, adapter| {
+        asserts: |host, root, adapter, _now| {
             // Why Reconcile re-establishes a hard link before every Run instead
             // of trusting the one it left: it is a second name for a *file*, so
             // the write-beside-then-rename-over an editor performs when it saves
@@ -814,7 +857,7 @@ fn the_real_host_conforms_to_the_port() {
     let host = RealHost::new();
     for case in CASES {
         let root = scratch(&case.named.replace(' ', "-"));
-        (case.asserts)(&host, &root, "RealHost");
+        (case.asserts)(&host, &root, "RealHost", host.now());
         let _ = std::fs::remove_dir_all(&root);
     }
 }
@@ -837,6 +880,6 @@ fn the_fake_host_conforms_to_the_port() {
         };
         let root = PathBuf::from("/conformance").join(case.named.replace(' ', "-"));
         host.create_dir_all(&root).expect("a root to work under");
-        (case.asserts)(&host, &root, "FakeHost");
+        (case.asserts)(&host, &root, "FakeHost", host.now());
     }
 }

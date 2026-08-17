@@ -15,8 +15,9 @@ use std::rc::Rc;
 use chrono::{TimeZone, Utc};
 use common::*;
 use perch::error::{EXIT_INVALID, EXIT_PROBE_REFUSED, EXIT_PROFILE_LIVE, EXIT_QUARANTINED};
+use perch::host::FakeHost;
 use perch::host::fake::{Effect, THIS_PROCESS};
-use perch::host::{FakeHost, Host};
+use perch::host::prelude::*;
 
 /// The Default Profile: where Shared State lives, and what a Run has to
 /// Reconcile out of.

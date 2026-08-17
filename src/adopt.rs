@@ -156,7 +156,7 @@ fn carry_the_identity_block(host: &dyn Host, findings: &Findings, store: &Store)
 /// otherwise land on first. A document that begins with three lines of prose is
 /// not a document, and the first run is exactly where a script meets it.
 ///
-/// That is the reasoning `Host::note` already carries for the stream it writes
+/// That is the reasoning `Terminal::note` already carries for the stream it writes
 /// to: "a note never lands in the middle of the JSON a script is reading off
 /// stdout". Adoption was the one thing saying its piece on the other one.
 fn report(host: &dyn Host, findings: &Findings) {

@@ -18,7 +18,8 @@ mod common;
 use chrono::Duration;
 use common::*;
 use perch::error::{EXIT_INVALID, EXIT_NOT_FOUND, EXIT_NOT_INTERCHANGEABLE};
-use perch::host::{FakeHost, Host};
+use perch::host::FakeHost;
+use perch::host::prelude::*;
 use perch::registry::Strategy;
 
 /// Three Accounts in one Group where the two Strategies disagree: the Account

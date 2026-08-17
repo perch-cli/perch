@@ -298,6 +298,7 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
 mod tests {
     use super::*;
     use crate::export::CURRENT_VERSION;
+    use crate::host::prelude::*;
     use crate::probe::Identity;
     use crate::registry::Active;
     use crate::registry::{Account, Quarantine, Settings};

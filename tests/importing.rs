@@ -8,7 +8,8 @@ mod common;
 
 use common::*;
 use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND};
-use perch::host::{FakeHost, Host, Platform};
+use perch::host::prelude::*;
+use perch::host::{FakeHost, Platform};
 use perch::registry::{Active, Quarantine, Registry};
 
 const PASSPHRASE: &str = "correct horse battery staple";

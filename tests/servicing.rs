@@ -20,7 +20,8 @@ use common::*;
 use perch::commands::watcher::WatcherCommand;
 use perch::error::{EXIT_HELD, EXIT_INVALID, EXIT_NOTHING_TO_DO, EXIT_OK};
 use perch::host::fake::Effect;
-use perch::host::{Execution, FakeHost, Host, Platform};
+use perch::host::prelude::*;
+use perch::host::{Execution, FakeHost, Platform};
 
 /// Where a `systemd --user` unit goes on the fixture's machine.
 const UNIT: &str = "/Users/someone/.config/systemd/user/perch-watch.service";

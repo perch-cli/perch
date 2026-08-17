@@ -214,7 +214,7 @@ fn there_is_no_keychain_here(host: &dyn Host) -> bool {
 /// Not a refusal. Perch did not necessarily write this file — Claude Code did,
 /// or a backup restored it — and refusing would strand a machine whose Claude
 /// Code is working perfectly. A tightened file is a better outcome than an
-/// explained one, and [`Host::note`](crate::host::Host::note) says it once
+/// explained one, and [`Terminal::note`](crate::host::Host::note) says it once
 /// however many times the file is read.
 fn tighten_if_loose(host: &dyn Host, path: &std::path::Path) {
     // A mode that cannot be read is not evidence of a loose file, and this is a

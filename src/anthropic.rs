@@ -142,7 +142,7 @@ pub fn utilization(host: &dyn Host, access_token: &str) -> Result<QuotaWindows, 
     }
     // After the refusals, so a reply that is not going to be used says the one
     // thing that is wrong with it rather than two. Said once, which is what
-    // `Host::note` is for: this is a remark about the shape of Anthropic's
+    // `Terminal::note` is for: this is a remark about the shape of Anthropic's
     // replies, and it is the same remark for every Account on the machine.
     for remark in said {
         host.note(&remark);
@@ -596,6 +596,7 @@ mod tests {
     }
 
     use super::*;
+    use crate::host::prelude::*;
 
     /// The windows a reply describes, with what it remarked on set aside —
     /// which is what every test here but the one about the remarks is asking.
