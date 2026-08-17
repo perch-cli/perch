@@ -432,6 +432,32 @@ fn list_says_which_account_is_active() {
     );
 }
 
+/// A listing with nothing to say under it ends at the table, and does not space
+/// for the sentences it has not got.
+///
+/// The blank line above the footer is the footer's own — a bare listing on a
+/// machine with no active Account, nothing Quarantined and no Switch in flight
+/// has no legend to explain, no Reserve to say (ADR 0058) and no reason to
+/// print, so there is nothing for the line to separate.
+#[test]
+fn a_listing_with_nothing_under_the_table_ends_at_the_table() {
+    let mut registry = a_group_of(None, EMAIL, &[(EMAIL, 42.0), (SECOND_EMAIL, 10.0)]);
+    registry.settle(None);
+    let host = machine_holding(&registry);
+
+    let (result, printed) = run_list(&host, false);
+
+    result.unwrap();
+    assert!(
+        printed.trim_end().ends_with("(as of 3m ago)"),
+        "the last row is the last thing said:\n{printed:?}"
+    );
+    assert!(
+        !printed.contains("\n\n"),
+        "and nothing is spaced off from it:\n{printed:?}"
+    );
+}
+
 #[test]
 fn list_shows_each_utilization_figure_with_its_age() {
     let host = machine_holding_three_accounts();

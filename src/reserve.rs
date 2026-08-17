@@ -107,29 +107,36 @@ impl<'a> Reserve<'a> {
     /// at wondering which.
     pub fn lines(&self, now: DateTime<Utc>) -> Vec<String> {
         let mut lines = vec![match self.best() {
-            Some((account, percent)) => format!(
-                "Reserve: {} of {} {} Headroom, the best {}% left ({})",
+            // The age is the best Account's own, read off the observation its
+            // Headroom was measured from — which is why there is one to read:
+            // Room is what an Account with a figure has, and the two absences
+            // [`HowMuchIsLeft`] tells apart are the other two arms.
+            Some((_, percent)) => format!(
+                "Reserve: {} of {} {} Headroom, the best {}% left (as of {})",
                 self.with_headroom.len(),
                 accounts(self.candidates.len()),
                 verb(self.with_headroom.len()),
                 utilization::percentage(percent),
-                observed(account, now),
+                utilization::age_phrase(
+                    self.best_read_at()
+                        .expect("Headroom is measured from a reading"),
+                    now,
+                ),
             ),
             // Nothing was read to reach this one: being Disabled or Quarantined
             // is a fact about the registry rather than an observation, so there
             // is no age to carry and none is invented.
             //
-            // A Scope holding no Account at all would reach this branch and
-            // describe an empty Scope as full of Accounts nothing may Cycle to,
-            // with the parenthetical naming them coming out empty. It cannot:
-            // the listing says its own better sentence — that the Scope holds no
-            // Accounts yet — and returns before any of this is asked for.
+            // Something is always in the way here, and the parenthetical is not
+            // guarded against being empty. Candidates come out empty only by
+            // every Account the Scope holds leaving the running; a Scope holding
+            // no Account at all would reach this branch with nothing to name,
+            // and it cannot — the listing says its own better sentence, that the
+            // Scope holds no Accounts yet, and returns before any of this is
+            // asked for.
             None if self.candidates.is_empty() => format!(
-                "Reserve: none — no Account here may be Cycled to{}",
-                match self.out_of_the_running.is_empty() {
-                    true => String::new(),
-                    false => format!(" ({})", self.out_of_the_running),
-                }
+                "Reserve: none — no Account here may be Cycled to ({})",
+                self.out_of_the_running,
             ),
             None => format!(
                 "Reserve: none of {} {} Headroom ({})",
@@ -255,15 +262,6 @@ fn verb(count: usize) -> &'static str {
     match count {
         1 => "has",
         _ => "have",
-    }
-}
-
-/// When the figure being quoted was read (ADR 0015), for the Account it was read
-/// for.
-fn observed(account: &Account, now: DateTime<Utc>) -> String {
-    match account.observed_utilization() {
-        Some(cached) => format!("as of {}", utilization::age_phrase(cached.observed_at, now)),
-        None => "never observed".to_string(),
     }
 }
 
