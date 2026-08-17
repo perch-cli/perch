@@ -464,6 +464,35 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "listing a file is an error, and not the absent-directory one",
+        asserts: |host, root, adapter, _now| {
+            // The other half of the sentence above, and the half nothing asked
+            // for until now. `probe::clients_in` reads `NotFound` as "no client
+            // has ever run here, so nothing is running" and lets a Switch
+            // replace the live Credential; anything else is doubt it refuses
+            // on. So a `<profile>/sessions` that is a regular file — a botched
+            // restore, a name crossed by a hard link — must not read as idle.
+            //
+            // The two adapters phrase the refusal differently, and are entitled
+            // to: the machine says `ENOTDIR` and the fake says so in a
+            // sentence. What has to agree is which side of the one distinction
+            // a caller acts on they land, so that is what is asserted.
+            let file = root.join("not-a-directory");
+            host.create_file_with_mode(&file, "x", PRIVATE_FILE_MODE)
+                .expect("a file to ask about");
+            match host.list_dir(&file) {
+                Err(HostError::NotFound { .. }) => panic!(
+                    "{adapter}: a file read as an absent directory is a Switch \
+                     replacing a Credential something else is holding"
+                ),
+                Err(_) => {}
+                Ok(listed) => {
+                    panic!("{adapter}: a file is not a directory, got {listed:?}")
+                }
+            }
+        },
+    },
+    Case {
         named: "a directory lists what it holds, as full paths",
         asserts: |host, root, adapter, _now| {
             let dir = root.join("holding-three");
