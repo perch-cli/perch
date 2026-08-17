@@ -99,12 +99,41 @@ Group `work`
   overflow@example.com  overflow  quarantined  never observed  never observed
 
 * is the active Account.
+Reserve: 1 of 1 Account has Headroom, the best 58% left (as of 3m ago)
+1 Quarantined, so nothing Cycles to it.
 overflow@example.com (as `overflow`) is Quarantined: Anthropic would not renew its Credential. `perch relogin overflow@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
 ```
 
 The Group column goes, because the heading has already answered it. Narrowed to
 the ungrouped, the table says what Cycling will and will not do with them
 unasked (ADR 0017).
+
+**The Reserve is what this Scope has left to draw on**: how many of the Accounts
+a Cycle may choose still have Headroom, and how much the best of them has, with
+the age of the reading that figure came from. It is a count and one Account's
+own figure, and never one pooled number — Accounts sit on different plans and
+Perch only ever sees percentages, so a `pro` Account at 50% and a `max` Account
+at 50% do not have the same quota left, and adding them would produce a figure
+that looks quantitative and is not.
+
+An Account a Cycle may not choose is not part of what the Scope has, so a
+Disabled or Quarantined one is named under the count rather than inside it — the
+counts on screen add up to the Accounts on screen. Where nothing is left, the
+line says what is in the way rather than only "none": exhausted, never observed,
+or out of the running. And where the count rests on a reading older than the one
+it quotes, a `Read 8h ago at the oldest.` line says so, because a count of
+Accounts rests on all of their readings rather than on the freshest.
+
+Among the ungrouped, the Reserve appears only once you have run `perch config set
+ungrouped interchangeable true`. Until then nothing has declared those Accounts a
+set, and what they have left *between them* is precisely the claim nobody has
+made (ADR 0017) — the same reason they are held rather than ranked.
+
+**A bare `perch list` says no Reserve** (ADR 0058). It is one table across every
+Scope at once with the Group as a column and no heading to name which Scope a
+sentence would be about, so each line would have to name its own — a heading
+smuggled into a sentence already as wide as a terminal. `--json` is the exception
+and carries one per section, because a section names its Scope in a key.
 
 The Scope is named rather than implied, so `perch list` keeps working when Perch
 holds no active Account — which is precisely the state `perch status` sends you
@@ -180,11 +209,25 @@ either `ranked` or `held`, and its `accounts` in that order.
     {
       "scope": { "kind": "group", "name": "work" },
       "order": "ranked",
+      "reserve": {
+        "candidates": 1,
+        "with_headroom": 1,
+        "exhausted": 0,
+        "never_observed": 0,
+        "out_of_the_running": 1,
+        "best": {
+          "email": "someone@example.com",
+          "percent": 58.0,
+          "observed_at": "2026-08-04T11:57:00+00:00"
+        },
+        "oldest_observed_at": "2026-08-04T11:57:00+00:00"
+      },
       "accounts": [ … ]
     },
     {
       "scope": { "kind": "ungrouped", "name": null },
       "order": "held",
+      "reserve": null,
       "accounts": [ … ]
     }
   ],
@@ -196,6 +239,22 @@ So `.sections[0].accounts[0]` is the Account a bare `perch switch` would land on
 and a section whose `order` is `held` is saying that its Accounts are in no
 meaningful order at all — a flat array would have let a script read a ranking out
 of that, which is the one claim this listing exists not to make.
+
+**Every section carries its Scope's `reserve`, at every breadth** — including the
+bare listing, where the table says none (ADR 0058). The table's silence is about
+having nowhere to put the sentence; a section has somewhere, because it names its
+own Scope in a key. As fields rather than the rendered sentence, because a prose
+sentence in a document is a thing scripts end up regexing. The counts are
+over the Accounts a Cycle may choose, so `with_headroom`, `exhausted` and
+`never_observed` add up to `candidates`, and those plus `out_of_the_running` add
+up to the section's own `accounts`. `best` is one Account's own figure, unrounded
+and named, and `null` where nothing here has Headroom. `oldest_observed_at` is
+the weakest reading the counts rest on.
+
+`reserve` is `null` where nothing has declared the Scope's Accounts
+interchangeable, saying the same "there is no answer here" the table says by
+silence — and `null` for a Scope holding nobody, which the empty `accounts`
+beside it tells apart.
 
 Every Account carries `headroom` beside its `utilization`: a `state` of `room`,
 `exhausted` or `never-observed`, and a `percent` that is a number under `room`

@@ -9,7 +9,7 @@
 | Command | What it does |
 | ------- | ------------ |
 | `perch status [--refresh] [--json]` | the active Account and how full it is |
-| `perch list [<scope>] [--refresh] [--json]` | every Account, its Alias, Group, state, Headroom and Utilization, in the order a Cycle ranks them — or one Group's, or the ungrouped ones' |
+| `perch list [<scope>] [--refresh] [--json]` | every Account, its Alias, Group, state, Headroom and Utilization, in the order a Cycle ranks them — or one Group's, or the ungrouped ones', with what that Scope has left to draw on |
 | `perch add [--group <name>\|--no-group] [--alias <name>]` | gain an Account by logging in, without disturbing the active one |
 | `perch alias <target> <name>` / `perch alias <target> --unset` | name an Account, or free the name |
 | `perch switch <target>` | make an Account active everywhere |

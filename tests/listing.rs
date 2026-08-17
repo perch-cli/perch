@@ -706,6 +706,282 @@ fn the_ungrouped_cycling_clause_says_so_once_cycling_has_been_allowed() {
     );
 }
 
+/// What the Scope has left to draw on, said under the table a heading has
+/// already named the Scope of (ADR 0058).
+///
+/// A count over the Accounts a Cycle may choose, the best one's own figure, and
+/// the age of the reading that figure came from — never one pooled figure, since
+/// Accounts sit on different plans and Perch only ever sees percentages.
+#[test]
+fn a_narrowed_listing_says_what_the_scope_has_left() {
+    let host = machine_holding_three_accounts();
+
+    let (result, printed) = run_list_in(&host, "work", false);
+
+    result.unwrap();
+    assert!(
+        printed.contains("Reserve: 1 of 1 Account has Headroom, the best 58% left (as of 3m ago)"),
+        "the count, the best Account's own figure and the age of the reading it \
+         came from:\n{printed}"
+    );
+    assert!(
+        printed.contains("1 Quarantined, so nothing Cycles to it."),
+        "and the Account a Cycle may not choose is said as what is out of the \
+         running rather than counted as something the Group has:\n{printed}"
+    );
+}
+
+/// An Account a Cycle may not choose is not part of what the Scope has, so the
+/// counts under the table add up to the Accounts in it.
+#[test]
+fn the_reserve_counts_only_the_accounts_a_cycle_may_choose() {
+    let mut registry = a_group_of(
+        Some("work"),
+        EMAIL,
+        &[(EMAIL, 90.0), (SECOND_EMAIL, 10.0), (THIRD_EMAIL, 40.0)],
+    );
+    registry
+        .held_mut(THIRD_EMAIL)
+        .expect("it was just added")
+        .disabled = true;
+    let host = machine_holding(&registry);
+
+    let (result, printed) = run_list_in(&host, "work", false);
+
+    result.unwrap();
+    assert!(
+        printed.contains("Reserve: 2 of 2 Accounts have Headroom, the best 90% left"),
+        "three Accounts are listed and one of them is Disabled, so the Reserve \
+         is over the other two:\n{printed}"
+    );
+    assert!(
+        printed.contains("1 disabled, so nothing Cycles to it."),
+        "and the third is said rather than dropped:\n{printed}"
+    );
+}
+
+/// No figure is invented for an Account nothing was ever read for, so a Scope
+/// nothing has been read for says what is in the way rather than `0%`.
+#[test]
+fn a_scope_with_nothing_left_says_what_is_in_the_way_rather_than_a_figure() {
+    let mut registry = a_group_of(Some("work"), EMAIL, &[(EMAIL, 100.0)]);
+    let mut unread = account(SECOND_EMAIL, "Overflow Ltd");
+    unread.group = Some("work".to_string());
+    registry.upsert(unread);
+    let host = machine_holding(&registry);
+
+    let (result, printed) = run_list_in(&host, "work", false);
+
+    result.unwrap();
+    assert!(
+        printed
+            .contains("Reserve: none of 2 Accounts have Headroom (1 exhausted, 1 never observed)"),
+        "\"none\" without a reason is a Group somebody stares at wondering \
+         which:\n{printed}"
+    );
+    assert!(
+        !printed.contains("Reserve: 0%") && !printed.contains("the best 0%"),
+        "and nothing reads as a figure Perch never had:\n{printed}"
+    );
+}
+
+/// A bare `perch list` is one table across every Scope at once, with the Group
+/// as a column and no heading to name which Scope a sentence would be about
+/// (ADR 0058). A Reserve line there would have to name its own Scope, which is a
+/// heading smuggled into a sentence already as wide as a terminal.
+#[test]
+fn a_bare_listing_says_no_reserve() {
+    for host in [
+        machine_holding_three_accounts(),
+        machine_holding(&a_group_of(Some("work"), EMAIL, &[(EMAIL, 42.0)])),
+        machine_holding(&a_group_of(None, EMAIL, &[(EMAIL, 42.0)])),
+    ] {
+        let (result, printed) = run_list(&host, false);
+
+        result.unwrap();
+        assert!(
+            !printed.contains("Reserve"),
+            "on no registry does the listing of everything say one:\n{printed}"
+        );
+    }
+}
+
+/// Being in no Group is the absence of a declaration that those Accounts are
+/// interchangeable (ADR 0017), and what they have left *between them* is exactly
+/// the claim nobody has made. So the listing declines it in the same breath it
+/// declines ranking them, and says it once the declaration is made.
+#[test]
+fn the_ungrouped_say_no_reserve_until_they_are_declared_interchangeable() {
+    let mut registry = a_group_of(None, EMAIL, &[(EMAIL, 90.0), (SECOND_EMAIL, 10.0)]);
+    let host = machine_holding(&registry);
+
+    let (result, printed) = run_list_in(&host, "ungrouped", false);
+
+    result.unwrap();
+    assert!(
+        !printed.contains("Reserve"),
+        "nothing has said these are a set:\n{printed}"
+    );
+
+    registry.ungrouped.interchangeable = true;
+    let host = machine_holding(&registry);
+
+    let (result, printed) = run_list_in(&host, "ungrouped", false);
+
+    result.unwrap();
+    assert!(
+        printed.contains("Reserve: 2 of 2 Accounts have Headroom, the best 90% left"),
+        "and once it has, what they have between them is a fact:\n{printed}"
+    );
+}
+
+/// The slot under the table reads top to bottom in the order each sentence
+/// qualifies the one above it: the legend, what a Switch in flight did to it
+/// (ADR 0048), what the Scope has left, whether Cycling may move within it, and
+/// last what is broken and how to repair it.
+#[test]
+fn the_reserve_sits_between_the_legend_and_the_quarantine_reasons() {
+    let host = machine_holding_three_accounts();
+    common::a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+
+    let (result, printed) = run_list_in(&host, "work", false);
+
+    result.unwrap();
+    let at = |said: &str| {
+        printed
+            .find(said)
+            .unwrap_or_else(|| panic!("{said} is under the table:\n{printed}"))
+    };
+    assert!(at("* is the active Account.") < at("A Switch was in flight"));
+    assert!(
+        at("A Switch was in flight") < at("Reserve:"),
+        "the Reserve comes after the Switch note:\n{printed}"
+    );
+    assert!(
+        at("Reserve:") < at("is Quarantined:"),
+        "and before the reasons anything is broken:\n{printed}"
+    );
+}
+
+/// And the `Cycling …` clause follows it directly, qualifying it: the count is
+/// over the Accounts a Cycle may move between, and that clause is the sentence
+/// saying whether it may.
+#[test]
+fn the_cycling_clause_follows_the_reserve_it_qualifies() {
+    let mut registry = a_group_of(None, EMAIL, &[(EMAIL, 90.0)]);
+    registry.ungrouped.interchangeable = true;
+    let host = machine_holding(&registry);
+
+    let (result, printed) = run_list_in(&host, "ungrouped", false);
+
+    result.unwrap();
+    let said: Vec<&str> = printed
+        .lines()
+        .skip_while(|line| !line.starts_with("Reserve:"))
+        .collect();
+    assert!(
+        said.get(1).is_some_and(|line| line.starts_with("Cycling ")),
+        "the clause sits directly under the line it qualifies:\n{printed}"
+    );
+}
+
+/// A Scope holding nobody says so in the one sentence that fits it, rather than
+/// counting to nought about Accounts it has not got.
+#[test]
+fn a_narrowed_scope_holding_no_accounts_says_only_that() {
+    let mut registry = Registry::default();
+    registry.upsert(account(EMAIL, "Acme"));
+    registry.settle(Some(EMAIL.to_string()));
+    registry
+        .groups
+        .insert("spare".to_string(), Settings::default());
+    let host = machine_holding(&registry);
+
+    let (result, printed) = run_list_in(&host, "spare", false);
+
+    result.unwrap();
+    assert_eq!(
+        printed.trim(),
+        "Group `spare`\nThe Group `spare` holds no Accounts yet.",
+        "the heading and the one sentence that fits an empty Scope, and nothing \
+         else at all:\n{printed}"
+    );
+}
+
+/// The document says it at every breadth, unlike the table (ADR 0058): each
+/// section names its own Scope in a key, which is the whole of what the table
+/// lacks.
+///
+/// As fields rather than the rendered sentence — the listing's document is
+/// structured throughout, and a prose sentence in a document is a thing scripts
+/// end up regexing.
+#[test]
+fn every_section_of_the_json_carries_the_scopes_reserve() {
+    let host = machine_holding_three_accounts();
+
+    let (result, printed) = run_list(&host, true);
+
+    result.unwrap();
+    let document: serde_json::Value = serde_json::from_str(&printed).expect("valid JSON");
+    let sections = document["sections"].as_array().unwrap();
+
+    let work = sections
+        .iter()
+        .find(|section| section["scope"]["name"] == "work")
+        .unwrap_or_else(|| panic!("`work` is a section: {document}"));
+    assert_eq!(work["reserve"]["candidates"], 1, "{document}");
+    assert_eq!(work["reserve"]["with_headroom"], 1, "{document}");
+    assert_eq!(work["reserve"]["out_of_the_running"], 1, "{document}");
+    assert_eq!(work["reserve"]["best"]["email"], EMAIL, "{document}");
+    assert_eq!(
+        work["reserve"]["best"]["percent"], 58.0,
+        "unrounded, like every other percentage in a document: {document}"
+    );
+    assert!(
+        work["reserve"]["best"]["observed_at"]
+            .as_str()
+            .is_some_and(|at| at.starts_with("2026-08-04T11:57:00")),
+        "the figure carries the age of the reading it came from: {document}"
+    );
+
+    let ungrouped = sections
+        .iter()
+        .find(|section| section["scope"]["kind"] == "ungrouped")
+        .unwrap_or_else(|| panic!("the Ungrouped are a section: {document}"));
+    assert!(
+        ungrouped["reserve"].is_null(),
+        "nothing has declared these a set, so there is no answer here — the \
+         same thing the table says by silence: {document}"
+    );
+}
+
+/// `null` for a Scope holding nobody too, which is not ambiguous against the
+/// other `null` because `accounts` sits beside it and tells "nobody is here"
+/// from "nobody declared these a set".
+#[test]
+fn a_section_holding_no_accounts_carries_no_reserve() {
+    let mut registry = Registry::default();
+    registry.upsert(account(EMAIL, "Acme"));
+    registry.settle(Some(EMAIL.to_string()));
+    registry
+        .groups
+        .insert("spare".to_string(), Settings::default());
+    let host = machine_holding(&registry);
+
+    let (result, printed) = run_list_in(&host, "spare", true);
+
+    result.unwrap();
+    let document: serde_json::Value = serde_json::from_str(&printed).expect("valid JSON");
+    let section = &document["sections"][0];
+    assert!(section["reserve"].is_null(), "{document}");
+    assert_eq!(
+        section["accounts"].as_array().map(Vec::len),
+        Some(0),
+        "and the empty array beside it is what says which `null` this is: \
+         {document}"
+    );
+}
+
 #[test]
 fn list_in_a_group_json_says_which_group_it_narrowed_to() {
     let host = machine_holding_three_accounts();
