@@ -13,9 +13,19 @@
 [files]
 # `.github/` is where the workflow that runs this check lives, and it was
 # spelling three words the British way while checking everything else. A gate
-# that exempts its own directory is a gate with a hole in it. `.git` stays out
-# regardless — that is `ignore-vcs`, not this.
+# that exempts its own directory is a gate with a hole in it.
 ignore-hidden = false
+# But hidden means hidden, and `.git` is hidden. It has to be named here rather
+# than left to `ignore-vcs`, which excludes what git *ignores* and not git's own
+# directory. What is in there is not Perch's prose and some of it can never
+# pass: `hooks/*.sample` ships from git in British English, and `COMMIT_EDITMSG`
+# and `logs/HEAD` hold commit messages, which are exempt for the same reason
+# CHANGELOG.md is — release-plz writes it from them.
+#
+# Worth knowing if this ever looks over-careful: a checkout has a `.git`
+# directory and a worktree has a `.git` *file*, so leaving this out fails on the
+# first and passes on the second.
+extend-exclude = [".git/"]
 
 [default]
 locale = "en-us"
