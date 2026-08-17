@@ -365,6 +365,10 @@ fn describe(host: &dyn Host) -> Result<Unit> {
             .collect(),
         log: service::log_path(host)?,
         user_id: host.user_id(),
+        // Off the machine, because `schtasks` has no notation for "whoever is
+        // running this" and the one Perch was passing — `%USERNAME%` — is
+        // `cmd.exe`'s, expanded by a shell that is not there.
+        user_name: host.env_var("USERNAME"),
     })
 }
 
