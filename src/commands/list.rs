@@ -20,6 +20,12 @@
 //! whether the set is everything or the Group you would Cycle within, and
 //! "where would I land before I switch" is that job asked of one Scope.
 //!
+//! Narrowed, it also says what that Scope has left to draw on — its Reserve
+//! (ADR 0058). Only narrowed: the table spans every Scope at once with the Group
+//! as a column, so there is no heading for a sentence about one of them to sit
+//! under. A `--json` section names its own Scope in a key, so every section
+//! carries the Reserve at every breadth.
+//!
 //! `--refresh` follows the breadth: it reads the Accounts about to be shown and
 //! no others, which is one rule rather than a capability each breadth has of
 //! its own.
@@ -37,6 +43,7 @@ use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::observe::{self, Report};
 use crate::registry::{self, Account, Quarantine, Registry, UNGROUPED};
+use crate::reserve::Reserve;
 use crate::utilization;
 
 #[derive(Debug, Default, Clone)]
@@ -200,6 +207,19 @@ impl<'a> Section<'a> {
         }
     }
 
+    /// What this Scope has left to draw on, or nothing where nothing has
+    /// declared its Accounts a set.
+    ///
+    /// The same gate the order goes through, and deliberately the same field: a
+    /// Reserve is what these Accounts have *between them*, which is the claim
+    /// ADR 0017 says nobody has made about the Ungrouped until `interchangeable`
+    /// is declared. Ranking them and saying what they have left are the two
+    /// things every surface declines together, so they are declined here off one
+    /// answer rather than two.
+    fn reserve<'r>(&self, registry: &'r Registry) -> Option<Reserve<'r>> {
+        self.ranked.then(|| Reserve::of(registry, &self.scope))
+    }
+
     fn document(
         &self,
         host: &dyn Host,
@@ -217,6 +237,20 @@ impl<'a> Section<'a> {
             // one should not have to learn a second spelling to read the other.
             "scope": Scope::from(&self.scope).json(),
             "order": self.order(),
+            // At every breadth, unlike the table (ADR 0058): the section has
+            // already named the Scope this is about, which is the whole of what
+            // the table lacks.
+            //
+            // `null` for a Scope holding nobody, where the human listing says a
+            // sentence of its own instead. Unambiguous against the other `null`
+            // because `accounts` sits beside it: an empty array distinguishes
+            // "nobody is here" from "nobody has declared these a set".
+            "reserve": match self.accounts.is_empty() {
+                true => serde_json::Value::Null,
+                false => self
+                    .reserve(registry)
+                    .map_or(serde_json::Value::Null, |reserve| reserve.document()),
+            },
             "accounts": listed,
         }))
     }
@@ -562,35 +596,64 @@ fn render_human(
         }
     }
 
-    let broken = why_they_are_quarantined(registry, accounts);
+    // The sentences under the table, in the order they qualify one another: the
+    // legend, what a Switch in flight has done to it, what this Scope has left,
+    // what Cycling will do with it, and what is broken. Collected rather than
+    // written one at a time so the blank line that separates them from the table
+    // is decided by whether there is anything down here at all, rather than by a
+    // condition each new sentence has to remember to join.
+    let mut footer = Vec::new();
+    if rows.iter().any(|row| row.active) {
+        footer.push("* is the active Account.".to_string());
+    }
     // Said whether or not the `*` is in this listing: with a Switch in flight
     // the marker is on the Account Perch was on rather than one it can
     // establish is live, and a listing narrowed to a Group that Switch was
     // leaving may carry no marker at all (ADR 0048).
-    let in_flight = registry.active().a_switch_in_flight();
-    if rows.iter().any(|row| row.active) || !broken.is_empty() || in_flight.is_some() {
+    footer.extend(registry.active().a_switch_in_flight());
+    footer.extend(reserve_lines(registry, scope, sections, now));
+    if matches!(scope, Scope::Ungrouped) {
+        // After the Reserve, because it qualifies it: the count above is over
+        // Accounts a Cycle may move between, and this is the sentence saying
+        // whether it may.
+        footer.push(format!("Cycling {}.", cycling_among_ungrouped(registry)));
+    }
+    footer.extend(why_they_are_quarantined(registry, accounts));
+
+    if !footer.is_empty() {
         say(out, "")?;
     }
-    if rows.iter().any(|row| row.active) {
-        say(out, "* is the active Account.")?;
-    }
-    // Straight after the line it qualifies.
-    if let Some(said) = in_flight {
-        say(out, &said)?;
-    }
-
-    if matches!(scope, Scope::Ungrouped) {
-        say(
-            out,
-            &format!("Cycling {}.", cycling_among_ungrouped(registry)),
-        )?;
-    }
-
-    for why in broken {
-        say(out, &why)?;
+    for line in footer {
+        say(out, &line)?;
     }
 
     Ok(())
+}
+
+/// What the Scope has left to draw on, said where a heading has already named
+/// which Scope that is (ADR 0058).
+///
+/// Off [`Scope::heading`] rather than off the breadth, because the heading is
+/// the condition rather than a proxy for it. A bare `perch list` has none: it is
+/// one table across every Scope at once — the reason is in [`render_human`] — so
+/// a Reserve line there would have to name its own Scope, which is a heading
+/// smuggled into a sentence already as wide as a terminal. Anything that gave
+/// the bare listing headings would be giving these sentences somewhere to sit by
+/// the same stroke.
+fn reserve_lines(
+    registry: &Registry,
+    scope: &Scope,
+    sections: &[Section<'_>],
+    now: DateTime<Utc>,
+) -> Vec<String> {
+    if scope.heading().is_none() {
+        return Vec::new();
+    }
+    sections
+        .iter()
+        .filter_map(|section| section.reserve(registry))
+        .flat_map(|reserve| reserve.lines(now))
+        .collect()
 }
 
 fn write_row(

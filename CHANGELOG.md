@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `perch list <group>` and `perch list ungrouped` now say what that Scope has left to draw on — its **Reserve**: how many of the Accounts a Cycle may choose still have Headroom, the best one's own figure, and the age of the reading it came from. Never one pooled figure, since Accounts sit on different plans and Perch only ever sees percentages. A Scope with nothing left says what is in the way rather than only "none", and one whose Accounts a Cycle may not choose says so under the count rather than inside it. A bare `perch list` says no Reserve — it is one table across every Scope with no heading for the sentence to sit under — while every section of `perch list --json` carries a `reserve` at every breadth, as fields, and `null` where nothing has declared the Scope's Accounts interchangeable or where the Scope holds nobody ([#197](https://github.com/perch-cli/perch/issues/197))
+
 ### Changed
 
 - [**breaking**] every command is now placed by the noun it is about, and the Account is the one left unsaid. The four that broke that rule move onto two nouns: `perch export`, `perch import` and `perch purge` become `perch holdings export|import|purge`, and `perch watch` becomes `perch watcher run` — taking `perch service install|uninstall|status` with it as `perch watcher install|uninstall|status`, because a Service is an arrangement of the Watcher rather than a noun of its own. `perch --help` now lists sixteen names rather than nineteen. `perch watch --once` becomes `perch watcher check`, a verb rather than a flag because it changes both the meaning of the exit code and the lifetime of the command; the exit codes themselves are untouched, and no other flag is affected. `Holdings` — everything Perch holds on this machine — is a glossary term ([#164](https://github.com/perch-cli/perch/issues/164))
