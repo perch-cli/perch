@@ -172,10 +172,12 @@ compared on, whoever is doing the choosing.
 _Avoid_: capacity, room, slack, remaining
 
 **Reserve**:
-What a Group has left to draw on, said as how many of its Accounts still have
+What a Scope has left to draw on, said as how many of its Accounts still have
 Headroom and how much the best of them has. Never one pooled figure: Accounts
 sit on different plans and Perch only ever sees percentages, so quota does not
-add up across Accounts and a number that implied it would be a lie.
+add up across Accounts and a number that implied it would be a lie. A Scope
+rather than a Group, because the Accounts in no Group have one too once
+somebody has declared them interchangeable.
 _Avoid_: total, pool, aggregate, group quota
 
 **Rotation**:
