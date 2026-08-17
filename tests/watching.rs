@@ -1029,6 +1029,54 @@ fn a_landing_the_watcher_cannot_settle_holds_the_loop_rather_than_stopping_it() 
     );
 }
 
+/// And the opening line names an Account only where one has been established
+/// (ADR 0055).
+///
+/// A Landing in flight is a Switch nothing has recorded the outcome of, and
+/// `Active::whose` answers with the Account being *left* — the last thing Perch
+/// established rather than the thing that is true. The opening line read that
+/// and said "Watching …" of it, before any lock had been taken and before
+/// anything could settle it. It now says nothing until the first round has, which
+/// is the whole of what the `Settled` witness is for: the line that names the
+/// Account is the line that cannot be printed too early.
+///
+/// The round after it settles the Landing and decides as usual, so what this
+/// costs is one line's worth of detail on a machine that was mid-Switch.
+#[test]
+fn a_landing_in_flight_leaves_the_opening_line_naming_nobody() {
+    let host = watching(&[42.0], 5.0);
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a Landing this Perch can settle is no reason to stop");
+    let opening = printed.lines().next().expect("the opening line");
+    assert!(
+        opening.starts_with("Started."),
+        "it says it started and leaves the reason to the first round: {opening}"
+    );
+    assert!(
+        !opening.contains(EMAIL) && !opening.contains(SECOND_EMAIL),
+        "and names neither of the two Accounts the Landing left in doubt: \
+         {opening}"
+    );
+
+    // The round settles it and gets on with watching, which is what makes the
+    // quiet opening a deferral rather than a refusal.
+    assert_eq!(
+        active(&host).as_deref(),
+        Some(EMAIL),
+        "the Landing is settled onto the Account that was being left: {printed}"
+    );
+    let decisions = decisions(&printed);
+    assert_eq!(decisions.len(), 1, "{printed}");
+    assert!(
+        decisions[0].contains(EMAIL) && decisions[0].contains("waiting"),
+        "and that line names the Account, because by then one is established: {}",
+        decisions[0]
+    );
+}
+
 /// **ADR 0051 and ADR 0017 together.** The watcher acts on the Accounts in no
 /// Group only where both things have been said about *that* Scope: they are
 /// interchangeable at all, and something may act on them.

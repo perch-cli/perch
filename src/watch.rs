@@ -19,8 +19,9 @@
 
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 
-use crate::error::{EXIT_HELD, EXIT_NO_CANDIDATE, EXIT_NOTHING_TO_DO, EXIT_OK};
+use crate::error::{EXIT_HELD, EXIT_NO_CANDIDATE, EXIT_NOTHING_TO_DO, EXIT_OK, PerchError, Result};
 use crate::registry::{Account, Checked, Settings};
+use crate::switch::NotIdle;
 
 /// How long the watcher waits between Refreshing the Account it is on.
 ///
@@ -97,8 +98,23 @@ impl Backoff {
         Backoff::default()
     }
 
+    /// A round that could not read: the failure is charged and the wait it lands
+    /// on comes back, in one call.
+    ///
+    /// The only way to do either, and that is the whole of the point. Counting a
+    /// failure and quoting what it costs were two calls a caller made in
+    /// sequence, at four sites — so a hold could be reported without being paid
+    /// for, or said against a wait it had not just earned, and nothing would have
+    /// caught either. The wait goes on the line the round prints, so a person
+    /// reading the log knows when the Watcher comes back rather than wondering
+    /// whether it has given up.
+    pub fn could_not_read(&mut self) -> u64 {
+        self.failed();
+        self.waiting_for()
+    }
+
     /// A Refresh that could not be read.
-    pub fn failed(&mut self) {
+    fn failed(&mut self) {
         self.failures = self.failures.saturating_add(1);
     }
 
@@ -111,7 +127,7 @@ impl Backoff {
     }
 
     /// How long to leave it before asking again, as things stand.
-    pub fn waiting_for(&self) -> u64 {
+    fn waiting_for(&self) -> u64 {
         let doublings = self.failures.saturating_sub(1);
         // Saturating throughout, so a loop left running against a dead endpoint
         // for a week arrives at the longest wait rather than back at the
@@ -424,6 +440,19 @@ impl Fullest {
         self.used_percent >= f64::from(threshold)
     }
 
+    /// The same question, answered as something the round can be given rather
+    /// than as something it can be told.
+    ///
+    /// The figure comes back either way, because a round that decided nothing
+    /// still prints what it read — and it is the same figure, so the number on
+    /// the line and the number the decision was taken on cannot come to differ.
+    pub fn crossed(self, threshold: u8) -> std::result::Result<Crossed, Fullest> {
+        match self.at_or_over(threshold) {
+            true => Ok(Crossed { fullest: self }),
+            false => Err(self),
+        }
+    }
+
     /// Said beside the threshold it is being judged against, so the figure and
     /// the verdict on the same line cannot disagree.
     fn as_a_clause(&self, threshold: u8) -> String {
@@ -432,6 +461,69 @@ impl Fullest {
             crate::utilization::percentage_against(self.used_percent, threshold),
             self.window
         )
+    }
+}
+
+/// A figure read this round, at or over the Threshold: the Account is full
+/// enough that moving off it is wanted.
+///
+/// Not a witness — it carries the figure, which is the thing a witness by
+/// definition does not do (ADR 0055). It is what [`Fullest::crossed`] answers
+/// with, and the only thing a [`Cooled`] can be earned from. The figure travels
+/// inside it because everything after the crossing quotes that number, and a
+/// second copy read from somewhere else is a second copy that can disagree.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Crossed {
+    fullest: Fullest,
+}
+
+/// Why nothing may move yet, though the Threshold was crossed (ADR 0046).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cooling {
+    pub why: String,
+}
+
+/// A crossing whose Cooldown is spent, so this round may Switch (ADR 0046).
+///
+/// A witness on the terms [`switch::Settled`](crate::switch::Settled) sets out
+/// (ADR 0055), with the one thing in it the ask established: it borrows the
+/// [`Crossed`] it was earned from, so it is proof about *that* crossing and
+/// cannot outlive it. The one funnel that produces candidate addresses takes
+/// one, so reading a candidate inside a Cooldown does not compile.
+#[derive(Debug)]
+pub struct Cooled<'a>(&'a Crossed);
+
+impl Crossed {
+    /// Whether the Cooldown between two Switches has run out.
+    ///
+    /// Asked before the candidates are read rather than after, which is the
+    /// ordering this type exists to make unskippable: a round that may not act
+    /// has no business spending an allowance on figures it cannot use.
+    pub fn cooled(
+        &self,
+        recently: &Recently,
+        now: DateTime<Utc>,
+    ) -> std::result::Result<Cooled<'_>, Cooling> {
+        match recently.resting(now) {
+            Some(why) => Err(Cooling { why }),
+            None => Ok(Cooled(self)),
+        }
+    }
+
+    /// The figure that crossed, for the line the round prints.
+    ///
+    /// Read through here rather than off a public field so that the two ways a
+    /// round reaches it — a crossing the Cooldown held, and one it did not — are
+    /// the same spelling.
+    pub fn fullest(&self) -> &Fullest {
+        &self.fullest
+    }
+}
+
+impl Cooled<'_> {
+    /// The figure the crossing was read on, which is [`Crossed::fullest`]'s.
+    pub fn fullest(&self) -> &Fullest {
+        self.0.fullest()
     }
 }
 
@@ -730,6 +822,32 @@ impl Outcome {
             Outcome::Held { .. } => "held",
             Outcome::Refused { .. } => "refused",
         }
+    }
+}
+
+/// What a round makes of a liveness ask that did not come back Idle: an outcome
+/// it can report, or a failure it has to raise (ADR 0055).
+///
+/// Every variant answered by name, with no catch-all — a fourth way for the ask
+/// to fail breaks the build here until the round says which of the two it is.
+/// Asked as an `if let` over the one refusal, the other two were dropped on the
+/// floor: no branch, no warning, and a round that carried on to spend a Renewal
+/// on every candidate before meeting the identical failure in the Switch, having
+/// spent exactly the allowance the early ask exists to save.
+pub fn refused_or_raised(not_idle: NotIdle) -> Result<Outcome> {
+    match not_idle {
+        // Reported as the Switch would have reported it, because it is the same
+        // refusal about the same Profile — the Switch simply no longer gets to
+        // be the one to notice. Waiting is an answer: the client exits, and the
+        // round after it moves.
+        NotIdle::Live(why) => Ok(Outcome::Refused {
+            why: PerchError::ProfileLive(why).to_string(),
+        }),
+        // Neither of these clears itself, so neither is a round's to have an
+        // opinion about. A `sessions` directory nobody can read and an address
+        // no Profile can be named after are both a machine somebody has to look
+        // at, and the loop stops rather than deciding what to do next about one.
+        NotIdle::SessionsUnreadable(error) | NotIdle::Unnameable(error) => Err(error),
     }
 }
 
@@ -1563,6 +1681,115 @@ mod tests {
             "{}",
             set_aside.because
         );
+    }
+
+    /// A figure under the Threshold earns no crossing, and hands the figure
+    /// back — the round decided nothing, and still has to print what it read.
+    #[test]
+    fn a_figure_under_the_threshold_earns_no_crossing_and_comes_back_whole() {
+        let under = Fullest {
+            window: "5-hour".to_string(),
+            used_percent: 42.0,
+        };
+
+        let handed_back = under
+            .clone()
+            .crossed(80)
+            .expect_err("42% is not full enough to want moving off");
+
+        assert_eq!(handed_back, under, "the figure the line will quote");
+    }
+
+    /// And at the Threshold it is a crossing, on the same `>=` the Threshold has
+    /// always meant: 80 is the figure somebody set as the point they want moving
+    /// at, and the witness is earned there rather than at 81.
+    #[test]
+    fn a_figure_at_the_threshold_is_a_crossing_carrying_the_figure_it_crossed_on() {
+        let crossed = Fullest {
+            window: "5-hour".to_string(),
+            used_percent: 80.0,
+        }
+        .crossed(80)
+        .expect("at the threshold is at or over it");
+
+        assert_eq!(crossed.fullest().used_percent, 80.0);
+        assert_eq!(crossed.fullest().window, "5-hour");
+    }
+
+    /// The Cooldown is asked of the crossing, and a crossing inside one earns no
+    /// [`Cooled`] — which is what the candidates are read behind. A round that
+    /// may not act spends nothing finding out where it would have gone (ADR
+    /// 0046).
+    #[test]
+    fn a_crossing_inside_the_cooldown_is_not_cooled_and_says_which_rule_held_it() {
+        let crossed = at(86.0).unwrap().crossed(80).unwrap();
+        let mut recently = Recently::nothing();
+        recently.switched(now());
+
+        let cooling = crossed
+            .cooled(&recently, now() + Duration::minutes(4))
+            .expect_err("four minutes into a fifteen minute cooldown");
+
+        assert!(cooling.why.contains("cooldown"), "{}", cooling.why);
+        assert!(cooling.why.contains("another 11"), "{}", cooling.why);
+    }
+
+    /// And once it has run out the crossing is Cooled, carrying the figure it
+    /// crossed on — the one the decision line quotes for a round that acted.
+    #[test]
+    fn a_crossing_with_the_cooldown_spent_is_cooled_and_still_knows_the_figure() {
+        let crossed = at(86.0).unwrap().crossed(80).unwrap();
+        let mut recently = Recently::nothing();
+        recently.switched(now());
+
+        let cooled = crossed
+            .cooled(&recently, now() + Duration::minutes(15))
+            .expect("a cooldown of fifteen minutes is over after fifteen");
+
+        assert_eq!(cooled.fullest().used_percent, 86.0);
+
+        // And a loop that has just started owes nobody a wait, so its first
+        // crossing may act at once.
+        assert!(crossed.cooled(&Recently::nothing(), now()).is_ok());
+    }
+
+    /// Every way the liveness ask can fail, and what a round does about each.
+    ///
+    /// Two of the three had never been walked: the round asked inside an `if
+    /// let` over `ProfileLive`, so a `sessions` directory that would not be read
+    /// and an address no Profile can be named after both fell through a pattern
+    /// that did not match — no branch, no warning. `Invalid` had no coverage at
+    /// all.
+    ///
+    /// A refusal is a round that decided something and a machine that carries
+    /// on; the other two are a machine nobody has looked at, and they keep the
+    /// exit code the failure earned rather than being folded into "nothing to do
+    /// now".
+    #[test]
+    fn every_way_the_liveness_ask_fails_is_a_refused_round_or_a_raise() {
+        let refused = refused_or_raised(NotIdle::Live(
+            "A client is running against someone@example.com's Profile (pid 4242).".to_string(),
+        ))
+        .expect("a client that will exit is a round that decided, not a failure");
+        assert!(
+            matches!(&refused, Outcome::Refused { why } if why.contains("pid 4242")),
+            "{refused:?}",
+        );
+        assert_eq!(refused.exit_code(), EXIT_NOTHING_TO_DO);
+
+        let unreadable = refused_or_raised(NotIdle::SessionsUnreadable(PerchError::ProbeRefused {
+            assumption: "session marker".to_string(),
+            detail: "sessions could not be read".to_string(),
+            version: "1.2.3".to_string(),
+        }))
+        .expect_err("a directory nobody can read does not clear itself");
+        assert_eq!(unreadable.exit_code(), crate::error::EXIT_PROBE_REFUSED);
+
+        let unnameable = refused_or_raised(NotIdle::Unnameable(PerchError::Invalid(
+            "`@` has no character a Profile directory can be named after.".to_string(),
+        )))
+        .expect_err("an address no Profile can be named after is not a wait");
+        assert_eq!(unnameable.exit_code(), crate::error::EXIT_INVALID);
     }
 
     /// Every line answers the same four questions, and a cooling round is a
