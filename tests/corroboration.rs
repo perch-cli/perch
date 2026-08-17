@@ -19,7 +19,8 @@
 //! write goes into a directory of their own in `temp_dir`. Nothing here is the
 //! developer's to consent to (ADR 0050).
 
-use perch::host::{Host, RealHost};
+use perch::host::RealHost;
+use perch::host::prelude::*;
 use perch::probe;
 
 /// The primitive the corroboration stands on: the operating system answers

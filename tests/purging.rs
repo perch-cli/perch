@@ -14,8 +14,9 @@ use std::path::Path;
 use common::*;
 use perch::error::{EXIT_INVALID, EXIT_NOTHING_TO_DO, EXIT_PROFILE_LIVE};
 use perch::export;
+use perch::host::FakeHost;
 use perch::host::fake::Effect;
-use perch::host::{FakeHost, Host};
+use perch::host::prelude::*;
 use perch::registry::{Quarantine, Registry};
 
 const PERCH_HOME: &str = "/Users/someone/.config/perch";

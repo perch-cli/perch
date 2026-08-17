@@ -13,7 +13,8 @@ use perch::commands::group::GroupCommand;
 use perch::error::{
     EXIT_CONFLICT, EXIT_GENERAL, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_NOT_INTERCHANGEABLE,
 };
-use perch::host::{FakeHost, Host};
+use perch::host::FakeHost;
+use perch::host::prelude::*;
 
 fn remove_group(host: &FakeHost, name: &str) -> (perch::Result<()>, String) {
     run_group(

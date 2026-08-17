@@ -975,7 +975,7 @@ enum Unsure {
     Marker(PathBuf),
     /// The sessions directory is there and would not be read. Told apart from
     /// an absent one, which is the ordinary "nothing is running" and the whole
-    /// reason [`Host::list_dir`] reports the two differently.
+    /// reason [`Files::list_dir`] reports the two differently.
     Unlistable { dir: PathBuf, why: HostError },
 }
 

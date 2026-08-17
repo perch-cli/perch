@@ -18,8 +18,9 @@ mod common;
 use common::*;
 use perch::commands::add::AddArgs;
 use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROFILE_LIVE};
+use perch::host::FakeHost;
 use perch::host::fake::{Effect, THIS_PROCESS};
-use perch::host::{FakeHost, Host};
+use perch::host::prelude::*;
 use perch::registry::{Active, Quarantine};
 
 /// What a repairing login produces for the second Account: the same person,

@@ -15,8 +15,9 @@ use perch::error::{
     EXIT_NO_CANDIDATE, EXIT_NOT_FOUND, EXIT_NOT_INTERCHANGEABLE, EXIT_NOTHING_TO_DO,
     EXIT_PROFILE_LIVE,
 };
+use perch::host::FakeHost;
 use perch::host::fake::Effect;
-use perch::host::{FakeHost, Host};
+use perch::host::prelude::*;
 
 /// Declares the ungrouped Accounts interchangeable (ADR 0017), the way a user
 /// declares it.

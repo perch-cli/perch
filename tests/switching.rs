@@ -17,8 +17,9 @@ use perch::error::{
     EXIT_CONFLICT, EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NOT_FOUND, EXIT_NOTHING_TO_DO,
     EXIT_PROBE_REFUSED, EXIT_PROFILE_LIVE, EXIT_QUARANTINED,
 };
+use perch::host::FakeHost;
 use perch::host::fake::Effect;
-use perch::host::{FakeHost, Host};
+use perch::host::prelude::*;
 use perch::probe;
 use perch::registry::{Active, Quarantine};
 
