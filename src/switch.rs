@@ -662,6 +662,49 @@ pub struct NotLanded {
     pub is_live: bool,
 }
 
+/// No Landing is in flight, so the registry a reader is about to ask about is
+/// one that tells the truth about who is active (ADR 0048).
+///
+/// **The witness, defined once here and referred to everywhere else** (ADR
+/// 0055). A witness is a value that exists only as proof that an ask was made:
+/// nothing to substitute, and nothing in it that the ask did not establish. This
+/// one and [`Idle`] are empty; [`Cooled`](crate::watch::Cooled) borrows the
+/// crossing it is proof about, because it is proof about *that* crossing rather
+/// than about crossings in general.
+///
+/// Each is the negative of a term the glossary already has — this one of a
+/// [`Landing`] — so nothing is promoted. The steps that must come after an ask
+/// take its witness as an argument, so an ordering that was a comment somebody
+/// had to honour becomes an arity they cannot skip.
+///
+/// Two things earn this one, and they mean the same thing: [`resolve_a_landing`]
+/// settles a Landing it found, and [`nothing_in_flight`] finds there was none to
+/// settle. Only the first needs the registry lock, and ADR 0055 is where a third
+/// would have to be argued for.
+pub struct Settled(());
+
+/// The same witness, for a reader that has a Landing to *check* rather than one
+/// to settle (ADR 0055).
+///
+/// A `perch watcher run` says what it is about to watch before it starts
+/// watching, off a registry it has not taken the lock on — and a Landing in
+/// flight is exactly the state where it has nothing to say yet, because
+/// [`Active::whose`] answers with the Account being *left* rather than with an
+/// Account anything has established. The opening line used to name that Account
+/// and claim it was being watched. It now says nothing until the first round has
+/// settled the Landing, which is the witness doing its job rather than a way
+/// round it.
+///
+/// It cannot weaken what [`Settled`] means: `None` is the whole of what it can
+/// answer about a Landing, and a caller that needs one settled still has to
+/// settle it.
+pub fn nothing_in_flight(registry: &Registry) -> Option<Settled> {
+    match registry.active() {
+        Active::Landing { .. } => None,
+        Active::Nobody | Active::Settled(_) => Some(Settled(())),
+    }
+}
+
 /// Settles a registry that holds a Landing, so that what follows runs against a
 /// registry that tells the truth.
 ///
@@ -685,9 +728,9 @@ pub fn resolve_a_landing(
     host: &dyn Host,
     perch: &mut lock::Held<'_>,
     registry: &mut Registry,
-) -> Result<()> {
+) -> Result<Settled> {
     let Active::Landing { leaving, arriving } = registry.active().clone() else {
-        return Ok(());
+        return Ok(Settled(()));
     };
 
     // A store that will not answer says nothing about what it holds, and what
@@ -719,7 +762,8 @@ pub fn resolve_a_landing(
     })?;
 
     registry.settle(settled_on);
-    registry::save(host, perch, registry)
+    registry::save(host, perch, registry)?;
+    Ok(Settled(()))
 }
 
 /// Which Account the live Credential belongs to, or `None` where nothing on the
@@ -1243,6 +1287,49 @@ fn identity_block_for(host: &dyn Host, incoming: &Account) -> Result<String> {
     Ok(held.unwrap_or_else(|| incoming.identity.oauth_account_block()))
 }
 
+/// The Profile that was asked about is not a Live Profile: nothing is running
+/// against the Credential a write would go under (ADR 0005).
+///
+/// A witness on the terms [`Settled`] sets out (ADR 0055) — the negative of a
+/// **Live Profile**, constructible only by [`refuse_if_live`], and taken as an
+/// argument by whatever must not happen before the ask.
+pub struct Idle(());
+
+/// Every way the liveness ask can fail, by name (ADR 0055).
+///
+/// Named one at a time rather than collapsed into a [`PerchError`] because two
+/// of the three are not refusals at all, and a caller deciding what to do next
+/// has to tell them apart. Asked as an `if let` over the one refusal, the other
+/// two went unanswered: a pattern that does not match drops the `Err` on the
+/// floor, with no branch and no warning.
+///
+/// No catch-all arm is reachable, so a fourth way to fail breaks the build of
+/// everything that answers this.
+pub enum NotIdle {
+    /// A client is running against the Profile, and this is the sentence saying
+    /// which. The one that resolves itself: the client exits, and the Credential
+    /// stops being its.
+    Live(String),
+    /// The `sessions` directory is there and would not be read — the root-owned
+    /// one a `sudo claude` leaves. Nothing about the Profile was established,
+    /// which is not the same as nothing running against it.
+    SessionsUnreadable(PerchError),
+    /// The Account is recorded under an address no Profile directory can be
+    /// named after, so there is nowhere to ask about.
+    Unnameable(PerchError),
+}
+
+/// For the callers that have nothing to decide off which way it failed, and only
+/// want to hand it on — the shape `?` gives them for free.
+impl From<NotIdle> for PerchError {
+    fn from(not_idle: NotIdle) -> PerchError {
+        match not_idle {
+            NotIdle::Live(why) => PerchError::ProfileLive(why),
+            NotIdle::SessionsUnreadable(error) | NotIdle::Unnameable(error) => error,
+        }
+    }
+}
+
 /// Refuses to touch a Profile something else is holding (ADR 0005).
 ///
 /// Public because two callers ask it *before* they spend something rather than
@@ -1251,10 +1338,15 @@ fn identity_block_for(host: &dyn Host, incoming: &Account) -> Result<String> {
 /// watcher run` asks before it reads every candidate's Utilization, because a
 /// Switch that is going to be refused is a Switch whose candidates never needed
 /// ranking.
-pub fn refuse_if_live(host: &dyn Host, account: &Account, installed: &Installed) -> Result<()> {
+pub fn refuse_if_live(
+    host: &dyn Host,
+    account: &Account,
+    installed: &Installed,
+) -> std::result::Result<Idle, NotIdle> {
+    let profile_dir = account.profile_dir(host).map_err(NotIdle::Unnameable)?;
     refuse_if_live_in(
         host,
-        &account.profile_dir(host)?,
+        &profile_dir,
         &format!("{}'s Profile", account.email()),
         installed,
     )
@@ -1268,14 +1360,15 @@ fn refuse_if_live_in(
     config_dir: &Path,
     whose: &str,
     installed: &Installed,
-) -> Result<()> {
-    let running = probe::live_clients(host, config_dir, installed)?;
+) -> std::result::Result<Idle, NotIdle> {
+    let running =
+        probe::live_clients(host, config_dir, installed).map_err(NotIdle::SessionsUnreadable)?;
     if running.is_empty() {
-        return Ok(());
+        return Ok(Idle(()));
     }
 
     let pids: Vec<String> = running.iter().map(u32::to_string).collect();
-    Err(PerchError::ProfileLive(format!(
+    Err(NotIdle::Live(format!(
         "A client is running against {whose} (pid {}).\n\
          Nothing was changed. That Credential belongs to it until it exits — \
          quit it, or switch to a different Account.",
@@ -1622,6 +1715,51 @@ mod tests {
             registry.checked("work"),
             None,
             "a Switch that changed nothing does not pace the next Check"
+        );
+    }
+
+    /// The one way the liveness ask fails before it has anywhere to ask about,
+    /// and the one that had no coverage at all (ADR 0055).
+    ///
+    /// An Account recorded under an address no Profile directory can be named
+    /// after never reaches a `sessions` directory to read, so it is neither Idle
+    /// nor a refusal — and told apart by name, it is the caller's to raise
+    /// rather than to answer. It was reached through an `if let` over
+    /// `ProfileLive` before, which is a pattern that does not match: no branch,
+    /// no warning, and a round that carried on to spend a Renewal on every
+    /// candidate.
+    #[test]
+    fn an_address_no_profile_can_be_named_after_is_unnameable_rather_than_idle() {
+        let host = FakeHost::new();
+        let nameless = Account {
+            identity: Identity {
+                // Nothing a directory can be named after survives the slug.
+                email: "@".to_string(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            disabled: false,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        };
+
+        let not_idle = refuse_if_live(&host, &nameless, &Installed::unknown("2.1.221"))
+            .err()
+            .expect("there is nowhere to ask about");
+
+        assert!(
+            matches!(not_idle, NotIdle::Unnameable(_)),
+            "not a Live Profile and not a refusal: nothing about that Profile \
+             was ever established"
+        );
+        assert_eq!(
+            PerchError::from(not_idle).exit_code(),
+            crate::error::EXIT_INVALID,
+            "and it keeps the code the failure earned, rather than being folded \
+             into the refusal's",
         );
     }
 

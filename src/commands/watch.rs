@@ -78,9 +78,9 @@ use crate::lock;
 use crate::observe::{self, Attempt};
 use crate::probe;
 use crate::registry::{self, Account, Registry, Scope, UNGROUPED};
-use crate::switch::{self, NotSwitched};
+use crate::switch::{self, Idle, NotSwitched, Settled};
 use crate::watch::{
-    self, Backoff, Considered, Fullest, Holding, Outcome, Policy, Recently, Round, Speak,
+    self, Backoff, Considered, Cooled, Fullest, Holding, Outcome, Policy, Recently, Round, Speak,
 };
 
 /// One round, for whatever scheduled it (ADR 0013).
@@ -226,12 +226,7 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
                 // So it is held like any other round that could not read: counted
                 // against the back-off, said out loud with when it will try again,
                 // and gone round again (ADR 0013, ADR 0018).
-                Err(PerchError::Busy(why)) => {
-                    backoff.failed();
-                    let waiting_for = backoff.waiting_for();
-                    let line = watch::held_line(&why, Some(waiting_for), host.now());
-                    (waiting_for, Spoken::held(&why, Some(waiting_for), line))
-                }
+                Err(PerchError::Busy(why)) => held_before_a_round(&mut backoff, &why, host.now()),
                 Err(other) => return Err(other),
             };
 
@@ -291,15 +286,8 @@ fn take_the_watch<'a>(
         match crate::lock::take_all(host, vec![registry::watcher_lock_spec(host)?]) {
             Ok(held) => return Ok(Some(held)),
             Err(PerchError::Busy(why)) => {
-                backoff.failed();
-                let waiting_for = backoff.waiting_for();
-                let line = watch::held_line(&why, Some(waiting_for), host.now());
-                say_it(
-                    out,
-                    holding,
-                    Spoken::held(&why, Some(waiting_for), line),
-                    host.now(),
-                )?;
+                let (waiting_for, spoken) = held_before_a_round(backoff, &why, host.now());
+                say_it(out, holding, spoken, host.now())?;
                 if host.wait(waiting_for) == Waited::Interrupted {
                     return Ok(None);
                 }
@@ -307,6 +295,27 @@ fn take_the_watch<'a>(
             Err(other) => return Err(other),
         }
     }
+}
+
+/// A hold that happened before there was a [`Round`] to hold: the Back-off is
+/// charged for it, and this is the wait that follows and the line that says so.
+///
+/// The two places a Watcher meets one — another `perch` holding the registry
+/// mid-round, and another Watcher holding the watch at startup — spelled this
+/// out identically, and each spelling was its own chance for the wait on the
+/// line to stop being the wait that is taken.
+///
+/// **The Back-off is charged in exactly one place**, and it is not this one: it
+/// is [`Backoff::could_not_read`], which counts the failure and answers with
+/// what it cost in the same call, so a hold cannot be reported without being
+/// paid for. What a hold *says* has two shapes, and only two, because a round
+/// that never learned which Account it was watching has no Account to name and
+/// no threshold to quote — this is that shape, and [`one_round`]'s `held` is the
+/// other.
+fn held_before_a_round(backoff: &mut Backoff, why: &str, now: DateTime<Utc>) -> (u64, Spoken) {
+    let waiting_for = backoff.could_not_read();
+    let line = watch::held_line(why, Some(waiting_for), now);
+    (waiting_for, Spoken::held(why, Some(waiting_for), line))
 }
 
 /// A round's line, and whether it was a hold — which is the only thing the
@@ -378,7 +387,13 @@ fn say_it(
 /// is the line that will repeat, and the one that says when it will ask again.
 fn opening(host: &dyn Host) -> Result<String> {
     let registry = adopt::ensure_adopted(host)?;
-    let Ok(watching) = permitted(&registry) else {
+    // The one reader that asks whether a Landing is in flight rather than
+    // settling one: this holds no lock, and a Switch left in flight is exactly
+    // the state where there is nothing to say yet. The first round settles it
+    // and says why, which is the line that will repeat.
+    let watching = switch::nothing_in_flight(&registry)
+        .and_then(|settled| permitted(&registry, &settled).ok());
+    let Some(watching) = watching else {
         return Ok(
             "Started. Nothing is being decided yet — the next line says what is \
              holding it, and the watcher takes over the moment that changes. \
@@ -423,9 +438,12 @@ impl Watcher {
     /// say. A loop backs off and prints the wait it lands on; a check is
     /// leaving, and promising an interval it has no part in would put the one
     /// untrue thing on the line.
-    fn asking_again(self, backoff: &Backoff) -> Option<u64> {
+    ///
+    /// Given the wait rather than the [`Backoff`] it came off, so the only way
+    /// to have one is to have just been charged for it.
+    fn asking_again(self, waiting_for: u64) -> Option<u64> {
         match self {
-            Watcher::Loop => Some(backoff.waiting_for()),
+            Watcher::Loop => Some(waiting_for),
             Watcher::Check => None,
         }
     }
@@ -496,7 +514,15 @@ struct Watching {
 /// Account, an ungrouped one nobody has declared interchangeable, a Scope that
 /// has not said the watcher may act — which is what lets the caller hold on all
 /// of them without sorting them from the failures that mean something is broken.
-fn permitted(registry: &Registry) -> Result<Watching> {
+///
+/// The [`Settled`] is why it cannot be asked too early (ADR 0055). A Switch path
+/// resolves a Landing before it reads anything off the registry (ADR 0048), because the
+/// Account this round watches is the Account a Capture would file the live
+/// Credential under — and during a Landing the registry names the Account being
+/// *left* rather than one anything established. That ordering was a comment
+/// above the call; it is an argument now, and the witness is the only thing that
+/// makes it one.
+fn permitted(registry: &Registry, _settled: &Settled) -> Result<Watching> {
     let account = registry.active_account().cloned().ok_or_else(|| {
         PerchError::NotFound(
             "Perch holds no active Account, so there is nothing to watch. \
@@ -580,9 +606,10 @@ fn one_round(
     // and comes back, because a state one `perch relogin` clears must not
     // become a dead Watcher somebody finds hours later, and a Check exits with
     // the code the refusal earned, because a scheduler has to be told.
-    if let Err(unsettled) = switch::resolve_a_landing(host, &mut perch, &mut registry) {
-        return Ok(Turn::NotArranged(unsettled));
-    }
+    let settled = match switch::resolve_a_landing(host, &mut perch, &mut registry) {
+        Ok(settled) => settled,
+        Err(unsettled) => return Ok(Turn::NotArranged(unsettled)),
+    };
 
     // Handed back rather than raised, so the two callers can answer it
     // differently without this one having to know which is asking (ADR 0040).
@@ -594,7 +621,7 @@ fn one_round(
     // still exits `18` for an ungrouped Account and `14` for a Scope that has
     // not said the watcher may act — the codes ADR 0013 promised a scheduler,
     // which nothing here repeals.
-    let watching = match permitted(&registry) {
+    let watching = match permitted(&registry, &settled) {
         Ok(watching) => watching,
         Err(not_arranged) => return Ok(Turn::NotArranged(not_arranged)),
     };
@@ -619,19 +646,20 @@ fn one_round(
 
     // A hold is not only a decision not to act: it is also the loop deciding to
     // ask less often, because the endpoint it is asking has a budget and is
-    // already refusing. Both live here, in the one place a hold is made, so a
-    // failure cannot be reported without being counted. The wait it lands on
-    // goes on the line, so a person reading the log knows when the watcher
-    // comes back rather than wondering whether it has given up.
+    // already refusing. Both live here, in the one place a round with an Account
+    // to name makes a hold, so a failure cannot be reported without being
+    // counted — and the charge and the wait it costs are one call
+    // ([`Backoff::could_not_read`]), so the wait on the line is the wait that
+    // was just earned.
     let mut held = |why: String| {
-        backoff.failed();
+        let waiting_for = backoff.could_not_read();
         Ok(Turn::Decided(Round {
             email: email.clone(),
             fullest: None,
             threshold: watching.policy.threshold,
             outcome: Outcome::Held {
                 why,
-                retrying_in: watcher.asking_again(backoff),
+                retrying_in: watcher.asking_again(waiting_for),
             },
         }))
     };
@@ -661,21 +689,36 @@ fn one_round(
     // go has read perfectly well.
     backoff.read();
 
-    let outcome = if !fullest.at_or_over(watching.policy.threshold) {
-        Outcome::Waiting
-    } else if let Some(why) = recently.resting(host.now()) {
-        // Before the candidates are read, so a round that may not act spends
-        // nothing finding out where it would have gone.
-        Outcome::Cooling { why }
-    } else {
-        act(
-            host,
-            &mut perch,
-            &mut registry,
-            &watching,
-            watcher,
-            recently,
-        )?
+    // The decision line, as two asks that hand on what they earned. Neither is a
+    // step the round can take out of order any more: [`act`] is reachable only
+    // through a [`Cooled`], and a `Cooled` only through a [`Crossed`].
+    //
+    // The figure comes back out of each of them, which is the one piece of
+    // ceremony the witnesses cost: the line quotes what was read whatever was
+    // decided about it.
+    let (fullest, outcome) = match fullest.crossed(watching.policy.threshold) {
+        Err(under) => (under, Outcome::Waiting),
+        Ok(crossed) => match crossed.cooled(recently, host.now()) {
+            // Before the candidates are read, so a round that may not act spends
+            // nothing finding out where it would have gone.
+            Err(cooling) => (
+                crossed.fullest().clone(),
+                Outcome::Cooling { why: cooling.why },
+            ),
+            Ok(cooled) => {
+                let fullest = cooled.fullest().clone();
+                let outcome = act(
+                    host,
+                    &mut perch,
+                    &mut registry,
+                    &watching,
+                    watcher,
+                    recently,
+                    &cooled,
+                )?;
+                (fullest, outcome)
+            }
+        },
     };
     Ok(Turn::Decided(Round {
         email,
@@ -754,6 +797,10 @@ fn refused_the_reading(attempts: &[Attempt]) -> Option<String> {
 /// round instead would cost is [`crate::watch::REFRESH_INTERVAL_MILLIS`]'s
 /// arithmetic, and it is why this is a burst at a crossing rather than a
 /// second loop.
+///
+/// Reachable only through a [`Cooled`], which says both halves of "full enough
+/// to move off" (ADR 0055): the figure crossed the threshold, and the Cooldown
+/// between two Switches is spent. Neither is a line above the call any more.
 fn act(
     host: &dyn Host,
     perch: &mut crate::lock::Held<'_>,
@@ -761,6 +808,7 @@ fn act(
     watching: &Watching,
     watcher: Watcher,
     recently: &mut Recently,
+    cooled: &Cooled<'_>,
 ) -> Result<Outcome> {
     let scope = watching.scope.clone();
     let outgoing = watching.account.clone();
@@ -781,37 +829,21 @@ fn act(
     // rules this out in as many words: candidates are ranked at the moment a
     // decision is taken, not kept warm.
     //
-    // Reported as the Switch would have reported it, because it is the same
-    // refusal about the same Profile — the Switch simply no longer gets to be
-    // the one to notice.
-    // Every way this can fail is answered, because an `if let` over one variant
-    // drops the rest on the floor. `refuse_if_live` refuses with `ProfileLive`,
-    // but it also fails with `ProbeRefused` for a `sessions` directory that is
-    // there and will not be read — the root-owned one a `sudo claude` leaves —
-    // and with `Invalid` for an address no Profile can be named after. Discarded,
-    // those became a round that carried on to spend a Renewal on every candidate
-    // and then met the same failure in the Switch below, which is the one thing
-    // the ask above exists to prevent: the allowance is gone by the time the
-    // round finds out it was never going to move.
+    // Every way this can fail is answered by name, which is
+    // `watch::refused_or_raised`'s to say — and the [`Idle`] it hands back is
+    // what the candidate Refresh below takes, so the burst cannot be reached
+    // without the ask.
     let installed = probe::Installed::probed(host)?;
-    match switch::refuse_if_live(host, &outgoing, &installed) {
-        Ok(()) => {}
-        Err(refused @ PerchError::ProfileLive(_)) => {
-            return Ok(Outcome::Refused {
-                why: refused.to_string(),
-            });
-        }
-        // The same ending the Switch below gives them, which is where they were
-        // being met before: the loop stops rather than deciding what to do next
-        // about a machine nobody has looked at.
-        Err(other) => return Err(other),
-    }
+    let idle = match switch::refuse_if_live(host, &outgoing, &installed) {
+        Ok(idle) => idle,
+        Err(not_idle) => return watch::refused_or_raised(not_idle),
+    };
 
     let read = observe::refresh(
         host,
         perch,
         registry,
-        &addresses_of(&considered(registry, watching)),
+        &addresses_of(&considered(registry, watching, cooled, &idle)),
     );
     // What could not be read, carried into the sentence that says where the
     // watcher went: an Account ranked on a figure from an hour ago is the one
@@ -824,7 +856,7 @@ fn act(
     let set_aside = watch::set_aside(
         &watching.policy,
         &watching.scope,
-        &considered(registry, watching),
+        &considered(registry, watching, cooled, &idle),
     );
 
     let choice = match cycle::choose(
@@ -934,13 +966,30 @@ fn act(
 /// two lists of "the Accounts that could be landed on" would have to be kept in
 /// step, and an Account in one and not the other is one the watcher never reads
 /// and lands on anyway.
-fn considered(registry: &Registry, watching: &Watching) -> Vec<Considered> {
+///
+/// The one funnel that produces candidate addresses, and it takes both witnesses
+/// for that reason (ADR 0055): a candidate Refresh inside a Cooldown, or before
+/// the liveness ask, is what the two comments above the calls used to rule out
+/// and is now what does not compile. Neither is read — a witness has nothing to
+/// read.
+fn considered(
+    registry: &Registry,
+    watching: &Watching,
+    _cooled: &Cooled<'_>,
+    _idle: &Idle,
+) -> Vec<Considered> {
     watching
         .scope
         .accounts(registry)
         .iter()
         .filter(|account| {
-            account.email() != watching.account.email() && cycle::is_a_candidate(account)
+            // Through the registry's own answer rather than `!=`, which was
+            // correct only because `permitted` clones the Account the registry
+            // holds and `load` refuses two Accounts that are one Account
+            // case-insensitively. Both are true two modules away, and a claim
+            // this file makes about its own list should be checkable in it.
+            !registry::same_name(account.email(), watching.account.email())
+                && cycle::is_a_candidate(account)
         })
         .map(|account| Considered {
             email: account.email().to_string(),
