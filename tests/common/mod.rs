@@ -584,23 +584,26 @@ pub fn run_alias(host: &FakeHost, command: AliasCommand) -> (perch::Result<()>, 
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
-/// `perch alias <name> <target>`.
+/// `perch alias <target> <name>`, taken the other way round: flipping the
+/// parameters to match would rewrite every call site in a dozen test files this
+/// change has no other business in, and the command line is what ADR 0054's
+/// rule is about.
 pub fn set_alias(host: &FakeHost, name: &str, target: &str) -> (perch::Result<()>, String) {
     run_alias(
         host,
         AliasCommand::Set {
-            name: name.to_string(),
             target: target.to_string(),
+            name: name.to_string(),
         },
     )
 }
 
-/// `perch alias <name> --unset`.
-pub fn unset_alias(host: &FakeHost, name: &str) -> (perch::Result<()>, String) {
+/// `perch alias <target> --unset`.
+pub fn unset_alias(host: &FakeHost, target: &str) -> (perch::Result<()>, String) {
     run_alias(
         host,
         AliasCommand::Unset {
-            name: name.to_string(),
+            target: target.to_string(),
         },
     )
 }

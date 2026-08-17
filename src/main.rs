@@ -57,14 +57,14 @@ enum Command {
     /// Aliases and Group names share one namespace, so a name is refused if
     /// the other half already has it and a Target is never ambiguous.
     Alias {
-        /// The name to give, or to free with `--unset`.
-        name: String,
-
         /// The Account to name: its current Alias, or its email address.
-        #[arg(required_unless_present = "unset", conflicts_with = "unset")]
-        target: Option<String>,
+        target: String,
 
-        /// Free the name instead of giving it.
+        /// The name to give, unless `--unset` is freeing the one it has.
+        #[arg(required_unless_present = "unset", conflicts_with = "unset")]
+        name: Option<String>,
+
+        /// Free the name the Account answers to, instead of giving it one.
         #[arg(long)]
         unset: bool,
     },
@@ -374,18 +374,18 @@ fn main() {
             },
             &mut out,
         )),
-        // `--unset` needs no reading of its own: clap requires a Target unless
-        // it was passed, and refuses both together, so the Target's absence is
-        // exactly the flag.
+        // `--unset` needs no reading of its own: clap requires a name unless
+        // `--unset` was passed, and refuses both together, so the name's
+        // absence is exactly the flag.
         Command::Alias {
-            name,
             target,
+            name,
             unset: _,
         } => ok(alias::run(
             &host,
-            match target {
-                Some(target) => AliasCommand::Set { name, target },
-                None => AliasCommand::Unset { name },
+            match name {
+                Some(name) => AliasCommand::Set { target, name },
+                None => AliasCommand::Unset { target },
             },
             &mut out,
         )),

@@ -7,6 +7,11 @@
 //!
 //! An Account answers to one Alias at a time: naming an Account that already
 //! has a name replaces it, and says which name it gave up.
+//!
+//! Both forms are told the Account first and the name second, because the thing
+//! a command acts on is its first argument (ADR 0054). So `--unset` frees
+//! whatever Alias the Account it names answers to, which is the same act
+//! reached by the Alias itself or by the email address behind it.
 
 use std::io::Write;
 
@@ -20,17 +25,17 @@ use crate::target::{self, AccountTarget};
 /// What was asked of `perch alias`.
 #[derive(Debug, Clone)]
 pub enum AliasCommand {
-    /// `perch alias <name> <target>` — name an Account.
-    Set { name: String, target: String },
-    /// `perch alias <name> --unset` — free a name.
-    Unset { name: String },
+    /// `perch alias <target> <name>` — name an Account.
+    Set { target: String, name: String },
+    /// `perch alias <target> --unset` — free the name it answers to.
+    Unset { target: String },
 }
 
 pub fn run(host: &dyn Host, command: AliasCommand, out: &mut dyn Write) -> Result<()> {
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
     match command {
-        AliasCommand::Set { name, target } => {
+        AliasCommand::Set { target, name } => {
             registry::validate_name(NameKind::Alias, &name)?;
             let account = target::resolve_account(&registry, &target)?;
             let named = set(&mut registry, &name, &account)?;
@@ -38,9 +43,12 @@ pub fn run(host: &dyn Host, command: AliasCommand, out: &mut dyn Write) -> Resul
             say(out, &account.matched)?;
             say(out, &named)
         }
-        AliasCommand::Unset { name } => {
-            let (held, email) = unset(&mut registry, &name)?;
+        AliasCommand::Unset { target } => {
+            let account = target::resolve_account(&registry, &target)?;
+            let held = unset(&mut registry, &account)?;
             registry::save(host, &mut perch, &registry)?;
+            say(out, &account.matched)?;
+            let email = &account.email;
             say(out, &format!("`{held}` no longer names {email}."))
         }
     }
@@ -60,17 +68,19 @@ fn set(registry: &mut Registry, name: &str, account: &AccountTarget) -> Result<S
     })
 }
 
-/// Frees a name. A name that reaches nothing is refused the same way any
-/// unresolvable Target is, so a typo reads as a typo.
-fn unset(registry: &mut Registry, name: &str) -> Result<(String, String)> {
-    match registry.unset_alias(name) {
-        Some(freed) => Ok(freed),
-        None => Err(match target::resolve(registry, name) {
-            Ok(matched) => PerchError::NotFound(format!(
-                "There is no Alias called `{name}` — {}",
-                matched.matched()
-            )),
-            Err(unresolvable) => unresolvable,
-        }),
+/// Frees whatever Alias an Account answers to, and says which name that was —
+/// the user need not have typed it. A typo reads as a typo because the Target
+/// was resolved before this was reached, so the only thing left to refuse is an
+/// Account with no name to give up.
+fn unset(registry: &mut Registry, account: &AccountTarget) -> Result<String> {
+    match registry.alias_of(&account.email).map(str::to_string) {
+        Some(held) => {
+            registry.unset_alias(&held);
+            Ok(held)
+        }
+        None => Err(PerchError::NotFound(format!(
+            "{} answers to no Alias, so there is none to free.",
+            account.email
+        ))),
     }
 }

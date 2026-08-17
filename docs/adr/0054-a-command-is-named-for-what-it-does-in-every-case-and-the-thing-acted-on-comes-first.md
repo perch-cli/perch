@@ -1,10 +1,5 @@
 # A command is named for what it does in every case, and the thing acted on comes first
 
-> **Decided, not yet carried out.** The argument-order flip and the guide edits
-> below are tracked separately. Like ADR 0047 through ADR 0053, this is the
-> artifact of a planning effort rather than of a change, so it lands ahead of the
-> work it describes.
-
 Two singleton Account verbs were the last of the surface left unexamined. ADR
 0047 settled that both belong at the top level with the Account elided, so
 placement was never in question — only whether either earns a *command*, and

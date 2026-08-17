@@ -54,7 +54,7 @@ subject to be wrong about, and a write does. Every line is the whole of the
 back are the same vocabulary and a script needs no parser.
 
 There is no `perch config unset`. With nothing above a Scope there is nothing to
-clear — a value is simply set to what it should be. (`perch alias <name>
+clear — a value is simply set to what it should be. (`perch alias <target>
 --unset` is untouched: freeing a name is a different act.)
 
 ## Scopes

@@ -329,7 +329,7 @@ fn an_alias_command_on_a_registry_from_before_aliases_finds_nothing() {
     let (result, _) = run_alias(
         &host,
         AliasCommand::Unset {
-            name: "work".into(),
+            target: "work".into(),
         },
     );
 
@@ -442,26 +442,68 @@ fn a_name_is_one_name_however_it_is_capitalised_in_any_language() {
     );
 }
 
-/// Unsetting a name that reaches an Account but is not an Alias. It is not an
-/// unresolvable Target — `perch alias --unset` on an email address finds
-/// something — so the refusal has to say what it found rather than "no such
-/// name", which would read as a typo in an address that is spelled correctly.
+/// The whole of what makes the flipped argument order a superset rather than a
+/// swap (ADR 0054): `--unset` takes a Target, so the person who knows only the
+/// email address can free a name they would otherwise have had to know first.
 #[test]
-fn unsetting_a_name_that_is_an_account_rather_than_an_alias_says_what_it_reached() {
-    let host = machine_with_two_accounts();
+fn unsetting_by_email_frees_the_alias_the_account_answers_to() {
+    let host = machine_with_a_named_second_account();
+
+    let (result, printed) = unset_alias(&host, SECOND_EMAIL);
+
+    result.expect("an email address is a Target like any other");
+    assert!(
+        printed.contains("overflow"),
+        "the name that was freed is said, since the user never typed it:\n{printed}"
+    );
+    assert_eq!(registry_of(&host).alias_of(SECOND_EMAIL), None);
+}
+
+/// Both arms take a Target, so both get the Group refusal the shared
+/// resolution path gives — the same answer `perch alias <group> <name>` has
+/// always had, where freeing a name used to be told there was no Alias by that
+/// name. An Alias is one Account's, and saying which kind did match is what
+/// tells somebody they named the wrong thing rather than misspelled it.
+#[test]
+fn unsetting_a_group_is_refused_as_a_group_the_way_naming_one_is() {
+    let host = machine_with_a_named_second_account();
+    declare_group(&host, "work");
+
+    let (result, _) = unset_alias(&host, "work");
+
+    let refusal = result.expect_err("an Alias names one Account, and `work` is a Group");
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    assert!(
+        refusal.to_string().contains("Group"),
+        "the kind that did match should be said: {refusal}"
+    );
+    assert_eq!(
+        registry_of(&host).alias_of(SECOND_EMAIL),
+        Some("overflow"),
+        "and nothing was freed"
+    );
+}
+
+/// The one refusal the shared resolution path does not already cover. The
+/// Target is perfectly good and the Account is held — there is simply no name
+/// to give up, which is a different thing from a typo and reads as one.
+#[test]
+fn unsetting_an_account_that_answers_to_no_alias_is_refused() {
+    let host = machine_with_a_named_second_account();
 
     let (result, _) = unset_alias(&host, EMAIL);
 
-    let refusal = result.expect_err("an email address is not an Alias");
+    let refusal = result.expect_err("this Account was never named");
     assert_eq!(refusal.exit_code(), EXIT_NOT_FOUND);
     let said = refusal.to_string();
     assert!(
-        said.contains(&format!("There is no Alias called `{EMAIL}`")),
-        "{said}"
+        said.contains(EMAIL) && said.contains("no Alias"),
+        "it says which Account has nothing to free: {said}"
     );
-    assert!(
-        said.contains(EMAIL),
-        "it says what the name did reach: {said}"
+    assert_eq!(
+        registry_of(&host).alias_of(SECOND_EMAIL),
+        Some("overflow"),
+        "and the Account that does answer to one still does"
     );
 }
 
@@ -470,6 +512,10 @@ fn unsetting_a_name_that_is_an_account_rather_than_an_alias_says_what_it_reached
 /// leave `perch switch <name>` meaning whichever the registry happened to
 /// resolve first — so it is refused, and the refusal names the command that
 /// frees the name rather than leaving somebody to guess at it.
+///
+/// The sentence it prints survived the argument flip untouched: the held name
+/// now sits where the Target goes rather than where the name did, and reaches
+/// the same Account either way, because a Target resolves an Alias first.
 #[test]
 fn a_name_that_already_reaches_another_account_is_refused_and_says_how_to_free_it() {
     let host = machine_with_two_accounts();
