@@ -203,9 +203,24 @@ pub fn renew(host: &dyn Host, refresh_token: &str) -> Result<Fresh, Refused> {
         // which reads as already expired and renews on every command forever —
         // the outcome the overflow guard above exists to prevent. A token that
         // arrives already dead is not a lifetime this reply gave either.
+        //
+        // A number JSON holds as a float is the same lifetime spelled another
+        // way, and `as_i64` answers `None` for every one of them — `3600.0` and
+        // `3.6e3` were indistinguishable here from a reply that gave no
+        // lifetime at all. What that costs is not nothing: a Credential stored
+        // without an `expiresAt` is one `usable_at` takes at its word for ever,
+        // so every later reading of that Account goes the long way round, being
+        // refused by Anthropic before anything renews it.
         expires_at: document
             .get("expires_in")
-            .and_then(Value::as_i64)
+            .and_then(|value| {
+                value.as_i64().or_else(|| {
+                    value
+                        .as_f64()
+                        .filter(|seconds| seconds.is_finite())
+                        .map(|seconds| seconds as i64)
+                })
+            })
             .filter(|seconds| *seconds > 0)
             .and_then(|seconds| seconds.checked_mul(1_000))
             .and_then(|millis| now.timestamp_millis().checked_add(millis)),
@@ -1072,5 +1087,26 @@ mod tests {
             "a token that arrives already dead is not a lifetime this reply gave"
         );
         assert_eq!(renewed("0").expires_at, None);
+
+        // A number JSON holds as a float is the same lifetime spelled another
+        // way, and `as_i64` answers `None` for every one of them. Read as no
+        // lifetime at all, what is stored carries no `expiresAt` — which
+        // `usable_at` takes at its word for ever, so every later reading of that
+        // Account goes the long way round and is refused by Anthropic before
+        // anything renews it.
+        assert_eq!(
+            renewed("3600.0").expires_at,
+            Some(host.now().timestamp_millis() + 3_600_000),
+            "a lifetime spelled as a float is a lifetime the reply gave"
+        );
+        assert_eq!(
+            renewed("3.6e3").expires_at,
+            Some(host.now().timestamp_millis() + 3_600_000)
+        );
+        assert_eq!(
+            renewed("-1.0").expires_at,
+            None,
+            "and the refusals hold whichever way the number is spelled"
+        );
     }
 }
