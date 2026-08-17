@@ -18,8 +18,7 @@
 
 use std::io::Write;
 
-use crate::adopt;
-use crate::commands::say;
+use crate::commands::only_the_registry;
 use crate::error::Result;
 use crate::host::Host;
 use crate::registry::{self, Quarantine, Registry};
@@ -44,14 +43,11 @@ impl EnableCommand {
 }
 
 pub fn run(host: &dyn Host, command: EnableCommand, out: &mut dyn Write) -> Result<()> {
-    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
-
-    let account = target::resolve_account(&registry, command.target())?;
-    let said = set(&mut registry, &account, &command)?;
-    registry::save(host, &mut perch, &registry)?;
-
-    say(out, &account.matched)?;
-    say(out, &said)
+    only_the_registry(host, out, |registry| {
+        let account = target::resolve_account(registry, command.target())?;
+        let said = set(registry, &account, &command)?;
+        Ok(vec![account.matched, said])
+    })
 }
 
 /// Moves one Account in or out of the Cycling pool, touching nothing else about

@@ -19,7 +19,7 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::{IN_NO_GROUP, cycling_among_ungrouped, say, write_failed};
+use crate::commands::{IN_NO_GROUP, cycling_among_ungrouped, only_the_registry, say};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::registry::{self, NO_GROUP, Registry, Scope};
@@ -73,38 +73,34 @@ pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Resul
         return list(out, &adopt::ensure_adopted(host)?);
     }
 
-    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
-
-    match command {
+    only_the_registry(host, out, |registry| match command {
         GroupCommand::Add { name } => {
             registry.declare_group(&name)?;
-            registry::save(host, &mut perch, &registry)?;
-            say(out, &format!("Declared the Group `{name}`."))?;
-            describe_configuration(out, &registry, &Scope::Group(name.clone()))
+            let mut said = vec![format!("Declared the Group `{name}`.")];
+            said.extend(configuration_lines(registry, &Scope::Group(name)));
+            Ok(said)
         }
         GroupCommand::Remove { name } => {
-            let removed = remove(&mut registry, &name)?;
-            registry::save(host, &mut perch, &registry)?;
-            say(out, &format!("Removed the Group `{removed}`."))
+            let removed = remove(registry, &name)?;
+            Ok(vec![format!("Removed the Group `{removed}`.")])
         }
         GroupCommand::Rename { from, to } => {
-            let renamed = rename(&mut registry, &from, &to)?;
-            registry::save(host, &mut perch, &registry)?;
-            say(out, &renamed)?;
+            let renamed = rename(registry, &from, &to)?;
+            let mut said = vec![renamed];
             // What it carries, because keeping it is the whole of what this
             // command is for: the Settings are the part a rename by hand loses.
-            describe_configuration(out, &registry, &Scope::Group(to))
+            said.extend(configuration_lines(registry, &Scope::Group(to)));
+            Ok(said)
         }
         GroupCommand::Move { target, group } => {
-            let account = target::resolve_account(&registry, &target)?;
-            let moved = move_account(&mut registry, &account, &group)?;
-            registry::save(host, &mut perch, &registry)?;
-            say(out, &account.matched)?;
-            say(out, &moved)
+            let account = target::resolve_account(registry, &target)?;
+            let moved = move_account(registry, &account, &group)?;
+            Ok(vec![account.matched, moved])
         }
-        // Answered above, before the lock.
-        GroupCommand::List => list(out, &registry),
-    }
+        // Answered above, before the lock, because it writes nothing and taking
+        // the write lock to read is the wait this command refuses to make.
+        GroupCommand::List => unreachable!("`perch group list` is answered before the lock"),
+    })
 }
 
 /// Forgets a Group, refusing to orphan the Accounts in it.
@@ -266,8 +262,23 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
 /// all of them: a Scope holds its own full Settings and there is nothing above
 /// it for one to have come from (ADR 0051).
 fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scope) -> Result<()> {
+    for line in configuration_lines(registry, scope) {
+        say(out, &line)?;
+    }
+    Ok(())
+}
+
+/// The same two rows as lines, for the callers that cannot write them
+/// themselves.
+///
+/// `perch group add` and `perch group rename` go through
+/// [`crate::commands::only_the_registry`] (ADR 0057), which hands the change no
+/// writer — so what they have to say comes back as words and is said after the
+/// save. The two readers above still write theirs directly, because they have a
+/// writer and nothing to save.
+fn configuration_lines(registry: &Registry, scope: &Scope) -> Vec<String> {
     let settings = registry.settings(scope);
-    write_line(out, "Strategy", settings.strategy.as_str())?;
+    let strategy = labeled("Strategy", settings.strategy.as_str());
     // The whole policy rather than the threshold alone: a summary that named
     // only when the watcher acts would read as the whole of what it does, and
     // the margin is what decides where it lands (ADR 0046). Two of the three
@@ -303,9 +314,13 @@ fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scop
         ),
         (false, _) => format!("off (would act {acting})"),
     };
-    write_line(out, "Watcher", &watcher)
+    vec![strategy, labeled("Watcher", &watcher)]
 }
 
 fn write_line(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {
-    writeln!(out, "  {label:LABEL_WIDTH$}{value}").map_err(write_failed)
+    say(out, &labeled(label, value))
+}
+
+fn labeled(label: &str, value: &str) -> String {
+    format!("  {label:LABEL_WIDTH$}{value}")
 }
