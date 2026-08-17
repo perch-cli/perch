@@ -35,7 +35,7 @@
 use std::io::Write;
 
 use crate::adopt;
-use crate::commands::{group, say};
+use crate::commands::{group, only_the_registry, say};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::registry::{self, Registry, Scope, Strategy, UNGROUPED};
@@ -79,7 +79,13 @@ pub fn run(host: &dyn Host, command: ConfigCommand, out: &mut dyn Write) -> Resu
     // round, and `perch status --refresh` holds it across every network read.
     // Same rule `perch status` states for itself and `perch list` follows.
     match command {
-        ConfigCommand::Set { words } => written(host, out, |registry| set(registry, &words)),
+        // The half that writes changes the registry and reaches nothing else,
+        // which is the whole of what `only_the_registry` is for (ADR 0057). The
+        // shape was written here first and lived here alone; `enable`, `alias`
+        // and `group` were spelling it out by hand.
+        ConfigCommand::Set { words } => {
+            only_the_registry(host, out, |registry| set(registry, &words))
+        }
         ConfigCommand::Get { words } => {
             let registry = adopt::ensure_adopted(host)?;
             for line in get(&registry, &words)? {
@@ -88,22 +94,6 @@ pub fn run(host: &dyn Host, command: ConfigCommand, out: &mut dyn Write) -> Resu
             Ok(())
         }
     }
-}
-
-/// The half that writes: under Perch's own lock, and saved only where the
-/// change was accepted.
-fn written(
-    host: &dyn Host,
-    out: &mut dyn Write,
-    change: impl FnOnce(&mut Registry) -> Result<Vec<String>>,
-) -> Result<()> {
-    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
-    let said = change(&mut registry)?;
-    registry::save(host, &mut perch, &registry)?;
-    for line in said {
-        say(out, &line)?;
-    }
-    Ok(())
 }
 
 /// Sets one Setting, returning what to tell the user: what it is now, and what

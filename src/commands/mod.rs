@@ -97,6 +97,13 @@ pub fn ask_secret(host: &dyn Host, out: &mut dyn Write, question: &str) -> Resul
 /// Refuses to go on if the registry lock went stale while a question was
 /// waiting for an answer.
 ///
+/// The counterpart to [`only_the_registry`], which is the door for commands
+/// that never wait at all. This is the guard for the ones that must wait while
+/// holding the lock, and ADR 0057 sets out why a third set — `add` and
+/// `relogin`, whose wait is a browser rather than a person — needs neither:
+/// they take the lock after the wait, so there is no hold old enough to have
+/// gone stale.
+///
 /// A question put to a person is the one wait in Perch with no bound on it —
 /// somebody may answer in a second or walk away and answer after lunch — so it
 /// is the one place a hold can go stale under a command that is otherwise
@@ -128,6 +135,54 @@ pub fn still_ours(perch: &mut crate::lock::Held<'_>, did: &str) -> Result<()> {
          date.\n\
          Nothing was {did}. Run this again."
     )))
+}
+
+/// The whole of a command that changes the registry and reaches nothing else:
+/// under Perch's own lock, saved only where the change was accepted, and said
+/// afterwards.
+///
+/// The counterpart to [`still_ours`], and the pair is the whole of ADR 0057.
+/// Perch holds the registry lock in three shapes. A command that waits — for a
+/// browser, or for an answer — either takes the lock *after* the wait, which
+/// `add` and `relogin` can do because they hold nothing worth guarding until
+/// the login comes back, or holds it *across* the wait and guards it with
+/// `still_ours`, which `remove`, `purge`, `import` and `export` must do because
+/// the question they ask is about the registry already in their hands. This is
+/// the third shape: no wait at all, so nothing to guard against, and the lock is
+/// held for exactly the span between reading and writing.
+///
+/// **`change` is handed no [`Host`], and that is the point rather than a
+/// convenience.** It is what makes the shape checkable instead of merely
+/// described: a command that comes through here cannot reach a Credential
+/// Store, cannot write a Profile and cannot touch the Default Profile, because
+/// it is given nothing that could. Widening this to pass a `Host` so that more
+/// call sites fit would leave a function that saves three lines, and three
+/// lines do not pay for one.
+///
+/// So the boundary is real rather than a rule of thumb, and `add` is where it
+/// can be seen. `add.rs` writes the same shape by hand — a closure around
+/// `upsert`, `name_account` and the save — and still does not belong here: the
+/// arm beneath it discards the Profile the login had already made, because one
+/// that nothing records holds a live refresh token nothing will ever look at
+/// again. That is a compensating action over a Credential on disk, it needs the
+/// `Host` this deliberately withholds, and it is the reason the door is this
+/// narrow.
+///
+/// What `change` returns is said after the save rather than before it, because
+/// a line describing a change that then failed to be written is a line that was
+/// not true.
+pub fn only_the_registry(
+    host: &dyn Host,
+    out: &mut dyn Write,
+    change: impl FnOnce(&mut crate::registry::Registry) -> Result<Vec<String>>,
+) -> Result<()> {
+    let (mut perch, mut registry) = crate::adopt::ensure_adopted_exclusively(host)?;
+    let said = change(&mut registry)?;
+    crate::registry::save(host, &mut perch, &registry)?;
+    for line in said {
+        say(out, &line)?;
+    }
+    Ok(())
 }
 
 /// The passphrase somebody typed, or `None` when they typed none.

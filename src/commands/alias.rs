@@ -15,8 +15,7 @@
 
 use std::io::Write;
 
-use crate::adopt;
-use crate::commands::say;
+use crate::commands::only_the_registry;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::registry::{self, NameKind, Registry};
@@ -32,26 +31,23 @@ pub enum AliasCommand {
 }
 
 pub fn run(host: &dyn Host, command: AliasCommand, out: &mut dyn Write) -> Result<()> {
-    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
-
-    match command {
+    only_the_registry(host, out, |registry| match command {
         AliasCommand::Set { target, name } => {
             registry::validate_name(NameKind::Alias, &name)?;
-            let account = target::resolve_account(&registry, &target)?;
-            let named = set(&mut registry, &name, &account)?;
-            registry::save(host, &mut perch, &registry)?;
-            say(out, &account.matched)?;
-            say(out, &named)
+            let account = target::resolve_account(registry, &target)?;
+            let named = set(registry, &name, &account)?;
+            Ok(vec![account.matched, named])
         }
         AliasCommand::Unset { target } => {
-            let account = target::resolve_account(&registry, &target)?;
-            let held = unset(&mut registry, &account)?;
-            registry::save(host, &mut perch, &registry)?;
-            say(out, &account.matched)?;
+            let account = target::resolve_account(registry, &target)?;
+            let held = unset(registry, &account)?;
             let email = &account.email;
-            say(out, &format!("`{held}` no longer names {email}."))
+            Ok(vec![
+                account.matched.clone(),
+                format!("`{held}` no longer names {email}."),
+            ])
         }
-    }
+    })
 }
 
 /// Names an Account, refusing anything that would leave two things answering
