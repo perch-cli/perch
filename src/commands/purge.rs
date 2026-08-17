@@ -88,7 +88,17 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
         // before the note reads it.
         let offered = offer_an_export(host, &mut perch, &registry, &home, &mut exported, out);
         offered.map_err(|error| still_standing(error, exported.as_deref()))?;
-        if !agreed(host, out)? {
+        // The note again, because the question *between* the offer and the
+        // decision is a failure path of its own: `agreed` writes a prompt and
+        // reads an answer, and a terminal that has gone away — a closed pty, a
+        // SIGHUP — fails both. Raised bare, this was the one way to stop
+        // between the bytes landing and every note that mentions them, so
+        // somebody read "could not read your answer" with no word of the
+        // armored file holding a working Credential for every Account that had
+        // just been written at a path nothing named — and the next `perch
+        // holdings purge` aborted on that path, because an Export refuses an
+        // occupied one.
+        if !agreed(host, out).map_err(|error| still_standing(error, exported.as_deref()))? {
             // What the machine is holding now, which is not always nothing. An
             // Export written a question ago is a file full of working
             // Credentials sitting at a path the user is about to stop thinking
