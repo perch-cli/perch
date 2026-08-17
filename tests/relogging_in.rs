@@ -117,7 +117,7 @@ fn a_repaired_account_is_a_cycle_candidate_again() {
 
     cycled.expect("the Account with all the room works again");
     assert_eq!(
-        registry_of(&host).active.whose(),
+        registry_of(&host).active().whose(),
         Some(SECOND_EMAIL),
         "{printed}"
     );
@@ -138,7 +138,7 @@ fn the_account_you_are_working_in_is_untouched_by_repairing_another() {
          does not notice: {printed}"
     );
     assert_eq!(host.file(IDENTITY_PATH).as_deref(), Some(before.as_str()));
-    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
     assert_eq!(
         credential_of(&host, EMAIL).as_deref(),
         Some(CREDENTIAL),
@@ -272,7 +272,7 @@ fn repairing_the_account_you_are_on_makes_its_fresh_credential_the_live_one() {
     assert_eq!(credential_of(&host, EMAIL).as_deref(), Some(REPAIRED));
     assert_eq!(quarantine_of(&host, EMAIL), None);
     assert_eq!(
-        registry_of(&host).active.whose(),
+        registry_of(&host).active().whose(),
         Some(EMAIL),
         "and it is still the active Account: this was a repair, not a Switch"
     );
@@ -327,7 +327,7 @@ fn a_landing_nothing_accounts_for_is_repaired_rather_than_refused() {
              question nothing else could: {printed}"
         );
         assert_eq!(
-            registry_of(&host).active,
+            *registry_of(&host).active(),
             Active::Settled(repairing.to_string()),
             "{what}: and the Landing is gone, because the Account repaired is \
              the one the machine is now on"
@@ -389,7 +389,7 @@ fn a_landing_nothing_accounts_for_does_not_stop_an_unrelated_repair() {
          about the Default Profile"
     );
     assert!(
-        matches!(registry_of(&host).active, Active::Landing { .. }),
+        matches!(*registry_of(&host).active(), Active::Landing { .. }),
         "so the Landing is still there, still unresolved, and still nobody's \
          business but a Switch's"
     );
@@ -539,7 +539,7 @@ fn a_client_started_during_the_login_stops_the_repair_of_the_account_you_are_on(
 /// seconds against a client that is holding them. A `claude` started in that
 /// gap was one nothing had seen by the time its Credential was replaced, which
 /// is the mid-task logout ADR 0005 exists to prevent, arriving at the one write
-/// that does not Capture first. `switch::perform` closes exactly this window by
+/// that does not Capture first. A `perch switch` closes exactly this window by
 /// asking again once the locks are held; the repair did not.
 #[test]
 fn a_client_that_starts_during_the_lock_wait_still_stops_the_repair() {
@@ -737,7 +737,7 @@ fn a_repair_whose_identity_patch_failed_is_live_and_still_recorded_as_active() {
         "the fresh Credential really is the live one"
     );
     assert_eq!(
-        registry_of(&host).active.whose(),
+        registry_of(&host).active().whose(),
         Some(EMAIL),
         "so Perch goes on recording the Account it is really on, and a Switch \
          away from it Captures whatever this session Rotates"
@@ -790,7 +790,7 @@ fn a_repair_that_could_not_be_made_live_leaves_nothing_to_capture_into() {
         "the repair itself stands"
     );
     assert_eq!(
-        registry_of(&host).active,
+        *registry_of(&host).active(),
         Active::Nobody,
         "and Perch is on nobody, so nothing can Capture over it"
     );

@@ -26,7 +26,7 @@ fn two_accounts_in_one_group() -> FakeHost {
 }
 
 fn active(host: &FakeHost) -> Option<String> {
-    registry_of(host).active.whose().map(str::to_string)
+    registry_of(host).active().whose().map(str::to_string)
 }
 
 fn is_disabled(host: &FakeHost, email: &str) -> bool {

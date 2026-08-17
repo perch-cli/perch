@@ -567,7 +567,7 @@ fn render_human(
     // the marker is on the Account Perch was on rather than one it can
     // establish is live, and a listing narrowed to a Group that Switch was
     // leaving may carry no marker at all (ADR 0048).
-    let in_flight = registry.active.a_switch_in_flight();
+    let in_flight = registry.active().a_switch_in_flight();
     if rows.iter().any(|row| row.active) || !broken.is_empty() || in_flight.is_some() {
         say(out, "")?;
     }
@@ -708,13 +708,13 @@ fn render_json(
         // Named apart from `status --json`'s `active`, which is an object: the
         // two documents answer two questions, and a script that reaches for the
         // wrong one should not find a plausible value there.
-        "active_account": registry.active.whose(),
+        "active_account": registry.active().whose(),
         // What qualifies the key above, under the same name and the same shape
         // it has in `status --json` (ADR 0048). Here as well as there because
         // which Account you are standing on is not a fact that stops being
         // worth qualifying because the question widened from it to the set it
         // sits in.
-        "landing": registry.active.document(),
+        "landing": registry.active().document(),
         "sections": sectioned,
         "refresh": report.document(),
     });
@@ -826,8 +826,6 @@ mod tests {
     /// asserts only that the listing depends on it.
     #[test]
     fn the_sections_hold_every_account_the_scope_covers() {
-        use crate::registry::Active;
-
         let mut registry = Registry::default();
         registry.declare_group("work").expect("the name is free");
         registry.declare_group("play").expect("the name is free");
@@ -841,7 +839,7 @@ mod tests {
             account.group = group.map(str::to_string);
             registry.upsert(account);
         }
-        registry.active = Active::settled_on(Some("c@example.com".to_string()));
+        registry.settle(Some("c@example.com".to_string()));
 
         let named = |mut accounts: Vec<&Account>| -> Vec<String> {
             accounts.sort_by_key(|account| account.email().to_string());

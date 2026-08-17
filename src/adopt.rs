@@ -12,7 +12,7 @@ use crate::host::Host;
 use crate::login;
 use crate::probe::{self, Findings, Store, Verdict};
 use crate::profile;
-use crate::registry::{self, Account, Active, Registry};
+use crate::registry::{self, Account, Registry};
 
 /// Loads the registry, adopting the existing login the first time Perch runs.
 ///
@@ -103,7 +103,7 @@ fn store_as_first_profile(
             group: None,
             utilization: None,
         });
-        registry.active = Active::Settled(findings.identity.email.clone());
+        registry.settle(Some(findings.identity.email.clone()));
 
         registry::save(host, perch, &registry)?;
         Ok(registry)

@@ -78,7 +78,7 @@ use crate::lock;
 use crate::observe::{self, Attempt};
 use crate::probe;
 use crate::registry::{self, Account, Registry, Scope, UNGROUPED};
-use crate::switch;
+use crate::switch::{self, NotSwitched};
 use crate::watch::{
     self, Backoff, Considered, Fullest, Holding, Outcome, Policy, Recently, Round, Speak,
 };
@@ -443,19 +443,22 @@ impl Watcher {
         }
     }
 
-    /// A Switch that happened, remembered where this watcher will find it next
-    /// time.
+    /// Which Switch this watcher is about to make, in the terms the Switch
+    /// itself keeps ([`switch::Reason`]).
     ///
-    /// For a check that is the registry, and the write happens before the
-    /// Switch is recorded so that the one save carries both: a cooldown that
-    /// did not survive the process would be a check that moved and let the next
-    /// one move straight back. The loop's memory is the
-    /// [`Recently`](crate::watch::Recently) it is holding, which the round has
-    /// already told.
-    fn remember(self, registry: &mut Registry, scope: &Scope, at: DateTime<Utc>) {
+    /// The one difference between the two watchers, and it is handed to the
+    /// Switch rather than sequenced around it: a check remembers nothing of the
+    /// one before it, so what paces the next one has to reach the registry in
+    /// the same save as the Switch it paces. The loop's memory is the
+    /// [`Recently`](crate::watch::Recently) it is holding, which the round tells
+    /// itself.
+    fn reason(self, scope: &Scope, at: DateTime<Utc>) -> switch::Reason {
         match self {
-            Watcher::Loop => {}
-            Watcher::Check => registry.record_check(scope.word(), at),
+            Watcher::Loop => switch::Reason::Loop,
+            Watcher::Check => switch::Reason::Check {
+                scope: scope.clone(),
+                at,
+            },
         }
     }
 }
@@ -843,33 +846,40 @@ fn act(
         Err(error) => return Err(error),
     };
 
-    let landing = switch::perform(
+    // One call, and the ordering between the Switch and what is written down
+    // beside it is inside it: the Check that made this Switch is recorded before
+    // the Switch is, so that one save carries both (ADR 0013). This round used
+    // to sequence that itself, and it was the second of two callers doing so.
+    let switched = switch::switch_to(
         host,
         perch,
+        registry,
         &installed,
         &choice.account,
         Some(&outgoing),
-        registry,
+        watcher.reason(&scope, host.now()),
     );
 
-    // Only a Switch that happened starts a cooldown. A round that was refused
-    // or found nowhere to go has changed nothing, and making it wait would be
+    // Only a Switch that happened starts a cooldown. A round that was refused or
+    // found nowhere to go has changed nothing, and making it wait would be
     // pacing the watcher on its failures.
     //
-    // A Switch that moved and then failed counts, and this is written before
-    // the recording below so that the one save carries both. Without it a check
-    // that moved and then failed left no record of having moved, and the next
-    // scheduled one was free to move straight back: exactly the "cooldown that
-    // did not survive the process" ADR 0013 names. Asking the Landing rather
-    // than the outcome is what makes the two cases one.
-    let moved = landing.moved();
+    // A Switch that moved and then *failed* counts, which is why the question is
+    // asked of both ways out rather than of the successful one: this is the
+    // loop's cooldown, held in memory, and a round that ends in a raise today
+    // ends the loop — but that is `keep_watching`'s to decide and nothing here
+    // asserts it. A check's cooldown is on the registry, where `switch_to` has
+    // already put it in the same save as the Switch.
+    let moved = match &switched {
+        Ok(switched) => switched.moved,
+        Err(not_switched) => not_switched.moved,
+    };
     if moved {
         recently.switched(host.now());
-        watcher.remember(registry, &watching.scope, host.now());
     }
 
-    match landing.record(host, perch, registry) {
-        Ok(_captured) => Ok(Outcome::Switched {
+    match switched {
+        Ok(_switched) => Ok(Outcome::Switched {
             because: also(choice.because, &unread),
         }),
         // Nothing was changed, so there is nothing to look at and nothing to
@@ -897,15 +907,17 @@ fn act(
         // watcher that carried on watching would be deciding what to do next
         // about a machine nobody has looked at yet. So it is answered first,
         // whatever the failure was.
-        Err(error) if moved => Err(error),
-        // A Quarantine has already been written by `record`, so the next round
-        // passes the Account over rather than making the same discovery again.
-        Err(error @ (PerchError::Quarantined { .. } | PerchError::ProfileLive(_))) => {
-            Ok(Outcome::Refused {
-                why: error.to_string(),
-            })
-        }
-        Err(other) => Err(other),
+        Err(NotSwitched { error, moved: true }) => Err(error),
+        // A Quarantine has already been written by `switch_to`, so the next
+        // round passes the Account over rather than making the same discovery
+        // again.
+        Err(NotSwitched {
+            error: error @ (PerchError::Quarantined { .. } | PerchError::ProfileLive(_)),
+            ..
+        }) => Ok(Outcome::Refused {
+            why: error.to_string(),
+        }),
+        Err(NotSwitched { error, .. }) => Err(error),
     }
 }
 

@@ -21,8 +21,16 @@
 //! the Run path (ADR 0003, ADR 0010) and a Switch needs none of it, which is
 //! exactly why memory, settings, plugins and project history follow the person
 //! across Accounts for free.
+//!
+//! **[`switch_to`] is the way in, and the only one.** The three steps, the
+//! Landing, the Quarantine a failure discovered, which Account is active
+//! afterwards and — for a scheduled Check — the Cooldown that paces the next one
+//! are one call, in one order. `perch switch` and the Watcher differ by a
+//! [`Reason`] and by nothing else.
 
 use std::path::Path;
+
+use chrono::{DateTime, Utc};
 
 use crate::credentials;
 use crate::error::{PerchError, Result};
@@ -30,7 +38,7 @@ use crate::host::{self, Host};
 use crate::lock;
 use crate::probe::{self, Credential, Installed, Store};
 use crate::profile;
-use crate::registry::{self, Account, Active, Quarantine, Registry};
+use crate::registry::{self, Account, Active, Quarantine, Registry, Scope};
 
 /// What the Capture found, which is the part of a Switch worth saying out loud:
 /// it is the part that protects the Account being left behind.
@@ -75,6 +83,153 @@ pub enum Captured {
     NothingToSave,
 }
 
+/// Why a Switch is being made — and, because of that, what else the save that
+/// records it carries.
+///
+/// Not a label for a log line. A scheduled `perch watcher check` is one of a
+/// sequence of processes with no memory between them, so what paces the next one
+/// has to be on the registry — and it has to reach the registry in the *same*
+/// save as the Switch it paces, or a Check that moved and then failed leaves no
+/// record of having moved and the next one is free to move straight back: the
+/// "cooldown that did not survive the process" ADR 0013 names. Told here rather
+/// than sequenced by the caller, that ordering stops being a comment somebody
+/// has to honour and becomes a fact of the call.
+#[derive(Debug)]
+pub enum Reason {
+    /// `perch switch` — somebody asked for this one.
+    Asked,
+    /// `perch watcher run` — the Watcher moved unasked, in a loop somebody is
+    /// watching. What paces the next round is the
+    /// [`Recently`](crate::watch::Recently) that process is already holding, so
+    /// nothing about this Switch is written down beyond the Switch itself.
+    ///
+    /// Named for the arrangement rather than for the Watcher, because a Check is
+    /// a Watcher too — all three arrangements are (ADR 0040) — and it mirrors the
+    /// `Watcher::Loop` this is made from.
+    ///
+    /// It reaches the registry as [`Reason::Asked`] does, and it is an arm of its
+    /// own so that a loop has one to pass: given only "asked" and "checked" it
+    /// would have had to claim one of them, and claiming the second is a loop
+    /// writing a Check nothing scheduled.
+    Loop,
+    /// `perch watcher check` — the Watcher moved unasked, and the Scope it moved
+    /// within records the Check that did it, in the same save (ADR 0013).
+    ///
+    /// The one arm that makes this enum more than a sentence, and
+    /// [`record_the_switch`] is where it is honoured.
+    Check {
+        /// The Scope the Switch was taken within, which is what the record is
+        /// kept per.
+        scope: Scope,
+        /// When it moved.
+        at: DateTime<Utc>,
+    },
+}
+
+/// A Switch that landed, and was written down.
+#[derive(Debug)]
+pub struct Switched {
+    /// What the Capture found — the part of a Switch worth saying out loud.
+    pub captured: Captured,
+    /// Whether the incoming Account's Credential is the live one. Always true
+    /// here, because a Switch only lands by finishing all three steps — and
+    /// said anyway, so that a caller pacing itself asks one question of both
+    /// ways out rather than reading the answer off which way out it got.
+    pub moved: bool,
+}
+
+/// A Switch that did not land, and what the machine is holding now.
+///
+/// The same distinction [`NotLanded`] draws, for the same reason: a failure
+/// after the Credential was written but before the Identity was patched has
+/// still changed which Account the machine is acting as. A caller deciding what
+/// to do next has to answer that first — a half-finished Switch is a machine
+/// nobody has looked at, whatever the failure was.
+pub struct NotSwitched {
+    /// The failure that stopped it, which is the one the user reads and the one
+    /// the exit code comes from.
+    pub error: PerchError,
+    /// Whether the incoming Account's Credential is the live one despite the
+    /// failure.
+    pub moved: bool,
+}
+
+/// The failure, for a caller that has nothing to decide off `moved` and only
+/// wants to hand it on.
+impl From<NotSwitched> for PerchError {
+    fn from(not_switched: NotSwitched) -> PerchError {
+        not_switched.error
+    }
+}
+
+/// Makes `incoming` the active Account and writes down what that came to: the
+/// whole of a Switch, and the one door onto one.
+///
+/// The three steps and every refusal that protects them are [`perform`]'s; what
+/// the registry is owed afterwards is [`Landing::record`]'s. Between them sat an
+/// ordering that existed only as a comment, and two callers assembling it
+/// themselves is how the second of them came to drop a clause the first kept.
+/// `reason` is what closes that: the caller says which Switch this is, and where
+/// something has to be written down beside it, this writes it in the right
+/// order.
+///
+/// `registry` is expected to be settled — [`resolve_a_landing`] is a step of the
+/// command rather than of this call, because four commands take it before they
+/// read which Account is active and only one of them Switches (ADR 0048).
+///
+/// `installed` is read once by the caller and passed in: a `perch switch` asks
+/// [`already_landed`] about the same Claude Code first, and a Watcher asks
+/// [`refuse_if_live`] before it spends a Refresh on every candidate.
+pub fn switch_to(
+    host: &dyn Host,
+    perch: &mut lock::Held<'_>,
+    registry: &mut Registry,
+    installed: &Installed,
+    incoming: &Account,
+    outgoing: Option<&Account>,
+    reason: Reason,
+) -> std::result::Result<Switched, NotSwitched> {
+    let landing = perform(host, perch, installed, incoming, outgoing, registry);
+    record_the_switch(host, perch, registry, landing, reason)
+}
+
+/// The half of a Switch that reaches the registry, with everything that has to
+/// reach it in the same save.
+///
+/// Split out from [`switch_to`] so that the ordering can be asserted against a
+/// Landing that moved and then failed, which is the state it exists for and the
+/// one no arrangement of a [`FakeHost`](crate::host::FakeHost) produces: a
+/// registry that cannot be written fails at the Landing write, with nothing
+/// moved.
+fn record_the_switch(
+    host: &dyn Host,
+    perch: &mut lock::Held<'_>,
+    registry: &mut Registry,
+    landing: Landing,
+    reason: Reason,
+) -> std::result::Result<Switched, NotSwitched> {
+    // Asked before the write, because a Switch that moved starts a Cooldown
+    // whether or not it finished.
+    let moved = landing.moved();
+
+    // The ordering [`Reason::Check`] exists for, and the whole of why it is
+    // here: before `record`, so that the save `record` makes carries both. A
+    // Check that moved and then failed is the case with no later save to fall
+    // back on.
+    //
+    // Only where something moved: a Switch that was refused or found nowhere to
+    // go has changed nothing, and pacing the next Check on it would be pacing
+    // the Watcher on its failures.
+    if moved && let Reason::Check { scope, at } = &reason {
+        registry.record_check(scope.word(), *at);
+    }
+
+    match landing.record(host, perch, registry) {
+        Ok(captured) => Ok(Switched { captured, moved }),
+        Err(error) => Err(NotSwitched { error, moved }),
+    }
+}
+
 /// A Switch under way in this process, and the registry record of it.
 ///
 /// Between the Landing being written down and [`Landing::record`] there is a
@@ -100,7 +255,7 @@ pub enum Captured {
 ///
 /// [`Landing::moved`] is the one question with an answer before the write,
 /// because a caller pacing itself has to know whether anything happened.
-pub struct Landing {
+struct Landing {
     outcome: Result<Captured>,
     /// The Account this Switch was to. Held rather than borrowed, so a caller
     /// may hand `record` the `&mut Registry` the Account was read out of.
@@ -126,7 +281,7 @@ impl Landing {
     /// in the same save as everything else (ADR 0013). It is a question about
     /// the machine rather than about what the caller must now do, which is what
     /// separates it from everything `record` keeps.
-    pub fn moved(&self) -> bool {
+    fn moved(&self) -> bool {
         self.incoming_is_live
     }
 
@@ -158,7 +313,7 @@ impl Landing {
     /// which is exactly the answer this line already knows. What it saves is
     /// somebody reading `perch status` and being told a Switch is in flight
     /// when the failure they are looking at says it never started.
-    pub fn record(
+    fn record(
         self,
         host: &dyn Host,
         perch: &mut lock::Held<'_>,
@@ -191,7 +346,7 @@ impl Landing {
             }
             Err(error) => {
                 if wrote_it_down {
-                    take_the_landing_back(host, perch, registry, Active::settled_on(leaving));
+                    take_the_landing_back(host, perch, registry, leaving);
                 }
                 Err(error)
             }
@@ -215,9 +370,9 @@ fn take_the_landing_back(
     host: &dyn Host,
     perch: &mut lock::Held<'_>,
     registry: &mut Registry,
-    settled: Active,
+    settled_on: Option<String>,
 ) {
-    registry.active = settled;
+    registry.settle(settled_on);
     let _ = registry::save(host, perch, registry);
 }
 
@@ -230,7 +385,7 @@ fn record_active(
     registry: &mut Registry,
     incoming: &str,
 ) -> Result<()> {
-    registry.active = Active::Settled(incoming.to_string());
+    registry.settle(Some(incoming.to_string()));
     registry::save(host, perch, registry).map_err(|error| {
         error.with_note(&format!(
             "The Switch itself worked: {incoming}'s Credential is the live one. \
@@ -279,7 +434,7 @@ struct Prepared {
 /// Returns a [`Landing`] rather than a `Result`, because whether a Switch
 /// succeeded is not a thing a caller may act on before it has written down what
 /// happened.
-pub fn perform(
+fn perform(
     host: &dyn Host,
     perch: &mut lock::Held<'_>,
     installed: &Installed,
@@ -378,14 +533,10 @@ fn write_it_down(
     leaving: &Option<String>,
     incoming: &Account,
 ) -> Result<()> {
-    let before = registry.active.clone();
-    registry.active = Active::Landing {
-        leaving: leaving.clone(),
-        arriving: incoming.email().to_string(),
-    };
+    let before = registry.begin_landing(leaving.clone(), incoming.email());
 
     if let Err(error) = registry::save(host, perch, registry) {
-        registry.active = before;
+        registry.abandon_landing(before);
         return Err(error.with_note(
             "Perch does not move the live Credential until it has written down \
              that it is about to, so nothing was moved.",
@@ -440,7 +591,7 @@ pub fn make_live(
         error,
         is_live: false,
     })?;
-    let leaving = registry.active.whose().map(str::to_string);
+    let leaving = registry.active().whose().map(str::to_string);
 
     let mut is_live = false;
     let mut wrote_it_down = false;
@@ -488,11 +639,11 @@ pub fn make_live(
     // sentence, which is why this one is best effort and says nothing: saying
     // it twice would be saying it in the wrong words once.
     if wrote_it_down {
-        let settled = match is_live {
-            true => Active::Settled(account.email().to_string()),
-            false => Active::settled_on(leaving),
+        let settled_on = match is_live {
+            true => Some(account.email().to_string()),
+            false => leaving,
         };
-        take_the_landing_back(host, perch, registry, settled);
+        take_the_landing_back(host, perch, registry, settled_on);
     }
 
     landed.map_err(|error| NotLanded { error, is_live })
@@ -535,7 +686,7 @@ pub fn resolve_a_landing(
     perch: &mut lock::Held<'_>,
     registry: &mut Registry,
 ) -> Result<()> {
-    let Active::Landing { leaving, arriving } = registry.active.clone() else {
+    let Active::Landing { leaving, arriving } = registry.active().clone() else {
         return Ok(());
     };
 
@@ -553,7 +704,7 @@ pub fn resolve_a_landing(
         ))
     })?;
 
-    let settled = whose_the_live_credential_is(
+    let settled_on = whose_the_live_credential_is(
         host,
         registry,
         leaving.as_deref(),
@@ -567,12 +718,17 @@ pub fn resolve_a_landing(
         ))
     })?;
 
-    registry.active = settled;
+    registry.settle(settled_on);
     registry::save(host, perch, registry)
 }
 
 /// Which Account the live Credential belongs to, or `None` where nothing on the
 /// machine says.
+///
+/// Two layers of `None`, and they are different answers: the outer one is
+/// *nothing on the machine says whose*, which is the corner
+/// [`the_landing_is_unaccounted_for`] refuses, and the inner one is *nobody's,
+/// because nothing is live* — a settled machine that is logged out.
 ///
 /// The two Accounts the Landing names are asked first, so the ordinary path
 /// costs two reads. Every other held Account is the **fallback**, and it is a
@@ -584,13 +740,13 @@ fn whose_the_live_credential_is(
     leaving: Option<&str>,
     arriving: &str,
     live: Option<&str>,
-) -> Option<Active> {
+) -> Option<Option<String>> {
     // Nothing live is nothing a later Capture could destroy, so this is the one
     // reading with nothing at stake in it: the Account being left is where the
     // registry already was, and a `claude /logout` mid-Switch is what it looks
     // like.
     let Some(live) = live else {
-        return Some(Active::settled_on(leaving.map(str::to_string)));
+        return Some(leaving.map(str::to_string));
     };
 
     let holding = |email: &str| {
@@ -601,12 +757,12 @@ fn whose_the_live_credential_is(
     };
 
     if holding(arriving) {
-        return Some(Active::Settled(arriving.to_string()));
+        return Some(Some(arriving.to_string()));
     }
     if let Some(leaving) = leaving
         && holding(leaving)
     {
-        return Some(Active::Settled(leaving.to_string()));
+        return Some(Some(leaving.to_string()));
     }
 
     registry
@@ -617,7 +773,7 @@ fn whose_the_live_credential_is(
                 && !leaving.is_some_and(|leaving| registry::same_name(account.email(), leaving))
                 && held_by(host, account).is_some_and(|held| held == live)
         })
-        .map(|account| Active::Settled(account.email().to_string()))
+        .map(|account| Some(account.email().to_string()))
 }
 
 /// The corner that stays undecidable: a Landing in flight, and a live Credential
@@ -1215,6 +1371,8 @@ fn live_but_unnamed(prepared: &Prepared, outgoing: Option<&Account>, incoming: &
 
 #[cfg(test)]
 mod tests {
+    use chrono::TimeZone;
+
     use super::*;
     use crate::host::FakeHost;
     use crate::probe::Identity;
@@ -1239,7 +1397,7 @@ mod tests {
                 utilization: None,
             });
         }
-        registry.active = Active::Settled(OUTGOING.to_string());
+        registry.settle(Some(OUTGOING.to_string()));
         registry
     }
 
@@ -1343,7 +1501,7 @@ mod tests {
                 case.what
             );
             assert_eq!(
-                registry.active,
+                *registry.active(),
                 Active::Settled(case.active.to_string()),
                 "{}: which Account is active is a fact about which Credential is \
                  live, and a Landing is not left behind either way",
@@ -1379,6 +1537,92 @@ mod tests {
             assert_eq!(handed_back.to_string(), said, "{what}");
             assert_eq!(handed_back.exit_code(), code, "{what}");
         }
+    }
+
+    /// The claim [`Reason::Check`] exists to make, and the one that had no home:
+    /// a Check that moved and then failed leaves the Check recorded, because the
+    /// save `record` makes on the way out of that failure is the only save there
+    /// is.
+    ///
+    /// Without it the next scheduled Check saw no cooldown and was free to move
+    /// straight back — the "cooldown that did not survive the process" ADR 0013
+    /// names. It was the Watcher's to sequence and the Watcher's alone, so
+    /// nothing said what would happen if the other caller ever needed it.
+    ///
+    /// Asserted off the file rather than off the registry in hand, because "one
+    /// save carries both" is a claim about what reached disk.
+    #[test]
+    fn a_check_that_moved_and_then_failed_still_records_the_check() {
+        let host = FakeHost::new();
+        let mut perch = registry::lock(&host).expect("the registry lock is free");
+        let mut registry = two_accounts();
+        registry
+            .declare_group("work")
+            .expect("the Group is nameable");
+        let at = Utc.with_ymd_and_hms(2026, 8, 17, 9, 30, 0).unwrap();
+
+        let not_switched = record_the_switch(
+            &host,
+            &mut perch,
+            &mut registry,
+            landing(Err(ordinary()), true),
+            Reason::Check {
+                scope: Scope::Group("work".to_string()),
+                at,
+            },
+        )
+        .expect_err("the Switch moved the Credential and then failed");
+
+        assert!(
+            not_switched.moved,
+            "the Credential moved, which is what the caller decides on"
+        );
+
+        let saved = registry::load(&host)
+            .expect("the registry is readable")
+            .expect("the Switch wrote one");
+        assert_eq!(
+            saved.checked("work").map(|checked| checked.switched_at),
+            Some(at),
+            "the save that recorded the Switch carries the Check that made it"
+        );
+        assert_eq!(
+            *saved.active(),
+            Active::Settled(INCOMING.to_string()),
+            "and records who the live Credential belongs to, as it always did"
+        );
+    }
+
+    /// The other half of the same rule: a Switch that never moved paces nothing.
+    /// A Check held on its own failures would be a watcher that stops watching
+    /// the moment something goes wrong.
+    #[test]
+    fn a_check_that_moved_nothing_records_no_check() {
+        let host = FakeHost::new();
+        let mut perch = registry::lock(&host).expect("the registry lock is free");
+        let mut registry = two_accounts();
+        registry
+            .declare_group("work")
+            .expect("the Group is nameable");
+
+        let not_switched = record_the_switch(
+            &host,
+            &mut perch,
+            &mut registry,
+            landing(Err(ordinary()), false),
+            Reason::Check {
+                scope: Scope::Group("work".to_string()),
+                at: Utc.with_ymd_and_hms(2026, 8, 17, 9, 30, 0).unwrap(),
+            },
+        )
+        .expect_err("the Switch failed before the Credential moved");
+
+        assert!(!not_switched.moved, "nothing moved");
+        assert_eq!(
+            registry.checked("work"),
+            None,
+            "a Switch that changed nothing does not pace the next Check"
+        );
     }
 
     /// A registry Perch could not write is not worth losing the failure over:

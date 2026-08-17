@@ -98,7 +98,7 @@ fn a_removed_account_is_no_longer_a_cycle_candidate() {
 
     cycled.expect("there is still somewhere to go");
     assert_eq!(
-        registry_of(&host).active.whose(),
+        registry_of(&host).active().whose(),
         Some(THIRD_EMAIL),
         "a Cycle cannot land on an Account Perch has forgotten: {printed}"
     );
@@ -116,7 +116,7 @@ fn removing_an_account_leaves_every_other_account_and_the_live_credential_alone(
         Some(CREDENTIAL),
         "removing an Account nobody is on switches nothing"
     );
-    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
     assert_eq!(credential_of(&host, THIRD_EMAIL), kept);
     assert!(
         host.http_calls().is_empty(),
@@ -160,7 +160,7 @@ fn removing_the_active_account_names_what_will_be_active_and_asks_first() {
         "and Perch landed there rather than leaving the machine running as an \
          Account it no longer holds"
     );
-    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
 }
 
 /// The window between the two halves of removing the active Account: the
@@ -185,7 +185,7 @@ fn a_removal_that_fails_after_landing_still_records_who_is_live() {
         "the landing happened, so the successor's Credential is the live one"
     );
     assert_eq!(
-        registry_of(&host).active.whose(),
+        registry_of(&host).active().whose(),
         Some(SECOND_EMAIL),
         "and the record says so, rather than going on naming the Account whose \
          Credential a Switch would now overwrite"
@@ -236,7 +236,7 @@ fn declining_removes_nothing_at_all() {
     assert!(holds(&host, EMAIL), "{printed}");
     assert_eq!(credential_of(&host, EMAIL).as_deref(), Some(CREDENTIAL));
     assert_eq!(live_credential(&host).as_deref(), Some(CREDENTIAL));
-    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
 }
 
 #[test]
@@ -253,7 +253,7 @@ fn the_account_left_active_is_one_the_user_declared_interchangeable() {
 
     result.expect("removed");
     assert_eq!(
-        registry_of(&host).active.whose(),
+        registry_of(&host).active().whose(),
         Some(THIRD_EMAIL),
         "the Group is the one landing place the user endorsed in advance, so it \
          is preferred over the Account that merely comes first: {printed}"
@@ -275,7 +275,7 @@ fn a_disabled_account_is_not_what_perch_lands_on() {
         "an Account kept out of Cycling is never chosen for you, so \
          there is nowhere to land and the question says so:\n{printed}"
     );
-    assert_eq!(registry_of(&host).active, Active::Nobody);
+    assert_eq!(*registry_of(&host).active(), Active::Nobody);
     assert_eq!(
         live_credential(&host).as_deref(),
         Some(CREDENTIAL),
@@ -297,7 +297,7 @@ fn removing_the_only_account_is_confirmed_rather_than_leaving_nothing_active_sil
     );
     let registry = registry_of(&host);
     assert!(registry.accounts.is_empty(), "{printed}");
-    assert_eq!(registry.active, Active::Nobody);
+    assert_eq!(*registry.active(), Active::Nobody);
     assert_eq!(credential_of(&host, EMAIL), None);
 }
 
@@ -334,7 +334,7 @@ fn without_a_terminal_the_active_account_goes_only_when_asked_for_outright() {
 
     result.expect("every capability is available non-interactively (ADR 0011)");
     assert!(!holds(&host, EMAIL), "{printed}");
-    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
 }
 
 #[test]
@@ -404,7 +404,7 @@ fn a_quarantined_account_is_not_what_perch_lands_on() {
         "landing on an Account whose Credential does not work would be no \
          landing at all:\n{printed}"
     );
-    assert_eq!(registry_of(&host).active, Active::Nobody);
+    assert_eq!(*registry_of(&host).active(), Active::Nobody);
     assert_eq!(
         live_credential(&host).as_deref(),
         Some(CREDENTIAL),
@@ -576,7 +576,7 @@ fn the_last_account_is_confirmed_without_claiming_it_is_the_one_running() {
     run_remove(&host, EMAIL)
         .0
         .expect("the active one is given up");
-    assert_eq!(registry_of(&host).active, Active::Nobody);
+    assert_eq!(*registry_of(&host).active(), Active::Nobody);
 
     let (result, printed) = run_remove(&host, SECOND_EMAIL);
 

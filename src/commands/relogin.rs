@@ -28,7 +28,7 @@ use crate::lock::Held;
 use crate::login::{self, Produced};
 use crate::probe::{Identity, Installed};
 use crate::profile;
-use crate::registry::{self, Account, Active, Registry};
+use crate::registry::{self, Account, Registry};
 use crate::switch;
 use crate::target;
 
@@ -353,7 +353,7 @@ fn no_longer_on_anybody(
     account: &Account,
     error: PerchError,
 ) -> PerchError {
-    registry.active = Active::Nobody;
+    registry.settle(None);
     let recorded = match registry::save(host, perch, registry) {
         Ok(()) => format!(
             "Perch holds no active Account now, so nothing will Capture the \
@@ -383,7 +383,7 @@ fn no_longer_on_anybody(
 /// way through. Repairing any *third* Account touches nothing live, and the
 /// Landing has no bearing on it.
 fn will_land_in_the_default_profile(registry: &Registry, account: &Account) -> bool {
-    registry.is_active(account.email()) || registry.active.names(account.email())
+    registry.is_active(account.email()) || registry.active().names(account.email())
 }
 
 fn announcement(registry: &Registry, account: &Account, landing_here: bool) -> String {
@@ -391,7 +391,7 @@ fn announcement(registry: &Registry, account: &Account, landing_here: bool) -> S
     if !landing_here {
         return format!(
             "{repairing}{}",
-            login::leaving_the_active_account_alone(registry.active.whose())
+            login::leaving_the_active_account_alone(registry.active().whose())
         );
     }
     // Which of the two it is, said apart, because "the Account you are on" is

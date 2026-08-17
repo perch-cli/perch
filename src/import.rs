@@ -29,7 +29,7 @@ use crate::host::Host;
 use crate::login;
 use crate::probe::{self, Store};
 use crate::profile;
-use crate::registry::{self, Active, Registry};
+use crate::registry::{self, Registry};
 
 /// Refuses to import onto a machine that is already holding Accounts, and names
 /// the one command that makes room.
@@ -99,11 +99,13 @@ pub fn restored(export: &Export, path: &std::path::Path) -> Result<Registry> {
     registry::validate(&export.registry)
         .map_err(|refusal| refusal.with_note(&registry::the_file_to_edit(path)))?;
 
-    Ok(Registry {
-        active: Active::Nobody,
-        checks: BTreeMap::new(),
-        ..export.registry.clone()
-    })
+    // Named one at a time rather than as a struct update, because who is active
+    // is not a field anybody may set: an Import lands on nobody, which is a
+    // transition of its own (ADR 0048) and the one an arriving registry gets.
+    let mut restored = export.registry.clone();
+    restored.settle(None);
+    restored.checks = BTreeMap::new();
+    Ok(restored)
 }
 
 /// One Profile an Import has written into, and whether the Import is what
@@ -297,6 +299,7 @@ mod tests {
     use super::*;
     use crate::export::CURRENT_VERSION;
     use crate::probe::Identity;
+    use crate::registry::Active;
     use crate::registry::{Account, Quarantine, Settings};
     use std::collections::BTreeMap;
 
@@ -327,7 +330,7 @@ mod tests {
             quarantine: Some(Quarantine::RenewalRejected),
             ..account("two@example.com")
         });
-        registry.active = Active::Settled("one@example.com".into());
+        registry.settle(Some("one@example.com".into()));
 
         Export {
             version: CURRENT_VERSION,
@@ -392,7 +395,7 @@ mod tests {
         let restored =
             restored(&export, std::path::Path::new(REGISTRY)).expect("this build understands it");
 
-        assert_eq!(restored.active, Active::Nobody);
+        assert_eq!(*restored.active(), Active::Nobody);
         assert_eq!(restored.accounts.len(), 2);
         assert_eq!(
             restored.account("two@example.com").unwrap().quarantine,

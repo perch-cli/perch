@@ -412,10 +412,7 @@ pub fn save_registry(host: &FakeHost, registry: &perch::registry::Registry) {
 /// settled against.
 pub fn a_switch_died_mid_flight(host: &FakeHost, leaving: Option<&str>, arriving: &str) {
     let mut registry = registry_of(host);
-    registry.active = perch::registry::Active::Landing {
-        leaving: leaving.map(str::to_string),
-        arriving: arriving.to_string(),
-    };
+    registry.begin_landing(leaving.map(str::to_string), arriving);
     save_registry(host, &registry);
 }
 

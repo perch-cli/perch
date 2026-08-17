@@ -184,7 +184,7 @@ fn a_switch_off_macos_moves_the_credential_between_files() {
         "and the outgoing one was Captured into its own Profile"
     );
     assert_eq!(
-        registry_of(&host).active.whose(),
+        registry_of(&host).active().whose(),
         Some(SECOND_EMAIL),
         "{printed}"
     );
@@ -459,7 +459,7 @@ fn a_switch_neither_store_would_keep_intact_stops_at_the_write() {
         "{error}"
     );
     assert_eq!(
-        registry_of(&host).active.whose(),
+        registry_of(&host).active().whose(),
         Some(EMAIL),
         "the Account being left is still the active one"
     );
@@ -513,5 +513,5 @@ fn a_store_that_would_not_take_the_write_at_all_keeps_the_credential_it_had() {
         Some(CREDENTIAL),
         "the Credential that was already live is untouched"
     );
-    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
 }

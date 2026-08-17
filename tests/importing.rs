@@ -185,7 +185,7 @@ fn nothing_is_made_active_by_an_import() {
     let (outcome, printed) = run_import(&host, AT);
     outcome.expect("the import lands");
 
-    assert_eq!(registry_of(&host).active, Active::Nobody);
+    assert_eq!(*registry_of(&host).active(), Active::Nobody);
     assert_eq!(
         host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME),
         live_before,
@@ -252,7 +252,7 @@ fn an_import_onto_a_logged_in_machine_adopts_nothing() {
         3,
         "the three the file held, and nothing adopted alongside them"
     );
-    assert_eq!(registry.active, Active::Nobody);
+    assert_eq!(*registry.active(), Active::Nobody);
 }
 
 /// Merging is where every hard case lives — the same Account on both sides one
@@ -651,7 +651,7 @@ fn what_an_export_wrote_is_what_an_import_reads_back() {
         run_export(&host, AT).0.expect("the export is written");
         let mut registry = registry_of(&host);
         // The one thing that deliberately does not travel.
-        registry.active = Active::Nobody;
+        registry.settle(None);
         (host.file(AT).expect("a file was written"), registry)
     };
 

@@ -92,7 +92,7 @@ fn asked_by(host: &FakeHost) -> Vec<String> {
 }
 
 fn active(host: &FakeHost) -> Option<String> {
-    registry_of(host).active.whose().map(str::to_string)
+    registry_of(host).active().whose().map(str::to_string)
 }
 
 /// A client that starts during the lock wait is a refusal the loop survives.
@@ -1057,7 +1057,7 @@ fn a_grant_said_about_a_group_leaves_ungrouped_accounts_alone() {
         "the declaration that is still missing is named: {printed}"
     );
     assert_eq!(
-        registry_of(&host).active.whose(),
+        registry_of(&host).active().whose(),
         Some(EMAIL),
         "and nothing moved underneath them, at 99% used with an empty Account \
          beside it (ADR 0017) — which is the whole of what the grant protects, \
@@ -1094,7 +1094,7 @@ fn a_watcher_acts_among_ungrouped_accounts_once_both_declarations_are_made() {
     result.expect("a watcher that switched is not a failure");
     assert!(printed.contains("switched"), "{printed}");
     assert_eq!(
-        registry_of(&host).active.whose(),
+        registry_of(&host).active().whose(),
         Some(SECOND_EMAIL),
         "{printed}"
     );

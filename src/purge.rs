@@ -269,7 +269,6 @@ mod tests {
     use super::*;
     use crate::host::{FakeHost, Platform};
     use crate::probe::Identity;
-    use crate::registry::Active;
 
     fn account(email: &str) -> Account {
         Account {
@@ -297,7 +296,7 @@ mod tests {
             let [primary, _] = credentials::stores_for(host, &store);
             primary.write(host, "held").expect("the store takes it");
         }
-        registry.active = Active::Settled("one@example.com".into());
+        registry.settle(Some("one@example.com".into()));
         registry
     }
 

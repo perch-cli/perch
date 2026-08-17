@@ -281,7 +281,7 @@ pub(crate) fn refuse_a_quarantined_account(registry: &Registry, email: &str) -> 
 /// should be able to see that nothing moved before the client takes the screen.
 fn launching(registry: &Registry, email: &str, said: &str) -> String {
     let named = registry.named_for_the_user(email);
-    match registry.active.whose() {
+    match registry.active().whose() {
         // Both Accounts are named the way every other command names one, so the
         // sentence that contrasts them does not hand one of them its Alias and
         // take the other's away.

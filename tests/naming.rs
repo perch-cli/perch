@@ -405,7 +405,7 @@ fn a_switch_accepts_the_spelling_every_other_command_accepts() {
     let (result, printed) = run_switch(&host, &SECOND_EMAIL.to_uppercase());
 
     result.expect("that is the Account, typed loudly");
-    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
     assert!(printed.contains(SECOND_EMAIL), "{printed}");
 }
 

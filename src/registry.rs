@@ -790,8 +790,17 @@ pub struct Registry {
     pub version: u32,
     /// The active Account, or the Switch that was under way when Perch last
     /// wrote this down.
+    ///
+    /// Private, and the only field here that is. Every other field is a thing
+    /// somebody declared; this one is a thing Perch *did*, and the three states
+    /// it moves between are the whole of ADR 0048. A `= Active::Settled(…)`
+    /// anywhere is a Switch recorded without having been written down first,
+    /// which is precisely the write [`crate::switch::switch_to`] exists to be
+    /// the one door for. So it is reached through [`Registry::begin_landing`],
+    /// [`Registry::settle`] and [`Registry::abandon_landing`], each of which
+    /// names a transition, and read through [`Registry::active`].
     #[serde(default, skip_serializing_if = "Active::is_nobody")]
-    pub active: Active,
+    active: Active,
     #[serde(default)]
     pub accounts: Vec<Account>,
     /// Alias to Account email. Empty until aliases land.
@@ -876,11 +885,65 @@ impl Registry {
         self.active.whose().and_then(|email| self.account(email))
     }
 
+    /// Which Account is active, or the Switch that was in flight when this was
+    /// last written (ADR 0048).
+    ///
+    /// Reading is nobody's to get wrong, so it is open to everybody. Writing is
+    /// three named transitions and nothing else.
+    pub fn active(&self) -> &Active {
+        &self.active
+    }
+
+    /// Writes down that a Switch is about to move the live Credential, naming
+    /// both Accounts it could then belong to (ADR 0048).
+    ///
+    /// Hands back what it replaced, because the Landing has to reach disk
+    /// before it means anything: a save that fails leaves a caller holding a
+    /// registry claiming a Switch is in flight that never started, and this is
+    /// what it puts back with [`Registry::abandon_landing`].
+    pub fn begin_landing(&mut self, leaving: Option<String>, arriving: &str) -> Active {
+        std::mem::replace(
+            &mut self.active,
+            Active::Landing {
+                leaving,
+                arriving: arriving.to_string(),
+            },
+        )
+    }
+
+    /// Puts back what [`Registry::begin_landing`] replaced, where the save that
+    /// would have carried it did not happen.
+    ///
+    /// Not the same transition as [`Registry::settle`] even though it leaves
+    /// the same field holding the same kind of thing: this one is a Landing
+    /// that never existed anywhere but in memory, and nothing has moved.
+    pub fn abandon_landing(&mut self, before: Active) {
+        self.active = before;
+    }
+
+    /// Records who is active now that a Switch is over — landed, refused, or
+    /// resolved afterwards off the live Credential. `None` is a machine on
+    /// nobody.
+    ///
+    /// Being active is a fact about which Credential is in the Default Profile
+    /// rather than a wish, so what is passed is who the machine is holding the
+    /// Credential of.
+    ///
+    /// It takes an address rather than an [`Active`], which is what makes
+    /// "settled" true of what it leaves behind: handed the enum it would accept
+    /// [`Active::Landing`], and a Landing written by anything but
+    /// [`Registry::begin_landing`] is a Switch recorded without having been
+    /// written down first — the one state ADR 0048 exists to keep impossible,
+    /// walking back in through the door built to stop it.
+    pub fn settle(&mut self, on: Option<String>) {
+        self.active = Active::settled_on(on);
+    }
+
     /// Whether this address is the one the registry records as active.
     ///
     /// One place, and case-folded like every other way the registry is asked
     /// about a name. A dozen call sites spelled this as
-    /// `registry.active.whose() == Some(account.email())`, which is the one
+    /// `registry.active().whose() == Some(account.email())`, which is the one
     /// comparison in Perch that answered a question about an address by exact
     /// bytes — while [`account`] beside it has always answered the same question
     /// with [`same_name`].
@@ -2240,7 +2303,7 @@ mod tests {
         assert!(registry.account_mut("CAFÉ@EXAMPLE.COM").is_some());
         assert_eq!(registry.alias_of("Café@Example.com"), Some("work"));
 
-        registry.active = Active::Settled("CAFÉ@EXAMPLE.COM".into());
+        registry.settle(Some("CAFÉ@EXAMPLE.COM".into()));
         assert!(
             registry.is_active("café@example.com"),
             "and which Account is active is the same question, asked the same \
@@ -2302,6 +2365,12 @@ mod tests {
     /// Account is active", so the repair somebody is offered is to switch to
     /// one, on a machine where the Account they are on is right there in the
     /// file.
+    ///
+    /// The `active` states here are written to the field rather than through the
+    /// transitions, and this is the one place that is right: `validate` guards a
+    /// registry Perch is *reading*, and a dangling pointer is a state no
+    /// transition can produce — a hand-edited file is what the rule is written
+    /// against.
     #[test]
     fn an_active_pointer_naming_nothing_is_refused_like_a_dangling_alias() {
         let mut registry = Registry {
@@ -2732,7 +2801,7 @@ mod tests {
             group: None,
             utilization: None,
         });
-        registry.active = Active::Settled("someone@example.com".into());
+        registry.settle(Some("someone@example.com".into()));
 
         let json = serde_json::to_string(&registry).unwrap();
         let back: Registry = serde_json::from_str(&json).unwrap();

@@ -56,7 +56,7 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
     // describe, so what it gets is the line and the field alone.
     let active = match (
         active_email(&registry),
-        registry.active.a_switch_in_flight(),
+        registry.active().a_switch_in_flight(),
     ) {
         (Ok(active), _) => active,
         (Err(_), Some(said)) => return the_switch_alone(out, &registry, args.json, &said),
@@ -120,7 +120,7 @@ fn render_human(
     // one it can establish is live. A note rather than a labelled row, as the
     // Refresh's own notes above it are — the column is for facts about the
     // Account, and this is a fact about whether Perch can name one.
-    if let Some(said) = registry.active.a_switch_in_flight() {
+    if let Some(said) = registry.active().a_switch_in_flight() {
         crate::commands::say(out, &said)?;
     }
 
@@ -176,7 +176,7 @@ fn render_json(
 ) -> Result<()> {
     let document = json!({
         "active": list::document(host, registry, account, now)?,
-        "landing": registry.active.document(),
+        "landing": registry.active().document(),
         "refresh": report.document(),
     });
 
@@ -205,7 +205,7 @@ fn the_switch_alone(
         out,
         &json!({
             "active": serde_json::Value::Null,
-            "landing": registry.active.document(),
+            "landing": registry.active().document(),
             "refresh": Report::default().document(),
         }),
     )
