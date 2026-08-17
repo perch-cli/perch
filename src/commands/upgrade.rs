@@ -110,17 +110,20 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
             // command is printed rather than run: it works perfectly well from
             // a shell where Perch is not running, and not at all from here.
             if host.platform() == Platform::Windows {
-                say(
-                    out,
-                    &format!(
-                        "This Installation came from npm, and npm cannot replace \
-                         `perch.exe` while it is running.\n\
-                         Run this from a terminal where Perch is not running:\n\
-                         \n    {}\n",
-                        upgrade::as_typed(&npm, &npm_args)
-                    ),
-                )?;
-                return Ok(crate::error::EXIT_OK);
+                // Said as nothing done rather than as done, because nothing was:
+                // reported as success, `perch upgrade && restart-my-thing`
+                // restarted the old binary and `perch --version` was unchanged
+                // afterwards. `NothingToDo` is already the code for "the request
+                // was understood and the machine is as it was", and it is what
+                // the arm above uses when the wanted Release is already
+                // installed.
+                return Err(PerchError::NothingToDo(format!(
+                    "This Installation came from npm, and npm cannot replace \
+                     `perch.exe` while it is running. Nothing was upgraded.\n\
+                     Run this from a terminal where Perch is not running:\n\
+                     \n    {}\n",
+                    upgrade::as_typed(&npm, &npm_args)
+                )));
             }
             hand_it_over(host, &npm, &npm_args, out)
         }
