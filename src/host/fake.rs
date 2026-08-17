@@ -1272,9 +1272,7 @@ impl FakeHost {
     /// unless a test arranged otherwise.
     fn as_stored(&self, path: &Path, contents: &str) -> String {
         if self.fs.corrupting.borrow().contains(path) {
-            let mut kept = contents.to_string();
-            kept.truncate(contents.len() / 2);
-            return kept;
+            return a_prefix_of(contents, contents.len() / 2);
         }
         contents.to_string()
     }
@@ -1298,6 +1296,23 @@ impl FakeHost {
                 detail: lock.detail.clone(),
             })
     }
+}
+
+/// As much of `text` as fits in `bytes`, cut at a character boundary.
+///
+/// One function, because the fake stands three different things in for by
+/// keeping a prefix — a store that corrupts what it holds, a disk that fills
+/// partway, and a keychain that will only take so much — and two of them were
+/// cutting with `String::truncate` at exactly half the byte length. That panics
+/// on any index that is not a character boundary, and what is being halved is
+/// registry JSON and `.claude.json`: an Alias, an email address or a project
+/// path with one accented letter in it is enough. The fake would then panic
+/// inside the arrangement rather than exercise the cleanup it was written for.
+fn a_prefix_of(text: &str, bytes: usize) -> String {
+    text.char_indices()
+        .take_while(|(at, _)| *at < bytes)
+        .map(|(_, c)| c)
+        .collect()
 }
 
 fn exec_key(program: &str, args: &[&str]) -> String {
@@ -1401,12 +1416,10 @@ impl port::Files for FakeHost {
         // `sync_all`. A fake that could only refuse before creating anything
         // could not model it, so the cleanup on this path went untested.
         if self.fs.filling.borrow().contains(&intended) {
-            let mut fitted = contents.to_string();
-            fitted.truncate(contents.len() / 2);
-            self.fs
-                .files
-                .borrow_mut()
-                .insert(path.to_path_buf(), fitted);
+            self.fs.files.borrow_mut().insert(
+                path.to_path_buf(),
+                a_prefix_of(contents, contents.len() / 2),
+            );
             self.fs.modes.borrow_mut().insert(path.to_path_buf(), mode);
             self.mark_written(path);
             return Err(HostError::Other(
@@ -1924,11 +1937,7 @@ impl port::Keys for FakeHost {
         // Truncated at a byte boundary and never mid-character: what is being
         // stood in for is a buffer that stops, not a broken encoder.
         let kept = match *self.keys.keychain_keeps.borrow() {
-            Some(bytes) if bytes < secret.len() => secret
-                .char_indices()
-                .take_while(|(at, _)| *at < bytes)
-                .map(|(_, c)| c)
-                .collect(),
+            Some(bytes) if bytes < secret.len() => a_prefix_of(secret, bytes),
             _ => secret.to_string(),
         };
         self.keys
