@@ -297,21 +297,35 @@ pub fn percentage_against(value: f64, boundary: u8) -> String {
 /// "just now", "3m ago", "2h ago", "4d ago".
 pub fn age_phrase(observed_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
     let seconds = (now - observed_at).num_seconds();
-    if seconds < 0 {
-        return "in the future".to_string();
-    }
-    // Minutes as far as two hours, for the reason `wait_phrase` hands over
-    // there: the two forms first agree at the boundary, and anywhere else they
-    // disagree across it. Handing over at ninety minutes had a figure a second
-    // older reading half an hour fresher — 5399 seconds rounded to "90m ago"
-    // and 5400 to "2h ago" — and under ADR 0015 the age is the whole of what a
-    // reader has to decide whether to trust the number beside it. The hour form
-    // hands over to the day form where those two agree already.
     match seconds {
+        ..0 => "in the future".to_string(),
         0..=44 => "just now".to_string(),
-        45..=7199 => format!("{}m ago", (seconds as f64 / 60.0).round() as i64),
-        7200..=86_399 => format!("{}h ago", (seconds as f64 / 3600.0).round() as i64),
-        _ => format!("{}d ago", (seconds as f64 / 86_400.0).round() as i64),
+        _ => format!("{} ago", spans(seconds, f64::round)),
+    }
+}
+
+/// How long a span is, in the largest unit that does not round it away: `3m`,
+/// `2h`, `4d`.
+///
+/// One table, because there were two — [`age_phrase`] and [`wait_phrase`] each
+/// carried their own copy of the same boundaries. They have already drifted
+/// apart once over exactly that: the handover to the hour form was moved in one
+/// and left in the other, so an age that grew by a second fell by half an hour,
+/// on the line ADR 0015 has a reader judging a figure's trustworthiness by.
+///
+/// Minutes as far as two hours, which is where the minute form and the hour
+/// form first agree; anywhere earlier they disagree across the boundary. The
+/// hour form hands over to the day form where those two agree already.
+///
+/// `minutes` is the only thing the two callers differ on, and it is the minute
+/// form alone: an hour or a day is a unit coarse enough that always rounding up
+/// would overstate a wait by more than the understatement it is guarding
+/// against.
+fn spans(seconds: i64, minutes: fn(f64) -> f64) -> String {
+    match seconds {
+        ..7200 => format!("{}m", minutes(seconds as f64 / 60.0) as i64),
+        7200..86_400 => format!("{}h", (seconds as f64 / 3600.0).round() as i64),
+        _ => format!("{}d", (seconds as f64 / 86_400.0).round() as i64),
     }
 }
 
@@ -342,23 +356,16 @@ pub fn clock_time(at: DateTime<Utc>) -> String {
     at.format("%Y-%m-%d %H:%M UTC").to_string()
 }
 
+/// A wait's minutes round *up* where an age's round to nearest, which is the
+/// whole of what this adds to [`spans`]: whether to wait for perishable quota
+/// is the decision the line is read for, and a wait that reads shorter than it
+/// is is the one direction that costs somebody something.
 fn wait_phrase(resets_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
     let seconds = (resets_at - now).num_seconds();
     if seconds <= 0 {
         return "any moment now".to_string();
     }
-    // Minutes as far as two hours, which is where the hour form and the minute
-    // form first agree. Handing over at ninety minutes had the two disagreeing
-    // across the boundary — 5399 seconds read "in 90m" and 5400 read "in 2h",
-    // so a wait grew by half an hour as it shortened by a second. Whether to
-    // wait for perishable quota is the decision this line is read for, and half
-    // an hour is the difference between making a cup of tea and doing something
-    // else.
-    match seconds {
-        1..=7199 => format!("in {}m", (seconds as f64 / 60.0).ceil() as i64),
-        7200..=86_399 => format!("in {}h", (seconds as f64 / 3600.0).round() as i64),
-        _ => format!("in {}d", (seconds as f64 / 86_400.0).round() as i64),
-    }
+    format!("in {}", spans(seconds, f64::ceil))
 }
 
 #[cfg(test)]
