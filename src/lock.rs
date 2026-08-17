@@ -142,7 +142,7 @@ impl<'a> Held<'a> {
             // it: giving a hold up is expensive in three separate ways, and
             // none of them is worth spending on a filesystem that hiccuped.
             match host.modified_at(&taken.lock.dir) {
-                Ok(seen) if still_ours(taken, Some(seen)) => {}
+                Ok(seen) if still_ours(taken, seen) => {}
                 Ok(_) | Err(HostError::NotFound { .. }) => {
                     taken.give_up(
                         host,
@@ -244,7 +244,7 @@ impl<'a> Held<'a> {
             //
             // [`renew`]: Held::renew
             let ours = match host.modified_at(&taken.lock.dir) {
-                Ok(seen) => still_ours(&taken, Some(seen)),
+                Ok(seen) => still_ours(&taken, seen),
                 Err(HostError::NotFound { .. }) => false,
                 Err(_) => taken.stamp.is_some(),
             };
@@ -256,11 +256,14 @@ impl<'a> Held<'a> {
 }
 
 /// Whether the artifact still says what Perch last left it saying.
-fn still_ours(taken: &Taken, stamp: Option<DateTime<Utc>>) -> bool {
-    match (taken.stamp, stamp) {
-        (Some(ours), Some(now)) => ours == now,
-        _ => false,
-    }
+///
+/// `seen` is a stamp the filesystem answered with, so it is a stamp rather than
+/// an `Option`: both callers reach this inside an `Ok(seen) =>` arm, and the
+/// artifact that is not there at all is answered by the `Err(NotFound)` arm
+/// beside them. Taken as an `Option`, the catch-all read as if a missing
+/// artifact were handled here, which is the one place it is not.
+fn still_ours(taken: &Taken, seen: DateTime<Utc>) -> bool {
+    taken.stamp == Some(seen)
 }
 
 impl Drop for Held<'_> {
