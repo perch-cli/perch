@@ -851,7 +851,7 @@ mod tests {
             host.set_unwritable(&lock.dir, "Permission denied");
             held.renew();
             still_held = held.still_held();
-            host.forget_unwritable(&lock.dir);
+            host.writable_again(&lock.dir);
             Ok(())
         });
         ran.expect("the work finishes");
@@ -940,7 +940,7 @@ mod tests {
                 if unreadable {
                     host.forget_unreadable(&lock.dir);
                 } else {
-                    host.forget_unwritable(&lock.dir);
+                    host.writable_again(&lock.dir);
                 }
                 Ok(())
             });

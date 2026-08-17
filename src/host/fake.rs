@@ -623,13 +623,14 @@ impl FakeHost {
             .insert(path.as_ref().to_path_buf(), detail.to_string());
     }
 
-    pub fn forget_unwritable(&self, path: impl AsRef<Path>) {
-        self.fs.unwritable.borrow_mut().remove(path.as_ref());
-    }
-
     /// Whatever stopped a path being written to has been put right — the
     /// permission fixed, the disk freed — so a test can carry on from a failure
     /// with the world it left rather than a fresh one.
+    ///
+    /// One name, because there were two with the same three-line body and no
+    /// difference between them but the spelling. A reader of a test had to go
+    /// and establish that `forget_unwritable` meant this and not something
+    /// narrower, which is a question a second name asks and never answers.
     pub fn writable_again(&self, path: impl AsRef<Path>) {
         self.fs.unwritable.borrow_mut().remove(path.as_ref());
     }
@@ -1674,14 +1675,18 @@ impl port::Files for FakeHost {
         if let Some(detail) = self.fs.unwritable.borrow().get(to) {
             return Err(HostError::Other(detail.clone()));
         }
+        // `Io`, which is what the real host answers: `rename_replacing`
+        // propagates the `ENOENT` rather than naming it, and `NotFound` is
+        // load-bearing elsewhere — `CredentialStore::read` reads it as "this
+        // store holds nothing" and `clients_in` as "nothing is running". A fake
+        // that answers it here is the answer the next caller to match on a
+        // failed rename would be written against.
         let moved = self
             .fs
             .files
             .borrow_mut()
             .remove(from)
-            .ok_or_else(|| HostError::NotFound {
-                path: from.to_path_buf(),
-            })?;
+            .ok_or_else(|| HostError::Io(std::io::Error::from(std::io::ErrorKind::NotFound)))?;
         self.fs.files.borrow_mut().insert(to.to_path_buf(), moved);
         // A rename moves the file, mode and all: what ends up at the target is
         // the file that was created beside it, not the one it replaced.
