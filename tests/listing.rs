@@ -17,7 +17,7 @@ use perch::error::EXIT_NOT_FOUND;
 use perch::host::FakeHost;
 use perch::probe::Identity;
 use perch::registry::{
-    Account, Active, CachedUtilization, Quarantine, Registry, Settings, WindowUtilization,
+    Account, CachedUtilization, Quarantine, Registry, Settings, WindowUtilization,
 };
 
 fn at(hour: u32, minute: u32) -> DateTime<Utc> {
@@ -74,7 +74,7 @@ fn machine_holding_three_accounts() -> FakeHost {
     spare.utilization = Some(observed(at(10, 0), &[("5-hour", 91.0)]));
     registry.upsert(spare);
 
-    registry.active = Active::Settled(EMAIL.to_string());
+    registry.settle(Some(EMAIL.to_string()));
     registry
         .groups
         .insert("work".to_string(), Settings::default());
@@ -120,7 +120,7 @@ fn a_group_of(group: Option<&str>, active: &str, accounts: &[(&str, f64)]) -> Re
         held.utilization = Some(observed(at(11, 57), &[("5-hour", *used_percent)]));
         registry.upsert(held);
     }
-    registry.active = Active::Settled(active.to_string());
+    registry.settle(Some(active.to_string()));
     registry
 }
 
@@ -329,7 +329,7 @@ fn the_scope_the_active_account_is_in_comes_first() {
     second.group = Some("zulu".to_string());
     registry.upsert(second);
     registry.upsert(account(THIRD_EMAIL, "Spare Ltd"));
-    registry.active = Active::Settled(SECOND_EMAIL.to_string());
+    registry.settle(Some(SECOND_EMAIL.to_string()));
     let host = machine_holding(&registry);
 
     let (result, printed) = run_list(&host, false);
@@ -653,7 +653,7 @@ fn list_ungrouped_shows_every_account_in_no_group() {
     registry
         .groups
         .insert("work".to_string(), Settings::default());
-    registry.active = Active::Settled(EMAIL.to_string());
+    registry.settle(Some(EMAIL.to_string()));
     let host = machine_holding(&registry);
 
     let (result, printed) = run_list_in(&host, "ungrouped", false);
@@ -693,7 +693,7 @@ fn the_ungrouped_cycling_clause_says_so_once_cycling_has_been_allowed() {
     registry.upsert(account(EMAIL, "Acme"));
     registry.upsert(account(THIRD_EMAIL, "Spare Ltd"));
     registry.ungrouped.interchangeable = true;
-    registry.active = Active::Settled(EMAIL.to_string());
+    registry.settle(Some(EMAIL.to_string()));
     let host = machine_holding(&registry);
 
     let (result, printed) = run_list_in(&host, "ungrouped", false);
@@ -737,7 +737,7 @@ fn list_in_a_group_json_says_which_group_it_narrowed_to() {
 fn list_ungrouped_json_says_it_narrowed_to_no_group() {
     let mut registry = Registry::default();
     registry.upsert(account(EMAIL, "Acme"));
-    registry.active = Active::Settled(EMAIL.to_string());
+    registry.settle(Some(EMAIL.to_string()));
     let host = machine_holding(&registry);
 
     let (result, printed) = run_list_in(&host, "ungrouped", true);
@@ -813,7 +813,7 @@ fn an_alias_is_not_a_scope() {
 fn list_narrows_on_a_machine_with_no_active_account() {
     let host = machine_holding_three_accounts();
     let mut registry = common::registry_of(&host);
-    registry.active = Active::Nobody;
+    registry.settle(None);
     common::save_registry(&host, &registry);
 
     let (result, printed) = run_list_in(&host, "work", false);
@@ -907,7 +907,7 @@ fn the_utilization_figures_line_up_down_the_column_across_unalike_accounts() {
     ));
     registry.upsert(per_model);
 
-    registry.active = Active::Settled(EMAIL.to_string());
+    registry.settle(Some(EMAIL.to_string()));
     let host = machine_holding(&registry);
 
     let (result, printed) = run_list(&host, false);

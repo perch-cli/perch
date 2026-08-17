@@ -71,7 +71,7 @@ fn assert_the_switch_captured_and_landed(host: &FakeHost, why: &str) {
         Some(SECOND_CREDENTIAL),
         "and the incoming Credential is the live one: {why}"
     );
-    assert_eq!(registry_of(host).active.whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(host).active().whose(), Some(SECOND_EMAIL));
 }
 
 fn stored_credential(host: &FakeHost, email: &str) -> Option<String> {
@@ -173,7 +173,7 @@ fn a_switch_that_cannot_place_the_default_profile_changes_nothing() {
         "it names the assumption that failed: {refused}"
     );
     assert_eq!(
-        registry_of(&host).active.whose(),
+        registry_of(&host).active().whose(),
         Some(EMAIL),
         "and nothing moved: the Account that was active still is"
     );
@@ -196,7 +196,7 @@ fn switching_by_email_makes_that_account_the_one_every_client_reads() {
         "the incoming Credential is the live one"
     );
     assert!(identity_file(&host).contains(SECOND_EMAIL));
-    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
     assert!(
         printed.contains(&format!("Switched to {SECOND_EMAIL}")),
         "{printed}"
@@ -562,7 +562,7 @@ fn a_sessions_directory_that_will_not_be_read_stops_the_switch_rather_than_readi
         Some(CREDENTIAL),
         "and nothing was written, because the doubt is resolved towards Live"
     );
-    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
 }
 
 /// An absent one is the ordinary case and still means nothing is running: a
@@ -575,7 +575,7 @@ fn a_profile_that_never_ran_a_client_has_no_sessions_directory_and_switches() {
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
     result.expect("nowhere to look is not the same as something to worry about");
-    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
 }
 
 /// The Capture is the write, and it writes into the *outgoing* Account's own
@@ -596,7 +596,7 @@ fn switching_away_from_a_profile_a_client_is_running_against_is_refused() {
         Some(CREDENTIAL),
         "nothing was written"
     );
-    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
 }
 
 /// A live store holding bytes that are not a Credential is the state a
@@ -648,7 +648,7 @@ fn a_live_credential_perch_cannot_read_does_not_stop_a_switch_to_another_account
         Some(SECOND_CREDENTIAL),
         "{printed}"
     );
-    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
     assert_eq!(
         credential_of(&host, EMAIL).as_deref(),
         Some(CREDENTIAL),
@@ -686,7 +686,7 @@ fn a_live_store_that_will_not_answer_stops_the_switch_rather_than_being_written_
         "the live store still holds what it held"
     );
     assert_eq!(
-        registry_of(&host).active.whose(),
+        registry_of(&host).active().whose(),
         Some(EMAIL),
         "and nothing moved"
     );
@@ -735,7 +735,7 @@ fn switching_onto_a_profile_a_client_is_running_against_lands() {
         Some(SECOND_CREDENTIAL),
         "the incoming Account's Credential is the live one"
     );
-    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
 }
 
 /// A `~/.claude.json` managed by stow, chezmoi or yadm, switched over.
@@ -983,7 +983,7 @@ fn a_switch_that_cannot_patch_the_identity_says_what_it_left_where() {
     // only measure that matters — whose Credential a client would read.
     assert_eq!(live_credential(&host).as_deref(), Some(SECOND_CREDENTIAL));
     assert_eq!(stored_credential(&host, EMAIL).as_deref(), Some(CREDENTIAL));
-    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
     assert_eq!(
         host.file(perch::host::temp_beside(&host, Path::new(IDENTITY_PATH))),
         None,
@@ -1188,7 +1188,7 @@ fn something_at_a_lock_path_that_is_not_a_lock_is_named_rather_than_blamed_on_cl
         !said.contains("quit it"),
         "and does not send somebody looking for a Claude Code to quit: {said}"
     );
-    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
 }
 
 /// A takeover on the last attempt gets the lock it just freed.
@@ -1210,7 +1210,7 @@ fn a_lock_abandoned_on_the_last_attempt_is_taken_rather_than_reported_as_held() 
         .0
         .expect("the lock was free by the time the last attempt asked");
 
-    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
 }
 
 #[test]
@@ -1230,7 +1230,7 @@ fn a_lock_somebody_is_holding_stops_the_switch_without_changing_anything() {
     );
     assert!(error.to_string().contains("Nothing was changed"), "{error}");
     assert_eq!(live_credential(&host).as_deref(), Some(CREDENTIAL));
-    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
     assert!(
         host.effects()
             .iter()
@@ -1361,7 +1361,7 @@ fn a_switch_finishes_against_a_claude_json_that_has_no_identity_block_yet() {
         "with every other member of it untouched (ADR 0001): {identity}"
     );
     assert_eq!(
-        registry_of(&host).active.whose(),
+        registry_of(&host).active().whose(),
         Some(SECOND_EMAIL),
         "{printed}"
     );
@@ -1375,7 +1375,7 @@ fn a_switch_finishes_against_a_claude_json_that_has_no_identity_block_yet() {
 fn switching_with_no_active_account_recorded_says_there_was_nothing_to_capture() {
     let host = machine_with_two_accounts();
     let mut registry = registry_of(&host);
-    registry.active = Active::Nobody;
+    registry.settle(None);
     save_registry(&host, &registry);
 
     let (result, printed) = run_switch(&host, SECOND_EMAIL);
@@ -1390,7 +1390,7 @@ fn switching_with_no_active_account_recorded_says_there_was_nothing_to_capture()
         Some(SECOND_CREDENTIAL),
         "and the Switch itself still happened"
     );
-    assert_eq!(registry_of(&host).active.whose(), Some(SECOND_EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
 }
 
 /// Switching away from a Claude Code that is logged out. Worth saying rather
@@ -1446,7 +1446,7 @@ fn a_switch_perch_cannot_write_down_moves_nothing_at_all() {
         "the outgoing Credential is still the live one: {said}"
     );
     assert_eq!(
-        registry_of(&host).active.whose(),
+        registry_of(&host).active().whose(),
         Some(EMAIL),
         "and Perch is on the Account it was on"
     );
@@ -1467,7 +1467,7 @@ fn a_switch_that_moves_nothing_takes_its_landing_back() {
 
     result.expect_err("the Default Profile could not be written");
     assert_eq!(
-        registry_of(&host).active,
+        *registry_of(&host).active(),
         Active::Settled(EMAIL.to_string()),
         "nothing moved, so Perch is settled on the Account it was on rather \
          than in flight"
@@ -1525,7 +1525,7 @@ fn a_switch_that_cannot_capture_says_nothing_moved_and_moves_nothing() {
         Some(CREDENTIAL),
         "the live Credential is the outgoing Account's, untouched"
     );
-    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
 }
 
 /// The live write failing with no active Account recorded. There is no
@@ -1537,7 +1537,7 @@ fn a_switch_that_cannot_capture_says_nothing_moved_and_moves_nothing() {
 fn a_live_write_that_fails_with_nothing_active_names_the_account_that_did_not_land() {
     let host = two_accounts_off_macos();
     let mut registry = registry_of(&host);
-    registry.active = Active::Nobody;
+    registry.settle(None);
     save_registry(&host, &registry);
     let host = host.with_unwritable_file(CREDENTIALS_PATH, "read-only file");
 
@@ -1583,7 +1583,7 @@ fn a_switch_that_captured_but_could_not_go_live_says_nothing_was_lost() {
         "and it says the Switch did not happen: {said}"
     );
     assert_eq!(
-        registry_of(&host).active.whose(),
+        registry_of(&host).active().whose(),
         Some(EMAIL),
         "the machine never moved"
     );
@@ -1622,7 +1622,7 @@ fn a_live_write_that_fails_with_nothing_captured_says_the_profile_is_unchanged()
 fn an_identity_that_cannot_be_patched_with_nothing_active_still_says_what_to_run() {
     let host = machine_with_two_accounts().with_unwritable_file(IDENTITY_PATH, "read-only file");
     let mut registry = registry_of(&host);
-    registry.active = Active::Nobody;
+    registry.settle(None);
     save_registry(&host, &registry);
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
@@ -1759,7 +1759,7 @@ fn a_stored_credential_that_cannot_be_understood_stops_the_switch_before_it_writ
         Some(CREDENTIAL),
         "nothing was written: the Credential is read before the first write"
     );
-    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
 }
 
 /// A client launched by a Run hands `CLAUDE_CONFIG_DIR` on to everything it
@@ -1874,7 +1874,7 @@ fn a_machine_on_an_accented_account() -> FakeHost {
 #[test]
 fn a_rotation_is_captured_however_the_identity_file_cases_a_non_ascii_address() {
     let host = a_machine_on_an_accented_account();
-    assert_eq!(registry_of(&host).active.whose(), Some(ACCENTED));
+    assert_eq!(registry_of(&host).active().whose(), Some(ACCENTED));
     // Claude Code renewed, Rotated, and rewrote its own file with the other
     // spelling of the same address.
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
@@ -1955,7 +1955,7 @@ fn a_landing_left_behind_by_a_death_does_not_cost_the_outgoing_account_its_crede
         "while the Switch that was asked for happened"
     );
     assert_eq!(
-        registry_of(&host).active,
+        *registry_of(&host).active(),
         Active::Settled(THIRD_EMAIL.to_string()),
         "and nothing is left in flight"
     );
@@ -2029,7 +2029,7 @@ fn a_landing_is_settled_onto_whoever_the_live_credential_belongs_to() {
         .unwrap_or_else(|error| panic!("{}: nobody is on it: {error}", case.what));
 
         assert_eq!(
-            registry_of(&host).active,
+            *registry_of(&host).active(),
             Active::Settled(case.settles_on.to_string()),
             "{}: the Landing is settled rather than left in flight",
             case.what
@@ -2069,7 +2069,7 @@ fn a_live_store_that_will_not_answer_resolves_no_landing() {
         "the live store still holds what it held"
     );
     assert!(
-        matches!(registry_of(&host).active, Active::Landing { .. }),
+        matches!(*registry_of(&host).active(), Active::Landing { .. }),
         "and the Landing is still there to be resolved once the store answers"
     );
 }
@@ -2084,7 +2084,7 @@ fn a_live_store_that_will_not_answer_resolves_no_landing() {
 fn a_landing_that_left_nobody_behind_is_refused_without_naming_one() {
     let host = machine_with_two_accounts();
     let mut registry = registry_of(&host);
-    registry.active = Active::Nobody;
+    registry.settle(None);
     save_registry(&host, &registry);
     a_switch_died_mid_flight(&host, None, SECOND_EMAIL);
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
@@ -2169,7 +2169,7 @@ fn repairing_an_interrupted_switch_never_writes_over_a_rotation_it_declined_to_s
         .0
         .expect_err("the Identity could not be patched");
     assert_eq!(
-        registry_of(&host).active.whose(),
+        registry_of(&host).active().whose(),
         Some(SECOND_EMAIL),
         "the incoming Account is live, so Perch records it as active"
     );
@@ -2286,7 +2286,7 @@ fn a_switch_onto_an_account_that_shares_a_profile_is_refused() {
          what a person needs to act: {said}"
     );
     assert_eq!(
-        registry_of(&host).active.whose(),
+        registry_of(&host).active().whose(),
         Some(EMAIL),
         "and the machine is exactly as it was: {printed}"
     );

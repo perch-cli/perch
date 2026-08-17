@@ -594,7 +594,7 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
     // `choose` keeps it, which is the disagreement this whole function exists to
     // prevent.
     let here = registry
-        .active
+        .active()
         .whose()
         .and_then(|active| {
             accounts
@@ -989,7 +989,7 @@ fn already_the_best(
 pub(crate) mod tests {
     use super::*;
     use crate::probe::Identity;
-    use crate::registry::{Active, Quarantine};
+    use crate::registry::Quarantine;
     use chrono::TimeZone;
 
     pub(crate) fn now() -> DateTime<Utc> {
@@ -1050,8 +1050,7 @@ pub(crate) mod tests {
     pub(crate) fn holding(accounts: Vec<Account>) -> Registry {
         let mut registry = Registry::default();
         registry.declare_group("work").unwrap();
-        registry.active =
-            Active::settled_on(accounts.first().map(|first| first.email().to_string()));
+        registry.settle(accounts.first().map(|first| first.email().to_string()));
         for account in accounts {
             registry.upsert(account);
         }
@@ -1264,7 +1263,7 @@ pub(crate) mod tests {
         choose(
             registry,
             &Scope::Group("work".to_string()),
-            registry.active.whose(),
+            registry.active().whose(),
             set_aside,
             now(),
         )
@@ -1779,7 +1778,7 @@ pub(crate) mod tests {
                     account("worse@example.com", vec![resetting("5-hour", 95.0, 2)]),
                     account("roomiest@example.com", vec![window("5-hour", 5.0)]),
                 ]);
-                registry.active = Active::Settled("HERE@EXAMPLE.COM".to_string());
+                registry.settle(Some("HERE@EXAMPLE.COM".to_string()));
                 registry
             },
             Strategy::SoonestReset,

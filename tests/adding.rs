@@ -34,7 +34,7 @@ fn login_directory(host: &FakeHost) -> std::path::PathBuf {
 /// there, still active, and its Credential is untouched.
 fn assert_the_active_account_survived(host: &FakeHost) {
     let registry = registry_of(host);
-    assert_eq!(registry.active.whose(), Some(EMAIL));
+    assert_eq!(registry.active().whose(), Some(EMAIL));
     assert_eq!(
         host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
         Some(CREDENTIAL),
@@ -582,7 +582,7 @@ fn an_add_does_not_revert_a_switch_that_ran_while_its_login_was_open() {
     let registry = registry_of(&host);
     assert!(registry.account(THIRD_EMAIL).is_some(), "{printed}");
     assert_eq!(
-        registry.active.whose(),
+        registry.active().whose(),
         Some(SECOND_EMAIL),
         "the Switch that happened during the login stands: an add records an \
          Account, it does not put the whole registry back to what it was"

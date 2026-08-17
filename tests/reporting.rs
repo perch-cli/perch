@@ -170,7 +170,7 @@ fn status_says_a_switch_was_in_flight_and_not_recorded_and_still_exits_zero() {
 fn a_switch_in_flight_from_nobody_is_still_reported_and_still_exits_zero() {
     let host = machine_with_two_accounts();
     let mut registry = registry_of(&host);
-    registry.active = Active::Nobody;
+    registry.settle(None);
     save_registry(&host, &registry);
     a_switch_died_mid_flight(&host, None, SECOND_EMAIL);
 
@@ -390,7 +390,7 @@ fn status_with_no_active_account_names_the_remedy_that_applies() {
     run_remove(&host, EMAIL)
         .0
         .expect("the active one is given up");
-    assert_eq!(registry_of(&host).active, Active::Nobody);
+    assert_eq!(*registry_of(&host).active(), Active::Nobody);
 
     let (result, _) = run_status(&host, false);
 

@@ -22,7 +22,7 @@ use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::probe::Installed;
 use crate::registry::{Account, Registry, Scope};
-use crate::switch::{self, Captured};
+use crate::switch::{self, Captured, Switched};
 use crate::target::{self, Target};
 use crate::utilization;
 
@@ -65,18 +65,22 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
     already_there(host, &installed, &registry, &incoming)?;
 
     // Everything the Switch owes the registry — the Quarantine it may have
-    // discovered, which Account is active now — is written by `record`, which
-    // is the only way to reach what the Switch found. What is left here is
+    // discovered, which Account is active now — is written by `switch_to`,
+    // which is the only way to reach what the Switch found. What is left here is
     // saying it.
-    let landing = switch::perform(
+    //
+    // `Reason::Asked` is the whole of what this caller differs by: somebody
+    // typed this, so there is nothing to pace and nothing else to write down
+    // beside it (ADR 0013).
+    let Switched { captured, .. } = switch::switch_to(
         host,
         &mut perch,
+        &mut registry,
         &installed,
         &incoming,
         outgoing.as_ref(),
-        &mut registry,
-    );
-    let captured = landing.record(host, &mut perch, &mut registry)?;
+        switch::Reason::Asked,
+    )?;
 
     report(out, &registry, &incoming, &captured, host.now())?;
     match caveat {
@@ -126,7 +130,7 @@ fn decide(
     let choice = cycle::choose(
         registry,
         &scope,
-        registry.active.whose(),
+        registry.active().whose(),
         &cycle::SetAside::nothing(),
         now,
     )?;

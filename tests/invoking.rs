@@ -31,7 +31,7 @@ use perch::error::{
     EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_NOT_UNDERSTOOD, EXIT_NOTHING_TO_DO, EXIT_OK,
 };
 use perch::probe::Identity;
-use perch::registry::{Account, Active, Registry, Settings};
+use perch::registry::{Account, Registry, Settings};
 
 /// The Account every scratch machine holds, and the Group declared beside it.
 const SOMEONE: &str = "someone@example.com";
@@ -112,7 +112,7 @@ impl Scratch {
             group: None,
             utilization: None,
         });
-        registry.active = Active::Settled(SOMEONE.to_string());
+        registry.settle(Some(SOMEONE.to_string()));
         registry
             .groups
             .insert(GROUP.to_string(), Settings::default());

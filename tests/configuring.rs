@@ -45,7 +45,7 @@ fn where_the_strategies_disagree() -> FakeHost {
 }
 
 fn active(host: &FakeHost) -> Option<String> {
-    registry_of(host).active.whose().map(str::to_string)
+    registry_of(host).active().whose().map(str::to_string)
 }
 
 /// The Settings a Group holds, which are the whole of what a Cycle there

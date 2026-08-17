@@ -28,7 +28,7 @@ use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::lock::Held;
 use crate::probe::Installed;
-use crate::registry::{self, Account, Active, Registry};
+use crate::registry::{self, Account, Registry};
 use crate::switch;
 use crate::target;
 
@@ -312,7 +312,7 @@ fn land_on(
     let is_live = landed.as_ref().err().is_none_or(|stopped| stopped.is_live);
 
     if is_live {
-        registry.active = Active::Settled(successor.email().to_string());
+        registry.settle(Some(successor.email().to_string()));
         registry::save(host, perch, registry).map_err(|error| {
             error.with_note(&format!(
                 "Nothing was removed. {}'s Credential is the live one now, so \

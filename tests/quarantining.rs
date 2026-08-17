@@ -84,7 +84,7 @@ fn a_credential_anthropic_will_not_renew_quarantines_its_account() {
          again with it gets the same answer forever: {printed}"
     );
     assert!(
-        is_held(&host, EMAIL) && registry_of(&host).active.whose() == Some(EMAIL),
+        is_held(&host, EMAIL) && registry_of(&host).active().whose() == Some(EMAIL),
         "the Account is kept and stays active — a Quarantine is a state, not a \
          removal: {printed}"
     );
@@ -374,7 +374,7 @@ fn switching_to_a_quarantined_account_by_name_is_refused_with_a_code_of_its_own(
         Some(CREDENTIAL),
         "and the Account being worked in is exactly where it was"
     );
-    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
 }
 
 #[test]
@@ -418,7 +418,7 @@ fn an_account_quarantined_by_a_refresh_leaves_the_cycling_pool_from_that_moment(
         "a Cycle lands nowhere rather than on an Account Perch has just watched \
          Anthropic turn down: {error}"
     );
-    assert_eq!(registry_of(&host).active.whose(), Some(EMAIL));
+    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
 }
 
 /// The Default Profile is not Perch's alone to write. Somebody who runs
