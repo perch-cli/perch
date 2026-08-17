@@ -29,7 +29,6 @@ pub mod purge;
 pub mod reconcile;
 pub mod registry;
 pub mod report;
-pub mod reserve;
 pub mod service;
 pub mod switch;
 pub mod target;
