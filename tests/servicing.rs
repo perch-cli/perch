@@ -750,3 +750,43 @@ fn a_service_manager_that_is_not_installed_says_so_rather_than_failing_blankly()
         "and the unit it had written is taken back"
     );
 }
+
+/// The Service writes its decisions into a file inside Perch's home, and the
+/// install is what has to put that directory there.
+///
+/// Perch's home is made on the way to the first lock Perch takes, and an
+/// install takes none — so on a machine where Claude Code is logged in and
+/// Perch has never run, the directory the unit points its output at simply was
+/// not there. `cmd /c … >> "…\watch.log"` cannot open a redirect into a
+/// directory that does not exist, so the Windows task failed at every logon
+/// without saying anything, and launchd cannot open a `StandardOutPath` there
+/// either.
+#[test]
+fn installing_on_a_machine_perch_has_never_run_on_makes_room_for_the_log() {
+    let host = logged_in_machine().with_exec(
+        "launchctl",
+        &["bootout", "gui/501/cli.perch.watch"],
+        worked(),
+    );
+    let plist = unit_at(&host);
+    host.set_exec(
+        "launchctl",
+        &["bootstrap", "gui/501", &plist.to_string_lossy()],
+        worked(),
+    );
+    let log = perch::service::log_path(&host)
+        .expect("home is known")
+        .expect("this platform keeps its own log");
+    assert!(
+        !host.path_exists(log.parent().expect("the log is inside Perch's home")),
+        "the fixture's premise: nothing has made Perch's home yet"
+    );
+
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
+
+    result.expect("the install works on a machine Perch has never run on");
+    assert!(
+        host.path_exists(log.parent().expect("the log is inside Perch's home")),
+        "the directory the unit points its output at is there: {printed}"
+    );
+}

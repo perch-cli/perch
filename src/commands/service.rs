@@ -39,6 +39,23 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     let at = service::unit_path(host)?;
     let replaced = at.as_deref().is_some_and(|at| host.path_exists(at));
 
+    // The directory the decision log goes in, before anything is told to write
+    // there. It is inside Perch's home, which is made on the way to the first
+    // lock Perch takes — and an install reads the registry through nothing that
+    // takes one, so on a machine where Claude Code is logged in and Perch has
+    // never run, the directory was simply not there. `cmd /c … >> "…\watch.log"`
+    // cannot open a redirect into a directory that does not exist, so the
+    // Windows task failed at every logon, silently; launchd cannot open
+    // `StandardOutPath` either.
+    //
+    // Private, because it is Perch's own home rather than a path somebody
+    // typed, and a Purge sweeps it with everything else Perch holds.
+    if let Some(log) = unit.log.as_deref().and_then(std::path::Path::parent) {
+        host.create_private_dir_all(log).map_err(|err| {
+            PerchError::file_write(log, format!("could not make room for the log: {err}"))
+        })?;
+    }
+
     // The file first, then the service manager: `bootstrap` and `enable` are
     // both given a path that has to be there when they read it.
     if let (Some(at), Some(rendered)) = (&at, unit.rendered(host.platform())) {
