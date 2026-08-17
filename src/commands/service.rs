@@ -171,7 +171,19 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
     let platform = host.platform();
     let at = service::unit_path(host)?;
     let installed = is_installed(host, at.as_deref())?;
-    let running = installed && is_running(host);
+    let watching = watcher_is_running(host);
+    // Windows is asked differently, because `schtasks /Query` answers whether
+    // the task *exists* rather than whether it is running — which is the same
+    // question `is_installed` asks it, so `installed && is_running` was true by
+    // construction and a logon task that had not fired since boot read as
+    // running. The evidence Windows does have is the watcher lock: a Watcher
+    // holds it for exactly as long as one runs, and the task's whole action is
+    // to be one. It cannot tell that Watcher from a `perch watcher run`
+    // somebody typed, and that is the smaller error of the two.
+    let running = match platform {
+        Platform::Windows => installed && watching,
+        _ => installed && is_running(host),
+    };
 
     // Read off the unit that is actually installed rather than off what one
     // would be written from now, because the whole point of the question is
@@ -180,7 +192,6 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
         .then(|| recorded_binary(host, at.as_deref()))
         .flatten();
     let binary_is_there = recorded.as_deref().map(|at| host.path_exists(at));
-    let watching = watcher_is_running(host);
 
     if json {
         return say_json(
