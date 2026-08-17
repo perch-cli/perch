@@ -612,8 +612,8 @@ fn permitted(registry: &Registry, _settled: &Settled) -> Result<Watching> {
     if !settings.watcher_may_act {
         return Err(PerchError::Invalid(format!(
             "{} has not been told the watcher may act on it, so nothing is \
-             being watched. Nothing only ever changes underneath you because \
-             you said it could.\n\
+             being watched. Anything that changes underneath you only ever \
+             does so because you said it could.\n\
              `perch config set {} watcher-may-act true` says it may.",
             scope.described(),
             scope.word(),
