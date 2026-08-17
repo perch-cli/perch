@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 #[cfg(unix)]
 use super::PRIVATE_DIR_MODE;
 use super::{
-    Execution, Host, HostError, HttpRequest, HttpResponse, Link, PRIVATE_FILE_MODE, Platform,
-    Waited,
+    Clock, Environment, Execution, Files, Filesystem, Host, HostError, HttpRequest, HttpResponse,
+    Keys, Link, Links, Network, PRIVATE_FILE_MODE, Platform, Processes, Terminal, Waited, Waiting,
 };
 use crate::keychain::{
     self, KeychainError, SECURITY_BIN, WritePath, classify, decode_password_output,
@@ -293,11 +293,13 @@ impl RealHost {
     }
 }
 
-impl Host for RealHost {
+impl Clock for RealHost {
     fn now(&self) -> DateTime<Utc> {
         Utc::now()
     }
+}
 
+impl Environment for RealHost {
     fn home_dir(&self) -> Result<PathBuf, HostError> {
         home_from(HOME_VARIABLE, std::env::var_os(HOME_VARIABLE))
     }
@@ -356,6 +358,28 @@ impl Host for RealHost {
         Ok(std::fs::canonicalize(&launched).unwrap_or(launched))
     }
 
+    /// Linked rather than shelled out to (ADR 0021): the whole of it is one
+    /// `geteuid`, and `id -u` would be a process spawned to answer a question
+    /// the C library already holds.
+    ///
+    /// The *effective* uid rather than the real one, because that is the
+    /// identity the filesystem will judge every write by, and the one launchd
+    /// files a session under.
+    #[cfg(unix)]
+    fn user_id(&self) -> Option<u32> {
+        // SAFETY: `geteuid` takes nothing, cannot fail, and touches no memory.
+        Some(unsafe { libc::geteuid() })
+    }
+
+    /// Windows has no uid: a logon task names the user it runs as, and there is
+    /// nothing here to quote or to refuse (ADR 0040).
+    #[cfg(not(unix))]
+    fn user_id(&self) -> Option<u32> {
+        None
+    }
+}
+
+impl Files for RealHost {
     fn read_file(&self, path: &Path) -> Result<String, HostError> {
         match std::fs::read_to_string(path) {
             Ok(contents) => Ok(contents),
@@ -478,6 +502,27 @@ impl Host for RealHost {
         }
     }
 
+    fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>, HostError> {
+        let entries = match std::fs::read_dir(path) {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Err(HostError::NotFound {
+                    path: path.to_path_buf(),
+                });
+            }
+            Err(err) => return Err(HostError::Io(err)),
+        };
+
+        let mut found = Vec::new();
+        for entry in entries {
+            found.push(entry?.path());
+        }
+        found.sort();
+        Ok(found)
+    }
+}
+
+impl Links for RealHost {
     fn link(&self, kind: Link, target: &Path, at: &Path) -> Result<(), HostError> {
         make_link(kind, target, at)
     }
@@ -504,26 +549,9 @@ impl Host for RealHost {
     fn remove_link(&self, path: &Path) -> Result<(), HostError> {
         remove_link(path)
     }
+}
 
-    fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>, HostError> {
-        let entries = match std::fs::read_dir(path) {
-            Ok(entries) => entries,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                return Err(HostError::NotFound {
-                    path: path.to_path_buf(),
-                });
-            }
-            Err(err) => return Err(HostError::Io(err)),
-        };
-
-        let mut found = Vec::new();
-        for entry in entries {
-            found.push(entry?.path());
-        }
-        found.sort();
-        Ok(found)
-    }
-
+impl Keys for RealHost {
     fn keychain_get(&self, service: &str, account: &str) -> Result<String, KeychainError> {
         let execution = security(
             &["find-generic-password", "-s", service, "-a", account, "-w"],
@@ -584,7 +612,9 @@ impl Host for RealHost {
         )?;
         Ok(())
     }
+}
 
+impl Processes for RealHost {
     fn exec(&self, program: &str, args: &[&str]) -> Result<Execution, HostError> {
         Ok(run(Path::new(program), args, None)?)
     }
@@ -628,33 +658,15 @@ impl Host for RealHost {
     fn process_started_at(&self, pid: u32) -> Option<DateTime<Utc>> {
         process_started_at(pid)
     }
+}
 
+impl Waiting for RealHost {
     fn sleep(&self, millis: u64) {
         std::thread::sleep(std::time::Duration::from_millis(millis));
     }
 
     fn listen_for_interrupts(&self) {
         listen_for_interrupts();
-    }
-
-    /// Linked rather than shelled out to (ADR 0021): the whole of it is one
-    /// `geteuid`, and `id -u` would be a process spawned to answer a question
-    /// the C library already holds.
-    ///
-    /// The *effective* uid rather than the real one, because that is the
-    /// identity the filesystem will judge every write by, and the one launchd
-    /// files a session under.
-    #[cfg(unix)]
-    fn user_id(&self) -> Option<u32> {
-        // SAFETY: `geteuid` takes nothing, cannot fail, and touches no memory.
-        Some(unsafe { libc::geteuid() })
-    }
-
-    /// Windows has no uid: a logon task names the user it runs as, and there is
-    /// nothing here to quote or to refuse (ADR 0040).
-    #[cfg(not(unix))]
-    fn user_id(&self) -> Option<u32> {
-        None
     }
 
     /// In slices, checking between them, because the platforms do not agree on
@@ -685,7 +697,9 @@ impl Host for RealHost {
             false => Waited::Fully,
         }
     }
+}
 
+impl Terminal for RealHost {
     fn is_interactive(&self) -> bool {
         use std::io::IsTerminal;
         // Both ends matter: a question needs somewhere to be shown as well as
@@ -708,7 +722,9 @@ impl Host for RealHost {
     fn read_secret(&self) -> Result<Option<String>, HostError> {
         read_without_echo()
     }
+}
 
+impl Network for RealHost {
     fn http(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, HostError> {
         let execution = curl(&curl_config(request)?)?;
         if !execution.succeeded() {
@@ -722,6 +738,10 @@ impl Host for RealHost {
         split_reply(&execution.stdout)
     }
 }
+
+impl Filesystem for RealHost {}
+
+impl Host for RealHost {}
 
 /// The body and the status code out of what `curl` wrote, which is the body
 /// followed by `--write-out '\n%{http_code}'`.

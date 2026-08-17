@@ -613,6 +613,7 @@ fn gone_quiet_for(host: &dyn Host, at: &Path, stale_millis: i64) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use crate::host::prelude::*;
     use std::path::{Path, PathBuf};
 
     use super::*;

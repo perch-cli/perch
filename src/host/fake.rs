@@ -13,8 +13,9 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, TimeZone, Utc};
 
 use super::{
-    Execution, Host, HostError, HttpRequest, HttpResponse, Link, PRIVATE_DIR_MODE,
-    PRIVATE_FILE_MODE, Platform, Waited,
+    Clock, Environment, Execution, Files, Filesystem, Host, HostError, HttpRequest, HttpResponse,
+    Keys, Link, Links, Network, PRIVATE_DIR_MODE, PRIVATE_FILE_MODE, Platform, Processes, Terminal,
+    Waited, Waiting,
 };
 use crate::keychain::KeychainError;
 
@@ -263,11 +264,18 @@ impl Default for FakeHost {
 /// `process_started_at` cost ten lines of trait, thirty-six here, and four
 /// `with_*` methods for one concept.
 ///
-/// Kept in the same file as `impl Host for FakeHost` below, deliberately. It
-/// looks like the obvious split for a file this size and it is not: over the
-/// last twenty-five commits that added or removed a function here, eleven
-/// touched both halves and eight touched one. Separating them would put the
-/// majority of changes across two files and say less about each, not more.
+/// Kept in the same file as the `impl` blocks below, deliberately. It looks
+/// like the obvious split for a file this size and it is not: over the last
+/// twenty-five commits that added or removed a function here, eleven touched
+/// both halves and eight touched one. Separating them would put the majority of
+/// changes across two files and say less about each, not more.
+///
+/// The same measurement is why the file did not follow the interface when the
+/// interface became nine traits (ADR 0056). There are nine `impl` blocks below,
+/// one per concern, and one file holding them — and the multiplier this comment
+/// measures is untouched by that, because it is per method rather than per
+/// trait. What would pay it down is structure in the fields these builders
+/// arrange, which is #205.
 ///
 /// What does separate cleanly is the *port's* semantics from either — and that
 /// is `tests/conformance.rs`, which asks this fake and [`super::RealHost`] the
@@ -880,7 +888,7 @@ impl FakeHost {
     }
 
     /// The link a path holds, of whatever kind, and what it stands for — hard
-    /// links included, which [`Host::link_target`] cannot report because the
+    /// links included, which [`Links::link_target`] cannot report because the
     /// filesystem cannot either.
     pub fn link_at(&self, path: impl AsRef<Path>) -> Option<(Link, PathBuf)> {
         self.links.borrow().get(path.as_ref()).cloned()
@@ -1111,11 +1119,13 @@ fn exec_key(program: &str, args: &[&str]) -> String {
     key
 }
 
-impl Host for FakeHost {
+impl Clock for FakeHost {
     fn now(&self) -> DateTime<Utc> {
         *self.now.borrow()
     }
+}
 
+impl Environment for FakeHost {
     fn home_dir(&self) -> Result<PathBuf, HostError> {
         Ok(self.home.clone())
     }
@@ -1147,6 +1157,12 @@ impl Host for FakeHost {
         Ok(self.current_exe.borrow().clone())
     }
 
+    fn user_id(&self) -> Option<u32> {
+        *self.user_id.borrow()
+    }
+}
+
+impl Files for FakeHost {
     fn read_file(&self, path: &Path) -> Result<String, HostError> {
         self.record(Effect::ReadFile(path.to_path_buf()));
         let at = self.through_links(path)?;
@@ -1486,6 +1502,67 @@ impl Host for FakeHost {
         Ok(())
     }
 
+    /// Through a link, as `read_dir` reads through one — but reporting what was
+    /// found under the name that was asked about, which is what `read_dir` does
+    /// with the path it was given. A `sessions` linked into another Profile
+    /// therefore answers with that Profile's markers, which is the whole of the
+    /// hazard ADR 0027 names.
+    fn list_dir(&self, asked: &Path) -> Result<Vec<PathBuf>, HostError> {
+        let resolved = self.resolved(asked);
+        let Some(path) = resolved
+            .clone()
+            .filter(|at| self.dirs.borrow().contains(at))
+        else {
+            // Something of that name that is not a directory is `ENOTDIR`, not
+            // `ENOENT`, and the two are opposite answers to the caller that
+            // matters: `probe::clients_in` reads `NotFound` as "no client has
+            // ever run here, so nothing is running" and lets a Switch replace
+            // the live Credential, and anything else as doubt it refuses on. So
+            // a `<profile>/sessions` that is a regular file — a botched restore,
+            // a name crossed by a hard link — read as idle in every behaviour
+            // test and as a refusal on the machine.
+            if resolved.is_some() {
+                return Err(HostError::Other(format!(
+                    "{} is not a directory",
+                    asked.display()
+                )));
+            }
+            return Err(HostError::NotFound {
+                path: asked.to_path_buf(),
+            });
+        };
+        let path = path.as_path();
+        // A directory that is there and will not be read is a different answer
+        // from one that is not there, and callers are entitled to tell them
+        // apart. Arranged the same way an unreadable file is.
+        if let Some(detail) = self.unreadable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
+        }
+        let held = |candidate: &PathBuf| candidate.parent() == Some(path);
+        let mut found: BTreeSet<PathBuf> = self
+            .files
+            .borrow()
+            .keys()
+            .filter(|file| held(file))
+            .cloned()
+            .collect();
+        found.extend(self.dirs.borrow().iter().filter(|dir| held(dir)).cloned());
+        // Links included, pointing at something or not: a directory holds the
+        // ones it holds, and a broken one is precisely what has to be found.
+        found.extend(self.links.borrow().keys().filter(|at| held(at)).cloned());
+        // Under the name that was asked about rather than the one it resolves
+        // to, so a caller that joins a name onto what it was given finds it.
+        Ok(found
+            .into_iter()
+            .map(|at| match at.file_name() {
+                Some(name) => asked.join(name),
+                None => at,
+            })
+            .collect())
+    }
+}
+
+impl Links for FakeHost {
     /// Makes a link, refusing the kinds this machine could not make.
     ///
     /// The refusals are the point of having this behind the port at all: a
@@ -1583,66 +1660,9 @@ impl Host for FakeHost {
         self.modified.borrow_mut().remove(path);
         Ok(())
     }
+}
 
-    /// Through a link, as `read_dir` reads through one — but reporting what was
-    /// found under the name that was asked about, which is what `read_dir` does
-    /// with the path it was given. A `sessions` linked into another Profile
-    /// therefore answers with that Profile's markers, which is the whole of the
-    /// hazard ADR 0027 names.
-    fn list_dir(&self, asked: &Path) -> Result<Vec<PathBuf>, HostError> {
-        let resolved = self.resolved(asked);
-        let Some(path) = resolved
-            .clone()
-            .filter(|at| self.dirs.borrow().contains(at))
-        else {
-            // Something of that name that is not a directory is `ENOTDIR`, not
-            // `ENOENT`, and the two are opposite answers to the caller that
-            // matters: `probe::clients_in` reads `NotFound` as "no client has
-            // ever run here, so nothing is running" and lets a Switch replace
-            // the live Credential, and anything else as doubt it refuses on. So
-            // a `<profile>/sessions` that is a regular file — a botched restore,
-            // a name crossed by a hard link — read as idle in every behaviour
-            // test and as a refusal on the machine.
-            if resolved.is_some() {
-                return Err(HostError::Other(format!(
-                    "{} is not a directory",
-                    asked.display()
-                )));
-            }
-            return Err(HostError::NotFound {
-                path: asked.to_path_buf(),
-            });
-        };
-        let path = path.as_path();
-        // A directory that is there and will not be read is a different answer
-        // from one that is not there, and callers are entitled to tell them
-        // apart. Arranged the same way an unreadable file is.
-        if let Some(detail) = self.unreadable.borrow().get(path) {
-            return Err(HostError::Other(detail.clone()));
-        }
-        let held = |candidate: &PathBuf| candidate.parent() == Some(path);
-        let mut found: BTreeSet<PathBuf> = self
-            .files
-            .borrow()
-            .keys()
-            .filter(|file| held(file))
-            .cloned()
-            .collect();
-        found.extend(self.dirs.borrow().iter().filter(|dir| held(dir)).cloned());
-        // Links included, pointing at something or not: a directory holds the
-        // ones it holds, and a broken one is precisely what has to be found.
-        found.extend(self.links.borrow().keys().filter(|at| held(at)).cloned());
-        // Under the name that was asked about rather than the one it resolves
-        // to, so a caller that joins a name onto what it was given finds it.
-        Ok(found
-            .into_iter()
-            .map(|at| match at.file_name() {
-                Some(name) => asked.join(name),
-                None => at,
-            })
-            .collect())
-    }
-
+impl Keys for FakeHost {
     fn keychain_get(&self, service: &str, account: &str) -> Result<String, KeychainError> {
         self.record(Effect::KeychainGet {
             service: service.to_string(),
@@ -1721,7 +1741,9 @@ impl Host for FakeHost {
                 account: account.to_string(),
             })
     }
+}
 
+impl Processes for FakeHost {
     fn exec(&self, program: &str, args: &[&str]) -> Result<Execution, HostError> {
         self.record(Effect::Exec {
             program: program.to_string(),
@@ -1787,7 +1809,9 @@ impl Host for FakeHost {
     fn process_started_at(&self, pid: u32) -> Option<DateTime<Utc>> {
         self.live_processes.borrow().get(&pid).copied().flatten()
     }
+}
 
+impl Waiting for FakeHost {
     /// Costs no time, but does pass it: waiting for a lock somebody else holds
     /// is how that lock comes to be stale, and a test should be able to reach
     /// that without sitting through it.
@@ -1806,10 +1830,6 @@ impl Host for FakeHost {
 
     fn listen_for_interrupts(&self) {
         *self.listening.borrow_mut() = true;
-    }
-
-    fn user_id(&self) -> Option<u32> {
-        *self.user_id.borrow()
     }
 
     /// Passes the time the same way a sleep does, and ends the way the test
@@ -1856,7 +1876,9 @@ impl Host for FakeHost {
             false => Waited::Fully,
         }
     }
+}
 
+impl Terminal for FakeHost {
     fn is_interactive(&self) -> bool {
         *self.interactive.borrow()
     }
@@ -1879,7 +1901,9 @@ impl Host for FakeHost {
         self.while_they_answer();
         Ok(self.secrets.borrow_mut().pop_front())
     }
+}
 
+impl Network for FakeHost {
     /// Answers with whatever the test arranged for this endpoint, and with
     /// nothing at all otherwise.
     ///
@@ -1929,6 +1953,10 @@ impl Host for FakeHost {
             .ok_or_else(|| HostError::Other(format!("the fake Host has no network: {asked}")))
     }
 }
+
+impl Filesystem for FakeHost {}
+
+impl Host for FakeHost {}
 
 #[cfg(test)]
 mod tests {

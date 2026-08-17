@@ -19,8 +19,9 @@ use chrono::{DateTime, Duration, Utc};
 use common::*;
 use perch::anthropic::{PROFILE_URL, TOKEN_URL, USAGE_URL};
 use perch::error::{EXIT_INVALID, EXIT_NOT_INTERCHANGEABLE};
+use perch::host::FakeHost;
 use perch::host::fake::{Effect, THIS_PROCESS};
-use perch::host::{FakeHost, Host};
+use perch::host::prelude::*;
 use perch::watch::REFRESH_INTERVAL_MILLIS;
 
 /// The Credential of an Account whose access token ran out twenty minutes ago,

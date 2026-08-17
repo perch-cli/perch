@@ -8,9 +8,9 @@
 mod common;
 
 use common::*;
-use perch::Host;
 use perch::commands::add::AddArgs;
 use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND};
+use perch::host::prelude::*;
 use perch::host::{FakeHost, fake::Effect};
 
 /// A machine with the first Account already adopted and a second login waiting

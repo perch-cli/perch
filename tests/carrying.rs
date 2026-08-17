@@ -11,9 +11,10 @@ mod common;
 use std::path::{Path, PathBuf};
 
 use common::*;
+use perch::carry;
 use perch::host::FakeHost;
 use perch::host::fake::Effect;
-use perch::{Host, carry};
+use perch::host::prelude::*;
 
 /// Where the person's own `.claude.json` is: beside the Default Profile, as
 /// Claude Code writes it.

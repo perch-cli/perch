@@ -249,6 +249,7 @@ pub fn leaving_the_active_account_alone(active: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::prelude::*;
     use crate::host::{Execution, FakeHost, fake::Effect};
 
     /// A writer that is not there — the ordinary closed pipe.

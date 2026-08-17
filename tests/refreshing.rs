@@ -14,8 +14,9 @@ use std::path::PathBuf;
 use chrono::{TimeZone, Utc};
 use common::*;
 use perch::anthropic::{self, BETA, PROFILE_URL, TOKEN_URL, USAGE_URL};
+use perch::host::FakeHost;
 use perch::host::fake::{Effect, THIS_PROCESS};
-use perch::host::{FakeHost, Host};
+use perch::host::prelude::*;
 
 const CONFIG_LOCK: &str = "/Users/someone/.claude.json.lock";
 

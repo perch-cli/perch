@@ -7,8 +7,8 @@
 mod common;
 
 use common::*;
-use perch::Host;
 use perch::error::{EXIT_KEYCHAIN_UNAVAILABLE, EXIT_NOT_FOUND, EXIT_PROBE_REFUSED};
+use perch::host::prelude::*;
 use perch::host::{Execution, FakeHost};
 use perch::registry;
 

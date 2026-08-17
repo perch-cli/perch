@@ -11,7 +11,8 @@ use common::*;
 use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND};
 use perch::export;
 use perch::host::fake::Effect;
-use perch::host::{FakeHost, Host, PRIVATE_FILE_MODE};
+use perch::host::prelude::*;
+use perch::host::{FakeHost, PRIVATE_FILE_MODE};
 use perch::registry::Quarantine;
 
 const PASSPHRASE: &str = "correct horse battery staple";
