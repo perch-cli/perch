@@ -538,6 +538,51 @@ fn xml_escaped(value: &str) -> String {
         .replace('\'', "&apos;")
 }
 
+/// The binary a unit names, read back out of the text of one.
+///
+/// Beside the two functions that wrote it, because reading a unit and writing
+/// one are the same format twice and the reader is the only thing that can
+/// establish the writer was right. Apart, the escaping had a test and the
+/// unescaping had none, and no test anywhere could put a path in one end and
+/// take it out of the other.
+///
+/// The text rather than the file: what a unit *says* is here and reaching the
+/// filesystem is [`crate::commands::service`]'s, so a path with an `&` in it
+/// can be argued with in a unit test instead of on somebody's machine.
+///
+/// `None` for a unit Perch does not recognize — one somebody has edited into
+/// another shape — which it declines to make claims about rather than guessing
+/// at. Windows is `None` always, and never reaches here: it keeps no file.
+pub fn binary_in(platform: Platform, unit: &str) -> Option<PathBuf> {
+    match platform {
+        Platform::Other => unit
+            .lines()
+            .find_map(|line| line.strip_prefix("ExecStart="))
+            .and_then(|line| line.strip_suffix(" watcher run"))
+            .map(PathBuf::from),
+        // The first `<string>` inside `ProgramArguments`, which is the program.
+        Platform::MacOs => {
+            let array = unit.split("<key>ProgramArguments</key>").nth(1)?;
+            let opened = array.find("<string>")? + "<string>".len();
+            let closed = array[opened..].find("</string>")? + opened;
+            Some(PathBuf::from(unescaped(&array[opened..closed])))
+        }
+        Platform::Windows => None,
+    }
+}
+
+/// The inverse of [`xml_escaped`], for reading a path back out of a plist.
+fn unescaped(value: &str) -> String {
+    value
+        .replace("&apos;", "'")
+        .replace("&quot;", "\"")
+        .replace("&gt;", ">")
+        .replace("&lt;", "<")
+        // Last, so that an `&amp;lt;` in somebody's path survives the round trip
+        // rather than becoming a `<` on the way back.
+        .replace("&amp;", "&")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -549,6 +594,64 @@ mod tests {
             log: None,
             user_id: Some(501),
         }
+    }
+
+    /// A path written into a unit is the path read back out of it, on both
+    /// platforms that keep one.
+    ///
+    /// The pair is what `perch service status` rests on: it asks whether the
+    /// installed unit and the machine have come apart, and a reader that
+    /// disagreed with the writer would answer that question wrongly in the one
+    /// direction nobody would check — reporting drift on a machine where
+    /// nothing had moved. The `&` is the case that made this worth asserting:
+    /// it is the character a home directory really can hold, it is escaped on
+    /// the way in, and it is the one the unescaping has to undo last.
+    #[test]
+    fn a_path_written_into_a_unit_is_the_path_read_back_out_of_it() {
+        for path in [
+            "/usr/local/bin/perch",
+            "/Users/some & one/bin/perch",
+            "/Users/o'brien/<perch>/\"bin\"/perch",
+            // An escape sequence spelled out in somebody's own path, which
+            // comes back as the five characters they typed rather than as the
+            // one it names.
+            "/Users/someone/&amp;lt;/perch",
+        ] {
+            for platform in [Platform::MacOs, Platform::Other] {
+                let unit = Unit {
+                    binary: PathBuf::from(path),
+                    ..a_unit()
+                };
+                let written = unit
+                    .rendered(platform)
+                    .expect("both of these platforms keep a file");
+                assert_eq!(
+                    binary_in(platform, &written),
+                    Some(PathBuf::from(path)),
+                    "{platform:?} did not read back the path it wrote: {written}"
+                );
+            }
+        }
+    }
+
+    /// A unit somebody has edited into a shape Perch does not recognize is one
+    /// it declines to make a claim about. `status` reads the answer as "cannot
+    /// say", which is the honest one — a guess here would report drift against
+    /// a binary nobody named.
+    #[test]
+    fn a_unit_perch_does_not_recognize_is_not_guessed_at() {
+        assert_eq!(binary_in(Platform::MacOs, "<plist></plist>"), None);
+        assert_eq!(binary_in(Platform::Other, "[Service]\nExecStart=\n"), None);
+        assert_eq!(
+            binary_in(Platform::Other, "[Service]\nExecStart=/bin/perch serve\n"),
+            None,
+            "a unit running something other than the Watcher loop names no Perch",
+        );
+        assert_eq!(
+            binary_in(Platform::Windows, &a_unit().plist()),
+            None,
+            "Windows keeps no file, so there is nothing to have read",
+        );
     }
 
     /// The correction that matters most, and the one a reasonable

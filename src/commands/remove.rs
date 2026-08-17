@@ -24,6 +24,7 @@ use std::io::Write;
 use crate::adopt;
 use crate::commands::{ask_a_word, say, still_ours};
 use crate::credentials;
+use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::lock::Held;
@@ -181,12 +182,25 @@ fn consequence_of(registry: &Registry, account: &Account) -> Consequence {
 /// Never a Quarantined Account, whose Credential does not work, and never a
 /// disabled one: never being chosen for you is the whole of what disabled means,
 /// and this is Perch choosing.
+///
+/// Which is [`cycle::is_a_candidate`], and asked rather than written out again.
+/// It was the same pair of conditions spelled a second time, and that predicate
+/// exists precisely so what a Cycle may choose and what a figure is measured
+/// over cannot drift apart — a Remove choosing an Account no Cycle would is the
+/// same divergence arriving through a third door.
+///
+/// It stays here rather than joining `cycle`, because it is not a Cycle. A Cycle
+/// stays inside the scope it started in (ADR 0002) and this deliberately leaves
+/// one when it has to; what makes that acceptable is that it is said out loud
+/// and agreed to first (ADR 0024), which is a property of the command rather
+/// than of the rule. Filing it under `cycle` would put a forced choice among the
+/// choices the user endorsed in advance.
 fn successor<'a>(registry: &'a Registry, leaving: &Account) -> Option<&'a Account> {
     let candidates = || {
         registry
             .accounts
             .iter()
-            .filter(|held| held.email() != leaving.email() && !held.disabled && !held.quarantined())
+            .filter(|held| held.email() != leaving.email() && cycle::is_a_candidate(held))
     };
     let in_its_group = leaving
         .group

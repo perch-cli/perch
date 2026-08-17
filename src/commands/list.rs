@@ -29,21 +29,26 @@
 //! `--refresh` follows the breadth: it reads the Accounts about to be shown and
 //! no others, which is one rule rather than a capability each breadth has of
 //! its own.
+//!
+//! What a Listing *is* — which Scopes it covers, in what order, and whether a
+//! Scope's order is a ranking — is [`crate::listing`]'s. What this command does
+//! is choose the breadth and draw it: the word somebody typed, the table, and
+//! the sentences under it. The [`Scope`] here is the breadth alone, which is why
+//! it has an arm a Cycle's Scope must never have.
 
 use std::io::Write;
 
 use chrono::{DateTime, Utc};
 use serde_json::json;
-use unicode_width::UnicodeWidthStr;
 
 use crate::adopt;
 use crate::commands::{IN_NO_GROUP, cycling_among_ungrouped, group, say, say_json, write_failed};
 use crate::cycle;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::listing::{self, Section};
 use crate::observe::{self, Report};
-use crate::registry::{self, Account, Quarantine, Registry, UNGROUPED};
-use crate::reserve::Reserve;
+use crate::registry::{self, Account, Registry, UNGROUPED};
 use crate::utilization;
 
 #[derive(Debug, Default, Clone)]
@@ -125,7 +130,7 @@ impl Scope {
     fn sections<'a>(&self, registry: &'a Registry, now: DateTime<Utc>) -> Vec<Section<'a>> {
         let of = |scope| Section::of(registry, scope, now);
         match self {
-            Scope::Everything => scopes(registry).into_iter().map(of).collect(),
+            Scope::Everything => listing::scopes(registry).into_iter().map(of).collect(),
             Scope::Group(name) => vec![of(registry::Scope::Group(name.clone()))],
             Scope::Ungrouped => vec![of(registry::Scope::Ungrouped)],
         }
@@ -141,11 +146,18 @@ impl Scope {
         }
     }
 
+    /// The breadth as a script reads it.
+    ///
+    /// Only the arm a Cycle's Scope has no answer for is spelled here. The other
+    /// two are [`listing::scope_json`]'s, which is also what a Section names
+    /// itself with — a listing narrowed to a Group would otherwise be at liberty
+    /// to describe that Group one way at the top of the document and another in
+    /// the section below it.
     fn json(&self) -> serde_json::Value {
         match self {
             Scope::Everything => json!({"kind": "all", "name": serde_json::Value::Null}),
-            Scope::Group(name) => json!({"kind": "group", "name": name}),
-            Scope::Ungrouped => json!({"kind": "ungrouped", "name": serde_json::Value::Null}),
+            Scope::Group(name) => listing::scope_json(&registry::Scope::Group(name.clone())),
+            Scope::Ungrouped => listing::scope_json(&registry::Scope::Ungrouped),
         }
     }
 }
@@ -158,146 +170,6 @@ impl Scope {
 /// would read as two Groups.
 fn group_heading(name: &str) -> String {
     registry::Scope::Group(name.to_string()).described()
-}
-
-/// One scope's Accounts as the listing shows them: in order, and with what that
-/// order *is*.
-///
-/// Ranked where a Cycle could happen in the scope, and in the order they were
-/// added where one could not. Being in no Group is the absence of a declaration
-/// that Accounts are interchangeable rather than a weaker form of one (ADR
-/// 0017), so until `interchangeable` says otherwise a bare `perch switch`
-/// refuses there instead of choosing. Ordering those Accounts by Headroom would
-/// show a ranking Perch would not make — the one thing this listing exists not
-/// to do — so they are held in the order they were added, with the Headroom
-/// still beside each of them as the figure it is.
-///
-/// Which of the two it is travels *with* the Accounts rather than being asked
-/// again by each renderer. A table shows the difference by not sorting; a
-/// document has to say it in a word (ADR 0053), and two answers to "was this
-/// ranked?" is how the two come to disagree about the distinction ADR 0049
-/// called its weightiest.
-struct Section<'a> {
-    scope: registry::Scope,
-    ranked: bool,
-    accounts: Vec<&'a Account>,
-}
-
-impl<'a> Section<'a> {
-    fn of(registry: &'a Registry, scope: registry::Scope, now: DateTime<Utc>) -> Section<'a> {
-        let ranked = cycle::may_cycle_within(registry, &scope);
-        let accounts = match ranked {
-            true => cycle::ranked(registry, &scope, now),
-            false => scope.accounts(registry),
-        };
-        Section {
-            scope,
-            ranked,
-            accounts,
-        }
-    }
-
-    /// What the order is, in the word the decision that drew the distinction
-    /// uses (ADR 0049) — so a script branches on the same term the guide
-    /// explains.
-    fn order(&self) -> &'static str {
-        match self.ranked {
-            true => "ranked",
-            false => "held",
-        }
-    }
-
-    /// What this Scope has left to draw on, or nothing where nothing has
-    /// declared its Accounts a set.
-    ///
-    /// The same gate the order goes through, and deliberately the same field: a
-    /// Reserve is what these Accounts have *between them*, which is the claim
-    /// ADR 0017 says nobody has made about the Ungrouped until `interchangeable`
-    /// is declared. Ranking them and saying what they have left are the two
-    /// things every surface declines together, so they are declined here off one
-    /// answer rather than two.
-    fn reserve<'r>(&self, registry: &'r Registry) -> Option<Reserve<'r>> {
-        self.ranked.then(|| Reserve::of(registry, &self.scope))
-    }
-
-    fn document(
-        &self,
-        host: &dyn Host,
-        registry: &Registry,
-        now: DateTime<Utc>,
-    ) -> Result<serde_json::Value> {
-        let listed: Vec<serde_json::Value> = self
-            .accounts
-            .iter()
-            .map(|account| document(host, registry, account, now))
-            .collect::<Result<_>>()?;
-        Ok(json!({
-            // The same shape the document's own `scope` key carries, because it
-            // is the same question asked of a narrower set: a script that reads
-            // one should not have to learn a second spelling to read the other.
-            "scope": Scope::from(&self.scope).json(),
-            "order": self.order(),
-            // At every breadth, unlike the table (ADR 0058): the section has
-            // already named the Scope this is about, which is the whole of what
-            // the table lacks.
-            //
-            // `null` for a Scope holding nobody, where the human listing says a
-            // sentence of its own instead. Unambiguous against the other `null`
-            // because `accounts` sits beside it: an empty array distinguishes
-            // "nobody is here" from "nobody has declared these a set".
-            "reserve": match self.accounts.is_empty() {
-                true => serde_json::Value::Null,
-                false => self
-                    .reserve(registry)
-                    .map_or(serde_json::Value::Null, |reserve| reserve.document()),
-            },
-            "accounts": listed,
-        }))
-    }
-}
-
-/// The Accounts of a Cycle's scope, said as a listing's.
-///
-/// Only this direction. [`Scope`]'s own doc gives the reason the two types are
-/// separate — a Cycle must not be handed "every Account" — and widening a
-/// Cycle's scope into a listing's cannot express that, since nothing here can
-/// produce [`Scope::Everything`] and no Cycle is ever handed one of these.
-impl From<&registry::Scope> for Scope {
-    fn from(scope: &registry::Scope) -> Scope {
-        match scope {
-            registry::Scope::Group(name) => Scope::Group(name.clone()),
-            registry::Scope::Ungrouped => Scope::Ungrouped,
-        }
-    }
-}
-
-/// Every scope, with the one the active Account is in first.
-///
-/// Every Group and the Accounts in no Group, so an Account is in exactly one of
-/// them and the listing holds all of them — the invariant
-/// [`crate::registry::Registry::group_names`] states and `load` enforces, since
-/// an Account claiming a Group nothing declared would be in none of these and
-/// so in no listing at all.
-///
-/// The active Account's scope leads, because it is where you are and, wherever
-/// a Cycle happens at all, the one a bare `perch switch` looks in.
-fn scopes(registry: &Registry) -> Vec<registry::Scope> {
-    let mut every: Vec<registry::Scope> = registry
-        .group_names()
-        .map(|name| registry::Scope::Group(name.to_string()))
-        .collect();
-    every.push(registry::Scope::Ungrouped);
-
-    let Some(active) = registry.active_account() else {
-        return every;
-    };
-    let here = match &active.group {
-        Some(name) => registry::Scope::Group(name.clone()),
-        None => registry::Scope::Ungrouped,
-    };
-    let mut ordered = vec![here.clone()];
-    ordered.extend(every.into_iter().filter(|scope| *scope != here));
-    ordered
 }
 
 pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
@@ -425,30 +297,6 @@ fn columns(registry: &Registry, account: &Account) -> [String; COLUMNS] {
     ]
 }
 
-/// How many terminal cells a string is drawn in.
-///
-/// Not its bytes, and not its characters either. A CJK Group name is drawn two
-/// columns per character and a combining mark is drawn in none, so a count of
-/// characters pads to the wrong width — and because the widths are shared by
-/// every row, one such name puts every column after it out of line for the whole
-/// table. What a column is measured in has to be what a terminal draws in.
-///
-/// `unicode-width` sits on no seam — the width of a string is a pure function
-/// of it — which is the test ADR 0025 actually sets, and a hand-rolled table of
-/// East Asian widths would be the same data kept by hand, going wrong quietly.
-fn cells(text: &str) -> usize {
-    UnicodeWidthStr::width(text)
-}
-
-/// `text` with spaces after it until it fills `width` cells.
-///
-/// `format!("{text:width$}")` pads to a count of characters, which is
-/// [`cells`]'s mistake from the other side: it would take the right width and
-/// then fill it wrongly.
-fn padded(text: &str, width: usize) -> String {
-    format!("{text}{}", " ".repeat(width.saturating_sub(cells(text))))
-}
-
 /// Each column as wide as the widest thing in it, [`HEADERS`] included,
 /// measured in the cells a terminal draws them in — see [`cells`].
 ///
@@ -459,8 +307,8 @@ fn widths<'a>(rows: impl IntoIterator<Item = &'a [String; COLUMNS]> + Clone) -> 
     std::array::from_fn(|column| {
         rows.clone()
             .into_iter()
-            .map(|row| cells(&row[column]))
-            .chain(std::iter::once(cells(HEADERS[column])))
+            .map(|row| utilization::cells(&row[column]))
+            .chain(std::iter::once(utilization::cells(HEADERS[column])))
             .max()
             .unwrap_or_default()
     })
@@ -564,7 +412,7 @@ fn render_human(
     // Group column and in the order, and a table that broke for a heading every
     // few rows would put a blank line between Accounts the eye is running down
     // a column of.
-    let accounts = &flattened(sections);
+    let accounts = &listing::flattened(sections);
     let rows = rows(registry, accounts, now);
     if rows.is_empty() {
         return say(out, &nothing_here(scope));
@@ -669,7 +517,7 @@ fn write_row(
         .zip(widths)
         .enumerate()
         .filter(|(column, _)| show_group || *column != GROUP_COLUMN)
-        .map(|(_, (value, width))| padded(value, *width))
+        .map(|(_, (value, width))| utilization::padded(value, *width))
         .collect();
     writeln!(
         out,
@@ -689,51 +537,6 @@ fn nothing_here(scope: &Scope) -> String {
         Scope::Group(name) => format!("The Group `{name}` holds no Accounts yet."),
         Scope::Ungrouped => "Every Account is in a Group.".to_string(),
     }
-}
-
-/// One Account as a script reads it, wherever it is being read.
-///
-/// One shape rather than two. `perch status --json` described its Account under
-/// `active` and `perch list --json` described one under `accounts`, and the two
-/// key sets did not even overlap: `status` carried `account_uuid` and neither
-/// `alias`, `group` nor `disabled`, and the listing carried the reverse. So a
-/// script that asked "which Group is the Account I am on in?" had to run a
-/// second command to find out, and one written against either could not be
-/// pointed at the other.
-///
-/// What each *document* answers still differs, and that is the part that should
-/// — this one asks about a set and `perch status` about one Account (see
-/// [`render_json`]). It is the Account itself that has no business being two
-/// things.
-pub fn document(
-    host: &dyn Host,
-    registry: &Registry,
-    account: &Account,
-    now: DateTime<Utc>,
-) -> Result<serde_json::Value> {
-    Ok(json!({
-        "email": account.email(),
-        "account_uuid": account.identity.account_uuid,
-        "alias": registry.alias_of(account.email()),
-        "group": account.group,
-        // Present on every Account, unlike the cell above it. A machine reading
-        // a shape is not a person reading a sentence (ADR 0043): a script that
-        // had to test for a key's presence to learn a bool would have been
-        // given a worse contract, not a truer one.
-        "disabled": account.disabled,
-        "quarantined": Quarantine::document(account.quarantine),
-        "active": registry.is_active(account.email()),
-        "organization": account.identity.organization_name,
-        "plan": account.plan,
-        "profile_dir": account.profile_dir(host)?,
-        // The figure the section's order was made on, beside the windows it was
-        // taken from. A section saying it is `ranked` and not carrying the
-        // number it ranked on would be a claim with no way of checking it —
-        // which is what the Headroom column exists to prevent on the surface a
-        // person reads (ADR 0049).
-        "headroom": cycle::headroom_document(account),
-        "utilization": utilization::document(account, now),
-    }))
 }
 
 /// A document says what its order is, or it does not have one (ADR 0053).
@@ -785,17 +588,10 @@ fn render_json(
     say_json(out, &document)
 }
 
-/// Every section's Accounts end to end, for the renderer that draws one table.
-fn flattened<'a>(sections: &[Section<'a>]) -> Vec<&'a Account> {
-    sections
-        .iter()
-        .flat_map(|section| section.accounts.iter().copied())
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registry::Quarantine;
 
     fn row(email: &str, alias: &str) -> [String; COLUMNS] {
         [email, alias, "none", NOTHING_TO_SAY, "40%"].map(str::to_string)
@@ -859,9 +655,6 @@ mod tests {
     /// on every row, not just the one with the name in it.
     #[test]
     fn a_column_is_measured_in_the_cells_a_terminal_draws_it_in() {
-        assert_eq!(cells("作業"), 4, "two characters, four columns");
-        assert_eq!(cells("øverfløw"), 8, "and a narrow one is still one each");
-
         let in_group = |name: &str| -> [[String; COLUMNS]; 1] {
             let mut row = row("a@b.com", "-");
             row[2] = name.to_string();
@@ -873,61 +666,5 @@ mod tests {
             "the header is still the floor"
         );
         assert_eq!(widths(&in_group("作業作業"))[2], 8);
-    }
-
-    /// The sections between them hold the same Accounts the scope does, or
-    /// `perch list` shows fewer Accounts than Perch holds.
-    ///
-    /// The listing is built scope by scope — every declared Group, then the
-    /// Accounts in none of them — so it lists everything only because those
-    /// scopes partition the registry. An Account that fell between them would
-    /// simply not be printed, with no error anywhere to say so.
-    ///
-    /// What holds the partition up is `load` declaring any Group an Account
-    /// claims, and nothing else. That is `registry`'s own invariant and is
-    /// asserted there, including for a claim spelled in another case; this
-    /// asserts only that the listing depends on it.
-    #[test]
-    fn the_sections_hold_every_account_the_scope_covers() {
-        let mut registry = Registry::default();
-        registry.declare_group("work").expect("the name is free");
-        registry.declare_group("play").expect("the name is free");
-        for (email, group) in [
-            ("a@example.com", Some("work")),
-            ("b@example.com", Some("play")),
-            ("c@example.com", None),
-            ("d@example.com", Some("work")),
-        ] {
-            let mut account = crate::cycle::tests::account(email, vec![]);
-            account.group = group.map(str::to_string);
-            registry.upsert(account);
-        }
-        registry.settle(Some("c@example.com".to_string()));
-
-        let named = |mut accounts: Vec<&Account>| -> Vec<String> {
-            accounts.sort_by_key(|account| account.email().to_string());
-            accounts
-                .into_iter()
-                .map(|account| account.email().to_string())
-                .collect()
-        };
-        let sections = Scope::Everything.sections(&registry, crate::cycle::tests::now());
-        assert_eq!(
-            named(flattened(&sections)),
-            named(Scope::Everything.accounts(&registry)),
-        );
-    }
-
-    /// Padding fills the width the same way it was measured, or the right
-    /// answer is arrived at and then spent wrongly.
-    #[test]
-    fn padding_fills_a_width_in_cells_rather_than_in_characters() {
-        assert_eq!(padded("作業", 6), "作業  ", "four cells, two to fill");
-        assert_eq!(padded("ab", 4), "ab  ");
-        assert_eq!(
-            padded("作業作業", 4),
-            "作業作業",
-            "and nothing is trimmed to fit: a cell count is a floor here"
-        );
     }
 }
