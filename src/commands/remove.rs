@@ -33,6 +33,16 @@ use crate::registry::{self, Account, Registry};
 use crate::switch;
 use crate::target;
 
+/// Why this command writes into the Default Profile, named for the two places
+/// that have to agree about it: the refusal somebody meets *before* the
+/// question, and the one [`switch::make_live`] raises after it.
+///
+/// A constant because they are meant to be the same sentence and nothing was
+/// making them one. Two literals that must match by hand is how a user comes to
+/// be told one thing when Perch asks and another when it acts.
+const WHY_THE_DEFAULT_PROFILE: &str = "the Default Profile, which is where the Account Perch would land on has to \
+     be written";
+
 #[derive(Debug, Clone)]
 pub struct RemoveArgs {
     /// The Account to give up: its Alias, or its email address.
@@ -152,10 +162,10 @@ fn refuse_while_anything_is_running(
     switch::refuse_if_live_anywhere(
         host,
         account,
-        consequence.successor.is_some().then_some(
-            "the Default Profile, which is where the Account Perch would land on \
-             has to be written",
-        ),
+        consequence
+            .successor
+            .is_some()
+            .then_some(WHY_THE_DEFAULT_PROFILE),
         &installed,
     )
 }
@@ -315,14 +325,7 @@ fn land_on(
     successor: &Account,
     leaving: &Account,
 ) -> Result<()> {
-    let landed = switch::make_live(
-        host,
-        perch,
-        registry,
-        successor,
-        "the Default Profile, which is where the Account Perch would land on has \
-         to be written",
-    );
+    let landed = switch::make_live(host, perch, registry, successor, WHY_THE_DEFAULT_PROFILE);
     let is_live = landed.as_ref().err().is_none_or(|stopped| stopped.is_live);
 
     if is_live {
