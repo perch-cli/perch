@@ -140,6 +140,6 @@ behind on a Group that no longer exists.
 
 A name that an Alias or another Group already answers to is refused before
 anything is written, because Aliases and Group names share one namespace.
-Changing only how a Group is capitalised is a rename rather than a collision
+Changing only how a Group is capitalized is a rename rather than a collision
 with itself, the same way naming an Account by the name it already answers to
 is.

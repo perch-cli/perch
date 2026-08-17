@@ -2,7 +2,7 @@
 //!
 //! Exit codes are part of the interface: a shell prompt or a script needs to
 //! tell "this account is gone" from "the keychain is locked" from "Perch does
-//! not recognise this Claude Code" without parsing prose.
+//! not recognize this Claude Code" without parsing prose.
 
 use std::path::PathBuf;
 
@@ -58,7 +58,7 @@ pub const EXIT_HELD: i32 = 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PerchError {
-    /// The probe does not recognise the installed Claude Code well enough to
+    /// The probe does not recognize the installed Claude Code well enough to
     /// touch anything. Names the assumption that failed (ADR 0007).
     #[error("Perch declined to act: {assumption} ({detail}), Claude Code {version}")]
     ProbeRefused {

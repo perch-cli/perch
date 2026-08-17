@@ -99,11 +99,11 @@ checks, and `contract_links.rs` drives only `RealHost`, so **nothing asserts the
 fake models them correctly**.
 
 That is the half that can actually be wrong. The platform is not going to stop
-sharing bytes across a hard link; the hand-maintained fake might stop modelling
+sharing bytes across a hard link; the hand-maintained fake might stop modeling
 it, and `conformance.rs`'s own header is a list of five times the two silently
 drifted apart. Moving these cases into conformance's table does not relocate a
 claim, it strengthens one — from *"the platform behaves as ADR 0026 assumes"* to
-*"…and the fake agrees"*, which is what every behaviour test leaning on
+*"…and the fake agrees"*, which is what every behavior test leaning on
 Reconcile actually depends on.
 
 The cost is named rather than hidden: two of the carried-over properties are
@@ -162,7 +162,7 @@ a price rather than a claim, so nothing ever tells you when a test has stopped
 qualifying, and under this map's yardstick a second flag is a second idea held.
 
 The price is measured rather than asserted. The two together take **7.01s run
-alone**; the whole 463-test lib suite takes **6.13s**, and Cargo parallelises
+alone**; the whole 463-test lib suite takes **6.13s**, and Cargo parallelizes
 within a binary, so the marginal cost of ungating both is **one to two seconds**
 on a six-second suite. Their own comment says *"a second of wall clock"*, which
 understates what it is guarding by about seven times.

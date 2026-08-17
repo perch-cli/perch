@@ -88,11 +88,11 @@ pub fn resolve_account(registry: &Registry, target: &str) -> Result<AccountTarge
     }
 }
 
-/// Matched however it was capitalised, because that is the rule the names were
+/// Matched however it was capitalized, because that is the rule the names were
 /// made under.
 ///
 /// The registry refuses an Alias or a Group that differs from a held name only
-/// in case — "nobody remembers which way they capitalised a Group months ago",
+/// in case — "nobody remembers which way they capitalized a Group months ago",
 /// as it puts it — so there is never more than one candidate to find. An exact
 /// lookup here made every command that *resolves* a Target stricter than every
 /// command that *sets* one: `perch group add Work` then `perch switch work`

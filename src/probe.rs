@@ -4,7 +4,7 @@
 //! Every path, service-name derivation and struct shape Perch depends on is
 //! reverse-engineered and none of it is a public contract. They live here, in
 //! one module, and nowhere else — so when Claude Code drifts, there is exactly
-//! one place that stops recognising it, and every dangerous operation is gated
+//! one place that stops recognizing it, and every dangerous operation is gated
 //! on the verdict it returns.
 
 use std::path::{Path, PathBuf};
@@ -225,8 +225,8 @@ pub struct Findings {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
     /// Everything Perch depends on was found and understood.
-    Recognised(Box<Findings>),
-    /// Claude Code is installed and recognised, but nobody is logged in.
+    Recognized(Box<Findings>),
+    /// Claude Code is installed and recognized, but nobody is logged in.
     NoLogin { version: String, store: Store },
 }
 
@@ -369,7 +369,7 @@ pub fn short_hash(config_dir: &Path) -> String {
     digest.iter().take(4).map(|b| format!("{b:02x}")).collect()
 }
 
-/// The store Claude Code uses right now, honouring `CLAUDE_CONFIG_DIR`.
+/// The store Claude Code uses right now, honoring `CLAUDE_CONFIG_DIR`.
 ///
 /// The default directory sits under home, and its identity file sits beside
 /// it as `~/.claude.json` — so no home is a refusal here, where every other
@@ -475,7 +475,7 @@ pub fn identity_file_in(config_dir: &Path) -> PathBuf {
 
 /// What stands in for the login name where there is no keychain to store
 /// anything under. Never looked up — it exists so that a `Store` off macOS can
-/// be derived at all, and it is spelled to be recognisable in a diagnostic.
+/// be derived at all, and it is spelled to be recognizable in a diagnostic.
 const NO_LOGIN_NAME: &str = "(no keychain)";
 
 /// The login name a keychain item is stored under. `USERNAME` is Windows'
@@ -521,7 +521,7 @@ pub fn read_credential(
 
 /// Makes sense of the bytes a keychain namespace holds, or says which belief
 /// they broke. `held_in` names the namespace they came out of, so a refusal
-/// says which Account's store stopped being recognisable.
+/// says which Account's store stopped being recognizable.
 pub fn understand_credential(
     raw: String,
     held_in: &str,
@@ -906,7 +906,7 @@ impl Drop for Claim<'_> {
 /// the two disagree: a Run refuses, because what it protects is a Credential a
 /// client is about to hold for hours, and a login discards the failure, because
 /// the directory holds nothing yet and refusing a login over a tidying-up detail
-/// would be a reason somebody cannot add an Account at all. Neither judgement
+/// would be a reason somebody cannot add an Account at all. Neither judgment
 /// belongs here — this module has no idea which caller can afford to lose it.
 pub fn claim<'a>(host: &'a dyn Host, config_dir: &Path) -> Result<Claim<'a>> {
     let pid = host.process_id();
@@ -1046,7 +1046,7 @@ fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32
         let session_began = match session_start_in(host, &marker) {
             Marker::Began(at) => at,
             // Parsed, or not, and either way it does not say what a marker has
-            // to say. That is a judgement about the *content* of a file Perch
+            // to say. That is a judgment about the *content* of a file Perch
             // can see all of, and the answer is that a Profile is Live when
             // something says so rather than when nothing does.
             Marker::SaysNothing => continue,
@@ -1087,7 +1087,7 @@ enum Marker {
     /// It says when its session began.
     Began(i64),
     /// Perch read the whole file and it is not a marker, or is one that does
-    /// not say. A judgement about content, which is settled: a Profile is Live
+    /// not say. A judgment about content, which is settled: a Profile is Live
     /// when something says so, not when nothing does.
     SaysNothing,
     /// Perch could not read it. Nothing has been established either way.
@@ -1154,7 +1154,7 @@ pub fn patch_oauth_account(
     // could never work. Only hand-editing `.claude.json` got out of it.
     //
     // The refusal that is left is the one it was always for: a `.claude.json`
-    // that is not a JSON object at all is a file Perch does not recognise, and
+    // that is not a JSON object at all is a file Perch does not recognize, and
     // nothing can be written into it.
     json::set_value_at(contents, IDENTITY_KEY, block).ok_or_else(|| {
         refusal(
@@ -1193,7 +1193,7 @@ impl Identity {
             block.insert("organizationUuid".into(), uuid.clone().into());
         }
         serde_json::to_string_pretty(&serde_json::Value::Object(block))
-            .expect("a map of strings serialises")
+            .expect("a map of strings serializes")
     }
 }
 
@@ -1214,7 +1214,7 @@ pub fn probe(host: &dyn Host, store: Store) -> Result<Verdict> {
     let identity = read_identity(host, &store, &installed)?;
 
     match (credential, identity) {
-        (Some(credential), Some(identity)) => Ok(Verdict::Recognised(Box::new(Findings {
+        (Some(credential), Some(identity)) => Ok(Verdict::Recognized(Box::new(Findings {
             version,
             store,
             identity,
@@ -1263,7 +1263,7 @@ mod tests {
     /// no test.
     ///
     /// The fake reports its own process as running, which is exactly the
-    /// situation being modelled: Perch waits for what it started, so the pid a
+    /// situation being modeled: Perch waits for what it started, so the pid a
     /// claim names is alive for precisely as long as the Run or the login.
     #[test]
     fn a_claim_makes_a_directory_live_and_letting_it_go_stops_it() {
@@ -1989,7 +1989,7 @@ mod tests {
         claude_version(&host)
     }
 
-    /// The three ways a Credential stops being one Perch recognises. Each names
+    /// The three ways a Credential stops being one Perch recognizes. Each names
     /// the store it came out of, so a refusal says which Account went wrong
     /// rather than that some Credential somewhere did.
     #[test]
@@ -2053,7 +2053,7 @@ mod tests {
         assert_eq!(
             credential.as_str(),
             raw,
-            "the bytes are copied rather than re-serialised"
+            "the bytes are copied rather than re-serialized"
         );
     }
 

@@ -34,8 +34,8 @@ Report privately through GitHub's
 [private vulnerability reporting](https://github.com/perch-cli/perch/security/advisories/new).
 Please do not open a public issue for a security problem.
 
-Expect an acknowledgement within a week. Perch is maintained by one person, so
-a fix may take longer than that — the acknowledgement will say where it stands.
+Expect an acknowledgment within a week. Perch is maintained by one person, so
+a fix may take longer than that — the acknowledgment will say where it stands.
 
 ## What is in scope
 

@@ -94,7 +94,7 @@ serious rival, and ADR 0053 is precedent *for* it: `perch list [<scope>]` had
 just collapsed two commands by making the argument the discriminator.
 
 It fails on preconditions. `add` refuses an Account that already exists;
-`relogin` requires one. The union command's behaviour would **invert** on its
+`relogin` requires one. The union command's behavior would **invert** on its
 optional argument rather than widen, which is the opposite of what `perch list`
 does — there the argument narrows one shape, here it would swap two. And all
 three of `add`'s flags — `--group`, `--no-group`, `--alias` — are meaningless for

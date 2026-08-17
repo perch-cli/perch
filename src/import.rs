@@ -58,7 +58,7 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
 /// The registry an Export restores to, or a refusal to guess at one.
 ///
 /// The Export's own envelope was checked when it was unsealed; this is the
-/// registry that travelled inside it, which carries its own version and answers
+/// registry that traveled inside it, which carries its own version and answers
 /// the same question about its own shape. A machine holding two builds — the
 /// newer one writing the file, the older one restoring it — is the case both
 /// guards exist for.

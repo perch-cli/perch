@@ -1,4 +1,4 @@
-//! Behaviour: gaining a second Account without losing the one you are using.
+//! Behavior: gaining a second Account without losing the one you are using.
 //!
 //! The thing under test is mostly an absence — `perch add` must leave the
 //! active Account, its Credential, and its Identity exactly as it found them,
@@ -649,10 +649,10 @@ fn no_group() -> AddArgs {
 }
 
 /// The same rule catching the case `switch` and `relogin` already treat as one
-/// Account: a login under a differently capitalised spelling of an address
+/// Account: a login under a differently capitalized spelling of an address
 /// Perch holds is that Account, not a second one.
 #[test]
-fn a_login_under_a_differently_capitalised_address_is_the_account_perch_holds() {
+fn a_login_under_a_differently_capitalized_address_is_the_account_perch_holds() {
     let shouted = EMAIL.to_uppercase();
     let host = logged_in_machine().with_login(login_producing(
         CREDENTIAL,
@@ -670,7 +670,7 @@ fn a_login_under_a_differently_capitalised_address_is_the_account_perch_holds() 
     assert_eq!(registry_of(&host).accounts.len(), 1);
 }
 
-/// And the same for an address whose capitalisation is only a capitalisation
+/// And the same for an address whose capitalization is only a capitalization
 /// outside ASCII. The collision is found by `same_profile`, which compares
 /// slugs and lowercases over the whole of Unicode; whether it is *one Account*
 /// was asked in ASCII, so these were one Profile and two Accounts. The refusal

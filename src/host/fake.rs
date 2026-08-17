@@ -1,6 +1,6 @@
 //! A Host that keeps the world in memory and records what it was asked to do.
 //!
-//! Behaviour tests drive real command code against this and assert on
+//! Behavior tests drive real command code against this and assert on
 //! observable outcomes: what was printed, what ended up in the keychain, and
 //! what went out to the network. A machine with no arranged replies has no
 //! network at all, so a command that fetches when it should not fails here
@@ -1258,7 +1258,7 @@ impl Host for FakeHost {
         // real Host answers `None` there. A fake that answered with a number
         // would let a test drive `tighten_if_loose` — reading the mode, making
         // the file private, remarking that others could read it — on a platform
-        // where none of that happens, which is a test asserting behaviour the
+        // where none of that happens, which is a test asserting behavior the
         // real Host cannot produce.
         if self.platform() == Platform::Windows {
             return Ok(None);
@@ -1328,7 +1328,7 @@ impl Host for FakeHost {
         // alone: `remove_dir_all` does not follow the last component, so it
         // unlinks the link itself and answers `Ok`. Measured, because the
         // opposite belief made `lock::clear_the_abandoned` unreachable in every
-        // test — a dangling artifact was modelled as wedging Perch for ever
+        // test — a dangling artifact was modeled as wedging Perch for ever
         // where the machine recovers on the next command.
         if self.links.borrow_mut().remove(path).is_some() {
             self.modified.borrow_mut().remove(path);
@@ -1601,7 +1601,7 @@ impl Host for FakeHost {
             // ever run here, so nothing is running" and lets a Switch replace
             // the live Credential, and anything else as doubt it refuses on. So
             // a `<profile>/sessions` that is a regular file — a botched restore,
-            // a name crossed by a hard link — read as idle in every behaviour
+            // a name crossed by a hard link — read as idle in every behavior
             // test and as a refusal on the machine.
             if resolved.is_some() {
                 return Err(HostError::Other(format!(
@@ -1777,7 +1777,7 @@ impl Host for FakeHost {
         // process — and `clients_in` parses a pid out of any filename in a
         // sessions directory, which is not a name Perch wrote. A fake that
         // answered "alive" where the real one says "dead" is a fake a test
-        // could prove the wrong behaviour against.
+        // could prove the wrong behavior against.
         if pid == 0 || pid == u32::MAX {
             return false;
         }
@@ -1946,7 +1946,7 @@ mod tests {
     /// `AlreadyExists`, reads the lock as abandoned because a dangling link
     /// will not say when it was written, calls `remove_dir_all` on a symlink
     /// and has the failure ignored — and then refuses every Switch and every
-    /// Run against that Profile for ever. No behaviour test could reach it.
+    /// Run against that Profile for ever. No behavior test could reach it.
     #[test]
     fn a_directory_is_not_taken_over_a_link_that_points_at_nothing() {
         let host = FakeHost::new().with_link(
@@ -2010,7 +2010,7 @@ mod tests {
     /// directory, and those are not names Perch wrote — so `0.json` is
     /// reachable. Unguarded, the fake called that process alive where the real
     /// host calls it dead, which is a fake a test could prove the wrong
-    /// behaviour against.
+    /// behavior against.
     #[test]
     fn the_process_ids_that_are_not_one_are_dead_here_too() {
         let host = FakeHost::new()

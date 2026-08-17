@@ -1,4 +1,4 @@
-//! Behaviour: what bare `perch switch` picks, and the three ways it honestly
+//! Behavior: what bare `perch switch` picks, and the three ways it honestly
 //! picks nothing.
 //!
 //! This is the command someone types mid-task when quota just ran out, so the
@@ -632,7 +632,7 @@ fn credentials_written(host: &FakeHost) -> usize {
 ///
 /// Before this there was no key, no Group and no command that could change it —
 /// the code read `Strategy::default()` because there was nothing to ask. It is
-/// the only behaviour in Perch a person could not configure, and this is the
+/// the only behavior in Perch a person could not configure, and this is the
 /// test that it has stopped being one.
 #[test]
 fn cycling_among_ungrouped_accounts_reads_the_strategy_that_scope_holds() {

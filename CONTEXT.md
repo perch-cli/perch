@@ -259,7 +259,7 @@ _Avoid_: policy, mode, algorithm, preference
 The process that Cycles on your behalf when the Account you are on runs low. It
 acts only within a Scope that has been told it may, and only above that Scope's
 Threshold; told otherwise it holds rather than stops, and says so. Three
-arrangements and one behaviour: a loop you can see and kill, a Service the
+arrangements and one behavior: a loop you can see and kill, a Service the
 machine runs for you, or a sequence of Checks something else schedules. One of
 them at a time.
 _Avoid_: daemon, monitor, background job
@@ -384,7 +384,7 @@ its own architecture. Not a platform: macOS is a platform and has two Targets.
 _Avoid_: platform, arch, triple, variant
 
 **Artifact**:
-One file belonging to a Release: an archive holding a binary and both licences,
+One file belonging to a Release: an archive holding a binary and both licenses,
 or the checksums, or the signed provenance for either. What an Artifact claims
 about itself is checkable — the checksums say which bytes, and the provenance
 says which workflow, in which repository, at which commit, produced them.
@@ -421,3 +421,16 @@ Installation the installer script left is one Perch replaces itself. Goes
 backwards when asked, which is still an Upgrade — the direction is the user's
 and the route is not.
 _Avoid_: update, self-update, bump, install
+
+## Proving it works
+
+**Behavior**:
+What a command does, and the largest of the three kinds of suite in `tests/` —
+the other two assert a correspondence between artifacts that have to agree, and
+the binary's surface (ADR 0045). Named for the Behavior rather than for the
+command: `perch status` is asserted across three files because three Behaviors
+share its verb, and `carrying`, `storing`, `reconciling` and `naming` are
+mechanics no single command owns. What separates one from a `mod tests` in `src`
+is what the test names — a command, or a module's own vocabulary through its own
+API — and never whether it reaches for a fake, which both sides do.
+_Avoid_: functional test, end-to-end test, feature test, acceptance test

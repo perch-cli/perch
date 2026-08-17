@@ -316,7 +316,7 @@ fn narrowed(registry: &Registry, name: &str) -> Result<Scope> {
     // The one word that has to be answered here rather than left to fall
     // through, and for the reason `validate_name` refuses it as a name: fallen
     // through it is answered with "Declare it with `perch group add global`",
-    // which is an offer the registry refuses to honour. `perch config` answers
+    // which is an offer the registry refuses to honor. `perch config` answers
     // it with there being no Scope every other one falls back to; a listing has
     // the happier answer, because every Scope at once is precisely what it
     // shows when it is asked for no Scope at all.

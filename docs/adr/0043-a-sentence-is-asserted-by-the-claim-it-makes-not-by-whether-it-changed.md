@@ -87,7 +87,7 @@ deliberately and often.
 The distinction is what the test is about, and the test's name almost always
 already says which. #116 fixed its own instance of this by hand — *"the existing
 tests asserted the ranking and walked past the bracket; they now assert the
-bracket too"* — and the rule is that sentence, generalised.
+bracket too"* — and the rule is that sentence, generalized.
 
 It binds tests written from here, and tests being changed for another reason.
 There is no sweep. Auditing 933 assertions against it would churn hundreds of

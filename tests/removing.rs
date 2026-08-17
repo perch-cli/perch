@@ -1,4 +1,4 @@
-//! Behaviour: forgetting an Account when a subscription is retired.
+//! Behavior: forgetting an Account when a subscription is retired.
 //!
 //! Removal is the one command that destroys something, so most of these tests
 //! are about what it refuses to destroy silently. Removing an Account nobody is

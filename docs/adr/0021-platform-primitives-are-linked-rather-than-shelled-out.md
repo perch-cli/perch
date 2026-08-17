@@ -3,7 +3,7 @@
 ADR 0008 says Perch drives `/usr/bin/security` rather than linking a keychain
 crate, and a reader arriving at `libc` and `windows-sys` in `Cargo.toml` will
 reasonably ask what changed. Nothing did: ADR 0008's argument is specific and
-does not generalise. macOS anchors a keychain item's access control to the binary
+does not generalize. macOS anchors a keychain item's access control to the binary
 that created it, so linking would make every Perch build a different creator and
 turn a silent read into a modal prompt after an upgrade. No such property attaches
 to asking whether a process is alive.
@@ -13,7 +13,7 @@ whether a process exists, whether there is a terminal, and setting a directory's
 modification time. On macOS these were three hand-written `extern "C"`
 declarations. Windows has none of them under those names.
 
-`isatty` is deleted outright in favour of `std::io::IsTerminal`, which is stable,
+`isatty` is deleted outright in favor of `std::io::IsTerminal`, which is stable,
 portable, safe, and needs nothing. The other two are taken from `libc` and
 `windows-sys` as direct dependencies. Both crates are already compiled in this
 build, pulled in transitively by `chrono`, `crossterm` and `ratatui`, so
@@ -45,7 +45,7 @@ platform, because that path is a security property rather than a convenience:
 it is typed (ADR 0014) — which the portable standard library has no way to ask
 for. So the count above is four rather than three: process existence, a
 directory's modification time, echo suppression, and the terminal test that was
-deleted in favour of `std::io::IsTerminal`.
+deleted in favor of `std::io::IsTerminal`.
 
 It is decided the same way, which is the point of recording it here rather than
 quietly adding a crate. The whole of it is `ECHO` off, one line, `ECHO` back on:

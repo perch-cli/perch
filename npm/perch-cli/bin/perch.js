@@ -68,7 +68,7 @@ const child = spawn(binary, process.argv.slice(2), { stdio: "inherit" });
 //
 // A *directed* signal is the other case, and it reaches this pid alone: perch is
 // a separate process, not a separate group, so nothing delivers it there. That
-// is `timeout 30 npx perch watcher run`, a CI runner cancelling a job, and a
+// is `timeout 30 npx perch watcher run`, a CI runner canceling a job, and a
 // terminal closing on a detached shell. Ignored rather than forwarded, the pair
 // ran until perch decided to stop on its own and `timeout` was defeated — so
 // those are passed on. Async `spawn` rather than `spawnSync` for the same

@@ -64,6 +64,23 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
 
+      # Perch writes American English — CLAUDE.md says why, typos.toml is the
+      # rule. Beside Format because it is the same kind of check: a mechanical
+      # convention, decided once, enforced rather than reviewed. Prose is the one
+      # thing here nothing else checks, and it is the half a reader sees first.
+      #
+      # Three invocations rather than one, because `typos` skips any file its own
+      # config could live in, and both of the files it skips are tracked. One
+      # platform, like the other steps that install a tool: spelling is a
+      # property of the code rather than of the runner.
+      - name: Spelling
+        if: runner.os == 'Linux'
+        run: |
+          cargo install typos-cli --locked --version 1.36.2
+          typos
+          typos - < Cargo.toml
+          typos - < typos.toml
+
       # --all-features so `your_machine.rs` is linted too: it is held back from
       # `cargo test` by a feature, and without this it would go unlinted.
       - name: Lint
@@ -78,7 +95,7 @@ jobs:
       #
       # --locked because a resolver that is free to update Cargo.lock is a CI
       # run that tested a dependency set no one has committed.
-      - name: Unit and behaviour tests
+      - name: Unit and behavior tests
         run: cargo test --locked
 
       # The binary somebody downloads, built with the feature set it ships with

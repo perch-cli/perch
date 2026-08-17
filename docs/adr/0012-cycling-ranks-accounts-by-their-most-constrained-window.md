@@ -18,7 +18,7 @@ help, which reads as the tool being broken. A weighted composite of the windows
 was rejected as unpredictable and undebuggable.
 
 This fixes how headroom is *measured*, not which account to prefer. Which
-account to prefer is a separate, configurable axis — favouring the most headroom,
+account to prefer is a separate, configurable axis — favoring the most headroom,
 or the soonest-resetting window so perishable quota is not wasted — and every
 such strategy reads headroom the same way.
 

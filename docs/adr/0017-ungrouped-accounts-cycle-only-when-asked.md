@@ -21,7 +21,7 @@ same reason: nothing changes underneath someone because they did not say it
 could.
 
 The setting is the Ungrouped Scope's own. An ungrouped Account has no Group
-to carry it, and modelling the ungrouped pool as a Group with a reserved name
+to carry it, and modeling the ungrouped pool as a Group with a reserved name
 would make a Group mean two contradictory things — a declaration the user made,
 and one Perch made for them.
 
@@ -77,7 +77,7 @@ a narrower statement than that wants a Group, which is what Groups are for.
 The setting stays exactly where this decision put it — Global, because an
 ungrouped Account has no Group to carry one. What is added is that the Ungrouped
 Accounts are now a Scope, which is the level a Setting is said at rather than a
-declaration anybody made. They remain not a Group, and modelling them as one
+declaration anybody made. They remain not a Group, and modeling them as one
 with a reserved name is still refused for the reason given above.
 
 The Scope closes a hole this ADR left open. Cycling among ungrouped Accounts
@@ -91,7 +91,7 @@ Strategy is finally something a person can set.
 on. This is the one place the layering is deliberately not uniform, and the
 reason is the one this whole ADR is about: somebody turning the watcher on at
 Global means "yes, Cycle my work Groups unattended", and Inheriting that
-straight through would authorise moving them off a work Account onto their
+straight through would authorize moving them off a work Account onto their
 personal subscription — precisely the failure Groups exist to prevent, arriving
 by a route nobody typed. Two independent yeses before anything moves underneath
 you: one saying these Accounts are interchangeable at all, one saying something

@@ -48,15 +48,15 @@ The premise also said thirty gerund binaries. There are thirty-three binaries,
 twenty-seven of them gerunds, and sorting them by *what they assert* rather than
 by how they are named produces three kinds — not one rule with a ragged edge.
 
-**Behaviour.** What a command does, driving real command code against
-`FakeHost`. Twenty-six of them. Named for the behaviour, which is not the same as
+**Behavior.** What a command does, driving real command code against
+`FakeHost`. Twenty-six of them. Named for the behavior, which is not the same as
 named for the command: `exporting` happens to be one command, but `carrying`
 (ADR 0003), `storing` (ADR 0020), `reconciling` (ADR 0026) and `naming` are
 mechanics no single command owns, and no per-command rule could have produced
-them. The clearest evidence the rule is behaviour and not command is `perch
+them. The clearest evidence the rule is behavior and not command is `perch
 status`, which is asserted across three files — `status.rs` for what it shows,
 `listing.rs` for `list` and `--group`, `refreshing.rs` for `--refresh`. Under a
-per-command rule that is a defect. Under this one it is three behaviours that
+per-command rule that is a defect. Under this one it is three behaviors that
 share a verb, which is what they are.
 
 **Correspondence.** That two artifacts which must agree, do. Six of them:
@@ -64,7 +64,7 @@ share a verb, which is what they are.
 `contract_*` suites ask whether the probe's beliefs still match the installed
 Claude Code (ADR 0007); `publishing` asks whether the site still matches the
 repository that publishes it (ADR 0035). These assert a relationship, not a
-behaviour, and none of them drives a command against a fake.
+behavior, and none of them drives a command against a fake.
 
 The gating axis cuts across this and does not define it. `contract_*` is held
 back by a feature and its failures are news about upstream; `conformance` is
@@ -73,19 +73,19 @@ ungated and its failures are ordinary faults in the change that caused them —
 can assert the same *kind* of thing and mean different things by failing.
 
 **Surface.** What the binary accepts and returns. One of them, `tests/invoking.rs`
-from ADR 0044, which is on the record as explicitly not a behaviour suite: *the
-surface, never the behaviour behind it.*
+from ADR 0044, which is on the record as explicitly not a behavior suite: *the
+surface, never the behavior behind it.*
 
 The naming signal is **a gerund for what Perch does, a noun for a
-correspondence**. Behaviour and Surface are both Perch doing something, so
+correspondence**. Behavior and Surface are both Perch doing something, so
 `invoking.rs` keeps the name ADR 0044 gave it. That leaves three files misnamed
 against a rule the other thirty already follow, and they are renamed rather than
 excused:
 
 | now              | becomes           | why                                    |
 | ---------------- | ----------------- | -------------------------------------- |
-| `adoption.rs`    | `adopting.rs`     | a behaviour wearing a noun             |
-| `status.rs`      | `reporting.rs`    | a behaviour wearing a command's name   |
+| `adoption.rs`    | `adopting.rs`     | a behavior wearing a noun              |
+| `status.rs`      | `reporting.rs`    | a behavior wearing a command's name    |
 | `publishing.rs`  | `publication.rs`  | a correspondence wearing a gerund      |
 
 Three `git mv`s. A test binary's name is its filename, so nothing else moves.
@@ -102,7 +102,7 @@ integration test.
 The line between a `mod tests` in `src` and a binary in `tests/` is followed
 consistently and stated nowhere.
 
-The obvious guess is wrong. It is not that unit tests are pure and behaviour
+The obvious guess is wrong. It is not that unit tests are pure and behavior
 tests use the fake: `src/lock.rs` and `src/registry.rs` both drive `FakeHost`
 from inside their own `mod tests`. The fake is not the discriminator, and anybody
 who assumed it was would draw the line in the wrong place on their first try.
@@ -119,12 +119,12 @@ log — `the_wait_doubles_with_every_failure_and_stops_at_the_longest`,
 either. `tests/watching.rs` holds fifty driving the real loop —
 `a_refresh_that_fails_across_a_threshold_crossing_never_switches`. Neither could
 be moved to the other side without loss: pushing `lock.rs`'s renewal cases into a
-behaviour binary would mean reaching them through whichever command happens to
-take a lock, and pulling command behaviour into a `mod tests` would abandon the
+behavior binary would mean reaching them through whichever command happens to
+take a lock, and pulling command behavior into a `mod tests` would abandon the
 what-does-a-person-get framing every file in `tests/` opens with.
 
 That rule is added to `tests/common/mod.rs`'s header, which is the file every
-behaviour binary already declares and already carries the harness's other
+behavior binary already declares and already carries the harness's other
 standing rule. A `tests/README.md` was declined: a second venue is a second thing
 to disagree with this ADR.
 
@@ -155,13 +155,13 @@ makes 895 lines invisible to the coverage job, and that it fires when Perch
 changes rather than when Claude Code does, are live and are #156's. Placing a
 suite in a taxonomy is not the same as approving how it runs.
 
-**Whether `browsing.rs` survives.** It is a behaviour suite under this ADR and
+**Whether `browsing.rs` survives.** It is a behavior suite under this ADR and
 will be a smaller one once ADR 0042's Config tab goes, but whether the picker
 exists at all is #151's, blocked on #147. If the picker goes, so does the file,
 and nothing here objects.
 
 **What the commands are.** #145 may redraw the command surface entirely. That is
-the strongest argument for naming binaries after behaviours rather than commands:
+the strongest argument for naming binaries after behaviors rather than commands:
 a rename of `perch status` does not invalidate `reporting.rs`, because the file
 was never named for the command.
 
@@ -173,16 +173,22 @@ Three renames, and no change to any assertion.
 
 `CONTEXT.md` loses its **Proving it works** heading. ADR 0041 empties it of all
 seven entries, and this ADR declines to refill it — the same call ADR 0042, ADR
-0043 and ADR 0044 each made in turn, on the same grounds. Behaviour,
+0043 and ADR 0044 each made in turn, on the same grounds. Behavior,
 Correspondence and Surface are terms a contributor holds, not terms somebody
 using Perch holds, and the glossary is for the second kind. They live in this ADR
 and in the header, which are the places a person writing a test is already
 looking. An empty heading would be worse than a deleted one.
 
+> **Reversed in part by #204.** The heading is back, holding **Behavior** alone,
+> with Correspondence and Surface named inside that entry rather than given ones
+> of their own. The argument above still holds for who the glossary is for; what
+> it did not weigh is that a term defined in an ADR and nowhere else is a term
+> the next agent writes an issue without. Nothing about the taxonomy changes.
+
 The `Host` port seam survives, and the map's watch on it can close. The seam
 exists so command code can be driven with no machine, and the map named exactly
 two things that could threaten it: #142, which passed by refusing to move
-behaviour off the fakes, and this ticket. Behaviour stays where it is, `host::fake`
+behavior off the fakes, and this ticket. Behavior stays where it is, `host::fake`
 remains the only way it is driven, and there is nothing left watching.
 
 This ADR supersedes nothing. ADR 0043 governs what an assertion must claim, ADR

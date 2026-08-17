@@ -1,6 +1,6 @@
 //! The Host port: every effect Perch has outside its own process.
 //!
-//! Commands take a `&dyn Host` and nothing else, so behaviour tests drive the
+//! Commands take a `&dyn Host` and nothing else, so behavior tests drive the
 //! real command code against [`fake::FakeHost`] and assert on outcomes rather
 //! than on mocks. One trait, two implementations: [`real::RealHost`] and the
 //! fake that records what it was asked to do.
@@ -111,7 +111,7 @@ pub struct HttpResponse {
 /// keychain and no other platform does (ADR 0020), and Windows finds programs
 /// through `PATHEXT` where everything else marks them executable.
 ///
-/// An effect rather than a `cfg!`, so the behaviour tests can drive every
+/// An effect rather than a `cfg!`, so the behavior tests can drive every
 /// platform's Credential Store and program search whatever they are running
 /// on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -602,7 +602,7 @@ pub fn write_atomically(host: &dyn Host, path: &Path, contents: &str) -> Result<
 /// make there afterwards does nothing. Nothing says so, and the repair is to
 /// notice.
 ///
-/// One hop rather than a full canonicalisation, because one hop is what a
+/// One hop rather than a full canonicalization, because one hop is what a
 /// dotfile manager makes and a walk would need a loop guard for no case anybody
 /// has. A relative target is resolved against the directory the link sits in,
 /// which is what the operating system does with it.

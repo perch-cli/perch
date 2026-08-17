@@ -1,4 +1,4 @@
-//! Behaviour: what `perch status --refresh` fetches, what it keeps, and what
+//! Behavior: what `perch status --refresh` fetches, what it keeps, and what
 //! it refuses to do to get a figure.
 //!
 //! This is the only command in v1 that spends network budget (ADR 0015), so the
@@ -626,10 +626,10 @@ fn an_outage_on_the_profile_endpoint_records_nothing_rather_than_guessing() {
 
 /// Drift, on the other hand, genuinely is no evidence either way — and is the
 /// case ADR 0019 wrote the carve-out for. A profile reply whose shape this build
-/// does not recognise must not stop a Utilization read: Anthropic changing a
+/// does not recognize must not stop a Utilization read: Anthropic changing a
 /// field name would otherwise take every figure in Perch with it.
 #[test]
-fn a_profile_reply_this_build_does_not_recognise_still_lets_the_figures_be_read() {
+fn a_profile_reply_this_build_does_not_recognize_still_lets_the_figures_be_read() {
     let host = machine_with_two_accounts();
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
     let host = host

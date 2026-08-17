@@ -1,4 +1,4 @@
-//! Behaviour: naming Accounts, and what a typed Target turns out to mean.
+//! Behavior: naming Accounts, and what a typed Target turns out to mean.
 //!
 //! No command should ever require typing an email address, which is what an
 //! Alias is for. The rest of these tests are about the one namespace Aliases
@@ -340,12 +340,12 @@ fn an_alias_command_on_a_registry_from_before_aliases_finds_nothing() {
 }
 
 /// The registry refuses an Alias or a Group that differs from a held name only
-/// in case, precisely so that nobody has to remember how they capitalised one
-/// months ago. Resolving a Target has to honour the same rule, or `perch group
+/// in case, precisely so that nobody has to remember how they capitalized one
+/// months ago. Resolving a Target has to honor the same rule, or `perch group
 /// add Work` produces a Group that `perch group remove work` will drop and
 /// `perch switch work` says does not exist.
 #[test]
-fn a_name_is_reached_however_it_is_capitalised() {
+fn a_name_is_reached_however_it_is_capitalized() {
     let host = machine_with_two_accounts();
     declare_group(&host, "Work");
     set_alias(&host, "Overflow", SECOND_EMAIL).0.expect("named");
@@ -415,7 +415,7 @@ fn a_switch_accepts_the_spelling_every_other_command_accepts() {
 /// making `café` and `CAFÉ` two — the exact ambiguity the rule exists to
 /// prevent, kept for the users whose language has accents in it.
 #[test]
-fn a_name_is_one_name_however_it_is_capitalised_in_any_language() {
+fn a_name_is_one_name_however_it_is_capitalized_in_any_language() {
     let host = machine_with_two_accounts();
     declare_group(&host, "café");
 

@@ -24,7 +24,7 @@ exactly the same measure.
 says so, and `switching.md:103` advertises it in an exit-15 message. ADR 0015's
 allowance is roughly 28–30 reads an hour *per Account*, so breadth spends
 breadth-many independent budgets rather than exhausting one, and ADR 0018 already
-makes each Account's failure its neighbours' business. Reading every Account on a
+makes each Account's failure its neighbors' business. Reading every Account on a
 loop is what `perch watch` is for.
 
 So the rule was never "keep the network away from listings". It is **a refresh
@@ -39,7 +39,7 @@ in no Group (ADR 0017).
 
 ADR 0045 found this before this question was asked: `perch status` is asserted
 across three files, and **`listing.rs` holds both `list` and `--group`**. The
-harness has treated the listing as one behaviour regardless of which command
+harness has treated the listing as one behavior regardless of which command
 reaches it since before anybody wondered whether it was.
 
 And ADR 0049 closes it. The ordering it moves out of the picker is
@@ -104,7 +104,7 @@ reads every Account it is about to show, `perch list <scope> --refresh` reads th
 Scope's. Two commands reach a refresh and that is not two capabilities — each
 refreshes what it shows, which is one rule applied to two shows.
 
-## The names stay, and ADR 0047's own defence is why
+## The names stay, and ADR 0047's own defense is why
 
 ADR 0047 deferred naming deliberately: "ruling on their names before ruling on
 their number would decide in the wrong order." With the number settled at two,
@@ -113,7 +113,7 @@ commands.
 
 It stays, and not by default. ADR 0047 defended `perch status` against `perch
 watcher status` as **"the rule working — same verb, different noun, and the
-elided noun is precisely what tells them apart."** That defence requires the word
+elided noun is precisely what tells them apart."** That defense requires the word
 to be the same at both levels; renaming the Account's one orphans the Watcher's
 as a lone noun and spends the collision ADR 0047 built. `status` also happens to
 be the most conventional name any CLI has — `git`, `systemctl`, `docker` — and a
@@ -177,7 +177,7 @@ to decline one for this reason.
 ## Considered Options
 
 **Collapse to one command.** The strongest rival, and it turns entirely on
-whether the labelled block survives. If `perch status` were `perch list` filtered
+whether the labeled block survives. If `perch status` were `perch list` filtered
 to one row, the two shapes would be identical and the count would follow — one
 name. It was refused because a table of one row is a worse answer to "which
 Account am I on" than a block is, and because the block is the only shape with

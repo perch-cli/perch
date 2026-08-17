@@ -7,7 +7,7 @@ are still open.
 
 The rule the individual answers come from: **a crate is taken unless it would
 sit on the wrong side of a seam.** Perch has two seams that matter. The Host
-port is one — every effect goes through `&dyn Host` so behaviour tests drive
+port is one — every effect goes through `&dyn Host` so behavior tests drive
 real command code against a fake, including a Windows `.cmd` and an unset
 `HOME` on whatever machine the tests happen to run on. Fidelity to what Claude
 Code actually does is the other: Perch shares files, keychain items and locks
@@ -16,7 +16,7 @@ worse than code that is exactly compatible.
 
 ## Taken
 
-**Randomised temp names**, in the shape the standard library can give them
+**Randomized temp names**, in the shape the standard library can give them
 rather than through `tempfile`. `write_atomically` and `write_private_file`
 both write beside their target and rename, at a name that used to be a fixed
 `<path>.perch-tmp`: predictable enough to pre-plant a symlink at, and shared by
@@ -61,7 +61,7 @@ question with one answer.
 
 **`which`** — the program search is `PATHEXT`-aware because npm installs
 `claude.cmd` (ADR 0007), and it goes through the Host so a test can pin the
-Windows behaviour from macOS. A crate that consults the real `PATH` cannot.
+Windows behavior from macOS. A crate that consults the real `PATH` cannot.
 
 **`dirs`** — the home directory is `USERPROFILE` on Windows and `HOME`
 elsewhere, and never `HOME` on Windows even when Git Bash sets it. That rule is

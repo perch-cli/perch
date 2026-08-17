@@ -277,7 +277,7 @@ enum Command {
 
     /// Cycle on your behalf when the Account you are on runs low.
     ///
-    /// Three arrangements and one behaviour (ADR 0040): `run` is a loop you can
+    /// Three arrangements and one behavior (ADR 0040): `run` is a loop you can
     /// see and kill, `install` hands that same loop to the machine's own service
     /// manager, and `check` is one round for a scheduler to fire. One of them at
     /// a time, and the policy is the same in all three.

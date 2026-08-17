@@ -1,4 +1,4 @@
-//! Behaviour: keeping an Account out of Cycling without giving it up.
+//! Behavior: keeping an Account out of Cycling without giving it up.
 //!
 //! Disabling is the smallest thing that can be said about an Account: it leaves
 //! the Cycling pool and nothing else changes. It stays listed, keeps its Alias

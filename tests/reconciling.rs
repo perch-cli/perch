@@ -1,4 +1,4 @@
-//! Behaviour tests for Reconcile: making Shared State reachable from the
+//! Behavior tests for Reconcile: making Shared State reachable from the
 //! Profile a Run launches (ADR 0026).
 //!
 //! Driven through the Host port, so the Windows half — junctions, and the

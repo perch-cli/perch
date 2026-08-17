@@ -109,7 +109,7 @@ fn member_indentation(contents: &str, open: usize, inside: &str) -> usize {
 /// the text is exact for a document written by `JSON.stringify`, which is what
 /// Claude Code writes.
 fn quoted(key: &str) -> String {
-    serde_json::to_string(key).expect("a string serialises")
+    serde_json::to_string(key).expect("a string serializes")
 }
 
 /// Where the value of a top-level key starts and ends.
@@ -213,7 +213,7 @@ fn balanced_end(bytes: &[u8], start: usize, open: u8, close: u8) -> Option<usize
     None
 }
 
-/// Where a JSON string ends, one past its closing quote, honouring escapes.
+/// Where a JSON string ends, one past its closing quote, honoring escapes.
 fn string_end(bytes: &[u8], start: usize) -> Option<usize> {
     let mut at = start + 1;
     while at < bytes.len() {

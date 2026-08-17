@@ -16,9 +16,9 @@ the drift is continuous — the lock protocol was established by reading bundle
 2.1.218, and this machine already runs 2.1.220.
 
 Perch therefore probes what it depends on before acting, and when something is
-unrecognised it refuses the dangerous operation and says which assumption
+unrecognized it refuses the dangerous operation and says which assumption
 failed. The failure a user experiences becomes "Perch declined to swap:
-unrecognised credential store, Claude Code 2.3.0" rather than being silently
+unrecognized credential store, Claude Code 2.3.0" rather than being silently
 logged out by a background auto-update. A weekly scheduled CI run asserts the
 same shapes against whatever Claude Code is current, to find drift before users
 do.

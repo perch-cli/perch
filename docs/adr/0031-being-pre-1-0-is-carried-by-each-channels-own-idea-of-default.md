@@ -45,4 +45,4 @@ The floor for taking it is the weekly contract suite green on all three
 platforms for four consecutive weeks. Not an arbitrary interval: those tests
 assert Perch's beliefs against a Claude Code that updates continuously (ADR
 0007), and drift there is the failure that cannot be tested for in advance, only
-waited out. Everything else is judgement.
+waited out. Everything else is judgment.

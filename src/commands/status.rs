@@ -117,25 +117,25 @@ fn render_human(
 
     // Above the Account line, because it is what qualifies it: with a Switch in
     // flight, the Account named below is the one Perch was on rather than the
-    // one it can establish is live. A note rather than a labelled row, as the
+    // one it can establish is live. A note rather than a labeled row, as the
     // Refresh's own notes above it are — the column is for facts about the
     // Account, and this is a fact about whether Perch can name one.
     if let Some(said) = registry.active().a_switch_in_flight() {
         crate::commands::say(out, &said)?;
     }
 
-    utilization::write_labelled(out, "Account", account.email())?;
+    utilization::write_labeled(out, "Account", account.email())?;
     if let Some(organization) = &account.identity.organization_name {
-        utilization::write_labelled(out, "Organization", organization)?;
+        utilization::write_labeled(out, "Organization", organization)?;
     }
     if let Some(plan) = &account.plan {
-        utilization::write_labelled(out, "Plan", plan)?;
+        utilization::write_labeled(out, "Plan", plan)?;
     }
     // Above the figures, because a Quarantined Account's figures describe quota
     // it cannot currently spend: the state is the news, and the numbers are the
     // detail.
     if let Some(why) = account.quarantine {
-        utilization::write_labelled(
+        utilization::write_labeled(
             out,
             "Quarantine",
             &format!(

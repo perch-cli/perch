@@ -349,7 +349,7 @@ impl Host for RealHost {
     /// the Homebrew case arrives as a symlink: `std::env::current_exe` on macOS
     /// hands back the path the process was launched with, which for a
     /// Homebrew install is `<prefix>/bin/perch` and says nothing about a
-    /// Cellar. A path that will not canonicalise is handed back as it came —
+    /// Cellar. A path that will not canonicalize is handed back as it came —
     /// less informative, and better than refusing to run.
     fn current_exe(&self) -> Result<PathBuf, HostError> {
         let launched = std::env::current_exe()?;
@@ -1255,7 +1255,7 @@ fn listen_for_interrupts() {
     // SAFETY: the handler stores to an atomic and reads its argument, and the
     // routine stays valid for the life of the process. A registration that
     // fails leaves the default handler in place, which ends the process on
-    // Ctrl-C — the behaviour of every other Perch command.
+    // Ctrl-C — the behavior of every other Perch command.
     unsafe {
         SetConsoleCtrlHandler(Some(stop), TRUE);
     }
@@ -1591,7 +1591,7 @@ mod tests {
 
     /// The one piece of parsing on the path every Renewal and every Utilization
     /// read goes through, and nothing could reach it: `FakeHost::http` answers
-    /// with a response already built, so no behaviour test ever splits a reply.
+    /// with a response already built, so no behavior test ever splits a reply.
     #[test]
     fn a_reply_is_split_into_a_body_and_a_status_and_says_so_when_it_cannot_be() {
         let reply = split_reply("{\"five_hour\":{}}\n200").expect("that is a reply");
@@ -1722,7 +1722,7 @@ mod tests {
     /// there is nothing here to hold back (ADR 0050). Ungated with
     /// `lock::exclusivity`, which is the other one that was waiting on a clock:
     /// the two together are a second or two on a six-second suite, and Cargo
-    /// parallelises within the binary.
+    /// parallelizes within the binary.
     #[test]
     fn touch_moves_a_directorys_modification_time_forward() {
         let host = RealHost::new();
@@ -1746,7 +1746,7 @@ mod tests {
     /// routinely do not carry one — so the failures it exists to catch were
     /// exactly the ones it let through.
     #[test]
-    fn a_complaint_from_security_is_recognised_without_the_word_error() {
+    fn a_complaint_from_security_is_recognized_without_the_word_error() {
         assert!(said_something_went_wrong(
             "security: -25299: The specified item already exists in the keychain.\n"
         ));

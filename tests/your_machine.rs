@@ -146,7 +146,7 @@ fn the_installed_claude_code_stores_what_perch_expects_to_find() {
     let store = perch::registry::the_default_profile(&host).expect("home is known");
 
     match probe::probe(&host, store) {
-        Ok(Verdict::Recognised(findings)) => {
+        Ok(Verdict::Recognized(findings)) => {
             // A real login on this machine: every belief held.
             assert!(findings.identity.email.contains('@'));
             assert!(
@@ -169,7 +169,7 @@ fn the_installed_claude_code_stores_what_perch_expects_to_find() {
         Err(error) => {
             assert!(
                 matches!(error, PerchError::ProbeRefused { .. }),
-                "an unrecognised Claude Code must be a refusal naming the assumption: {error}"
+                "an unrecognized Claude Code must be a refusal naming the assumption: {error}"
             );
         }
     }
@@ -432,7 +432,7 @@ fn a_running_clients_marker_is_the_shape_perch_believes_in() {
 /// Code is asked who it is: it answers out of that file, having answered
 /// "nobody" for the same directory a moment earlier. The empty answer is half
 /// the test — without it, a Claude Code reading the real login on this machine
-/// would look like one honouring the directory.
+/// would look like one honoring the directory.
 ///
 /// On macOS this also asserts that the plaintext store is consulted when the
 /// keychain holds nothing for that directory, which is the fallback half of the
@@ -492,7 +492,7 @@ fn auth_status(config_dir: &Path) -> Option<bool> {
     let said = String::from_utf8_lossy(&output.stdout);
 
     // Read as loosely as the question allows: this is a test about a path, and
-    // an unrecognisable reply is a reason to say nothing rather than to fail
+    // an unrecognizable reply is a reason to say nothing rather than to fail
     // over the shape of an answer Perch never parses in earnest.
     if said.contains("\"loggedIn\": true") {
         Some(true)

@@ -147,7 +147,7 @@ pub fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
 /// branches on `--json` rather than on the code.
 ///
 /// It does not read the log. On Linux that would mean shelling out to
-/// `journalctl` (ADR 0021 disfavours it) to do worse than `journalctl -f`
+/// `journalctl` (ADR 0021 disfavors it) to do worse than `journalctl -f`
 /// already does, and it would fork the implementation three ways for a feature
 /// every platform already ships.
 pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
@@ -423,7 +423,7 @@ fn watcher_is_running(host: &dyn Host) -> bool {
 /// again from the machine would agree with the machine by construction.
 ///
 /// `None` where there is nothing to read: Windows keeps no file, and a unit
-/// somebody has edited into a shape Perch does not recognise is one Perch
+/// somebody has edited into a shape Perch does not recognize is one Perch
 /// declines to make claims about rather than guessing at.
 fn recorded_binary(host: &dyn Host, at: Option<&std::path::Path>) -> Option<PathBuf> {
     let text = host.read_file(at?).ok()?;

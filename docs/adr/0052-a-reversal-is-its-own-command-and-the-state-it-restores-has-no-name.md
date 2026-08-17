@@ -32,7 +32,7 @@ otherwise.
 
 The code says the opposite twice. `Account.enabled` (`registry.rs:176`) is a bool
 written on every Account, always — `#[serde(default = "enabled_by_default")]`
-with no `skip_serializing_if`, where its four optional neighbours (`plan`,
+with no `skip_serializing_if`, where its four optional neighbors (`plan`,
 `quarantine`, `group`, `utilization`) all omit themselves when absent. Every
 registry fixture in the repository carries `"enabled":true`. And `state_of`
 (`list.rs:244`) prints the literal word `enabled` in the state column, with

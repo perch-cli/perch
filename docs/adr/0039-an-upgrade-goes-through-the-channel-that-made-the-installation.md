@@ -119,8 +119,8 @@ Perch has lost any means of reporting that it failed.
 
 The installers verify checksums always and provenance only where `gh` is
 installed, so on most machines the strongest check is skipped. `perch upgrade`
-inherits that exactly rather than being stricter — one behaviour for install and
-upgrade, which is one behaviour to keep right — but it *says* which checks it
+inherits that exactly rather than being stricter — one behavior for install and
+upgrade, which is one behavior to keep right — but it *says* which checks it
 made, including the one it did not. A silently skipped provenance check is the
 single thing a tool built around being careful with Credentials should not do
 quietly.

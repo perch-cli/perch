@@ -125,7 +125,7 @@ jobs:
       - name: Build
         run: cargo build --locked --release --target ${{ matrix.target }}
 
-      # Flat archives — the binary and both licences, no wrapping directory —
+      # Flat archives — the binary and both licenses, no wrapping directory —
       # because everything that reads them extracts into a directory of its own
       # first. `.zip` on Windows because a Windows without tar in the shell is
       # still a machine people have.

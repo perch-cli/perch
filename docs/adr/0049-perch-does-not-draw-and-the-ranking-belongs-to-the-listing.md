@@ -112,11 +112,11 @@ here.
 
 ADR 0011's stated justification — "a read-only picker is `perch list` with
 box-drawing characters, so the whole justification for it is making a choice" —
-is false today, and in the picker's favour. `perch list` prints four columns in
+is false today, and in the picker's favor. `perch list` prints four columns in
 registry order. The picker's Accounts view prints the same listing **ordered as
 a Cycle ranks it, with the Headroom that order was made on beside it**, and
 renders Ungrouped Accounts as *held* rather than ranked (ADR 0017). `list.rs`
-knows this: `widths` is generalised over N columns rather than written over its
+knows this: `widths` is generalized over N columns rather than written over its
 own four, "because the TUI's Accounts view shows the same listing with the
 figure its order was made on beside it."
 
@@ -145,7 +145,7 @@ this whole thread exists to prevent, arrived at by scheduling.
 ADR 0016 is three decisions in one file and only two of them are the picker's.
 Its ratatui-over-crossterm choice and its second Amended section — `tui::Screen`,
 the Refresh thread's own Host, `Host::print_remarks` — are superseded here. **Its
-colour-eyre repeal and the two-error-idiom rule stand**: expected failures are
+color-eyre repeal and the two-error-idiom rule stand**: expected failures are
 `PerchError` carrying an exit code a script reads, unexpected ones are panics
 through the twelve-line hook in `report.rs`, and anything that starts as a panic
 and turns out to be an outcome moves across. None of that was ever about drawing,
@@ -153,7 +153,7 @@ and superseding the file whole would have taken `report.rs`'s charter with it.
 
 ADR 0042 is superseded in full — both halves of its decision are void, since the
 tab it removed goes with the view it preserved — but one sentence is carried
-forward rather than buried, because it generalised past the thing it was written
+forward rather than buried, because it generalized past the thing it was written
 about:
 
 > a surface which writes at all pulls in locking, deferral, refusal and

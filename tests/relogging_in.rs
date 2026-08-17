@@ -1,4 +1,4 @@
-//! Behaviour: `perch relogin` — the way back from a Quarantine.
+//! Behavior: `perch relogin` — the way back from a Quarantine.
 //!
 //! The Account that comes back has to be the *same* Account: same Alias, same
 //! Group, same standing with Cycling, same place in the listing. Removing and
@@ -179,7 +179,7 @@ fn leaked(text: &str) -> &'static str {
 }
 
 /// The other direction of the same rule: a login under a differently
-/// capitalised spelling is the Account being repaired, not somebody else.
+/// capitalized spelling is the Account being repaired, not somebody else.
 ///
 /// Asked in ASCII, this was the one comparison disagreeing with `add` and
 /// `target`, and it disagreed on the path `add` sends people down. Told that
@@ -622,7 +622,7 @@ fn repairing_the_account_you_are_on_is_refused_while_a_client_holds_the_default_
 /// you are on, while the broken Credential is still the live one and the fresh
 /// one sits in the Account's own Profile. That is exactly the state
 /// `no_longer_on_anybody` defends against by clearing `active` — and clearing
-/// `active` is a registry write, which is what just failed. So the only defence
+/// `active` is a registry write, which is what just failed. So the only defense
 /// left is saying what not to do, and a bare `?` said only that a file could not
 /// be written.
 #[test]

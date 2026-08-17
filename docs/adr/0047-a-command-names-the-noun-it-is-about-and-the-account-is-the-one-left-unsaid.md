@@ -148,7 +148,7 @@ rule conceding on the very case that exposed it.
 ### The Watcher
 
 `CONTEXT.md` already says these are one thing: the Watcher is "**Three
-arrangements and one behaviour**: a loop you can see and kill, a Service the
+arrangements and one behavior**: a loop you can see and kill, a Service the
 machine runs for you, or a sequence of Checks something else schedules. One of them
 at a time."
 
@@ -166,7 +166,7 @@ along.
 **Service keeps its glossary entry and loses its tree.** It names an *arrangement*
 of the Watcher, which is why `install` and `uninstall` are the right verbs for it
 and why it was never a rival noun. A tree per arrangement would have been three
-trees for one behaviour.
+trees for one behavior.
 
 Two apparent collisions are not. `perch status` is an Account's and `perch watcher
 status` is the Watcher's; `perch run` launches a client and `perch watcher run`
@@ -273,7 +273,7 @@ It is the only path `CONTEXT.md` cites that this decision moves; `perch status
 --refresh`, `perch relogin` and `perch upgrade` are all unaffected.
 
 **Watcher** and **Service** are untouched. The Watcher entry's "three arrangements
-and one behaviour" is what this decision implements rather than something it
+and one behavior" is what this decision implements rather than something it
 changes, and Service cites no path.
 
 ## Consequences
@@ -309,7 +309,7 @@ following imperfectly since ADR 0011, and there is no prior decision to correct 
 which is itself the finding. The shape was never chosen; it accreted, and three
 commands happened to get a noun because their nouns happened to have names.
 
-**Nothing about behaviour changes.** No exit code moves, no flag other than
+**Nothing about behavior changes.** No exit code moves, no flag other than
 `--once` is affected, `perch watcher check` reports on ADR 0013's table exactly as
 `perch watch --once` did, and no capability is added or removed. This is a decision
 about where twenty-eight capabilities are reached from, and about the one sentence

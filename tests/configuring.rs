@@ -1,4 +1,4 @@
-//! Behaviour: `perch config set` and `perch config get`.
+//! Behavior: `perch config set` and `perch config get`.
 //!
 //! Perch has to be complete over SSH and in CI, so every capability is
 //! available non-interactively (ADR 0011) — this is the one that changes how a
@@ -870,7 +870,7 @@ fn a_setting_said_about_one_scope_reaches_no_other() {
 }
 
 /// The grant is the one this matters most for: consent said about one Scope
-/// authorises that Scope, and a Group declared afterwards is a Group nobody has
+/// authorizes that Scope, and a Group declared afterwards is a Group nobody has
 /// said anything about (ADR 0051).
 #[test]
 fn a_group_declared_after_a_grant_is_not_covered_by_it() {

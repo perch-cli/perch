@@ -107,7 +107,7 @@ forbids is a run that **quietly** proved a third of what it was asked to. A
 run-time skip is named, counted and in the report, with a reason somebody can act
 on — *nothing was stale here, come back in the morning*. That is the loud kind.
 The alternative on offer was a phase that runs against a live token, renews
-nothing, and reports green, which is the quiet kind wearing the figure's colours.
+nothing, and reports green, which is the quiet kind wearing the figure's colors.
 
 ## Consequences
 

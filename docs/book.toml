@@ -16,7 +16,7 @@
 title = "Perch"
 description = "Run Claude Code as whichever Claude account you want, without going through the login flow again."
 authors = ["The Perch authors"]
-language = "en"
+language = "en-us"
 src = "guide"
 
 [build]

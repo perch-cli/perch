@@ -67,8 +67,8 @@ pub fn window_width_across<'a>(accounts: impl IntoIterator<Item = &'a Account>) 
 }
 
 /// Writes a label and a value in that column, for the surfaces that render an
-/// Account as labelled lines.
-pub fn write_labelled(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {
+/// Account as labeled lines.
+pub fn write_labeled(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {
     writeln!(out, "{label:LABEL_WIDTH$}{value}").map_err(write_failed)
 }
 
@@ -80,7 +80,7 @@ pub fn write_figures(out: &mut dyn Write, account: &Account, now: DateTime<Utc>)
     let width = window_width_across([account]);
     for (index, figure) in lines(account, now, width).iter().enumerate() {
         let label = if index == 0 { "Utilization" } else { "" };
-        write_labelled(out, label, figure)?;
+        write_labeled(out, label, figure)?;
     }
     Ok(())
 }
@@ -219,7 +219,7 @@ pub fn percentage(value: f64) -> String {
 }
 
 /// A percentage printed beside the figure it is being judged against, at a
-/// precision that cannot contradict the judgement.
+/// precision that cannot contradict the judgment.
 ///
 /// [`percentage`] rounds to whole numbers and the comparison is made on what
 /// Anthropic sent, so the two disagreed either side of a threshold: 79.6 is

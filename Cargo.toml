@@ -34,16 +34,16 @@ unsafe_op_in_unsafe_fn = "deny"
 all = "deny"
 
 # A distributed CLI is a binary somebody downloads, so its size is a cost they
-# pay. None of this changes behaviour.
+# pay. None of this changes behavior.
 [profile.release]
 strip = true
 lto = "thin"
 codegen-units = 1
 
 # scrypt is deliberately expensive, and `export.rs` pins how expensive. An
-# unoptimised build of it is that cost times twenty — which is paid by nothing a
+# unoptimized build of it is that cost times twenty — which is paid by nothing a
 # user runs, and by every test that seals or opens an Export, several times each.
-# Optimising the three crates that do the arithmetic takes the suite back from
+# Optimizing the three crates that do the arithmetic takes the suite back from
 # minutes to seconds without touching the work factor, which is the number that
 # is supposed to decide this.
 [profile.dev.package.scrypt]
@@ -118,7 +118,7 @@ your-machine = []
 
 # `host::fake`, which exists so the real command code can be driven with no
 # machine.
-# Behaviour tests are integration tests, so they link the library as any other
+# Behavior tests are integration tests, so they link the library as any other
 # crate would and `#[cfg(test)]` cannot reach them; without a feature the fake
 # went into the binary somebody downloads, along with every planted keychain
 # item and injected failure it carries.

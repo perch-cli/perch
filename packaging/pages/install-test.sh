@@ -289,8 +289,8 @@ expect "Add it to ~/.bashrc:"
 expect "export PATH=\"$install_dir:\$PATH\""
 
 # tcsh is neither one of the three shells that get a file named nor one that
-# reads ~/.profile, so it is the plain unrecognised case.
-run_case "an unrecognised shell is named no file at all" /bin/tcsh home fresh .local/bin
+# reads ~/.profile, so it is the plain unrecognized case.
+run_case "an unrecognized shell is named no file at all" /bin/tcsh home fresh .local/bin
 expect "export PATH=\"$install_dir:\$PATH\""
 refute "~/."
 

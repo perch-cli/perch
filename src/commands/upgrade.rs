@@ -164,7 +164,7 @@ fn chosen_channel(host: &dyn Host, named: Option<&str>) -> Result<Channel> {
         PerchError::Invalid(format!(
             "Perch is installed at {}, and nothing about that path says which \
              Channel put it there.\n\
-             Homebrew and npm keep their binaries somewhere Perch recognises, \
+             Homebrew and npm keep their binaries somewhere Perch recognizes, \
              and the installer script puts one in {expected}. A binary anywhere \
              else was placed by hand — most likely unpacked from the Release \
              page — and Perch will not write over a file it did not put there.\n\
@@ -283,7 +283,7 @@ fn agree_to_going_back(
 }
 
 /// Homebrew installs what the formula says and has no way to be pointed at an
-/// older Release, so `--release` there is a request that cannot be honoured.
+/// older Release, so `--release` there is a request that cannot be honored.
 ///
 /// Refused rather than quietly ignored: silently installing the newest when
 /// somebody named an older one is the failure mode where they find out by

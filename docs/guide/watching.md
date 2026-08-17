@@ -130,7 +130,7 @@ looking** are different things, and among the Accounts in no Group both have to
 be said. A Group needs only the second, because a Group *is* the first.
 
 A `watcher-may-act` is said about the Scope it grants and reaches no other
-(ADR 0051), so letting the watcher into your work Group authorises that Group and
+(ADR 0051), so letting the watcher into your work Group authorizes that Group and
 nothing else — not the Accounts in no Group, and not a Group you declare
 tomorrow. The price is that there is no one command that withdraws the watcher
 everywhere: it is one per Scope. A brake that worked by blanket inheritance would

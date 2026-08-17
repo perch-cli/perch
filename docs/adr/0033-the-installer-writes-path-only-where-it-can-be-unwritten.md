@@ -51,7 +51,7 @@ Unix user is handed `export PATH="..."`, while a Windows user gets a
 **Unix advises.** It names the file for the shell `$SHELL` reports — `.bashrc`,
 `.zshrc`, `config.fish` with `fish_add_path`, since fish cannot use an `export`
 line — and falls back to the bare POSIX line for anything it does not
-recognise. Where it created `~/.local/bin` itself and the user's `~/.profile`
+recognize. Where it created `~/.local/bin` itself and the user's `~/.profile`
 already carries the Debian conditional, it says to start a new login shell
 rather than handing out a second export, because on that machine the guard was
 false at login and is the right answer now.

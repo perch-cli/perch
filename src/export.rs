@@ -38,7 +38,7 @@ pub const CURRENT_VERSION: u32 = 1;
 /// point of it. `age`'s own default ceiling is "about a second of work here,
 /// plus four doublings", and its default *work factor* is about a second of
 /// work on whatever wrote the file — so with both left alone, whether an Export
-/// opens is a question about the pair of machines it travelled between. An
+/// opens is a question about the pair of machines it traveled between. An
 /// Export written on a desktop and carried to a laptop, or opened inside a
 /// container with less CPU than the one that wrote it, was refused on that
 /// alone. ADR 0014 wants this file to outlive the machine that wrote it, and it
@@ -260,7 +260,7 @@ fn read_the_identity_file(host: &dyn Host, account: &Account) -> Option<String> 
 }
 
 impl Export {
-    /// How many Accounts travelled in it.
+    /// How many Accounts traveled in it.
     pub fn accounts(&self) -> usize {
         self.registry.accounts.len()
     }
@@ -297,7 +297,7 @@ impl Export {
 /// password manager, which is a thing you can do with text.
 pub fn seal(export: &Export, passphrase: &str) -> Result<String> {
     let plain = serde_json::to_vec(export)
-        .map_err(|err| PerchError::Other(format!("could not serialise the Export: {err}")))?;
+        .map_err(|err| PerchError::Other(format!("could not serialize the Export: {err}")))?;
 
     age::encrypt_and_armor(&recipient(passphrase), &plain)
         .map_err(|err| PerchError::Other(format!("could not encrypt the Export: {err}")))
@@ -323,7 +323,7 @@ pub fn unseal(sealed: &str, passphrase: &str) -> Result<Export> {
     // *decryption* — about a second of work here, plus four doublings. So an
     // Export written on a fast desktop and opened on a slow laptop, or inside a
     // CPU-limited container, was refused for no reason but the pair of machines
-    // it travelled between. That is the one property ADR 0014 is about: this
+    // it traveled between. That is the one property ADR 0014 is about: this
     // file is meant to outlive the machine that wrote it, so what will open it
     // cannot be a function of the machine that opens it. 22 is where `age`'s own
     // guidance tops out, and is above `WORK_FACTOR`, which is what `seal`
@@ -509,10 +509,10 @@ mod tests {
     }
 
     /// The whole of what an Export promises: what went in comes back out, and
-    /// what it travelled in is a file the standard `age` command reads.
+    /// what it traveled in is a file the standard `age` command reads.
     ///
     /// Two things say the second half. The armor header is what `age -d`
-    /// recognises the text encoding by, and the recipient is scrypt — which is
+    /// recognizes the text encoding by, and the recipient is scrypt — which is
     /// what makes it a file `age` opens by *asking for a passphrase* rather than
     /// one it wants a key file for. Verified against `age` 1.3.1 by hand, which
     /// is as far as a test that must run on a machine with no `age` installed
@@ -617,7 +617,7 @@ mod tests {
             "and it names what is missing: {refused}"
         );
 
-        // The neighbouring shape that *is* meaningful, and still opens.
+        // The neighboring shape that *is* meaningful, and still opens.
         let none_kept = Export {
             credentials: BTreeMap::new(),
             ..an_export()
