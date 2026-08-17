@@ -1407,7 +1407,16 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
     }
 
     let seconds = i64::try_from(info.pbi_start_tvsec).ok()?;
-    DateTime::from_timestamp(seconds, u32::try_from(info.pbi_start_tvusec).ok()? * 1_000)
+    // `checked_mul`, because this is the one arithmetic here on a number the
+    // kernel chooses: a `tv_usec` above 4,294,967 overflows `u32` and is a
+    // panic in a debug build and a wrapped nanosecond count in a release one.
+    // A real `tv_usec` is under a million, so nothing is expected to reach it —
+    // which is exactly the kind of expectation worth spelling as an answer
+    // rather than as a multiplication.
+    let nanoseconds = u32::try_from(info.pbi_start_tvusec)
+        .ok()?
+        .checked_mul(1_000)?;
+    DateTime::from_timestamp(seconds, nanoseconds)
 }
 
 /// When a process began, as `GetProcessTimes` reports it: a creation `FILETIME`
