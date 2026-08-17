@@ -263,11 +263,26 @@ fn observe(host: &dyn Host, registry: &Registry, account: &Account) -> Step<Quot
     let theirs =
         |outcome| only_off_a_credential_that_is_theirs(host, outcome, &asked, account, &installed);
 
-    let token = usable_token(host, &asked, &installed).map_err(theirs)?;
-    match read_off(host, &token, account) {
+    let asking = usable_token(host, &asked, &installed).map_err(theirs)?;
+    match read_off(host, &asking.token, account) {
         Ok(windows) => return Ok(windows),
         Err(settled @ Turned::Settled(_)) => return Err(settled.settled()),
         Err(Turned::Away) => {}
+    }
+
+    // A token this reading has just minted, refused by the server that minted
+    // it. The block below is written against the opposite premise — "the
+    // Credential holding it did not think it had run out" — and renewing again
+    // buys nothing: the second Renewal asks the same endpoint, seconds later,
+    // for a replacement of a token it issued and would not accept. What it
+    // costs is real, because a Renewal may Rotate, and every Rotation is a
+    // window where a failed write is a permanent `RotationLost`.
+    //
+    // So the contradiction is reported as one, which is what `Turned::Away`
+    // already says in words: Anthropic renewed this Credential and then would
+    // not take the token it had just issued.
+    if asking.freshly_renewed {
+        return Err(Turned::Away.settled());
     }
 
     // Anthropic would not take the access token Perch asked with, and the
@@ -455,19 +470,39 @@ enum Because {
     AnthropicRefusedIt,
 }
 
+/// An access token to ask with, and where this reading got it.
+struct Asking {
+    token: String,
+    /// Whether a Renewal in *this* reading produced it.
+    ///
+    /// What it decides is whether a refusal from Anthropic is worth renewing
+    /// over. A token the server minted moments ago and then refused is a
+    /// contradiction inside one command rather than a Credential that has
+    /// quietly run out, and the second Renewal that answered it spent a
+    /// Rotation to ask the same question again.
+    freshly_renewed: bool,
+}
+
 /// An access token that can still be asked a question, renewing the Credential
 /// when the one there is has run out.
-fn usable_token(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<String> {
+fn usable_token(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<Asking> {
     let credential = credential_in(host, asked, installed)?;
     if credential.usable_at(host.now()) {
-        return Ok(credential.access_token);
+        return Ok(Asking {
+            token: credential.access_token,
+            freshly_renewed: false,
+        });
     }
 
     // Asked before the locks are taken, so an Account that was never going to
     // be renewed says so without queuing behind anything, and asked again
     // under them, where the answer is the one that counts.
     refuse_if_live(host, asked, installed)?;
-    renew_under_the_lock(host, asked, installed, Because::ItSaysItRanOut)
+    let token = renew_under_the_lock(host, asked, installed, Because::ItSaysItRanOut)?;
+    Ok(Asking {
+        token,
+        freshly_renewed: true,
+    })
 }
 
 /// Refuses to renew a Credential something else is holding (ADR 0005).
