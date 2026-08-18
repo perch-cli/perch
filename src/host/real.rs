@@ -1601,6 +1601,11 @@ fn process_alive(pid: u32) -> bool {
     if pid <= 0 {
         return false;
     }
+    // SAFETY: `kill` takes no pointer and touches no memory Perch owns. Signal
+    // `0` sends nothing at all — it is the "does this pid exist, and may I
+    // signal it" query — and the two guards above are what make the argument a
+    // pid rather than one of the values `kill` reads as a *group*: `0` is the
+    // caller's own process group and `-1` is every process it may signal.
     if unsafe { libc::kill(pid, 0) } == 0 {
         return true;
     }
