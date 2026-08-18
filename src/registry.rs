@@ -3492,6 +3492,9 @@ mod tests {
         registry.forget_group("OFFICE");
         assert!(registry.group("office").is_none());
         assert!(registry.checked("office").is_none());
+        // And forgetting one nothing declared is nothing to do rather than
+        // something to do to whatever the name happens to match.
+        registry.forget_group("office");
     }
 
     /// A rename of a Group nothing declared is a refusal, which is what the

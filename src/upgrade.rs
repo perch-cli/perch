@@ -769,6 +769,7 @@ mod tests {
         // walk: a number sorts below a word, and where one suffix runs out
         // first the longer one is the newer.
         assert_eq!(compare("0.2.0-alpha", "0.2.0-1"), Ordering::Greater);
+        assert_eq!(compare("0.2.0-1", "0.2.0-alpha"), Ordering::Less);
         assert_eq!(compare("0.2.0-rc.1.1", "0.2.0-rc.1"), Ordering::Greater);
     }
 

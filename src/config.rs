@@ -456,6 +456,24 @@ mod tests {
         );
     }
 
+    /// Writing a Setting onto a Group nothing declared is a refusal, which is
+    /// what the signature says. It used to be an abort.
+    ///
+    /// `commands::config` resolves the Scope through `declared_group` before it
+    /// gets here, so the CLI cannot reach this — but `Setting::write` is a
+    /// `pub fn` on a `pub` type returning a `Result`, and a signature that says
+    /// it refuses should not be the thing that panics on the second caller.
+    #[test]
+    fn setting_a_scope_nothing_declared_is_refused_rather_than_panicked_on() {
+        let mut registry = Registry::default();
+
+        let error = Setting::Strategy
+            .write(&mut registry, &work(), "most-headroom")
+            .expect_err("there is no such Group");
+
+        assert!(error.to_string().contains("work"), "{error}");
+    }
+
     #[test]
     fn a_vocabulary_is_named_as_a_sentence() {
         assert_eq!(listed(&["one"]), "`one`");

@@ -957,4 +957,23 @@ mod tests {
 
         assert_eq!(host.file(real).as_deref(), Some("{\"a\":1}"));
     }
+
+    /// A child's output is the buffer it already is wherever it can be, and the
+    /// lossy read only where it has to be.
+    ///
+    /// `security find-generic-password` answers with a Credential on stdout, so
+    /// the copy this avoids was a second heap buffer holding a refresh token
+    /// that nothing wipes — and the fallback still has to hand back *something*
+    /// for a reply that is not UTF-8, because a caller that got no answer would
+    /// read it as a store holding nothing.
+    #[test]
+    fn a_childs_output_is_taken_over_where_it_is_already_text() {
+        assert_eq!(
+            taken_over(b"sk-ant-oat01-test".to_vec()),
+            "sk-ant-oat01-test"
+        );
+        assert_eq!(taken_over(Vec::new()), "");
+        // A lone continuation byte, which no UTF-8 string holds.
+        assert_eq!(taken_over(vec![b'a', 0x80, b'b']), "a\u{fffd}b");
+    }
 }
