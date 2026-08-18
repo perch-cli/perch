@@ -412,6 +412,34 @@ fn only_off_a_credential_that_is_theirs(
     let Outcome::Quarantined { why, detail } = &outcome else {
         return outcome;
     };
+    // A Switch onto this Account that was written down and never recorded. Its
+    // Credential was copied into the Default Profile and is live there, so a
+    // Claude Code Renewal may have Rotated it — which retires the copy still
+    // sitting in this Account's own Profile, the very copy this reading asked
+    // with. The refusal is then evidence about a Credential that has been
+    // superseded rather than about an Account that is broken, and a Quarantine
+    // is permanent until a browser login clears it.
+    //
+    // Before the `its_own_profile` short-circuit rather than after, because
+    // during a Landing `holding` reads *both* halves out of their own Profiles
+    // — nothing is settled, so neither is the active one — and that arm is the
+    // one that lets a terminal verdict straight through.
+    if asked.arriving_in_a_landing {
+        let how = match detail {
+            Some(detail) => format!(" ({detail})"),
+            None => String::new(),
+        };
+        return Outcome::Failed(format!(
+            "the Credential in this Account's own Profile could not be used — \
+             {}{how} — but a Switch onto it is in flight and was never \
+             recorded, so the working copy may be the live one. Nothing was \
+             recorded against this Account. `perch switch {}` settles that and \
+             says which it was.",
+            why.because(),
+            account.email(),
+        ));
+    }
+
     if asked.its_own_profile || names(host, &asked.store, account, installed) {
         return outcome;
     }
@@ -450,6 +478,10 @@ struct Asked {
     store: Store,
     /// Whether this is the Account's own Profile rather than the Default one.
     its_own_profile: bool,
+    /// Whether a Switch onto this Account is in flight and not yet recorded, so
+    /// the copy being asked with may have been overtaken by a Rotation of the
+    /// live one (ADR 0048).
+    arriving_in_a_landing: bool,
     /// Every configuration directory a client could be holding this Account's
     /// Credential from, which is what a Renewal has to be refused against.
     ///
@@ -501,12 +533,18 @@ fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<As
             in_use_from: vec![store.config_dir.clone(), its_own_profile],
             store,
             its_own_profile: false,
+            arriving_in_a_landing: false,
         })
     } else {
         Ok(Asked {
             in_use_from: vec![its_own_profile],
             store: account.store(host)?,
             its_own_profile: true,
+            arriving_in_a_landing: matches!(
+                registry.active(),
+                registry::Active::Landing { arriving, .. }
+                    if registry::same_name(arriving, account.email())
+            ),
         })
     }
 }
