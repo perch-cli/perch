@@ -373,6 +373,36 @@ fn installing_with_no_grant_anywhere_succeeds_and_says_the_service_will_hold() {
     );
 }
 
+/// A grant said about the Ungrouped Accounts is not on its own enough for the
+/// Watcher to act on them: `interchangeable` is the declaration that has to come
+/// first, and without it every round holds (ADR 0017).
+///
+/// Read from `watcher-may-act` alone, this line stayed silent on a machine where
+/// the Watcher can never act — telling somebody their Service was arranged when
+/// it was one `perch config set` short of it. The same claim `perch group list`
+/// was making until it took the gate on.
+#[test]
+fn a_grant_the_watcher_will_never_act_on_still_says_the_service_will_hold() {
+    let host = linux();
+    config_set(&host, &["work", "watcher-may-act", "false"])
+        .0
+        .expect("the Group takes the permission back");
+    // The only grant on the machine, and one the Watcher declines: nothing has
+    // said the Accounts in no Group are interchangeable at all.
+    config_set(&host, &["ungrouped", "watcher-may-act", "true"])
+        .0
+        .expect("the Ungrouped Accounts take the permission");
+
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
+
+    assert_eq!(result.expect("not a refusal"), EXIT_OK);
+    assert!(
+        printed.contains("will hold"),
+        "a grant the Watcher will never act on is not a Service that will act: \
+         {printed}"
+    );
+}
+
 /// **The hazard a Purge exists to avoid, one level up.** A Watcher is the one
 /// process that writes Credentials without being asked, and a supervised one
 /// comes straight back — so it is stopped before anything is deleted, and the

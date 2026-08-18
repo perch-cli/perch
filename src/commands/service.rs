@@ -23,6 +23,7 @@ use std::path::PathBuf;
 use crate::commands::{say, say_json};
 use crate::error::{EXIT_NOTHING_TO_DO, EXIT_OK, PerchError, Result};
 use crate::host::{Host, Platform};
+use crate::registry::Scope;
 use crate::service::{self, Driven, Unit};
 use crate::{registry, upgrade};
 
@@ -477,10 +478,16 @@ fn nothing_may_act(host: &dyn Host) -> Result<Option<String>> {
         return Ok(None);
     };
 
-    let any = registry
-        .scopes()
-        .iter()
-        .any(|scope| registry.settings(scope).watcher_may_act);
+    // Both statements, because a grant alone is not enough for the Ungrouped
+    // Accounts: `perch watcher run` asks `interchangeable` first and holds
+    // without it (ADR 0017). Read from `watcher-may-act` alone, this line stayed
+    // silent on a machine whose only grant is one the Watcher will never act on
+    // — the same claim `perch group list` was making until it took the gate on
+    // (`commands::group`), and `config::scope_lines` already answers correctly.
+    let any = registry.scopes().iter().any(|scope| {
+        let interchangeable = *scope != Scope::Ungrouped || registry.ungrouped.interchangeable;
+        registry.settings(scope).watcher_may_act && interchangeable
+    });
     if any {
         return Ok(None);
     }
