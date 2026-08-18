@@ -430,14 +430,23 @@ fn say_it(
 /// doing and leaves the reason it is not to the first round's held line — which
 /// is the line that will repeat, and the one that says when it will ask again.
 fn opening(host: &dyn Host) -> Result<String> {
-    let registry = adopt::ensure_adopted(host)?;
-    // The one reader that asks whether a Landing is in flight rather than
-    // settling one: this holds no lock, and a Switch left in flight is exactly
-    // the state where there is nothing to say yet. The first round settles it
-    // and says why, which is the line that will repeat.
-    let watching = switch::nothing_in_flight(&registry)
-        .and_then(|settled| permitted(&registry, &settled).ok());
-    let Some(watching) = watching else {
+    // Read rather than insisted on, for the reason the round beneath it holds
+    // rather than exits: a machine with no Claude Code login has nothing to
+    // adopt, and raising that here ended the loop before the first round could
+    // hold on it — which on a Service is the crash loop ADR 0040 repealed. The
+    // opening has an answer for having no registry already, and it is the right
+    // one: say what is not being decided, and leave the reason to the first
+    // round's held line.
+    let watching = adopt::ensure_adopted(host).ok().and_then(|registry| {
+        // The one reader that asks whether a Landing is in flight rather than
+        // settling one: this holds no lock, and a Switch left in flight is
+        // exactly the state where there is nothing to say yet. The first round
+        // settles it and says why, which is the line that will repeat.
+        let watching = switch::nothing_in_flight(&registry)
+            .and_then(|settled| permitted(&registry, &settled).ok())?;
+        Some((registry.named_for_the_user(watching.account.email()), watching))
+    });
+    let Some((named, watching)) = watching else {
         return Ok(
             "Started. Nothing is being decided yet — the next line says what is \
              holding it, and the watcher takes over the moment that changes. \
@@ -450,7 +459,7 @@ fn opening(host: &dyn Host) -> Result<String> {
          within that Scope when its fullest Quota Window reaches {}% — to an \
          Account at {}% or under, and never twice inside {} minutes. Ctrl-C \
          stops.",
-        registry.named_for_the_user(watching.account.email()),
+        named,
         watching.scope.within(),
         watch::how_often(),
         watching.policy.threshold,
@@ -639,7 +648,30 @@ fn one_round(
     recently: &mut Recently,
     backoff: &mut Backoff,
 ) -> Result<Turn> {
-    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
+    // Adoption is the first thing a round asks the machine for, and on a machine
+    // Perch has never run on it is the first thing that can refuse: no Claude
+    // Code login yet, so there is nothing to adopt and no registry to read (ADR
+    // 0009). Raised, that ended the loop — and `perch watcher install` succeeds
+    // on such a machine, so the Service came up at the next login, exited 12,
+    // and systemd's start limit left the unit `failed` for good. Logging into
+    // Claude Code afterwards never revived it.
+    //
+    // Which is the exact crash loop ADR 0040 repealed the permission exits over,
+    // arriving one line above where they are caught. So it travels the same way
+    // they do: the loop holds and says why, and takes over the moment there is
+    // something to adopt. A Check still exits with the code the refusal earned,
+    // because `one_check` turns a `NotArranged` back into the failure itself and
+    // a scheduler has to be told.
+    //
+    // `Busy` is not one of these and is passed through untouched: both callers
+    // already answer it, and they answer it differently from "this machine is
+    // not arranged" — a loop charges it to the back-off, and a Check says it on
+    // standard output and exits `EXIT_HELD`.
+    let (mut perch, mut registry) = match adopt::ensure_adopted_exclusively(host) {
+        Ok(both) => both,
+        Err(busy @ PerchError::Busy(_)) => return Err(busy),
+        Err(not_arranged) => return Ok(Turn::NotArranged(not_arranged)),
+    };
 
     // A Switch path, so it resolves a Landing before it reads anything off the
     // registry (ADR 0048) — the Account this round watches is the Account the

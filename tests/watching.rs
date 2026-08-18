@@ -62,6 +62,49 @@ fn when(decision: &str) -> DateTime<Utc> {
         .with_timezone(&Utc)
 }
 
+/// **The Service comes up before there is anything to watch.**
+///
+/// `perch watcher install` succeeds on a machine Perch has never run on —
+/// nothing it writes reads a registry — so the Service starts at the next login
+/// and the first round asks adoption for one. On a machine with no Claude Code
+/// login there is nothing to adopt (ADR 0009), and that refusal used to end the
+/// loop: exit 12, systemd's start limit, a unit left `failed` for good. Logging
+/// into Claude Code afterwards never revived it.
+///
+/// Which is the crash loop ADR 0040 repealed the permission exits over,
+/// arriving one line above where they are caught. So it holds and says why,
+/// like every other way this machine can be un-arranged.
+#[test]
+fn a_watcher_on_a_machine_with_no_login_holds_rather_than_exiting() {
+    let host = machine_with_claude_code().with_interrupt_after(2);
+
+    let (outcome, said) = run_watch(&host);
+
+    outcome.expect("a machine with nothing to adopt is held on, not exited on");
+    assert!(
+        said.contains("No Claude Code login"),
+        "and the held line says what is missing: {said}"
+    );
+    assert!(
+        said.contains("Stopped."),
+        "the loop ran until it was asked to stop, rather than ending itself: \
+         {said}"
+    );
+}
+
+/// The other half of the same repeal: a Check is one process reporting to a
+/// scheduler, so it still exits with the code the refusal earned rather than
+/// holding on it (ADR 0013).
+#[test]
+fn a_check_on_a_machine_with_no_login_still_reports_the_refusal() {
+    let host = machine_with_claude_code();
+
+    let (outcome, _) = run_watch_once(&host);
+
+    let refused = outcome.expect_err("a scheduler has to be told");
+    assert!(refused.to_string().contains("No Claude Code login"), "{refused}");
+}
+
 /// A machine where the Account being watched cannot be read: the usage
 /// endpoint answers `refusals` in turn, the last of them for every round after
 /// the trace runs out, and the Account it would move to is empty and waiting.
