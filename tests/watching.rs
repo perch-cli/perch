@@ -1573,15 +1573,21 @@ fn a_loop_that_finds_the_watch_held_says_so_and_comes_back_rather_than_exiting()
     );
 }
 
-/// **A Watcher renews the watch, once a round** (ADR 0040).
+/// **A Watcher renews the watch, on both sides of every round it takes** (ADR
+/// 0040).
 ///
-/// The watcher lock's staleness window is derived from that sentence — it is
-/// the longest a healthy loop can go quiet between rounds — so a loop that
-/// never renews goes stale on its own artifact while it is still deciding. The
-/// next `perch watcher check` then reads the lock as abandoned, clears it, and
-/// decides alongside a Watcher that never notices: the loop keeps its Cooldown
-/// in memory and a Check reads the one in `checks`, which is exactly the pair
-/// this lock exists to keep apart.
+/// The watcher lock's staleness window is derived from "once a round" — it is
+/// the longest wait plus the round after it — so a loop that never renews goes
+/// stale on its own artifact while it is still deciding. The next `perch
+/// watcher check` then reads the lock as abandoned, clears it, and decides
+/// alongside a Watcher that never notices: the loop keeps its Cooldown in
+/// memory and a Check reads the one in `checks`, which is exactly the pair this
+/// lock exists to keep apart.
+///
+/// Both sides, because that arithmetic only holds while a round is short and a
+/// round is bounded by nothing but the network. Touched coming out of the wait
+/// as well as going into it, the artifact goes quiet for the wait *or* the
+/// round rather than for their sum.
 #[test]
 fn a_loop_says_the_watch_is_still_held_on_every_round_it_takes() {
     let host = watching(&[40.0, 41.0, 42.0], 5.0);
@@ -1607,6 +1613,28 @@ fn a_loop_says_the_watch_is_still_held_on_every_round_it_takes() {
         renewals, 2,
         "every round but the one the take itself covers says the watch is \
          still held"
+    );
+
+    // And coming out of a wait the touch is the *first* thing that happens,
+    // ahead of the round's own work — which is the half that bounds the gap,
+    // because the reads a round makes are what it can spend minutes on.
+    let effects = host.effects();
+    let after_a_wait = effects
+        .iter()
+        .position(|effect| matches!(effect, Effect::Waited { .. }))
+        .expect("the loop waits between rounds");
+    let next = effects[after_a_wait + 1..]
+        .iter()
+        .find(|effect| {
+            matches!(effect, Effect::Touched(path) if path == &lock)
+                || matches!(effect, Effect::Http { .. })
+        })
+        .expect("the round after a wait does something");
+    assert!(
+        matches!(next, Effect::Touched(_)),
+        "a renewal taken only after the reads is one already old by the time \
+         the loop waits on it, so the wait and the round add up against the \
+         staleness window instead of each standing alone: {next:?}"
     );
 }
 

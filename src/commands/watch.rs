@@ -191,6 +191,24 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     say(out, &opening(host)?)?;
 
     loop {
+        // Twice a round rather than once, and this is the half that bounds the
+        // gap. The staleness window is derived from "a Watcher renews this once
+        // a round" and reads as the longest wait plus the round after it — an
+        // arithmetic that only holds while a round is short. A round is bounded
+        // by nothing but the network: two requests per Account at thirty seconds
+        // each, plus a Renewal, over as many candidates as a Scope holds. After
+        // a saturated back-off the pair could exceed the window, and the
+        // healthy Watcher was then declared dead by the next `perch watcher
+        // check` to come along — which is the two-Watcher state the lock exists
+        // to prevent (ADR 0040).
+        //
+        // Touched here, straight out of the wait, so the gap either side is the
+        // wait alone or the round alone rather than their sum.
+        watching_alone.renew();
+        if !watching_alone.still_held() {
+            return handed_over(out);
+        }
+
         let (waiting_for, spoken) =
             match one_round(host, Watcher::Loop, &mut recently, &mut backoff) {
                 Ok(Turn::Decided(round)) => {
@@ -242,13 +260,11 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
 
         say_it(out, &mut holding, spoken, host.now())?;
 
-        // Once a round, which is the cadence
-        // [`registry::watcher_lock_spec`]'s staleness window is derived from.
-        // Here rather than at the top of the round because this is where the
-        // round's own work is over: everything above may have waited on
-        // Claude Code's locks or on a keychain that stopped to ask, and a
-        // renewal taken before all of that is a renewal that is already old by
-        // the time the loop waits on it.
+        // The other half. Here because this is where the round's own work is
+        // over: everything above may have waited on Claude Code's locks or on a
+        // keychain that stopped to ask, and a renewal taken only before all of
+        // that is a renewal that is already old by the time the loop waits on
+        // it.
         watching_alone.renew();
         if !watching_alone.still_held() {
             // Renewing is what discovers this, and `renew` has already said
