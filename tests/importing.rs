@@ -103,6 +103,59 @@ fn a_credential_keyed_in_another_case_is_placed_rather_than_silently_dropped() {
     );
 }
 
+/// **The terminal going away after the Import lands does not un-import it.**
+///
+/// `report` is the last fallible thing an Import does, and everything before it
+/// has already succeeded: every Credential is placed and the registry is
+/// written. A closed pty, a `SIGHUP`, a `head` that stopped reading — any of
+/// them fails that `say`, and raised bare it read as an Import that had not
+/// happened. The obvious next move then meets
+/// `refuse_a_machine_that_is_not_empty`, whose advice is that `perch holdings
+/// purge` "gives the machine back and is what makes room" — on a machine that
+/// is already restored.
+///
+/// `commands::export` carries `landed` for this and `purge::still_standing`
+/// closes the same gap; an Import was the one of the three that never got it.
+#[test]
+fn a_terminal_that_goes_away_after_the_import_lands_says_it_landed() {
+    /// Writes until the Import's own report starts, and then is not there.
+    struct GoesAwayReporting;
+
+    impl std::io::Write for GoesAwayReporting {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            match String::from_utf8_lossy(bytes).contains("Imported") {
+                true => Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "the pipe closed",
+                )),
+                false => Ok(bytes.len()),
+            }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let host = a_new_machine_holding(&an_export_of_a_whole_machine());
+
+    let outcome =
+        perch::commands::import::run(&host, std::path::Path::new(AT), &mut GoesAwayReporting);
+
+    let refused = outcome.expect_err("the report could not be written");
+    let said = refused.to_string();
+    assert!(
+        said.contains("nothing to run again"),
+        "a machine that is restored is not told to import again: {said}"
+    );
+    assert_eq!(
+        registry_on(&host).map(|registry| registry.accounts.len()),
+        Some(3),
+        "and it really is restored"
+    );
+    assert!(credential_of(&host, EMAIL).is_some(), "Credentials and all");
+}
+
 /// The fourth command with an unbounded prompt under the registry lock, and
 /// the one that skipped the guard the other three take.
 ///

@@ -67,7 +67,24 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
         )
     })?;
 
-    report(out, path, &export)
+    // The Import is complete by this line: every Credential is placed and the
+    // registry is written. What is left is saying so, and a terminal that has
+    // gone away — a closed pty, a `SIGHUP`, a pipe whose reader exited — makes
+    // that write fail. Raised bare, a machine that *is* restored reported a
+    // non-zero exit with nothing saying otherwise, and the obvious next move
+    // then hits `refuse_a_machine_that_is_not_empty`, whose advice is that
+    // `perch holdings purge` "gives the machine back and is what makes room".
+    //
+    // `commands::export` carries `landed` for this and `purge::still_standing`
+    // closes the same gap; an Import is the one of the three that never got it.
+    report(out, path, &export).map_err(|error| {
+        error.with_note(
+            "The Import itself finished: every Credential the Export held is \
+             restored and Perch's registry is written. Only the report of it \
+             could not be, so there is nothing to run again — `perch list` says \
+             what arrived.",
+        )
+    })
 }
 
 /// The file, as the text `age` wrote. Read before anything else is decided,
