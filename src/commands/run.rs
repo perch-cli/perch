@@ -39,6 +39,7 @@ use crate::commands;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::registry::{self, Registry};
+use crate::switch;
 use crate::{carry, probe, reconcile, target};
 
 #[derive(Debug, Clone)]
@@ -90,9 +91,29 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // The one file Reconcile cannot link, because it holds the Account as well
     // as the person (ADR 0003). Handled key by key, and afterwards: Reconcile is
     // what makes the Profile a directory at all.
-    carry::carry(host, &registry, &found.email, &default_profile, &profile);
+    // The one reader here that asks whether a Landing is in flight rather than
+    // settling one, and for the reason `perch watcher run`'s opening line asks
+    // (ADR 0055): a Run holds no registry lock by design, and a Switch left in
+    // flight is exactly the state where "who is active" has no answer —
+    // `Active::whose` hands back the Account being *left*, which is the last
+    // thing Perch established rather than anything it knows.
+    let settled = switch::nothing_in_flight(&registry);
 
-    host.note(&launching(&registry, &found.email, &launch.said));
+    carry::carry(
+        host,
+        &registry,
+        &found.email,
+        &default_profile,
+        &profile,
+        settled.as_ref(),
+    );
+
+    host.note(&launching(
+        &registry,
+        &found.email,
+        &launch.said,
+        settled.as_ref(),
+    ));
     // Flushed before the client is handed the terminal. Nothing of Perch's own
     // goes to standard output here, but a command run before this one may have
     // left something in the buffer, and it would be delivered after the output
@@ -279,9 +300,19 @@ pub(crate) fn refuse_a_quarantined_account(registry: &Registry, email: &str) -> 
 /// The second half is the whole point of the command, and the difference from
 /// the command next to it: somebody who typed `run` where they meant `switch`
 /// should be able to see that nothing moved before the client takes the screen.
-fn launching(registry: &Registry, email: &str, said: &str) -> String {
+fn launching(
+    registry: &Registry,
+    email: &str,
+    said: &str,
+    settled: Option<&switch::Settled>,
+) -> String {
     let named = registry.named_for_the_user(email);
-    match registry.active().whose() {
+    // Nothing about who is active where nothing has settled who is active. The
+    // second half of the sentence is the whole point of the command — that
+    // nothing moved — and saying it about the Account a Switch was leaving is
+    // saying it about the one Account it may no longer be true of.
+    let active = settled.and_then(|_| registry.active().whose());
+    match active {
         // Both Accounts are named the way every other command names one, so the
         // sentence that contrasts them does not hand one of them its Alias and
         // take the other's away.

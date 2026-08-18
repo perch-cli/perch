@@ -400,6 +400,33 @@ fn a_run_says_which_account_stays_active_everywhere_else() {
     );
 }
 
+/// And says nothing about it where nothing has settled who is active.
+///
+/// A Switch written down and not yet recorded is a **Landing**, and
+/// `Active::whose` answers one with the Account being *left* — the last thing
+/// Perch established rather than anything it knows. Said off that answer, a Run
+/// promised that Account "stays the active Account everywhere else" while the
+/// other one's Credential may already be the live one. That is the same claim
+/// ADR 0055 had taken out of `perch watcher run`'s opening line, still being
+/// made by the command whose whole point is the second half of the sentence.
+#[test]
+fn a_run_claims_nothing_about_who_is_active_while_a_switch_is_in_flight() {
+    let host = machine();
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+
+    let _ = run_run(&host, SECOND_EMAIL);
+
+    let said = host.notes().join("\n");
+    assert!(
+        said.contains("Running Claude Code as"),
+        "the Run still says what it launched: {said}"
+    );
+    assert!(
+        !said.contains("stays the active Account"),
+        "and claims nothing about an Account nothing has established: {said}"
+    );
+}
+
 /// A Run against the Account that is already active is not the "nothing to do"
 /// a Switch to it would be: it still gets a Profile of its own, which is what
 /// keeps the session out of the way of a later Switch.

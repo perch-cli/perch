@@ -76,7 +76,17 @@ pub fn carry(
     email: &str,
     default_profile: &Store,
     into: &Path,
+    settled: Option<&crate::switch::Settled>,
 ) {
+    // Where an Account's state lives depends on whether it is the active one,
+    // and during a Landing nothing is (ADR 0048): `is_active` answers with the
+    // Account being *left*, so `where_it_works` would look for its state in the
+    // Default Profile off a claim the registry has not made. Doing nothing is
+    // an ordinary outcome here and costs a dialog, which is the cheaper of the
+    // two answers.
+    if settled.is_none() {
+        return;
+    }
     let destination = probe::identity_file_in(into);
     let Some(mine) = read(host, &destination) else {
         return;
