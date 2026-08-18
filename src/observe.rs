@@ -524,6 +524,15 @@ struct Asked {
     /// refresh token for an *Account* rather than for a file: every copy of
     /// that Credential dies together, wherever it is being held from.
     in_use_from: Vec<PathBuf>,
+    /// The other Account whose Profile this one derives too, where there is one.
+    ///
+    /// A Profile is `profiles_dir` joined with the slugged address, and the slug
+    /// flattens everything that is not alphanumeric — so `user+work@example.com`
+    /// and `user.work@example.com` share one directory and therefore one
+    /// Credential Store. Every path that *acts* as an Account asks about this
+    /// (`add`, `import`, `switch`, `run`, `relogin`, `remove`); a Renewal is the
+    /// one write that did not, and it is the write ADR 0006 calls unrecoverable.
+    shares_its_profile_with: Option<String>,
 }
 
 /// Which store holds the Credential to ask with.
@@ -553,6 +562,13 @@ struct Asked {
 /// on each of their doors.
 fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<Asked> {
     let its_own_profile = account.profile_dir(host)?;
+    let shares_its_profile_with = registry
+        .accounts
+        .iter()
+        .find(|held| {
+            held.email() != account.email() && registry::same_profile(held.email(), account.email())
+        })
+        .map(|held| held.email().to_string());
     let settled_on_it = matches!(
         registry.active(),
         registry::Active::Settled(active) if registry::same_name(active, account.email())
@@ -569,6 +585,7 @@ fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<As
             store,
             its_own_profile: false,
             arriving_in_a_landing: false,
+            shares_its_profile_with,
         })
     } else {
         Ok(Asked {
@@ -580,6 +597,7 @@ fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<As
                 registry::Active::Landing { arriving, .. }
                     if registry::same_name(arriving, account.email())
             ),
+            shares_its_profile_with,
         })
     }
 }
@@ -701,6 +719,26 @@ fn renew_under_the_lock(
     installed: &Installed,
     because: Because,
 ) -> Step<Asking> {
+    // Every path that acts as an Account refuses a shared Profile first, and
+    // this was the one write that did not — so a single `perch status
+    // --refresh` over the wrong pair retired the other Account's refresh token,
+    // which ADR 0006 calls unrecoverable. Here rather than at the two callers
+    // because this is the one door every Renewal goes through, and the registry
+    // cannot change underneath it: `perch` is held for the whole command.
+    //
+    // A refusal for this Account alone rather than for the command, which is
+    // what ADR 0018 asks of everything in this module: the other Accounts in the
+    // Scope are readable and their figures are not this one's to lose.
+    if let Some(sharer) = &asked.shares_its_profile_with {
+        return Err(Outcome::Failed(format!(
+            "its access token has expired and it shares one Profile — and so one \
+             Credential Store — with {sharer}, because their addresses differ \
+             only in characters a Profile directory does not keep apart. \
+             Renewing may Rotate, which would retire a refresh token that is not \
+             this Account's to spend. The cached figure is what you see."
+        )));
+    }
+
     let store = &asked.store;
     lock::under(host, probe::locks_for(store), |held| {
         let mut holds = lock::Holds::of(held, perch);

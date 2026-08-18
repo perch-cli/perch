@@ -933,3 +933,52 @@ fn a_refresh_mid_landing_reads_the_account_named_rather_than_whatever_is_live() 
          about"
     );
 }
+
+/// A Profile is `profiles_dir` joined with the slugged address, and the slug
+/// flattens everything that is not alphanumeric — so two addresses that differ
+/// only in punctuation derive one directory, and therefore one Credential
+/// Store.
+///
+/// Every path that *acts* as an Account refuses that state before it moves
+/// anything: `perch add`, `perch holdings import`, `perch switch`, `perch run`,
+/// `perch relogin` and `perch remove` each ask. A Renewal did not, and it is the
+/// write ADR 0006 calls unrecoverable — Anthropic retires the old refresh token
+/// when it Rotates, so renewing here spends a token that is not this Account's.
+///
+/// The state is only reachable by hand, because the doors that make an Account
+/// all refuse it. That is exactly why the guard belongs on the write rather
+/// than only on the doors.
+#[test]
+fn an_account_that_shares_a_profile_with_another_is_never_renewed() {
+    let host = machine_with_two_accounts();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
+    let host = host.with_reply(TOKEN_URL, 200, RENEWED);
+
+    // The second Account, respelled so that it slugs to the same directory as
+    // the active one: `someone@example.com` and `someone@example-com` are two
+    // Accounts to Perch and one Profile to the filesystem.
+    let mut registry = registry_of(&host);
+    let sharer = "someone@example-com";
+    registry
+        .accounts
+        .iter_mut()
+        .find(|account| account.email() == SECOND_EMAIL)
+        .expect("the second Account")
+        .identity
+        .email = sharer.to_string();
+    save_registry(&host, &registry);
+    host.forget_effects();
+
+    let (result, printed) = run_status_refresh(&host, false);
+
+    result.expect("an Account Perch may not renew is not a failed command");
+    assert!(
+        host.sent_to(TOKEN_URL).is_empty(),
+        "a Rotation here would retire a refresh token belonging to {sharer}"
+    );
+    assert!(
+        printed.contains(sharer),
+        "the refusal names the Account it is protecting: {printed}"
+    );
+    assert!(printed.contains("cached figure"), "{printed}");
+}
