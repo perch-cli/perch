@@ -793,6 +793,7 @@ pub fn resolve_a_landing(
 
         let settled_on = whose_the_live_credential_is(
             host,
+            &mut holds,
             registry,
             leaving.as_deref(),
             &arriving,
@@ -823,8 +824,20 @@ pub fn resolve_a_landing(
 /// costs two reads. Every other held Account is the **fallback**, and it is a
 /// fallback rather than a sweep: it is one keychain prompt each on macOS, and
 /// it is reached only where a Landing says a Switch was in flight.
+///
+/// Every one of those reads renews both holds, which is why this takes them
+/// rather than being wrapped in one `around` by its caller. The reads either
+/// side of it were renewed and this was not, so the caller's claim that "the
+/// window the locks close is the whole of read-decide-record" was true of the
+/// read and the record and not of the decide — and the decide is the slowest of
+/// the three by a wide margin. One `around` over the whole call would not fix
+/// it: a machine holding several Accounts spends a keychain prompt per Account
+/// here, and the config-file lock goes stale after ten seconds, so the sweep has
+/// to renew *as it goes* or the save at the end lands under a lock a running
+/// `claude` was entitled to take over partway through.
 fn whose_the_live_credential_is(
     host: &dyn Host,
+    holds: &mut lock::Holds<'_, '_, '_>,
     registry: &Registry,
     leaving: Option<&str>,
     arriving: &str,
@@ -838,31 +851,39 @@ fn whose_the_live_credential_is(
         return Some(leaving.map(str::to_string));
     };
 
-    let holding = |email: &str| {
-        registry
-            .account(email)
-            .and_then(|account| held_by(host, account))
+    let holding = |holds: &mut lock::Holds<'_, '_, '_>, account: &Account| {
+        holds
+            .around(|| held_by(host, account))
             .is_some_and(|held| *held == live)
     };
 
-    if holding(arriving) {
+    if registry
+        .account(arriving)
+        .is_some_and(|account| holding(holds, account))
+    {
         return Some(Some(arriving.to_string()));
     }
     if let Some(leaving) = leaving
-        && holding(leaving)
+        && registry
+            .account(leaving)
+            .is_some_and(|account| holding(holds, account))
     {
         return Some(Some(leaving.to_string()));
     }
 
-    registry
-        .accounts
-        .iter()
-        .find(|account| {
-            !registry::same_name(account.email(), arriving)
-                && !leaving.is_some_and(|leaving| registry::same_name(account.email(), leaving))
-                && held_by(host, account).is_some_and(|held| *held == live)
-        })
-        .map(|account| Some(account.email().to_string()))
+    // A `for` rather than a `find`, because the predicate renews the holds and
+    // so is `FnMut` over them.
+    for account in &registry.accounts {
+        if registry::same_name(account.email(), arriving)
+            || leaving.is_some_and(|leaving| registry::same_name(account.email(), leaving))
+        {
+            continue;
+        }
+        if holding(holds, account) {
+            return Some(Some(account.email().to_string()));
+        }
+    }
+    None
 }
 
 /// The corner that stays undecidable: a Landing in flight, and a live Credential
