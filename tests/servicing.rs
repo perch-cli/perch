@@ -673,6 +673,38 @@ fn status_says_when_the_unit_names_a_binary_that_is_no_longer_there() {
     );
 }
 
+/// The log a Service writes to is the one baked into its unit at install time,
+/// not the one a `perch watcher status` would derive right now.
+///
+/// `status` already reads the *binary* back out of the installed unit, on the
+/// argument that whether the two have come apart is the whole question. The log
+/// line beside it was recomputing from `PERCH_HOME` as it stands this minute, so
+/// a machine whose `PERCH_HOME` changed after the install was told, confidently,
+/// about a file nothing writes to.
+#[test]
+fn status_says_where_the_installed_service_actually_writes_its_log() {
+    let host = mac().with_env("PERCH_HOME", "/Users/someone/elsewhere");
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("installed");
+
+    // A `PERCH_HOME` exported in a shell profile after the fact, or a `status`
+    // run from a terminal that never had it set. The Service goes on writing
+    // where it was installed to write either way.
+    let host = host.without_env("PERCH_HOME");
+
+    let (_, said) = run_service(&host, WatcherCommand::Status { json: false });
+
+    // Joined rather than spelled out, because `service::log_path` joins and the
+    // separator it joins with is the *running* machine's — a `\` under the
+    // Windows runner, whatever platform the fixture reports.
+    let at = std::path::Path::new("/Users/someone/elsewhere").join("watch.log");
+    assert!(
+        said.contains(&*at.to_string_lossy()),
+        "the log the unit names, not the one the environment would derive: {said}"
+    );
+}
+
 /// Said rather than refused, for the reason ADR 0013 gives about a Margin at or
 /// above a Threshold: refusing would make the order two `perch config set`s are
 /// typed in matter. A Service with no grant holds harmlessly and takes over the

@@ -392,6 +392,36 @@ fn an_account_is_given_up_on_a_machine_that_no_longer_has_claude_code_on_it() {
     );
 }
 
+/// The same machine, giving up the Account you are *on*.
+///
+/// The tolerance above stopped short of the landing: `switch::make_live` probed
+/// for a Claude Code of its own, so removing the active Account on an
+/// uninstalled machine ran every check, showed the consequence, took the "y" —
+/// and then failed with "no `claude` was found on PATH", having removed
+/// nothing. `perch holdings purge` was still the only way out, which is the
+/// state the swallow was written to end.
+#[test]
+fn the_account_you_are_on_is_given_up_on_a_machine_with_no_claude_code_either() {
+    let host = machine_with_two_accounts().with_answers(&["y"]);
+    host.remove_file(std::path::Path::new(CLAUDE_BIN))
+        .expect("Claude Code is uninstalled");
+
+    let (result, printed) = run_remove(&host, EMAIL);
+
+    result.expect("a removal needs no Claude Code, landing included");
+    assert!(!holds(&host, EMAIL), "{printed}");
+    assert_eq!(
+        registry_of(&host).active().whose(),
+        Some(SECOND_EMAIL),
+        "and it landed on the successor rather than leaving nobody active: \n{printed}"
+    );
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "whose Credential is the live one: {printed}"
+    );
+}
+
 #[test]
 fn a_quarantined_account_is_not_what_perch_lands_on() {
     let host = machine_with_two_accounts().with_answers(&["y"]);

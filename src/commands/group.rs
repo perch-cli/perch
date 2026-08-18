@@ -302,7 +302,7 @@ fn configuration_lines(registry: &Registry, scope: &Scope) -> Vec<String> {
     // switching that the watcher declines, and said the same thing whichever way
     // the gate was set, so it was unfalsifiable in both directions.
     // `config::scope_lines` already answers this correctly.
-    let interchangeable = *scope != Scope::Ungrouped || registry.ungrouped.interchangeable;
+    let interchangeable = crate::cycle::may_cycle_within(registry, scope);
     let watcher = match (settings.watcher_may_act, interchangeable) {
         (true, true) => format!("may switch unattended {acting}"),
         // The Setting's own value, not `off`. `on`/`off` is not a value

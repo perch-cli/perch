@@ -19,6 +19,7 @@
 
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
+use zeroize::Zeroizing;
 
 use crate::host::{Host, HttpRequest, HttpResponse};
 use crate::registry::WindowUtilization;
@@ -104,10 +105,14 @@ impl std::fmt::Display for Refused {
 /// What a renewal hands back.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Fresh {
-    pub access_token: String,
+    pub access_token: Zeroizing<String>,
     /// The Rotated refresh token, when Anthropic Rotated one. Absent means the
     /// refresh token already stored is still the live one.
-    pub refresh_token: Option<String>,
+    ///
+    /// `Zeroizing` for the reason the `Debug` below gives, one step further: a
+    /// freshly Rotated refresh token is the only copy there is, so this buffer
+    /// is worth wiping as well as worth not printing.
+    pub refresh_token: Option<Zeroizing<String>>,
     /// When the new access token expires, in milliseconds — the unit a
     /// Credential records it in.
     pub expires_at: Option<i64>,
@@ -201,15 +206,17 @@ pub fn renew(host: &dyn Host, refresh_token: &str) -> Result<Fresh, Refused> {
     let now = host.now();
 
     Ok(Fresh {
-        access_token: document
-            .get("access_token")
-            .and_then(Value::as_str)
-            .ok_or_else(|| missing("access_token"))?
-            .to_string(),
+        access_token: Zeroizing::new(
+            document
+                .get("access_token")
+                .and_then(Value::as_str)
+                .ok_or_else(|| missing("access_token"))?
+                .to_string(),
+        ),
         refresh_token: document
             .get("refresh_token")
             .and_then(Value::as_str)
-            .map(str::to_string),
+            .map(|token| Zeroizing::new(token.to_string())),
         // Checked, because this is the one arithmetic in Perch on a number
         // Anthropic chose, at the one moment nothing can be retried: `renew`
         // has already caused the old refresh token to be retired, and the

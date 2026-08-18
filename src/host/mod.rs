@@ -34,11 +34,33 @@ pub use fake::FakeHost;
 pub use real::RealHost;
 
 /// The result of running another program.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Execution {
     pub status: i32,
     pub stdout: String,
     pub stderr: String,
+}
+
+impl std::fmt::Debug for Execution {
+    /// Names the status and the sizes, never the bytes — the same redaction
+    /// [`crate::credentials::StoredCredential`] and [`crate::anthropic::Fresh`]
+    /// already hand-write, for the same secret one step earlier.
+    ///
+    /// This is the *first* shape a Credential takes: `security
+    /// find-generic-password -w` answers with one on stdout, so an `Execution`
+    /// returning from a keychain read is a struct holding a refresh token in a
+    /// public field. A derived `Debug` would print it, and the two types that
+    /// carry it afterwards had already been fixed while the one that carries it
+    /// first was still derived.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "Execution {{ status: {}, stdout: <{} bytes>, stderr: <{} bytes> }}",
+            self.status,
+            self.stdout.len(),
+            self.stderr.len()
+        )
+    }
 }
 
 impl Execution {
@@ -85,7 +107,7 @@ fn taken_over(bytes: Vec<u8>) -> String {
 /// header passed on a command line sits in `argv` where any process on the
 /// machine can read it off the process table — the same reason a Credential
 /// never reaches `security`'s command line (ADR 0008).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct HttpRequest<'a> {
     pub url: &'a str,
     pub headers: &'a [(&'a str, &'a str)],
@@ -100,6 +122,24 @@ pub struct HttpRequest<'a> {
     /// upgrade check on `perch --version` is a line nobody asked for, and a
     /// black-holed network must cost it nothing (ADR 0039).
     pub within_millis: Option<u64>,
+}
+
+impl std::fmt::Debug for HttpRequest<'_> {
+    /// The url and the header *names*, never a header value and never the body.
+    /// The doc comment above says an access token is a Credential and travels
+    /// as a header; the renewal's body is a refresh token outright
+    /// ([`crate::anthropic::renew`]). A derived `Debug` printed both.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let names: Vec<&str> = self.headers.iter().map(|(name, _)| *name).collect();
+        write!(
+            formatter,
+            "HttpRequest {{ url: {:?}, headers: {:?}, body: <{} bytes>, within_millis: {:?} }}",
+            self.url,
+            names,
+            self.body.map_or(0, str::len),
+            self.within_millis
+        )
+    }
 }
 
 impl<'a> HttpRequest<'a> {
@@ -129,10 +169,26 @@ impl<'a> HttpRequest<'a> {
 }
 
 /// A reply from an HTTP request.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct HttpResponse {
     pub status: u16,
     pub body: String,
+}
+
+impl std::fmt::Debug for HttpResponse {
+    /// The status and the size, never the body. The token endpoint answers a
+    /// renewal with the new access token and the rotated refresh token in that
+    /// body ([`crate::anthropic::renew`]), so this is the shape a Credential
+    /// arrives in — redacted for the same reason the request that asked for it
+    /// is.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "HttpResponse {{ status: {}, body: <{} bytes> }}",
+            self.status,
+            self.body.len()
+        )
+    }
 }
 
 /// The machine, to the resolution Perch cares about: macOS keeps secrets in a
@@ -777,6 +833,43 @@ mod tests {
     use crate::host::fake::Effect;
 
     const PATH: &str = "/Users/someone/.claude.json";
+
+    /// The three shapes a Credential passes through on its way in and out of
+    /// this port. Each one is asserted on the secret's absence rather than on
+    /// the exact wording, so a `Debug` somebody reformats stays honest.
+    #[test]
+    fn nothing_that_carries_a_credential_prints_one() {
+        const SECRET: &str = "sk-ant-oat01-a-live-refresh-token";
+
+        let read_from_the_keychain = Execution {
+            status: 0,
+            stdout: SECRET.to_string(),
+            stderr: String::new(),
+        };
+        let authorization = format!("Bearer {SECRET}");
+        let headers = [("Authorization", authorization.as_str())];
+        let renewal = HttpRequest::post(
+            "https://console.anthropic.com/v1/oauth/token",
+            &headers,
+            SECRET,
+        );
+        let rotated = HttpResponse {
+            status: 200,
+            body: format!("{{\"refresh_token\":\"{SECRET}\"}}"),
+        };
+
+        for printed in [
+            format!("{read_from_the_keychain:?}"),
+            format!("{renewal:?}"),
+            format!("{rotated:?}"),
+        ] {
+            assert!(!printed.contains(SECRET), "printed a Credential: {printed}");
+        }
+
+        // The header *name* still prints, because knowing a request carried an
+        // Authorization is the half of it that is worth having.
+        assert!(format!("{renewal:?}").contains("Authorization"));
+    }
 
     #[test]
     fn a_replacement_is_created_with_the_mode_the_file_already_had() {

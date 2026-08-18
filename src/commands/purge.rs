@@ -153,7 +153,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     // before deleting anything.
     crate::commands::service::take_back_before_a_purge(host, out).map_err(and_the_export)?;
 
-    let purged = purge::erase(host, &registry).map_err(and_the_export)?;
+    let purged = purge::erase(host, &mut perch, &registry).map_err(and_the_export)?;
     report(host, out, &home, &purged)
 }
 

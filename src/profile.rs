@@ -239,7 +239,7 @@ fn write_and_read_back(
         holds_a_bad_copy: true,
     })?;
 
-    if read_back.as_deref() != Some(credential) {
+    if read_back.as_ref().map(|held| held.as_str()) != Some(credential) {
         // Reported as a failure of the store it happened in, so the exit code a
         // script branches on still says which half of the machine to look at.
         let error = match kept_in {

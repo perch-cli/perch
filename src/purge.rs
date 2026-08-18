@@ -28,6 +28,7 @@ use std::path::PathBuf;
 use crate::credentials::{self, Forgotten};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
+use crate::lock;
 use crate::probe;
 use crate::registry::{self, Account, Registry};
 
@@ -137,7 +138,20 @@ fn everything_perch_holds(host: &dyn Host) -> Vec<std::path::PathBuf> {
 /// registry, any login nobody came back from, and the lock this is running
 /// under. Losing the lock artifact costs nothing: what it excludes is another
 /// Perch changing a registry that no longer exists.
-pub fn erase(host: &dyn Host, registry: &Registry) -> Result<Purged> {
+///
+/// It takes the hold rather than trusting the caller's last check of it, and
+/// renews around every store it empties. The caller's `still_ours` is asked
+/// before the first deletion and nothing renewed the artifact after that, but
+/// what happens here is unbounded: one Credential Store per Account, and the
+/// keychain half of each is a `security delete-generic-password` that can stop
+/// for an authorization dialog. Perch's registry lock goes stale after ninety
+/// seconds, so a Purge of a handful of Accounts on macOS could read as abandoned
+/// while it was still running — and a `perch add` in another terminal that took
+/// it over would write a Profile into a home this is about to `remove_dir_all`,
+/// leaving that Account's keychain item live and unnameable for ever. That is
+/// verbatim the failure [`forget_what_the_registry_does_not_name`] exists to
+/// prevent, reached through the lock it assumed was held.
+pub fn erase(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -> Result<Purged> {
     // Resolved before anything is deleted, although it is not needed until the
     // end: every Profile is derived from it, so a machine that cannot say where
     // home is must not have half its Credentials taken on the way to finding
@@ -146,11 +160,20 @@ pub fn erase(host: &dyn Host, registry: &Registry) -> Result<Purged> {
 
     let mut credentials = 0;
     for account in &registry.accounts {
+        perch.renew();
         if forget_the_credential(host, account)? {
             credentials += 1;
         }
     }
+    perch.renew();
     forget_what_the_registry_does_not_name(host, registry)?;
+
+    // The last thing asked before the one deletion that cannot be finished by
+    // running this again. Everything above is idempotent — a Credential Store
+    // already empty is one this walks past — but a home that has gone takes
+    // whatever another Perch put in it while this was working, and there is
+    // nothing left afterwards that could name it.
+    crate::commands::still_ours(perch, "given back")?;
 
     host.remove_dir_all(&home).map_err(|err| {
         PerchError::Other(format!(
@@ -331,7 +354,12 @@ mod tests {
             let host = FakeHost::new().with_platform(platform);
             let registry = holding_two(&host);
 
-            let purged = erase(&host, &registry).expect("nothing refuses");
+            let purged = erase(
+                &host,
+                &mut registry::lock(&host).expect("the lock is free"),
+                &registry,
+            )
+            .expect("nothing refuses");
 
             assert_eq!(
                 purged,
@@ -370,7 +398,12 @@ mod tests {
             .unwrap();
         host.forget_keychain_item(&store.keychain_service, &store.keychain_account);
 
-        let purged = erase(&host, &registry).expect("nothing refuses");
+        let purged = erase(
+            &host,
+            &mut registry::lock(&host).expect("the lock is free"),
+            &registry,
+        )
+        .expect("nothing refuses");
 
         assert_eq!(
             purged,
@@ -391,7 +424,12 @@ mod tests {
         let registry = holding_two(&host);
         host.lock_keychain("User interaction is not allowed");
 
-        let refused = erase(&host, &registry).expect_err("the keychain will not answer");
+        let refused = erase(
+            &host,
+            &mut registry::lock(&host).expect("the lock is free"),
+            &registry,
+        )
+        .expect_err("the keychain will not answer");
 
         assert!(refused.to_string().contains("run again"), "{refused}");
         assert!(
@@ -412,7 +450,12 @@ mod tests {
         let mut registry = holding_two(&host);
         registry.upsert(account("@"));
 
-        let purged = erase(&host, &registry).expect("`@` names no directory and no store");
+        let purged = erase(
+            &host,
+            &mut registry::lock(&host).expect("the lock is free"),
+            &registry,
+        )
+        .expect("`@` names no directory and no store");
 
         assert_eq!(purged.accounts, 3);
         assert_eq!(purged.credentials, 2);

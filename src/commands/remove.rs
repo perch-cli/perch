@@ -91,7 +91,31 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     // Before the question rather than after: an Account Perch may not touch is
     // not one to ask about giving up (ADR 0005).
     let consequence = consequence_of(&registry, &account);
-    refuse_while_anything_is_running(host, &account, &consequence)?;
+
+    // Once per command, which is [`Installed`]'s own rule: the answer cannot
+    // change under a process that is already running, and the reading is a
+    // subprocess — a `PATH` walk and a `claude --version` each time. Probed
+    // inside the helper below, which is called twice, and again inside
+    // `make_live`, one removal ran three.
+    //
+    // A machine that cannot say which Claude Code it has is still a machine an
+    // Account can be given up on. The version is not what answers the liveness
+    // question — session markers are, and they are read straight off the
+    // Profile — it is only what a refusal quotes when the markers cannot be
+    // read. Propagated, it refused the whole removal on a machine where Claude
+    // Code had been uninstalled, leaving `perch holdings purge` as the only way
+    // to give up one lapsed subscription. `export::the_live_store` swallows it
+    // for the same reason.
+    //
+    // Hoisted here rather than left inside the helper so that the *landing*
+    // gets the same tolerance: `make_live` probed for itself, so removing the
+    // active Account on an uninstalled machine still failed — after the user
+    // had agreed to it, and with the escape hatch the swallow was written to
+    // avoid still being the only way out.
+    let installed =
+        Installed::probed(host).unwrap_or_else(|_| Installed::unknown("(not installed)"));
+
+    refuse_while_anything_is_running(host, &account, &consequence, &installed)?;
 
     if !agreed(host, out, &registry, &account, &consequence, args.yes)? {
         return say(out, "Nothing was removed.");
@@ -103,7 +127,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     // nothing about the Profile this is about to delete. `perch holdings purge`
     // and `perch relogin` both ask twice; this is the only command that deletes
     // a Credential, and it was asking once.
-    refuse_while_anything_is_running(host, &account, &consequence)?;
+    refuse_while_anything_is_running(host, &account, &consequence, &installed)?;
 
     // The question above is the one wait in Perch with no bound on it — somebody
     // may answer it in a second or walk away and answer it after lunch — so it
@@ -117,7 +141,15 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     // Somewhere to land before anything is deleted. A failure here has cost
     // nothing: the Account is still held, and its Credential is still live.
     if let Some(successor) = &consequence.successor {
-        land_on(host, &mut perch, out, &mut registry, successor, &account)?;
+        land_on(
+            host,
+            &mut perch,
+            out,
+            &mut registry,
+            successor,
+            &account,
+            &installed,
+        )?;
     }
 
     let deleted = delete_the_credential_and_its_profile(host, &registry, &account)?;
@@ -148,17 +180,8 @@ fn refuse_while_anything_is_running(
     host: &dyn Host,
     account: &Account,
     consequence: &Consequence,
+    installed: &Installed,
 ) -> Result<()> {
-    // A machine that cannot say which Claude Code it has is still a machine an
-    // Account can be given up on. The version is not what answers this question
-    // — session markers are, and they are read straight off the Profile — it is
-    // only what a refusal quotes when the markers cannot be read. Propagated,
-    // it refused the whole removal on a machine where Claude Code had been
-    // uninstalled, leaving `perch holdings purge` as the only way to give up
-    // one lapsed subscription. `export::the_live_store` swallows it for the
-    // same reason.
-    let installed =
-        Installed::probed(host).unwrap_or_else(|_| Installed::unknown("(not installed)"));
     switch::refuse_if_live_anywhere(
         host,
         account,
@@ -166,7 +189,7 @@ fn refuse_while_anything_is_running(
             .successor
             .is_some()
             .then_some(WHY_THE_DEFAULT_PROFILE),
-        &installed,
+        installed,
     )
 }
 
@@ -331,8 +354,16 @@ fn land_on(
     registry: &mut Registry,
     successor: &Account,
     leaving: &Account,
+    installed: &Installed,
 ) -> Result<()> {
-    let landed = switch::make_live(host, perch, registry, successor, WHY_THE_DEFAULT_PROFILE);
+    let landed = switch::make_live(
+        host,
+        perch,
+        registry,
+        successor,
+        WHY_THE_DEFAULT_PROFILE,
+        installed,
+    );
     let is_live = landed.as_ref().err().is_none_or(|stopped| stopped.is_live);
 
     if is_live {

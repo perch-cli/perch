@@ -284,10 +284,25 @@ struct Candidate {
 /// Carry silently did nothing and its owner met the onboarding dialog on every
 /// Run.
 ///
+/// `same_name` for the Group too, and for the reason its own doc gives about
+/// Groups by name: nobody remembers which way they capitalized one months ago.
+/// Every other Group comparison in the registry folds case —
+/// `Registry::accounts_in`, `declared_group`, `rename_group`, `checked` — so
+/// `Scope::accounts` and this were asking one question two ways, in the same
+/// expression whose other half already explains why bytes are the wrong test.
+/// What kept them agreeing is `with_every_claimed_group_declared` rewriting
+/// each claimed spelling to the declared one on load, which is an invariant this
+/// module neither states nor owns.
+///
 /// [`Registry::is_active`]: crate::registry::Registry::is_active
 fn may_cross(account: &Account, email: &str, group: Option<&str>) -> bool {
-    crate::registry::same_name(account.email(), email)
-        || (group.is_some() && account.group.as_deref() == group)
+    use crate::registry::same_name;
+
+    same_name(account.email(), email)
+        || match (account.group.as_deref(), group) {
+            (Some(held), Some(of)) => same_name(held, of),
+            _ => false,
+        }
 }
 
 /// Where an Account's `.claude.json` actually is: the Default Profile for the
@@ -373,6 +388,11 @@ mod tests {
         assert!(
             may_cross(&account, "nobody@example.com", Some("work")),
             "and a Group still crosses on the Group"
+        );
+        assert!(
+            may_cross(&account, "nobody@example.com", Some("Work")),
+            "however it was capitalized, which is what `same_name` is for and \
+             what every other Group comparison in the registry already does"
         );
         assert!(
             !may_cross(&account, "nobody@example.com", None),

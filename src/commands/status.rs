@@ -59,7 +59,9 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
         registry.active().a_switch_in_flight(),
     ) {
         (Ok(active), _) => active,
-        (Err(_), Some(said)) => return the_switch_alone(out, &registry, args.json, &said),
+        (Err(_), Some(said)) => {
+            return the_switch_alone(out, &registry, args.json, args.refresh, &said);
+        }
         (Err(nobody), None) => return Err(nobody),
     };
 
@@ -182,7 +184,7 @@ fn render_json(
     report: &Report,
 ) -> Result<()> {
     let document = json!({
-        "active": listing::document(host, registry, account, now)?,
+        "active": listing::document(host, registry, account, now),
         "landing": registry.active().document(),
         "refresh": report.document(),
     });
@@ -203,6 +205,7 @@ fn the_switch_alone(
     out: &mut dyn Write,
     registry: &Registry,
     json: bool,
+    refresh: bool,
     said: &str,
 ) -> Result<()> {
     if !json {
@@ -213,7 +216,14 @@ fn the_switch_alone(
         &json!({
             "active": serde_json::Value::Null,
             "landing": registry.active().document(),
-            "refresh": Report::default().document(),
+            // Whether one was asked for, not whether one happened: a Landing
+            // that left nobody behind has no Account to read, and a hard-coded
+            // default said "nobody asked" to a caller who had passed
+            // `--refresh`.
+            "refresh": match refresh {
+                true => Report::asked_for().document(),
+                false => Report::default().document(),
+            },
         }),
     )
 }

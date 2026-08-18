@@ -1963,7 +1963,7 @@ fn a_configuration_directory_that_is_not_a_profile_is_where_a_switch_lands() {
     assert_eq!(
         perch::credentials::read(&host, &store)
             .expect("the store could be consulted")
-            .map(|held| held.credential)
+            .map(|held| held.credential.to_string())
             .as_deref(),
         Some(SECOND_CREDENTIAL),
         "the directory they moved their configuration to is the Default Profile"

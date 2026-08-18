@@ -628,7 +628,7 @@ fn permitted(registry: &Registry, _settled: &Settled) -> Result<Watching> {
     // Asked before `watcher-may-act` so that somebody who has said neither is
     // told about the declaration rather than about the permission — the
     // declaration is the one that has to come first.
-    if scope == Scope::Ungrouped && !registry.ungrouped.interchangeable {
+    if !cycle::may_cycle_within(registry, &scope) {
         return Err(PerchError::NotInterchangeable(format!(
             "{} is in no Group, and nothing has said the Accounts in no Group \
              are interchangeable at all — so there is nowhere for the watcher \

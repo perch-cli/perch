@@ -625,7 +625,7 @@ pub fn log_is_at(platform: Platform, log: Option<&Path>) -> String {
     match (platform, log) {
         (Platform::Other, _) => "journalctl --user -u perch-watch -f".to_string(),
         (_, Some(path)) => format!("{}", path.display()),
-        (_, None) => "nowhere — this platform keeps no log".to_string(),
+        (_, None) => "nowhere — nothing names a log file".to_string(),
     }
 }
 
@@ -693,6 +693,36 @@ pub fn binary_in(platform: Platform, unit: &str) -> Option<PathBuf> {
             Some(PathBuf::from(unescaped(binary)))
         }
         Platform::Windows => None,
+    }
+}
+
+/// Where a unit actually sends the decision log, read back out of the text of
+/// one.
+///
+/// Beside [`binary_in`] and for its reason: `status` asks what the *installed*
+/// unit says rather than what one written now would say, because the two coming
+/// apart is the whole of what it is asking. The log path is derived from
+/// `PERCH_HOME` at the moment it is read (see [`log_path`]), so a Service
+/// installed under one `PERCH_HOME` and a `perch watcher status` run under
+/// another disagreed silently: the line named a file nothing writes to while the
+/// real log went on filling up somewhere else.
+///
+/// `None` where there is nothing to read it out of — a unit that names no log
+/// file, and Windows, which registers a task rather than writing a unit. Linux
+/// answers `None` too and loses nothing by it: standard output goes to the
+/// journal there, and [`log_is_at`] says so without consulting a path.
+pub fn log_in(platform: Platform, unit: &str) -> Option<PathBuf> {
+    match platform {
+        Platform::MacOs => {
+            // Bounded by the next `<key>`, so a `StandardOutPath` somebody
+            // deleted the value of never reads the *following* key's string as
+            // the log's path.
+            let value = unit.split("<key>StandardOutPath</key>").nth(1)?;
+            let value = value.split("<key>").next()?;
+            let path = value.split("<string>").nth(1)?.split("</string>").next()?;
+            Some(PathBuf::from(unescaped(path)))
+        }
+        Platform::Other | Platform::Windows => None,
     }
 }
 
@@ -1030,6 +1060,35 @@ mod tests {
             2,
             "one file, named twice: {plist}"
         );
+    }
+
+    /// The install writes it and `status` reads it back — the round trip
+    /// [`binary_in`] already had, for the other thing a unit bakes in.
+    ///
+    /// A path with an `&` in it, because that is the character the plist has to
+    /// escape and the reader has to put back.
+    #[test]
+    fn the_log_a_plist_names_is_read_back_out_of_the_plist_that_names_it() {
+        let at = PathBuf::from("/Users/someone/R&D/perch/watch.log");
+        let unit = Unit {
+            log: Some(at.clone()),
+            ..a_unit()
+        };
+        let plist = unit.rendered(Platform::MacOs).expect("macOS writes a file");
+
+        assert_eq!(log_in(Platform::MacOs, &plist), Some(at));
+    }
+
+    /// The one it must not answer: a plist with the key and no value takes the
+    /// *next* key's string where nothing bounds the read, which would name
+    /// somebody's binary as their log file.
+    #[test]
+    fn a_plist_that_names_no_log_is_answered_with_none_rather_than_the_next_value() {
+        let emptied = "<key>StandardOutPath</key>\n\t<key>Program</key>\n\t\
+             <string>/usr/local/bin/perch</string>";
+
+        assert_eq!(log_in(Platform::MacOs, emptied), None);
+        assert_eq!(log_in(Platform::MacOs, "<dict></dict>"), None);
     }
 
     /// What every unit format is told to run, asserted on all three at once.

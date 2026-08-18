@@ -206,6 +206,41 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
         });
     }
 
+    // Two keys in either map that fold to one address, refused for the reason
+    // the `unlisted` guard above exists and reached by the same fold it uses.
+    // `Export::credential_for` finds the *first* case-insensitive match, so
+    // `ONE@example.com` beside `one@example.com` both passed that guard — each
+    // names a listed Account — and then only one was ever placed. The other was
+    // discarded in silence under a report saying the file had been restored
+    // whole, which is the partial-restore-wearing-success's-clothes ADR 0014
+    // exists to prevent.
+    //
+    // Both maps, because `identity_file_for` folds the same way: a `.claude.json`
+    // dropped this way is a Profile that meets the onboarding dialog on every
+    // Run, said to have been restored.
+    for (what, keys) in [
+        ("a Credential", &export.credentials),
+        ("a `.claude.json`", &export.identity_files),
+    ] {
+        let held: Vec<&str> = keys.keys().map(String::as_str).collect();
+        for (at, key) in held.iter().enumerate() {
+            if let Some(clash) = held[..at]
+                .iter()
+                .find(|earlier| registry::same_name(earlier, key))
+            {
+                return Err(PerchError::Malformed {
+                    path: "the Export".to_string(),
+                    detail: format!(
+                        "it holds {what} under both {clash} and {key}, which are \
+                         one address. Nothing was imported: only one of the two \
+                         would ever be restored, and an Import that quietly kept \
+                         one and dropped the other is not the whole file.",
+                    ),
+                });
+            }
+        }
+    }
+
     // Every Profile is named before any is made. Where one of them lands is
     // derivation and not a write, and an address no directory can be named after
     // is a refusal (see [`registry::profile_dir_for`]) — meeting it half way
@@ -522,7 +557,7 @@ mod tests {
             assert_eq!(
                 crate::credentials::read(&host, &store)
                     .unwrap()
-                    .map(|held| held.credential),
+                    .map(|held| held.credential.to_string()),
                 Some("held".to_string()),
                 "{platform:?}"
             );
@@ -595,6 +630,47 @@ mod tests {
             refused.to_string().contains("nobody@example.com"),
             "it names the Account that is missing: {refused}"
         );
+    }
+
+    /// Two keys that fold to one address is one Credential restored and one
+    /// discarded, under a report saying the file was restored whole.
+    ///
+    /// The `unlisted` guard folds case, so both keys name a listed Account and
+    /// both pass it. `credential_for` folds case too and answers with the
+    /// *first* — so the second was never placed, never mentioned, and never
+    /// counted. ADR 0014 supports a hand-written Export (`age -a -p`), which is
+    /// where a capitalization that differs between two keys comes from.
+    #[test]
+    fn an_export_holding_one_address_under_two_spellings_is_refused() {
+        for (what, mut export) in [
+            ("a Credential", an_export()),
+            ("a `.claude.json`", an_export()),
+        ] {
+            let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+            let map = match what {
+                "a Credential" => &mut export.credentials,
+                _ => &mut export.identity_files,
+            };
+            map.insert("one@example.com".to_string(), "held".to_string());
+            map.insert("ONE@example.com".to_string(), "also held".to_string());
+
+            let refused = place(&host, &export).expect_err("only one of the two would land");
+
+            let said = refused.to_string();
+            assert!(
+                said.contains("ONE@example.com") && said.contains("one@example.com"),
+                "it names both spellings: {said}"
+            );
+            assert!(
+                said.contains(what),
+                "and says which of the two maps holds them: {said}"
+            );
+            assert!(
+                host.effects().is_empty(),
+                "with nothing written on the way to finding out: {:?}",
+                host.effects()
+            );
+        }
     }
 
     /// Two addresses can flatten to one Profile name, and plus-addressing on a

@@ -31,6 +31,7 @@
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
+use zeroize::Zeroizing;
 
 use crate::credentials;
 use crate::error::{PerchError, Result};
@@ -588,14 +589,24 @@ fn write_it_down(
 /// afterwards — that is not this to sequence — but a `make_live` that moved
 /// nothing takes its own Landing back, because the caller writes nothing on
 /// that path at all.
+///
+/// `installed` is the caller's rather than probed here, for [`Installed`]'s own
+/// reason — once per command, since the answer cannot change under a process
+/// already running and the reading is a subprocess — and for a second reason
+/// `perch remove` has: it deliberately tolerates a machine with no Claude Code
+/// on it, because giving up one lapsed subscription is a thing to be able to do
+/// after uninstalling. Probed in here, that tolerance stopped at the landing,
+/// and removing the *active* Account failed after the user had already agreed
+/// to it.
 pub fn make_live(
     host: &dyn Host,
     perch: &mut lock::Held<'_>,
     registry: &mut Registry,
     account: &Account,
     whose: &str,
+    installed: &Installed,
 ) -> std::result::Result<(), NotLanded> {
-    let (installed, store) = ground(host).map_err(|error| NotLanded {
+    let store = registry::the_default_profile(host).map_err(|error| NotLanded {
         error,
         is_live: false,
     })?;
@@ -617,12 +628,12 @@ pub fn make_live(
         // using it (ADR 0027).
         let mut holds = lock::Holds::of(held, perch);
 
-        holds.around(|| refuse_if_live_in(host, &store.config_dir, whose, &installed))?;
+        holds.around(|| refuse_if_live_in(host, &store.config_dir, whose, installed))?;
 
         // Renewed around it for the reason `perform` says: a keychain that
         // stops to ask goes on stopping for as long as the person takes, and
         // the hold this is running under expires in ten seconds.
-        let prepared = holds.around(|| prepare(host, account, None, installed, store))?;
+        let prepared = holds.around(|| prepare(host, account, None, installed.clone(), store))?;
 
         holds.around_a_registry_write(|perch| {
             write_it_down(host, perch, registry, &leaving, account)
@@ -782,6 +793,7 @@ pub fn resolve_a_landing(
 
         let settled_on = whose_the_live_credential_is(
             host,
+            &mut holds,
             registry,
             leaving.as_deref(),
             &arriving,
@@ -812,8 +824,20 @@ pub fn resolve_a_landing(
 /// costs two reads. Every other held Account is the **fallback**, and it is a
 /// fallback rather than a sweep: it is one keychain prompt each on macOS, and
 /// it is reached only where a Landing says a Switch was in flight.
+///
+/// Every one of those reads renews both holds, which is why this takes them
+/// rather than being wrapped in one `around` by its caller. The reads either
+/// side of it were renewed and this was not, so the caller's claim that "the
+/// window the locks close is the whole of read-decide-record" was true of the
+/// read and the record and not of the decide — and the decide is the slowest of
+/// the three by a wide margin. One `around` over the whole call would not fix
+/// it: a machine holding several Accounts spends a keychain prompt per Account
+/// here, and the config-file lock goes stale after ten seconds, so the sweep has
+/// to renew *as it goes* or the save at the end lands under a lock a running
+/// `claude` was entitled to take over partway through.
 fn whose_the_live_credential_is(
     host: &dyn Host,
+    holds: &mut lock::Holds<'_, '_, '_>,
     registry: &Registry,
     leaving: Option<&str>,
     arriving: &str,
@@ -827,31 +851,39 @@ fn whose_the_live_credential_is(
         return Some(leaving.map(str::to_string));
     };
 
-    let holding = |email: &str| {
-        registry
-            .account(email)
-            .and_then(|account| held_by(host, account))
-            .is_some_and(|held| held == live)
+    let holding = |holds: &mut lock::Holds<'_, '_, '_>, account: &Account| {
+        holds
+            .around(|| held_by(host, account))
+            .is_some_and(|held| *held == live)
     };
 
-    if holding(arriving) {
+    if registry
+        .account(arriving)
+        .is_some_and(|account| holding(holds, account))
+    {
         return Some(Some(arriving.to_string()));
     }
     if let Some(leaving) = leaving
-        && holding(leaving)
+        && registry
+            .account(leaving)
+            .is_some_and(|account| holding(holds, account))
     {
         return Some(Some(leaving.to_string()));
     }
 
-    registry
-        .accounts
-        .iter()
-        .find(|account| {
-            !registry::same_name(account.email(), arriving)
-                && !leaving.is_some_and(|leaving| registry::same_name(account.email(), leaving))
-                && held_by(host, account).is_some_and(|held| held == live)
-        })
-        .map(|account| Some(account.email().to_string()))
+    // A `for` rather than a `find`, because the predicate renews the holds and
+    // so is `FnMut` over them.
+    for account in &registry.accounts {
+        if registry::same_name(account.email(), arriving)
+            || leaving.is_some_and(|leaving| registry::same_name(account.email(), leaving))
+        {
+            continue;
+        }
+        if holding(holds, account) {
+            return Some(Some(account.email().to_string()));
+        }
+    }
+    None
 }
 
 /// The corner that stays undecidable: a Landing in flight, and a live Credential
@@ -930,16 +962,6 @@ pub fn already_landed(host: &dyn Host, installed: &Installed, account: &Account)
     let usable = matches!(probe::read_credential(host, &store, installed), Ok(Some(_)));
 
     Ok(named && usable)
-}
-
-/// The two things that are true whatever else is: which Claude Code is
-/// installed, and where the Default Profile is. Established before the locks,
-/// because the locks are derived from the second of them.
-fn ground(host: &dyn Host) -> Result<(Installed, Store)> {
-    Ok((
-        Installed::probed(host)?,
-        registry::the_default_profile(host)?,
-    ))
 }
 
 /// Refuses to act *as* an Account whose Profile is not its alone.
@@ -1234,20 +1256,20 @@ fn corroborates(
     // holds there is no Rotation and nothing a wrong answer could cost. That is
     // the ordinary interrupted Switch — Perch's record moved on and
     // `.claude.json` did not — and it must stay a Switch that simply runs.
-    if held_by(host, outgoing).is_some_and(|held| held == live) {
+    if held_by(host, outgoing).is_some_and(|held| *held == live) {
         return Corroboration::NothingAtStake;
     }
     let Some(account) = registry.account(named) else {
         return Corroboration::NotOurs;
     };
     match held_by(host, account) {
-        Some(held) if held == live => Corroboration::NotOurs,
+        Some(held) if *held == live => Corroboration::NotOurs,
         _ => Corroboration::Unaccounted,
     }
 }
 
 /// What an Account's own Profile holds, where it can be read at all.
-fn held_by(host: &dyn Host, account: &Account) -> Option<String> {
+fn held_by(host: &dyn Host, account: &Account) -> Option<Zeroizing<String>> {
     let store = account.store(host).ok()?;
     Some(credentials::read(host, &store).ok()??.credential)
 }
