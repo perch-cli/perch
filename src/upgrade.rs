@@ -302,7 +302,15 @@ pub fn compare(a: &str, b: &str) -> Ordering {
         (
             numbers
                 .split('.')
-                .map(|part| part.parse::<u64>().unwrap_or(0))
+                // Saturating rather than zero. Every version that reaches here
+                // has been through `version_typed`, on both paths — what
+                // somebody typed and the `tag_name` `newest` reads — so each
+                // component is a run of ASCII digits and the only way this
+                // parse fails is a number too big for a `u64`. Read as zero, a
+                // `--release 99999999999999999999.0.0` compared as `0.0.0` and
+                // was offered as "the older Release", which is the
+                // wrong-direction prompt the `+build.3` rule above is about.
+                .map(|part| part.parse::<u64>().unwrap_or(u64::MAX))
                 .collect(),
             suffix,
         )
@@ -730,5 +738,19 @@ mod tests {
         assert_eq!(compare("0.2.0+build.3", "0.2.0-rc.1"), Ordering::Greater);
         assert_eq!(compare("0.2.0+a", "0.2.0+b"), Ordering::Equal);
         assert_eq!(compare("0.3.0+build.3", "0.2.0"), Ordering::Greater);
+    }
+
+    /// A component too big for a `u64` is bigger than any Release, not smaller
+    /// than all of them.
+    ///
+    /// `version_typed` accepts any run of ASCII digits, so this is reachable by
+    /// typing rather than hypothetical — and read as zero it compared as
+    /// `0.0.0` and was offered as "the older Release", the wrong-direction
+    /// prompt the build-metadata rule above is about.
+    #[test]
+    fn a_number_too_big_to_read_is_the_newer_release_rather_than_the_oldest_possible() {
+        let enormous = "99999999999999999999.0.0";
+        assert_eq!(compare(enormous, "0.2.0"), Ordering::Greater);
+        assert_eq!(compare("0.2.0", enormous), Ordering::Less);
     }
 }
