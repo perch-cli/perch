@@ -153,7 +153,7 @@ pub fn erase(host: &dyn Host, registry: &Registry) -> Result<Purged> {
             credentials += 1;
         }
     }
-    forget_what_the_registry_does_not_name(host)?;
+    forget_what_the_registry_does_not_name(host, registry)?;
 
     host.remove_dir_all(&home).map_err(|err| {
         PerchError::Other(format!(
@@ -194,8 +194,22 @@ pub fn erase(host: &dyn Host, registry: &Registry) -> Result<Purged> {
 /// directories hold are Credentials for Accounts the user does not believe they
 /// have, and a Purge that announced two more than it was asked about would be
 /// answering a question nobody put.
-fn forget_what_the_registry_does_not_name(host: &dyn Host) -> Result<()> {
+fn forget_what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) -> Result<()> {
+    // Filtered by the registry, the way `refuse_while_anything_is_running`
+    // filters the same walk. Unfiltered, the loop below re-emptied every store
+    // the loop above had just emptied — so a Purge of five Accounts on macOS
+    // made ten `security delete-generic-password` shell-outs instead of five,
+    // and the function did not do what its name says.
+    let recorded: Vec<std::path::PathBuf> = registry
+        .accounts
+        .iter()
+        .filter_map(|account| account.profile_dir(host).ok())
+        .collect();
+
     for dir in everything_perch_holds(host) {
+        if recorded.contains(&dir) {
+            continue;
+        }
         // The same answer `forget_the_credential` gives, and for its reason: a
         // store that cannot even be named is one whose Credential cannot be
         // deleted, and passing over it would report a machine given back while
@@ -217,18 +231,32 @@ fn forget_what_the_registry_does_not_name(host: &dyn Host) -> Result<()> {
                 dir.display(),
             ))
         })?;
-        for kept_in in credentials::stores_for(host, &store) {
-            kept_in.forget(host).map_err(|error| {
-                error.with_note(&format!(
-                    "Perch's registry is untouched and every Credential already \
-                     deleted is already gone, so `perch holdings purge` can be \
-                     run again once {} can be written to, and it will finish.",
-                    kept_in.describe(),
-                ))
-            })?;
-        }
+        empty_the_stores(host, &store)?;
     }
     Ok(())
+}
+
+/// Empties both of a Profile's Credential Stores, and says whether either held
+/// anything.
+///
+/// One function because there are two passes over the same act — the Accounts
+/// the registry names, and the directories it does not — and the sentence a
+/// failure carries is the whole of what a half-finished Purge can promise. Two
+/// copies of it is how the second of them ships without it.
+fn empty_the_stores(host: &dyn Host, store: &probe::Store) -> Result<bool> {
+    let mut held = false;
+    for kept_in in credentials::stores_for(host, store) {
+        let forgotten = kept_in.forget(host).map_err(|error| {
+            error.with_note(&format!(
+                "Perch's registry is untouched and every Credential already \
+                 deleted is already gone, so `perch holdings purge` can be run \
+                 again once {} can be written to, and it will finish.",
+                kept_in.describe(),
+            ))
+        })?;
+        held |= forgotten == Forgotten::Credential;
+    }
+    Ok(held)
 }
 
 /// Takes an Account's Credential out of both of its stores, and says whether
@@ -248,20 +276,7 @@ fn forget_the_credential(host: &dyn Host, account: &Account) -> Result<bool> {
     // cannot be deleted, and passing over it would report a machine given back
     // while a keychain went on holding a working login.
     let store = probe::store_for_profile(host, &dir)?;
-
-    let mut held = false;
-    for kept_in in credentials::stores_for(host, &store) {
-        let forgotten = kept_in.forget(host).map_err(|error| {
-            error.with_note(&format!(
-                "Perch's registry is untouched and every Credential already \
-                 deleted is already gone, so `perch holdings purge` can be run \
-                 again once {} can be written to, and it will finish.",
-                kept_in.describe(),
-            ))
-        })?;
-        held |= forgotten == Forgotten::Credential;
-    }
-    Ok(held)
+    empty_the_stores(host, &store)
 }
 
 #[cfg(test)]

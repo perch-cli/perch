@@ -285,6 +285,37 @@ fn a_tilde_typed_at_the_export_prompt_means_home_because_no_shell_will_say_so() 
     );
 }
 
+/// **`forget_what_the_registry_does_not_name` did not do what its name says.**
+///
+/// It walked every directory under Perch's home with no filter, so every
+/// Account the pass above had just emptied was emptied a second time. On macOS
+/// that is a `security delete-generic-password` per Account per pass — twice
+/// the shell-outs, on the command whose whole job is to finish.
+///
+/// `refuse_while_anything_is_running` filters the same walk by the same
+/// registry; this is the copy that did not.
+#[test]
+fn a_purge_empties_each_credential_store_once() {
+    let host = a_machine_to_give_back();
+    let held = registry_on(&host).expect("a registry").accounts.len();
+    host.forget_effects();
+
+    run_purge(&host).0.expect("the word was typed");
+
+    let deletes = host
+        .effects()
+        .iter()
+        .filter(|effect| matches!(effect, Effect::KeychainDelete { .. }))
+        .count();
+    assert_eq!(
+        deletes,
+        held,
+        "one keychain delete per Account, rather than one per Account per pass: \
+         {:?}",
+        host.effects()
+    );
+}
+
 /// The same on the platform that writes the other separator.
 ///
 /// `~\backups\perch.age` is what somebody on Windows types, and only `~/` was
