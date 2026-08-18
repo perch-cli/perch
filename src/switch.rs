@@ -467,13 +467,21 @@ fn perform(
     let mut incoming_is_live = false;
     let mut wrote_it_down = false;
     let switched: Result<Captured> = lock::under(host, probe::locks_for(&store), |held| {
-        let prepared = prepare(host, incoming, outgoing, installed.clone(), store)?;
-
         // Every step of the Switch is slow enough to outlast a hold. `prepare`
         // reads a Credential and `capture` reads and writes one, and a keychain
         // that stops to ask the user for permission stretches either without
         // warning — past the ten seconds the config-file lock goes stale in.
+        //
+        // Built before the first of those steps rather than after it. `prepare`
+        // is the step this comment names first and was the one step never
+        // wrapped: a keychain dialog that a person answers after fifteen
+        // seconds let the config-file lock go stale under it, and the takeover
+        // was then discovered at the *next* step — by which time Claude Code
+        // believed it held a lock Perch was about to write under.
         let mut holds = lock::Holds::of(held, perch);
+
+        let prepared =
+            holds.around(|| prepare(host, incoming, outgoing, installed.clone(), store))?;
 
         let captured = holds
             .around(|| capture(host, &prepared, incoming, outgoing, registry))
@@ -607,10 +615,14 @@ pub fn make_live(
         // The Default Profile alone. The Account's own Profile is only read
         // here, and reading a Credential takes nothing away from the session
         // using it (ADR 0027).
-        refuse_if_live_in(host, &store.config_dir, whose, &installed)?;
-
-        let prepared = prepare(host, account, None, installed, store)?;
         let mut holds = lock::Holds::of(held, perch);
+
+        holds.around(|| refuse_if_live_in(host, &store.config_dir, whose, &installed))?;
+
+        // Renewed around it for the reason `perform` says: a keychain that
+        // stops to ask goes on stopping for as long as the person takes, and
+        // the hold this is running under expires in ten seconds.
+        let prepared = holds.around(|| prepare(host, account, None, installed, store))?;
 
         holds.around_a_registry_write(|perch| {
             write_it_down(host, perch, registry, &leaving, account)
