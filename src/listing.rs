@@ -27,7 +27,6 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 
 use crate::cycle;
-use crate::error::Result;
 use crate::host::Host;
 use crate::registry::{self, Account, Quarantine, Registry};
 use crate::reserve::Reserve;
@@ -103,13 +102,13 @@ impl<'a> Section<'a> {
         host: &dyn Host,
         registry: &Registry,
         now: DateTime<Utc>,
-    ) -> Result<serde_json::Value> {
+    ) -> serde_json::Value {
         let listed: Vec<serde_json::Value> = self
             .accounts
             .iter()
             .map(|account| document(host, registry, account, now))
-            .collect::<Result<_>>()?;
-        Ok(json!({
+            .collect();
+        json!({
             // The same shape the document's own `scope` key carries, because it
             // is the same question asked of a narrower set: a script that reads
             // one should not have to learn a second spelling to read the other.
@@ -130,7 +129,7 @@ impl<'a> Section<'a> {
                     .map_or(serde_json::Value::Null, |reserve| reserve.document()),
             },
             "accounts": listed,
-        }))
+        })
     }
 }
 
@@ -208,8 +207,8 @@ pub fn document(
     registry: &Registry,
     account: &Account,
     now: DateTime<Utc>,
-) -> Result<serde_json::Value> {
-    Ok(json!({
+) -> serde_json::Value {
+    json!({
         "email": account.email(),
         "account_uuid": account.identity.account_uuid,
         "alias": registry.alias_of(account.email()),
@@ -223,7 +222,15 @@ pub fn document(
         "active": registry.is_active(account.email()),
         "organization": account.identity.organization_name,
         "plan": account.plan,
-        "profile_dir": account.profile_dir(host)?,
+        // `ok()` rather than `?`, so an address no directory can be named after
+        // is a null field on that Account rather than a `perch list --json`
+        // that refuses to list anything at all. `registry::validate` does not
+        // turn such an address away and `purge::forget_the_credential` guards it
+        // as reachable by hand-editing, so the two surfaces disagreed about
+        // whether the Account exists: every renderer a person reads shows it —
+        // none of them ask for the directory — and the one a script reads failed
+        // outright.
+        "profile_dir": account.profile_dir(host).ok(),
         // The figure the section's order was made on, beside the windows it was
         // taken from. A section saying it is `ranked` and not carrying the
         // number it ranked on would be a claim with no way of checking it —
@@ -231,7 +238,7 @@ pub fn document(
         // person reads (ADR 0049).
         "headroom": cycle::headroom_document(account),
         "utilization": utilization::document(account, now),
-    }))
+    })
 }
 
 #[cfg(test)]
@@ -291,6 +298,44 @@ mod tests {
         assert_eq!(
             named(flattened(&every_section(&registry))),
             named(registry.accounts.iter().collect()),
+        );
+    }
+
+    /// An address no directory can be named after is an Account the human
+    /// renderers show and `--json` refused to say anything at all about.
+    ///
+    /// `registry::validate` does not turn such an address away, and
+    /// `purge::forget_the_credential` guards it as reachable by hand-editing —
+    /// so it is a state Perch has to be able to describe. Every renderer a
+    /// person reads shows the Account, because none of them ask where its
+    /// Profile is; this one asked, propagated, and failed the whole listing.
+    #[test]
+    fn an_account_no_profile_can_be_named_for_is_listed_rather_than_failing_the_listing() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let mut registry = Registry::default();
+        registry.upsert(crate::registry::Account {
+            identity: crate::probe::Identity {
+                email: "@".to_string(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            disabled: false,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        });
+        let account = registry.account("@").expect("hand-edited in");
+
+        let listed = document(&host, &registry, account, chrono::Utc::now());
+
+        assert_eq!(listed["email"], "@");
+        assert_eq!(
+            listed["profile_dir"],
+            serde_json::Value::Null,
+            "said as the one thing that is not knowable rather than as a \
+             refusal about the whole listing"
         );
     }
 

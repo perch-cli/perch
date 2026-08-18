@@ -571,7 +571,7 @@ fn render_json(
     let sectioned: Vec<serde_json::Value> = sections
         .iter()
         .map(|section| section.document(host, registry, now))
-        .collect::<Result<_>>()?;
+        .collect();
 
     let document = json!({
         // What was asked for. Each section says what it holds and how it is
