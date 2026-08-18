@@ -795,6 +795,51 @@ mod tests {
         );
     }
 
+    /// `remove_link` takes away a link and nothing else, and the "nothing else"
+    /// is the part that has to be checked.
+    ///
+    /// It was `remove_file` on a bare path, which deletes whatever is there —
+    /// so the one call whose whole contract is that it only ever takes away
+    /// Perch's own share would have taken away the person's file at the same
+    /// name. Its only caller asks `link_target` first, but that is a separate
+    /// syscall, and the fake answered `Ok` untouched for a plain file: a
+    /// regression that dropped the guard passed every behavior test and deleted
+    /// a file on the machine.
+    #[test]
+    fn removing_a_link_refuses_anything_that_is_not_one() {
+        let host = FakeHost::new().with_file(PATH, "{\"mine\":true}");
+
+        host.remove_link(Path::new(PATH))
+            .expect_err("a file is not a link");
+
+        assert_eq!(
+            host.file(PATH).as_deref(),
+            Some("{\"mine\":true}"),
+            "and it is still there"
+        );
+    }
+
+    /// The two ends of the same rule: a link goes, and a path with nothing at it
+    /// is not a failure — a share that has already gone is a share that is gone.
+    #[test]
+    fn removing_a_link_takes_the_link_and_leaves_what_it_points_at() {
+        let real = "/Users/someone/dotfiles/claude.json";
+        let host = FakeHost::new()
+            .with_file(real, "{}")
+            .with_link(Link::Symbolic, real, PATH);
+
+        host.remove_link(Path::new(PATH)).expect("a link goes");
+        host.remove_link(Path::new(PATH))
+            .expect("and one that has already gone is not a failure");
+
+        assert!(host.link_at(PATH).is_none(), "the link is gone");
+        assert_eq!(
+            host.file(real).as_deref(),
+            Some("{}"),
+            "and what it pointed at is untouched"
+        );
+    }
+
     /// A private write is the same choreography, and the fake performs it
     /// rather than describing it.
     ///

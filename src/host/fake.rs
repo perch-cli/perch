@@ -1925,6 +1925,19 @@ impl port::Links for FakeHost {
         if self.fs.links.borrow_mut().remove(path).is_some() {
             self.fs.files.borrow_mut().remove(path);
             self.fs.modes.borrow_mut().remove(path);
+            self.fs.modified.borrow_mut().remove(path);
+            return Ok(());
+        }
+        // Something that is not a link is refused rather than passed over, which
+        // is what the real call does now. Answered `Ok` untouched, the fake
+        // could not tell a caller that dropped its `link_target` guard from one
+        // that kept it — while the real `remove_file` underneath deleted the
+        // person's file.
+        if self.fs.files.borrow().contains_key(path) || self.fs.dirs.borrow().contains(path) {
+            return Err(HostError::Other(format!(
+                "{} is not a link, so it is not Perch's to remove",
+                path.display()
+            )));
         }
         self.fs.modified.borrow_mut().remove(path);
         Ok(())
