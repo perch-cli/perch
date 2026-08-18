@@ -363,8 +363,16 @@ impl SetAside {
         SetAside::default()
     }
 
+    /// `same_name`, like every other way this module asks about an address —
+    /// see the paragraphs `choose`'s `is_leaving` and `ranked`'s `here` each
+    /// carry. `upsert` matches an Account with `same_name` and stores the
+    /// incoming spelling, so an Identity re-read under another capitalization
+    /// leaves the two lists spelling one Account two ways, and a set-aside
+    /// Account compared by bytes quietly stops being set aside.
     fn holds(&self, email: &str) -> bool {
-        self.emails.iter().any(|held| held == email)
+        self.emails
+            .iter()
+            .any(|held| registry::same_name(held, email))
     }
 }
 
