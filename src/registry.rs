@@ -1390,13 +1390,26 @@ impl Registry {
         // dangling pointer the registry refuses to load, and half a Switch is
         // not a thing to keep a record of once one of its two ends is gone.
         //
+        // What it settles *on* is the other half, where the other half is still
+        // held. Settling on nobody threw away an Account the registry was
+        // treating as active: forgetting the *arriving* half of a Landing left
+        // `leaving` held and named by nothing, so the next Capture had no
+        // Profile to file the live Credential into. `settled_on` is the answer
+        // to "what does a Landing come back to when nothing moved", which is
+        // this question exactly.
+        //
         // Through `settle`, because that is what the field being private is
         // for: `active` is reached through `begin_landing`, `settle` and
         // `abandon_landing`, each of which names a transition, and a fourth
         // writer inside the one module the rule is aimed at is the one a later
         // reader copies.
         if self.active.names(email) {
-            self.settle(None);
+            let comes_back_to = self
+                .active
+                .whose()
+                .filter(|whose| !same_name(whose, email))
+                .map(str::to_string);
+            self.settle(comes_back_to);
         }
     }
 
@@ -2335,6 +2348,65 @@ mod tests {
         registry.forget("CAFÉ@example.com");
         assert!(registry.accounts.is_empty(), "and it is the one that goes");
         assert!(registry.aliases.is_empty(), "with the name it answered to");
+    }
+
+    /// Two Accounts, which is the fewest a Landing needs.
+    fn holding_two() -> Registry {
+        let mut registry = Registry::default();
+        for email in ["one@example.com", "two@example.com"] {
+            registry.upsert(Account {
+                identity: Identity {
+                    email: email.into(),
+                    account_uuid: None,
+                    organization_name: None,
+                    organization_uuid: None,
+                },
+                plan: None,
+                disabled: false,
+                quarantine: None,
+                group: None,
+                utilization: None,
+            });
+        }
+        registry
+    }
+
+    /// Forgetting either half of a Landing takes the Landing with it — a Switch
+    /// with one end gone is not a record worth keeping, and one naming an
+    /// Account Perch no longer holds is a dangling pointer `load` refuses.
+    ///
+    /// What it comes back to is the half that is still held. Settled on nobody,
+    /// forgetting the *arriving* half threw away the Account the registry was
+    /// treating as active: `leaving` stayed in `accounts`, named by nothing, and
+    /// the next Capture had no Profile to file the live Credential into.
+    #[test]
+    fn forgetting_the_arriving_half_of_a_landing_comes_back_to_the_one_being_left() {
+        let mut registry = holding_two();
+        registry.begin_landing(Some("one@example.com".into()), "two@example.com");
+
+        registry.forget("two@example.com");
+
+        assert_eq!(
+            registry.active().whose(),
+            Some("one@example.com"),
+            "the Account still held is the one the registry is on"
+        );
+        assert!(
+            registry.active().a_switch_in_flight().is_none(),
+            "and the Landing is gone with the half that went"
+        );
+    }
+
+    /// The other half of the same rule: forgetting the Account being left
+    /// settles on nobody, because there is nobody left to come back to.
+    #[test]
+    fn forgetting_the_leaving_half_of_a_landing_settles_on_nobody() {
+        let mut registry = holding_two();
+        registry.begin_landing(Some("one@example.com".into()), "two@example.com");
+
+        registry.forget("one@example.com");
+
+        assert_eq!(*registry.active(), Active::Nobody);
     }
 
     /// An Account that was named and is not there is a refusal, not a panic.
