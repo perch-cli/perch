@@ -736,6 +736,12 @@ fn one_round(
 
     watcher.pacing(recently, &registry, &watching.scope);
 
+    // Once per round, and handed to everything in it that wants one. Probed
+    // where it is wanted, an acting round spawned three `claude --version`
+    // subprocesses and walked `PATH` three times — which is the very thing
+    // [`probe::Installed`] exists to make impossible.
+    let installed = probe::Installed::probed(host);
+
     // The one Account Refreshed, and nearly all of the network this loop
     // spends (ADR 0013).
     let report = observe::refresh(
@@ -743,6 +749,7 @@ fn one_round(
         &mut perch,
         &mut registry,
         std::slice::from_ref(&email),
+        &installed,
     );
     // Worth saying and not worth holding a decision over: the figure this round
     // decides on is the one that was just read, whether or not it survived to
@@ -822,6 +829,7 @@ fn one_round(
                     watcher,
                     recently,
                     &cooled,
+                    &installed,
                 )?;
                 (fullest, outcome)
             }
@@ -908,6 +916,11 @@ fn refused_the_reading(attempts: &[Attempt]) -> Option<String> {
 /// Reachable only through a [`Cooled`], which says both halves of "full enough
 /// to move off" (ADR 0055): the figure crossed the threshold, and the Cooldown
 /// between two Switches is spent. Neither is a line above the call any more.
+// Eight, and the eighth is the point: `probed` is what the round already asked
+// the machine and must not ask again. Bundling it with anything here would put
+// "what Claude Code is installed" inside a value about permission, pacing or a
+// witness, none of which it belongs to.
+#[allow(clippy::too_many_arguments)]
 fn act(
     host: &dyn Host,
     perch: &mut crate::lock::Held<'_>,
@@ -916,6 +929,7 @@ fn act(
     watcher: Watcher,
     recently: &mut Recently,
     cooled: &Cooled<'_>,
+    probed: &Result<probe::Installed>,
 ) -> Result<Outcome> {
     let scope = watching.scope.clone();
     let outgoing = watching.account.clone();
@@ -940,7 +954,10 @@ fn act(
     // `watch::refused_or_raised`'s to say — and the [`Idle`] it hands back is
     // what the candidate Refresh below takes, so the burst cannot be reached
     // without the ask.
-    let installed = probe::Installed::probed(host)?;
+    let installed = probed
+        .as_ref()
+        .map_err(|why| PerchError::Other(why.to_string()))?
+        .clone();
     let idle = match switch::refuse_if_live(host, &outgoing, &installed) {
         Ok(idle) => idle,
         Err(not_idle) => return watch::refused_or_raised(not_idle),
@@ -951,6 +968,7 @@ fn act(
         perch,
         registry,
         &addresses_of(&considered(registry, watching, cooled, &idle)),
+        probed,
     );
     // What could not be read, carried into the sentence that says where the
     // watcher went: an Account ranked on a figure from an hour ago is the one

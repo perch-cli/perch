@@ -199,27 +199,29 @@ impl Report {
 }
 
 /// Reads current Utilization for each of `emails` and keeps what came back.
+///
+/// `installed` is asked for rather than probed, because a probe is a `PATH` walk
+/// and a `claude --version` subprocess and the answer cannot change under a
+/// process that is already running — which is the whole reason
+/// [`Installed`] is a type. Probed here, one acting round of `perch watcher run`
+/// spawned three: one for the active Account's Refresh, one for the ask that
+/// stops the candidate burst, and one for the burst itself. Taken as an
+/// argument, the caller that already has one cannot spawn a second, and the
+/// ones that do not are one expression away.
+///
+/// Carried as the failure it may be rather than as an `Option`, because an
+/// Account that is already Quarantined is answered before the version is wanted
+/// at all — and a machine whose Claude Code has been uninstalled must not turn
+/// that answer into a different one.
 pub fn refresh(
     host: &dyn Host,
     perch: &mut Held<'_>,
     registry: &mut Registry,
     emails: &[String],
+    installed: &Result<Installed>,
 ) -> Report {
     let mut report = Report::default();
     let mut anything_to_keep = false;
-
-    // Once, which is what [`Installed::probed`] promises and what the loop below
-    // was breaking: a `PATH` walk and a `claude --version` subprocess per
-    // Account. `perch list --refresh` over a Group of five spawned five of them,
-    // and `perch watcher run` spawned one every poll round for the life of the
-    // loop. The answer cannot change under a process that is already running,
-    // which is the whole reason the type exists.
-    //
-    // Kept as the failure it may be rather than raised here, because an Account
-    // that is already Quarantined is answered before the version is wanted at
-    // all — and a machine whose Claude Code has been uninstalled must not turn
-    // that answer into a different one.
-    let installed = Installed::probed(host);
 
     for email in emails {
         // A round trip to Anthropic each, over as many Accounts as a Group

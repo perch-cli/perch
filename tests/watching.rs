@@ -235,6 +235,34 @@ fn only_the_account_you_are_on_is_refreshed() {
     );
 }
 
+/// Which Claude Code is installed is asked once a round, whatever the round
+/// does.
+///
+/// `probe::Installed` exists so that a `PATH` walk and a `claude --version`
+/// subprocess happen once per command — the answer cannot change under a process
+/// that is already running. Probed wherever it was wanted, an acting round did
+/// it three times: the active Account's Refresh, the ask that guards the
+/// candidate burst, and the burst itself. A Service at a round every 2m30s pays
+/// that for as long as it is left running.
+#[test]
+fn a_round_asks_once_which_claude_code_is_installed_however_much_it_does() {
+    // Over the threshold, so the round reads the candidates and Switches: the
+    // round that used to ask three times.
+    let host = watching(&[95.0], 5.0);
+
+    run_watch(&host).0.expect("it was stopped");
+
+    let probes = host
+        .effects()
+        .iter()
+        .filter(|effect| {
+            matches!(effect, Effect::Exec { program, args }
+                if program == CLAUDE_BIN && args == &["--version".to_string()])
+        })
+        .count();
+    assert_eq!(probes, 1, "{:?}", host.effects());
+}
+
 /// The interval is the policy: the endpoint allows roughly 28-30 reads an hour
 /// per Account, and the loop has to leave room inside that for the
 /// `perch status --refresh` somebody types while it runs.

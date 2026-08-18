@@ -68,7 +68,13 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
     // reads exactly what it is about to show, which is the rule `perch list`
     // follows at its own breadths.
     let report = match &mut perch {
-        Some(perch) => observe::refresh(host, perch, &mut registry, std::slice::from_ref(&active)),
+        Some(perch) => observe::refresh(
+            host,
+            perch,
+            &mut registry,
+            std::slice::from_ref(&active),
+            &crate::probe::Installed::probed(host),
+        ),
         None => Report::default(),
     };
 
