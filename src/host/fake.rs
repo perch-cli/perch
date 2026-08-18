@@ -1594,6 +1594,15 @@ impl port::Files for FakeHost {
         if let Some(detail) = self.fs.undeletable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
+        // A directory that will not be walked cannot be removed either, which
+        // `with_unlistable_dir`'s own doc says — "`remove_dir_all` and the
+        // listing both fail EACCES" — and only `list_dir` was reading it. There
+        // is no machine where a directory refuses `opendir` and then disappears
+        // under a recursive remove, because the remove has to `opendir` first;
+        // a recovery path proved green against that pair would not run on one.
+        if let Some(detail) = self.fs.unlistable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
+        }
         // A link at the path is taken away and what it points at is left
         // alone: `remove_dir_all` does not follow the last component, so it
         // unlinks the link itself and answers `Ok`. Measured, because the

@@ -1232,9 +1232,12 @@ fn an_abandoned_lock_that_would_not_be_cleared_is_waited_on_rather_than_declared
 fn an_abandoned_lock_that_cannot_even_be_walked_is_still_waited_on_rather_than_declared_broken() {
     let host = machine_with_two_accounts();
     let long_ago = host.now() - chrono::Duration::seconds(120);
+    // One arrangement rather than two. `with_unlistable_dir` says what it means
+    // — "`remove_dir_all` and the listing both fail EACCES" — and the fake now
+    // answers both, so a test no longer has to describe one real state by
+    // turning two knobs that could be turned apart.
     let host = host
         .with_dir_held_since(REFRESH_LOCK, long_ago)
-        .with_undeletable_file(REFRESH_LOCK, "Permission denied")
         .with_unlistable_dir(REFRESH_LOCK, "Permission denied");
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
