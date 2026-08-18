@@ -290,14 +290,14 @@ pub fn tag_of(version: &str) -> String {
 /// Release?" about the version that was already there. `version_typed` accepts
 /// the spelling deliberately, so it is reachable rather than hypothetical.
 pub fn compare(a: &str, b: &str) -> Ordering {
-    let split = |version: &str| -> (Vec<u64>, String) {
+    let split = |version: &str| -> (Vec<u64>, Vec<String>) {
         let version = match version.find('+') {
             Some(at) => &version[..at],
             None => version,
         };
-        let (numbers, suffix) = match version.find('-') {
-            Some(at) => (&version[..at], version[at..].to_string()),
-            None => (version, String::new()),
+        let (numbers, pre_release) = match version.find('-') {
+            Some(at) => (&version[..at], &version[at + 1..]),
+            None => (version, ""),
         };
         (
             numbers
@@ -312,21 +312,61 @@ pub fn compare(a: &str, b: &str) -> Ordering {
                 // wrong-direction prompt the `+build.3` rule above is about.
                 .map(|part| part.parse::<u64>().unwrap_or(u64::MAX))
                 .collect(),
-            suffix,
+            match pre_release.is_empty() {
+                true => Vec::new(),
+                false => pre_release.split('.').map(str::to_string).collect(),
+            },
         )
     };
 
-    let (a_numbers, a_suffix) = split(a);
-    let (b_numbers, b_suffix) = split(b);
+    let (a_numbers, a_pre_release) = split(a);
+    let (b_numbers, b_pre_release) = split(b);
     let ordered = a_numbers.cmp(&b_numbers);
     if ordered != Ordering::Equal {
         return ordered;
     }
-    match (a_suffix.is_empty(), b_suffix.is_empty()) {
+    match (a_pre_release.is_empty(), b_pre_release.is_empty()) {
         (true, true) => Ordering::Equal,
         (true, false) => Ordering::Greater,
         (false, true) => Ordering::Less,
-        (false, false) => a_suffix.cmp(&b_suffix),
+        (false, false) => by_identifier(&a_pre_release, &b_pre_release),
+    }
+}
+
+/// Two pre-release suffixes, compared the way semver says: field by field,
+/// numerically wherever both fields are numbers.
+///
+/// Compared as one string it was the same trap the numbers above are split for:
+/// `-rc.10` against `-rc.9` is `'1'` against `'9'`, so `rc.10` came out *older*
+/// than `rc.9` and `perch upgrade --release 0.2.0-rc.10` asked "Install the
+/// older Release?" about the newer one — and non-interactively refused it
+/// outright. `version_typed` accepts the spelling deliberately, so it is
+/// reachable by typing rather than hypothetical.
+///
+/// A number always sorts below a word, which is semver's rule and not an
+/// arbitrary one: it is what keeps `1.0.0-alpha` above `1.0.0-1`. And where one
+/// suffix runs out first, the longer one is the newer — `rc.1.1` after `rc.1`.
+fn by_identifier(a: &[String], b: &[String]) -> Ordering {
+    for (ours, theirs) in a.iter().zip(b) {
+        let ordered = match (a_number(ours), a_number(theirs)) {
+            (Some(ours), Some(theirs)) => ours.cmp(&theirs),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => ours.cmp(theirs),
+        };
+        if ordered != Ordering::Equal {
+            return ordered;
+        }
+    }
+    a.len().cmp(&b.len())
+}
+
+/// One field of a pre-release suffix as the number it is, or nothing where it
+/// is a word. Saturating for the reason the version's own components are.
+fn a_number(field: &str) -> Option<u64> {
+    match !field.is_empty() && field.chars().all(|c| c.is_ascii_digit()) {
+        true => Some(field.parse().unwrap_or(u64::MAX)),
+        false => None,
     }
 }
 
@@ -711,6 +751,25 @@ mod tests {
         assert_eq!(compare("0.2.0-rc.1", "0.2.0"), Ordering::Less);
         assert_eq!(compare("0.2.0", "0.2.0-rc.1"), Ordering::Greater);
         assert_eq!(compare("0.2.0-rc.2", "0.2.0-rc.1"), Ordering::Greater);
+    }
+
+    /// A run-up is numbered, and a number is not spelled: `rc.10` follows
+    /// `rc.9`.
+    ///
+    /// Compared as one string it was `'1'` against `'9'`, so `perch upgrade
+    /// --release 0.2.0-rc.10` on an installed `0.2.0-rc.9` asked "Install the
+    /// older Release?" about the newer one, and refused it outright where
+    /// nobody was there to answer.
+    #[test]
+    fn a_run_up_is_ordered_by_its_number_rather_than_by_its_spelling() {
+        assert_eq!(compare("0.2.0-rc.10", "0.2.0-rc.9"), Ordering::Greater);
+        assert_eq!(compare("0.2.0-rc.9", "0.2.0-rc.10"), Ordering::Less);
+        assert_eq!(compare("0.2.0-rc.10", "0.2.0-rc.10"), Ordering::Equal);
+        // Semver's other two rules about a suffix, which fall out of the same
+        // walk: a number sorts below a word, and where one suffix runs out
+        // first the longer one is the newer.
+        assert_eq!(compare("0.2.0-alpha", "0.2.0-1"), Ordering::Greater);
+        assert_eq!(compare("0.2.0-rc.1.1", "0.2.0-rc.1"), Ordering::Greater);
     }
 
     /// Build metadata has no bearing on precedence, which semver states and
