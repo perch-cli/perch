@@ -608,7 +608,15 @@ fn list_json_carries_an_observation_time_on_every_figure() {
         "and a broken one says what broke it, so a script can tell a Credential \
          Anthropic turned down from one Perch never had: {overflow}"
     );
-    assert!(overflow["quarantined"]["detail"].is_string());
+    assert!(
+        overflow["quarantined"]["said"].is_string(),
+        "the reason rendered as prose, named for what it is: `detail` is what \
+         `said_of` calls the failure underneath, and this is not that"
+    );
+    assert!(
+        overflow["quarantined"]["detail"].is_null(),
+        "and the word that means the other thing is not here: {overflow}"
+    );
     assert_eq!(overflow["active"], false);
     assert_eq!(
         overflow["utilization"]["never_observed"], true,

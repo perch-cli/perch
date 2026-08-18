@@ -498,3 +498,33 @@ fn a_switch_in_flight_is_not_evidence_that_the_account_arriving_is_broken() {
         "and the Landing is named as the reason nothing was recorded: {printed}"
     );
 }
+
+/// A Quarantine reports the machine-readable reason and the failure underneath
+/// as two keys, because they are two facts.
+///
+/// `detail` means the same thing everywhere Perch says it — "whatever the
+/// failure underneath said" — and the refresh report put the *reason* there
+/// instead. So a script read `outcome: "quarantined"` beside `detail:
+/// "renewal-rejected"`, which is the outcome again in a second spelling, while
+/// the one thing the key promises was sitting unread in the value the human line
+/// prints.
+#[test]
+fn a_quarantine_in_json_carries_the_reason_and_the_failure_underneath_apart() {
+    let host = about_to_renew(SPENT).with_reply(TOKEN_URL, 401, RETIRED);
+
+    let (result, printed) = run_status_refresh(&host, true);
+
+    result.expect("a refresh degrades the display rather than failing it");
+    let document: serde_json::Value = serde_json::from_str(&printed).expect("valid JSON");
+    let attempt = &document["refresh"]["accounts"][0];
+    assert_eq!(attempt["outcome"], "quarantined");
+    assert_eq!(
+        attempt["reason"], "renewal-rejected",
+        "the reason a script branches on: {printed}"
+    );
+    assert_ne!(
+        attempt["detail"], attempt["reason"],
+        "and `detail` is the failure underneath rather than the reason again: \
+         {printed}"
+    );
+}

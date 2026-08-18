@@ -135,14 +135,32 @@ impl Attempt {
         }
     }
 
+    /// `detail` is the same thing everywhere it appears here and in
+    /// [`Attempt::note_beside_the_account`]: whatever the failure underneath
+    /// said. A Quarantine put the machine-readable *reason* there instead — so a
+    /// script read `outcome: "quarantined"` beside `detail: "renewal-rejected"`,
+    /// which is the outcome again in a second spelling, while the one thing the
+    /// key promises was sitting unread in the same value the human line prints.
+    ///
+    /// Both now, under the words they mean: `reason` for the machine, `detail`
+    /// for what happened underneath, `null` where there was nothing worth
+    /// keeping. `reason` is `null` for every other outcome, because a
+    /// Quarantine is the only one that has one.
     fn document(&self) -> serde_json::Value {
-        let (outcome, detail) = match &self.outcome {
-            Outcome::Observed => ("observed", None),
-            Outcome::Throttled => ("throttled", Some(Refused::Throttled.to_string())),
-            Outcome::Failed(why) => ("failed", Some(why.clone())),
-            Outcome::Quarantined { why, .. } => ("quarantined", Some(why.as_str().to_string())),
+        let (outcome, reason, detail) = match &self.outcome {
+            Outcome::Observed => ("observed", None, None),
+            Outcome::Throttled => ("throttled", None, Some(Refused::Throttled.to_string())),
+            Outcome::Failed(why) => ("failed", None, Some(why.clone())),
+            Outcome::Quarantined { why, detail } => {
+                ("quarantined", Some(why.as_str()), detail.clone())
+            }
         };
-        json!({"email": self.email, "outcome": outcome, "detail": detail})
+        json!({
+            "email": self.email,
+            "outcome": outcome,
+            "reason": reason,
+            "detail": detail,
+        })
     }
 }
 

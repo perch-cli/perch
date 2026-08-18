@@ -149,10 +149,26 @@ impl Quarantine {
     /// The same as a script reads it. Absent reads as false and present reads
     /// as true wherever a script asks whether it is set, so the fact a script
     /// already branches on branches the same way — and now carries why.
+    ///
+    /// `said` rather than `detail`, because `detail` already means something
+    /// else here and it is not this: [`said_of`](Quarantine::said_of) takes one,
+    /// and its doc defines it as "whatever the failure underneath said — a
+    /// keychain that would not take the Rotated Credential, say. The reason is
+    /// what happened; the detail is how." What this key carries is the *reason*
+    /// rendered as prose — one fixed sentence per `reason`, and therefore a
+    /// restatement of the key beside it rather than a second fact. A script
+    /// reading `detail` for the "how" got the "what" again, in longer words,
+    /// and nothing told it so.
+    ///
+    /// The underlying detail is not here to be carried: the registry records a
+    /// `Quarantine` and not the failure that produced it, so the machine
+    /// surface has one fact where the human sentence has two. Naming the key
+    /// for what it holds is what keeps that visible instead of hiding it behind
+    /// a word that promises the other one.
     pub fn document(quarantine: Option<Quarantine>) -> serde_json::Value {
         match quarantine {
             Some(why) => {
-                serde_json::json!({"reason": why.as_str(), "detail": why.because()})
+                serde_json::json!({"reason": why.as_str(), "said": why.because()})
             }
             None => serde_json::Value::Null,
         }
