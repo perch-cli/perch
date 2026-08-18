@@ -1440,6 +1440,16 @@ impl port::Files for FakeHost {
             return Err(HostError::Other(detail.clone()));
         }
         self.note_directories_of(path);
+        // Whatever was at the path is taken away first, a link included — the
+        // real one leads with `remove_file` and then `create_new`, and its own
+        // comment calls that the security property: "anything that can write the
+        // directory can unlink this file and leave a link at the same name".
+        //
+        // Left behind, the fake described one path as both a regular file and a
+        // symbolic link, with `read_file` answering the new contents while
+        // `link_target` went on naming somewhere else. `rename` already gets
+        // this right and says why; this is the same sentence at the other write.
+        self.fs.links.borrow_mut().remove(path);
         // A disk that fills partway leaves what fitted behind and then fails,
         // which is the order the real host does it in: open, `write_all`,
         // `sync_all`. A fake that could only refuse before creating anything
