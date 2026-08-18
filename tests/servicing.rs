@@ -192,6 +192,46 @@ fn an_install_the_service_manager_refuses_leaves_no_unit_behind() {
     );
 }
 
+/// The other half of the same rule, and the case it was getting wrong: taking
+/// the unit back is only right where this install *made* it.
+///
+/// Re-running is the documented repair after an Upgrade, so the ordinary way to
+/// reach a failed start is with a working Service already installed — and the
+/// unit has already been overwritten by the time the start is attempted.
+/// Removing it there takes away the Service that was there, under a sentence
+/// promising Perch is unchanged: a `systemctl --user` with no session bus over
+/// SSH silently uninstalled a Watcher that had been running for months.
+#[test]
+fn a_start_that_fails_over_a_service_that_was_working_leaves_the_unit_where_it_is() {
+    let host = linux();
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("the first install works");
+    // The same machine, with the service manager no longer answering — an SSH
+    // session with no user bus is the ordinary way to reach this.
+    let host = host.with_exec(
+        "systemctl",
+        &["--user", "enable", "--now", "perch-watch.service"],
+        failed("Failed to connect to bus: No medium found"),
+    );
+
+    let (result, _) = run_service(&host, WatcherCommand::Install);
+
+    let refusal = result.expect_err("the service manager refused");
+    assert!(
+        host.path_exists(std::path::Path::new(UNIT)),
+        "the Service that was working is still installed: {refusal}"
+    );
+    assert!(
+        !refusal.to_string().contains("Perch is unchanged"),
+        "and nothing claims otherwise: {refusal}"
+    );
+    assert!(
+        refusal.to_string().contains("perch watcher status"),
+        "and it says how to see what is there now: {refusal}"
+    );
+}
+
 /// **A Service belongs to one person.** Every Profile is under a home
 /// directory, so one installed under `sudo` would watch root's registry — which
 /// is empty — while the person who typed it wondered why nothing switched.

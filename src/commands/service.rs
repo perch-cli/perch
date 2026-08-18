@@ -73,10 +73,28 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     // undo there — but on the two platforms with a file, a `bootstrap` that
     // fails would otherwise leave a unit behind that starts at the next login
     // having never been checked.
+    //
+    // Only where this install *made* the unit. A re-install is the documented
+    // repair after an Upgrade, so the common way to reach this is with a working
+    // Service already installed — and taking the file back then left the machine
+    // worse than it found it: the unit was already overwritten by the time the
+    // start was attempted, so removing it takes away the Service that was there,
+    // under a sentence promising Perch is unchanged. A start that fails for
+    // something outside Perch, like a `systemctl --user` with no session bus
+    // over SSH, would silently uninstall a Watcher that had been running for
+    // months. The replaced unit is left where it is and said so instead.
     if let Err(failed) = drive(
         host,
         service::starting(host.platform(), &unit, at.as_deref()),
     ) {
+        if replaced {
+            return Err(failed.with_note(
+                "The Service was not started. The unit file has been replaced \
+                 and is left where it is, so it starts at the next login — \
+                 `perch watcher status` says what is there now, and `perch \
+                 watcher uninstall` takes it away.",
+            ));
+        }
         if let Some(at) = &at {
             let _ = host.remove_file(at);
         }
