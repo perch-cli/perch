@@ -1466,9 +1466,19 @@ pub fn profiles_dir(host: &dyn Host) -> Result<PathBuf> {
 /// it had, and left the registry naming an Account the machine was not on — the
 /// disagreement between Credential and Identity that ADR 0006 exists to keep
 /// impossible, arriving by way of the environment.
+///
+/// Asked of the whole of [`perch_home`] rather than of `profiles`, because a
+/// Profile is not the only directory Perch points that variable at: a login
+/// runs in [`pending_login_dir`], and the client it launches passes the
+/// variable on to everything it starts just as a Run does. A `perch switch`
+/// typed inside a login session was told the pending directory was the Default
+/// Profile, Captured the live Credential into a directory `login` deletes when
+/// the command ends, and recorded the registry as active on an Account the
+/// machine was not on. No directory under Perch's own home is ever the Default
+/// Profile, which is what the rule above already claims it is.
 pub fn the_default_profile(host: &dyn Host) -> Result<crate::probe::Store> {
     let told = crate::probe::default_store(host)?;
-    if told.config_dir.starts_with(profiles_dir(host)?) {
+    if told.config_dir.starts_with(perch_home(host)?) {
         return crate::probe::default_profile_store(host);
     }
     Ok(told)

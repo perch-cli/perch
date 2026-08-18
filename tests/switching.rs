@@ -1799,6 +1799,48 @@ fn a_switch_typed_inside_a_run_lands_on_the_default_profile_rather_than_the_runs
     );
 }
 
+/// A Profile is not the only directory Perch points `CLAUDE_CONFIG_DIR` at. A
+/// login runs in a pending directory of Perch's own, and the client it launches
+/// hands the variable on to everything it starts exactly as a Run does — so a
+/// `perch switch` typed inside a login session arrives with that directory named
+/// in its environment.
+///
+/// Taken for the Default Profile it Captured the live Credential into a
+/// directory the login deletes when it ends, wrote the incoming Credential
+/// there instead of where every client reads one, and left the registry naming
+/// an Account the machine was not on. No directory under Perch's own home is
+/// ever the Default Profile.
+#[test]
+fn a_switch_typed_inside_a_login_lands_on_the_default_profile_rather_than_the_pending_one() {
+    let host = machine_with_two_accounts();
+    let pending = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    let host =
+        machine_with_two_accounts().with_env("CLAUDE_CONFIG_DIR", &pending.to_string_lossy());
+
+    run_switch(&host, SECOND_EMAIL).0.expect("the Switch lands");
+
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "the live Credential is the one every client falls back to, not one \
+         filed in a directory the login is about to delete"
+    );
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(CREDENTIAL),
+        "and the outgoing Account was Captured back into its own Profile"
+    );
+    assert!(
+        perch::credentials::read(
+            &host,
+            &probe::store_for_profile(&host, &pending).expect("USER is set")
+        )
+        .expect("the store could be consulted")
+        .is_none(),
+        "nothing was written into the pending login directory at all"
+    );
+}
+
 /// The other half, as the Run path already states it: a configuration directory
 /// somebody deliberately moved is where the live Credential is, and a Switch
 /// writes it there. Only a Profile is disqualified, because only a Profile is
