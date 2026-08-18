@@ -1006,7 +1006,7 @@ impl Registry {
     pub fn settings(&self, scope: &Scope) -> Settings {
         match scope {
             Scope::Ungrouped => self.ungrouped.settings,
-            Scope::Group(name) => self.groups.get(name).copied().unwrap_or_default(),
+            Scope::Group(name) => self.group(name).copied().unwrap_or_default(),
         }
     }
 
@@ -1015,7 +1015,10 @@ impl Registry {
     pub fn settings_mut(&mut self, scope: &Scope) -> Option<&mut Settings> {
         match scope {
             Scope::Ungrouped => Some(&mut self.ungrouped.settings),
-            Scope::Group(name) => self.groups.get_mut(name),
+            Scope::Group(name) => {
+                let declared = self.declared_group(name)?.to_string();
+                self.groups.get_mut(&declared)
+            }
         }
     }
 
@@ -1037,7 +1040,12 @@ impl Registry {
     pub fn accounts_in(&self, group: &str) -> Vec<&Account> {
         self.accounts
             .iter()
-            .filter(|account| account.group.as_deref() == Some(group))
+            .filter(|account| {
+                account
+                    .group
+                    .as_deref()
+                    .is_some_and(|held| same_name(held, group))
+            })
             .collect()
     }
 
@@ -1164,17 +1172,28 @@ impl Registry {
     pub fn rename_group(&mut self, held: &str, to: &str) -> Result<()> {
         self.refuse_a_name_nothing_may_answer_to(NameKind::Group, to, Some(held))?;
 
-        let settings = self
-            .groups
-            .remove(held)
-            .expect("the caller established the Group is declared");
+        // Through `declared_group`, which is how every other question about a
+        // Group name is answered here. A bare `groups.remove(held)` agreed with
+        // that only by accident of the caller having case-folded first, and the
+        // `expect` under it turned a second caller that had not into an abort
+        // out of a function whose signature says it refuses.
+        let Some(declared) = self.declared_group(held).map(str::to_string) else {
+            return Err(PerchError::NotFound(format!(
+                "no Group is called `{held}`."
+            )));
+        };
+        let settings = self.groups.remove(&declared).unwrap_or_default();
         self.groups.insert(to.to_string(), settings);
         for account in &mut self.accounts {
-            if account.group.as_deref() == Some(held) {
+            if account
+                .group
+                .as_deref()
+                .is_some_and(|held| same_name(held, &declared))
+            {
                 account.group = Some(to.to_string());
             }
         }
-        if let Some(checked) = self.checks.remove(held) {
+        if let Some(checked) = self.checks.remove(&declared) {
             self.checks.insert(to.to_string(), checked);
         }
         Ok(())
@@ -1201,20 +1220,30 @@ impl Registry {
     /// paces nothing, and a record kept past it would be a cooldown a Group
     /// declared under the same name later inherited from a Group it never was.
     pub fn forget_group(&mut self, name: &str) {
-        self.groups.remove(name);
-        self.checks.remove(name);
+        let Some(declared) = self.declared_group(name).map(str::to_string) else {
+            return;
+        };
+        self.groups.remove(&declared);
+        self.checks.remove(&declared);
     }
 
     /// What the last scheduled Check did within a Group, if one has Switched
     /// there.
     pub fn checked(&self, group: &str) -> Option<&Checked> {
-        self.checks.get(group)
+        self.checks
+            .iter()
+            .find(|(declared, _)| same_name(declared, group))
+            .map(|(_, checked)| checked)
     }
 
     /// Records a Switch a Check made, for the next one to be paced by.
+    ///
+    /// Filed under the spelling the Group was declared under, so a Check that
+    /// named it in another case does not leave a second record beside the first
+    /// — which is a Cooldown neither of them is paced by.
     pub fn record_check(&mut self, group: &str, at: DateTime<Utc>) {
-        self.checks
-            .insert(group.to_string(), Checked { switched_at: at });
+        let under = self.declared_group(group).unwrap_or(group).to_string();
+        self.checks.insert(under, Checked { switched_at: at });
     }
 
     pub fn account_mut(&mut self, email: &str) -> Option<&mut Account> {
@@ -3386,6 +3415,80 @@ mod tests {
         assert!(registry.group("work").is_some());
         assert!(registry.group("WORK").is_some());
         assert!(registry.group("play").is_none());
+    }
+
+    /// And so is every other question the registry answers about a Group.
+    ///
+    /// `group` was repaired and the five methods around it were not, each one a
+    /// bare `groups.get`/`checks.get` against the name it was handed. That is
+    /// the trap `group`'s own comment names: `settings` answered with the
+    /// compiled-in defaults for a Group Perch holds — so a Threshold somebody
+    /// set read as the default with nothing said — `settings_mut` answered
+    /// `None`, which `Setting::write` turned into an abort, `rename_group`
+    /// aborted out of a function whose signature says it refuses, and a Check
+    /// filed its Cooldown under a second spelling that paced nothing.
+    #[test]
+    fn every_question_about_a_group_is_answered_however_the_name_was_capitalized() {
+        let mut registry = Registry::default();
+        registry.declare_group("work").expect("a usable name");
+        registry.upsert(Account {
+            identity: Identity {
+                email: "someone@example.com".into(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            disabled: false,
+            quarantine: None,
+            group: Some("work".to_string()),
+            utilization: None,
+        });
+
+        registry
+            .settings_mut(&Scope::Group("WORK".to_string()))
+            .expect("the Group is declared, whatever it was typed as")
+            .watcher_threshold_percent = 65;
+        assert_eq!(
+            registry
+                .settings(&Scope::Group("Work".to_string()))
+                .watcher_threshold_percent,
+            65,
+            "what was written is what is read back"
+        );
+        assert_eq!(registry.accounts_in("WORK").len(), 1);
+
+        let at = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
+        registry.record_check("WORK", at);
+        assert!(
+            registry.checked("work").is_some(),
+            "one Cooldown record, under the spelling the Group was declared as"
+        );
+
+        registry.rename_group("WORK", "office").expect("it renames");
+        assert!(registry.group("work").is_none());
+        assert_eq!(registry.accounts_in("office").len(), 1);
+        assert!(
+            registry.checked("office").is_some(),
+            "the Cooldown came too"
+        );
+
+        registry.forget_group("OFFICE");
+        assert!(registry.group("office").is_none());
+        assert!(registry.checked("office").is_none());
+    }
+
+    /// A rename of a Group nothing declared is a refusal, which is what the
+    /// signature says. It used to be an abort.
+    #[test]
+    fn renaming_a_group_nothing_declared_is_refused_rather_than_panicked_on() {
+        let mut registry = Registry::default();
+
+        let error = registry
+            .rename_group("work", "office")
+            .expect_err("there is no such Group");
+
+        assert!(error.to_string().contains("work"), "{error}");
     }
 
     /// An Account claiming a Group nothing declared falls out of `perch list`

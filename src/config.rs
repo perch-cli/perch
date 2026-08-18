@@ -136,9 +136,20 @@ impl Setting {
             }
         }
         settings.validate(scope)?;
-        *registry
-            .settings_mut(scope)
-            .expect("the Scope was just addressed") = settings;
+        // A refusal rather than an abort. `commands::config` resolves the Scope
+        // through `declared_group` before it gets here, so today's one caller
+        // cannot reach this — but this is a `pub fn` on a `pub` type returning a
+        // `Result`, and a signature that says it refuses should not be the thing
+        // that panics on the second caller.
+        let Some(held) = registry.settings_mut(scope) else {
+            let Scope::Group(name) = scope else {
+                unreachable!("the Ungrouped Scope is always there to write to")
+            };
+            return Err(PerchError::NotFound(format!(
+                "no Group is called `{name}`, so there is nothing to set on it."
+            )));
+        };
+        *held = settings;
         registry.ungrouped.interchangeable = interchangeable;
         Ok(())
     }
