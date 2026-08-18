@@ -445,7 +445,15 @@ fn watcher_is_running(host: &dyn Host) -> bool {
         // Taken, so nobody had it — and it is given back on the way out of this
         // function, when the hold is dropped.
         Ok(_taken) => false,
-        Err(_) => true,
+        // `Busy` is the one answer that means somebody is holding it. Everything
+        // else is the lock failing rather than being held — a parent directory
+        // that cannot be created, an artifact whose time will not be read — and
+        // read as contention it told the user a Watcher is running on a machine
+        // where none is, which on Windows also makes `running` true. The rest of
+        // Perch tells `Busy` from a fault everywhere it asks; this was the one
+        // place that folded them together.
+        Err(PerchError::Busy(_)) => true,
+        Err(_) => false,
     }
 }
 

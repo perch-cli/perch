@@ -373,6 +373,35 @@ fn installing_with_no_grant_anywhere_succeeds_and_says_the_service_will_hold() {
     );
 }
 
+/// The lock is read by trying to take it, and only one way of failing to take it
+/// means somebody is holding it.
+///
+/// Read as "any failure is a holder", a lock that could not be taken because the
+/// filesystem refused told the user a Watcher is running on a machine where none
+/// is — and on Windows, where the lock is the only evidence there is, made the
+/// Service look like it was running too. `Busy` is the answer that means
+/// contention, and Perch tells it from a fault everywhere else it asks.
+#[test]
+fn a_watcher_lock_that_will_not_be_taken_at_all_is_not_a_watcher_that_is_running() {
+    let spec = perch::registry::watcher_lock_spec(&linux()).expect("home is known");
+    let host = linux().with_unwritable_file(&spec.dir, "the filesystem said no");
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("installed");
+
+    let (_, said) = run_service(&host, WatcherCommand::Status { json: true });
+    let reported: serde_json::Value = serde_json::from_str(&said).expect("it is JSON");
+
+    assert_eq!(
+        reported["watching"], false,
+        "a lock that would not be taken is not a lock somebody is holding: {said}"
+    );
+    assert!(
+        !said.contains("A Watcher is running on this machine"),
+        "and nothing claims one is: {said}"
+    );
+}
+
 /// A grant said about the Ungrouped Accounts is not on its own enough for the
 /// Watcher to act on them: `interchangeable` is the declaration that has to come
 /// first, and without it every round holds (ADR 0017).
