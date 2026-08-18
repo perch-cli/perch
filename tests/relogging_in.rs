@@ -284,6 +284,59 @@ fn repairing_the_account_you_are_on_makes_its_fresh_credential_the_live_one() {
     );
 }
 
+/// The terminal going away between the repair and the line about it still
+/// leaves a machine whose live Credential is the repaired one.
+///
+/// `report` is the last thing said before the landing, and it is fallible: a
+/// closed pty, a SIGHUP, a `| head -1`. Propagated from there, `perch relogin`
+/// returned with the Quarantine released and saved, the fresh Credential in the
+/// Account's own Profile, the *broken* one still live, and `active` still
+/// naming this Account — so the next `perch switch` Captures the broken live
+/// copy over the fresh one and undoes the repair. Neither `make_live` nor the
+/// `no_longer_on_anybody` defense behind it had run.
+#[test]
+fn a_terminal_that_goes_away_after_the_repair_still_makes_the_fresh_credential_live() {
+    /// Writes until the repair is announced, and then is not there.
+    struct GoesAwayReporting;
+
+    impl std::io::Write for GoesAwayReporting {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            match String::from_utf8_lossy(bytes).contains("Repaired") {
+                true => Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "the pipe closed",
+                )),
+                false => Ok(bytes.len()),
+            }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let host = machine_with_two_accounts().with_login(login_producing(REPAIRED, IDENTITY_FILE));
+    quarantine(&host, EMAIL);
+
+    let outcome = perch::commands::relogin::run(
+        &host,
+        perch::commands::relogin::ReloginArgs {
+            target: EMAIL.to_string(),
+        },
+        &mut GoesAwayReporting,
+    );
+
+    outcome.expect_err("the report could not be written");
+    assert_eq!(
+        host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
+        Some(REPAIRED),
+        "the landing is what makes the repair hold, and nothing about it is \
+         contingent on somebody reading a sentence"
+    );
+    assert_eq!(quarantine_of(&host, EMAIL), None);
+    assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
+}
+
 /// A Landing nothing can account for is the one state ADR 0048 names this
 /// command as the way out of: *"`perch relogin {arriving}` finishes that Switch
 /// and `perch relogin {leaving}` abandons it"*. So it is the one failure the

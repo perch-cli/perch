@@ -137,7 +137,17 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     registry::save(host, &mut perch, &registry)
         .map_err(|error| unrecorded(&account, landing_in_the_default_profile, error))?;
 
-    report(out, &registry, &account, was_quarantined)?;
+    // Said here, so the repair is announced before the landing line that
+    // follows it — but its failure is held rather than propagated. A write to
+    // stdout can fail: a closed pty, a `| head -1`, a SIGHUP. Propagated from
+    // here, it returned before `make_live` *and* before `no_longer_on_anybody`,
+    // leaving the state neither is allowed to leave: the Quarantine released
+    // and saved, the fresh Credential in the Account's own Profile, the broken
+    // one still live, and `active` still naming this Account — so the next
+    // Switch Captures the broken live copy over the fresh one and undoes the
+    // repair. Everything below this line is what makes the repair safe, and
+    // none of it is contingent on anybody having read a sentence.
+    let said = report(out, &registry, &account, was_quarantined);
 
     // The same answer the liveness check above was given, deliberately: if
     // another terminal switched away during the login, the live Credential is
@@ -145,7 +155,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // destroy theirs (ADR 0006). Reading it twice is how the Profile that gets
     // written comes to be one that was never checked.
     if !landing_in_the_default_profile {
-        return Ok(());
+        return said;
     }
     let landed = switch::make_live(
         host,
@@ -170,14 +180,19 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // now-working session goes on to make is destroyed by the next Switch. That
     // is the hazard `no_longer_on_anybody` exists to prevent, caused by it.
     match landed {
-        Ok(()) => say(
-            out,
-            &format!(
-                "Its fresh Credential is the live one, so {} is working again \
-                 everywhere without a Switch.",
-                account.email()
-            ),
-        ),
+        // The held failure first, since a stdout that will not take the line
+        // above will not take this one either — and the repair it describes has
+        // happened either way.
+        Ok(()) => said.and_then(|()| {
+            say(
+                out,
+                &format!(
+                    "Its fresh Credential is the live one, so {} is working again \
+                     everywhere without a Switch.",
+                    account.email()
+                ),
+            )
+        }),
         Err(stopped) if stopped.is_live => Err(stopped.error.with_note(&format!(
             "The repair stands and {} is working again: its fresh Credential is \
              the live one. What is behind is Claude Code's own record of which \
