@@ -1153,8 +1153,31 @@ fn make_link(kind: Link, target: &Path, at: &Path) -> Result<(), HostError> {
 
 /// Removes a link and nothing else. A link that has already gone is not a
 /// failure, as with every other removal here.
+///
+/// "And nothing else" is checked rather than assumed. This was `remove_file` on
+/// a bare path, which deletes whatever is there — so the one call whose whole
+/// contract is that it only ever takes away Perch's own share would have taken
+/// away the person's file at the same name. Its only caller asks `link_target`
+/// first, but that is a separate syscall from this one and the fake could not
+/// have caught its loss: `FakeHost::remove_link` leaves a plain file alone.
+///
+/// A symbolic link and no other kind, because that is all there is to remove
+/// here: `reconcile::make` offers a hard link on Windows alone, and Windows has
+/// its own arm below. A hard link is a name for the file and cannot be told
+/// from one, so a check like this would be wrong there and is right here.
 #[cfg(not(windows))]
 fn remove_link(path: &Path) -> Result<(), HostError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.file_type().is_symlink() => {
+            return Err(HostError::Other(format!(
+                "{} is not a link, so it is not Perch's to remove",
+                path.display()
+            )));
+        }
+        Ok(_) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(HostError::Io(err)),
+    }
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),

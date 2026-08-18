@@ -245,6 +245,18 @@ struct Filesystem {
     /// one: a store that refuses a write is routinely one a superseded copy can
     /// still be cleared out of.
     undeletable: RefCell<BTreeMap<PathBuf, String>>,
+    /// Directories that are there and will not be walked, while still answering
+    /// everything asked about them from the outside.
+    ///
+    /// Distinct from [`unreadable`], which stops `modified_at` too. A directory
+    /// whose own read bit is gone — one a `sudo claude` left root-owned inside a
+    /// Profile — is stat-ed from its parent perfectly well and fails `opendir`
+    /// with EACCES, and modeled as unreadable it could not be told apart from a
+    /// lock artifact whose time will not be read. `lock::clear_the_abandoned`
+    /// turns on exactly that difference.
+    ///
+    /// [`unreadable`]: World::unreadable
+    unlistable: RefCell<BTreeMap<PathBuf, String>>,
     /// Files that come back different from how they were written.
     corrupting: RefCell<BTreeSet<PathBuf>>,
     /// Files whose write dies partway, leaving what fitted behind.
@@ -417,6 +429,7 @@ impl FakeHost {
                 unreadable: RefCell::new(BTreeMap::new()),
                 not_text: RefCell::new(BTreeSet::new()),
                 unwritable: RefCell::new(BTreeMap::new()),
+                unlistable: RefCell::new(BTreeMap::new()),
                 undeletable: RefCell::new(BTreeMap::new()),
                 corrupting: RefCell::new(BTreeSet::new()),
                 filling: RefCell::new(BTreeSet::new()),
@@ -584,6 +597,21 @@ impl FakeHost {
     pub fn with_unreadable_file(self, path: impl AsRef<Path>, detail: &str) -> Self {
         self.fs
             .unreadable
+            .borrow_mut()
+            .insert(path.as_ref().to_path_buf(), detail.to_string());
+        self
+    }
+
+    /// A directory that is there and will not be walked, while still answering
+    /// when it was last written.
+    ///
+    /// The state a lock left root-owned inside a Profile is in, and the one
+    /// `lock::clear_the_abandoned` has to tell from a plain file wedging the
+    /// path: `remove_dir_all` and the listing both fail EACCES, and only one of
+    /// those is worth ending a command over.
+    pub fn with_unlistable_dir(self, path: impl AsRef<Path>, detail: &str) -> Self {
+        self.fs
+            .unlistable
             .borrow_mut()
             .insert(path.as_ref().to_path_buf(), detail.to_string());
         self
@@ -1759,8 +1787,15 @@ impl port::Files for FakeHost {
         // A directory that is there and will not be read is a different answer
         // from one that is not there, and callers are entitled to tell them
         // apart. Arranged the same way an unreadable file is.
-        if let Some(detail) = self.fs.unreadable.borrow().get(path) {
-            return Err(HostError::Other(detail.clone()));
+        let refused = self
+            .fs
+            .unreadable
+            .borrow()
+            .get(path)
+            .cloned()
+            .or_else(|| self.fs.unlistable.borrow().get(path).cloned());
+        if let Some(detail) = refused {
+            return Err(HostError::Other(detail));
         }
         let held = |candidate: &PathBuf| candidate.parent() == Some(path);
         let mut found: BTreeSet<PathBuf> = self
@@ -1890,6 +1925,19 @@ impl port::Links for FakeHost {
         if self.fs.links.borrow_mut().remove(path).is_some() {
             self.fs.files.borrow_mut().remove(path);
             self.fs.modes.borrow_mut().remove(path);
+            self.fs.modified.borrow_mut().remove(path);
+            return Ok(());
+        }
+        // Something that is not a link is refused rather than passed over, which
+        // is what the real call does now. Answered `Ok` untouched, the fake
+        // could not tell a caller that dropped its `link_target` guard from one
+        // that kept it — while the real `remove_file` underneath deleted the
+        // person's file.
+        if self.fs.files.borrow().contains_key(path) || self.fs.dirs.borrow().contains(path) {
+            return Err(HostError::Other(format!(
+                "{} is not a link, so it is not Perch's to remove",
+                path.display()
+            )));
         }
         self.fs.modified.borrow_mut().remove(path);
         Ok(())

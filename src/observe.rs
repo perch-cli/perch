@@ -305,7 +305,7 @@ fn observe(host: &dyn Host, registry: &Registry, account: &Account) -> Step<Quot
     refuse_if_live(host, &asked, &installed).map_err(theirs)?;
     let renewed = renew_under_the_lock(host, &asked, &installed, Because::AnthropicRefusedIt)
         .map_err(theirs)?;
-    read_off(host, &renewed, account).map_err(Turned::settled)
+    read_off(host, &renewed.token, account).map_err(Turned::settled)
 }
 
 /// What one attempt at a reading came to when it did not come to figures.
@@ -431,9 +431,32 @@ struct Asked {
 /// its Credential, and it is ahead of the copy in its own Profile, which only
 /// catches up when a Switch away Captures it (ADR 0006). Every other Account is
 /// asked about with the Credential in its own Profile.
+///
+/// A *settled* registry, rather than [`Registry::is_active`], which answers a
+/// Landing with the Account being **left** (ADR 0048). A Switch killed between
+/// storing the arriving Credential and patching the Identity leaves exactly
+/// that state, and `is_active` then says yes for the leaving Account while the
+/// Default Profile holds the arriving one's Credential. Off that answer a
+/// Refresh asks Anthropic as one Account using the other's token, files the
+/// figures it reads under the wrong address, and — because a Renewal may
+/// Rotate — retires a refresh token the copy in the arriving Account's own
+/// Profile is still holding. A rejection is worse: the Quarantine lands on the
+/// Account that was named rather than the one whose Credential was refused,
+/// and it is permanent.
+///
+/// The same guard `crate::export::the_live_store` carries, and here for the
+/// same reason it is there: this is the other place that reads the live
+/// Credential off a name. `perch status --refresh` and `perch list --refresh`
+/// do not settle a Landing before they read — the command that does is
+/// `perch watcher run` — so the belt goes where every caller passes rather than
+/// on each of their doors.
 fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<Asked> {
     let its_own_profile = account.profile_dir(host)?;
-    if registry.is_active(account.email()) {
+    let settled_on_it = matches!(
+        registry.active(),
+        registry::Active::Settled(active) if registry::same_name(active, account.email())
+    );
+    if settled_on_it {
         let store = registry::the_default_profile(host)?;
         // Two directories rather than one, and this is the only case where they
         // differ. The copy being renewed is the live one in the Default
@@ -498,11 +521,7 @@ fn usable_token(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<A
     // be renewed says so without queuing behind anything, and asked again
     // under them, where the answer is the one that counts.
     refuse_if_live(host, asked, installed)?;
-    let token = renew_under_the_lock(host, asked, installed, Because::ItSaysItRanOut)?;
-    Ok(Asking {
-        token,
-        freshly_renewed: true,
-    })
+    renew_under_the_lock(host, asked, installed, Because::ItSaysItRanOut)
 }
 
 /// Refuses to renew a Credential something else is holding (ADR 0005).
@@ -565,7 +584,7 @@ fn renew_under_the_lock(
     asked: &Asked,
     installed: &Installed,
     because: Because,
-) -> Step<String> {
+) -> Step<Asking> {
     let store = &asked.store;
     lock::under(host, probe::locks_for(store), |held| {
         // Both of the questions asked before the locks were taken, asked again
@@ -573,7 +592,17 @@ fn renew_under_the_lock(
         refuse_if_live(host, asked, installed)?;
         let credential = credential_in(host, asked, installed)?;
         if because == Because::ItSaysItRanOut && credential.usable_at(host.now()) {
-            return Ok(credential.access_token);
+            // Somebody else renewed it while Perch queued for the lock, so this
+            // reading did not. Said so rather than reported as a Renewal: what
+            // `freshly_renewed` decides is whether a later refusal is the
+            // contradiction `Turned::Away` describes — Anthropic declining a
+            // token it minted moments ago — and claiming one that never happened
+            // reported that sentence about a token Anthropic did not issue here,
+            // and skipped the one retry a rejection is allowed.
+            return Ok(Asking {
+                token: credential.access_token,
+                freshly_renewed: false,
+            });
         }
 
         // An access token that has run out and no refresh token to buy another
@@ -623,7 +652,10 @@ fn renew_under_the_lock(
             rotated_away(&refresh_token, fresh.refresh_token.as_deref()),
         )?;
 
-        Ok(fresh.access_token)
+        Ok(Asking {
+            token: fresh.access_token,
+            freshly_renewed: true,
+        })
     })
 }
 

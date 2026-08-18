@@ -192,6 +192,156 @@ fn an_install_the_service_manager_refuses_leaves_no_unit_behind() {
     );
 }
 
+/// A unit file is a line-oriented format, and Perch already has an answer for
+/// that shape — `host::inert`, which guards the curl config and `security`'s
+/// stdin. The unit was the third such protocol and the one that skipped it.
+///
+/// A `PERCH_HOME` with a newline in it closed `Environment=` and wrote whatever
+/// followed as further unit directives, into a file systemd loads at every
+/// login: arbitrary code, persisted, out of a variable a script set.
+#[test]
+fn a_carried_value_that_would_write_its_own_directive_is_refused_before_anything_is_installed() {
+    let host = linux().with_env("PERCH_HOME", "/tmp/perch\nExecStartPre=/bin/sh -c evil");
+
+    let (result, _) = run_service(&host, WatcherCommand::Install);
+
+    let refusal = result.expect_err("a value no unit can hold is not installable");
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    assert!(
+        refusal.to_string().contains("PERCH_HOME"),
+        "it names which value: {refusal}"
+    );
+    assert!(
+        !host.path_exists(std::path::Path::new(UNIT)),
+        "and nothing was written at all"
+    );
+    assert!(ran(&host).is_empty(), "and nothing was run");
+}
+
+/// A path with a space in it is ordinary — an npm prefix under a home somebody
+/// put a space in, `/opt/My Tools` — and systemd splits `ExecStart=` on
+/// whitespace. Written unquoted, the unit installed cleanly, systemd ran
+/// `/opt/My`, and the Service never came up.
+///
+/// `%` is the other half: systemd expands a specifier before it runs anything,
+/// so a path carrying one came back as something else or failed to load.
+#[test]
+fn a_path_a_shell_would_split_survives_the_unit_it_is_written_into() {
+    for awkward in [
+        "/opt/My Tools/perch",
+        "/opt/100%/perch",
+        "/opt/say \"hi\"/perch",
+    ] {
+        let unit = perch::service::Unit {
+            binary: std::path::PathBuf::from(awkward),
+            environment: Vec::new(),
+            log: None,
+            user_id: None,
+            user_name: None,
+        };
+        let text = unit
+            .rendered(Platform::Other)
+            .expect("Linux keeps a unit file");
+
+        assert_eq!(
+            perch::service::binary_in(Platform::Other, &text).as_deref(),
+            Some(std::path::Path::new(awkward)),
+            "the path written is the path read back: {text}"
+        );
+    }
+}
+
+/// Windows is refused more widely than the two platforms that keep a file,
+/// because there is nothing to quote *with*.
+///
+/// `schtasks /TR` hands the command to `cmd.exe`, which has no escape for a `"`
+/// inside a quoted string and expands `%VAR%` when the task runs rather than
+/// when it is written. So a `"` in a carried value closed the command and
+/// everything after it became `cmd` syntax — registered to run at every logon,
+/// long after the process that set the variable was gone.
+#[test]
+fn a_carried_value_a_scheduled_task_cannot_quote_is_refused_on_windows() {
+    for hostile in ["x\" && evil.exe && set \"y=", "%APPDATA%"] {
+        let host = watched()
+            .with_platform(Platform::Windows)
+            .with_env("PERCH_HOME", hostile);
+
+        let (result, _) = run_service(&host, WatcherCommand::Install);
+
+        let refusal = result.expect_err("a Scheduled Task cannot hold this");
+        assert_eq!(refusal.exit_code(), EXIT_INVALID);
+        // Whichever value it reaches first — the log path is derived from
+        // `PERCH_HOME`, so it carries the same character — and why.
+        assert!(
+            refusal.to_string().contains("Scheduled Task"),
+            "it says what cannot hold it: {refusal}"
+        );
+        assert!(
+            ran(&host).is_empty(),
+            "and nothing was registered: {refusal}"
+        );
+    }
+}
+
+/// A unit Perch did not write is one it declines to make claims about rather
+/// than guessing at — and now that `ExecStart=` is quoted, "did not write it"
+/// includes the unquoted spelling and a `%` that is a specifier rather than a
+/// doubled literal.
+#[test]
+fn a_unit_in_a_shape_perch_does_not_write_names_no_binary() {
+    for foreign in [
+        "[Service]\nExecStart=/usr/local/bin/perch watcher run\n",
+        "[Service]\nExecStart=\"/usr/local/bin/%h/perch\" watcher run\n",
+        "[Service]\nExecStart=\"/usr/local/bin/perch watcher run\n",
+    ] {
+        assert_eq!(
+            perch::service::binary_in(Platform::Other, foreign),
+            None,
+            "not a unit this writer produced: {foreign}"
+        );
+    }
+}
+
+/// The other half of the same rule, and the case it was getting wrong: taking
+/// the unit back is only right where this install *made* it.
+///
+/// Re-running is the documented repair after an Upgrade, so the ordinary way to
+/// reach a failed start is with a working Service already installed — and the
+/// unit has already been overwritten by the time the start is attempted.
+/// Removing it there takes away the Service that was there, under a sentence
+/// promising Perch is unchanged: a `systemctl --user` with no session bus over
+/// SSH silently uninstalled a Watcher that had been running for months.
+#[test]
+fn a_start_that_fails_over_a_service_that_was_working_leaves_the_unit_where_it_is() {
+    let host = linux();
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("the first install works");
+    // The same machine, with the service manager no longer answering — an SSH
+    // session with no user bus is the ordinary way to reach this.
+    let host = host.with_exec(
+        "systemctl",
+        &["--user", "enable", "--now", "perch-watch.service"],
+        failed("Failed to connect to bus: No medium found"),
+    );
+
+    let (result, _) = run_service(&host, WatcherCommand::Install);
+
+    let refusal = result.expect_err("the service manager refused");
+    assert!(
+        host.path_exists(std::path::Path::new(UNIT)),
+        "the Service that was working is still installed: {refusal}"
+    );
+    assert!(
+        !refusal.to_string().contains("Perch is unchanged"),
+        "and nothing claims otherwise: {refusal}"
+    );
+    assert!(
+        refusal.to_string().contains("perch watcher status"),
+        "and it says how to see what is there now: {refusal}"
+    );
+}
+
 /// **A Service belongs to one person.** Every Profile is under a home
 /// directory, so one installed under `sudo` would watch root's registry — which
 /// is empty — while the person who typed it wondered why nothing switched.
@@ -370,6 +520,65 @@ fn installing_with_no_grant_anywhere_succeeds_and_says_the_service_will_hold() {
     assert!(
         printed.contains("will hold"),
         "and it says what that means rather than only what is missing: {printed}"
+    );
+}
+
+/// The lock is read by trying to take it, and only one way of failing to take it
+/// means somebody is holding it.
+///
+/// Read as "any failure is a holder", a lock that could not be taken because the
+/// filesystem refused told the user a Watcher is running on a machine where none
+/// is — and on Windows, where the lock is the only evidence there is, made the
+/// Service look like it was running too. `Busy` is the answer that means
+/// contention, and Perch tells it from a fault everywhere else it asks.
+#[test]
+fn a_watcher_lock_that_will_not_be_taken_at_all_is_not_a_watcher_that_is_running() {
+    let spec = perch::registry::watcher_lock_spec(&linux()).expect("home is known");
+    let host = linux().with_unwritable_file(&spec.dir, "the filesystem said no");
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("installed");
+
+    let (_, said) = run_service(&host, WatcherCommand::Status { json: true });
+    let reported: serde_json::Value = serde_json::from_str(&said).expect("it is JSON");
+
+    assert_eq!(
+        reported["watching"], false,
+        "a lock that would not be taken is not a lock somebody is holding: {said}"
+    );
+    assert!(
+        !said.contains("A Watcher is running on this machine"),
+        "and nothing claims one is: {said}"
+    );
+}
+
+/// A grant said about the Ungrouped Accounts is not on its own enough for the
+/// Watcher to act on them: `interchangeable` is the declaration that has to come
+/// first, and without it every round holds (ADR 0017).
+///
+/// Read from `watcher-may-act` alone, this line stayed silent on a machine where
+/// the Watcher can never act — telling somebody their Service was arranged when
+/// it was one `perch config set` short of it. The same claim `perch group list`
+/// was making until it took the gate on.
+#[test]
+fn a_grant_the_watcher_will_never_act_on_still_says_the_service_will_hold() {
+    let host = linux();
+    config_set(&host, &["work", "watcher-may-act", "false"])
+        .0
+        .expect("the Group takes the permission back");
+    // The only grant on the machine, and one the Watcher declines: nothing has
+    // said the Accounts in no Group are interchangeable at all.
+    config_set(&host, &["ungrouped", "watcher-may-act", "true"])
+        .0
+        .expect("the Ungrouped Accounts take the permission");
+
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
+
+    assert_eq!(result.expect("not a refusal"), EXIT_OK);
+    assert!(
+        printed.contains("will hold"),
+        "a grant the Watcher will never act on is not a Service that will act: \
+         {printed}"
     );
 }
 

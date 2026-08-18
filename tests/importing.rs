@@ -56,6 +56,42 @@ fn registry_on(host: &FakeHost) -> Option<Registry> {
     perch::registry::load(host).expect("whatever is there is readable")
 }
 
+/// The guard above asks whether every Credential in the file is listed, and it
+/// asks with `registry::same_name`, which folds case. Placement looked the same
+/// keys up in a `BTreeMap`, which does not.
+///
+/// So an Export spelling a credential key `SOMEONE@example.com` beside an
+/// account entry `someone@example.com` passed the check — the key *is* listed —
+/// and then missed at placement, leaving that Account with no Profile and no
+/// Credential while the Import reported success. That is exactly the partial
+/// restore the guard exists to prevent, arriving through the one comparison it
+/// did not share with the placement it guards.
+#[test]
+fn a_credential_keyed_in_another_case_is_placed_rather_than_silently_dropped() {
+    let mut export =
+        perch::export::unseal(&an_export_of_a_whole_machine(), PASSPHRASE).expect("it opens");
+    // The same Account, spelled the other way — which is what a file written by
+    // something other than `gather` looks like.
+    let credential = export.credentials.remove(EMAIL).expect("it holds one");
+    export
+        .credentials
+        .insert(EMAIL.to_uppercase(), credential.clone());
+    if let Some(identity) = export.identity_files.remove(EMAIL) {
+        export.identity_files.insert(EMAIL.to_uppercase(), identity);
+    }
+    let sealed = perch::export::seal(&export, PASSPHRASE).expect("it seals");
+    let host = a_new_machine_holding(&sealed);
+
+    run_import(&host, AT).0.expect("the import restores");
+
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(credential.as_str()),
+        "an Account the file holds a Credential for gets it, whichever way the \
+         key was spelled"
+    );
+}
+
 /// The fourth command with an unbounded prompt under the registry lock, and
 /// the one that skipped the guard the other three take.
 ///

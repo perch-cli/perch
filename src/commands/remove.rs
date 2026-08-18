@@ -207,10 +207,9 @@ fn consequence_of(registry: &Registry, account: &Account) -> Consequence {
 /// choices the user endorsed in advance.
 fn successor<'a>(registry: &'a Registry, leaving: &Account) -> Option<&'a Account> {
     let candidates = || {
-        registry
-            .accounts
-            .iter()
-            .filter(|held| held.email() != leaving.email() && cycle::is_a_candidate(held))
+        registry.accounts.iter().filter(|held| {
+            !registry::same_name(held.email(), leaving.email()) && cycle::is_a_candidate(held)
+        })
     };
     let in_its_group = leaving
         .group
@@ -404,7 +403,8 @@ fn delete_the_credential_and_its_profile(
     // and the outcome says the Credential is not gone rather than claiming a
     // deletion that did not happen.
     if let Some(sharer) = registry.accounts.iter().find(|held| {
-        held.email() != account.email() && registry::same_profile(held.email(), account.email())
+        !registry::same_name(held.email(), account.email())
+            && registry::same_profile(held.email(), account.email())
     }) {
         return Ok(Deleted::NothingSharedWith(
             registry.named_for_the_user(sharer.email()),

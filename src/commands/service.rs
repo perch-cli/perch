@@ -23,6 +23,7 @@ use std::path::PathBuf;
 use crate::commands::{say, say_json};
 use crate::error::{EXIT_NOTHING_TO_DO, EXIT_OK, PerchError, Result};
 use crate::host::{Host, Platform};
+use crate::registry::Scope;
 use crate::service::{self, Driven, Unit};
 use crate::{registry, upgrade};
 
@@ -36,6 +37,10 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     refuse_as_root(host)?;
 
     let unit = describe(host)?;
+    // Before the log directory is made and before anything is written: a value
+    // no format can hold is a refusal about the Unit, not a half-finished
+    // install to take back.
+    unit.refuse_what_the_format_cannot_hold(host.platform())?;
     let at = service::unit_path(host)?;
     let replaced = at.as_deref().is_some_and(|at| host.path_exists(at));
 
@@ -72,10 +77,28 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     // undo there — but on the two platforms with a file, a `bootstrap` that
     // fails would otherwise leave a unit behind that starts at the next login
     // having never been checked.
+    //
+    // Only where this install *made* the unit. A re-install is the documented
+    // repair after an Upgrade, so the common way to reach this is with a working
+    // Service already installed — and taking the file back then left the machine
+    // worse than it found it: the unit was already overwritten by the time the
+    // start was attempted, so removing it takes away the Service that was there,
+    // under a sentence promising Perch is unchanged. A start that fails for
+    // something outside Perch, like a `systemctl --user` with no session bus
+    // over SSH, would silently uninstall a Watcher that had been running for
+    // months. The replaced unit is left where it is and said so instead.
     if let Err(failed) = drive(
         host,
         service::starting(host.platform(), &unit, at.as_deref()),
     ) {
+        if replaced {
+            return Err(failed.with_note(
+                "The Service was not started. The unit file has been replaced \
+                 and is left where it is, so it starts at the next login — \
+                 `perch watcher status` says what is there now, and `perch \
+                 watcher uninstall` takes it away.",
+            ));
+        }
         if let Some(at) = &at {
             let _ = host.remove_file(at);
         }
@@ -444,7 +467,15 @@ fn watcher_is_running(host: &dyn Host) -> bool {
         // Taken, so nobody had it — and it is given back on the way out of this
         // function, when the hold is dropped.
         Ok(_taken) => false,
-        Err(_) => true,
+        // `Busy` is the one answer that means somebody is holding it. Everything
+        // else is the lock failing rather than being held — a parent directory
+        // that cannot be created, an artifact whose time will not be read — and
+        // read as contention it told the user a Watcher is running on a machine
+        // where none is, which on Windows also makes `running` true. The rest of
+        // Perch tells `Busy` from a fault everywhere it asks; this was the one
+        // place that folded them together.
+        Err(PerchError::Busy(_)) => true,
+        Err(_) => false,
     }
 }
 
@@ -477,10 +508,16 @@ fn nothing_may_act(host: &dyn Host) -> Result<Option<String>> {
         return Ok(None);
     };
 
-    let any = registry
-        .scopes()
-        .iter()
-        .any(|scope| registry.settings(scope).watcher_may_act);
+    // Both statements, because a grant alone is not enough for the Ungrouped
+    // Accounts: `perch watcher run` asks `interchangeable` first and holds
+    // without it (ADR 0017). Read from `watcher-may-act` alone, this line stayed
+    // silent on a machine whose only grant is one the Watcher will never act on
+    // — the same claim `perch group list` was making until it took the gate on
+    // (`commands::group`), and `config::scope_lines` already answers correctly.
+    let any = registry.scopes().iter().any(|scope| {
+        let interchangeable = *scope != Scope::Ungrouped || registry.ungrouped.interchangeable;
+        registry.settings(scope).watcher_may_act && interchangeable
+    });
     if any {
         return Ok(None);
     }

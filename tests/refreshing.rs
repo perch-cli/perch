@@ -687,6 +687,51 @@ fn a_credential_renewed_while_perch_waited_for_the_lock_is_not_renewed_again() {
     );
 }
 
+/// The same moment, and what happens next when Anthropic refuses the token the
+/// other holder left.
+///
+/// `freshly_renewed` decides whether a rejection is worth one Renewal: a token
+/// Anthropic minted moments ago and then refused is a contradiction inside one
+/// command, and renewing again would spend a Rotation to ask the same question.
+/// But the re-read under the lock hands back a Credential *somebody else*
+/// renewed, and this reading renewed nothing — so claiming it had reported that
+/// contradiction about a token Anthropic never issued here, and skipped the one
+/// retry a rejection is allowed.
+#[test]
+fn a_credential_somebody_else_renewed_still_gets_the_one_renewal_a_rejection_earns() {
+    let host = machine_with_two_accounts();
+    let now = host.now();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
+    let host = host
+        .with_reply(TOKEN_URL, 200, RENEWED)
+        // The other holder's token is refused, which is what earns the retry.
+        .with_reply_to(PROFILE_URL, FRESH_TOKEN, 401, "")
+        .with_reply_to(PROFILE_URL, RENEWED_TOKEN, 200, &profile_of(EMAIL))
+        .with_reply_to(USAGE_URL, RENEWED_TOKEN, 200, USAGE)
+        .with_dir_held_since(CONFIG_LOCK, now)
+        .once_while_waiting(|host| {
+            host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
+            host.remove_dir_all(std::path::Path::new(CONFIG_LOCK))
+                .expect("they give the lock back");
+        });
+    host.forget_effects();
+
+    run_status_refresh(&host, false)
+        .0
+        .expect("the retry gets a token Anthropic accepts");
+
+    assert_eq!(
+        host.sent_to(TOKEN_URL).len(),
+        1,
+        "the rejection earned a Renewal, because this reading had not made one"
+    );
+    assert_eq!(
+        cached_windows(&host, EMAIL).len(),
+        3,
+        "and the figures were read rather than the reading being given up on"
+    );
+}
+
 /// A refresh that failed outright, in the form a script parses. The reason has
 /// to travel with it: an outcome of "failed" with no detail is one nothing can
 /// be done about without running the command again by hand.
@@ -745,5 +790,67 @@ fn a_token_renewed_on_the_way_in_is_not_renewed_again_when_anthropic_refuses_it(
     assert!(
         printed.contains("would not accept the token it had just issued"),
         "and it is reported as the contradiction it is: {printed}"
+    );
+}
+
+/// A Switch that was written down and not yet recorded is a **Landing**, and a
+/// registry holding one answers "who is active" with the Account being *left*
+/// (ADR 0048) — while the Default Profile may already hold the Credential of
+/// the one arriving. A Switch killed between storing the arriving Credential
+/// and patching the Identity leaves exactly that.
+///
+/// `perch status --refresh` and `perch list --refresh` do not settle a Landing
+/// before they read, so a Refresh taken on that answer asks Anthropic as one
+/// Account carrying the other's token: the figures it reads are filed under the
+/// wrong address, a Renewal may Rotate a refresh token the arriving Account's
+/// own Profile is still holding, and a rejection Quarantines whichever Account
+/// was named rather than the one whose Credential was refused.
+///
+/// So the live store is taken only for an Account the registry is *settled* on
+/// — the belt `perch holdings export` already carries, in the one other place
+/// that reads the live Credential off a name.
+#[test]
+fn a_refresh_mid_landing_reads_the_account_named_rather_than_whatever_is_live() {
+    let host = machine_with_two_accounts();
+    // What a Switch leaves when it dies after the Credential moved and before
+    // the Identity was patched: the arriving Account's Credential is live, and
+    // the registry still answers "who is active" with the one being left.
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SECOND_FRESH);
+    host.set_keychain_item(&store_of(&host, EMAIL).keychain_service, LOGIN_NAME, FRESH);
+    let host = host
+        .with_reply_to(PROFILE_URL, FRESH_TOKEN, 200, &profile_of(EMAIL))
+        .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE)
+        .with_reply_to(PROFILE_URL, SECOND_TOKEN, 200, &profile_of(SECOND_EMAIL))
+        .with_reply_to(USAGE_URL, SECOND_TOKEN, 200, USAGE);
+    host.forget_effects();
+
+    run_status_refresh(&host, false).0.expect("the read works");
+
+    // Every request, not only the one that carries figures: a token spent on
+    // the wrong Account is the Rotation hazard whether or not what came back
+    // was ever recorded.
+    for sent in host
+        .sent_to(PROFILE_URL)
+        .iter()
+        .chain(&host.sent_to(USAGE_URL))
+    {
+        assert_eq!(
+            sent.bearer(),
+            Some(FRESH_TOKEN),
+            "the Account being left is asked about with the Credential in its \
+             own Profile, never with whatever the interrupted Switch happened \
+             to leave live"
+        );
+    }
+    assert_eq!(
+        host.sent_to(USAGE_URL).len(),
+        1,
+        "one Account shown, one read spent"
+    );
+    assert!(
+        cached_windows(&host, SECOND_EMAIL).is_empty(),
+        "and nothing was filed against the Account arriving, which nobody asked \
+         about"
     );
 }

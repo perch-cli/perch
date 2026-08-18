@@ -431,6 +431,22 @@ pub fn store_for_profile(host: &dyn Host, config_dir: &Path) -> Result<Store> {
 }
 
 fn store_for_directory(host: &dyn Host, config_dir: PathBuf, is_default: bool) -> Result<Store> {
+    // One spelling, before anything is derived from it. Every derivation below
+    // reads the path as text: `short_hash` hashes it into the keychain service
+    // name, and `locks_for` pushes `.lock` onto it rather than joining. A
+    // `CLAUDE_CONFIG_DIR` with a trailing separator is the same directory and a
+    // different string, so `perch` invoked once with the slash and once without
+    // disagreed about where its own Credential was kept — one wrote into a
+    // namespace the other never reads — and took a legacy lock at
+    // `<dir>/.lock` instead of the `<dir>.lock` a running Claude Code contends
+    // for, which is the mutual exclusion `locks_for` calls its contract.
+    //
+    // Through `components`, which is the normalization the standard library
+    // already has: it drops the trailing separator and the `.` segments, and
+    // leaves everything else — including `..`, which is a different directory
+    // and not this function's to resolve.
+    let config_dir: PathBuf = config_dir.components().collect();
+
     Ok(Store {
         identity_file: identity_file_for(&config_dir, is_default, host)?,
         keychain_service: service_name_for(&config_dir, is_default),
@@ -1264,6 +1280,43 @@ mod tests {
         Installed::unknown("2.1.221")
     }
     use crate::host::{Execution, FakeHost, Platform};
+
+    /// One directory is one store, however the path naming it was spelled.
+    ///
+    /// Every derivation here reads the path as text — `short_hash` hashes it
+    /// into the keychain service name, `locks_for` pushes `.lock` onto it — so a
+    /// `CLAUDE_CONFIG_DIR` with a trailing separator was the same directory and
+    /// a different Credential Store. `perch` invoked once with the slash and
+    /// once without wrote into two keychain namespaces, neither of which reads
+    /// the other, and took a legacy lock inside the directory rather than the
+    /// sibling one a running Claude Code contends for.
+    #[test]
+    fn a_configuration_directory_spelled_with_a_trailing_separator_is_the_same_store() {
+        let host = FakeHost::new();
+        let plain =
+            store_for_profile(&host, Path::new("/Users/someone/elsewhere")).expect("USER is set");
+        let trailing =
+            store_for_profile(&host, Path::new("/Users/someone/elsewhere/")).expect("USER is set");
+
+        assert_eq!(
+            plain.keychain_service, trailing.keychain_service,
+            "the namespace a Credential is kept in is the directory, not its spelling"
+        );
+        assert_eq!(plain.config_dir, trailing.config_dir);
+        assert_eq!(plain.credentials_file, trailing.credentials_file);
+        assert_eq!(plain.identity_file, trailing.identity_file);
+        assert_eq!(
+            locks_for(&plain)
+                .iter()
+                .map(|lock| lock.dir.clone())
+                .collect::<Vec<_>>(),
+            locks_for(&trailing)
+                .iter()
+                .map(|lock| lock.dir.clone())
+                .collect::<Vec<_>>(),
+            "and the locks are the ones a running Claude Code takes"
+        );
+    }
 
     /// The round trip through this module's own interface: a claim makes the
     /// directory Live, and letting it go stops it.

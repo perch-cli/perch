@@ -1150,6 +1150,41 @@ fn an_abandoned_lock_that_would_not_be_cleared_is_waited_on_rather_than_declared
     );
 }
 
+/// The case the listing test still got wrong: a directory that can be neither
+/// removed nor walked.
+///
+/// A lock left root-owned inside a Profile by a `sudo claude`, or a Profile
+/// whose read bit somebody took away, is stat-ed from its parent perfectly well
+/// and fails both `remove_dir_all` and the listing with EACCES. Told apart by
+/// whether it could be listed, it was reported as not being a directory when it
+/// is — the one message that turns an unrecoverable state into a five-second
+/// fix, printed about a state that is neither.
+#[test]
+fn an_abandoned_lock_that_cannot_even_be_walked_is_still_waited_on_rather_than_declared_broken() {
+    let host = machine_with_two_accounts();
+    let long_ago = host.now() - chrono::Duration::seconds(120);
+    let host = host
+        .with_dir_held_since(REFRESH_LOCK, long_ago)
+        .with_undeletable_file(REFRESH_LOCK, "Permission denied")
+        .with_unlistable_dir(REFRESH_LOCK, "Permission denied");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let refusal = result.expect_err("the lock never comes free");
+    let said = refusal.to_string();
+    assert!(
+        !said.contains("is not a lock directory"),
+        "a directory nothing can walk is still a directory: {said}"
+    );
+    assert!(
+        host.effects()
+            .iter()
+            .any(|effect| matches!(effect, Effect::Slept { .. })),
+        "so it falls through to the ordinary wait: {:?}",
+        host.effects()
+    );
+}
+
 /// Something at a lock path that is not a lock is said, rather than reported as
 /// a Claude Code that will not let go.
 ///
@@ -1796,6 +1831,48 @@ fn a_switch_typed_inside_a_run_lands_on_the_default_profile_rather_than_the_runs
         credential_of(&host, EMAIL).as_deref(),
         Some(CREDENTIAL),
         "and the outgoing Account was Captured back into its own Profile"
+    );
+}
+
+/// A Profile is not the only directory Perch points `CLAUDE_CONFIG_DIR` at. A
+/// login runs in a pending directory of Perch's own, and the client it launches
+/// hands the variable on to everything it starts exactly as a Run does — so a
+/// `perch switch` typed inside a login session arrives with that directory named
+/// in its environment.
+///
+/// Taken for the Default Profile it Captured the live Credential into a
+/// directory the login deletes when it ends, wrote the incoming Credential
+/// there instead of where every client reads one, and left the registry naming
+/// an Account the machine was not on. No directory under Perch's own home is
+/// ever the Default Profile.
+#[test]
+fn a_switch_typed_inside_a_login_lands_on_the_default_profile_rather_than_the_pending_one() {
+    let host = machine_with_two_accounts();
+    let pending = perch::registry::pending_login_dir(&host, host.now()).expect("home is known");
+    let host =
+        machine_with_two_accounts().with_env("CLAUDE_CONFIG_DIR", &pending.to_string_lossy());
+
+    run_switch(&host, SECOND_EMAIL).0.expect("the Switch lands");
+
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "the live Credential is the one every client falls back to, not one \
+         filed in a directory the login is about to delete"
+    );
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(CREDENTIAL),
+        "and the outgoing Account was Captured back into its own Profile"
+    );
+    assert!(
+        perch::credentials::read(
+            &host,
+            &probe::store_for_profile(&host, &pending).expect("USER is set")
+        )
+        .expect("the store could be consulted")
+        .is_none(),
+        "nothing was written into the pending login directory at all"
     );
 }
 

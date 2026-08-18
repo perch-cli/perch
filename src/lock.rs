@@ -430,18 +430,13 @@ fn take(host: &dyn Host, lock: &LockSpec) -> Result<()> {
                 // the artifact below: a lock Claude Code is holding right now is
                 // the common case, and it is not a takeover. The answer that
                 // decides anything is the one `take_over` asks under the claim.
+                //
+                // `take_over` answers whether it took the lock, not merely
+                // whether it cleared one: the creation happens under the claim,
+                // where nothing else can be clearing. A `false` is somebody else
+                // holding it, which makes them a holder like any other.
                 if abandoned(host, lock) && take_over(host, lock)? {
-                    // Tried again now rather than after this attempt's wait:
-                    // the lock is free as of this instant, and the attempt that
-                    // found it abandoned is the one that should get it.
-                    // Otherwise a takeover on the last attempt clears the lock
-                    // and then reports it as held — about a lock this very call
-                    // just freed.
-                    if host.create_dir_exclusive(&lock.dir).is_ok() {
-                        return Ok(());
-                    }
-                    // Somebody else got in between, which makes them a holder
-                    // like any other: wait on them.
+                    return Ok(());
                 }
                 if attempt < ATTEMPTS {
                     host.sleep(WAIT_MILLIS);
@@ -514,6 +509,16 @@ const TAKEOVER_SUFFIX: &str = ".perch-takeover";
 /// taken over again, which is the wedge [`clear_the_abandoned`] is written
 /// about. So one as stale as the lock it guards is itself cleared, and the next
 /// attempt a second later gets it.
+///
+/// The *taking* happens here too, and that is the half the claim was missing.
+/// Clearing under the claim and creating outside it left the winner's `mkdir`
+/// unguarded: between dropping the claim and making the lock, a second perch
+/// could take the free claim, find the lock momentarily absent — which
+/// [`gone_quiet_for`] reads as abandoned — and `remove_dir_all` the lock the
+/// winner had just made. Both then walked away believing they held it, which is
+/// the exact outcome the claim exists to prevent, reached through the one step
+/// it did not cover. So `mkdir` on the lock sits between the second staleness
+/// question and the claim's release, where nothing else can be clearing.
 fn take_over(host: &dyn Host, lock: &LockSpec) -> Result<bool> {
     let claim = takeover_claim(lock);
     if let Err(refused) = host.create_dir_exclusive(&claim) {
@@ -527,15 +532,16 @@ fn take_over(host: &dyn Host, lock: &LockSpec) -> Result<bool> {
 
     // Asked again, under the claim. The answer read before it was about a
     // moment that has passed, and what it decides is a deletion.
-    let cleared = match abandoned(host, lock) {
-        true => clear_the_abandoned(host, lock),
+    let taken = match abandoned(host, lock) {
+        true => clear_the_abandoned(host, lock)
+            .map(|cleared| cleared && host.create_dir_exclusive(&lock.dir).is_ok()),
         false => Ok(false),
     };
 
     // On every way out, including the refusal: a claim that stays is a lock
     // nothing can ever take over.
     let _ = host.remove_dir_all(&claim);
-    cleared
+    taken
 }
 
 /// Clears a lock nobody is holding any more, refusing rather than spinning when
@@ -571,10 +577,16 @@ fn clear_the_abandoned(host: &dyn Host, lock: &LockSpec) -> Result<bool> {
         return Ok(true);
     };
 
-    // Listable is the definition of the thing the refusal says this is not. A
-    // directory that would not go is contention, so it falls through to the
-    // ordinary wait rather than ending the command.
-    if host.list_dir(&lock.dir).is_ok() {
+    // Asked as `is_file`, which is the definition of the thing the refusal says
+    // this is: a plain file, and not a directory, a link or an absent path.
+    //
+    // Asked as "can it be listed" it was still wrong for a subset of the cases
+    // it was added for. A directory that cannot be *walked* — one a `sudo
+    // claude` left root-owned inside a Profile, one whose read bit somebody
+    // took away — fails `remove_dir_all` with EACCES and fails `list_dir` with
+    // EACCES too, so it was reported as not being a directory when it is, and
+    // told the user to delete a path by hand where waiting would have done.
+    if !host.is_file(&lock.dir) {
         return Ok(false);
     }
 
@@ -1208,6 +1220,47 @@ mod tests {
             "the answer read before the claim was about a moment that has passed"
         );
         assert!(host.path_exists(&lock.dir), "somebody is holding it");
+    }
+
+    /// The other half of the same race, and the one the claim did not cover.
+    ///
+    /// Clearing happened under the claim and creating happened after it, so the
+    /// winner's own `mkdir` was unguarded: a second perch could take the freed
+    /// claim, find the lock momentarily absent — which reads as abandoned — and
+    /// remove the lock the winner had just made. Both then held it.
+    ///
+    /// Asserted as an ordering, because that is the whole of the fix: the lock
+    /// comes into being before the claim on it is given back, so there is no
+    /// moment at which the lock is absent and the claim is free.
+    #[test]
+    fn the_lock_a_takeover_makes_comes_into_being_before_the_claim_is_given_back() {
+        let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
+        let host = FakeHost::new();
+        let long_ago = host.now() - chrono::Duration::seconds(120);
+        let host = host.with_dir_held_since(&lock.dir, long_ago);
+        host.forget_effects();
+
+        assert!(
+            take_over(&host, &lock).expect("nothing failed"),
+            "the lock was abandoned and nobody else was clearing it"
+        );
+
+        let claim = takeover_claim(&lock);
+        let effects = host.effects();
+        let took = effects
+            .iter()
+            .position(|effect| matches!(effect, Effect::Took(at) if *at == lock.dir))
+            .expect("the lock was taken");
+        let gave_back = effects
+            .iter()
+            .position(|effect| matches!(effect, Effect::RemovedDir(at) if *at == claim))
+            .expect("the claim was given back");
+        assert!(
+            took < gave_back,
+            "the lock is taken under the claim, not after it: {effects:?}"
+        );
+        assert!(host.path_exists(&lock.dir), "and it is held on the way out");
+        assert!(!host.path_exists(&claim), "with the claim given back");
     }
 
     /// A claim outliving the process that made it would stop this lock ever
