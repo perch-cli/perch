@@ -1150,15 +1150,15 @@ fn an_abandoned_lock_that_would_not_be_cleared_is_waited_on_rather_than_declared
     );
 }
 
-/// The case the "can it be listed" test still got wrong: a directory that can
-/// neither be removed nor walked.
+/// The case the listing test still got wrong: a directory that can be neither
+/// removed nor walked.
 ///
 /// A lock left root-owned inside a Profile by a `sudo claude`, or a Profile
-/// whose read bit somebody took away, fails `remove_dir_all` with EACCES and
-/// fails the listing with EACCES too — so it was reported as not being a
-/// directory when it is, and the user was told to delete a path by hand where
-/// waiting one more second would have done. What the refusal claims is that the
-/// path holds a plain file, so that is what it asks.
+/// whose read bit somebody took away, is stat-ed from its parent perfectly well
+/// and fails both `remove_dir_all` and the listing with EACCES. Told apart by
+/// whether it could be listed, it was reported as not being a directory when it
+/// is — the one message that turns an unrecoverable state into a five-second
+/// fix, printed about a state that is neither.
 #[test]
 fn an_abandoned_lock_that_cannot_even_be_walked_is_still_waited_on_rather_than_declared_broken() {
     let host = machine_with_two_accounts();
@@ -1166,7 +1166,7 @@ fn an_abandoned_lock_that_cannot_even_be_walked_is_still_waited_on_rather_than_d
     let host = host
         .with_dir_held_since(REFRESH_LOCK, long_ago)
         .with_undeletable_file(REFRESH_LOCK, "Permission denied")
-        .with_unreadable_file(REFRESH_LOCK, "Permission denied");
+        .with_unlistable_dir(REFRESH_LOCK, "Permission denied");
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);
 
