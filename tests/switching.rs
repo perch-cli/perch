@@ -836,6 +836,37 @@ fn a_marker_whose_pid_now_belongs_to_a_younger_process_is_not_a_live_profile() {
     assert_the_switch_captured_and_landed(&host, "that client died; the pid was recycled");
 }
 
+/// The ordering ADR 0022 corroborates a Marker by compares two clocks, and on
+/// Linux only one of them stands still.
+///
+/// `/proc/<pid>/stat` gives a process's start in ticks since boot, and the
+/// kernel derives `btime` as realtime minus uptime — so when a marker records a
+/// session at noon and NTP then steps the wall clock forward two seconds, the
+/// very process that wrote it reads back as having begun at 12:00:02. Read
+/// strictly, its own Marker dismissed it: the Profile stopped being Live under
+/// a running client, and the Renewal that followed Rotated the Credential that
+/// client was holding.
+///
+/// A pid the operating system has handed out again belongs to a process a whole
+/// session younger, which is what the test above is about and what the margin
+/// leaves untouched.
+#[test]
+fn a_clock_that_stepped_forward_does_not_dismiss_the_marker_of_a_running_client() {
+    let session_began = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
+    let host = machine_with_two_accounts()
+        .with_file(
+            format!("{FIRST_PROFILE}/sessions/4242.json"),
+            &a_client_marker(4242, session_began),
+        )
+        .with_live_process_started_at(4242, Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 2).unwrap());
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("that client is running");
+    assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
+    assert!(error.to_string().contains("4242"), "{error}");
+}
+
 #[test]
 fn a_marker_that_does_not_say_when_its_session_began_is_no_evidence_of_a_client() {
     // The marker parses but is not the shape Perch believes in. A Profile is
@@ -1201,9 +1232,12 @@ fn an_abandoned_lock_that_would_not_be_cleared_is_waited_on_rather_than_declared
 fn an_abandoned_lock_that_cannot_even_be_walked_is_still_waited_on_rather_than_declared_broken() {
     let host = machine_with_two_accounts();
     let long_ago = host.now() - chrono::Duration::seconds(120);
+    // One arrangement rather than two. `with_unlistable_dir` says what it means
+    // — "`remove_dir_all` and the listing both fail EACCES" — and the fake now
+    // answers both, so a test no longer has to describe one real state by
+    // turning two knobs that could be turned apart.
     let host = host
         .with_dir_held_since(REFRESH_LOCK, long_ago)
-        .with_undeletable_file(REFRESH_LOCK, "Permission denied")
         .with_unlistable_dir(REFRESH_LOCK, "Permission denied");
 
     let (result, _) = run_switch(&host, SECOND_EMAIL);

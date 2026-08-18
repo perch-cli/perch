@@ -406,7 +406,7 @@ fn run_the_installer(host: &dyn Host, at: &std::path::Path, tag: &str) -> Result
     // parse.
     let (program, args) = match host.platform() {
         Platform::Windows => (
-            "powershell".to_string(),
+            powershell(host)?,
             vec![
                 "-NoProfile".to_string(),
                 "-ExecutionPolicy".to_string(),
@@ -421,4 +421,36 @@ fn run_the_installer(host: &dyn Host, at: &std::path::Path, tag: &str) -> Result
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
     host.exec_interactive(&program, &borrowed, &[("PERCH_VERSION", tag)])
         .map_err(|err| PerchError::Other(format!("could not run the installer: {err}")))
+}
+
+/// Where Windows keeps PowerShell, from the environment rather than from
+/// `PATH`.
+///
+/// ADR 0021's rule, and the one program Perch runs that was outside it: every
+/// other one goes by an absolute path — `curl`, `security`, `<prefix>/bin/brew`,
+/// the `npm` `probe::on_path` resolved — "because that path is a security
+/// property rather than a convenience". A bare name handed to Windows is
+/// searched for in the application directory and *the current working
+/// directory* before `PATH`, so `perch upgrade` typed in a downloads folder
+/// holding a `powershell.exe` ran that, with `-ExecutionPolicy Bypass`, and
+/// handed it a script whose whole job is to overwrite the Perch binary.
+///
+/// `%SystemRoot%` rather than `C:\\Windows`, and a refusal rather than a walk
+/// of `PATH` where it is unset, both for the reason `curl_bin` gives: Windows
+/// need not be installed where it usually is, and a machine that will not say
+/// where it is has told Perch nothing it can safely guess from.
+fn powershell(host: &dyn Host) -> Result<String> {
+    let root = host
+        .env_var("SystemRoot")
+        .filter(|root| !root.is_empty())
+        .ok_or_else(|| {
+            PerchError::Other(
+                "SystemRoot is unset, so PowerShell cannot be located and the \
+                 installer was not run. Nothing was changed."
+                    .to_string(),
+            )
+        })?;
+    Ok(format!(
+        "{root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+    ))
 }

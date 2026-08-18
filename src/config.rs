@@ -136,9 +136,20 @@ impl Setting {
             }
         }
         settings.validate(scope)?;
-        *registry
-            .settings_mut(scope)
-            .expect("the Scope was just addressed") = settings;
+        // A refusal rather than an abort. `commands::config` resolves the Scope
+        // through `declared_group` before it gets here, so today's one caller
+        // cannot reach this — but this is a `pub fn` on a `pub` type returning a
+        // `Result`, and a signature that says it refuses should not be the thing
+        // that panics on the second caller.
+        let Some(held) = registry.settings_mut(scope) else {
+            let Scope::Group(name) = scope else {
+                unreachable!("the Ungrouped Scope is always there to write to")
+            };
+            return Err(PerchError::NotFound(format!(
+                "no Group is called `{name}`, so there is nothing to set on it."
+            )));
+        };
+        *held = settings;
         registry.ungrouped.interchangeable = interchangeable;
         Ok(())
     }
@@ -443,6 +454,24 @@ mod tests {
                 .contains("interchangeable"),
             "a named Group needs no second yes",
         );
+    }
+
+    /// Writing a Setting onto a Group nothing declared is a refusal, which is
+    /// what the signature says. It used to be an abort.
+    ///
+    /// `commands::config` resolves the Scope through `declared_group` before it
+    /// gets here, so the CLI cannot reach this — but `Setting::write` is a
+    /// `pub fn` on a `pub` type returning a `Result`, and a signature that says
+    /// it refuses should not be the thing that panics on the second caller.
+    #[test]
+    fn setting_a_scope_nothing_declared_is_refused_rather_than_panicked_on() {
+        let mut registry = Registry::default();
+
+        let error = Setting::Strategy
+            .write(&mut registry, &work(), "most-headroom")
+            .expect_err("there is no such Group");
+
+        assert!(error.to_string().contains("work"), "{error}");
     }
 
     #[test]

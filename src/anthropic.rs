@@ -150,13 +150,35 @@ pub fn utilization(host: &dyn Host, access_token: &str) -> Result<QuotaWindows, 
     Ok(windows)
 }
 
-/// Which Account an access token belongs to, when the reply says.
+/// Which Account an access token belongs to.
 ///
-/// `None` is "the reply did not say" rather than "nobody": a caller weighs
-/// evidence with this, and no evidence is not evidence against.
-pub fn whose(host: &dyn Host, access_token: &str) -> Result<Option<String>, Refused> {
+/// A reply that parses and names nobody is `Unrecognized` rather than an
+/// answer, which is how the other reader in this module treats a shape it does
+/// not know: `windows_in` refuses a drifted window and `reset_time_in` remarks
+/// on a `resets_at` it cannot parse. This one folded "the endpoint named nobody"
+/// together with "the endpoint is not shaped the way Perch believes" and handed
+/// both back as `None` — which [`crate::observe::confirm`] reads as permission
+/// to cache.
+///
+/// So the day Anthropic renamed `email_address`, the ADR 0019 guard would have
+/// become a no-op for every Account, for ever, with nothing printed anywhere.
+/// That is strictly worse than the outage this endpoint's other failure mode
+/// causes, because an outage ends and a rename does not.
+///
+/// It stays a *carve-out* rather than a refusal — `confirm` still goes on to
+/// read Utilization, because drift in a reply is no evidence either way — but
+/// now it says so out loud.
+pub fn whose(host: &dyn Host, access_token: &str) -> Result<String, Refused> {
     let document = read(host, PROFILE_URL, access_token)?;
-    Ok(email_in(&document))
+    email_in(&document).ok_or_else(|| {
+        Refused::Unrecognized(
+            "the profile endpoint named no email address, so whose an access \
+             token is cannot be established — the check that keeps one \
+             Account's figures from being filed under another's is passing \
+             everything through until Perch is taught the new shape"
+                .to_string(),
+        )
+    })
 }
 
 /// Renews an access token, and reports the Rotation when there was one.
@@ -401,8 +423,22 @@ fn windows_in(
 /// decide whether that is drift or a field beside the windows. A window
 /// Anthropic adds under a period Perch has never seen is still recorded — it
 /// says how full it is, and that is what makes it a window.
+///
+/// Keyed on the *unit* rather than on the count, which is what makes that last
+/// sentence true. `matches!(.., "five" | "seven")` was an allowlist of the two
+/// counts in use, so the argument this whole module makes — that a window
+/// dropped in silence "becomes one nothing would ever rank on" — held for
+/// exactly those two and for nothing else. A `one_hour` or `thirty_day` window
+/// that arrived flattened to a bare number would have been passed over without
+/// a word, and the ADR 0012 failure would be back under a new name.
 fn named_by_a_period(key: &str) -> bool {
-    matches!(key.split('_').next(), Some("five" | "seven"))
+    let mut parts = key.split('_');
+    let counted = parts.next().is_some_and(|count| !count.is_empty());
+    counted
+        && matches!(
+            parts.next(),
+            Some("hour" | "hours" | "day" | "days" | "week" | "weeks" | "month" | "months")
+        )
 }
 
 /// How full a key says it is, when it reads as a Quota Window at all.
@@ -753,6 +789,44 @@ mod tests {
                 "it names the window: {refused}"
             );
         }
+    }
+
+    /// And a window under a period Anthropic has not used yet is drift on the
+    /// same terms, rather than a field beside the windows.
+    ///
+    /// `named_by_a_period` was an allowlist of the two counts in use — `five`
+    /// and `seven` — so the whole argument this module makes about a window
+    /// dropped in silence held for those two and for nothing else. A `one_hour`
+    /// window flattened to a number would have been passed over without a word,
+    /// and the ADR 0012 failure would be back under a new name. It keys on the
+    /// unit now, which is what its own doc always claimed.
+    #[test]
+    fn a_window_under_a_period_anthropic_has_not_used_yet_is_drift_when_it_stops_answering() {
+        let document: Value = serde_json::from_str(
+            r#"{"five_hour": {"utilization": 1}, "seven_day": {"utilization": 10},
+                "one_hour": 98}"#,
+        )
+        .unwrap();
+
+        let refused = windows_of(&document).expect_err("a window is a window");
+
+        assert!(refused.contains("one_hour"), "it names it: {refused}");
+    }
+
+    /// The other side of the same line: a field beside the windows is still
+    /// passed over, so keying on the unit did not turn every unread key into a
+    /// refusal.
+    #[test]
+    fn a_field_beside_the_windows_is_still_not_a_window() {
+        let document: Value = serde_json::from_str(
+            r#"{"five_hour": {"utilization": 1}, "seven_day": {"utilization": 10},
+                "organization": {"uuid": "x"}, "limits": [], "extra_usage": 3}"#,
+        )
+        .unwrap();
+
+        let windows = windows_of(&document).expect("those are not windows");
+
+        assert_eq!(windows.len(), 2, "{windows:?}");
     }
 
     /// A window every Account has, left out of the reply altogether, is the same

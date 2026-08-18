@@ -400,6 +400,33 @@ fn a_run_says_which_account_stays_active_everywhere_else() {
     );
 }
 
+/// And says nothing about it where nothing has settled who is active.
+///
+/// A Switch written down and not yet recorded is a **Landing**, and
+/// `Active::whose` answers one with the Account being *left* — the last thing
+/// Perch established rather than anything it knows. Said off that answer, a Run
+/// promised that Account "stays the active Account everywhere else" while the
+/// other one's Credential may already be the live one. That is the same claim
+/// ADR 0055 had taken out of `perch watcher run`'s opening line, still being
+/// made by the command whose whole point is the second half of the sentence.
+#[test]
+fn a_run_claims_nothing_about_who_is_active_while_a_switch_is_in_flight() {
+    let host = machine();
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+
+    let _ = run_run(&host, SECOND_EMAIL);
+
+    let said = host.notes().join("\n");
+    assert!(
+        said.contains("Running Claude Code as"),
+        "the Run still says what it launched: {said}"
+    );
+    assert!(
+        !said.contains("stays the active Account"),
+        "and claims nothing about an Account nothing has established: {said}"
+    );
+}
+
 /// A Run against the Account that is already active is not the "nothing to do"
 /// a Switch to it would be: it still gets a Profile of its own, which is what
 /// keeps the session out of the way of a later Switch.
@@ -844,5 +871,103 @@ fn an_empty_first_word_is_an_argument_rather_than_a_program() {
             "--resume".to_string(),
         ]],
         "Claude Code, handed both words as they were typed"
+    );
+}
+
+/// A machine holding an ordinary active Account and two whose email addresses
+/// derive one Profile between them — `slug` flattens every non-alphanumeric
+/// character, so `some-one@` and `some.one@` name one directory.
+fn machine_holding_the_two_that_share_a_profile() -> FakeHost {
+    let host = logged_in_machine();
+    run_list(&host, false)
+        .0
+        .expect("the first command adopts the login there already is");
+    let mut registry = registry_of(&host);
+    for email in ["some-one@example.com", "some.one@example.com"] {
+        registry.upsert(perch::registry::Account {
+            identity: perch::probe::Identity {
+                email: email.to_string(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            disabled: false,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        });
+    }
+    common::save_registry(&host, &registry);
+
+    let store = store_of(&host, "some-one@example.com");
+    host.set_keychain_item(&store.keychain_service, &store.keychain_account, CREDENTIAL);
+    host
+}
+
+/// A Run against a Profile two Accounts share is refused, the way a Switch onto
+/// one is.
+///
+/// One directory means one Credential Store and one Credential, so the client
+/// this launches runs as whichever of the two is in it — while the line Perch
+/// prints a moment earlier names the other. `perch switch` refuses exactly this
+/// (ADR 0006); the Run reached the same directory by another route and did not.
+#[test]
+fn a_run_against_a_profile_two_accounts_share_is_refused() {
+    let host = machine_holding_the_two_that_share_a_profile().with_login(client_exiting(0));
+
+    let (result, _) = run_run(&host, "some-one@example.com");
+
+    let error = result.expect_err("Perch cannot say which Account that would run as");
+    assert!(error.to_string().contains("share one Profile"), "{error}");
+    assert!(
+        error.to_string().contains("some.one@example.com"),
+        "and it names the other one: {error}"
+    );
+    assert!(launched(&host).is_empty(), "and nothing was launched");
+}
+
+/// A Run claims its Profile before it links anything into it, so nothing else
+/// can take the Profile away while it is being prepared.
+///
+/// Reconcile and Carry are both filesystem-bound over a whole Profile, and the
+/// Marker used to be written after both. Until it exists nothing on the machine
+/// knows the Run is happening: `perch remove` asks twice whether the Profile is
+/// Live, is told no both times, and then deletes the Credential and
+/// `remove_dir_all`s the directory this command is still linking into. What
+/// starts is a client pointed at an empty configuration directory asking its
+/// user to log in — the state `refuse_a_quarantined_account` exists to prevent,
+/// reached by a different road.
+#[test]
+fn a_run_marks_its_profile_live_before_it_touches_anything_in_it() {
+    // With Shared State to link and a `.claude.json` to Carry, so there is
+    // something for the claim to come before.
+    let host = machine_with_shared_state();
+    let profile = perch::registry::profile_dir_for(&host, SECOND_EMAIL).expect("home is known");
+    let sessions = profile.join("sessions");
+
+    run_run(&host, SECOND_EMAIL).0.expect("the client ran");
+
+    let touched: Vec<Effect> = host
+        .effects()
+        .into_iter()
+        .filter(|effect| match effect {
+            Effect::WroteFile(at)
+            | Effect::WrotePrivateFile(at)
+            | Effect::Linked { at, .. }
+            | Effect::RemovedLink(at)
+            | Effect::RemovedFile(at)
+            | Effect::CreatedDir(at) => at.starts_with(&profile),
+            Effect::Renamed { to, .. } => to.starts_with(&profile),
+            _ => false,
+        })
+        .collect();
+
+    let first = touched.first().expect("a Run prepares its Profile");
+    assert!(
+        matches!(first, Effect::CreatedDir(at) if at.starts_with(&sessions)),
+        "the Marker's own directory is the first thing made in the Profile, so \
+         every later step happens under a Profile that is already Live: \
+         {touched:?}"
     );
 }

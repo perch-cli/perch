@@ -135,14 +135,32 @@ impl Attempt {
         }
     }
 
+    /// `detail` is the same thing everywhere it appears here and in
+    /// [`Attempt::note_beside_the_account`]: whatever the failure underneath
+    /// said. A Quarantine put the machine-readable *reason* there instead — so a
+    /// script read `outcome: "quarantined"` beside `detail: "renewal-rejected"`,
+    /// which is the outcome again in a second spelling, while the one thing the
+    /// key promises was sitting unread in the same value the human line prints.
+    ///
+    /// Both now, under the words they mean: `reason` for the machine, `detail`
+    /// for what happened underneath, `null` where there was nothing worth
+    /// keeping. `reason` is `null` for every other outcome, because a
+    /// Quarantine is the only one that has one.
     fn document(&self) -> serde_json::Value {
-        let (outcome, detail) = match &self.outcome {
-            Outcome::Observed => ("observed", None),
-            Outcome::Throttled => ("throttled", Some(Refused::Throttled.to_string())),
-            Outcome::Failed(why) => ("failed", Some(why.clone())),
-            Outcome::Quarantined { why, .. } => ("quarantined", Some(why.as_str().to_string())),
+        let (outcome, reason, detail) = match &self.outcome {
+            Outcome::Observed => ("observed", None, None),
+            Outcome::Throttled => ("throttled", None, Some(Refused::Throttled.to_string())),
+            Outcome::Failed(why) => ("failed", None, Some(why.clone())),
+            Outcome::Quarantined { why, detail } => {
+                ("quarantined", Some(why.as_str()), detail.clone())
+            }
         };
-        json!({"email": self.email, "outcome": outcome, "detail": detail})
+        json!({
+            "email": self.email,
+            "outcome": outcome,
+            "reason": reason,
+            "detail": detail,
+        })
     }
 }
 
@@ -199,39 +217,51 @@ impl Report {
 }
 
 /// Reads current Utilization for each of `emails` and keeps what came back.
+///
+/// `installed` is asked for rather than probed, because a probe is a `PATH` walk
+/// and a `claude --version` subprocess and the answer cannot change under a
+/// process that is already running — which is the whole reason
+/// [`Installed`] is a type. Probed here, one acting round of `perch watcher run`
+/// spawned three: one for the active Account's Refresh, one for the ask that
+/// stops the candidate burst, and one for the burst itself. Taken as an
+/// argument, the caller that already has one cannot spawn a second, and the
+/// ones that do not are one expression away.
+///
+/// Carried as the failure it may be rather than as an `Option`, because an
+/// Account that is already Quarantined is answered before the version is wanted
+/// at all — and a machine whose Claude Code has been uninstalled must not turn
+/// that answer into a different one.
 pub fn refresh(
     host: &dyn Host,
     perch: &mut Held<'_>,
     registry: &mut Registry,
     emails: &[String],
+    installed: &Result<Installed>,
 ) -> Report {
     let mut report = Report::default();
     let mut anything_to_keep = false;
-
-    // Once, which is what [`Installed::probed`] promises and what the loop below
-    // was breaking: a `PATH` walk and a `claude --version` subprocess per
-    // Account. `perch list --refresh` over a Group of five spawned five of them,
-    // and `perch watcher run` spawned one every poll round for the life of the
-    // loop. The answer cannot change under a process that is already running,
-    // which is the whole reason the type exists.
-    //
-    // Kept as the failure it may be rather than raised here, because an Account
-    // that is already Quarantined is answered before the version is wanted at
-    // all — and a machine whose Claude Code has been uninstalled must not turn
-    // that answer into a different one.
-    let installed = Installed::probed(host);
 
     for email in emails {
         // A round trip to Anthropic each, over as many Accounts as a Group
         // holds. Said between them rather than only at the write, so a narrowed
         // refresh over a slow connection does not run past the staleness window
         // and hand another `perch` the lock this one is still working under.
+        //
+        // And said again inside the turn rather than only at the top of it,
+        // which is what this line alone was not enough for. One Account's turn
+        // is up to six requests — a Renewal, a profile, a Utilization, and the
+        // same three again after a rejection — each bounded at thirty seconds,
+        // which is twice the ninety the registry hold goes stale in. A single
+        // black-holed endpoint therefore lost the hold partway through the
+        // first Account and threw away the whole command's figures *and* every
+        // Quarantine it had discovered on the way, which is the one thing the
+        // block below says must not happen.
         perch.renew();
 
         let Some(account) = registry.account(email).cloned() else {
             continue;
         };
-        let outcome = match observe(host, registry, &account, installed.as_ref()) {
+        let outcome = match observe(host, perch, registry, &account, installed.as_ref()) {
             Ok(windows) => {
                 keep(registry, email, windows, host.now());
                 anything_to_keep = true;
@@ -264,6 +294,7 @@ pub fn refresh(
 
 fn observe(
     host: &dyn Host,
+    perch: &mut Held<'_>,
     registry: &Registry,
     account: &Account,
     installed: std::result::Result<&Installed, &PerchError>,
@@ -281,8 +312,8 @@ fn observe(
     let theirs =
         |outcome| only_off_a_credential_that_is_theirs(host, outcome, &asked, account, installed);
 
-    let asking = usable_token(host, &asked, installed).map_err(theirs)?;
-    match read_off(host, &asking.token, account) {
+    let asking = usable_token(host, perch, &asked, installed).map_err(theirs)?;
+    match read_off(host, perch, &asking.token, account) {
         Ok(windows) => return Ok(windows),
         Err(settled @ Turned::Settled(_)) => return Err(settled.settled()),
         Err(Turned::Away) => {}
@@ -321,9 +352,9 @@ fn observe(
     // which is exactly why `usable_at` will not renew on suspicion. A refusal
     // from Anthropic is not suspicion.
     refuse_if_live(host, &asked, installed).map_err(theirs)?;
-    let renewed = renew_under_the_lock(host, &asked, installed, Because::AnthropicRefusedIt)
+    let renewed = renew_under_the_lock(host, perch, &asked, installed, Because::AnthropicRefusedIt)
         .map_err(theirs)?;
-    read_off(host, &renewed.token, account).map_err(Turned::settled)
+    read_off(host, perch, &renewed.token, account).map_err(Turned::settled)
 }
 
 /// What one attempt at a reading came to when it did not come to figures.
@@ -358,10 +389,15 @@ impl Turned {
 /// questions one reading asks, off one access token.
 fn read_off(
     host: &dyn Host,
+    perch: &mut Held<'_>,
     token: &str,
     account: &Account,
 ) -> std::result::Result<QuotaWindows, Turned> {
     confirm(host, token, account)?;
+    // Between the two requests, because they are two: an endpoint that accepts
+    // a connection and then says nothing costs thirty seconds each, and the
+    // hold this is running under is worth keeping for the second one.
+    perch.renew();
     match anthropic::utilization(host, token) {
         Ok(windows) => Ok(windows),
         Err(Refused::Rejected) => Err(Turned::Away),
@@ -396,6 +432,34 @@ fn only_off_a_credential_that_is_theirs(
     let Outcome::Quarantined { why, detail } = &outcome else {
         return outcome;
     };
+    // A Switch onto this Account that was written down and never recorded. Its
+    // Credential was copied into the Default Profile and is live there, so a
+    // Claude Code Renewal may have Rotated it — which retires the copy still
+    // sitting in this Account's own Profile, the very copy this reading asked
+    // with. The refusal is then evidence about a Credential that has been
+    // superseded rather than about an Account that is broken, and a Quarantine
+    // is permanent until a browser login clears it.
+    //
+    // Before the `its_own_profile` short-circuit rather than after, because
+    // during a Landing `holding` reads *both* halves out of their own Profiles
+    // — nothing is settled, so neither is the active one — and that arm is the
+    // one that lets a terminal verdict straight through.
+    if asked.arriving_in_a_landing {
+        let how = match detail {
+            Some(detail) => format!(" ({detail})"),
+            None => String::new(),
+        };
+        return Outcome::Failed(format!(
+            "the Credential in this Account's own Profile could not be used — \
+             {}{how} — but a Switch onto it is in flight and was never \
+             recorded, so the working copy may be the live one. Nothing was \
+             recorded against this Account. `perch switch {}` settles that and \
+             says which it was.",
+            why.because(),
+            account.email(),
+        ));
+    }
+
     if asked.its_own_profile || names(host, &asked.store, account, installed) {
         return outcome;
     }
@@ -434,6 +498,10 @@ struct Asked {
     store: Store,
     /// Whether this is the Account's own Profile rather than the Default one.
     its_own_profile: bool,
+    /// Whether a Switch onto this Account is in flight and not yet recorded, so
+    /// the copy being asked with may have been overtaken by a Rotation of the
+    /// live one (ADR 0048).
+    arriving_in_a_landing: bool,
     /// Every configuration directory a client could be holding this Account's
     /// Credential from, which is what a Renewal has to be refused against.
     ///
@@ -485,12 +553,18 @@ fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<As
             in_use_from: vec![store.config_dir.clone(), its_own_profile],
             store,
             its_own_profile: false,
+            arriving_in_a_landing: false,
         })
     } else {
         Ok(Asked {
             in_use_from: vec![its_own_profile],
             store: account.store(host)?,
             its_own_profile: true,
+            arriving_in_a_landing: matches!(
+                registry.active(),
+                registry::Active::Landing { arriving, .. }
+                    if registry::same_name(arriving, account.email())
+            ),
         })
     }
 }
@@ -526,7 +600,12 @@ struct Asking {
 
 /// An access token that can still be asked a question, renewing the Credential
 /// when the one there is has run out.
-fn usable_token(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<Asking> {
+fn usable_token(
+    host: &dyn Host,
+    perch: &mut Held<'_>,
+    asked: &Asked,
+    installed: &Installed,
+) -> Step<Asking> {
     let credential = credential_in(host, asked, installed)?;
     if credential.usable_at(host.now()) {
         return Ok(Asking {
@@ -539,7 +618,7 @@ fn usable_token(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<A
     // be renewed says so without queuing behind anything, and asked again
     // under them, where the answer is the one that counts.
     refuse_if_live(host, asked, installed)?;
-    renew_under_the_lock(host, asked, installed, Because::ItSaysItRanOut)
+    renew_under_the_lock(host, perch, asked, installed, Because::ItSaysItRanOut)
 }
 
 /// Refuses to renew a Credential something else is holding (ADR 0005).
@@ -599,12 +678,14 @@ fn credential_in(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<
 /// Perch waited for it may have renewed the very Credential Perch was about to.
 fn renew_under_the_lock(
     host: &dyn Host,
+    perch: &mut Held<'_>,
     asked: &Asked,
     installed: &Installed,
     because: Because,
 ) -> Step<Asking> {
     let store = &asked.store;
     lock::under(host, probe::locks_for(store), |held| {
+        let mut holds = lock::Holds::of(held, perch);
         // Both of the questions asked before the locks were taken, asked again
         // now that nothing can change the answer underneath Perch.
         refuse_if_live(host, asked, installed)?;
@@ -641,21 +722,20 @@ fn renew_under_the_lock(
         // somebody else may take over — and the takeover is then discovered
         // afterwards, when the Rotation has already happened.
         //
-        // Claude Code's lock alone, and not Perch's, which is why this is not
-        // the [`crate::lock::Holds`] pair a Switch uses. The registry hold is
-        // renewed once per Account above and goes stale in ninety seconds
-        // rather than ten, and what it is protecting here is the write of the
-        // *figures* — a Credential that Rotated is written under this lock, not
-        // that one. So a round trip long enough to lose it costs the reading
-        // and says so, through `not_kept`, rather than costing a Credential.
-        held.renew();
-
-        // Anthropic may Rotate here. Everything after this line is Perch making
-        // sure the Rotation is not lost.
-        let renewal = anthropic::renew(host, &refresh_token);
+        // Both holds rather than Claude Code's alone (the [`crate::lock::Holds`]
+        // pair a Switch uses), because both are running out under the same
+        // request. Claude Code's is the expensive one to lose — a Credential
+        // that Rotated is written under it — and Perch's is the one that
+        // decides whether anything read on this command is written down at
+        // all: lost here, the figures *and* every Quarantine the rest of the
+        // Group turns up are discarded together, which is a reason discovered
+        // again at a browser round trip each.
+        //
+        // Anthropic may Rotate inside `around`. Everything after it is Perch
+        // making sure the Rotation is not lost.
+        let renewal = holds.around(|| anthropic::renew(host, &refresh_token));
         let fresh = renewal.map_err(not_renewed)?;
 
-        held.renew();
         let rotated = probe::credential_after_rotation(
             &credential,
             &fresh.access_token,
@@ -748,7 +828,7 @@ const RATE_LIMITED: &str = "Anthropic is rate-limiting Perch, so nothing about \
 /// having spent quota it never spent, which is the evidence a Cycle ranks on.
 fn confirm(host: &dyn Host, token: &str, account: &Account) -> std::result::Result<(), Turned> {
     match anthropic::whose(host, token) {
-        Ok(Some(email)) if !registry::same_name(&email, account.email()) => {
+        Ok(email) if !registry::same_name(&email, account.email()) => {
             Err(Turned::Settled(Outcome::Failed(format!(
                 "the Credential Perch would ask with belongs to {email} rather \
                  than to {}, so no figure was recorded against it.",
@@ -771,7 +851,17 @@ fn confirm(host: &dyn Host, token: &str, account: &Account) -> std::result::Resu
         // under another's — the plausible wrong answer ADR 0019 says this
         // design cannot afford, arriving on the day Anthropic has a bad
         // afternoon.
-        Err(Refused::Unrecognized(_)) => Ok(()),
+        Err(Refused::Unrecognized(drift)) => {
+            // Said rather than swallowed. The carve-out is deliberate, but a
+            // guard that has switched itself off is worth one line: an endpoint
+            // that renames a field turns this check into a no-op for every
+            // Account for ever, and silence makes that indistinguishable from
+            // the check passing. Once, which is what `note` is for — it is a
+            // remark about the shape of Anthropic's replies rather than about
+            // this Account.
+            host.note(&Refused::Unrecognized(drift).to_string());
+            Ok(())
+        }
         Err(why) => Err(Turned::Settled(getting_ready_refused(why))),
     }
 }

@@ -457,3 +457,74 @@ fn a_credential_that_may_be_somebody_elses_quarantines_nobody() {
         "its own copy is still there to switch back to"
     );
 }
+
+/// The half of a Landing that is *arriving* is asked about with the copy in its
+/// own Profile — and that copy is the one a Rotation of the live one retires.
+///
+/// A Switch writes the Landing down, copies the arriving Account's Credential
+/// into the Default Profile, and is killed before it records anything. That
+/// Credential is now live, and a Claude Code Renewal against it may Rotate —
+/// which retires the copy still sitting in the arriving Account's own Profile.
+/// A Refresh then reads that Profile, is turned down, and used to write a
+/// Quarantine that only a browser login clears, against an Account whose
+/// working Credential was live on the same machine the whole time.
+///
+/// `holding` reads *both* halves out of their own Profiles during a Landing —
+/// nothing is settled, so neither is the active one — so the `its_own_profile`
+/// arm of the ADR 0019 guard let the terminal verdict straight through.
+#[test]
+fn a_switch_in_flight_is_not_evidence_that_the_account_arriving_is_broken() {
+    let host = machine_with_two_accounts();
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    // The copy in the arriving Account's own Profile, overtaken by a Rotation
+    // of the live one: it has to renew before it can be read, and the refresh
+    // token it renews with is the retired one.
+    let second = store_of(&host, SECOND_EMAIL);
+    host.set_keychain_item(&second.keychain_service, LOGIN_NAME, SPENT);
+    let host = host.with_reply(TOKEN_URL, 401, RETIRED);
+    host.forget_effects();
+
+    let (result, printed) = run_list_refresh(&host, false);
+
+    result.expect("a refresh degrades the display rather than failing it (ADR 0018)");
+    assert_eq!(
+        quarantine_of(&host, SECOND_EMAIL),
+        None,
+        "nothing terminal is recorded against an Account whose working \
+         Credential may be the live one: {printed}"
+    );
+    assert!(
+        printed.contains("in flight"),
+        "and the Landing is named as the reason nothing was recorded: {printed}"
+    );
+}
+
+/// A Quarantine reports the machine-readable reason and the failure underneath
+/// as two keys, because they are two facts.
+///
+/// `detail` means the same thing everywhere Perch says it — "whatever the
+/// failure underneath said" — and the refresh report put the *reason* there
+/// instead. So a script read `outcome: "quarantined"` beside `detail:
+/// "renewal-rejected"`, which is the outcome again in a second spelling, while
+/// the one thing the key promises was sitting unread in the value the human line
+/// prints.
+#[test]
+fn a_quarantine_in_json_carries_the_reason_and_the_failure_underneath_apart() {
+    let host = about_to_renew(SPENT).with_reply(TOKEN_URL, 401, RETIRED);
+
+    let (result, printed) = run_status_refresh(&host, true);
+
+    result.expect("a refresh degrades the display rather than failing it");
+    let document: serde_json::Value = serde_json::from_str(&printed).expect("valid JSON");
+    let attempt = &document["refresh"]["accounts"][0];
+    assert_eq!(attempt["outcome"], "quarantined");
+    assert_eq!(
+        attempt["reason"], "renewal-rejected",
+        "the reason a script branches on: {printed}"
+    );
+    assert_ne!(
+        attempt["detail"], attempt["reason"],
+        "and `detail` is the failure underneath rather than the reason again: \
+         {printed}"
+    );
+}

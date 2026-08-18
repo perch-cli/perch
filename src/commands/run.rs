@@ -39,6 +39,7 @@ use crate::commands;
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::registry::{self, Registry};
+use crate::switch;
 use crate::{carry, probe, reconcile, target};
 
 #[derive(Debug, Clone)]
@@ -77,6 +78,12 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     let found = target::resolve_account(&registry, &args.target)?;
     host.note(&found.matched);
     refuse_a_quarantined_account(&registry, &found.email)?;
+    // Beside the Quarantine refusal, and for a reason of the same size: a
+    // Profile two Accounts share holds one Credential, so the client this
+    // launches runs as whichever of them is in it — while the line above it has
+    // just named the other. A Switch refuses this; a Run reached the same
+    // directory by another route and did not.
+    switch::refuse_a_shared_profile(registry.held(&found.email)?, &registry)?;
 
     // Settled before anything is linked. Where this is the Claude Code the probe
     // has to find, a machine without one is a refusal that should cost the
@@ -85,25 +92,57 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     let launch = what_to_launch(host, &args.command)?;
     let profile = registry::profile_dir_for(host, &found.email)?;
     let default_profile = registry::the_default_profile(host)?;
+
+    // Claimed before anything is linked rather than immediately before the
+    // launch (ADR 0027). Reconcile and Carry are both filesystem-bound over a
+    // whole Profile, and until the Marker exists nothing on the machine knows
+    // this Run is happening: a `perch remove` in another terminal asks whether
+    // the Profile is Live, is told no — twice, both times before this Marker
+    // was written — and then deletes the Credential and the directory while
+    // this command is still linking into it. What starts is a client pointed at
+    // an empty configuration directory, asking its user to log in, which is the
+    // state `refuse_a_quarantined_account` above exists to prevent.
+    //
+    // Nothing is lost by claiming early. The `Claim` takes its Marker back when
+    // it drops, so a Run that fails between here and the launch leaves nothing
+    // behind — which is what "the marker cannot outlive a Run that never
+    // started" asked for, and it was the ordering rather than the Drop that
+    // used to be relied on.
+    let _live = probe::claim(host, &profile)?;
+
     reconcile::reconcile(host, &default_profile.config_dir, &profile)?;
 
     // The one file Reconcile cannot link, because it holds the Account as well
     // as the person (ADR 0003). Handled key by key, and afterwards: Reconcile is
     // what makes the Profile a directory at all.
-    carry::carry(host, &registry, &found.email, &default_profile, &profile);
+    // The one reader here that asks whether a Landing is in flight rather than
+    // settling one, and for the reason `perch watcher run`'s opening line asks
+    // (ADR 0055): a Run holds no registry lock by design, and a Switch left in
+    // flight is exactly the state where "who is active" has no answer —
+    // `Active::whose` hands back the Account being *left*, which is the last
+    // thing Perch established rather than anything it knows.
+    let settled = switch::nothing_in_flight(&registry);
 
-    host.note(&launching(&registry, &found.email, &launch.said));
+    carry::carry(
+        host,
+        &registry,
+        &found.email,
+        &default_profile,
+        &profile,
+        settled.as_ref(),
+    );
+
+    host.note(&launching(
+        &registry,
+        &found.email,
+        &launch.said,
+        settled.as_ref(),
+    ));
     // Flushed before the client is handed the terminal. Nothing of Perch's own
     // goes to standard output here, but a command run before this one may have
     // left something in the buffer, and it would be delivered after the output
     // of the thing it was announcing.
     out.flush().map_err(commands::write_failed)?;
-
-    // After the Carry, which will not write into a Live Profile and would
-    // therefore refuse its own Run; and immediately before the launch, with
-    // nothing fallible in between, so the marker cannot outlive a Run that never
-    // started (ADR 0027).
-    let _live = probe::claim(host, &profile)?;
 
     // The environment of this one process, and the whole of what makes the Run
     // a Run.
@@ -279,9 +318,19 @@ pub(crate) fn refuse_a_quarantined_account(registry: &Registry, email: &str) -> 
 /// The second half is the whole point of the command, and the difference from
 /// the command next to it: somebody who typed `run` where they meant `switch`
 /// should be able to see that nothing moved before the client takes the screen.
-fn launching(registry: &Registry, email: &str, said: &str) -> String {
+fn launching(
+    registry: &Registry,
+    email: &str,
+    said: &str,
+    settled: Option<&switch::Settled>,
+) -> String {
     let named = registry.named_for_the_user(email);
-    match registry.active().whose() {
+    // Nothing about who is active where nothing has settled who is active. The
+    // second half of the sentence is the whole point of the command — that
+    // nothing moved — and saying it about the Account a Switch was leaving is
+    // saying it about the one Account it may no longer be true of.
+    let active = settled.and_then(|_| registry.active().whose());
+    match active {
         // Both Accounts are named the way every other command names one, so the
         // sentence that contrasts them does not hand one of them its Alias and
         // take the other's away.

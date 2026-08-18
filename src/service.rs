@@ -484,9 +484,21 @@ pub fn starting(platform: Platform, unit: &Unit, at: Option<&Path>) -> Vec<Drive
         // unit file that did not exist when it last looked. `--now` is what
         // makes an install something that has already happened rather than
         // something that happens next time you log in.
+        //
+        // And `restart` after it, because `enable --now` starts a unit that is
+        // *stopped* and does nothing to one that is already running. Re-running
+        // the install is the documented repair after an Upgrade (ADR 0039), and
+        // there the unit is always already running — so `perch watcher install`
+        // said "Replaced the Service, and it now runs /usr/local/bin/perch"
+        // while the old process image went on running until the next logout.
+        // `binary_for_the_unit` deliberately keeps the path stable for Homebrew
+        // and npm, so `status`' "it names X, which is not there any more" could
+        // never catch it either. May fail: a unit that was not running is
+        // started by `enable --now` above and has nothing left for this to do.
         Platform::Other => vec![
             Driven::must("systemctl", &["--user", "daemon-reload"]),
             Driven::must("systemctl", &["--user", "enable", "--now", UNIT_NAME]),
+            Driven::may_fail("systemctl", &["--user", "restart", UNIT_NAME]),
         ],
         // `/NP` is what keeps a console window off the desktop at every login:
         // it registers the task to run without a stored password, which Windows
@@ -508,7 +520,24 @@ pub fn starting(platform: Platform, unit: &Unit, at: Option<&Path>) -> Vec<Drive
                 args.extend(["/RU", user, "/NP"]);
             }
             args.extend(["/TR", &command, "/F"]);
-            vec![Driven::must("schtasks", &args)]
+            // And run it, because `/Create /SC ONLOGON` registers a trigger and
+            // never starts anything. Without this, `perch watcher install`
+            // printed "it is running now" and a `perch watcher status` a second
+            // later printed "not running" — the two commands contradicting each
+            // other on every fresh Windows install, because `status` asks the
+            // watcher lock and there was nothing holding it until the next
+            // logon.
+            //
+            // `/End` first for the same reason macOS `bootout`s before it
+            // bootstraps: a re-install after an Upgrade is the documented repair
+            // and the task may already be running the old binary. Both may fail
+            // — "not running" is the ordinary case on a first install, and it is
+            // what `/End` is being asked to make true.
+            vec![
+                Driven::must("schtasks", &args),
+                Driven::may_fail("schtasks", &["/End", "/TN", TASK_NAME]),
+                Driven::may_fail("schtasks", &["/Run", "/TN", TASK_NAME]),
+            ]
         }
     }
 }

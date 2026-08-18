@@ -58,6 +58,13 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     say(out, &found.matched)?;
     let account = registry.held(&found.email)?.clone();
 
+    // Asked before the login rather than after, like everything else here: a
+    // repair that writes the fresh Credential into a store another Account is
+    // also kept in destroys that Account's refresh token, which is the one loss
+    // ADR 0006 calls unrecoverable — and it would do it after the browser round
+    // trip, having already told the user this was the way back.
+    switch::refuse_a_shared_profile(&account, &registry)?;
+
     // Asked before the login rather than after: a Profile Perch may not write
     // to is one no browser round trip was going to repair (ADR 0005).
     let installed = Installed::probed(host)?;

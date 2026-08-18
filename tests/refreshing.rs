@@ -692,6 +692,41 @@ fn a_profile_reply_this_build_does_not_recognize_still_lets_the_figures_be_read(
     assert!(!cached_windows(&host, EMAIL).is_empty());
 }
 
+/// And a profile reply that *parses* but names nobody is the same thing, said
+/// out loud rather than swallowed.
+///
+/// The carve-out is deliberate — drift is no evidence either way — but a guard
+/// that has switched itself off is worth one line. `email_in` folded "the reply
+/// named nobody" together with "the reply is not the shape Perch believes in"
+/// and answered `None` to both, which `confirm` read as permission to cache. So
+/// the day Anthropic renames `email_address`, the ADR 0019 check becomes a
+/// no-op for every Account, for ever, with nothing printed anywhere — which is
+/// strictly worse than the outage the test above is about, because an outage
+/// ends and a rename does not.
+#[test]
+fn a_profile_reply_that_names_nobody_says_the_ownership_check_is_passing_everything() {
+    let host = machine_with_two_accounts();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
+    // Valid JSON, and none of the fields Perch knows to read an address out of.
+    let host = host
+        .with_reply_to(PROFILE_URL, FRESH_TOKEN, 200, r#"{"account":{"mail":"x"}}"#)
+        .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE);
+    host.forget_effects();
+
+    let (result, printed) = run_status_refresh(&host, false);
+
+    result.expect("the command answers");
+    assert!(
+        printed.contains("42%"),
+        "the figures are still read: {printed}"
+    );
+    let noted = host.notes().join("\n");
+    assert!(
+        noted.contains("email address"),
+        "and the guard says it is passing everything through: {noted}"
+    );
+}
+
 /// Whoever was holding Claude Code's lock while Perch waited for it may have
 /// renewed the very Credential Perch was about to renew. So the Credential is
 /// read again once the lock is held, and a Rotation that has already happened

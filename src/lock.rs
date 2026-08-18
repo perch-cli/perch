@@ -419,6 +419,39 @@ pub fn take_all(host: &dyn Host, locks: Vec<LockSpec>) -> Result<Held<'_>> {
     Ok(held)
 }
 
+/// Whether somebody is holding a lock *right now*, without waiting to find out.
+///
+/// The same question [`take`] answers, minus the part that makes it a request:
+/// `mkdir` either creates the directory or does not, and either way the answer
+/// is the one asked for. Taking it properly and giving it straight back would
+/// answer too — but only after four one-second waits, because `Busy` is what
+/// `take` says when it has run out of attempts. That made the *healthy* machine
+/// the slow one: `perch watcher status` on a machine where the Service is
+/// running, which is the machine the command exists for, sat there for four
+/// seconds saying nothing, and a Purge paid the same on its way to the
+/// question.
+///
+/// A stale artifact reads as nobody holding it, which is the same rule `take`
+/// goes by. Nothing is cleared here — that is a takeover, and a takeover is
+/// something a caller asks for by asking to hold the lock.
+///
+/// `None` where the lock could not be asked about at all. That is not
+/// contention and must not be read as it: a parent directory that cannot be
+/// created, an artifact whose time will not be read.
+pub fn is_held(host: &dyn Host, lock: &LockSpec) -> Option<bool> {
+    match host.create_dir_exclusive(&lock.dir) {
+        Ok(()) => {
+            // Given straight back. Nothing was asked for beyond the answer, and
+            // an artifact left behind is a lock nothing else can take until it
+            // goes stale.
+            let _ = host.remove_dir_all(&lock.dir);
+            Some(false)
+        }
+        Err(HostError::AlreadyExists { .. }) => Some(!abandoned(host, lock)),
+        Err(_) => None,
+    }
+}
+
 /// Takes one lock, waiting out a holder that is alive and taking over from one
 /// that is not.
 fn take(host: &dyn Host, lock: &LockSpec) -> Result<()> {

@@ -340,11 +340,17 @@ fn nothing_is_written_while_a_client_is_running_against_that_profile() {
 }
 
 /// The same precondition, read from the other end. A Run makes the Profile it
-/// launches Live (ADR 0027), so a Run that marked itself before Carrying would
-/// meet its own marker and refuse its own write — silently, on every Run,
-/// leaving every first Run of an Account to the onboarding questions.
+/// launches Live (ADR 0027), and it does so *before* it Carries — so the Carry
+/// has to discount the Run's own claim, or it would meet that claim and refuse
+/// its own write, silently, on every Run, leaving every first Run of an Account
+/// to the onboarding questions.
+///
+/// The claim comes first because until the Marker exists nothing on the machine
+/// knows this Run is happening: a `perch remove` in another terminal asks
+/// whether the Profile is Live, is told no, and deletes the directory while
+/// this command is still linking into it.
 #[test]
-fn a_run_carries_before_it_marks_the_profile_live() {
+fn a_run_marks_the_profile_live_before_it_carries_and_carries_anyway() {
     let host = machine();
 
     run_run(&host, SECOND_EMAIL).0.expect("the client ran");
@@ -364,7 +370,11 @@ fn a_run_carries_before_it_marks_the_profile_live() {
         .iter()
         .position(|effect| matches!(effect, Effect::WroteFile(path) if path.starts_with(profile_of(&host, SECOND_EMAIL).join("sessions"))))
         .expect("the Run marked the Profile Live");
-    assert!(carried < marked, "and it wrote before it marked");
+    assert!(
+        marked < carried,
+        "and it marked before it wrote, so nothing else may take the Profile \
+         away while it is being prepared"
+    );
 }
 
 /// A Profile that will not take the write is a remark rather than a refusal:

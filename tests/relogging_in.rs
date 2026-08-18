@@ -846,3 +846,60 @@ fn an_account_removed_while_its_login_was_open_says_the_login_still_worked() {
         "it says the Credential is not lost, and how to keep it: {said}"
     );
 }
+
+/// A machine holding an ordinary active Account and two whose email addresses
+/// derive one Profile between them — `slug` flattens every non-alphanumeric
+/// character, so `some-one@` and `some.one@` name one directory.
+fn machine_holding_the_two_that_share_a_profile() -> FakeHost {
+    let host = logged_in_machine();
+    run_list(&host, false)
+        .0
+        .expect("the first command adopts the login there already is");
+    let mut registry = registry_of(&host);
+    for email in ["some-one@example.com", "some.one@example.com"] {
+        registry.upsert(perch::registry::Account {
+            identity: perch::probe::Identity {
+                email: email.to_string(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            disabled: false,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        });
+    }
+    common::save_registry(&host, &registry);
+
+    let store = store_of(&host, "some-one@example.com");
+    host.set_keychain_item(&store.keychain_service, &store.keychain_account, CREDENTIAL);
+    host
+}
+
+/// A repair of an Account whose Profile is not its alone is refused before the
+/// browser round trip.
+///
+/// `settle_into_its_own_profile` writes the fresh Credential into the shared
+/// store, which supersedes the other Account's — and a retired refresh token is
+/// the one loss ADR 0006 calls unrecoverable. Worse, it would happen *after* the
+/// login, having already told the user this was the way back.
+#[test]
+fn repairing_an_account_whose_profile_is_shared_is_refused_before_the_login() {
+    let host = machine_holding_the_two_that_share_a_profile();
+    host.forget_effects();
+
+    let (result, _) = run_relogin(&host, "some-one@example.com");
+
+    let error = result.expect_err("the repair would destroy the other Account's Credential");
+    assert!(error.to_string().contains("share one Profile"), "{error}");
+    assert!(
+        !host
+            .effects()
+            .iter()
+            .any(|effect| matches!(effect, Effect::Exec { .. })),
+        "and no browser round trip was spent finding that out: {:?}",
+        host.effects()
+    );
+}

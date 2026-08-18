@@ -184,6 +184,56 @@ fn an_installer_installation_runs_the_embedded_installer_at_the_tag() {
 /// — refusing to upgrade the one Channel Perch is able to upgrade itself.
 #[test]
 fn a_windows_installer_installation_is_recognized_where_windows_puts_it() {
+    let host =
+        windows_machine().installed_at("C:\\Users\\someone\\AppData\\Local\\Perch\\bin\\perch.exe");
+
+    let (outcome, _) = upgrading(&host, UpgradeArgs::default());
+
+    outcome.expect("it ran the installer");
+    let launched = ran(&host);
+    assert_eq!(launched.len(), 1);
+    assert_eq!(
+        launched[0].0,
+        "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+    );
+    assert_eq!(
+        launched[0].2,
+        vec![("PERCH_VERSION".to_string(), format!("v{NEWER}"))]
+    );
+}
+
+fn windows_machine() -> perch::host::FakeHost {
+    machine()
+        .with_platform(Platform::Windows)
+        .with_env("LOCALAPPDATA", "C:\\Users\\someone\\AppData\\Local")
+        .with_env("SystemRoot", "C:\\Windows")
+}
+
+/// PowerShell is run by the path Windows says it is at, never by its bare name.
+///
+/// A bare name is searched for in the current working directory before `PATH`,
+/// so `perch upgrade` typed in a downloads folder holding a `powershell.exe`
+/// would run that one — with `-ExecutionPolicy Bypass`, and handed a script
+/// whose whole job is to replace the Perch binary (ADR 0021).
+#[test]
+fn the_installer_is_run_by_the_powershell_windows_says_it_has() {
+    let host =
+        windows_machine().installed_at("C:\\Users\\someone\\AppData\\Local\\Perch\\bin\\perch.exe");
+
+    upgrading(&host, UpgradeArgs::default())
+        .0
+        .expect("it ran the installer");
+
+    assert_eq!(
+        ran(&host)[0].0,
+        "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+    );
+}
+
+/// And a machine that will not say where Windows is gets a refusal rather than
+/// a walk of `PATH`, which is the same answer `curl` gets there.
+#[test]
+fn a_windows_that_does_not_say_where_it_is_installed_runs_no_installer() {
     let host = machine()
         .with_platform(Platform::Windows)
         .with_env("LOCALAPPDATA", "C:\\Users\\someone\\AppData\\Local")
@@ -191,14 +241,9 @@ fn a_windows_installer_installation_is_recognized_where_windows_puts_it() {
 
     let (outcome, _) = upgrading(&host, UpgradeArgs::default());
 
-    outcome.expect("it ran the installer");
-    let launched = ran(&host);
-    assert_eq!(launched.len(), 1);
-    assert_eq!(launched[0].0, "powershell");
-    assert_eq!(
-        launched[0].2,
-        vec![("PERCH_VERSION".to_string(), format!("v{NEWER}"))]
-    );
+    let said = outcome.expect_err("it refused").to_string();
+    assert!(said.contains("SystemRoot"), "{said}");
+    assert!(ran(&host).is_empty(), "nothing was run");
 }
 
 /// Both installers take `PERCH_INSTALL_DIR` above their own default, so a

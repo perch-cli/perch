@@ -23,6 +23,8 @@
 //! logged the user out of the tool they are using would be doing more than
 //! giving the machine back.
 
+use std::path::PathBuf;
+
 use crate::credentials::{self, Forgotten};
 use crate::error::{PerchError, Result};
 use crate::host::Host;
@@ -76,15 +78,10 @@ pub fn refuse_while_anything_is_running(host: &dyn Host, registry: &Registry) ->
     // Named generically, because there is nothing to name them by: a login in
     // progress has no Account yet, and a Profile the registry does not hold has
     // no address Perch can put to the user.
-    let recorded: Vec<std::path::PathBuf> = registry
-        .accounts
-        .iter()
-        .filter_map(|account| account.profile_dir(host).ok())
-        .collect();
     running.extend(
-        everything_perch_holds(host)
+        what_the_registry_does_not_name(host, registry)
             .into_iter()
-            .filter(|dir| !recorded.contains(dir) && probe::anything_running(host, dir))
+            .filter(|dir| probe::anything_running(host, dir))
             .map(|dir| format!("{}, which no Account of Perch's names", dir.display())),
     );
 
@@ -195,21 +192,7 @@ pub fn erase(host: &dyn Host, registry: &Registry) -> Result<Purged> {
 /// have, and a Purge that announced two more than it was asked about would be
 /// answering a question nobody put.
 fn forget_what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) -> Result<()> {
-    // Filtered by the registry, the way `refuse_while_anything_is_running`
-    // filters the same walk. Unfiltered, the loop below re-emptied every store
-    // the loop above had just emptied — so a Purge of five Accounts on macOS
-    // made ten `security delete-generic-password` shell-outs instead of five,
-    // and the function did not do what its name says.
-    let recorded: Vec<std::path::PathBuf> = registry
-        .accounts
-        .iter()
-        .filter_map(|account| account.profile_dir(host).ok())
-        .collect();
-
-    for dir in everything_perch_holds(host) {
-        if recorded.contains(&dir) {
-            continue;
-        }
+    for dir in what_the_registry_does_not_name(host, registry) {
         // The same answer `forget_the_credential` gives, and for its reason: a
         // store that cannot even be named is one whose Credential cannot be
         // deleted, and passing over it would report a machine given back while
@@ -234,6 +217,29 @@ fn forget_what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) 
         empty_the_stores(host, &store)?;
     }
     Ok(())
+}
+
+/// Every directory Perch holds that no Account of its names.
+///
+/// One walk, because the refusal and the deletion have to be looking at the same
+/// set: what `refuse_while_anything_is_running` declines to purge is exactly
+/// what `forget_what_the_registry_does_not_name` then empties, and the two are
+/// only that if they filter the same way. They were written out separately and
+/// had already drifted once over how to answer an unnameable store — this
+/// module's own commentary calls it out ("Perch was refusing to purge a machine
+/// holding Accounts and reporting success on the same machine holding only
+/// their leftovers"), which is the argument for there being one of these rather
+/// than two.
+fn what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) -> Vec<PathBuf> {
+    let recorded: Vec<PathBuf> = registry
+        .accounts
+        .iter()
+        .filter_map(|account| account.profile_dir(host).ok())
+        .collect();
+    everything_perch_holds(host)
+        .into_iter()
+        .filter(|dir| !recorded.contains(dir))
+        .collect()
 }
 
 /// Empties both of a Profile's Credential Stores, and says whether either held

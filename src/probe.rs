@@ -1055,8 +1055,23 @@ impl Unsure {
 /// writing under a client that rewrites the file wholesale on its way out costs
 /// the file.
 pub fn anything_running(host: &dyn Host, config_dir: &Path) -> bool {
+    anything_running_but(host, config_dir, None)
+}
+
+/// The same, discounting one process — which is only ever the caller's own.
+///
+/// A Run claims its Profile before it reconciles and Carries, so that nothing
+/// else may delete the directory out from under a session that is starting
+/// (ADR 0027). That claim is a Marker, and a Marker is what makes a Profile
+/// Live, so the Carry that follows would find the Run's own claim and decline to
+/// write — leaving every Run meeting the onboarding dialog afresh, which is the
+/// one thing the Carry exists to prevent.
+///
+/// Discounting rather than skipping the question: any *other* client is still a
+/// client, and doubt still resolves towards Live.
+pub fn anything_running_but(host: &dyn Host, config_dir: &Path, mine: Option<u32>) -> bool {
     match clients_in(host, config_dir) {
-        Ok(running) => !running.is_empty(),
+        Ok(running) => running.iter().any(|pid| Some(*pid) != mine),
         Err(_) => true,
     }
 }
@@ -1117,7 +1132,7 @@ fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32
 
         match host.process_started_at(pid) {
             Some(process_began) => {
-                if process_began.timestamp_millis() <= session_began {
+                if process_began.timestamp_millis() <= session_began + CLOCK_STEP_MARGIN_MILLIS {
                     running.push(pid);
                 }
             }
@@ -1129,6 +1144,32 @@ fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32
     }
     Ok(running)
 }
+
+/// How far a process may appear to have begun *after* the session it is named
+/// by and still be taken as the one that wrote the Marker.
+///
+/// ADR 0022 corroborates a Marker by comparing two clocks that are supposed to
+/// be one: when the session began, written down by the client, and when the
+/// process began, read back from the operating system. On macOS and Windows the
+/// second of those is fixed at process creation. On Linux it is *recomputed*
+/// every time it is read — `/proc/<pid>/stat` gives the start in ticks since
+/// boot, and the kernel derives `btime` in `/proc/stat` as realtime minus
+/// uptime, so it moves by exactly as much as anything that steps the wall
+/// clock.
+///
+/// So a `perch run` that claimed a Profile, followed by an NTP correction of a
+/// couple of seconds, made its own live process look like one that began after
+/// the session it had just recorded. The Marker was dismissed, the Profile
+/// stopped being Live, and the next Renewal Rotated the Credential the running
+/// client was holding — logging that session out mid-task, which is the whole
+/// of what ADR 0005 and ADR 0022 exist to prevent.
+///
+/// The margin costs nothing in the direction the ordering is *for*. A pid the
+/// operating system has handed out again belongs to a process that started when
+/// the first one had already finished, which is a whole session later rather
+/// than a few seconds; and a doubt resolved towards Live is the way every other
+/// doubt in this function resolves.
+const CLOCK_STEP_MARGIN_MILLIS: i64 = 5_000;
 
 /// What a session marker turned out to be.
 ///

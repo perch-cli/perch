@@ -1440,6 +1440,16 @@ impl port::Files for FakeHost {
             return Err(HostError::Other(detail.clone()));
         }
         self.note_directories_of(path);
+        // Whatever was at the path is taken away first, a link included — the
+        // real one leads with `remove_file` and then `create_new`, and its own
+        // comment calls that the security property: "anything that can write the
+        // directory can unlink this file and leave a link at the same name".
+        //
+        // Left behind, the fake described one path as both a regular file and a
+        // symbolic link, with `read_file` answering the new contents while
+        // `link_target` went on naming somewhere else. `rename` already gets
+        // this right and says why; this is the same sentence at the other write.
+        self.fs.links.borrow_mut().remove(path);
         // A disk that fills partway leaves what fitted behind and then fails,
         // which is the order the real host does it in: open, `write_all`,
         // `sync_all`. A fake that could only refuse before creating anything
@@ -1592,6 +1602,15 @@ impl port::Files for FakeHost {
     fn remove_dir_all(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::RemovedDir(path.to_path_buf()));
         if let Some(detail) = self.fs.undeletable.borrow().get(path) {
+            return Err(HostError::Other(detail.clone()));
+        }
+        // A directory that will not be walked cannot be removed either, which
+        // `with_unlistable_dir`'s own doc says — "`remove_dir_all` and the
+        // listing both fail EACCES" — and only `list_dir` was reading it. There
+        // is no machine where a directory refuses `opendir` and then disappears
+        // under a recursive remove, because the remove has to `opendir` first;
+        // a recovery path proved green against that pair would not run on one.
+        if let Some(detail) = self.fs.unlistable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
         // A link at the path is taken away and what it points at is left

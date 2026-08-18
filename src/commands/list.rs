@@ -197,7 +197,13 @@ pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
     let report = match &mut perch {
         Some(perch) => {
             let asking_about = scope.emails(&registry);
-            observe::refresh(host, perch, &mut registry, &asking_about)
+            observe::refresh(
+                host,
+                perch,
+                &mut registry,
+                &asking_about,
+                &crate::probe::Installed::probed(host),
+            )
         }
         // Nothing to report about a refresh nobody asked for: the empty report
         // renders as "nobody asked".

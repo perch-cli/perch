@@ -105,6 +105,25 @@ fn curl_config(request: &HttpRequest<'_>) -> Result<String, HostError> {
     }
     if let Some(body) = request.body {
         super::inert("the request body", body)?;
+        // And `curl`'s own escape, which quoting does not disarm: the
+        // configuration parser strips the quotes and *then* the option parser
+        // reads a leading `@` in `data-binary` as "the rest of this is a
+        // filename". `curl` would post the contents of that file instead of the
+        // body, or fail naming a path — either way sending something Perch did
+        // not compose to an endpoint it authenticates to.
+        //
+        // Not reachable today: every body Perch posts is a JSON object and
+        // starts with `{`. Here because `inert`'s own reasoning applies exactly
+        // — "Perch does not author most of what goes through here" — and it
+        // produced a guard against newlines alone. Only the body, because `@`
+        // means nothing to `url` or to `header`.
+        if body.starts_with('@') {
+            return Err(HostError::Other(
+                "the request body begins with `@`, which curl reads as a \
+                 filename rather than as data"
+                    .to_string(),
+            ));
+        }
     }
 
     // Whole seconds, because that is the only unit `curl` takes here, and at
@@ -1582,6 +1601,11 @@ fn process_alive(pid: u32) -> bool {
     if pid <= 0 {
         return false;
     }
+    // SAFETY: `kill` takes no pointer and touches no memory Perch owns. Signal
+    // `0` sends nothing at all — it is the "does this pid exist, and may I
+    // signal it" query — and the two guards above are what make the argument a
+    // pid rather than one of the values `kill` reads as a *group*: `0` is the
+    // caller's own process group and `-1` is every process it may signal.
     if unsafe { libc::kill(pid, 0) } == 0 {
         return true;
     }
@@ -1971,6 +1995,31 @@ mod tests {
                 "{}\noutput = /tmp/taken"
             ))
             .is_err()
+        );
+    }
+
+    /// `curl`'s own escape, which quoting does not disarm: the configuration
+    /// parser strips the quotes and the option parser then reads a leading `@`
+    /// in `data-binary` as a filename. `curl` would post that file's contents
+    /// to an endpoint Perch authenticates to, or fail naming a path.
+    #[test]
+    fn a_body_that_curl_would_read_as_a_filename_is_refused() {
+        let refused = curl_config(&HttpRequest::post(
+            "https://example.test/token",
+            &[],
+            "@/etc/passwd",
+        ));
+
+        let said = refused.expect_err("that is a filename to curl, not data");
+        assert!(said.to_string().contains("filename"), "{said}");
+        // Only the body: `@` is data to `url` and to `header`, and refusing it
+        // there would be a rule about nothing.
+        assert!(
+            curl_config(&HttpRequest::get(
+                "https://example.test/usage",
+                &[("X-Thing", "@value")]
+            ))
+            .is_ok()
         );
     }
 }

@@ -54,9 +54,27 @@ impl From<std::process::Output> for Execution {
     fn from(output: std::process::Output) -> Execution {
         Execution {
             status: output.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            stdout: taken_over(output.stdout),
+            stderr: taken_over(output.stderr),
         }
+    }
+}
+
+/// A child's output as a `String`, moving the buffer where it can.
+///
+/// `String::from_utf8_lossy(..).into_owned()` allocates and copies even when the
+/// bytes are already valid UTF-8, which they are for every program Perch runs.
+/// This takes the `Vec` the child's output already is and hands it straight over
+/// in that case, falling back to the lossy read only where it has to.
+///
+/// The copy was worth removing for more than its cost. `security find-generic-password`
+/// answers with a Credential on stdout, so the copy was a second buffer holding
+/// a refresh token that nothing wipes and nothing reads again — one more place
+/// for it to outlive the process in a core dump or a swap file.
+fn taken_over(bytes: Vec<u8>) -> String {
+    match String::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(not_utf8) => String::from_utf8_lossy(not_utf8.as_bytes()).into_owned(),
     }
 }
 
@@ -938,5 +956,24 @@ mod tests {
         write_atomically(&host, Path::new(PATH), "{\"a\":1}").expect("it is written");
 
         assert_eq!(host.file(real).as_deref(), Some("{\"a\":1}"));
+    }
+
+    /// A child's output is the buffer it already is wherever it can be, and the
+    /// lossy read only where it has to be.
+    ///
+    /// `security find-generic-password` answers with a Credential on stdout, so
+    /// the copy this avoids was a second heap buffer holding a refresh token
+    /// that nothing wipes — and the fallback still has to hand back *something*
+    /// for a reply that is not UTF-8, because a caller that got no answer would
+    /// read it as a store holding nothing.
+    #[test]
+    fn the_output_of_a_child_is_taken_over_where_it_is_already_text() {
+        assert_eq!(
+            taken_over(b"sk-ant-oat01-test".to_vec()),
+            "sk-ant-oat01-test"
+        );
+        assert_eq!(taken_over(Vec::new()), "");
+        // A lone continuation byte, which no UTF-8 string holds.
+        assert_eq!(taken_over(vec![b'a', 0x80, b'b']), "a\u{fffd}b");
     }
 }

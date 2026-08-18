@@ -184,9 +184,11 @@ while every other Account is still read. `--json` carries the same under
 `perch status --json` and `perch list [<scope>] --json` carry the same
 information, with an observation time on every figure. Neither makes a network
 call without `--refresh`. `quarantined` is `null` for an Account that works and
-an object — `reason` and `detail` — for one that does not, so a script asking
+an object — `reason` and `said` — for one that does not, so a script asking
 whether it is set reads the same answer it always did and now gets the reason
-with it.
+with it. `said` is that same reason as a sentence, one per `reason` rather than
+a second fact: what broke underneath is in the line Perch prints and is not
+something the registry records.
 
 Each document answers its own command's question, so the two shapes differ:
 `perch status --json` answers about one Account under `active`, and the listing

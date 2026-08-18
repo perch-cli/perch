@@ -153,9 +153,12 @@ fn installing_writes_a_unit_and_starts_it_through_the_service_manager() {
         vec![
             "systemctl --user daemon-reload",
             "systemctl --user enable --now perch-watch.service",
+            "systemctl --user restart perch-watch.service",
         ],
-        "reloaded before it is asked about a unit that is new, and started now \
-         rather than at the next login"
+        "reloaded before it is asked about a unit that is new, started now \
+         rather than at the next login — and restarted, because `enable --now` \
+         starts a stopped unit and does nothing to a running one, which is the \
+         state re-installing after an Upgrade is always in"
     );
     assert!(printed.contains("log in"), "{printed}");
 }
@@ -331,6 +334,51 @@ fn a_carried_value_a_scheduled_task_cannot_quote_is_refused_on_windows() {
             "and nothing was registered: {refusal}"
         );
     }
+}
+
+/// Installing on Windows starts the task, rather than only registering the
+/// trigger that would start it at the next logon.
+///
+/// `schtasks /Create /SC ONLOGON` writes a trigger and runs nothing, while the
+/// sentence `install` prints is "It starts when you log in, and it is running
+/// now." A `perch watcher status` a second later asks the watcher lock, finds
+/// nothing holding it, and prints "not running" — the two commands
+/// contradicting each other on every fresh install. `/End` first for the reason
+/// macOS `bootout`s before it bootstraps: a re-install after an Upgrade is the
+/// documented repair, and the task may already be running the old binary.
+#[test]
+fn installing_on_windows_starts_the_task_rather_than_only_registering_it() {
+    let host = watched().with_platform(Platform::Windows);
+    // `schtasks /Create` carries a command built out of this machine's own
+    // paths, so the only honest way to arrange an answer for it is to let the
+    // install say what it would run — the same trick the test above uses.
+    let _ = run_service(&host, WatcherCommand::Install);
+    for effect in host.effects() {
+        if let Effect::Exec { program, args } = effect {
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            host.set_exec(&program, &args, worked());
+        }
+    }
+    host.forget_effects();
+
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
+
+    result.expect("the service manager answered");
+    // The `/Query` that asks whether one is already registered comes first and
+    // is not part of the install; these three are.
+    let driven = ran(&host);
+    let registered = driven
+        .iter()
+        .position(|line| line.contains("/Create"))
+        .expect("it registers the task");
+    assert_eq!(
+        &driven[registered + 1..],
+        [
+            r"schtasks /End /TN Perch\Watch".to_string(),
+            r"schtasks /Run /TN Perch\Watch".to_string(),
+        ],
+        "{driven:?} — {printed}"
+    );
 }
 
 /// A unit Perch did not write is one it declines to make claims about rather
@@ -555,6 +603,41 @@ fn status_tells_an_installed_service_apart_from_a_watcher_that_is_running() {
     assert_eq!(
         reported["watching"], true,
         "the lock is what a Watcher holds, and what says one is running: {said}"
+    );
+}
+
+/// And it answers at once, which is the whole difference between asking whether
+/// a lock is held and asking to hold it.
+///
+/// `status` used to answer by taking the watcher lock and giving it back, and
+/// the only way to get a refusal out of `take` is to sit through its four
+/// one-second waits. So the *healthy* machine was the slow one — a Service
+/// running is the machine this command exists for — and it printed nothing at
+/// all for four seconds. A Purge paid the same on its way to the same question.
+#[test]
+fn status_asks_whether_a_watcher_holds_the_lock_rather_than_waiting_for_it() {
+    let host = linux();
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("installed");
+    let _held = perch::lock::take_all(
+        &host,
+        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+    )
+    .expect("the lock is free");
+    host.forget_effects();
+
+    let (_, said) = run_service(&host, WatcherCommand::Status { json: true });
+
+    let reported: serde_json::Value = serde_json::from_str(&said).expect("it is JSON");
+    assert_eq!(reported["watching"], true, "{said}");
+    assert!(
+        !host
+            .effects()
+            .iter()
+            .any(|effect| matches!(effect, Effect::Slept { .. })),
+        "and nothing waited on it: {:?}",
+        host.effects()
     );
 }
 

@@ -76,7 +76,17 @@ pub fn carry(
     email: &str,
     default_profile: &Store,
     into: &Path,
+    settled: Option<&crate::switch::Settled>,
 ) {
+    // Where an Account's state lives depends on whether it is the active one,
+    // and during a Landing nothing is (ADR 0048): `is_active` answers with the
+    // Account being *left*, so `where_it_works` would look for its state in the
+    // Default Profile off a claim the registry has not made. Doing nothing is
+    // an ordinary outcome here and costs a dialog, which is the cheaper of the
+    // two answers.
+    if settled.is_none() {
+        return;
+    }
     let destination = probe::identity_file_in(into);
     let Some(mine) = read(host, &destination) else {
         return;
@@ -86,7 +96,12 @@ pub fn carry(
     // Run path's business alone: a client holds this file open and rewrites it
     // wholesale on its way out, so a Profile with one running is a Profile
     // Perch has nothing useful to say about.
-    if probe::anything_running(host, into) {
+    //
+    // Discounting this process, because the Run has already claimed the Profile
+    // by the time it Carries: the claim is what stops another `perch` deleting
+    // the directory out from under a session that is starting, and read as an
+    // ordinary client it would decline every Carry there is.
+    if probe::anything_running_but(host, into, Some(host.process_id())) {
         return;
     }
 
@@ -98,7 +113,9 @@ pub fn carry(
         return;
     };
 
-    let patched = crossed(host, &theirs, mine.clone());
+    let Some(patched) = crossed(host, &theirs, &mine) else {
+        return;
+    };
     if patched == mine {
         return;
     }
@@ -117,7 +134,13 @@ pub fn carry(
     // Doing nothing is the ordinary outcome here, so this is a quiet skip like
     // every other reason not to write: nothing carried costs a dialog, and a
     // broken file costs the Account.
-    if serde_json::from_str::<serde_json::Value>(&patched).is_err() {
+    //
+    // Read for its shape and not for its contents: `IgnoredAny` walks the
+    // document and builds nothing, where a `Value` builds the whole tree —
+    // every map, every string, every entry of `projects` that just crossed —
+    // and drops it on the next line. The question asked is "is this JSON", and
+    // that is the reader that answers exactly it.
+    if serde_json::from_str::<serde::de::IgnoredAny>(&patched).is_err() {
         return;
     }
     // Said rather than swallowed, and said rather than raised. Somebody whose
@@ -134,23 +157,29 @@ pub fn carry(
 }
 
 /// `mine` with every key that crosses taken from `theirs`, and every other byte
-/// of it as it was.
+/// of it as it was — or nothing where no key crossed.
 ///
 /// Each key is a bounded read and a bounded write of its own: the value is
 /// found as a span of text and spliced in ([`crate::json`]), so nothing outside
 /// the keys named here is reformatted, reordered or read at all. The file is
 /// never parsed and never written back wholesale.
-fn crossed(host: &dyn Host, theirs: &str, mine: String) -> String {
-    let mut patched = mine;
+///
+/// `Option` rather than a `String` that may equal what went in, so the ordinary
+/// case — a source holding none of these keys — costs no copy of the
+/// destination at all. It used to be handed one, which meant every Run cloned
+/// the file whether or not anything was going to cross it.
+fn crossed(host: &dyn Host, theirs: &str, mine: &str) -> Option<String> {
+    let mut patched: Option<String> = None;
     for key in PERSON_KEYS {
         let Some(value) = json::value_at(theirs, key) else {
             continue;
         };
-        if let Some(written) = json::set_value_at(&patched, key, value) {
-            patched = written;
+        let against = patched.as_deref().unwrap_or(mine);
+        if let Some(written) = json::set_value_at(against, key, value) {
+            patched = Some(written);
         }
     }
-    project_entry(host, theirs, patched)
+    project_entry(host, theirs, patched, mine)
 }
 
 /// The same for `projects[<current working directory>]`, which is one entry of
@@ -159,7 +188,12 @@ fn crossed(host: &dyn Host, theirs: &str, mine: String) -> String {
 /// Only the directory the Run was typed in. The rest of `projects` is every
 /// other repository the person has ever opened, and an Account does not need
 /// the tool approvals of work it is not doing.
-fn project_entry(host: &dyn Host, theirs: &str, patched: String) -> String {
+fn project_entry(
+    host: &dyn Host,
+    theirs: &str,
+    patched: Option<String>,
+    mine: &str,
+) -> Option<String> {
     let Ok(here) = host.current_dir() else {
         return patched;
     };
@@ -171,14 +205,15 @@ fn project_entry(host: &dyn Host, theirs: &str, patched: String) -> String {
         return patched;
     };
 
+    let against = patched.as_deref().unwrap_or(mine);
     // A Profile that has never been run holds no `projects` at all, which is an
     // empty one for this purpose: the entry is written into it and the key
     // comes into being with it.
-    let held = json::value_at(&patched, PROJECTS).unwrap_or("{}");
+    let held = json::value_at(against, PROJECTS).unwrap_or("{}");
     let Some(projects) = json::set_value_at(held, &here, entry) else {
         return patched;
     };
-    json::set_value_at(&patched, PROJECTS, &projects).unwrap_or(patched)
+    json::set_value_at(against, PROJECTS, &projects).or(patched)
 }
 
 /// The identity file a Run copies from: the most recently used one holding
