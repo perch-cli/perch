@@ -398,15 +398,41 @@ impl Environment for RealHost {
     }
 }
 
+/// A syscall's "no such file" as [`HostError::NotFound`], naming the path it was
+/// asked about; anything else as itself.
+///
+/// Written once because it was written nine times. Every `Files` and `Links`
+/// method that reads something has the same three arms — the value, the missing
+/// file, the rest — and nine copies of a classification is how a tenth call
+/// comes to disagree with the nine about what "not there" is. The distinction
+/// matters to callers: `HostError::NotFound` is the one `credentials` reads as
+/// "this store holds nothing" rather than as a machine that is broken.
+fn or_not_found<T>(result: std::io::Result<T>, path: &Path) -> Result<T, HostError> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(HostError::NotFound {
+            path: path.to_path_buf(),
+        }),
+        Err(err) => Err(HostError::Io(err)),
+    }
+}
+
+/// The same three arms where a missing file is not a failure at all: `None`.
+///
+/// What every removal here wants, since a path that is already gone is the state
+/// the caller asked for — and what the two `remove_link`s want one step earlier,
+/// where the question is whether there is anything to inspect before removing.
+fn if_it_is_there<T>(result: std::io::Result<T>) -> Result<Option<T>, HostError> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(HostError::Io(err)),
+    }
+}
+
 impl Files for RealHost {
     fn read_file(&self, path: &Path) -> Result<String, HostError> {
-        match std::fs::read_to_string(path) {
-            Ok(contents) => Ok(contents),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(HostError::NotFound {
-                path: path.to_path_buf(),
-            }),
-            Err(err) => Err(HostError::Io(err)),
-        }
+        or_not_found(std::fs::read_to_string(path), path)
     }
 
     fn create_file_with_mode(
@@ -442,15 +468,7 @@ impl Files for RealHost {
     }
 
     fn file_mode(&self, path: &Path) -> Result<Option<u32>, HostError> {
-        let metadata = match std::fs::metadata(path) {
-            Ok(metadata) => metadata,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                return Err(HostError::NotFound {
-                    path: path.to_path_buf(),
-                });
-            }
-            Err(err) => return Err(HostError::Io(err)),
-        };
+        let metadata = or_not_found(std::fs::metadata(path), path)?;
         Ok(mode_of(&metadata))
     }
 
@@ -472,11 +490,7 @@ impl Files for RealHost {
     }
 
     fn remove_dir_all(&self, path: &Path) -> Result<(), HostError> {
-        match std::fs::remove_dir_all(path) {
-            Ok(()) => Ok(()),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(HostError::Io(err)),
-        }
+        if_it_is_there(std::fs::remove_dir_all(path)).map(|_| ())
     }
 
     fn create_dir_exclusive(&self, path: &Path) -> Result<(), HostError> {
@@ -492,13 +506,11 @@ impl Files for RealHost {
     }
 
     fn modified_at(&self, path: &Path) -> Result<DateTime<Utc>, HostError> {
-        match std::fs::metadata(path).and_then(|metadata| metadata.modified()) {
-            Ok(modified) => Ok(DateTime::<Utc>::from(modified)),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(HostError::NotFound {
-                path: path.to_path_buf(),
-            }),
-            Err(err) => Err(HostError::Io(err)),
-        }
+        let modified = or_not_found(
+            std::fs::metadata(path).and_then(|metadata| metadata.modified()),
+            path,
+        )?;
+        Ok(DateTime::<Utc>::from(modified))
     }
 
     fn touch(&self, path: &Path) -> Result<(), HostError> {
@@ -514,23 +526,11 @@ impl Files for RealHost {
     }
 
     fn remove_file(&self, path: &Path) -> Result<(), HostError> {
-        match std::fs::remove_file(path) {
-            Ok(()) => Ok(()),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(HostError::Io(err)),
-        }
+        if_it_is_there(std::fs::remove_file(path)).map(|_| ())
     }
 
     fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>, HostError> {
-        let entries = match std::fs::read_dir(path) {
-            Ok(entries) => entries,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                return Err(HostError::NotFound {
-                    path: path.to_path_buf(),
-                });
-            }
-            Err(err) => return Err(HostError::Io(err)),
-        };
+        let entries = or_not_found(std::fs::read_dir(path), path)?;
 
         let mut found = Vec::new();
         for entry in entries {
@@ -550,15 +550,7 @@ impl Links for RealHost {
     /// stay three: a link, something that is not a link, and nothing there.
     /// `read_link` collapses the last two into one error.
     fn link_target(&self, path: &Path) -> Result<Option<PathBuf>, HostError> {
-        let metadata = match std::fs::symlink_metadata(path) {
-            Ok(metadata) => metadata,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                return Err(HostError::NotFound {
-                    path: path.to_path_buf(),
-                });
-            }
-            Err(err) => return Err(HostError::Io(err)),
-        };
+        let metadata = or_not_found(std::fs::symlink_metadata(path), path)?;
         if !metadata.file_type().is_symlink() {
             return Ok(None);
         }
@@ -1193,22 +1185,16 @@ fn make_link(kind: Link, target: &Path, at: &Path) -> Result<(), HostError> {
 /// from one, so a check like this would be wrong there and is right here.
 #[cfg(not(windows))]
 fn remove_link(path: &Path) -> Result<(), HostError> {
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) if !metadata.file_type().is_symlink() => {
-            return Err(HostError::Other(format!(
-                "{} is not a link, so it is not Perch's to remove",
-                path.display()
-            )));
-        }
-        Ok(_) => {}
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(err) => return Err(HostError::Io(err)),
+    let Some(metadata) = if_it_is_there(std::fs::symlink_metadata(path))? else {
+        return Ok(());
+    };
+    if !metadata.file_type().is_symlink() {
+        return Err(HostError::Other(format!(
+            "{} is not a link, so it is not Perch's to remove",
+            path.display()
+        )));
     }
-    match std::fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(HostError::Io(err)),
-    }
+    if_it_is_there(std::fs::remove_file(path)).map(|_| ())
 }
 
 /// The same on Windows, where which call removes a link depends on whether it
@@ -1223,10 +1209,8 @@ fn remove_link(path: &Path) -> Result<(), HostError> {
 
     use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY;
 
-    let metadata = match std::fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(err) => return Err(HostError::Io(err)),
+    let Some(metadata) = if_it_is_there(std::fs::symlink_metadata(path))? else {
+        return Ok(());
     };
 
     let removed = if metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0 {
@@ -1234,11 +1218,7 @@ fn remove_link(path: &Path) -> Result<(), HostError> {
     } else {
         std::fs::remove_file(path)
     };
-    match removed {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(HostError::Io(err)),
-    }
+    if_it_is_there(removed).map(|_| ())
 }
 
 /// Whether the person at the terminal has asked a loop to stop.
