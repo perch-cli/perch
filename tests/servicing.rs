@@ -153,9 +153,12 @@ fn installing_writes_a_unit_and_starts_it_through_the_service_manager() {
         vec![
             "systemctl --user daemon-reload",
             "systemctl --user enable --now perch-watch.service",
+            "systemctl --user restart perch-watch.service",
         ],
-        "reloaded before it is asked about a unit that is new, and started now \
-         rather than at the next login"
+        "reloaded before it is asked about a unit that is new, started now \
+         rather than at the next login — and restarted, because `enable --now` \
+         starts a stopped unit and does nothing to a running one, which is the \
+         state re-installing after an Upgrade is always in"
     );
     assert!(printed.contains("log in"), "{printed}");
 }
@@ -331,6 +334,51 @@ fn a_carried_value_a_scheduled_task_cannot_quote_is_refused_on_windows() {
             "and nothing was registered: {refusal}"
         );
     }
+}
+
+/// Installing on Windows starts the task, rather than only registering the
+/// trigger that would start it at the next logon.
+///
+/// `schtasks /Create /SC ONLOGON` writes a trigger and runs nothing, while the
+/// sentence `install` prints is "It starts when you log in, and it is running
+/// now." A `perch watcher status` a second later asks the watcher lock, finds
+/// nothing holding it, and prints "not running" — the two commands
+/// contradicting each other on every fresh install. `/End` first for the reason
+/// macOS `bootout`s before it bootstraps: a re-install after an Upgrade is the
+/// documented repair, and the task may already be running the old binary.
+#[test]
+fn installing_on_windows_starts_the_task_rather_than_only_registering_it() {
+    let host = watched().with_platform(Platform::Windows);
+    // `schtasks /Create` carries a command built out of this machine's own
+    // paths, so the only honest way to arrange an answer for it is to let the
+    // install say what it would run — the same trick the test above uses.
+    let _ = run_service(&host, WatcherCommand::Install);
+    for effect in host.effects() {
+        if let Effect::Exec { program, args } = effect {
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            host.set_exec(&program, &args, worked());
+        }
+    }
+    host.forget_effects();
+
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
+
+    result.expect("the service manager answered");
+    // The `/Query` that asks whether one is already registered comes first and
+    // is not part of the install; these three are.
+    let driven = ran(&host);
+    let registered = driven
+        .iter()
+        .position(|line| line.contains("/Create"))
+        .expect("it registers the task");
+    assert_eq!(
+        &driven[registered + 1..],
+        [
+            r"schtasks /End /TN Perch\Watch".to_string(),
+            r"schtasks /Run /TN Perch\Watch".to_string(),
+        ],
+        "{driven:?} — {printed}"
+    );
 }
 
 /// A unit Perch did not write is one it declines to make claims about rather
