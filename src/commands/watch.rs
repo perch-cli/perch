@@ -603,10 +603,11 @@ fn permitted(registry: &Registry, _settled: &Settled) -> Result<Watching> {
         )
     })?;
 
-    let scope = match account.group.clone() {
-        Some(group) => Scope::Group(group),
-        None => Scope::Ungrouped,
-    };
+    // `scope_of` rather than the same match written out again. It existed with
+    // no caller at all while this was the hand-rolled copy of it, which is the
+    // arrangement where the two come to disagree without either being wrong on
+    // its own.
+    let scope = registry.scope_of(&account);
 
     // Two independent yeses before anything moves unasked, and they are two
     // different statements: one declaring these Accounts interchangeable at
