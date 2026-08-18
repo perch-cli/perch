@@ -593,9 +593,8 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
     // here is the staying-put veto silently dropped from the listing while
     // `choose` keeps it, which is the disagreement this whole function exists to
     // prevent.
-    let here = registry
-        .active()
-        .whose()
+    let leaving = registry.active().whose();
+    let here = leaving
         .and_then(|active| {
             accounts
                 .iter()
@@ -613,7 +612,7 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
     // added — the same tie-break the choice itself has.
     let mut placed: Vec<(&Account, Place)> = accounts
         .into_iter()
-        .map(|account| (account, place(account, here, strategy, now)))
+        .map(|account| (account, place(account, leaving, here, strategy, now)))
         .collect();
     placed
         .sort_by(|(_, (theirs, them)), (_, (ours, us))| ours.cmp(theirs).then(us.total_cmp(them)));
@@ -633,19 +632,39 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
 /// is not one to show at the top however good its number looks. It is what makes
 /// the highest row a Cycle would land on the highest row full stop — the Account
 /// being left included, since moving to where you already are gains nothing.
+///
+/// `leaving` is named rather than inferred from `here`, and that is the half
+/// that was missing. `here` is a *measured* Headroom, so it is `None` for an
+/// Account nobody has observed — which out of the box is every Account — and a
+/// `None` there let the staying-put rule fall away entirely, the Account being
+/// left included. [`choose`] excludes it unconditionally whatever it has been
+/// observed to hold, so the listing put an Account at the top that a bare
+/// `perch switch` would never land on: the disagreement between the two orders
+/// this function exists to prevent (ADR 0049), surviving in the one state a
+/// fresh machine is always in.
 type Place = ((u8, u8, u8), f64);
 
 fn place(
     account: &Account,
+    leaving: Option<&str>,
     here: Option<&Headroom>,
     strategy: Strategy,
     now: DateTime<Utc>,
 ) -> Place {
-    let candidate = u8::from(is_a_candidate(account));
+    let candidate = is_a_candidate(account);
     let headroom = headroom_of(account);
-    let worth = u8::from(here.is_none_or(|here| worth_leaving_for(&headroom, here, strategy, now)));
+    // Asked only of an Account a Cycle would consider, because that is the only
+    // set [`choose`] asks it of: it drops the non-candidates before it looks for
+    // the one being left. Asked of all of them, the Account you are sitting on
+    // sorted below the other Accounts nobody can use — an order about a
+    // comparison the choice never makes.
+    let staying =
+        candidate && leaving.is_some_and(|email| registry::same_name(account.email(), email));
+    let worth = u8::from(
+        !staying && here.is_none_or(|here| worth_leaving_for(&headroom, here, strategy, now)),
+    );
     let (tier, figure) = headroom.ranking(strategy, now);
-    ((candidate, worth, tier), figure)
+    ((u8::from(candidate), worth, tier), figure)
 }
 
 /// Whether a Cycle could land on this Account at all — which is a different
@@ -1079,6 +1098,37 @@ pub(crate) mod tests {
             .into_iter()
             .map(Account::email)
             .collect()
+    }
+
+    /// The listing and the choice are one order, in the state a fresh machine
+    /// is always in: no Account observed at all.
+    ///
+    /// `here` is a *measured* Headroom, so it is `None` until something has been
+    /// read — and a `None` there used to let the staying-put rule fall away for
+    /// every Account, the one being left included. `choose` excludes that
+    /// Account whatever has been observed of it, so the top row of the listing
+    /// was an Account a bare `perch switch` would never land on, which is the
+    /// disagreement `ranked` exists to prevent (ADR 0049).
+    #[test]
+    fn the_account_being_left_is_never_the_top_row_even_where_nothing_has_been_observed() {
+        let registry = holding(vec![
+            account("here@example.com", vec![]),
+            account("there@example.com", vec![]),
+        ]);
+
+        assert_eq!(
+            ranked_emails(&registry),
+            ["there@example.com", "here@example.com"],
+            "the Account being left sorts below the one a Cycle could land on"
+        );
+        assert_eq!(
+            cycle(&registry)
+                .expect("there is somewhere to go")
+                .account
+                .email(),
+            "there@example.com",
+            "and it is the one the choice makes, which is the whole point"
+        );
     }
 
     /// The Account you are on is the only one left, and Perch has never read a
