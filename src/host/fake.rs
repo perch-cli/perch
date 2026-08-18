@@ -1530,9 +1530,14 @@ impl port::Files for FakeHost {
     /// open followed by an `fchmod`, so a link at the last component fails
     /// rather than sending the mode wherever it points. A directory *above* it
     /// is still followed, which is what an open does.
+    ///
+    /// Where permission bits mean nothing there is no narrowing and so nothing
+    /// to redirect: `RealHost::make_private` is `#[cfg(unix)]` and a silent
+    /// no-op elsewhere, and this fake gates on the runtime Platform for it —
+    /// the same split [`file_mode`](FakeHost::file_mode) is written against.
     fn make_private(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::MadePrivate(path.to_path_buf()));
-        if self.fs.links.borrow().contains_key(path) {
+        if self.platform() != Platform::Windows && self.fs.links.borrow().contains_key(path) {
             return Err(HostError::Io(std::io::Error::other(format!(
                 "{} is a symbolic link, and narrowing one would set the mode of \
                  whatever it points at",

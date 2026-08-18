@@ -429,8 +429,22 @@ const CASES: &[Case] = &[
             host.link(Link::Symbolic, &elsewhere, &planted)
                 .expect("linked");
 
-            host.make_private(&planted)
-                .expect_err("a link is refused rather than followed");
+            match modes_mean_something() {
+                // A `chmod` on a name follows a link, and `O_NOFOLLOW` is what
+                // refuses one.
+                true => {
+                    host.make_private(&planted)
+                        .expect_err("a link is refused rather than followed");
+                }
+                // No mode to send anywhere: the narrowing is a documented no-op
+                // where permission bits mean nothing, so there is no
+                // redirection for it to refuse.
+                false => {
+                    host.make_private(&planted).unwrap_or_else(|err| {
+                        panic!("{adapter}: a no-op cannot be redirected: {err}")
+                    });
+                }
+            }
 
             assert_eq!(
                 host.file_mode(&elsewhere).expect("it is still there"),
