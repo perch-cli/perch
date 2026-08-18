@@ -695,8 +695,12 @@ fn status_says_where_the_installed_service_actually_writes_its_log() {
 
     let (_, said) = run_service(&host, WatcherCommand::Status { json: false });
 
+    // Joined rather than spelled out, because `service::log_path` joins and the
+    // separator it joins with is the *running* machine's — a `\` under the
+    // Windows runner, whatever platform the fixture reports.
+    let at = std::path::Path::new("/Users/someone/elsewhere").join("watch.log");
     assert!(
-        said.contains("/Users/someone/elsewhere/watch.log"),
+        said.contains(&*at.to_string_lossy()),
         "the log the unit names, not the one the environment would derive: {said}"
     );
 }
