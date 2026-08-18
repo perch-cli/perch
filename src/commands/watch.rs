@@ -444,7 +444,10 @@ fn opening(host: &dyn Host) -> Result<String> {
         // settles it and says why, which is the line that will repeat.
         let watching = switch::nothing_in_flight(&registry)
             .and_then(|settled| permitted(&registry, &settled).ok())?;
-        Some((registry.named_for_the_user(watching.account.email()), watching))
+        Some((
+            registry.named_for_the_user(watching.account.email()),
+            watching,
+        ))
     });
     let Some((named, watching)) = watching else {
         return Ok(

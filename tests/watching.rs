@@ -102,7 +102,10 @@ fn a_check_on_a_machine_with_no_login_still_reports_the_refusal() {
     let (outcome, _) = run_watch_once(&host);
 
     let refused = outcome.expect_err("a scheduler has to be told");
-    assert!(refused.to_string().contains("No Claude Code login"), "{refused}");
+    assert!(
+        refused.to_string().contains("No Claude Code login"),
+        "{refused}"
+    );
 }
 
 /// A machine where the Account being watched cannot be read: the usage
