@@ -431,9 +431,32 @@ struct Asked {
 /// its Credential, and it is ahead of the copy in its own Profile, which only
 /// catches up when a Switch away Captures it (ADR 0006). Every other Account is
 /// asked about with the Credential in its own Profile.
+///
+/// A *settled* registry, rather than [`Registry::is_active`], which answers a
+/// Landing with the Account being **left** (ADR 0048). A Switch killed between
+/// storing the arriving Credential and patching the Identity leaves exactly
+/// that state, and `is_active` then says yes for the leaving Account while the
+/// Default Profile holds the arriving one's Credential. Off that answer a
+/// Refresh asks Anthropic as one Account using the other's token, files the
+/// figures it reads under the wrong address, and — because a Renewal may
+/// Rotate — retires a refresh token the copy in the arriving Account's own
+/// Profile is still holding. A rejection is worse: the Quarantine lands on the
+/// Account that was named rather than the one whose Credential was refused,
+/// and it is permanent.
+///
+/// The same guard `crate::export::the_live_store` carries, and here for the
+/// same reason it is there: this is the other place that reads the live
+/// Credential off a name. `perch status --refresh` and `perch list --refresh`
+/// do not settle a Landing before they read — the command that does is
+/// `perch watcher run` — so the belt goes where every caller passes rather than
+/// on each of their doors.
 fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<Asked> {
     let its_own_profile = account.profile_dir(host)?;
-    if registry.is_active(account.email()) {
+    let settled_on_it = matches!(
+        registry.active(),
+        registry::Active::Settled(active) if registry::same_name(active, account.email())
+    );
+    if settled_on_it {
         let store = registry::the_default_profile(host)?;
         // Two directories rather than one, and this is the only case where they
         // differ. The copy being renewed is the live one in the Default
