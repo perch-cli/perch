@@ -679,8 +679,14 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
 /// written at all. The registry already carries one dangling-pointer check for
 /// what this names; a second field would need a second, held by nothing but
 /// care.
+///
+/// `deny_unknown_fields` for the reason [`load`] gives for every other type
+/// here, and this was the one that did not carry it. A `leavign` in a Landing
+/// deserialized as `leaving: None` and said nothing — so the Landing claimed
+/// Perch had been on nobody, and the next Switch's Capture had no Profile to
+/// file the outgoing Credential into.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Active {
     /// Perch is on nobody: a machine that has never Switched, one a removal
     /// left with nowhere to land, or one a repair took off the Account it could
@@ -2866,6 +2872,19 @@ mod tests {
             (
                 format!("{{\"version\":{CURRENT_VERSION},\"accounts\":[],\"aliasses\":{{}}}}"),
                 "aliasses",
+            ),
+            // The Landing was the one shape exempt from this, because `Active`
+            // was the one type without the attribute. A transposed `leaving`
+            // deserialized as `None`, which is not nothing: it is the Landing
+            // saying Perch had been on nobody, so the Capture that resumes it
+            // has no Profile to file the outgoing Credential into.
+            (
+                format!(
+                    "{{\"version\":{CURRENT_VERSION},\"accounts\":[],\"active\":\
+                     {{\"landing\":{{\"leavign\":\"one@example.com\",\
+                     \"arriving\":\"two@example.com\"}}}}}}"
+                ),
+                "leavign",
             ),
         ] {
             let host = crate::host::FakeHost::new().with_file(path, &written);
