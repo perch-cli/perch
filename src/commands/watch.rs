@@ -184,7 +184,7 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     // status` that asks by taking the lock — cleared it out from under a
     // Watcher that went on deciding, which is the two-Watcher state the lock
     // exists to prevent (ADR 0040).
-    let Some(mut watching_alone) = take_the_watch(host, out, &mut backoff, &mut holding)? else {
+    let Some(mut watching_alone) = take_the_watch(host, out, &mut holding)? else {
         return stopped(out);
     };
 
@@ -339,14 +339,25 @@ fn handed_over(out: &mut dyn Write) -> Result<()> {
 fn take_the_watch<'a>(
     host: &'a dyn Host,
     out: &mut dyn Write,
-    backoff: &mut Backoff,
     holding: &mut Holding,
 ) -> Result<Option<crate::lock::Held<'a>>> {
+    // Its own, rather than the loop's. A Back-off paces one question nobody is
+    // answering, and this is a different question from the loop's: the only
+    // thing that clears the count is a Refresh that produced a figure, and the
+    // waits charged here are not waits for a Refresh.
+    //
+    // Shared, they crossed over. A Service `kill -9`ed and restarted waits out
+    // a lock left behind, which takes as long as the staleness window — about
+    // six failures, so the count is saturated by the time the watch is free.
+    // The first round that could not read then announced "asking again in
+    // 20m00s" for a failure that had earned two and a half minutes, which is
+    // exactly the rest `Backoff` says a watcher must never be left waiting out.
+    let mut backoff = Backoff::none();
     loop {
         match crate::lock::take_all(host, vec![registry::watcher_lock_spec(host)?]) {
             Ok(held) => return Ok(Some(held)),
             Err(PerchError::Busy(why)) => {
-                let (waiting_for, spoken) = held_before_a_round(backoff, &why, host.now());
+                let (waiting_for, spoken) = held_before_a_round(&mut backoff, &why, host.now());
                 say_it(out, holding, spoken, host.now())?;
                 if host.wait(waiting_for) == Waited::Interrupted {
                     return Ok(None);
