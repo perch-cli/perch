@@ -282,6 +282,28 @@ impl Export {
         self.registry.accounts.len()
     }
 
+    /// The Credential this Export carries for one Account, if it carries one.
+    ///
+    /// Keyed the way an address is compared everywhere else — `registry::same_name`
+    /// folds case — rather than by the `BTreeMap` lookup the key type offers.
+    /// An Export is a file a person may write themselves with `age -a -p` (ADR
+    /// 0014), and one keying a credential `ONE@example.com` beside an account
+    /// entry `one@example.com` is one where the two halves of an Import
+    /// disagreed: placement found the Credential and put it down, and the report
+    /// afterwards said the Account had been "restored without one" and sent its
+    /// owner to `perch relogin` for an Account that was fine.
+    ///
+    /// Here rather than at either caller, because the disagreement was the two
+    /// of them asking the same question two ways.
+    pub fn credential_for(&self, email: &str) -> Option<&String> {
+        by_name(&self.credentials, email)
+    }
+
+    /// The same, for the `.claude.json` that travels beside it.
+    pub fn identity_file_for(&self, email: &str) -> Option<&String> {
+        by_name(&self.identity_files, email)
+    }
+
     /// The Accounts it holds no Credential for, in the order they are listed.
     ///
     /// Ordinary for a Quarantined Account whose stores hold nothing, and news
@@ -291,9 +313,16 @@ impl Export {
             .accounts
             .iter()
             .map(Account::email)
-            .filter(|email| !self.credentials.contains_key(*email))
+            .filter(|email| self.credential_for(email).is_none())
             .collect()
     }
+}
+
+/// What one Account's entry is in a map an Export keys by address.
+fn by_name<'a>(held: &'a BTreeMap<String, String>, email: &str) -> Option<&'a String> {
+    held.iter()
+        .find(|(key, _)| registry::same_name(key, email))
+        .map(|(_, value)| value)
 }
 
 /// The `age` file, as the text that goes in it.

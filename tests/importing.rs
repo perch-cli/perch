@@ -82,13 +82,24 @@ fn a_credential_keyed_in_another_case_is_placed_rather_than_silently_dropped() {
     let sealed = perch::export::seal(&export, PASSPHRASE).expect("it seals");
     let host = a_new_machine_holding(&sealed);
 
-    run_import(&host, AT).0.expect("the import restores");
+    let (outcome, said) = run_import(&host, AT);
 
+    outcome.expect("the import restores");
     assert_eq!(
         credential_of(&host, EMAIL).as_deref(),
         Some(credential.as_str()),
         "an Account the file holds a Credential for gets it, whichever way the \
          key was spelled"
+    );
+    // The report asked the same question a third way, and got a third answer:
+    // `without_a_credential` was the one caller still doing a lookup by key, so
+    // an Account whose Credential had just been placed was announced as
+    // "restored without one" and its owner sent to `perch relogin` for an
+    // Account that was fine.
+    assert!(
+        !said.contains("held no Credential"),
+        "and the report says so, rather than sending somebody to repair an \
+         Account that is whole: {said}"
     );
 }
 
