@@ -1052,9 +1052,16 @@ fn create_private_dir_all(path: &Path) -> Result<(), HostError> {
     Ok(())
 }
 
-/// Creates a file with its mode, refusing to write into one that is already
-/// there: an existing file's mode is whatever it was, and `open` would not
-/// change it.
+/// Creates a file with its mode, never writing *into* one that is already
+/// there: anything at the name is unlinked first and the file is created afresh
+/// with `O_EXCL`.
+///
+/// Which is the security property, and it is not the one the first line of this
+/// comment used to claim — it said the call refuses an existing file, and it has
+/// never refused one; `tests/conformance.rs` asserts that creating over one
+/// takes the new mode. Opening an existing file would leave it at whatever mode
+/// it already had, which for a Credential store is the whole question, and a
+/// reader auditing this path was being told the opposite of what it does.
 ///
 /// Synced before it is closed. A rename is atomic against other *processes*,
 /// not against a crash: the rename can reach the disk while the data blocks
