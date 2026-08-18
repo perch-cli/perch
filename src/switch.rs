@@ -589,14 +589,24 @@ fn write_it_down(
 /// afterwards — that is not this to sequence — but a `make_live` that moved
 /// nothing takes its own Landing back, because the caller writes nothing on
 /// that path at all.
+///
+/// `installed` is the caller's rather than probed here, for [`Installed`]'s own
+/// reason — once per command, since the answer cannot change under a process
+/// already running and the reading is a subprocess — and for a second reason
+/// `perch remove` has: it deliberately tolerates a machine with no Claude Code
+/// on it, because giving up one lapsed subscription is a thing to be able to do
+/// after uninstalling. Probed in here, that tolerance stopped at the landing,
+/// and removing the *active* Account failed after the user had already agreed
+/// to it.
 pub fn make_live(
     host: &dyn Host,
     perch: &mut lock::Held<'_>,
     registry: &mut Registry,
     account: &Account,
     whose: &str,
+    installed: &Installed,
 ) -> std::result::Result<(), NotLanded> {
-    let (installed, store) = ground(host).map_err(|error| NotLanded {
+    let store = registry::the_default_profile(host).map_err(|error| NotLanded {
         error,
         is_live: false,
     })?;
@@ -618,12 +628,12 @@ pub fn make_live(
         // using it (ADR 0027).
         let mut holds = lock::Holds::of(held, perch);
 
-        holds.around(|| refuse_if_live_in(host, &store.config_dir, whose, &installed))?;
+        holds.around(|| refuse_if_live_in(host, &store.config_dir, whose, installed))?;
 
         // Renewed around it for the reason `perform` says: a keychain that
         // stops to ask goes on stopping for as long as the person takes, and
         // the hold this is running under expires in ten seconds.
-        let prepared = holds.around(|| prepare(host, account, None, installed, store))?;
+        let prepared = holds.around(|| prepare(host, account, None, installed.clone(), store))?;
 
         holds.around_a_registry_write(|perch| {
             write_it_down(host, perch, registry, &leaving, account)
@@ -931,16 +941,6 @@ pub fn already_landed(host: &dyn Host, installed: &Installed, account: &Account)
     let usable = matches!(probe::read_credential(host, &store, installed), Ok(Some(_)));
 
     Ok(named && usable)
-}
-
-/// The two things that are true whatever else is: which Claude Code is
-/// installed, and where the Default Profile is. Established before the locks,
-/// because the locks are derived from the second of them.
-fn ground(host: &dyn Host) -> Result<(Installed, Store)> {
-    Ok((
-        Installed::probed(host)?,
-        registry::the_default_profile(host)?,
-    ))
 }
 
 /// Refuses to act *as* an Account whose Profile is not its alone.

@@ -153,6 +153,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
         &mut registry,
         &account,
         WHY_THE_DEFAULT_PROFILE,
+        &installed,
     );
     // Whether the fresh Credential became the live one, whatever else failed.
     // `make_live` writes the Credential and then patches the Identity, and a
