@@ -817,6 +817,33 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "removing a link refuses anything that is not one",
+        asserts: |host, root, adapter, _now| {
+            // The one call whose whole contract is that it only ever takes away
+            // Perch's own share. Asserted here rather than only against the
+            // fake, because that is how the Windows arm came to read the
+            // attributes purely to choose between `remove_dir` and
+            // `remove_file` and then remove whatever was at the name: the
+            // refusal was proven by the adapter that had it, on every platform
+            // including the one that did not.
+            let plain = root.join("the-persons-own-file");
+            host.create_file_with_mode(&plain, "not Perch's", PRIVATE_FILE_MODE)
+                .expect("the file");
+
+            let refused = host.remove_link(&plain);
+
+            assert!(
+                refused.is_err(),
+                "{adapter}: a plain file is not a link, got {refused:?}"
+            );
+            assert_eq!(
+                host.read_file(&plain).ok().as_deref(),
+                Some("not Perch's"),
+                "{adapter}: and it is still there"
+            );
+        },
+    },
+    Case {
         named: "a kind this platform will not make is refused rather than substituted",
         asserts: |host, root, adapter, _now| {
             // A junction is Windows' link for a directory and exists nowhere

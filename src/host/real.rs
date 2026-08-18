@@ -1215,15 +1215,36 @@ fn remove_link(path: &Path) -> Result<(), HostError> {
 /// Read off the attributes rather than off `FileType`, which reports a junction
 /// as a symlink and not as a directory — true, and not what the call to make
 /// turns on.
+///
+/// The same refusal as the unix arm, and it was missing here: the attributes
+/// were read only to choose between the two removals, so whatever sat at the
+/// name went — a plain file of the person's, or an empty directory of theirs.
+/// `FakeHost::remove_link` refuses regardless of platform, so the test that
+/// proves the guard passed on Windows by asking the adapter that has it.
+///
+/// A reparse point rather than a symlink, because that is the one thing both
+/// kinds Windows makes have in common: `reconcile::make` offers a junction here
+/// as well as a symbolic link, and a junction is not a symlink to anything that
+/// asks. A hard link is left out for the reason the unix arm gives — it is a
+/// name for the file and cannot be told from one.
 #[cfg(windows)]
 fn remove_link(path: &Path) -> Result<(), HostError> {
     use std::os::windows::fs::MetadataExt;
 
-    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+    };
 
     let Some(metadata) = if_it_is_there(std::fs::symlink_metadata(path))? else {
         return Ok(());
     };
+
+    if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0 {
+        return Err(HostError::Other(format!(
+            "{} is not a link, so it is not Perch's to remove",
+            path.display()
+        )));
+    }
 
     let removed = if metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0 {
         std::fs::remove_dir(path)
