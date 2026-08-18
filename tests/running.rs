@@ -926,3 +926,48 @@ fn a_run_against_a_profile_two_accounts_share_is_refused() {
     );
     assert!(launched(&host).is_empty(), "and nothing was launched");
 }
+
+/// A Run claims its Profile before it links anything into it, so nothing else
+/// can take the Profile away while it is being prepared.
+///
+/// Reconcile and Carry are both filesystem-bound over a whole Profile, and the
+/// Marker used to be written after both. Until it exists nothing on the machine
+/// knows the Run is happening: `perch remove` asks twice whether the Profile is
+/// Live, is told no both times, and then deletes the Credential and
+/// `remove_dir_all`s the directory this command is still linking into. What
+/// starts is a client pointed at an empty configuration directory asking its
+/// user to log in — the state `refuse_a_quarantined_account` exists to prevent,
+/// reached by a different road.
+#[test]
+fn a_run_marks_its_profile_live_before_it_touches_anything_in_it() {
+    // With Shared State to link and a `.claude.json` to Carry, so there is
+    // something for the claim to come before.
+    let host = machine_with_shared_state();
+    let profile = perch::registry::profile_dir_for(&host, SECOND_EMAIL).expect("home is known");
+    let sessions = profile.join("sessions");
+
+    run_run(&host, SECOND_EMAIL).0.expect("the client ran");
+
+    let touched: Vec<Effect> = host
+        .effects()
+        .into_iter()
+        .filter(|effect| match effect {
+            Effect::WroteFile(at)
+            | Effect::WrotePrivateFile(at)
+            | Effect::Linked { at, .. }
+            | Effect::RemovedLink(at)
+            | Effect::RemovedFile(at)
+            | Effect::CreatedDir(at) => at.starts_with(&profile),
+            Effect::Renamed { to, .. } => to.starts_with(&profile),
+            _ => false,
+        })
+        .collect();
+
+    let first = touched.first().expect("a Run prepares its Profile");
+    assert!(
+        matches!(first, Effect::CreatedDir(at) if at.starts_with(&sessions)),
+        "the Marker's own directory is the first thing made in the Profile, so \
+         every later step happens under a Profile that is already Live: \
+         {touched:?}"
+    );
+}

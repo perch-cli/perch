@@ -1055,8 +1055,23 @@ impl Unsure {
 /// writing under a client that rewrites the file wholesale on its way out costs
 /// the file.
 pub fn anything_running(host: &dyn Host, config_dir: &Path) -> bool {
+    anything_running_but(host, config_dir, None)
+}
+
+/// The same, discounting one process — which is only ever the caller's own.
+///
+/// A Run claims its Profile before it reconciles and Carries, so that nothing
+/// else may delete the directory out from under a session that is starting
+/// (ADR 0027). That claim is a Marker, and a Marker is what makes a Profile
+/// Live, so the Carry that follows would find the Run's own claim and decline to
+/// write — leaving every Run meeting the onboarding dialog afresh, which is the
+/// one thing the Carry exists to prevent.
+///
+/// Discounting rather than skipping the question: any *other* client is still a
+/// client, and doubt still resolves towards Live.
+pub fn anything_running_but(host: &dyn Host, config_dir: &Path, mine: Option<u32>) -> bool {
     match clients_in(host, config_dir) {
-        Ok(running) => !running.is_empty(),
+        Ok(running) => running.iter().any(|pid| Some(*pid) != mine),
         Err(_) => true,
     }
 }

@@ -92,6 +92,24 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     let launch = what_to_launch(host, &args.command)?;
     let profile = registry::profile_dir_for(host, &found.email)?;
     let default_profile = registry::the_default_profile(host)?;
+
+    // Claimed before anything is linked rather than immediately before the
+    // launch (ADR 0027). Reconcile and Carry are both filesystem-bound over a
+    // whole Profile, and until the Marker exists nothing on the machine knows
+    // this Run is happening: a `perch remove` in another terminal asks whether
+    // the Profile is Live, is told no — twice, both times before this Marker
+    // was written — and then deletes the Credential and the directory while
+    // this command is still linking into it. What starts is a client pointed at
+    // an empty configuration directory, asking its user to log in, which is the
+    // state `refuse_a_quarantined_account` above exists to prevent.
+    //
+    // Nothing is lost by claiming early. The `Claim` takes its Marker back when
+    // it drops, so a Run that fails between here and the launch leaves nothing
+    // behind — which is what "the marker cannot outlive a Run that never
+    // started" asked for, and it was the ordering rather than the Drop that
+    // used to be relied on.
+    let _live = probe::claim(host, &profile)?;
+
     reconcile::reconcile(host, &default_profile.config_dir, &profile)?;
 
     // The one file Reconcile cannot link, because it holds the Account as well
@@ -125,12 +143,6 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // left something in the buffer, and it would be delivered after the output
     // of the thing it was announcing.
     out.flush().map_err(commands::write_failed)?;
-
-    // After the Carry, which will not write into a Live Profile and would
-    // therefore refuse its own Run; and immediately before the launch, with
-    // nothing fallible in between, so the marker cannot outlive a Run that never
-    // started (ADR 0027).
-    let _live = probe::claim(host, &profile)?;
 
     // The environment of this one process, and the whole of what makes the Run
     // a Run.

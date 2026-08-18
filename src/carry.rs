@@ -96,7 +96,12 @@ pub fn carry(
     // Run path's business alone: a client holds this file open and rewrites it
     // wholesale on its way out, so a Profile with one running is a Profile
     // Perch has nothing useful to say about.
-    if probe::anything_running(host, into) {
+    //
+    // Discounting this process, because the Run has already claimed the Profile
+    // by the time it Carries: the claim is what stops another `perch` deleting
+    // the directory out from under a session that is starting, and read as an
+    // ordinary client it would decline every Carry there is.
+    if probe::anything_running_but(host, into, Some(host.process_id())) {
         return;
     }
 
