@@ -140,7 +140,17 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
     // binary really is newer, and a Service that could not be refreshed is a
     // warning with a one-command repair rather than a reason to report an
     // Upgrade that did not happen.
-    if let Some(said) = crate::commands::service::refreshed_after_an_upgrade(host) {
+    //
+    // Only where the Channel's command succeeded, which is what `replaced`
+    // carries: `hand_it_over` and `replace_it_ourselves` report a `brew` or
+    // `npm` or installer that refused as an exit code rather than as an error,
+    // so this ran unconditionally. A `brew upgrade` that failed on a checksum
+    // then bounced the watcher onto the binary it was already running and
+    // printed "The Service was restarted, and now runs …" — a sentence about
+    // an Upgrade that had not happened, beside the non-zero code saying so.
+    if replaced == crate::error::EXIT_OK
+        && let Some(said) = crate::commands::service::refreshed_after_an_upgrade(host)
+    {
         say(out, &said)?;
     }
     Ok(replaced)

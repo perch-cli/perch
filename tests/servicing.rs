@@ -765,6 +765,44 @@ fn a_service_that_will_not_restart_is_a_warning_rather_than_a_failed_upgrade() {
     );
 }
 
+/// **An Upgrade that did not happen owes the Service nothing.** `brew` and `npm`
+/// report a refusal as an exit code rather than as an error — a pinned formula,
+/// a network that is down, an `npm` without permission — and Perch passes that
+/// code through. Left unchecked, the follow-up ran anyway: the watcher was
+/// bounced onto the binary it was already running, and the Upgrade printed "The
+/// Service was restarted, and now runs …" beside the non-zero code saying it
+/// had not.
+#[test]
+fn a_channel_that_refused_the_upgrade_leaves_the_service_where_it_is() {
+    let host = upgradable();
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("a Service is installed before the Upgrade");
+    host.set_exec(
+        "/opt/homebrew/bin/brew",
+        &["upgrade", "perch"],
+        failed("Error: perch is pinned"),
+    );
+    let before = ran(&host).len();
+
+    let (outcome, said) = upgrading(&host);
+
+    assert_eq!(
+        outcome.expect("`brew` answered, and what it answered was a refusal"),
+        1
+    );
+    let after: Vec<String> = ran(&host).into_iter().skip(before).collect();
+    assert!(
+        !after.iter().any(|line| line.starts_with("launchctl")),
+        "nothing was said to the service manager about a binary that did not \
+         move: {after:?}"
+    );
+    assert!(
+        !said.contains("Service"),
+        "and nothing claimed an Upgrade that did not happen: {said}"
+    );
+}
+
 /// Most machines have no Service, and an Upgrade on one must not go looking for
 /// a service manager or say anything about one.
 #[test]

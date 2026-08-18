@@ -2037,6 +2037,16 @@ impl port::Processes for FakeHost {
     /// Stands in for whatever took the terminal — the login the user drives, or
     /// the program a Run launched: it writes whatever the configured [`Login`]
     /// leaves in the directory it was pointed at, and exits as that says.
+    ///
+    /// A program [`FakeHost::set_exec`] has been given an answer for exits with
+    /// that answer's status, ahead of the [`Login`]. Without it there was no way
+    /// to say "the program took the terminal and refused" at all: every
+    /// interactive program exited 0 unless a whole [`Login`] was written for it,
+    /// and the ones that are not logins — `brew upgrade perch`, `npm install -g`,
+    /// the installer script — have no directory to write into and no business
+    /// with one. So `perch upgrade`'s entire failure arm was unreachable from a
+    /// test, which is how it came to refresh the Service after a `brew` that had
+    /// refused.
     fn exec_interactive(
         &self,
         program: &str,
@@ -2058,6 +2068,15 @@ impl port::Processes for FakeHost {
                 .map(|(key, value)| (key.to_string(), value.to_string()))
                 .collect(),
         });
+
+        if let Some(arranged) = self
+            .processes
+            .executions
+            .borrow()
+            .get(&exec_key(program, args))
+        {
+            return Ok(arranged.status);
+        }
 
         let login = self.processes.login.borrow();
         match login.as_ref() {
