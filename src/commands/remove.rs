@@ -177,7 +177,15 @@ fn consequence_of(registry: &Registry, account: &Account) -> Consequence {
         successor: is_active
             .then(|| successor(registry, account).cloned())
             .flatten(),
-        remaining: registry.accounts.len() - 1,
+        // Saturating. The subtraction is sound only because
+        // `target::resolve_account` has already matched, so `accounts` is not
+        // empty — and nothing in the type or the signature says so. What
+        // `remaining == 0` decides is half of `Consequence::is_asked_about`,
+        // which is whether `perch remove` confirms before it deletes a
+        // Credential; and the release profile sets no `overflow-checks`, so a
+        // regression here would wrap to `usize::MAX` in the shipped binary and
+        // quietly stop asking rather than crash.
+        remaining: registry.accounts.len().saturating_sub(1),
     }
 }
 
