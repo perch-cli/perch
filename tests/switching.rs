@@ -921,6 +921,44 @@ fn an_unreadable_marker_whose_process_is_gone_holds_nothing() {
     assert_the_switch_captured_and_landed(&host, "no client is holding that Profile");
 }
 
+/// The same marker with its process alive is doubt — and the refusal has to say
+/// which belief failed (ADR 0007), which here is a file Perch could not read.
+///
+/// It shared a sentence with the case below, whose cause is an operating system
+/// that would not say when a process began. So somebody meeting a marker left
+/// root-owned by a `sudo claude` — a file they can `chmod` — was told Perch
+/// could not find out when a process started, and sent looking at the wrong
+/// thing entirely.
+#[test]
+fn an_unreadable_marker_whose_process_is_alive_names_the_file_rather_than_the_clock() {
+    let host = machine_with_two_accounts()
+        .with_file(format!("{FIRST_PROFILE}/sessions/4242.json"), "")
+        .with_unreadable_file(
+            format!("{FIRST_PROFILE}/sessions/4242.json"),
+            "Permission denied",
+        )
+        .with_live_process(4242);
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("the marker cannot be corroborated");
+    assert_eq!(error.exit_code(), EXIT_PROBE_REFUSED);
+    let said = error.to_string();
+    assert!(
+        said.contains("could not be read") && said.contains("readable"),
+        "the refusal names the file and what to do about it: {said}"
+    );
+    assert!(
+        !said.contains("when that process began"),
+        "and not the clock, which is the other doubt's diagnosis: {said}"
+    );
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(CREDENTIAL),
+        "nothing was written"
+    );
+}
+
 #[test]
 fn a_marker_that_is_not_json_is_no_evidence_of_a_client() {
     let host = machine_with_two_accounts()

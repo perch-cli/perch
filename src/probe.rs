@@ -1001,7 +1001,18 @@ pub fn live_clients(host: &dyn Host, config_dir: &Path, installed: &Installed) -
 enum Unsure {
     /// A marker naming a running process whose start the operating system will
     /// not say, so it can be neither corroborated nor dismissed.
-    Marker(PathBuf),
+    WhenItBegan(PathBuf),
+    /// A marker naming a running process that Perch could not read at all —
+    /// root-owned after a `sudo claude`, most often.
+    ///
+    /// Its own variant rather than the one above, because the two are told apart
+    /// by what the reader has to do about them: one is a file whose permissions
+    /// are wrong, and the other is an operating system that would not answer.
+    /// Folded together they shared the second's sentence, so somebody meeting a
+    /// marker they could `chmod` was told Perch could not find out when a
+    /// process started — the wrong diagnosis, in the one module whose whole job
+    /// is naming which belief failed (ADR 0007).
+    Unreadable(PathBuf),
     /// The sessions directory is there and would not be read. Told apart from
     /// an absent one, which is the ordinary "nothing is running" and the whole
     /// reason [`Files::list_dir`] reports the two differently.
@@ -1011,10 +1022,16 @@ enum Unsure {
 impl Unsure {
     fn detail(&self) -> String {
         match self {
-            Unsure::Marker(marker) => format!(
+            Unsure::WhenItBegan(marker) => format!(
                 "{} names a running process, but when that process began could \
                  not be read, so the marker can be neither corroborated nor \
                  dismissed. If that session is dead, delete the file",
+                marker.display()
+            ),
+            Unsure::Unreadable(marker) => format!(
+                "{} names a running process and could not be read, so the \
+                 marker can be neither corroborated nor dismissed. Make that \
+                 file readable, or delete it if that session is dead",
                 marker.display()
             ),
             Unsure::Unlistable { dir, why } => format!(
@@ -1080,14 +1097,21 @@ fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32
             // something says so rather than when nothing does.
             Marker::SaysNothing => continue,
             // A different thing entirely: the marker is there and would not be
-            // read — root-owned after a `sudo claude`, or halfway through being
-            // written by a client that is starting up right now. Nothing about
-            // it has been established, so it resolves the way every other doubt
-            // in this function resolves, which is towards Live. Only for a pid
-            // that is actually running: a file nobody can read beside a process
-            // that is not there is litter, and litter must not refuse every
-            // Switch against this Profile for ever.
-            Marker::Unreadable if host.process_alive(pid) => return Err(Unsure::Marker(marker)),
+            // read at all — root-owned after a `sudo claude`. Nothing about it
+            // has been established, so it resolves the way every other doubt in
+            // this function resolves, which is towards Live. Only for a pid that
+            // is actually running: a file nobody can read beside a process that
+            // is not there is litter, and litter must not refuse every Switch
+            // against this Profile for ever.
+            //
+            // A marker halfway through being written is *not* this case — it is
+            // readable and unparseable, so it is `SaysNothing` above, and that
+            // arm's rule is the deliberate one: a Profile is Live when something
+            // says so rather than when nothing does. Said here because the two
+            // read alike and this comment used to claim the half-written one.
+            Marker::Unreadable if host.process_alive(pid) => {
+                return Err(Unsure::Unreadable(marker));
+            }
             Marker::Unreadable => continue,
         };
 
@@ -1100,7 +1124,7 @@ fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32
             // No start to compare. The process being gone is the ordinary way
             // that happens — a marker left behind by a client that died.
             None if !host.process_alive(pid) => {}
-            None => return Err(Unsure::Marker(marker)),
+            None => return Err(Unsure::WhenItBegan(marker)),
         }
     }
     Ok(running)
