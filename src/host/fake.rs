@@ -1526,9 +1526,19 @@ impl port::Files for FakeHost {
         )))
     }
 
-    /// Through a link, as `set_permissions` narrows what one points at.
+    /// Refusing a link, as `RealHost` does: the narrowing is an `O_NOFOLLOW`
+    /// open followed by an `fchmod`, so a link at the last component fails
+    /// rather than sending the mode wherever it points. A directory *above* it
+    /// is still followed, which is what an open does.
     fn make_private(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::MadePrivate(path.to_path_buf()));
+        if self.fs.links.borrow().contains_key(path) {
+            return Err(HostError::Io(std::io::Error::other(format!(
+                "{} is a symbolic link, and narrowing one would set the mode of \
+                 whatever it points at",
+                path.display(),
+            ))));
+        }
         let Some(path) = self.resolved(path) else {
             return Err(HostError::NotFound {
                 path: path.to_path_buf(),
