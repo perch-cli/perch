@@ -111,18 +111,22 @@ is Captured into its own Profile first (ADR 0006), Claude Code's locks are
 taken, and a Live Profile's token is never Renewed (ADR 0005). Running while
 Claude Code is working is the normal case, not the exception.
 
-Two things stop it, at the first round or at any round after, because there
-would be nothing for it to do:
+Two things leave it with nothing to do, at the first round or at any round
+after. It **holds** on either rather than exiting — it says what is missing,
+waits, and takes over the moment that changes (ADR 0040):
 
 ```
 $ perch watcher run
-you@example.com is in no Group, and nothing has said the Accounts in no Group are interchangeable at all — so there is nowhere for the watcher to Switch it to. Nothing is being watched.
-`perch config set ungrouped interchangeable true` says they are, and `perch config set ungrouped watcher-may-act true` then says the watcher may act on them. [...]   # exit 18
+Started. Nothing is being decided yet — the next line says what is holding it, and the watcher takes over the moment that changes. Ctrl-C stops.
+2026-08-04T12:00:00Z  held      unread unread; threshold unread — nothing current to decide on, so nothing was decided: you@example.com is in no Group, and nothing has said the Accounts in no Group are interchangeable at all [...] Asking again in 2m30s.
 
 $ perch watcher run
-Group `work` has not been told the watcher may act on it, so nothing is being watched. Anything that changes underneath you only ever does so because you said it could.
-`perch config set work watcher-may-act true` says it may.   # exit 14
+Started. Nothing is being decided yet — the next line says what is holding it, and the watcher takes over the moment that changes. Ctrl-C stops.
+2026-08-04T12:00:00Z  held      unread unread; threshold unread — nothing current to decide on, so nothing was decided: Group `work` has not been told the watcher may act on it [...] Asking again in 2m30s.
 ```
+
+`perch watcher check` is the one that exits on these, with the codes in the
+table below, because a Check is one process reporting to a scheduler.
 
 `interchangeable` grants the watcher nothing on its own. Declaring a set of
 Accounts substitutable and letting something move between them **while nobody is
@@ -234,7 +238,7 @@ five of them:
 | Code | What a check decided |
 | ---- | -------------------- |
 | 0 | it Switched |
-| 15 | nothing to do now — under the threshold, inside the cooldown, or a client was holding the Profile |
+| 15 | nothing to do now — under the threshold, inside the cooldown, a client was holding the Profile, or the Account it went to turned out to be Quarantined |
 | 17 | a Switch was wanted and every candidate was exhausted |
 | 18 | the Account it is on is in no Group, so nothing carries permission |
 | 20 | held: the figures were stale and the Refresh that would have replaced them failed |
@@ -247,9 +251,13 @@ the rules held it is on the line rather than in the code,
 because a script can do nothing different about it and a person reading a cron
 mailbox wants to know.
 
-An Account whose Credential has stopped working is `20` as well — a figure that
-cannot be read is a figure that cannot be read — and the line names the
-Quarantine and the `perch relogin` that repairs it.
+An Account whose Credential has stopped working is `20` when the *Refresh* is
+what found out — a figure that cannot be read is a figure that cannot be read —
+and the line names the Quarantine and the `perch relogin` that repairs it. Where
+the Switch itself is what found out, it is `15` instead: the Quarantine has been
+written down, the Account is passed over from the next round onwards, and there
+genuinely is nothing to do now. Either way the line says which Account and which
+repair, so a cron mailbox is not left reading the code alone.
 
 Anything that stops a check from deciding exits as it would from any other
 command: `14` for a Group that has not said the watcher may act, `12` for no
