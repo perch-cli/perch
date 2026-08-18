@@ -745,7 +745,10 @@ fn renew_under_the_lock(
         // Both of the questions asked before the locks were taken, asked again
         // now that nothing can change the answer underneath Perch.
         refuse_if_live(host, asked, installed)?;
-        let credential = credential_in(host, asked, installed)?;
+        // Renewed around the read for the same reason as the write below: a
+        // keychain read is a `security` subprocess, and one that stops to ask
+        // the user for permission takes as long as they take to answer.
+        let credential = holds.around(|| credential_in(host, asked, installed))?;
         if because == Because::ItSaysItRanOut && credential.usable_at(host.now()) {
             // Somebody else renewed it while Perch queued for the lock, so this
             // reading did not. Said so rather than reported as a Renewal: what
@@ -792,22 +795,39 @@ fn renew_under_the_lock(
         let renewal = holds.around(|| anthropic::renew(host, &refresh_token));
         let fresh = renewal.map_err(not_renewed)?;
 
-        let rotated = probe::credential_after_rotation(
-            &credential,
-            &fresh.access_token,
-            fresh.refresh_token.as_ref().map(|token| token.as_str()),
-            fresh.expires_at,
-            installed,
-        )?;
-        store_it(
-            host,
-            store,
-            &rotated,
-            rotated_away(
-                &refresh_token,
+        // Inside `around` for the reason the network call above is, and the
+        // reason `switch::perform` wraps its own `store_credential`: this is not
+        // a fast step. On macOS `profile::store_credential` is a `security`
+        // write, a read-back and a supersede of the other store — three
+        // subprocesses, and a keychain that stops to ask the user for permission
+        // stretches it without bound. The config-file lock goes stale in ten
+        // seconds, so left unrenewed any Claude Code on the machine becomes
+        // entitled to clear the artifact and take the lock *while Perch is
+        // writing the Rotated Credential under it*.
+        //
+        // Which is the one write ADR 0006 calls unrecoverable: Anthropic has
+        // already retired the old refresh token by the time this runs, so
+        // everything from here to the store is Perch making sure the Rotation is
+        // not lost. It was the longest step in the function and the only one
+        // holding nothing.
+        holds.around(|| {
+            let rotated = probe::credential_after_rotation(
+                &credential,
+                &fresh.access_token,
                 fresh.refresh_token.as_ref().map(|token| token.as_str()),
-            ),
-        )?;
+                fresh.expires_at,
+                installed,
+            )?;
+            store_it(
+                host,
+                store,
+                &rotated,
+                rotated_away(
+                    &refresh_token,
+                    fresh.refresh_token.as_ref().map(|token| token.as_str()),
+                ),
+            )
+        })?;
 
         Ok(Asking {
             token: fresh.access_token,
