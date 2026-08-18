@@ -78,6 +78,16 @@ pub struct Report {
     pub attempts: Vec<Attempt>,
     /// Set when figures were read but could not be kept for next time.
     pub not_kept: Option<String>,
+    /// Whether a refresh was asked for, which is not the same as whether one
+    /// read anything.
+    ///
+    /// Read off `attempts` being non-empty, the two came apart wherever the
+    /// Scope held no Accounts: `perch list <an empty group> --refresh --json`
+    /// answered `"refresh": null`, and `null` is this document's word for
+    /// *nobody asked*. A script could not tell that from a `--refresh` it never
+    /// passed. Carried rather than inferred, so the one thing the field means
+    /// is decided by the caller who knows.
+    pub asked: bool,
 }
 
 /// One step of an observation: what it produced, or the outcome that stopped
@@ -166,9 +176,13 @@ impl Attempt {
 }
 
 impl Report {
-    /// Whether a refresh was asked for at all.
-    pub fn asked(&self) -> bool {
-        !self.attempts.is_empty()
+    /// A refresh that was asked for and read nothing, which is what an empty
+    /// Scope produces — distinct from the default, which is nobody asking.
+    pub fn asked_for() -> Report {
+        Report {
+            asked: true,
+            ..Report::default()
+        }
     }
 
     /// The lines a person is told, which are the ones about figures they are
@@ -209,7 +223,7 @@ impl Report {
     /// The same as a script reads it, and `null` when no refresh was asked for
     /// — so "everything was fine" and "nobody asked" are never the same answer.
     pub fn document(&self) -> serde_json::Value {
-        if !self.asked() {
+        if !self.asked {
             return serde_json::Value::Null;
         }
         let accounts: Vec<_> = self.attempts.iter().map(Attempt::document).collect();
@@ -239,7 +253,7 @@ pub fn refresh(
     emails: &[String],
     installed: &Result<Installed>,
 ) -> Report {
-    let mut report = Report::default();
+    let mut report = Report::asked_for();
     let mut anything_to_keep = false;
 
     for email in emails {
@@ -934,6 +948,7 @@ mod tests {
         let report = Report {
             attempts: vec![attempt("someone@example.com", Outcome::Observed)],
             not_kept: None,
+            asked: true,
         };
         assert!(report.notes().is_empty(), "the age of the figure says it");
         assert_eq!(report.document()["kept"], true);
@@ -947,6 +962,7 @@ mod tests {
                 attempt("overflow@example.com", Outcome::Failed("no token".into())),
             ],
             not_kept: None,
+            asked: true,
         };
 
         let notes = report.notes();
@@ -959,8 +975,24 @@ mod tests {
     #[test]
     fn a_refresh_nobody_asked_for_is_not_reported_as_one_that_went_well() {
         let report = Report::default();
-        assert!(!report.asked());
+        assert!(!report.asked);
         assert_eq!(report.document(), serde_json::Value::Null);
+    }
+
+    /// The other half of that distinction, which reading it off `attempts` could
+    /// not make: `perch list <an empty group> --refresh --json` asked for a
+    /// refresh and read nothing, and answered `null` — this document's word for
+    /// nobody having asked.
+    #[test]
+    fn a_refresh_that_had_nothing_to_read_is_not_reported_as_one_nobody_asked_for() {
+        let asked = Report::asked_for();
+
+        assert!(asked.asked);
+        assert_eq!(
+            asked.document(),
+            json!({"accounts": [], "kept": true}),
+            "asked, read nothing, kept nothing to fail at keeping"
+        );
     }
 
     #[test]
