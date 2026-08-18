@@ -317,6 +317,12 @@ fn a_line_the_parser_refuses_ends_the_process_at_two() {
         &["holdings", "import", "/tmp/perch.age", "--force"],
         &["holdings", "purge", "--group", GROUP],
         &["upgrade", "--json"],
+        // A check asks what the *newest* Release is and installs nothing, so
+        // there is nothing for either of these to say to it. Ignored, `--check
+        // --release 0.1.0` answered about the newest and never mentioned that
+        // the version named had been thrown away.
+        &["upgrade", "--check", "--release", "0.1.0"],
+        &["upgrade", "--check", "--yes"],
     ] {
         let ran = perch(&machine, line);
 
