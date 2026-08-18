@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 
 use crate::commands::{ask, ask_a_word, export, say, still_ours};
 use crate::error::{PerchError, Result};
-use crate::host::Host;
+use crate::host::{Host, Platform};
 use crate::purge::{self, Purged};
 use crate::registry::{self, Account, Registry};
 
@@ -344,7 +344,17 @@ fn expanded(host: &dyn Host, typed: &str) -> Result<PathBuf> {
     let Some(rest) = typed.strip_prefix('~') else {
         return Ok(PathBuf::from(typed));
     };
-    let Some(rest) = rest.strip_prefix('/') else {
+    // Either separator, because Windows reads both and the person typing here
+    // is typing at Perch rather than at a shell. `~\backups\perch.age` is what
+    // somebody on Windows writes, and it fell into the refusal below — which
+    // aborts the whole Purge, so every question already answered had to be
+    // answered again over a path that was perfectly clear. `upgrade::beneath`
+    // and `segments` already establish that a path Perch reads on Windows comes
+    // spelled either way.
+    let separator = |character: char| {
+        character == '/' || (host.platform() == Platform::Windows && character == '\\')
+    };
+    let Some(rest) = rest.strip_prefix(separator) else {
         return Err(PerchError::Invalid(format!(
             "`{typed}` begins with a `~` that does not name this machine's home, \
              and Perch will not read it as the name of a file — written where it \

@@ -14,9 +14,9 @@ use std::path::Path;
 use common::*;
 use perch::error::{EXIT_INVALID, EXIT_NOTHING_TO_DO, EXIT_PROFILE_LIVE};
 use perch::export;
-use perch::host::FakeHost;
 use perch::host::fake::Effect;
 use perch::host::prelude::*;
+use perch::host::{FakeHost, Platform};
 use perch::registry::{Quarantine, Registry};
 
 const PERCH_HOME: &str = "/Users/someone/.config/perch";
@@ -282,6 +282,29 @@ fn a_tilde_typed_at_the_export_prompt_means_home_because_no_shell_will_say_so() 
             .accounts(),
         3,
         "and it is the whole Export rather than an empty file at a strange path"
+    );
+}
+
+/// The same on the platform that writes the other separator.
+///
+/// `~\backups\perch.age` is what somebody on Windows types, and only `~/` was
+/// read as home — so it fell into the refusal below, which aborts the whole
+/// Purge and makes every question already answered have to be answered again,
+/// over a path that was perfectly clear. Perch reads a Windows path spelled
+/// either way everywhere else it reads one.
+#[test]
+fn a_windows_tilde_means_home_too_because_windows_writes_the_other_separator() {
+    let host = a_machine_to_give_back()
+        .with_platform(Platform::Windows)
+        .with_answers(&["y", "~\\perch-backup.age", "purge"])
+        .with_secrets(&[PASSPHRASE, PASSPHRASE]);
+
+    let (outcome, printed) = run_purge(&host);
+
+    outcome.expect("the word was typed");
+    assert!(
+        host.file(AT).is_some(),
+        "the Export is written under home: {printed}"
     );
 }
 
