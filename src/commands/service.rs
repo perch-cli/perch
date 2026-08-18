@@ -292,7 +292,20 @@ pub fn take_back_before_a_purge(host: &dyn Host, out: &mut dyn Write) -> Result<
     // fail and this is the one caller for whom that is not good enough: an
     // `uninstall` judges by what is left, and a Purge has to judge by what is
     // still running.
-    if is_running(host) {
+    //
+    // The watcher lock first, and on every platform. What this guard is about is
+    // a *Watcher* writing a captured Credential into a Profile the Purge is
+    // deleting, and the lock is the only thing that answers that question
+    // directly: it is held for exactly as long as a Watcher runs and given back
+    // however the process ends. The service manager answers a question one step
+    // away from it — on Linux a unit can read `inactive` while the process it
+    // started is still winding down mid-Switch, and on Windows `schtasks /Query`
+    // answers whether the task *exists*, which `/Delete` has just made false
+    // whether or not it killed anything. `status` has known that about Windows
+    // for as long as it has been asked; this copy of the question did not, so
+    // the one platform where `stopping` cannot terminate a running instance was
+    // also the one where the guard could not see it.
+    if watcher_is_running(host) || (host.platform() != Platform::Windows && is_running(host)) {
         return Err(PerchError::Busy(format!(
             "The Service is still running, so nothing was purged.\n\
              It would go on Switching Credentials into Profiles this command is \

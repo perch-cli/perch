@@ -533,10 +533,20 @@ pub fn stopping(platform: Platform, user_id: Option<u32>) -> Vec<Driven> {
             Driven::may_fail("systemctl", &["--user", "disable", "--now", UNIT_NAME]),
             Driven::may_fail("systemctl", &["--user", "daemon-reload"]),
         ],
-        Platform::Windows => vec![Driven::may_fail(
-            "schtasks",
-            &["/Delete", "/TN", TASK_NAME, "/F"],
-        )],
+        // `/End` before `/Delete`, and it is the step that was missing.
+        // `/Delete` unregisters the task; it does not terminate the instance the
+        // scheduler already started, and there is no flag on it that does. So a
+        // `stopping` that was only the delete left a Watcher running against a
+        // machine whose Service had just been reported stopped — and made
+        // `schtasks /Query` answer "no such task", which is what the callers ask
+        // to find out whether it worked.
+        //
+        // A task that is registered and not running fails this, which is the
+        // ordinary case and is why every step here may fail.
+        Platform::Windows => vec![
+            Driven::may_fail("schtasks", &["/End", "/TN", TASK_NAME]),
+            Driven::may_fail("schtasks", &["/Delete", "/TN", TASK_NAME, "/F"]),
+        ],
     }
 }
 

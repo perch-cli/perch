@@ -700,6 +700,66 @@ fn a_purge_refuses_rather_than_deleting_under_a_service_that_will_not_stop() {
     );
 }
 
+/// **The service manager's answer is one step away from the question.** What
+/// this guard is about is a *Watcher* writing a captured Credential into a
+/// Profile the Purge is deleting, and a stopped unit is not the same fact: a
+/// systemd unit reads `inactive` while the process it started is still winding
+/// down mid-Switch, and on Windows `schtasks /Query` answers whether the task
+/// *exists* — which `/Delete` has just made false whether or not it terminated
+/// the instance, because there is no flag on `/Delete` that terminates one.
+///
+/// The watcher lock is the fact itself: a Watcher holds it for exactly as long
+/// as one runs, and gives it back however the process ends. `status` has asked
+/// it that way for as long as it has been asked; this copy of the question was
+/// judging by the unit alone.
+#[test]
+fn a_purge_refuses_while_a_watcher_still_holds_the_watch() {
+    let host = mac().with_answers(&["n", "purge"]);
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("installed");
+    // The Service stops cleanly and the machine says so — and a Watcher is
+    // still holding the watch, which is the state the unit cannot report.
+    let host = host.with_exec(
+        "launchctl",
+        &["print", "gui/501/cli.perch.watch"],
+        failed("Could not find service"),
+    );
+    let _still_watching = perch::lock::take_all(
+        &host,
+        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+    )
+    .expect("nobody else holds it");
+
+    let (result, _) = run_purge(&host);
+
+    let refusal = result.expect_err("nothing may be deleted underneath a Watcher");
+    assert_eq!(refusal.exit_code(), EXIT_HELD, "{refusal}");
+    assert!(
+        !registry_of(&host).accounts.is_empty(),
+        "and every Account is still there"
+    );
+}
+
+/// `/Delete` unregisters a task; it does not stop the instance the scheduler
+/// already started, and nothing else in `stopping` would. So `/End` runs first
+/// — the step whose absence is what made the guard above reachable at all.
+#[test]
+fn stopping_a_windows_task_ends_the_running_instance_before_unregistering_it() {
+    let driven: Vec<String> = perch::service::stopping(Platform::Windows, None)
+        .iter()
+        .map(|step| format!("{} {}", step.program, step.args.join(" ")))
+        .collect();
+
+    assert_eq!(
+        driven,
+        [
+            r"schtasks /End /TN Perch\Watch",
+            r"schtasks /Delete /TN Perch\Watch /F",
+        ],
+    );
+}
+
 /// macOS keeps its unit somewhere else and is driven by something else, and the
 /// same three properties hold. Asserted because the platform split is the whole
 /// of what this feature is, and one arm of it going untested is one arm of it
