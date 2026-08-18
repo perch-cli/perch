@@ -204,6 +204,7 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
         .then(|| recorded_binary(host, at.as_deref()))
         .flatten();
     let binary_is_there = recorded.as_deref().map(|at| host.path_exists(at));
+    let log = recorded_log(host, at.as_deref(), installed)?;
 
     if json {
         return say_json(
@@ -216,7 +217,7 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
                 "unit": at.as_ref().map(|at| at.to_string_lossy()),
                 "binary": recorded.as_ref().map(|at| at.to_string_lossy()),
                 "binaryExists": binary_is_there,
-                "log": service::log_is_at(platform, service::log_path(host)?.as_deref()),
+                "log": service::log_is_at(platform, log.as_deref()),
             }),
         )
         .map(|()| EXIT_OK);
@@ -264,7 +265,7 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
             out,
             &format!(
                 "Its decisions go to {}.",
-                service::log_is_at(platform, service::log_path(host)?.as_deref()),
+                service::log_is_at(platform, log.as_deref()),
             ),
         )?;
     }
@@ -538,6 +539,31 @@ fn watcher_is_running(host: &dyn Host) -> bool {
 fn recorded_binary(host: &dyn Host, at: Option<&std::path::Path>) -> Option<PathBuf> {
     let text = host.read_file(at?).ok()?;
     service::binary_in(host.platform(), &text)
+}
+
+/// Where the decision log goes, asked of the unit that is installed.
+///
+/// The same rule as [`recorded_binary`], applied to the other thing an install
+/// bakes into the unit. [`service::log_path`] derives the path from `PERCH_HOME`
+/// as it stands *now*, so a Service installed under one and a `status` run under
+/// another named a file nothing writes to, confidently, while the real log went
+/// on filling up where the install had put it.
+///
+/// Falls back to that derivation only where there is nothing to read back: a
+/// machine with no Service installed, where what one would be written with is
+/// the honest answer, and Windows, which registers a task rather than writing a
+/// unit — the same platform [`recorded_binary`] can say nothing about either.
+fn recorded_log(
+    host: &dyn Host,
+    at: Option<&std::path::Path>,
+    installed: bool,
+) -> Result<Option<PathBuf>> {
+    if !installed || host.platform() == Platform::Windows {
+        return service::log_path(host);
+    }
+    Ok(at
+        .and_then(|at| host.read_file(at).ok())
+        .and_then(|text| service::log_in(host.platform(), &text)))
 }
 
 /// The line saying a Service will hold because no Scope has granted anything,
