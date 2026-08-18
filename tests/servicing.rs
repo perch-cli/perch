@@ -251,6 +251,57 @@ fn a_path_a_shell_would_split_survives_the_unit_it_is_written_into() {
     }
 }
 
+/// Windows is refused more widely than the two platforms that keep a file,
+/// because there is nothing to quote *with*.
+///
+/// `schtasks /TR` hands the command to `cmd.exe`, which has no escape for a `"`
+/// inside a quoted string and expands `%VAR%` when the task runs rather than
+/// when it is written. So a `"` in a carried value closed the command and
+/// everything after it became `cmd` syntax — registered to run at every logon,
+/// long after the process that set the variable was gone.
+#[test]
+fn a_carried_value_a_scheduled_task_cannot_quote_is_refused_on_windows() {
+    for hostile in ["x\" && evil.exe && set \"y=", "%APPDATA%"] {
+        let host = watched()
+            .with_platform(Platform::Windows)
+            .with_env("PERCH_HOME", hostile);
+
+        let (result, _) = run_service(&host, WatcherCommand::Install);
+
+        let refusal = result.expect_err("a Scheduled Task cannot hold this");
+        assert_eq!(refusal.exit_code(), EXIT_INVALID);
+        // Whichever value it reaches first — the log path is derived from
+        // `PERCH_HOME`, so it carries the same character — and why.
+        assert!(
+            refusal.to_string().contains("Scheduled Task"),
+            "it says what cannot hold it: {refusal}"
+        );
+        assert!(
+            ran(&host).is_empty(),
+            "and nothing was registered: {refusal}"
+        );
+    }
+}
+
+/// A unit Perch did not write is one it declines to make claims about rather
+/// than guessing at — and now that `ExecStart=` is quoted, "did not write it"
+/// includes the unquoted spelling and a `%` that is a specifier rather than a
+/// doubled literal.
+#[test]
+fn a_unit_in_a_shape_perch_does_not_write_names_no_binary() {
+    for foreign in [
+        "[Service]\nExecStart=/usr/local/bin/perch watcher run\n",
+        "[Service]\nExecStart=\"/usr/local/bin/%h/perch\" watcher run\n",
+        "[Service]\nExecStart=\"/usr/local/bin/perch watcher run\n",
+    ] {
+        assert_eq!(
+            perch::service::binary_in(Platform::Other, foreign),
+            None,
+            "not a unit this writer produced: {foreign}"
+        );
+    }
+}
+
 /// The other half of the same rule, and the case it was getting wrong: taking
 /// the unit back is only right where this install *made* it.
 ///
