@@ -78,6 +78,12 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     let found = target::resolve_account(&registry, &args.target)?;
     host.note(&found.matched);
     refuse_a_quarantined_account(&registry, &found.email)?;
+    // Beside the Quarantine refusal, and for a reason of the same size: a
+    // Profile two Accounts share holds one Credential, so the client this
+    // launches runs as whichever of them is in it — while the line above it has
+    // just named the other. A Switch refuses this; a Run reached the same
+    // directory by another route and did not.
+    switch::refuse_a_shared_profile(registry.held(&found.email)?, &registry)?;
 
     // Settled before anything is linked. Where this is the Claude Code the probe
     // has to find, a machine without one is a refusal that should cost the

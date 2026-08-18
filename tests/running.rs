@@ -873,3 +873,56 @@ fn an_empty_first_word_is_an_argument_rather_than_a_program() {
         "Claude Code, handed both words as they were typed"
     );
 }
+
+/// A machine holding an ordinary active Account and two whose email addresses
+/// derive one Profile between them — `slug` flattens every non-alphanumeric
+/// character, so `some-one@` and `some.one@` name one directory.
+fn machine_holding_the_two_that_share_a_profile() -> FakeHost {
+    let host = logged_in_machine();
+    run_list(&host, false)
+        .0
+        .expect("the first command adopts the login there already is");
+    let mut registry = registry_of(&host);
+    for email in ["some-one@example.com", "some.one@example.com"] {
+        registry.upsert(perch::registry::Account {
+            identity: perch::probe::Identity {
+                email: email.to_string(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            disabled: false,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        });
+    }
+    common::save_registry(&host, &registry);
+
+    let store = store_of(&host, "some-one@example.com");
+    host.set_keychain_item(&store.keychain_service, &store.keychain_account, CREDENTIAL);
+    host
+}
+
+/// A Run against a Profile two Accounts share is refused, the way a Switch onto
+/// one is.
+///
+/// One directory means one Credential Store and one Credential, so the client
+/// this launches runs as whichever of the two is in it — while the line Perch
+/// prints a moment earlier names the other. `perch switch` refuses exactly this
+/// (ADR 0006); the Run reached the same directory by another route and did not.
+#[test]
+fn a_run_against_a_profile_two_accounts_share_is_refused() {
+    let host = machine_holding_the_two_that_share_a_profile().with_login(client_exiting(0));
+
+    let (result, _) = run_run(&host, "some-one@example.com");
+
+    let error = result.expect_err("Perch cannot say which Account that would run as");
+    assert!(error.to_string().contains("share one Profile"), "{error}");
+    assert!(
+        error.to_string().contains("some.one@example.com"),
+        "and it names the other one: {error}"
+    );
+    assert!(launched(&host).is_empty(), "and nothing was launched");
+}

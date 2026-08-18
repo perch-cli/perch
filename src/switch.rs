@@ -942,14 +942,14 @@ fn ground(host: &dyn Host) -> Result<(Installed, Store)> {
     ))
 }
 
-/// Refuses a Switch onto an Account whose Profile is not its alone.
+/// Refuses to act *as* an Account whose Profile is not its alone.
 ///
 /// A Profile is `profiles/<slugged email>`, and the slug flattens every
 /// non-alphanumeric character — so `some-one@example.com` and
 /// `some.one@example.com` name one directory, one Credential Store, and one
 /// Credential between them. `perch add` refuses to make that state and `perch
-/// remove` degrades rather than deleting into it; this was the consumer with no
-/// guard at all.
+/// remove` degrades rather than deleting into it, which is the way back out of
+/// one; a Switch was the consumer with no guard at all.
 ///
 /// What a Switch would do there is the one disagreement ADR 0006 exists to keep
 /// impossible. `prepare` reads the shared store and gets whichever Account's
@@ -958,9 +958,21 @@ fn ground(host: &dyn Host) -> Result<(Installed, Store)> {
 /// was asked for. The machine acts as one Account while Claude Code displays
 /// the other and the registry records the other, and nothing afterwards can
 /// tell which of the two the live Credential belongs to.
-fn refuse_a_shared_profile(incoming: &Account, registry: &Registry) -> Result<()> {
+///
+/// Two more commands do the same thing by other routes and had no guard either.
+/// `perch relogin` writes the fresh Credential into the shared store, which
+/// destroys the other Account's refresh token with nothing said — the one loss
+/// ADR 0006 calls unrecoverable — and then makes it live under the repaired
+/// Account's name. `perch run` launches a client against the shared directory,
+/// so the session runs as whichever Credential is in it while Perch has just
+/// printed the other Account's name.
+///
+/// Not asked by `perch remove` or by the landing it makes: that is the escape
+/// hatch, and a refusal there would be Perch holding both Accounts hostage to a
+/// state it is offering to undo.
+pub fn refuse_a_shared_profile(account: &Account, registry: &Registry) -> Result<()> {
     let Some(sharer) = registry.accounts.iter().find(|held| {
-        held.email() != incoming.email() && registry::same_profile(held.email(), incoming.email())
+        held.email() != account.email() && registry::same_profile(held.email(), account.email())
     }) else {
         return Ok(());
     };
@@ -968,11 +980,11 @@ fn refuse_a_shared_profile(incoming: &Account, registry: &Registry) -> Result<()
         "{} and {} share one Profile, so they share one Credential — their \
          addresses differ only in characters a Profile directory does not keep \
          apart.\n\
-         Switching would write whichever Credential that Profile holds and then \
-         name the other Account as the one it belongs to, and nothing could tell \
-         them apart afterwards. `perch remove` one of them, then `perch add` it \
-         again.",
-        incoming.email(),
+         Perch cannot act as either of them: whichever Credential that Profile \
+         holds is the one a client would run as, whatever Perch says it is, and \
+         nothing afterwards could tell the two apart. `perch remove` one of \
+         them, then `perch add` it again.",
+        account.email(),
         sharer.email(),
     )))
 }
