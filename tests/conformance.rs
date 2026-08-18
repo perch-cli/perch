@@ -817,6 +817,59 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "making a directory at a link uses what it points at",
+        asserts: |host, root, adapter, _now| {
+            // The state ADR 0027 is about: a Profile whose `sessions` is a link
+            // into another configuration directory. `probe::claim` does
+            // `create_dir_all` on that path, so what this answers decides
+            // whether the Marker lands in the Profile or somewhere else — and
+            // the fake used to insert a directory *shadowing* the link, which
+            // is a third behavior no filesystem has.
+            let elsewhere = root.join("another-profile-sessions");
+            let here = root.join("sessions");
+            host.create_dir_all(&elsewhere)
+                .expect("somewhere to point at");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
+            host.link(Link::Symbolic, &elsewhere, &here)
+                .expect("the link is made");
+
+            host.create_dir_all(&here)
+                .expect("a directory that is already there is not a failure");
+
+            assert_eq!(
+                host.link_target(&here).expect("it is there"),
+                Some(elsewhere.clone()),
+                "{adapter}: the link is still a link rather than shadowed"
+            );
+        },
+    },
+    Case {
+        named: "making a directory at a link to nothing is refused",
+        asserts: |host, root, adapter, _now| {
+            // `mkdir` answers EEXIST and the `is_dir` that `create_dir_all`
+            // falls back on follows the link and finds nothing — so this is the
+            // one shape of `mkdir -p` that fails on a path nothing occupies.
+            let gone = root.join("target-that-was-removed");
+            let dangling = root.join("points-at-nothing");
+            host.create_dir_all(&gone).expect("somewhere to point at");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
+            host.link(Link::Symbolic, &gone, &dangling)
+                .expect("the link is made");
+            host.remove_dir_all(&gone).expect("and then it goes");
+
+            let refused = host.create_dir_all(&dangling);
+
+            assert!(
+                refused.is_err(),
+                "{adapter}: a link to nothing is not a directory to make, got {refused:?}"
+            );
+        },
+    },
+    Case {
         named: "removing a link refuses anything that is not one",
         asserts: |host, root, adapter, _now| {
             // The one call whose whole contract is that it only ever takes away

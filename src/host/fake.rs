@@ -1143,23 +1143,59 @@ impl FakeHost {
     /// stamped every parent instead would report a Profile as private however
     /// it had been created — which is the one thing these modes are here to
     /// tell apart (ADR 0020).
-    fn make_dirs(&self, path: &Path, mode: u32) {
-        let mut missing = Vec::new();
-        let mut at = Some(path);
-        while let Some(dir) = at {
-            if dir.as_os_str().is_empty() || self.fs.dirs.borrow().contains(dir) {
-                break;
-            }
-            missing.push(dir.to_path_buf());
-            at = dir.parent();
+    /// A link counts as what it points at here too, which it did not.
+    ///
+    /// This consulted `fs.dirs` alone, so a `mkdir -p` at a path that is a link
+    /// inserted a *directory* shadowing it — and [`resolved`](FakeHost::resolved)
+    /// looks in `files` and `dirs` before `links`, so the link was unreachable
+    /// from then on. Real `create_dir_all` does neither: at a link to a
+    /// directory it succeeds and uses the target, and at a link to nothing it
+    /// fails, because `mkdir` answers `EEXIST` and the `is_dir` it falls back on
+    /// follows the link and finds nothing.
+    ///
+    /// What that hid is the state ADR 0027 is about. A Profile whose `sessions`
+    /// is a link into the Default Profile is exactly what `reconcile::HELD_BACK`
+    /// and `sweep` exist to repair, and `probe::claim` does `create_dir_all` on
+    /// that path — so a Marker written through the link, into another
+    /// directory, was a thing this fake could not model.
+    fn make_dirs(&self, path: &Path, mode: u32) -> Result<(), HostError> {
+        // Already a directory, by whatever route — including through a link, in
+        // which case the target is what was asked for and nothing is made.
+        if let Some(at) = self.resolved(path) {
+            return if self.fs.dirs.borrow().contains(&at) {
+                Ok(())
+            } else {
+                Err(HostError::Other(format!(
+                    "{} is already there and is not a directory",
+                    path.display()
+                )))
+            };
         }
 
-        let mut dirs = self.fs.dirs.borrow_mut();
-        let mut modes = self.fs.modes.borrow_mut();
-        for dir in missing {
-            modes.entry(dir.clone()).or_insert(mode);
-            dirs.insert(dir);
+        // Nothing resolves. A link at the name itself is the dangling case, and
+        // the one `mkdir -p` refuses rather than replaces.
+        if self.fs.links.borrow().contains_key(path) {
+            return Err(HostError::Other(format!(
+                "{} is a link to nothing, so a directory cannot be made there",
+                path.display()
+            )));
         }
+
+        // Whatever the parents resolve to is where this is made, so a directory
+        // above it that is a link is followed rather than shadowed.
+        let at = match path.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => {
+                self.make_dirs(parent, mode)?;
+                self.resolved(parent)
+                    .unwrap_or_else(|| parent.to_path_buf())
+                    .join(path.file_name().unwrap_or(path.as_os_str()))
+            }
+            _ => path.to_path_buf(),
+        };
+
+        self.fs.modes.borrow_mut().entry(at.clone()).or_insert(mode);
+        self.fs.dirs.borrow_mut().insert(at);
+        Ok(())
     }
 
     /// What a path names once its links are followed, or `None` when it names
@@ -1494,14 +1530,14 @@ impl port::Files for FakeHost {
     fn write_private_file(&self, path: &Path, contents: &str) -> Result<(), HostError> {
         self.record(Effect::WrotePrivateFile(path.to_path_buf()));
         if let Some(parent) = path.parent() {
-            self.make_dirs(parent, PRIVATE_DIR_MODE);
+            self.make_dirs(parent, PRIVATE_DIR_MODE)?;
         }
         super::replace_via_tmp(self, path, contents, PRIVATE_FILE_MODE)
     }
 
     fn create_private_dir_all(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::CreatedDir(path.to_path_buf()));
-        self.make_dirs(path, PRIVATE_DIR_MODE);
+        self.make_dirs(path, PRIVATE_DIR_MODE)?;
         self.mark_written(path);
         Ok(())
     }
@@ -1578,7 +1614,7 @@ impl port::Files for FakeHost {
 
     fn create_dir_all(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::CreatedDir(path.to_path_buf()));
-        self.make_dirs(path, ORDINARY_DIR_MODE);
+        self.make_dirs(path, ORDINARY_DIR_MODE)?;
         self.mark_written(path);
         Ok(())
     }
