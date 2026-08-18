@@ -218,6 +218,56 @@ fn a_carried_value_that_would_write_its_own_directive_is_refused_before_anything
     assert!(ran(&host).is_empty(), "and nothing was run");
 }
 
+/// **The same door, reached the other way.** An Upgrade rewrites the unit
+/// against the binary the Channel just moved (ADR 0039), and it does it from a
+/// `describe` that re-reads `PERCH_HOME` and `CLAUDE_CONFIG_DIR` out of the
+/// environment `perch upgrade` was run in. That path assembled the sequence by
+/// hand and dropped the guard above, so the value refused at install time went
+/// straight into a file systemd loads at every login — the same arbitrary code,
+/// persisted, one command over.
+#[test]
+fn an_upgrade_refuses_to_rewrite_the_unit_with_a_value_no_unit_can_hold() {
+    let host = linux();
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("a Service is installed before the Upgrade");
+    let installed = host.read_file(std::path::Path::new(UNIT)).expect("a unit");
+    // The environment changes between the install and the Upgrade, which is what
+    // a `PERCH_HOME` exported in a shell profile after the fact looks like.
+    let host = host
+        .with_env("PERCH_HOME", "/tmp/perch\nExecStartPre=/bin/sh -c evil")
+        .with_reply(
+            perch::upgrade::LATEST_URL,
+            200,
+            r#"{"tag_name":"v999.0.0","name":"whatever"}"#,
+        )
+        .with_file("/usr/bin/npm", "");
+
+    let mut out = Vec::new();
+    let outcome = perch::commands::upgrade::run(
+        &host,
+        perch::commands::upgrade::UpgradeArgs {
+            channel: Some("npm".to_string()),
+            ..perch::commands::upgrade::UpgradeArgs::default()
+        },
+        &mut out,
+    );
+    let said = String::from_utf8(out).expect("it said text");
+
+    outcome.expect("the Upgrade itself succeeded — the binary really is newer");
+    assert_eq!(
+        host.read_file(std::path::Path::new(UNIT)).as_deref().ok(),
+        Some(installed.as_str()),
+        "the unit on disk is untouched: a value no format can hold is refused \
+         before anything is written, whichever door asked"
+    );
+    assert!(
+        said.contains("could not be restarted") && said.contains("perch watcher install"),
+        "and it is a warning with a one-command repair rather than a silent \
+         rewrite: {said}"
+    );
+}
+
 /// A path with a space in it is ordinary — an npm prefix under a home somebody
 /// put a space in, `/opt/My Tools` — and systemd splits `ExecStart=` on
 /// whitespace. Written unquoted, the unit installed cleanly, systemd ran

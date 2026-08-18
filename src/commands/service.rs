@@ -37,41 +37,8 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     refuse_as_root(host)?;
 
     let unit = describe(host)?;
-    // Before the log directory is made and before anything is written: a value
-    // no format can hold is a refusal about the Unit, not a half-finished
-    // install to take back.
-    unit.refuse_what_the_format_cannot_hold(host.platform())?;
     let at = service::unit_path(host)?;
     let replaced = at.as_deref().is_some_and(|at| host.path_exists(at));
-
-    // The directory the decision log goes in, before anything is told to write
-    // there. It is inside Perch's home, which is made on the way to the first
-    // lock Perch takes — and an install reads the registry through nothing that
-    // takes one, so on a machine where Claude Code is logged in and Perch has
-    // never run, the directory was simply not there. `cmd /c … >> "…\watch.log"`
-    // cannot open a redirect into a directory that does not exist, so the
-    // Windows task failed at every logon, silently; launchd cannot open
-    // `StandardOutPath` either.
-    //
-    // Private, because it is Perch's own home rather than a path somebody
-    // typed, and a Purge sweeps it with everything else Perch holds.
-    if let Some(log) = unit.log.as_deref().and_then(std::path::Path::parent) {
-        host.create_private_dir_all(log).map_err(|err| {
-            PerchError::file_write(log, format!("could not make room for the log: {err}"))
-        })?;
-    }
-
-    // The file first, then the service manager: `bootstrap` and `enable` are
-    // both given a path that has to be there when they read it.
-    if let (Some(at), Some(rendered)) = (&at, unit.rendered(host.platform())) {
-        if let Some(parent) = at.parent() {
-            host.create_dir_all(parent).map_err(|err| {
-                PerchError::file_write(parent, format!("could not make room for the unit: {err}"))
-            })?;
-        }
-        crate::host::write_atomically(host, at, &rendered)
-            .map_err(|err| PerchError::file_write(at, err))?;
-    }
 
     // A Windows task is registered rather than written, so there is nothing to
     // undo there — but on the two platforms with a file, a `bootstrap` that
@@ -87,10 +54,7 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     // something outside Perch, like a `systemctl --user` with no session bus
     // over SSH, would silently uninstall a Watcher that had been running for
     // months. The replaced unit is left where it is and said so instead.
-    if let Err(failed) = drive(
-        host,
-        service::starting(host.platform(), &unit, at.as_deref()),
-    ) {
+    if let Err(failed) = write_and_start(host, &unit, at.as_deref()) {
         if replaced {
             return Err(failed.with_note(
                 "The Service was not started. The unit file has been replaced \
@@ -361,6 +325,60 @@ pub fn is_there(host: &dyn Host) -> bool {
         .unwrap_or(false)
 }
 
+/// Puts the unit on disk and hands it to the service manager: the whole of what
+/// "install this Service" means on every platform that keeps a file, and nothing
+/// at all on the one that does not.
+///
+/// One function because there are two doors to it — an `install` somebody typed
+/// and the refresh an Upgrade owes a Service whose binary has moved — and the
+/// second of them had assembled the sequence by hand, minus a clause. The guard
+/// was the clause: `install` refuses a Unit carrying a value the format cannot
+/// hold *before* it writes anything, and the Upgrade path wrote
+/// `unit.rendered(...)` straight out. Both read `PERCH_HOME` and
+/// `CLAUDE_CONFIG_DIR` off the environment they are run in, so a `PERCH_HOME`
+/// with a newline in it closed `Environment=` and appended arbitrary directives
+/// to a unit systemd loads at every login — the exact hazard
+/// [`Unit::refuse_what_the_format_cannot_hold`] exists for, reached through the
+/// door that did not ask it.
+///
+/// The file first, then the service manager: `bootstrap` and `enable` are both
+/// given a path that has to be there when they read it.
+fn write_and_start(host: &dyn Host, unit: &Unit, at: Option<&std::path::Path>) -> Result<()> {
+    // Before the parent directory is made and before anything is written: a
+    // value no format can hold is a refusal about the Unit, not a half-finished
+    // install to take back.
+    unit.refuse_what_the_format_cannot_hold(host.platform())?;
+
+    // The directory the decision log goes in, before anything is told to write
+    // there. It is inside Perch's home, which is made on the way to the first
+    // lock Perch takes — and neither door here reads the registry through
+    // anything that takes one, so on a machine where Claude Code is logged in
+    // and Perch has never run, the directory was simply not there. `cmd /c … >>
+    // "…\watch.log"` cannot open a redirect into a directory that does not
+    // exist, so the Windows task failed at every logon, silently; launchd cannot
+    // open `StandardOutPath` either.
+    //
+    // Private, because it is Perch's own home rather than a path somebody
+    // typed, and a Purge sweeps it with everything else Perch holds.
+    if let Some(log) = unit.log.as_deref().and_then(std::path::Path::parent) {
+        host.create_private_dir_all(log).map_err(|err| {
+            PerchError::file_write(log, format!("could not make room for the log: {err}"))
+        })?;
+    }
+
+    if let (Some(at), Some(rendered)) = (at, unit.rendered(host.platform())) {
+        if let Some(parent) = at.parent() {
+            host.create_dir_all(parent).map_err(|err| {
+                PerchError::file_write(parent, format!("could not make room for the unit: {err}"))
+            })?;
+        }
+        crate::host::write_atomically(host, at, &rendered)
+            .map_err(|err| PerchError::file_write(at, err))?;
+    }
+
+    drive(host, service::starting(host.platform(), unit, at))
+}
+
 /// Writes the unit again against the binary that is there now, after an Upgrade
 /// has moved it (ADR 0039, ADR 0040).
 ///
@@ -375,14 +393,7 @@ pub fn refreshed_after_an_upgrade(host: &dyn Host) -> Option<String> {
 
     let refreshed = describe(host).and_then(|unit| {
         let at = service::unit_path(host)?;
-        if let (Some(at), Some(rendered)) = (&at, unit.rendered(host.platform())) {
-            crate::host::write_atomically(host, at, &rendered)
-                .map_err(|err| PerchError::file_write(at, err))?;
-        }
-        drive(
-            host,
-            service::starting(host.platform(), &unit, at.as_deref()),
-        )?;
+        write_and_start(host, &unit, at.as_deref())?;
         Ok(unit.binary)
     });
 
