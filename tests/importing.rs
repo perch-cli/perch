@@ -7,7 +7,7 @@
 mod common;
 
 use common::*;
-use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND};
+use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROFILE_LIVE};
 use perch::host::prelude::*;
 use perch::host::{FakeHost, Platform};
 use perch::registry::{Active, Quarantine, Registry};
@@ -817,4 +817,39 @@ fn an_account_whose_export_carried_no_identity_file_still_gets_one() {
         .file(store_of(&onto, SECOND_EMAIL).identity_file)
         .expect("one was composed rather than left absent");
     assert!(held.contains(SECOND_EMAIL), "{held}");
+}
+
+/// A Profile something is running against is one nothing writes into, and an
+/// Import was the one writer that never asked.
+///
+/// An Import runs on a machine holding no *Accounts*, which is not the same as
+/// a machine holding no Profiles: a Purge that failed at its last step leaves
+/// `profiles/` populated with no registry above it, and `Touched::was_already_there`
+/// exists because of exactly that. Somebody who then opens a terminal against
+/// one of those directories and runs `perch holdings import` had that session's
+/// Credential replaced underneath it — the mid-task logout ADR 0005 refuses
+/// everywhere else.
+#[test]
+fn an_import_into_a_profile_a_client_is_holding_writes_nothing() {
+    let sealed = an_export_of_a_whole_machine();
+    let host = a_new_machine_holding(&sealed);
+    // What a Purge that could not finish leaves: a Profile directory with a
+    // client in it and no registry naming it.
+    let profile = perch::registry::profile_dir_for(&host, EMAIL).expect("home is known");
+    let host = client_running_against(host, &profile.to_string_lossy(), 4242);
+
+    let (outcome, _) = run_import(&host, AT);
+
+    let error = outcome.expect_err("that session is holding the Credential");
+    assert_eq!(error.exit_code(), EXIT_PROFILE_LIVE);
+    assert!(error.to_string().contains(EMAIL), "{error}");
+    assert!(
+        registry_on(&host).is_none(),
+        "and nothing was imported: an Import is whole or it did not happen"
+    );
+    assert_eq!(
+        credential_of(&host, EMAIL),
+        None,
+        "the Credential that session is using was not written over"
+    );
 }

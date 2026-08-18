@@ -270,6 +270,35 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
         }
     }
 
+    // A Profile something is running against is one nothing writes into, and
+    // `profile::store_credential`'s own doc names this as the one obligation it
+    // cannot check for itself. Every other writer honors it — a Switch, a login,
+    // a Carry, a Purge — and an Import did not.
+    //
+    // An Import runs on a machine holding no *Accounts*, which is not the same
+    // as a machine holding no Profiles: `Touched::was_already_there` exists
+    // because a Purge that failed at its last step leaves `profiles/` populated
+    // with no registry above it. Somebody who then opens a terminal against one
+    // of those directories and runs `perch holdings import` had that session's
+    // Credential replaced underneath it.
+    //
+    // Asked over everything about to be written, before the first write, which
+    // is the same bargain every other refusal here makes: named before anything
+    // is made.
+    let live: Vec<String> = placements
+        .iter()
+        .filter(|(_, store, _, _)| probe::anything_running(host, &store.config_dir))
+        .map(|(email, store, _, _)| format!("{email} ({})", store.config_dir.display()))
+        .collect();
+    if !live.is_empty() {
+        return Err(PerchError::ProfileLive(format!(
+            "a client is running against a Profile this Import would write into, \
+             so its Credential would be replaced underneath that session: {}.\n\
+             Nothing was imported. Close it and run this again.",
+            live.join(", "),
+        )));
+    }
+
     let mut placed = Placed::default();
     for (email, store, credential, identity_file) in placements {
         // Recorded before it is written rather than after it worked, because
