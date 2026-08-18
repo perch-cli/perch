@@ -240,6 +240,24 @@ pub fn control_character_in(value: &str) -> Option<String> {
         .map(|control| format!("a control character (U+{:04X})", control as u32))
 }
 
+/// A command as somebody would have typed it, for the line printed before it is
+/// run or the one that says what failed.
+///
+/// Here because it is about what goes through [`Processes::exec`], and because
+/// it was written twice — once in `upgrade` for the installer it drives and
+/// once in `service` for the service manager it drives — with the same doc
+/// comment reasoning above each. The two are read side by side in
+/// `perch upgrade` and `perch watcher install`, so two spellings of "as
+/// somebody would have typed it" is two answers to one question.
+pub fn as_typed(program: &Path, args: &[String]) -> String {
+    let mut line = program.to_string_lossy().into_owned();
+    for arg in args {
+        line.push(' ');
+        line.push_str(arg);
+    }
+    line
+}
+
 /// Whether a mode lets anybody but the owner near the file.
 pub fn is_private(mode: u32) -> bool {
     mode & 0o077 == 0

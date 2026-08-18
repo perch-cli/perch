@@ -472,17 +472,6 @@ pub fn npm_command(host: &dyn Host, version: Option<&str>) -> Result<(PathBuf, V
     Ok((npm, args))
 }
 
-/// A command as somebody would have typed it, for the line printed before it is
-/// run.
-pub fn as_typed(program: &Path, args: &[String]) -> String {
-    let mut line = program.to_string_lossy().into_owned();
-    for arg in args {
-        line.push(' ');
-        line.push_str(arg);
-    }
-    line
-}
-
 /// The installer this platform is upgraded by, embedded rather than fetched.
 ///
 /// `include_str!` at build time, because the alternative is downloading a shell

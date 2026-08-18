@@ -456,12 +456,10 @@ impl Driven {
     }
 
     /// The command as somebody would have typed it, for the line that says what
-    /// failed.
+    /// failed — the same sentence `perch upgrade` prints about the installer it
+    /// drives, and so the same function.
     pub fn as_typed(&self) -> String {
-        std::iter::once(self.program.clone())
-            .chain(self.args.iter().cloned())
-            .collect::<Vec<_>>()
-            .join(" ")
+        crate::host::as_typed(Path::new(&self.program), &self.args)
     }
 }
 

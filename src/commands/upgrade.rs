@@ -122,7 +122,7 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
                      `perch.exe` while it is running. Nothing was upgraded.\n\
                      Run this from a terminal where Perch is not running:\n\
                      \n    {}\n",
-                    upgrade::as_typed(&npm, &npm_args)
+                    crate::host::as_typed(&npm, &npm_args)
                 )));
             }
             hand_it_over(host, &npm, &npm_args, out)
@@ -340,13 +340,13 @@ fn hand_it_over(
     args: &[String],
     out: &mut dyn Write,
 ) -> Result<i32> {
-    say(out, &upgrade::as_typed(program, args))?;
+    say(out, &crate::host::as_typed(program, args))?;
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
     host.exec_interactive(&program.to_string_lossy(), &borrowed, &[])
         .map_err(|err| {
             PerchError::Other(format!(
                 "could not run `{}`: {err}",
-                upgrade::as_typed(program, args)
+                crate::host::as_typed(program, args)
             ))
         })
 }
