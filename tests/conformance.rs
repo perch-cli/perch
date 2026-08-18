@@ -437,6 +437,25 @@ const CASES: &[Case] = &[
             );
         },
     },
+    Case {
+        named: "a rename of what is not there fails, and not as NotFound",
+        asserts: |host, root, adapter, _now| {
+            let failed = host
+                .rename(&root.join("never-existed"), &root.join("nowhere"))
+                .expect_err("there is nothing to move");
+
+            // `NotFound` is load-bearing at this port — `CredentialStore::read`
+            // reads it as "this store holds nothing" and `clients_in` as
+            // "nothing is running" — so a rename that answered with it was an
+            // answer the next caller would have been written against, and only
+            // one of the two adapters gave it.
+            assert!(
+                !matches!(failed, HostError::NotFound { .. }),
+                "{adapter}: a rename propagates what the filesystem said rather \
+                 than naming it: {failed:?}"
+            );
+        },
+    },
     // ---- asking about what is there --------------------------------------
     Case {
         named: "a directory is not a file",

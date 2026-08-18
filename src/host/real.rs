@@ -1088,7 +1088,17 @@ fn create_file_with_mode(path: &Path, contents: &str, mode: u32) -> Result<(), H
     // to ask. Safe at this point and nowhere later: the file is `O_EXCL` and
     // still empty, so the instant this widens is an instant there is nothing in
     // it to read — which is the whole of what "at creation" was protecting.
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))?;
+    //
+    // Through the handle rather than through the path. `std::fs::set_permissions`
+    // is `chmod(2)` on a name and follows a link, which throws away the whole of
+    // what `create_new` just established: between the open and the chmod,
+    // anything that can write the directory can unlink this file and leave a
+    // link at the same name, and the mode lands on whatever that link points
+    // at. The directory is attacker-writable in the case this file already
+    // defends against — `CLAUDE_CONFIG_DIR` is taken verbatim and can name a
+    // shared location — and `File::set_permissions` is `fchmod(2)`, which
+    // cannot be redirected.
+    file.set_permissions(std::fs::Permissions::from_mode(mode))?;
     file.write_all(contents.as_bytes())?;
     file.sync_all()?;
     Ok(())
@@ -1397,7 +1407,16 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
     }
 
     let seconds = i64::try_from(info.pbi_start_tvsec).ok()?;
-    DateTime::from_timestamp(seconds, u32::try_from(info.pbi_start_tvusec).ok()? * 1_000)
+    // `checked_mul`, because this is the one arithmetic here on a number the
+    // kernel chooses: a `tv_usec` above 4,294,967 overflows `u32` and is a
+    // panic in a debug build and a wrapped nanosecond count in a release one.
+    // A real `tv_usec` is under a million, so nothing is expected to reach it —
+    // which is exactly the kind of expectation worth spelling as an answer
+    // rather than as a multiplication.
+    let nanoseconds = u32::try_from(info.pbi_start_tvusec)
+        .ok()?
+        .checked_mul(1_000)?;
+    DateTime::from_timestamp(seconds, nanoseconds)
 }
 
 /// When a process began, as `GetProcessTimes` reports it: a creation `FILETIME`

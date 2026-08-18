@@ -215,7 +215,24 @@ fn the_live_store(
     registry: &Registry,
     account: &Account,
 ) -> Result<Option<crate::probe::Store>> {
-    if !registry.is_active(account.email()) {
+    // A *settled* registry, rather than `is_active`, which answers a Landing
+    // with the Account being **left** (ADR 0048). A Switch killed between
+    // storing the arriving Credential and patching the Identity leaves exactly
+    // that state, and `is_active` then said yes for the leaving Account while
+    // the live store held the arriving one's Credential — so the Export filed
+    // one Account's refresh token under the other's address and dropped the
+    // genuine copy of it. Restoring that gives two Accounts one token, and the
+    // first Renewal Rotates it and kills the other.
+    //
+    // Every command that acts on the live Credential settles a Landing before
+    // reading who is active, and `perch holdings export` now does too. This is
+    // the belt to that brace, and it is the one that covers `perch holdings
+    // purge` — which reads the registry directly, and must not become the
+    // command an unaccountable Landing can stop.
+    if !matches!(
+        registry.active(),
+        registry::Active::Settled(active) if registry::same_name(active, account.email())
+    ) {
         return Ok(None);
     }
     let live = registry::the_default_profile(host)?;

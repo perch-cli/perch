@@ -120,7 +120,7 @@ you@example.com is in no Group, and nothing has said the Accounts in no Group ar
 `perch config set ungrouped interchangeable true` says they are, and `perch config set ungrouped watcher-may-act true` then says the watcher may act on them. [...]   # exit 18
 
 $ perch watcher run
-Group `work` has not been told the watcher may act on it, so nothing is being watched. Nothing only ever changes underneath you because you said it could.
+Group `work` has not been told the watcher may act on it, so nothing is being watched. Anything that changes underneath you only ever does so because you said it could.
 `perch config set work watcher-may-act true` says it may.   # exit 14
 ```
 

@@ -712,3 +712,38 @@ fn a_refresh_that_failed_is_named_as_one_in_json_with_the_reason() {
         "and the figure shown is the one that was cached"
     );
 }
+
+/// A Credential that had run out is Renewed on the way in, and a token
+/// Anthropic minted seconds ago and then refused is a contradiction inside one
+/// command — not a second Credential that has quietly run out.
+///
+/// Renewing again buys nothing: it asks the same endpoint for a replacement of
+/// a token that endpoint had just issued and would not take. What it costs is
+/// real, because every Renewal may Rotate, and a Rotation whose write fails is
+/// a permanent `RotationLost`. During an outage on the endpoint Perch reads for
+/// reassurance, a Group of five doubled to ten Rotations.
+#[test]
+fn a_token_renewed_on_the_way_in_is_not_renewed_again_when_anthropic_refuses_it() {
+    let host = machine_with_two_accounts();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
+    let host = host
+        .with_reply(TOKEN_URL, 200, RENEWED)
+        // The token the Renewal just issued, refused by the server that issued
+        // it.
+        .with_reply_to(PROFILE_URL, RENEWED_TOKEN, 401, "");
+    host.forget_effects();
+
+    let (result, printed) = run_status_refresh(&host, false);
+
+    result.expect("a refusal degrades the display rather than failing the command");
+    assert_eq!(
+        host.sent_to(TOKEN_URL).len(),
+        1,
+        "renewed once on the way in, and not a second time over the refusal \
+         that followed it: {printed}"
+    );
+    assert!(
+        printed.contains("would not accept the token it had just issued"),
+        "and it is reported as the contradiction it is: {printed}"
+    );
+}

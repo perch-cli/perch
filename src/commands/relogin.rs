@@ -32,6 +32,16 @@ use crate::registry::{self, Account, Registry};
 use crate::switch;
 use crate::target;
 
+/// Why this command writes into the Default Profile, named for the two places
+/// that have to agree about it: the refusal somebody meets *before* the browser
+/// round trip, and the one [`switch::make_live`] raises after it.
+///
+/// A constant because they are meant to be the same sentence and nothing was
+/// making them one. Two literals that must match by hand is how a user comes to
+/// be told one thing when Perch asks and another when it acts.
+const WHY_THE_DEFAULT_PROFILE: &str = "the Default Profile, which is where this Account's repaired Credential has \
+     to land";
+
 #[derive(Debug, Clone)]
 pub struct ReloginArgs {
     /// The Account to log in again: its Alias, or its email address.
@@ -135,8 +145,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
         &mut perch,
         &mut registry,
         &account,
-        "the Default Profile, which is where this Account's repaired Credential \
-         has to land",
+        WHY_THE_DEFAULT_PROFILE,
     );
     // Whether the fresh Credential became the live one, whatever else failed.
     // `make_live` writes the Credential and then patches the Identity, and a
@@ -196,10 +205,7 @@ fn refuse_while_anything_is_running(
     switch::refuse_if_live_anywhere(
         host,
         account,
-        landing_in_the_default_profile.then_some(
-            "the Default Profile, which is where this Account's repaired \
-             Credential has to land",
-        ),
+        landing_in_the_default_profile.then_some(WHY_THE_DEFAULT_PROFILE),
         installed,
     )
 }

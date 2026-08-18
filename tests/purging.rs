@@ -1044,3 +1044,56 @@ fn a_leftover_directory_that_names_no_store_stops_the_purge_rather_than_being_pa
         "and the home is still there, because the Purge did not finish"
     );
 }
+
+/// The same file, and the same silence, one question later.
+///
+/// Between the Export landing and the note that mentions it there is one more
+/// prompt: the word `purge`, written to the terminal and answered from it. A
+/// closed pty or a SIGHUP fails that too — and this was the one failure path
+/// between the two that carried nothing, so somebody read "could not read your
+/// answer" with no word of the armored file holding a working Credential for
+/// every Account sitting at a path they had typed once and would not think
+/// about again.
+#[test]
+fn a_terminal_that_goes_away_at_the_last_question_does_not_lose_the_export() {
+    /// Writes until the Purge asks for the word, and then is not there.
+    struct GoesAwayAsking;
+
+    impl std::io::Write for GoesAwayAsking {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            match String::from_utf8_lossy(bytes).contains("to give the machine back") {
+                true => Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "the pipe closed",
+                )),
+                false => Ok(bytes.len()),
+            }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let host = a_machine_to_give_back()
+        .with_answers(&["y", AT, "purge"])
+        .with_secrets(&[PASSPHRASE, PASSPHRASE]);
+
+    let outcome = perch::commands::purge::run(&host, false, &mut GoesAwayAsking);
+
+    let refused = outcome.expect_err("the question could not be put");
+    let said = refused.to_string();
+    assert!(
+        said.contains(AT),
+        "the Export that was written is still named: {said}"
+    );
+    assert!(
+        said.contains("will not write over it"),
+        "and so is what the next Purge will do about it: {said}"
+    );
+    assert_eq!(
+        registry_on(&host).map(|registry| registry.accounts.len()),
+        Some(3),
+        "with nothing purged"
+    );
+}

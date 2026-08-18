@@ -641,6 +641,40 @@ fn windows_keeps_the_task_itself_so_status_reads_no_unit_file() {
         reported["installed"], true,
         "and what is installed is what the task scheduler says is: {said}"
     );
+    assert_eq!(
+        reported["running"], false,
+        "a registered task that has not fired is not a running one — and \
+         `schtasks /Query` answers whether it exists, which is the question \
+         `installed` already asked it: {said}"
+    );
+}
+
+/// A registered task and a Watcher holding the watch is the whole of what
+/// Windows can be asked, so it is what "running" is answered from there.
+///
+/// `schtasks /Query` succeeds whenever the task *exists*, which is the same
+/// query `installed` is read off — so a `running` computed from it was true by
+/// construction, and a logon task that had not fired since boot reported itself
+/// as running to the prose and to the `--json` a script branches on.
+#[test]
+fn a_windows_task_is_running_when_a_watcher_is_actually_holding_the_watch() {
+    let host = watched().with_platform(Platform::Windows).with_exec(
+        "schtasks",
+        &["/Query", "/TN", r"Perch\Watch"],
+        worked(),
+    );
+    let _watching_alone = perch::lock::take_all(
+        &host,
+        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+    )
+    .expect("nobody holds it yet");
+
+    let (result, said) = run_service(&host, WatcherCommand::Status { json: true });
+
+    assert_eq!(result.expect("a question"), EXIT_OK);
+    let reported: serde_json::Value = serde_json::from_str(&said).expect("it is JSON");
+    assert_eq!(reported["running"], true, "{said}");
+    assert_eq!(reported["watching"], true, "{said}");
 }
 
 /// What the service manager said is what the user needs, and some of them say it
@@ -748,5 +782,45 @@ fn a_service_manager_that_is_not_installed_says_so_rather_than_failing_blankly()
     assert!(
         !host.path_exists(std::path::Path::new(UNIT)),
         "and the unit it had written is taken back"
+    );
+}
+
+/// The Service writes its decisions into a file inside Perch's home, and the
+/// install is what has to put that directory there.
+///
+/// Perch's home is made on the way to the first lock Perch takes, and an
+/// install takes none — so on a machine where Claude Code is logged in and
+/// Perch has never run, the directory the unit points its output at simply was
+/// not there. `cmd /c … >> "…\watch.log"` cannot open a redirect into a
+/// directory that does not exist, so the Windows task failed at every logon
+/// without saying anything, and launchd cannot open a `StandardOutPath` there
+/// either.
+#[test]
+fn installing_on_a_machine_perch_has_never_run_on_makes_room_for_the_log() {
+    let host = logged_in_machine().with_exec(
+        "launchctl",
+        &["bootout", "gui/501/cli.perch.watch"],
+        worked(),
+    );
+    let plist = unit_at(&host);
+    host.set_exec(
+        "launchctl",
+        &["bootstrap", "gui/501", &plist.to_string_lossy()],
+        worked(),
+    );
+    let log = perch::service::log_path(&host)
+        .expect("home is known")
+        .expect("this platform keeps its own log");
+    assert!(
+        !host.path_exists(log.parent().expect("the log is inside Perch's home")),
+        "the fixture's premise: nothing has made Perch's home yet"
+    );
+
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
+
+    result.expect("the install works on a machine Perch has never run on");
+    assert!(
+        host.path_exists(log.parent().expect("the log is inside Perch's home")),
+        "the directory the unit points its output at is there: {printed}"
     );
 }

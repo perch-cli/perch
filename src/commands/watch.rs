@@ -174,7 +174,17 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     // Exactly one Watcher per person per machine. Taken before the opening line
     // rather than after it, so a second `perch watcher run` never claims to be
     // watching anything.
-    let Some(_watching_alone) = take_the_watch(host, out, &mut backoff, &mut holding)? else {
+    //
+    // Kept by name rather than dropped into a `_`, because a hold that is never
+    // renewed is a hold that expires: the watcher lock's staleness window is
+    // derived from "a Watcher renews this once a round" (see
+    // [`registry::watcher_lock_spec`]), and nothing was renewing it. A perfectly
+    // healthy loop therefore went quiet on the artifact from the moment it
+    // started, and the next `perch watcher check` — or the `perch watcher
+    // status` that asks by taking the lock — cleared it out from under a
+    // Watcher that went on deciding, which is the two-Watcher state the lock
+    // exists to prevent (ADR 0040).
+    let Some(mut watching_alone) = take_the_watch(host, out, &mut backoff, &mut holding)? else {
         return stopped(out);
     };
 
@@ -232,6 +242,23 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
 
         say_it(out, &mut holding, spoken, host.now())?;
 
+        // Once a round, which is the cadence
+        // [`registry::watcher_lock_spec`]'s staleness window is derived from.
+        // Here rather than at the top of the round because this is where the
+        // round's own work is over: everything above may have waited on
+        // Claude Code's locks or on a keychain that stopped to ask, and a
+        // renewal taken before all of that is a renewal that is already old by
+        // the time the loop waits on it.
+        watching_alone.renew();
+        if !watching_alone.still_held() {
+            // Renewing is what discovers this, and `renew` has already said
+            // what happened and what it means (`lost_means`). Whoever took the
+            // lock over is watching this machine now, and a second Watcher
+            // deciding beside them is the whole of what the lock is for — so
+            // this one leaves rather than going round again.
+            return handed_over(out);
+        }
+
         // The one place the loop holds nothing it took this round, and
         // therefore the only place it is asked whether to go round again: a
         // stop asked for during a round is answered here, once that round has
@@ -260,6 +287,23 @@ fn stopped(out: &mut dyn Write) -> Result<()> {
         out,
         "Stopped. The watcher lock is given back, no file of its own was \
          written, and the Account you are on is the one it last Switched to.",
+    )
+}
+
+/// What the loop says when it leaves because it is no longer the Watcher.
+///
+/// Not [`stopped`], because the two promises that line makes are not both true
+/// here: the lock is *not* given back — it is somebody else's now, and giving
+/// back a lock another process holds is how one loss becomes two — and nobody
+/// asked this loop to stop. What is true is the same last sentence, so it is
+/// the one kept.
+fn handed_over(out: &mut dyn Write) -> Result<()> {
+    say(
+        out,
+        "Stopped: another Watcher has taken the watch over, so this one is no \
+         longer the only one deciding. Its lock is left where it is, no file of \
+         its own was written, and the Account you are on is the one it last \
+         Switched to.",
     )
 }
 
@@ -568,8 +612,8 @@ fn permitted(registry: &Registry, _settled: &Settled) -> Result<Watching> {
     if !settings.watcher_may_act {
         return Err(PerchError::Invalid(format!(
             "{} has not been told the watcher may act on it, so nothing is \
-             being watched. Nothing only ever changes underneath you because \
-             you said it could.\n\
+             being watched. Anything that changes underneath you only ever \
+             does so because you said it could.\n\
              `perch config set {} watcher-may-act true` says it may.",
             scope.described(),
             scope.word(),

@@ -39,6 +39,23 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     let at = service::unit_path(host)?;
     let replaced = at.as_deref().is_some_and(|at| host.path_exists(at));
 
+    // The directory the decision log goes in, before anything is told to write
+    // there. It is inside Perch's home, which is made on the way to the first
+    // lock Perch takes — and an install reads the registry through nothing that
+    // takes one, so on a machine where Claude Code is logged in and Perch has
+    // never run, the directory was simply not there. `cmd /c … >> "…\watch.log"`
+    // cannot open a redirect into a directory that does not exist, so the
+    // Windows task failed at every logon, silently; launchd cannot open
+    // `StandardOutPath` either.
+    //
+    // Private, because it is Perch's own home rather than a path somebody
+    // typed, and a Purge sweeps it with everything else Perch holds.
+    if let Some(log) = unit.log.as_deref().and_then(std::path::Path::parent) {
+        host.create_private_dir_all(log).map_err(|err| {
+            PerchError::file_write(log, format!("could not make room for the log: {err}"))
+        })?;
+    }
+
     // The file first, then the service manager: `bootstrap` and `enable` are
     // both given a path that has to be there when they read it.
     if let (Some(at), Some(rendered)) = (&at, unit.rendered(host.platform())) {
@@ -154,7 +171,19 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
     let platform = host.platform();
     let at = service::unit_path(host)?;
     let installed = is_installed(host, at.as_deref())?;
-    let running = installed && is_running(host);
+    let watching = watcher_is_running(host);
+    // Windows is asked differently, because `schtasks /Query` answers whether
+    // the task *exists* rather than whether it is running — which is the same
+    // question `is_installed` asks it, so `installed && is_running` was true by
+    // construction and a logon task that had not fired since boot read as
+    // running. The evidence Windows does have is the watcher lock: a Watcher
+    // holds it for exactly as long as one runs, and the task's whole action is
+    // to be one. It cannot tell that Watcher from a `perch watcher run`
+    // somebody typed, and that is the smaller error of the two.
+    let running = match platform {
+        Platform::Windows => installed && watching,
+        _ => installed && is_running(host),
+    };
 
     // Read off the unit that is actually installed rather than off what one
     // would be written from now, because the whole point of the question is
@@ -163,7 +192,6 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
         .then(|| recorded_binary(host, at.as_deref()))
         .flatten();
     let binary_is_there = recorded.as_deref().map(|at| host.path_exists(at));
-    let watching = watcher_is_running(host);
 
     if json {
         return say_json(
@@ -365,6 +393,10 @@ fn describe(host: &dyn Host) -> Result<Unit> {
             .collect(),
         log: service::log_path(host)?,
         user_id: host.user_id(),
+        // Off the machine, because `schtasks` has no notation for "whoever is
+        // running this" and the one Perch was passing — `%USERNAME%` — is
+        // `cmd.exe`'s, expanded by a shell that is not there.
+        user_name: host.env_var("USERNAME"),
     })
 }
 

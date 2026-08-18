@@ -14,7 +14,7 @@ mod common;
 
 use common::*;
 use perch::commands::upgrade::{self, UpgradeArgs};
-use perch::error::{EXIT_OK, PerchError};
+use perch::error::{EXIT_NOTHING_TO_DO, EXIT_OK, PerchError};
 use perch::host::fake::Effect;
 use perch::host::{FakeHost, Platform};
 use perch::upgrade::LATEST_URL;
@@ -113,6 +113,11 @@ fn an_npm_installation_is_handed_to_npm() {
 /// npm would be replacing `perch.exe` while it is the running process, and
 /// Windows holds a running executable open — so the one thing that must not
 /// happen is Perch running it anyway and reporting whatever npm made of that.
+///
+/// Reported as nothing done, because nothing was. A `0` here is a script's
+/// `perch upgrade && restart-my-thing` restarting the old binary on the
+/// strength of an Upgrade that only printed a suggestion, and `15` is already
+/// the code for a request understood and a machine left as it was.
 #[test]
 fn npm_on_windows_is_printed_rather_than_run_because_it_cannot_work_from_here() {
     let host = machine()
@@ -121,13 +126,23 @@ fn npm_on_windows_is_printed_rather_than_run_because_it_cannot_work_from_here() 
         .with_file("/usr/bin/npm.cmd", "")
         .installed_at("/c/Users/someone/AppData/Roaming/npm/node_modules/perch-cli/node_modules/@perch-cli/win32-x64/bin/perch.exe");
 
-    let (outcome, said) = upgrading(&host, UpgradeArgs::default());
+    let (outcome, _said) = upgrading(&host, UpgradeArgs::default());
 
-    assert_eq!(outcome.expect("it said what to type"), EXIT_OK);
+    let said = outcome
+        .expect_err("nothing was upgraded, so it does not report one")
+        .to_string();
+    assert_eq!(
+        PerchError::NothingToDo(String::new()).exit_code(),
+        EXIT_NOTHING_TO_DO
+    );
     assert!(ran(&host).is_empty(), "nothing was run: {:?}", ran(&host));
     assert!(
         said.contains("update -g perch-cli") && said.contains("running"),
         "it says the command and why Perch is not the one to run it: {said}"
+    );
+    assert!(
+        said.contains("Nothing was upgraded"),
+        "and says plainly that the machine is as it was: {said}"
     );
 }
 
@@ -448,6 +463,36 @@ fn a_channel_that_is_not_one_is_refused_by_name() {
     let refused = outcome.expect_err("apt is not a Channel");
     assert!(refused.to_string().contains("homebrew"), "{refused}");
     assert!(refused.to_string().contains("apt"), "{refused}");
+}
+
+/// A check may go without the answer read off the *path* — that is what lets a
+/// hand-unpacked Perch ask what is newest — and a word somebody typed wrongly
+/// is not that answer.
+///
+/// Swallowed with the rest, `--check --channel homebre` dropped the refusal
+/// naming the three Channels and reported "channel unknown (nothing about this
+/// binary's path says)", with advice to pass the flag that had just been
+/// passed, on a machine whose path says perfectly well which Channel it is.
+#[test]
+fn a_check_refuses_a_channel_word_that_is_not_one_rather_than_reporting_none() {
+    let host = machine().installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch");
+
+    let (outcome, said) = upgrading(
+        &host,
+        UpgradeArgs {
+            check: true,
+            channel: Some("homebre".to_string()),
+            ..UpgradeArgs::default()
+        },
+    );
+
+    let refused = outcome.expect_err("`homebre` is a typo rather than a Channel");
+    assert!(refused.to_string().contains("homebre"), "{refused}");
+    assert!(refused.to_string().contains("`npm`"), "{refused}");
+    assert!(
+        !said.contains("unknown"),
+        "and nothing is reported about a Channel that was never resolved: {said}"
+    );
 }
 
 // ---- asking rather than installing ---------------------------------------

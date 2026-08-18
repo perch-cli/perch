@@ -1526,3 +1526,71 @@ fn a_loop_that_finds_the_watch_held_says_so_and_comes_back_rather_than_exiting()
         "and a Ctrl-C while it is waiting still ends it cleanly: {printed}"
     );
 }
+
+/// **A Watcher renews the watch, once a round** (ADR 0040).
+///
+/// The watcher lock's staleness window is derived from that sentence — it is
+/// the longest a healthy loop can go quiet between rounds — so a loop that
+/// never renews goes stale on its own artifact while it is still deciding. The
+/// next `perch watcher check` then reads the lock as abandoned, clears it, and
+/// decides alongside a Watcher that never notices: the loop keeps its Cooldown
+/// in memory and a Check reads the one in `checks`, which is exactly the pair
+/// this lock exists to keep apart.
+#[test]
+fn a_loop_says_the_watch_is_still_held_on_every_round_it_takes() {
+    let host = watching(&[40.0, 41.0, 42.0], 5.0);
+    let lock = perch::registry::watcher_lock_spec(&host)
+        .expect("home is known")
+        .dir;
+
+    let (result, _printed) = run_watch(&host);
+    result.expect("nothing here fails");
+
+    let renewals = host
+        .effects()
+        .iter()
+        .filter(|effect| matches!(effect, Effect::Touched(path) if path == &lock))
+        .count();
+    // Three rounds and two renewals, which is what "once a round" comes to: the
+    // first round opens inside the update interval of the take that wrote the
+    // artifact, and a renewal that touched there would be replacing a stamp
+    // written moments earlier. Every round after that renews, which is the
+    // property — the artifact never goes quiet for longer than a round while
+    // the loop is still deciding.
+    assert_eq!(
+        renewals, 2,
+        "every round but the one the take itself covers says the watch is \
+         still held"
+    );
+}
+
+/// The other half of the same hold: a lock somebody else has taken over is one
+/// this loop stops under rather than deciding beside.
+///
+/// A takeover is what the staleness window makes possible in the first place,
+/// and the answer to it is not to renew back over the top: whoever holds the
+/// artifact now is watching this machine, and two Watchers is the state the
+/// lock exists to prevent.
+#[test]
+fn a_loop_whose_watch_was_taken_over_stops_rather_than_deciding_beside_it() {
+    let lock = "/Users/someone/.config/perch/.watch.lock";
+    let host = watching(&[40.0, 41.0, 42.0], 5.0).once_while_waiting(move |host| {
+        // What a takeover leaves behind: the artifact this loop took is gone,
+        // because whoever decided it had gone quiet cleared it before making
+        // their own. An artifact that is not there is not this Watcher's hold,
+        // which is the whole of what a bare lock directory can say.
+        let _ = host.remove_dir_all(std::path::Path::new(lock));
+    });
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a watch taken over is not this Watcher's failure");
+    assert!(
+        printed.contains("another Watcher has taken the watch over"),
+        "it says why it is leaving rather than reporting an ordinary stop: {printed}"
+    );
+    assert!(
+        host.sent_to(USAGE_URL).len() < 3,
+        "and it leaves rather than taking the rounds that were left"
+    );
+}

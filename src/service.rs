@@ -207,6 +207,16 @@ pub struct Unit {
     pub log: Option<PathBuf>,
     /// Which session a LaunchAgent is bootstrapped into.
     pub user_id: Option<u32>,
+    /// Whose Scheduled Task a Windows Service is, and `None` where the machine
+    /// will not say.
+    ///
+    /// Read off the machine rather than left as `%USERNAME%` for `schtasks` to
+    /// expand, because nothing expands it: `%VAR%` is `cmd.exe`'s notation, and
+    /// these arguments go to `CreateProcess` with no shell between (ADR 0021).
+    /// `schtasks` received the ten characters and refused the account name, so
+    /// `perch watcher install` rolled back and Windows never got a Service at
+    /// all.
+    pub user_name: Option<String>,
 }
 
 impl Unit {
@@ -428,22 +438,23 @@ pub fn starting(platform: Platform, unit: &Unit, at: Option<&Path>) -> Vec<Drive
         // runs non-interactively. `/RU` names the user whose home the Profiles
         // are under, and `/F` is what makes a re-install a replacement rather
         // than a collision.
-        Platform::Windows => vec![Driven::must(
-            "schtasks",
-            &[
-                "/Create",
-                "/TN",
-                TASK_NAME,
-                "/SC",
-                "ONLOGON",
-                "/RU",
-                "%USERNAME%",
-                "/NP",
-                "/TR",
-                &unit.windows_command(),
-                "/F",
-            ],
-        )],
+        //
+        // The user is named by [`Unit::user_name`], which is a value read off
+        // the machine. A `%USERNAME%` here was ten characters `schtasks` took
+        // verbatim — there is no shell in front of it to expand one — so the
+        // account name was refused and the install rolled back every time. A
+        // machine that will not say leaves the pair off entirely and lets
+        // `schtasks` register the task under whoever is running it, which is
+        // the same answer `%USERNAME%` was reaching for.
+        Platform::Windows => {
+            let command = unit.windows_command();
+            let mut args = vec!["/Create", "/TN", TASK_NAME, "/SC", "ONLOGON"];
+            if let Some(user) = &unit.user_name {
+                args.extend(["/RU", user, "/NP"]);
+            }
+            args.extend(["/TR", &command, "/F"]);
+            vec![Driven::must("schtasks", &args)]
+        }
     }
 }
 
@@ -593,6 +604,7 @@ mod tests {
             environment: Vec::new(),
             log: None,
             user_id: Some(501),
+            user_name: Some("someone".to_string()),
         }
     }
 
@@ -884,6 +896,35 @@ mod tests {
             line.contains("/F"),
             "so that a re-install replaces rather than collides: {line}"
         );
+        assert!(
+            line.contains("/RU someone"),
+            "and the account is named by a value read off the machine: {line}"
+        );
+        assert!(
+            !line.contains('%'),
+            "`%USERNAME%` is `cmd.exe`'s notation, and there is no shell in \
+             front of `schtasks` to expand it: {line}"
+        );
+    }
+
+    /// A machine that will not say who is running the install registers the
+    /// task under whoever that is, which is what naming them was reaching for.
+    ///
+    /// `/NP` goes with `/RU` rather than standing alone: it says the task runs
+    /// without a stored password *for that account*, and there is no account
+    /// here for it to be about.
+    #[test]
+    fn a_windows_task_names_no_user_where_the_machine_will_not_say_who_it_is() {
+        let unit = Unit {
+            user_name: None,
+            ..a_unit()
+        };
+
+        let line = starting(Platform::Windows, &unit, None)[0].as_typed();
+
+        assert!(line.contains("/SC ONLOGON"), "{line}");
+        assert!(!line.contains("/RU"), "{line}");
+        assert!(!line.contains("/NP"), "{line}");
     }
 
     /// Windows has no field for an environment and no capture of standard
@@ -895,6 +936,7 @@ mod tests {
             environment: vec![("PERCH_HOME".to_string(), r"C:\work\perch".to_string())],
             log: Some(PathBuf::from(r"C:\work\perch\watch.log")),
             user_id: None,
+            user_name: Some("someone".to_string()),
         };
 
         let command = unit.windows_command();

@@ -409,11 +409,13 @@ impl Scope {
     }
 
     /// What a Cycle is about to do, said before it does it.
+    ///
+    /// Built from [`Scope::within`] rather than spelled out arm for arm, which
+    /// is that method's own argument applied to itself: it was the same two
+    /// phrases with "Cycling" in front and a full stop after, in a second match
+    /// that could come to disagree with the first.
     pub fn announcement(&self) -> String {
-        match self {
-            Scope::Ungrouped => "Cycling among the Accounts in no Group.".to_string(),
-            Scope::Group(name) => format!("Cycling within Group `{name}`."),
-        }
+        format!("Cycling {}.", self.within())
     }
 }
 
@@ -1285,11 +1287,12 @@ impl Registry {
                     "`{held}` already names {target}. Free it with `perch alias {held} --unset` first."
                 )));
             }
-            if let Some(declared) = self.declared_group(alias) {
-                return Err(PerchError::Conflict(format!(
-                    "`{declared}` is already a Group name, and a name cannot be both."
-                )));
-            }
+            // The same lookup and the same sentence
+            // [`Self::refuse_a_group_of_this_name`] is, which exists because an
+            // Alias renaming itself needs this half without the one above it.
+            // Two copies of one refusal is what the whole of
+            // `refuse_a_name_nothing_may_answer_to` was written to end.
+            self.refuse_a_group_of_this_name(alias)?;
         }
 
         if let Some(group) = group
@@ -1386,8 +1389,14 @@ impl Registry {
         // active: a Landing naming an Account Perch no longer holds is a
         // dangling pointer the registry refuses to load, and half a Switch is
         // not a thing to keep a record of once one of its two ends is gone.
+        //
+        // Through `settle`, because that is what the field being private is
+        // for: `active` is reached through `begin_landing`, `settle` and
+        // `abandon_landing`, each of which names a transition, and a fourth
+        // writer inside the one module the rule is aimed at is the one a later
+        // reader copies.
         if self.active.names(email) {
-            self.active = Active::Nobody;
+            self.settle(None);
         }
     }
 

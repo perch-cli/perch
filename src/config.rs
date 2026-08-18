@@ -186,8 +186,8 @@ impl Setting {
             Setting::WatcherMayAct => format!(
                 "`perch watcher run` will not act {within}: started on an \
                  Account there, it says so and exits rather than watching. \
-                 Nothing only ever changes underneath you because you said it \
-                 could."
+                 Anything that changes underneath you only ever does so \
+                 because you said it could."
             ),
             Setting::WatcherThresholdPercent => format!(
                 "`perch watcher run` Switches {within} once that much of the \

@@ -664,3 +664,40 @@ fn an_export_is_written_by_a_machine_that_no_longer_has_claude_code_on_it() {
          been evidence against"
     );
 }
+
+/// A Switch that was written down and not yet recorded is a **Landing**, and a
+/// registry holding one answers "who is active" with the Account being *left*
+/// (ADR 0048). The live Credential during one may be either Account's: a Switch
+/// killed between storing the arriving Credential and patching the Identity
+/// leaves the arriving Account's token live under the leaving Account's name.
+///
+/// Taken on that answer, an Export filed one Account's refresh token under the
+/// other's address and dropped the genuine copy of it — a file that restores two
+/// Accounts onto one token, which the first Renewal Rotates out from under one
+/// of them. So the Landing is settled before anything is read, which is what
+/// every other command that reads through the live Credential already does.
+#[test]
+fn an_export_settles_a_landing_before_it_decides_whose_the_live_credential_is() {
+    let host = machine_with_three_accounts();
+    // What a Switch leaves when it dies after the Credential moved and before
+    // the Identity was patched: the arriving Account's Credential is live, and
+    // `.claude.json` still names the one being left.
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SECOND_CREDENTIAL);
+    let host = typing_the_passphrase(host);
+
+    run_export(&host, AT).0.expect("the export is written");
+
+    let export = opened(&host, AT);
+    assert_eq!(
+        export.credentials.get(EMAIL).map(String::as_str),
+        Some(CREDENTIAL),
+        "the Account being left travels as its own Profile holds it, not as \
+         whatever the interrupted Switch happened to leave live"
+    );
+    assert_eq!(
+        export.credentials.get(SECOND_EMAIL).map(String::as_str),
+        Some(SECOND_CREDENTIAL),
+        "and the Account arriving travels as itself, once rather than nowhere"
+    );
+}
