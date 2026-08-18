@@ -512,20 +512,18 @@ fn watcher_is_running(host: &dyn Host) -> bool {
     let Ok(spec) = registry::watcher_lock_spec(host) else {
         return false;
     };
-    match crate::lock::take_all(host, vec![spec]) {
-        // Taken, so nobody had it — and it is given back on the way out of this
-        // function, when the hold is dropped.
-        Ok(_taken) => false,
-        // `Busy` is the one answer that means somebody is holding it. Everything
-        // else is the lock failing rather than being held — a parent directory
-        // that cannot be created, an artifact whose time will not be read — and
-        // read as contention it told the user a Watcher is running on a machine
-        // where none is, which on Windows also makes `running` true. The rest of
-        // Perch tells `Busy` from a fault everywhere it asks; this was the one
-        // place that folded them together.
-        Err(PerchError::Busy(_)) => true,
-        Err(_) => false,
-    }
+    // Asked rather than requested. `take_all` answers this too, but only by
+    // exhausting its five attempts first — so the machine this command exists
+    // for, the one with a Service running, was the one that sat for four
+    // seconds saying nothing before it printed a word.
+    //
+    // A lock that cannot be asked about at all is not contention and is not
+    // read as it — a parent directory that cannot be created, an artifact whose
+    // time will not be read. Read as a holder it told the user a Watcher is
+    // running on a machine where none is, which on Windows also makes `running`
+    // true. The rest of Perch tells a refusal from a fault everywhere it asks;
+    // this was the one place that folded them together.
+    crate::lock::is_held(host, &spec).unwrap_or(false)
 }
 
 /// The binary the *installed* unit names, read back out of it.

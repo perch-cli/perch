@@ -558,6 +558,41 @@ fn status_tells_an_installed_service_apart_from_a_watcher_that_is_running() {
     );
 }
 
+/// And it answers at once, which is the whole difference between asking whether
+/// a lock is held and asking to hold it.
+///
+/// `status` used to answer by taking the watcher lock and giving it back, and
+/// the only way to get a refusal out of `take` is to sit through its four
+/// one-second waits. So the *healthy* machine was the slow one — a Service
+/// running is the machine this command exists for — and it printed nothing at
+/// all for four seconds. A Purge paid the same on its way to the same question.
+#[test]
+fn status_asks_whether_a_watcher_holds_the_lock_rather_than_waiting_for_it() {
+    let host = linux();
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("installed");
+    let _held = perch::lock::take_all(
+        &host,
+        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+    )
+    .expect("the lock is free");
+    host.forget_effects();
+
+    let (_, said) = run_service(&host, WatcherCommand::Status { json: true });
+
+    let reported: serde_json::Value = serde_json::from_str(&said).expect("it is JSON");
+    assert_eq!(reported["watching"], true, "{said}");
+    assert!(
+        !host
+            .effects()
+            .iter()
+            .any(|effect| matches!(effect, Effect::Slept { .. })),
+        "and nothing waited on it: {:?}",
+        host.effects()
+    );
+}
+
 /// A Service that names a binary an Upgrade has since moved is the failure
 /// `status` exists to make visible — it comes up silently broken at the next
 /// login otherwise.
