@@ -24,6 +24,8 @@ pub mod watcher;
 
 use std::io::Write;
 
+use zeroize::Zeroizing;
+
 use crate::error::{PerchError, Result};
 use crate::host::Host;
 
@@ -84,14 +86,21 @@ pub fn ask_a_word(host: &dyn Host, out: &mut dyn Write, question: &str) -> Resul
 /// would have written is the one that was suppressed: with echo off, the Return
 /// that ended the answer never reached the screen, so whatever is said next
 /// would otherwise be written where the question ended.
-pub fn ask_secret(host: &dyn Host, out: &mut dyn Write, question: &str) -> Result<Option<String>> {
+pub fn ask_secret(
+    host: &dyn Host,
+    out: &mut dyn Write,
+    question: &str,
+) -> Result<Option<Zeroizing<String>>> {
     write!(out, "{question}").map_err(write_failed)?;
     out.flush().map_err(write_failed)?;
     let answered = host
         .read_secret()
         .map_err(|err| PerchError::Other(format!("could not read your answer: {err}")))?;
     writeln!(out).map_err(write_failed)?;
-    Ok(answered)
+    // Wrapped where Perch first owns it, and `Zeroizing::new` takes the `String`
+    // rather than copying it — so the buffer that gets wiped is the one the
+    // terminal was read into, not a second copy of it beside the first.
+    Ok(answered.map(Zeroizing::new))
 }
 
 /// Refuses to go on if the registry lock went stale while a question was
@@ -196,7 +205,7 @@ pub fn ask_passphrase(
     host: &dyn Host,
     out: &mut dyn Write,
     question: &str,
-) -> Result<Option<String>> {
+) -> Result<Option<Zeroizing<String>>> {
     let typed = ask_secret(host, out, question)?.unwrap_or_default();
     Ok(Some(typed).filter(|typed| !typed.trim().is_empty()))
 }

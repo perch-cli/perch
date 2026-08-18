@@ -627,10 +627,11 @@ fn an_export_or_a_registry_from_a_newer_perch_is_refused_rather_than_guessed_at(
     let opened = perch::export::unseal(&an_export_of_a_whole_machine(), PASSPHRASE)
         .expect("it opens with the passphrase it was sealed with");
 
-    let ahead_by_envelope = perch::export::Export {
-        version: perch::export::CURRENT_VERSION + 1,
-        ..opened.clone()
-    };
+    // Stamped on a clone rather than built with `..opened`: an `Export` wipes
+    // itself when it is dropped, and a type with a `Drop` cannot have its fields
+    // moved out.
+    let mut ahead_by_envelope = opened.clone();
+    ahead_by_envelope.version = perch::export::CURRENT_VERSION + 1;
     let mut ahead_by_registry = opened;
     ahead_by_registry.registry.version = perch::registry::CURRENT_VERSION + 1;
 

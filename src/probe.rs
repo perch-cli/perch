@@ -1105,7 +1105,7 @@ fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32
             // against this Profile for ever.
             //
             // A marker halfway through being written is *not* this case — it is
-            // readable and unparseable, so it is `SaysNothing` above, and that
+            // readable and unparsable, so it is `SaysNothing` above, and that
             // arm's rule is the deliberate one: a Profile is Live when something
             // says so rather than when nothing does. Said here because the two
             // read alike and this comment used to claim the half-written one.

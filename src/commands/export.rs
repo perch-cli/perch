@@ -25,6 +25,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::adopt;
+use zeroize::Zeroizing;
+
 use crate::commands::{ask_passphrase, ask_secret, refuse_without_a_terminal, say, still_ours};
 use crate::error::{PerchError, Result};
 use crate::export::{self, Export};
@@ -172,7 +174,7 @@ fn refuse_a_directory_that_is_not_there(host: &dyn Host, path: &Path) -> Result<
 /// once is a file nobody finds out is unreadable until the machine it would have
 /// restored is already gone. Empty is refused for the same reason an optional
 /// passphrase was — it is the same skip, typed rather than configured.
-fn agreed_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<String> {
+fn agreed_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<String>> {
     say(
         out,
         "This file holds a working Credential for every Account Perch has. It is \

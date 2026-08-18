@@ -24,6 +24,8 @@
 use std::io::Write;
 use std::path::Path;
 
+use zeroize::Zeroizing;
+
 use crate::commands::{ask_passphrase, refuse_without_a_terminal, say, still_ours};
 use crate::error::{PerchError, Result};
 use crate::export::{self, Export};
@@ -127,7 +129,7 @@ fn read_the_file(host: &dyn Host, path: &Path) -> Result<String> {
 /// Export it mirrors: a passphrase being *chosen* is confirmed because a file
 /// nobody can open is not discovered until it is needed, and a passphrase being
 /// *checked* is answered by the file itself a moment later.
-fn the_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<String> {
+fn the_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<String>> {
     say(
         out,
         "This file is encrypted with the passphrase it was written with. Nothing \
