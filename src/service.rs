@@ -298,6 +298,58 @@ impl Unit {
         )
     }
 
+    /// Refuses a Unit carrying something the platform's format cannot hold.
+    ///
+    /// Every one of these formats is line-oriented or shell-parsed, and Perch
+    /// already has an answer for that shape: [`crate::host::inert`], which
+    /// guards the curl config and `security`'s stdin. The unit file is the third
+    /// such protocol and was the one that skipped the check — so a `PERCH_HOME`
+    /// with a newline in it closed `Environment=` and wrote whatever followed as
+    /// further unit directives, into a file systemd loads at every login. That
+    /// is arbitrary code, persisted, out of a variable a script set.
+    ///
+    /// Quoting handles the rest on the two platforms that keep a file
+    /// ([`systemd_quoted`], [`xml_escaped`]). Windows is refused more widely
+    /// because there is nothing to quote *with*: `schtasks /TR` hands the string
+    /// to `cmd.exe`, which has no escape for a `"` inside one and expands
+    /// `%VAR%` when the task runs rather than when it is written.
+    pub fn refuse_what_the_format_cannot_hold(&self, platform: Platform) -> Result<()> {
+        let mut values: Vec<(String, String)> = vec![(
+            "Perch's own path".to_string(),
+            self.binary.to_string_lossy().to_string(),
+        )];
+        if let Some(log) = &self.log {
+            values.push((
+                "the log's path".to_string(),
+                log.to_string_lossy().to_string(),
+            ));
+        }
+        for (key, value) in &self.environment {
+            values.push((format!("`{key}`"), value.clone()));
+        }
+
+        for (what, value) in values {
+            crate::host::inert(&what, &value).map_err(|err| {
+                PerchError::Invalid(format!(
+                    "{err}, so the Service cannot be described.\nNothing was installed."
+                ))
+            })?;
+            if platform == Platform::Windows
+                && let Some(character) = value.chars().find(|c| *c == '"' || *c == '%')
+            {
+                return Err(PerchError::Invalid(format!(
+                    "{what} carries `{character}`, which a Scheduled Task's \
+                     command line has no way to hold as part of a value: \
+                     `schtasks` hands it to `cmd.exe`, which reads `\"` as the \
+                     end of one and expands `%…%` when the task runs.\n\
+                     Nothing was installed. `perch watcher run` in a terminal \
+                     works whatever the path is."
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// A `systemd --user` unit.
     ///
     /// `Type=simple` because the Watcher is the process: it does not fork, does
@@ -311,7 +363,12 @@ impl Unit {
         let environment = self
             .environment
             .iter()
-            .map(|(key, value)| format!("Environment=\"{key}={}\"\n", value.replace('"', "\\\"")))
+            .map(|(key, value)| {
+                format!(
+                    "Environment={}\n",
+                    systemd_quoted(&format!("{key}={value}"))
+                )
+            })
             .collect::<String>();
 
         format!(
@@ -330,7 +387,7 @@ impl Unit {
              {environment}\n\
              [Install]\n\
              WantedBy=default.target\n",
-            binary = self.binary.display(),
+            binary = systemd_quoted(&self.binary.to_string_lossy()),
             restart = RESTART_SECONDS,
             grace = STOP_GRACE_SECONDS,
             window = GIVE_UP_AFTER_SECONDS,
@@ -570,6 +627,7 @@ pub fn binary_in(platform: Platform, unit: &str) -> Option<PathBuf> {
             .lines()
             .find_map(|line| line.strip_prefix("ExecStart="))
             .and_then(|line| line.strip_suffix(" watcher run"))
+            .and_then(systemd_unquoted)
             .map(PathBuf::from),
         // The first `<string>` inside `ProgramArguments`, which is the program.
         Platform::MacOs => {
@@ -580,6 +638,55 @@ pub fn binary_in(platform: Platform, unit: &str) -> Option<PathBuf> {
         }
         Platform::Windows => None,
     }
+}
+
+/// A value as a systemd unit can hold one, which is quoted.
+///
+/// Three characters and not one: `"` and `\` end and escape the quoted string,
+/// and `%` is a *specifier* systemd expands before it ever runs anything — so a
+/// path Perch wrote verbatim came back as something else, or refused the unit
+/// outright with "Failed to resolve specifier". Unquoted, a path with a space in
+/// it — `/opt/My Tools/perch`, an npm prefix under a home somebody put a space
+/// in — was split on the whitespace and systemd ran `/opt/My`, which installs
+/// cleanly and never comes up.
+///
+/// Its inverse is [`systemd_unquoted`], beside it for the reason [`binary_in`]
+/// gives: the reader is the only thing that can establish the writer was right.
+fn systemd_quoted(value: &str) -> String {
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('"');
+    for character in value.chars() {
+        match character {
+            '\\' | '"' => {
+                quoted.push('\\');
+                quoted.push(character);
+            }
+            '%' => quoted.push_str("%%"),
+            other => quoted.push(other),
+        }
+    }
+    quoted.push('"');
+    quoted
+}
+
+/// The inverse of [`systemd_quoted`]. `None` for anything not written by it,
+/// which [`binary_in`] answers as a unit Perch does not recognize.
+fn systemd_unquoted(value: &str) -> Option<String> {
+    let inner = value.strip_prefix('"')?.strip_suffix('"')?;
+    let mut read = String::with_capacity(inner.len());
+    let mut characters = inner.chars();
+    while let Some(character) = characters.next() {
+        match character {
+            '\\' => read.push(characters.next()?),
+            '%' => match characters.next()? {
+                '%' => read.push('%'),
+                // A lone `%` is a specifier, which is not something this wrote.
+                _ => return None,
+            },
+            other => read.push(other),
+        }
+    }
+    Some(read)
 }
 
 /// The inverse of [`xml_escaped`], for reading a path back out of a plist.

@@ -192,6 +192,65 @@ fn an_install_the_service_manager_refuses_leaves_no_unit_behind() {
     );
 }
 
+/// A unit file is a line-oriented format, and Perch already has an answer for
+/// that shape — `host::inert`, which guards the curl config and `security`'s
+/// stdin. The unit was the third such protocol and the one that skipped it.
+///
+/// A `PERCH_HOME` with a newline in it closed `Environment=` and wrote whatever
+/// followed as further unit directives, into a file systemd loads at every
+/// login: arbitrary code, persisted, out of a variable a script set.
+#[test]
+fn a_carried_value_that_would_write_its_own_directive_is_refused_before_anything_is_installed() {
+    let host = linux().with_env("PERCH_HOME", "/tmp/perch\nExecStartPre=/bin/sh -c evil");
+
+    let (result, _) = run_service(&host, WatcherCommand::Install);
+
+    let refusal = result.expect_err("a value no unit can hold is not installable");
+    assert_eq!(refusal.exit_code(), EXIT_INVALID);
+    assert!(
+        refusal.to_string().contains("PERCH_HOME"),
+        "it names which value: {refusal}"
+    );
+    assert!(
+        !host.path_exists(std::path::Path::new(UNIT)),
+        "and nothing was written at all"
+    );
+    assert!(ran(&host).is_empty(), "and nothing was run");
+}
+
+/// A path with a space in it is ordinary — an npm prefix under a home somebody
+/// put a space in, `/opt/My Tools` — and systemd splits `ExecStart=` on
+/// whitespace. Written unquoted, the unit installed cleanly, systemd ran
+/// `/opt/My`, and the Service never came up.
+///
+/// `%` is the other half: systemd expands a specifier before it runs anything,
+/// so a path carrying one came back as something else or failed to load.
+#[test]
+fn a_path_a_shell_would_split_survives_the_unit_it_is_written_into() {
+    for awkward in [
+        "/opt/My Tools/perch",
+        "/opt/100%/perch",
+        "/opt/say \"hi\"/perch",
+    ] {
+        let unit = perch::service::Unit {
+            binary: std::path::PathBuf::from(awkward),
+            environment: Vec::new(),
+            log: None,
+            user_id: None,
+            user_name: None,
+        };
+        let text = unit
+            .rendered(Platform::Other)
+            .expect("Linux keeps a unit file");
+
+        assert_eq!(
+            perch::service::binary_in(Platform::Other, &text).as_deref(),
+            Some(std::path::Path::new(awkward)),
+            "the path written is the path read back: {text}"
+        );
+    }
+}
+
 /// The other half of the same rule, and the case it was getting wrong: taking
 /// the unit back is only right where this install *made* it.
 ///

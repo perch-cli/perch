@@ -37,6 +37,10 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     refuse_as_root(host)?;
 
     let unit = describe(host)?;
+    // Before the log directory is made and before anything is written: a value
+    // no format can hold is a refusal about the Unit, not a half-finished
+    // install to take back.
+    unit.refuse_what_the_format_cannot_hold(host.platform())?;
     let at = service::unit_path(host)?;
     let replaced = at.as_deref().is_some_and(|at| host.path_exists(at));
 
