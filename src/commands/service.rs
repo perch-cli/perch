@@ -37,8 +37,23 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     refuse_as_root(host)?;
 
     let unit = describe(host)?;
+    // Before the machine is asked anything and before anything is written. A
+    // value no format can hold is a refusal about the Unit, not a half-finished
+    // install to take back — and the line below asks the service manager a
+    // question, which on Windows is a `schtasks` this refusal must come ahead
+    // of. `write_and_start` asks it again as its own precondition, because the
+    // other door into it has no such ordering to keep; reaching it from here
+    // means this one already answered.
+    unit.refuse_what_the_format_cannot_hold(host.platform())?;
     let at = service::unit_path(host)?;
-    let replaced = at.as_deref().is_some_and(|at| host.path_exists(at));
+    // Asked the way `status` asks it, rather than of the file alone. Windows
+    // keeps no unit file — `unit_path` is `None` there and the task lives in
+    // Windows' own store — so a re-install over a working Scheduled Task always
+    // reported "Installed the Service", and a `schtasks /Create` that then
+    // failed took the rollback arm written for an install that *made* something,
+    // which is the arm this whole comment block below says must not run over one
+    // that was already there.
+    let replaced = is_installed(host, at.as_deref())?;
 
     // A Windows task is registered rather than written, so there is nothing to
     // undo there — but on the two platforms with a file, a `bootstrap` that
@@ -55,21 +70,31 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     // over SSH, would silently uninstall a Watcher that had been running for
     // months. The replaced unit is left where it is and said so instead.
     if let Err(failed) = write_and_start(host, &unit, at.as_deref()) {
+        // Named for what this platform keeps, because Windows keeps no file and
+        // a sentence about one is a sentence pointing at nothing. What is true
+        // on all three is that something is registered and was not started.
+        let kept = match at.is_some() {
+            true => "The unit file has been replaced and is left where it is",
+            false => "What was registered is left where it is",
+        };
         if replaced {
-            return Err(failed.with_note(
-                "The Service was not started. The unit file has been replaced \
-                 and is left where it is, so it starts at the next login — \
-                 `perch watcher status` says what is there now, and `perch \
-                 watcher uninstall` takes it away.",
-            ));
+            return Err(failed.with_note(&format!(
+                "The Service was not started. {kept}, so it starts at the next \
+                 login — `perch watcher status` says what is there now, and \
+                 `perch watcher uninstall` takes it away.",
+            )));
         }
         if let Some(at) = &at {
             let _ = host.remove_file(at);
         }
-        return Err(failed.with_note(
-            "Nothing was installed, and the unit file was taken back. Perch is \
-             unchanged, and `perch watcher run` in a terminal still works.",
-        ));
+        return Err(failed.with_note(&format!(
+            "Nothing was installed{}. Perch is unchanged, and `perch watcher \
+             run` in a terminal still works.",
+            match at.is_some() {
+                true => ", and the unit file was taken back",
+                false => "",
+            },
+        )));
     }
 
     say(

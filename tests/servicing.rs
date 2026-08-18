@@ -430,6 +430,44 @@ fn installing_twice_replaces_the_unit_rather_than_refusing() {
     assert!(host.path_exists(std::path::Path::new(UNIT)));
 }
 
+/// The same claim on the platform that keeps no file to look for.
+///
+/// `replaced` was read off `unit_path`, which is `None` on Windows because the
+/// task lives in Windows' own store — so it was false by construction there,
+/// and a re-install over a working Scheduled Task reported "Installed the
+/// Service" every time. Worse than the wrong word: a `schtasks /Create` that
+/// then failed took the rollback arm written for an install that *made*
+/// something, which is the one the comment above it says must not run over an
+/// install that was already there.
+#[test]
+fn installing_twice_on_windows_says_it_replaced_what_was_already_registered() {
+    let host = watched().with_platform(Platform::Windows).with_exec(
+        "schtasks",
+        &["/Query", "/TN", r"Perch\Watch"],
+        worked(),
+    );
+    // `schtasks /Create` carries a command built out of this machine's own
+    // paths, so the only honest way to arrange an answer for it is to let the
+    // install say what it would run. The first one fails for want of exactly
+    // that; everything it tried is then given one.
+    let _ = run_service(&host, WatcherCommand::Install);
+    for effect in host.effects() {
+        if let Effect::Exec { program, args } = effect {
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            host.set_exec(&program, &args, worked());
+        }
+    }
+
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
+
+    assert_eq!(result.expect("the task scheduler answered"), EXIT_OK);
+    assert!(
+        printed.contains("Replaced"),
+        "a task that is already registered is replaced, and Windows can be \
+         asked whether one is: {printed}"
+    );
+}
+
 #[test]
 fn uninstalling_stops_the_service_and_takes_the_unit_back() {
     let host = linux();
