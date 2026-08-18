@@ -66,6 +66,18 @@ opt-level = 3
 # Export go through the Host port's ordinary private write.
 age = { version = "0.12.1", default-features = false, features = ["armor"] }
 chrono = { version = "0.4", features = ["serde"] }
+
+# Wipes a buffer before it is freed, for the two that hold every Credential on
+# the machine at once: the passphrase an Export is sealed with, and the
+# serialized bundle either side of the encryption. Freed heap outlives the
+# process in a core dump, a swap file or a hibernation image, and a compiler is
+# entitled to elide a plain overwrite of memory nothing reads again — which is
+# the whole of what this crate is and why it cannot be hand-rolled.
+#
+# It sits on neither of Perch's seams (ADR 0025) and is already in the tree
+# through `age`, so it adds no crate to the build and nothing to audit that was
+# not being audited already.
+zeroize = "1.9"
 clap = { version = "4", features = ["derive"] }
 
 serde = { version = "1", features = ["derive"] }

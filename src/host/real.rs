@@ -1052,9 +1052,16 @@ fn create_private_dir_all(path: &Path) -> Result<(), HostError> {
     Ok(())
 }
 
-/// Creates a file with its mode, refusing to write into one that is already
-/// there: an existing file's mode is whatever it was, and `open` would not
-/// change it.
+/// Creates a file with its mode, never writing *into* one that is already
+/// there: anything at the name is unlinked first and the file is created afresh
+/// with `O_EXCL`.
+///
+/// Which is the security property, and it is not the one the first line of this
+/// comment used to claim — it said the call refuses an existing file, and it has
+/// never refused one; `tests/conformance.rs` asserts that creating over one
+/// takes the new mode. Opening an existing file would leave it at whatever mode
+/// it already had, which for a Credential store is the whole question, and a
+/// reader auditing this path was being told the opposite of what it does.
 ///
 /// Synced before it is closed. A rename is atomic against other *processes*,
 /// not against a crash: the rename can reach the disk while the data blocks
@@ -1350,10 +1357,33 @@ fn mode_of(_metadata: &std::fs::Metadata) -> Option<u32> {
     None
 }
 
+/// The one `chmod` Perch performs, done through a handle rather than through a
+/// name.
+///
+/// `std::fs::set_permissions` is `chmod(2)` on a path and follows a link, which
+/// is the hazard [`create_file_with_mode`] is already written against and the
+/// one call left making it. The file this narrows is a Credential store Perch
+/// did not necessarily create — Claude Code did, or a backup restored it — and
+/// it sits under `CLAUDE_CONFIG_DIR`, which is taken verbatim and can name a
+/// location somebody else can write. A link planted at that name sent the mode
+/// to whatever it pointed at, and the two path-based calls either side of it
+/// (`file_mode`, then this) were a window as well as a redirection.
+///
+/// `O_NOFOLLOW` on the open is what closes it: a symlink at the last component
+/// fails with `ELOOP` rather than being followed, so the answer becomes the
+/// remark `tighten_if_loose` already makes about a file it could not narrow.
+/// `fchmod(2)` on the handle cannot be redirected afterwards.
+///
+/// Read-only, because a mode is not the contents: opening for writing would
+/// truncate the Credential this is protecting.
 #[cfg(unix)]
 fn set_private_mode(path: &Path) -> Result<(), HostError> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(PRIVATE_FILE_MODE))?;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)?;
+    file.set_permissions(std::fs::Permissions::from_mode(PRIVATE_FILE_MODE))?;
     Ok(())
 }
 

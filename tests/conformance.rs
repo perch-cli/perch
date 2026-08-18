@@ -412,6 +412,51 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "narrowing refuses a link rather than narrowing what it points at",
+        asserts: |host, root, adapter, _now| {
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
+            // The store this narrows sits under `CLAUDE_CONFIG_DIR`, which is
+            // taken verbatim and can name a directory somebody else can write.
+            // A `chmod` on a *name* follows a link, so a link planted at that
+            // name sent the mode to whatever it pointed at — a file the user can
+            // read and did not mean to expose.
+            let elsewhere = root.join("someone-elses-file");
+            host.create_file_with_mode(&elsewhere, "not mine", 0o644)
+                .expect("it is created");
+            let planted = root.join("planted");
+            host.link(Link::Symbolic, &elsewhere, &planted)
+                .expect("linked");
+
+            match modes_mean_something() {
+                // A `chmod` on a name follows a link, and `O_NOFOLLOW` is what
+                // refuses one.
+                true => {
+                    host.make_private(&planted)
+                        .expect_err("a link is refused rather than followed");
+                }
+                // No mode to send anywhere: the narrowing is a documented no-op
+                // where permission bits mean nothing, so there is no
+                // redirection for it to refuse.
+                false => {
+                    host.make_private(&planted).unwrap_or_else(|err| {
+                        panic!("{adapter}: a no-op cannot be redirected: {err}")
+                    });
+                }
+            }
+
+            assert_eq!(
+                host.file_mode(&elsewhere).expect("it is still there"),
+                match modes_mean_something() {
+                    true => Some(0o644),
+                    false => None,
+                },
+                "{adapter}: and what it pointed at is exactly as it was"
+            );
+        },
+    },
+    Case {
         named: "removing a file that was not there is not a failure",
         asserts: |host, root, adapter, _now| {
             host.remove_file(&root.join("never-existed"))

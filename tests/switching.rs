@@ -921,6 +921,44 @@ fn an_unreadable_marker_whose_process_is_gone_holds_nothing() {
     assert_the_switch_captured_and_landed(&host, "no client is holding that Profile");
 }
 
+/// The same marker with its process alive is doubt — and the refusal has to say
+/// which belief failed (ADR 0007), which here is a file Perch could not read.
+///
+/// It shared a sentence with the case below, whose cause is an operating system
+/// that would not say when a process began. So somebody meeting a marker left
+/// root-owned by a `sudo claude` — a file they can `chmod` — was told Perch
+/// could not find out when a process started, and sent looking at the wrong
+/// thing entirely.
+#[test]
+fn an_unreadable_marker_whose_process_is_alive_names_the_file_rather_than_the_clock() {
+    let host = machine_with_two_accounts()
+        .with_file(format!("{FIRST_PROFILE}/sessions/4242.json"), "")
+        .with_unreadable_file(
+            format!("{FIRST_PROFILE}/sessions/4242.json"),
+            "Permission denied",
+        )
+        .with_live_process(4242);
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("the marker cannot be corroborated");
+    assert_eq!(error.exit_code(), EXIT_PROBE_REFUSED);
+    let said = error.to_string();
+    assert!(
+        said.contains("could not be read") && said.contains("readable"),
+        "the refusal names the file and what to do about it: {said}"
+    );
+    assert!(
+        !said.contains("when that process began"),
+        "and not the clock, which is the other doubt's diagnosis: {said}"
+    );
+    assert_eq!(
+        live_credential(&host).as_deref(),
+        Some(CREDENTIAL),
+        "nothing was written"
+    );
+}
+
 #[test]
 fn a_marker_that_is_not_json_is_no_evidence_of_a_client() {
     let host = machine_with_two_accounts()
@@ -2111,6 +2149,55 @@ fn a_landing_is_settled_onto_whoever_the_live_credential_belongs_to() {
             Active::Settled(case.settles_on.to_string()),
             "{}: the Landing is settled rather than left in flight",
             case.what
+        );
+    }
+}
+
+/// **A Landing is resolved under Claude Code's own locks**, like every other
+/// reading of the live Credential (ADR 0006).
+///
+/// The evidence a Landing is settled from is byte-equality against copies Perch
+/// holds, so a Rotation landing during the read leaves nothing on the machine
+/// that says whose those bytes are — and the `Conflict` that follows is one no
+/// later run can clear, because every later run re-reads the same rotated
+/// bytes. ADR 0048 accepts a Rotation *since the interruption* defeating
+/// resolution; it does not have to accept one Perch could have locked out.
+///
+/// Asserted through `perch remove` of an Account nobody is on, which settles and
+/// then leaves who is active alone — the same door the four readings above use.
+#[test]
+fn a_landing_is_resolved_with_claude_codes_locks_held() {
+    let host = machine_with_three_accounts();
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SECOND_CREDENTIAL);
+    host.forget_effects();
+
+    run_remove_with(
+        &host,
+        perch::commands::remove::RemoveArgs {
+            target: THIRD_EMAIL.to_string(),
+            yes: true,
+        },
+    )
+    .0
+    .expect("nobody is on it");
+
+    let effects = host.effects();
+    let read_the_live_store = effects
+        .iter()
+        .position(|effect| {
+            matches!(effect, Effect::KeychainGet { service, .. } if service == DEFAULT_SERVICE)
+        })
+        .expect("the live Credential is what settles a Landing");
+    for held in [REFRESH_LOCK, LEGACY_LOCK, CONFIG_LOCK] {
+        let took = effects
+            .iter()
+            .position(|effect| matches!(effect, Effect::Took(path) if path == Path::new(held)))
+            .unwrap_or_else(|| panic!("{held} is taken: {effects:?}"));
+        assert!(
+            took < read_the_live_store,
+            "{held} is held before the live Credential is read, or a Claude Code \
+             refresh lands on the one thing that can settle this Landing"
         );
     }
 }

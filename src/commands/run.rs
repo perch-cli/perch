@@ -285,7 +285,13 @@ fn launching(registry: &Registry, email: &str, said: &str) -> String {
         // Both Accounts are named the way every other command names one, so the
         // sentence that contrasts them does not hand one of them its Alias and
         // take the other's away.
-        Some(active) if active != email => format!(
+        //
+        // Asked through `is_active`, which is the one place the registry answers
+        // a question about an address: compared by bytes, an Account reached by
+        // an Alias whose spelling `upsert` has since replaced was named as two
+        // Accounts in one sentence — "Running … as X. X stays the active Account
+        // everywhere else."
+        Some(active) if !registry.is_active(email) => format!(
             "Running {said} as {named}, in this terminal alone. {} stays the \
              active Account everywhere else.",
             registry.named_for_the_user(active)

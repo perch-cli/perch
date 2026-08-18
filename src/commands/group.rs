@@ -216,9 +216,12 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
         )?;
     }
 
-    for name in registry.groups.keys().cloned().collect::<Vec<String>>() {
-        say(out, &name)?;
-        let members = registry.accounts_in(&name);
+    // Borrowed rather than collected into a `Vec<String>`: nothing here mutates
+    // the registry, so the map can be walked directly and the only clone left is
+    // the one `Scope::Group` genuinely needs.
+    for name in registry.groups.keys() {
+        say(out, name)?;
+        let members = registry.accounts_in(name);
         if members.is_empty() {
             write_line(out, "Accounts", "none yet")?;
         } else {

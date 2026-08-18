@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 
 use age::secrecy::SecretString;
 use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::credentials;
 use crate::error::{PerchError, Result};
@@ -115,6 +116,29 @@ pub struct Export {
     /// one meets the onboarding dialog on every single Run (ADR 0003).
     #[serde(default)]
     pub identity_files: BTreeMap<String, String>,
+}
+
+/// Wiped when it goes out of scope, for the reason its [`Debug`] is written by
+/// hand: this is the one shape in Perch carrying every Credential on the machine
+/// at once, and it lives for the whole of an Export or an Import rather than for
+/// a call.
+///
+/// Only the two maps that hold secrets. The registry beside them is addresses,
+/// Aliases, Groups and figures — the thing an Export is *for* somebody reading,
+/// and nothing a core dump makes worse.
+///
+/// Hand-written rather than derived, because `ZeroizeOnDrop` would want every
+/// field to be `Zeroize` and `Registry` is not one, nor should it become one to
+/// satisfy a derive.
+impl Drop for Export {
+    fn drop(&mut self) {
+        for held in self.credentials.values_mut() {
+            held.zeroize();
+        }
+        for held in self.identity_files.values_mut() {
+            held.zeroize();
+        }
+    }
 }
 
 impl std::fmt::Debug for Export {
@@ -282,6 +306,28 @@ impl Export {
         self.registry.accounts.len()
     }
 
+    /// The Credential this Export carries for one Account, if it carries one.
+    ///
+    /// Keyed the way an address is compared everywhere else — `registry::same_name`
+    /// folds case — rather than by the `BTreeMap` lookup the key type offers.
+    /// An Export is a file a person may write themselves with `age -a -p` (ADR
+    /// 0014), and one keying a credential `ONE@example.com` beside an account
+    /// entry `one@example.com` is one where the two halves of an Import
+    /// disagreed: placement found the Credential and put it down, and the report
+    /// afterwards said the Account had been "restored without one" and sent its
+    /// owner to `perch relogin` for an Account that was fine.
+    ///
+    /// Here rather than at either caller, because the disagreement was the two
+    /// of them asking the same question two ways.
+    pub fn credential_for(&self, email: &str) -> Option<&String> {
+        by_name(&self.credentials, email)
+    }
+
+    /// The same, for the `.claude.json` that travels beside it.
+    pub fn identity_file_for(&self, email: &str) -> Option<&String> {
+        by_name(&self.identity_files, email)
+    }
+
     /// The Accounts it holds no Credential for, in the order they are listed.
     ///
     /// Ordinary for a Quarantined Account whose stores hold nothing, and news
@@ -291,9 +337,16 @@ impl Export {
             .accounts
             .iter()
             .map(Account::email)
-            .filter(|email| !self.credentials.contains_key(*email))
+            .filter(|email| self.credential_for(email).is_none())
             .collect()
     }
+}
+
+/// What one Account's entry is in a map an Export keys by address.
+fn by_name<'a>(held: &'a BTreeMap<String, String>, email: &str) -> Option<&'a String> {
+    held.iter()
+        .find(|(key, _)| registry::same_name(key, email))
+        .map(|(_, value)| value)
 }
 
 /// The `age` file, as the text that goes in it.
@@ -313,8 +366,16 @@ impl Export {
 /// to write one; and an Export is something a person may want to paste into a
 /// password manager, which is a thing you can do with text.
 pub fn seal(export: &Export, passphrase: &str) -> Result<String> {
-    let plain = serde_json::to_vec(export)
-        .map_err(|err| PerchError::Other(format!("could not serialize the Export: {err}")))?;
+    // Wiped before it is freed. This is every Credential on the machine in
+    // cleartext, and it is the one moment they are all in one buffer — freed
+    // heap outlives the process in a core dump, a swap file or a hibernation
+    // image, and a plain overwrite of memory nothing reads again is something a
+    // compiler may elide. `Zeroizing` takes the `Vec` rather than copying it, so
+    // what is wiped is the buffer `to_vec` produced.
+    let plain = Zeroizing::new(
+        serde_json::to_vec(export)
+            .map_err(|err| PerchError::Other(format!("could not serialize the Export: {err}")))?,
+    );
 
     age::encrypt_and_armor(&recipient(passphrase), &plain)
         .map_err(|err| PerchError::Other(format!("could not encrypt the Export: {err}")))
@@ -348,7 +409,8 @@ pub fn unseal(sealed: &str, passphrase: &str) -> Result<Export> {
     // calibration does not have.
     identity.set_max_work_factor(MAX_WORK_FACTOR);
 
-    let plain = age::decrypt(&identity, sealed.as_bytes()).map_err(would_not_open)?;
+    // The same buffer coming the other way, and wiped for the same reason.
+    let plain = Zeroizing::new(age::decrypt(&identity, sealed.as_bytes()).map_err(would_not_open)?);
 
     // Both versions first, off a shape that is only the versions, and before
     // the document is read as an Export. This is the order the guards need to
@@ -634,11 +696,12 @@ mod tests {
             "and it names what is missing: {refused}"
         );
 
-        // The neighboring shape that *is* meaningful, and still opens.
-        let none_kept = Export {
-            credentials: BTreeMap::new(),
-            ..an_export()
-        };
+        // The neighboring shape that *is* meaningful, and still opens. Built by
+        // emptying rather than by `..an_export()`, because an `Export` wipes
+        // itself when it is dropped and a type with a `Drop` cannot have its
+        // fields moved out.
+        let mut none_kept = an_export();
+        none_kept.credentials = BTreeMap::new();
         let sealed = seal(&none_kept, PASSPHRASE).expect("it seals");
         assert_eq!(
             unseal(&sealed, PASSPHRASE).expect("an Export of Quarantined Accounts opens"),
@@ -755,10 +818,8 @@ mod tests {
     /// than the current one — this is about the future, not the past.
     #[test]
     fn an_export_from_a_newer_perch_is_refused_rather_than_guessed_at() {
-        let ahead = Export {
-            version: CURRENT_VERSION + 1,
-            ..an_export()
-        };
+        let mut ahead = an_export();
+        ahead.version = CURRENT_VERSION + 1;
         let sealed = seal(&ahead, PASSPHRASE).expect("it seals");
 
         let refused = unseal(&sealed, PASSPHRASE).expect_err("this build does not understand it");

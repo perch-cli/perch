@@ -533,10 +533,20 @@ pub fn stopping(platform: Platform, user_id: Option<u32>) -> Vec<Driven> {
             Driven::may_fail("systemctl", &["--user", "disable", "--now", UNIT_NAME]),
             Driven::may_fail("systemctl", &["--user", "daemon-reload"]),
         ],
-        Platform::Windows => vec![Driven::may_fail(
-            "schtasks",
-            &["/Delete", "/TN", TASK_NAME, "/F"],
-        )],
+        // `/End` before `/Delete`, and it is the step that was missing.
+        // `/Delete` unregisters the task; it does not terminate the instance the
+        // scheduler already started, and there is no flag on it that does. So a
+        // `stopping` that was only the delete left a Watcher running against a
+        // machine whose Service had just been reported stopped — and made
+        // `schtasks /Query` answer "no such task", which is what the callers ask
+        // to find out whether it worked.
+        //
+        // A task that is registered and not running fails this, which is the
+        // ordinary case and is why every step here may fail.
+        Platform::Windows => vec![
+            Driven::may_fail("schtasks", &["/End", "/TN", TASK_NAME]),
+            Driven::may_fail("schtasks", &["/Delete", "/TN", TASK_NAME, "/F"]),
+        ],
     }
 }
 
@@ -627,12 +637,31 @@ pub fn binary_in(platform: Platform, unit: &str) -> Option<PathBuf> {
             .and_then(|line| line.strip_suffix(" watcher run"))
             .and_then(systemd_unquoted)
             .map(PathBuf::from),
-        // The first `<string>` inside `ProgramArguments`, which is the program.
+        // The first `<string>` inside `ProgramArguments`, which is the program —
+        // and then the two after it, which are what say the unit runs the
+        // Watcher.
+        //
+        // The systemd arm above has always required its ` watcher run`, and this
+        // one took whatever came first regardless. So a plist somebody had
+        // edited to run `perch list` was reported by `perch watcher status` as
+        // "It runs /usr/local/bin/perch", and the drift check beside it made a
+        // claim about a unit Perch does not recognize — which is the answer
+        // `None` exists to give.
+        //
+        // Bounded by `</array>`, so a `<string>` belonging to a later key —
+        // `StandardOutPath` is one — is never read as an argument.
         Platform::MacOs => {
             let array = unit.split("<key>ProgramArguments</key>").nth(1)?;
-            let opened = array.find("<string>")? + "<string>".len();
-            let closed = array[opened..].find("</string>")? + opened;
-            Some(PathBuf::from(unescaped(&array[opened..closed])))
+            let array = array.split("</array>").next()?;
+            let mut arguments = array
+                .split("<string>")
+                .skip(1)
+                .map(|rest| rest.split("</string>").next());
+            let binary = arguments.next()??;
+            if arguments.next()?? != "watcher" || arguments.next()?? != "run" {
+                return None;
+            }
+            Some(PathBuf::from(unescaped(binary)))
         }
         Platform::Windows => None,
     }
@@ -763,6 +792,29 @@ mod tests {
             binary_in(Platform::Other, "[Service]\nExecStart=/bin/perch serve\n"),
             None,
             "a unit running something other than the Watcher loop names no Perch",
+        );
+        // The same claim on the other platform that keeps a file, which had
+        // never been made there: the mac arm took the first `<string>` and
+        // asked nothing about the two after it, so a plist edited to run
+        // `perch list` was reported as "It runs /bin/perch" and then checked
+        // for drift against a unit Perch does not recognize.
+        assert_eq!(
+            binary_in(
+                Platform::MacOs,
+                "<key>ProgramArguments</key>\n<array>\n<string>/bin/perch</string>\n\
+                 <string>list</string>\n</array>\n",
+            ),
+            None,
+            "and a plist running something else names no Perch either",
+        );
+        assert_eq!(
+            binary_in(
+                Platform::MacOs,
+                "<key>ProgramArguments</key>\n<array>\n<string>/bin/perch</string>\n\
+                 </array>\n<key>StandardOutPath</key>\n<string>watcher</string>\n",
+            ),
+            None,
+            "and a `<string>` belonging to a later key is not read as an argument",
         );
         assert_eq!(
             binary_in(Platform::Windows, &a_unit().plist()),

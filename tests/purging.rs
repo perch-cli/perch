@@ -14,9 +14,9 @@ use std::path::Path;
 use common::*;
 use perch::error::{EXIT_INVALID, EXIT_NOTHING_TO_DO, EXIT_PROFILE_LIVE};
 use perch::export;
-use perch::host::FakeHost;
 use perch::host::fake::Effect;
 use perch::host::prelude::*;
+use perch::host::{FakeHost, Platform};
 use perch::registry::{Quarantine, Registry};
 
 const PERCH_HOME: &str = "/Users/someone/.config/perch";
@@ -282,6 +282,60 @@ fn a_tilde_typed_at_the_export_prompt_means_home_because_no_shell_will_say_so() 
             .accounts(),
         3,
         "and it is the whole Export rather than an empty file at a strange path"
+    );
+}
+
+/// **`forget_what_the_registry_does_not_name` did not do what its name says.**
+///
+/// It walked every directory under Perch's home with no filter, so every
+/// Account the pass above had just emptied was emptied a second time. On macOS
+/// that is a `security delete-generic-password` per Account per pass — twice
+/// the shell-outs, on the command whose whole job is to finish.
+///
+/// `refuse_while_anything_is_running` filters the same walk by the same
+/// registry; this is the copy that did not.
+#[test]
+fn a_purge_empties_each_credential_store_once() {
+    let host = a_machine_to_give_back();
+    let held = registry_on(&host).expect("a registry").accounts.len();
+    host.forget_effects();
+
+    run_purge(&host).0.expect("the word was typed");
+
+    let deletes = host
+        .effects()
+        .iter()
+        .filter(|effect| matches!(effect, Effect::KeychainDelete { .. }))
+        .count();
+    assert_eq!(
+        deletes,
+        held,
+        "one keychain delete per Account, rather than one per Account per pass: \
+         {:?}",
+        host.effects()
+    );
+}
+
+/// The same on the platform that writes the other separator.
+///
+/// `~\backups\perch.age` is what somebody on Windows types, and only `~/` was
+/// read as home — so it fell into the refusal below, which aborts the whole
+/// Purge and makes every question already answered have to be answered again,
+/// over a path that was perfectly clear. Perch reads a Windows path spelled
+/// either way everywhere else it reads one.
+#[test]
+fn a_windows_tilde_means_home_too_because_windows_writes_the_other_separator() {
+    let host = a_machine_to_give_back()
+        .with_platform(Platform::Windows)
+        .with_answers(&["y", "~\\perch-backup.age", "purge"])
+        .with_secrets(&[PASSPHRASE, PASSPHRASE]);
+
+    let (outcome, printed) = run_purge(&host);
+
+    outcome.expect("the word was typed");
+    assert!(
+        host.file(AT).is_some(),
+        "the Export is written under home: {printed}"
     );
 }
 

@@ -218,6 +218,56 @@ fn a_carried_value_that_would_write_its_own_directive_is_refused_before_anything
     assert!(ran(&host).is_empty(), "and nothing was run");
 }
 
+/// **The same door, reached the other way.** An Upgrade rewrites the unit
+/// against the binary the Channel just moved (ADR 0039), and it does it from a
+/// `describe` that re-reads `PERCH_HOME` and `CLAUDE_CONFIG_DIR` out of the
+/// environment `perch upgrade` was run in. That path assembled the sequence by
+/// hand and dropped the guard above, so the value refused at install time went
+/// straight into a file systemd loads at every login — the same arbitrary code,
+/// persisted, one command over.
+#[test]
+fn an_upgrade_refuses_to_rewrite_the_unit_with_a_value_no_unit_can_hold() {
+    let host = linux();
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("a Service is installed before the Upgrade");
+    let installed = host.read_file(std::path::Path::new(UNIT)).expect("a unit");
+    // The environment changes between the install and the Upgrade, which is what
+    // a `PERCH_HOME` exported in a shell profile after the fact looks like.
+    let host = host
+        .with_env("PERCH_HOME", "/tmp/perch\nExecStartPre=/bin/sh -c evil")
+        .with_reply(
+            perch::upgrade::LATEST_URL,
+            200,
+            r#"{"tag_name":"v999.0.0","name":"whatever"}"#,
+        )
+        .with_file("/usr/bin/npm", "");
+
+    let mut out = Vec::new();
+    let outcome = perch::commands::upgrade::run(
+        &host,
+        perch::commands::upgrade::UpgradeArgs {
+            channel: Some("npm".to_string()),
+            ..perch::commands::upgrade::UpgradeArgs::default()
+        },
+        &mut out,
+    );
+    let said = String::from_utf8(out).expect("it said text");
+
+    outcome.expect("the Upgrade itself succeeded — the binary really is newer");
+    assert_eq!(
+        host.read_file(std::path::Path::new(UNIT)).as_deref().ok(),
+        Some(installed.as_str()),
+        "the unit on disk is untouched: a value no format can hold is refused \
+         before anything is written, whichever door asked"
+    );
+    assert!(
+        said.contains("could not be restarted") && said.contains("perch watcher install"),
+        "and it is a warning with a one-command repair rather than a silent \
+         rewrite: {said}"
+    );
+}
+
 /// A path with a space in it is ordinary — an npm prefix under a home somebody
 /// put a space in, `/opt/My Tools` — and systemd splits `ExecStart=` on
 /// whitespace. Written unquoted, the unit installed cleanly, systemd ran
@@ -378,6 +428,44 @@ fn installing_twice_replaces_the_unit_rather_than_refusing() {
         "it says which of the two it did: {printed}"
     );
     assert!(host.path_exists(std::path::Path::new(UNIT)));
+}
+
+/// The same claim on the platform that keeps no file to look for.
+///
+/// `replaced` was read off `unit_path`, which is `None` on Windows because the
+/// task lives in Windows' own store — so it was false by construction there,
+/// and a re-install over a working Scheduled Task reported "Installed the
+/// Service" every time. Worse than the wrong word: a `schtasks /Create` that
+/// then failed took the rollback arm written for an install that *made*
+/// something, which is the one the comment above it says must not run over an
+/// install that was already there.
+#[test]
+fn installing_twice_on_windows_says_it_replaced_what_was_already_registered() {
+    let host = watched().with_platform(Platform::Windows).with_exec(
+        "schtasks",
+        &["/Query", "/TN", r"Perch\Watch"],
+        worked(),
+    );
+    // `schtasks /Create` carries a command built out of this machine's own
+    // paths, so the only honest way to arrange an answer for it is to let the
+    // install say what it would run. The first one fails for want of exactly
+    // that; everything it tried is then given one.
+    let _ = run_service(&host, WatcherCommand::Install);
+    for effect in host.effects() {
+        if let Effect::Exec { program, args } = effect {
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            host.set_exec(&program, &args, worked());
+        }
+    }
+
+    let (result, printed) = run_service(&host, WatcherCommand::Install);
+
+    assert_eq!(result.expect("the task scheduler answered"), EXIT_OK);
+    assert!(
+        printed.contains("Replaced"),
+        "a task that is already registered is replaced, and Windows can be \
+         asked whether one is: {printed}"
+    );
 }
 
 #[test]
@@ -650,6 +738,66 @@ fn a_purge_refuses_rather_than_deleting_under_a_service_that_will_not_stop() {
     );
 }
 
+/// **The service manager's answer is one step away from the question.** What
+/// this guard is about is a *Watcher* writing a captured Credential into a
+/// Profile the Purge is deleting, and a stopped unit is not the same fact: a
+/// systemd unit reads `inactive` while the process it started is still winding
+/// down mid-Switch, and on Windows `schtasks /Query` answers whether the task
+/// *exists* — which `/Delete` has just made false whether or not it terminated
+/// the instance, because there is no flag on `/Delete` that terminates one.
+///
+/// The watcher lock is the fact itself: a Watcher holds it for exactly as long
+/// as one runs, and gives it back however the process ends. `status` has asked
+/// it that way for as long as it has been asked; this copy of the question was
+/// judging by the unit alone.
+#[test]
+fn a_purge_refuses_while_a_watcher_still_holds_the_watch() {
+    let host = mac().with_answers(&["n", "purge"]);
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("installed");
+    // The Service stops cleanly and the machine says so — and a Watcher is
+    // still holding the watch, which is the state the unit cannot report.
+    let host = host.with_exec(
+        "launchctl",
+        &["print", "gui/501/cli.perch.watch"],
+        failed("Could not find service"),
+    );
+    let _still_watching = perch::lock::take_all(
+        &host,
+        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+    )
+    .expect("nobody else holds it");
+
+    let (result, _) = run_purge(&host);
+
+    let refusal = result.expect_err("nothing may be deleted underneath a Watcher");
+    assert_eq!(refusal.exit_code(), EXIT_HELD, "{refusal}");
+    assert!(
+        !registry_of(&host).accounts.is_empty(),
+        "and every Account is still there"
+    );
+}
+
+/// `/Delete` unregisters a task; it does not stop the instance the scheduler
+/// already started, and nothing else in `stopping` would. So `/End` runs first
+/// — the step whose absence is what made the guard above reachable at all.
+#[test]
+fn stopping_a_windows_task_ends_the_running_instance_before_unregistering_it() {
+    let driven: Vec<String> = perch::service::stopping(Platform::Windows, None)
+        .iter()
+        .map(|step| format!("{} {}", step.program, step.args.join(" ")))
+        .collect();
+
+    assert_eq!(
+        driven,
+        [
+            r"schtasks /End /TN Perch\Watch",
+            r"schtasks /Delete /TN Perch\Watch /F",
+        ],
+    );
+}
+
 /// macOS keeps its unit somewhere else and is driven by something else, and the
 /// same three properties hold. Asserted because the platform split is the whole
 /// of what this feature is, and one arm of it going untested is one arm of it
@@ -762,6 +910,44 @@ fn a_service_that_will_not_restart_is_a_warning_rather_than_a_failed_upgrade() {
     assert!(
         said.contains("perch watcher install"),
         "and the repair is one command: {said}"
+    );
+}
+
+/// **An Upgrade that did not happen owes the Service nothing.** `brew` and `npm`
+/// report a refusal as an exit code rather than as an error — a pinned formula,
+/// a network that is down, an `npm` without permission — and Perch passes that
+/// code through. Left unchecked, the follow-up ran anyway: the watcher was
+/// bounced onto the binary it was already running, and the Upgrade printed "The
+/// Service was restarted, and now runs …" beside the non-zero code saying it
+/// had not.
+#[test]
+fn a_channel_that_refused_the_upgrade_leaves_the_service_where_it_is() {
+    let host = upgradable();
+    run_service(&host, WatcherCommand::Install)
+        .0
+        .expect("a Service is installed before the Upgrade");
+    host.set_exec(
+        "/opt/homebrew/bin/brew",
+        &["upgrade", "perch"],
+        failed("Error: perch is pinned"),
+    );
+    let before = ran(&host).len();
+
+    let (outcome, said) = upgrading(&host);
+
+    assert_eq!(
+        outcome.expect("`brew` answered, and what it answered was a refusal"),
+        1
+    );
+    let after: Vec<String> = ran(&host).into_iter().skip(before).collect();
+    assert!(
+        !after.iter().any(|line| line.starts_with("launchctl")),
+        "nothing was said to the service manager about a binary that did not \
+         move: {after:?}"
+    );
+    assert!(
+        !said.contains("Service"),
+        "and nothing claimed an Upgrade that did not happen: {said}"
     );
 }
 

@@ -239,8 +239,20 @@ struct Candidate {
 }
 
 /// Whether an Account's state may cross into the Profile being launched.
+///
+/// `same_name` rather than `==`, for the reason [`Registry::is_active`] gives:
+/// `upsert` matches an entry case-folded and stores the incoming spelling, so an
+/// Identity re-read under another capitalization leaves the alias map — which is
+/// where a `perch run <alias>` gets the address it hands in here — naming the
+/// entry the old way. Compared by bytes, the Account being launched matched
+/// nothing, and where it was in no Group there were no candidates at all: the
+/// Carry silently did nothing and its owner met the onboarding dialog on every
+/// Run.
+///
+/// [`Registry::is_active`]: crate::registry::Registry::is_active
 fn may_cross(account: &Account, email: &str, group: Option<&str>) -> bool {
-    account.email() == email || (group.is_some() && account.group.as_deref() == group)
+    crate::registry::same_name(account.email(), email)
+        || (group.is_some() && account.group.as_deref() == group)
 }
 
 /// Where an Account's `.claude.json` actually is: the Default Profile for the
@@ -291,6 +303,46 @@ mod tests {
         ] {
             assert!(!PERSON_KEYS.contains(&key), "{key} does not cross");
         }
+    }
+
+    /// The registry compares an address case-folded everywhere it answers a
+    /// question about one, because `upsert` matches that way and then stores the
+    /// incoming spelling — so the Alias map can be left naming an entry the old
+    /// way after an Identity is re-read.
+    ///
+    /// Compared by bytes here, the Account being launched did not match itself,
+    /// and an ungrouped one had no candidates at all: the Carry silently did
+    /// nothing and its owner met the onboarding dialog on every Run.
+    #[test]
+    fn an_account_spelled_the_other_way_is_still_itself() {
+        let mut account = crate::registry::Account {
+            identity: crate::probe::Identity {
+                email: "Someone@Example.com".to_string(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            disabled: false,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        };
+
+        assert!(
+            may_cross(&account, "someone@example.com", None),
+            "the Account being launched may always carry from itself"
+        );
+
+        account.group = Some("work".to_string());
+        assert!(
+            may_cross(&account, "nobody@example.com", Some("work")),
+            "and a Group still crosses on the Group"
+        );
+        assert!(
+            !may_cross(&account, "nobody@example.com", None),
+            "while an unrelated Account in no Group crosses nothing"
+        );
     }
 
     /// The set is about first-run friction, and each of the three kinds of it

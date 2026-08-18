@@ -191,6 +191,24 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     say(out, &opening(host)?)?;
 
     loop {
+        // Twice a round rather than once, and this is the half that bounds the
+        // gap. The staleness window is derived from "a Watcher renews this once
+        // a round" and reads as the longest wait plus the round after it — an
+        // arithmetic that only holds while a round is short. A round is bounded
+        // by nothing but the network: two requests per Account at thirty seconds
+        // each, plus a Renewal, over as many candidates as a Scope holds. After
+        // a saturated back-off the pair could exceed the window, and the
+        // healthy Watcher was then declared dead by the next `perch watcher
+        // check` to come along — which is the two-Watcher state the lock exists
+        // to prevent (ADR 0040).
+        //
+        // Touched here, straight out of the wait, so the gap either side is the
+        // wait alone or the round alone rather than their sum.
+        watching_alone.renew();
+        if !watching_alone.still_held() {
+            return handed_over(out);
+        }
+
         let (waiting_for, spoken) =
             match one_round(host, Watcher::Loop, &mut recently, &mut backoff) {
                 Ok(Turn::Decided(round)) => {
@@ -242,13 +260,11 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
 
         say_it(out, &mut holding, spoken, host.now())?;
 
-        // Once a round, which is the cadence
-        // [`registry::watcher_lock_spec`]'s staleness window is derived from.
-        // Here rather than at the top of the round because this is where the
-        // round's own work is over: everything above may have waited on
-        // Claude Code's locks or on a keychain that stopped to ask, and a
-        // renewal taken before all of that is a renewal that is already old by
-        // the time the loop waits on it.
+        // The other half. Here because this is where the round's own work is
+        // over: everything above may have waited on Claude Code's locks or on a
+        // keychain that stopped to ask, and a renewal taken only before all of
+        // that is a renewal that is already old by the time the loop waits on
+        // it.
         watching_alone.renew();
         if !watching_alone.still_held() {
             // Renewing is what discovers this, and `renew` has already said
@@ -430,14 +446,26 @@ fn say_it(
 /// doing and leaves the reason it is not to the first round's held line — which
 /// is the line that will repeat, and the one that says when it will ask again.
 fn opening(host: &dyn Host) -> Result<String> {
-    let registry = adopt::ensure_adopted(host)?;
-    // The one reader that asks whether a Landing is in flight rather than
-    // settling one: this holds no lock, and a Switch left in flight is exactly
-    // the state where there is nothing to say yet. The first round settles it
-    // and says why, which is the line that will repeat.
-    let watching = switch::nothing_in_flight(&registry)
-        .and_then(|settled| permitted(&registry, &settled).ok());
-    let Some(watching) = watching else {
+    // Read rather than insisted on, for the reason the round beneath it holds
+    // rather than exits: a machine with no Claude Code login has nothing to
+    // adopt, and raising that here ended the loop before the first round could
+    // hold on it — which on a Service is the crash loop ADR 0040 repealed. The
+    // opening has an answer for having no registry already, and it is the right
+    // one: say what is not being decided, and leave the reason to the first
+    // round's held line.
+    let watching = adopt::ensure_adopted(host).ok().and_then(|registry| {
+        // The one reader that asks whether a Landing is in flight rather than
+        // settling one: this holds no lock, and a Switch left in flight is
+        // exactly the state where there is nothing to say yet. The first round
+        // settles it and says why, which is the line that will repeat.
+        let watching = switch::nothing_in_flight(&registry)
+            .and_then(|settled| permitted(&registry, &settled).ok())?;
+        Some((
+            registry.named_for_the_user(watching.account.email()),
+            watching,
+        ))
+    });
+    let Some((named, watching)) = watching else {
         return Ok(
             "Started. Nothing is being decided yet — the next line says what is \
              holding it, and the watcher takes over the moment that changes. \
@@ -450,7 +478,7 @@ fn opening(host: &dyn Host) -> Result<String> {
          within that Scope when its fullest Quota Window reaches {}% — to an \
          Account at {}% or under, and never twice inside {} minutes. Ctrl-C \
          stops.",
-        registry.named_for_the_user(watching.account.email()),
+        named,
         watching.scope.within(),
         watch::how_often(),
         watching.policy.threshold,
@@ -575,10 +603,11 @@ fn permitted(registry: &Registry, _settled: &Settled) -> Result<Watching> {
         )
     })?;
 
-    let scope = match account.group.clone() {
-        Some(group) => Scope::Group(group),
-        None => Scope::Ungrouped,
-    };
+    // `scope_of` rather than the same match written out again. It existed with
+    // no caller at all while this was the hand-rolled copy of it, which is the
+    // arrangement where the two come to disagree without either being wrong on
+    // its own.
+    let scope = registry.scope_of(&account);
 
     // Two independent yeses before anything moves unasked, and they are two
     // different statements: one declaring these Accounts interchangeable at
@@ -639,7 +668,30 @@ fn one_round(
     recently: &mut Recently,
     backoff: &mut Backoff,
 ) -> Result<Turn> {
-    let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
+    // Adoption is the first thing a round asks the machine for, and on a machine
+    // Perch has never run on it is the first thing that can refuse: no Claude
+    // Code login yet, so there is nothing to adopt and no registry to read (ADR
+    // 0009). Raised, that ended the loop — and `perch watcher install` succeeds
+    // on such a machine, so the Service came up at the next login, exited 12,
+    // and systemd's start limit left the unit `failed` for good. Logging into
+    // Claude Code afterwards never revived it.
+    //
+    // Which is the exact crash loop ADR 0040 repealed the permission exits over,
+    // arriving one line above where they are caught. So it travels the same way
+    // they do: the loop holds and says why, and takes over the moment there is
+    // something to adopt. A Check still exits with the code the refusal earned,
+    // because `one_check` turns a `NotArranged` back into the failure itself and
+    // a scheduler has to be told.
+    //
+    // `Busy` is not one of these and is passed through untouched: both callers
+    // already answer it, and they answer it differently from "this machine is
+    // not arranged" — a loop charges it to the back-off, and a Check says it on
+    // standard output and exits `EXIT_HELD`.
+    let (mut perch, mut registry) = match adopt::ensure_adopted_exclusively(host) {
+        Ok(both) => both,
+        Err(busy @ PerchError::Busy(_)) => return Err(busy),
+        Err(not_arranged) => return Ok(Turn::NotArranged(not_arranged)),
+    };
 
     // A Switch path, so it resolves a Landing before it reads anything off the
     // registry (ADR 0048) — the Account this round watches is the Account the

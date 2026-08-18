@@ -973,8 +973,17 @@ impl Registry {
         self.groups.keys().map(String::as_str)
     }
 
+    /// The Settings of the Group declared under a name, whatever it was
+    /// capitalized as.
+    ///
+    /// Through [`declared_group`](Self::declared_group), because that is how
+    /// every other question about a Group name is answered here: two names
+    /// differing only in case are one name. A bare `groups.get` agreed with
+    /// that only by accident of the caller having the declared spelling
+    /// already, and nothing in the signature said so — which is a trap set for
+    /// whoever reaches for this next.
     pub fn group(&self, name: &str) -> Option<&Settings> {
-        self.groups.get(name)
+        self.groups.get(self.declared_group(name)?)
     }
 
     /// Every Scope a Setting can be said at, in the order they are offered: the
@@ -1012,6 +1021,11 @@ impl Registry {
 
     /// The Scope an Account's Settings come from: its Group, or the Ungrouped
     /// Accounts.
+    ///
+    /// One place, because the rule is ADR 0017's and there is nothing to it but
+    /// this match — which is exactly the kind of thing that gets written out
+    /// again at a call site and then goes on being written out. `permitted` had
+    /// its own copy while this had no caller at all.
     pub fn scope_of(&self, account: &Account) -> Scope {
         match &account.group {
             Some(name) => Scope::Group(name.clone()),
@@ -3358,6 +3372,22 @@ mod tests {
 
     /// The invariant `group_names` states, now that something holds it.
     ///
+    /// A Group's Settings are answered whatever the name was capitalized as,
+    /// like every other question the registry answers about a name.
+    ///
+    /// `groups.get` agreed with that only while the caller already held the
+    /// declared spelling, and nothing in the signature said it had to — a trap
+    /// set for whoever reached for this next.
+    #[test]
+    fn a_groups_settings_are_found_however_the_name_was_capitalized() {
+        let mut registry = Registry::default();
+        registry.declare_group("Work").expect("a usable name");
+
+        assert!(registry.group("work").is_some());
+        assert!(registry.group("WORK").is_some());
+        assert!(registry.group("play").is_none());
+    }
+
     /// An Account claiming a Group nothing declared falls out of `perch list`
     /// entirely — the listing walks the declared Groups and then the Accounts
     /// in none of them (ADR 0049) — which makes it an Account nothing shows,

@@ -733,37 +733,59 @@ pub fn resolve_a_landing(
         return Ok(Settled(()));
     };
 
-    // A store that will not answer says nothing about what it holds, and what
-    // it holds is the whole of the evidence. Refused rather than guessed at,
-    // for the reason `capture` refuses the same silence: a Switch that has to
-    // be run again after a `chmod` is recoverable where a lost refresh token is
-    // not.
     let store = registry::the_default_profile(host)?;
-    let live = credentials::read(host, &store).map_err(|would_not_answer| {
-        would_not_answer.with_note(&format!(
-            "A Switch to {arriving} was in flight and was not recorded, and the \
-             live Credential is the only thing that says whether it happened.\n\
-             Nothing was changed. Make that store readable and run this again."
-        ))
-    })?;
 
-    let settled_on = whose_the_live_credential_is(
-        host,
-        registry,
-        leaving.as_deref(),
-        &arriving,
-        live.as_ref().map(|held| held.credential.as_str()),
-    )
-    .ok_or_else(|| {
-        PerchError::Conflict(the_landing_is_unaccounted_for(
+    // Under Claude Code's own locks, which is how every other reading of the
+    // live Credential is taken (ADR 0006). The evidence here is byte-equality
+    // against copies Perch holds, so a Rotation lands on the one thing that can
+    // settle a Landing and leaves nothing on the machine that says whose those
+    // bytes are — a `Conflict` no later run can clear, because every later run
+    // re-reads the same rotated bytes. ADR 0048 accepts a Rotation *since the
+    // interruption* defeating resolution; it does not have to accept one Perch
+    // could have locked out, and read outside the locks a Claude Code refresh
+    // landing during this very read did exactly that.
+    //
+    // The save is inside too, so the window the locks close is the whole of
+    // read-decide-record rather than the read alone.
+    lock::under(host, probe::locks_for(&store), |held| {
+        let mut holds = lock::Holds::of(held, perch);
+
+        // A store that will not answer says nothing about what it holds, and
+        // what it holds is the whole of the evidence. Refused rather than
+        // guessed at, for the reason `capture` refuses the same silence: a
+        // Switch that has to be run again after a `chmod` is recoverable where a
+        // lost refresh token is not.
+        let live =
+            holds
+                .around(|| credentials::read(host, &store))
+                .map_err(|would_not_answer| {
+                    would_not_answer.with_note(&format!(
+                        "A Switch to {arriving} was in flight and was not recorded, \
+                     and the live Credential is the only thing that says whether \
+                     it happened.\n\
+                     Nothing was changed. Make that store readable and run this \
+                     again."
+                    ))
+                })?;
+
+        let settled_on = whose_the_live_credential_is(
+            host,
+            registry,
             leaving.as_deref(),
             &arriving,
-        ))
-    })?;
+            live.as_ref().map(|held| held.credential.as_str()),
+        )
+        .ok_or_else(|| {
+            PerchError::Conflict(the_landing_is_unaccounted_for(
+                leaving.as_deref(),
+                &arriving,
+            ))
+        })?;
 
-    registry.settle(settled_on);
-    registry::save(host, perch, registry)?;
-    Ok(Settled(()))
+        registry.settle(settled_on);
+        holds.around_a_registry_write(|perch| registry::save(host, perch, registry))?;
+        Ok(Settled(()))
+    })
 }
 
 /// Which Account the live Credential belongs to, or `None` where nothing on the

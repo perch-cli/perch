@@ -668,8 +668,21 @@ fn place(
     // comparison the choice never makes.
     let staying =
         candidate && leaving.is_some_and(|email| registry::same_name(account.email(), email));
+    // Exhausted asked outright, and not left to `worth_leaving_for`. That
+    // comparison is against `here`, and `here` is `None` for an active Account
+    // nobody has observed *and* for one that is itself Exhausted
+    // ([`measured_against`]) — so `is_none_or` handed every exhausted candidate
+    // a `true`, and the listing put an Account with nothing left above the
+    // Account being left. [`choose`] drops them from `landable`
+    // unconditionally, so `perch switch` answered "the only Account here that
+    // is not exhausted is the one you are on" while `perch list` showed one of
+    // the exhausted ones on the top row: the disagreement between the two
+    // orders this function exists to prevent (ADR 0049), in the state a fresh
+    // machine is always in.
     let worth = u8::from(
-        !staying && here.is_none_or(|here| worth_leaving_for(&headroom, here, strategy, now)),
+        !staying
+            && !headroom.is_exhausted()
+            && here.is_none_or(|here| worth_leaving_for(&headroom, here, strategy, now)),
     );
     let (tier, figure) = headroom.ranking(strategy, now);
     ((u8::from(candidate), worth, tier), figure)
@@ -1136,6 +1149,37 @@ pub(crate) mod tests {
                 .email(),
             "there@example.com",
             "and it is the one the choice makes, which is the whole point"
+        );
+    }
+
+    /// The other half of the same state, from the listing's side.
+    ///
+    /// An exhausted Account is a candidate — a Cycle would consider it tomorrow
+    /// — so `place` scored it on `worth_leaving_for` against `here`. But `here`
+    /// is `None` for an active Account nobody has observed, and `is_none_or`
+    /// answers `true` for a `None`, so every exhausted candidate outranked the
+    /// Account being left. `choose` drops them from `landable` unconditionally:
+    /// `perch switch` said "the only Account here that is not exhausted is the
+    /// one you are on" while `perch list` put one of the exhausted ones on the
+    /// top row — two orders over one Scope (ADR 0049).
+    #[test]
+    fn an_exhausted_account_never_outranks_the_one_being_left() {
+        let registry = holding(vec![
+            account("here@example.com", vec![]),
+            account("full@example.com", vec![window("5-hour", 100.0)]),
+            account("fuller@example.com", vec![window("5-hour", 100.0)]),
+        ]);
+
+        assert_eq!(
+            ranked_emails(&registry),
+            ["here@example.com", "full@example.com", "fuller@example.com"],
+            "nothing a Cycle would refuse to land on sorts above the Account it \
+             would be leaving"
+        );
+        assert!(
+            cycle(&registry).is_err(),
+            "and the choice agrees there is nowhere to go, which is what makes \
+             the order above the only honest one"
         );
     }
 

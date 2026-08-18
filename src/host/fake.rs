@@ -1526,9 +1526,24 @@ impl port::Files for FakeHost {
         )))
     }
 
-    /// Through a link, as `set_permissions` narrows what one points at.
+    /// Refusing a link, as `RealHost` does: the narrowing is an `O_NOFOLLOW`
+    /// open followed by an `fchmod`, so a link at the last component fails
+    /// rather than sending the mode wherever it points. A directory *above* it
+    /// is still followed, which is what an open does.
+    ///
+    /// Where permission bits mean nothing there is no narrowing and so nothing
+    /// to redirect: `RealHost::make_private` is `#[cfg(unix)]` and a silent
+    /// no-op elsewhere, and this fake gates on the runtime Platform for it —
+    /// the same split [`file_mode`](FakeHost::file_mode) is written against.
     fn make_private(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::MadePrivate(path.to_path_buf()));
+        if self.platform() != Platform::Windows && self.fs.links.borrow().contains_key(path) {
+            return Err(HostError::Io(std::io::Error::other(format!(
+                "{} is a symbolic link, and narrowing one would set the mode of \
+                 whatever it points at",
+                path.display(),
+            ))));
+        }
         let Some(path) = self.resolved(path) else {
             return Err(HostError::NotFound {
                 path: path.to_path_buf(),
@@ -2037,6 +2052,16 @@ impl port::Processes for FakeHost {
     /// Stands in for whatever took the terminal — the login the user drives, or
     /// the program a Run launched: it writes whatever the configured [`Login`]
     /// leaves in the directory it was pointed at, and exits as that says.
+    ///
+    /// A program [`FakeHost::set_exec`] has been given an answer for exits with
+    /// that answer's status, ahead of the [`Login`]. Without it there was no way
+    /// to say "the program took the terminal and refused" at all: every
+    /// interactive program exited 0 unless a whole [`Login`] was written for it,
+    /// and the ones that are not logins — `brew upgrade perch`, `npm install -g`,
+    /// the installer script — have no directory to write into and no business
+    /// with one. So `perch upgrade`'s entire failure arm was unreachable from a
+    /// test, which is how it came to refresh the Service after a `brew` that had
+    /// refused.
     fn exec_interactive(
         &self,
         program: &str,
@@ -2058,6 +2083,15 @@ impl port::Processes for FakeHost {
                 .map(|(key, value)| (key.to_string(), value.to_string()))
                 .collect(),
         });
+
+        if let Some(arranged) = self
+            .processes
+            .executions
+            .borrow()
+            .get(&exec_key(program, args))
+        {
+            return Ok(arranged.status);
+        }
 
         let login = self.processes.login.borrow();
         match login.as_ref() {
