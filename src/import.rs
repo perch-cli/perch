@@ -235,10 +235,27 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
         }
     }
 
+    // Keyed the way the guard above asked the question. `account` folds case
+    // (`registry::same_name`) and a `BTreeMap` lookup does not, so an Export
+    // spelling a credential key `ONE@example.com` beside an account entry
+    // `one@example.com` passed the unlisted-Credential check — the key is
+    // listed — and then missed here, leaving that Account with no Profile and no
+    // Credential while the Import reported success. That is exactly the partial
+    // restore the guard exists to prevent, arriving through the one comparison
+    // it does not share with placement.
+    fn carried<'a>(
+        held: &'a std::collections::BTreeMap<String, String>,
+        email: &str,
+    ) -> Option<&'a String> {
+        held.iter()
+            .find(|(key, _)| registry::same_name(key, email))
+            .map(|(_, value)| value)
+    }
+
     let mut placements = Vec::new();
     for account in &export.registry.accounts {
         let store = account.store(host)?;
-        if let Some(credential) = export.credentials.get(account.email()) {
+        if let Some(credential) = carried(&export.credentials, account.email()) {
             // The Profile's own `.claude.json` travels beside its Credential.
             // Where the Export carries one it is written verbatim, because the
             // `oauthAccount` block Claude Code wrote holds fields the registry
@@ -246,9 +263,7 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
             // compose. Where it carries none, one is composed — a Profile
             // without this file Carries nothing, so every Run against it would
             // meet the onboarding dialog afresh (ADR 0003).
-            let identity_file = export
-                .identity_files
-                .get(account.email())
+            let identity_file = carried(&export.identity_files, account.email())
                 .cloned()
                 .unwrap_or_else(|| {
                     probe::fresh_identity_file(&account.identity.oauth_account_block())
