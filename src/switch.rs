@@ -31,6 +31,7 @@
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
+use zeroize::Zeroizing;
 
 use crate::credentials;
 use crate::error::{PerchError, Result};
@@ -831,7 +832,7 @@ fn whose_the_live_credential_is(
         registry
             .account(email)
             .and_then(|account| held_by(host, account))
-            .is_some_and(|held| held == live)
+            .is_some_and(|held| *held == live)
     };
 
     if holding(arriving) {
@@ -849,7 +850,7 @@ fn whose_the_live_credential_is(
         .find(|account| {
             !registry::same_name(account.email(), arriving)
                 && !leaving.is_some_and(|leaving| registry::same_name(account.email(), leaving))
-                && held_by(host, account).is_some_and(|held| held == live)
+                && held_by(host, account).is_some_and(|held| *held == live)
         })
         .map(|account| Some(account.email().to_string()))
 }
@@ -1234,20 +1235,20 @@ fn corroborates(
     // holds there is no Rotation and nothing a wrong answer could cost. That is
     // the ordinary interrupted Switch — Perch's record moved on and
     // `.claude.json` did not — and it must stay a Switch that simply runs.
-    if held_by(host, outgoing).is_some_and(|held| held == live) {
+    if held_by(host, outgoing).is_some_and(|held| *held == live) {
         return Corroboration::NothingAtStake;
     }
     let Some(account) = registry.account(named) else {
         return Corroboration::NotOurs;
     };
     match held_by(host, account) {
-        Some(held) if held == live => Corroboration::NotOurs,
+        Some(held) if *held == live => Corroboration::NotOurs,
         _ => Corroboration::Unaccounted,
     }
 }
 
 /// What an Account's own Profile holds, where it can be read at all.
-fn held_by(host: &dyn Host, account: &Account) -> Option<String> {
+fn held_by(host: &dyn Host, account: &Account) -> Option<Zeroizing<String>> {
     let store = account.store(host).ok()?;
     Some(credentials::read(host, &store).ok()??.credential)
 }

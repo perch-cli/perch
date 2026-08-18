@@ -18,6 +18,8 @@
 
 use std::path::PathBuf;
 
+use zeroize::Zeroizing;
+
 use crate::error::{PerchError, Result};
 use crate::host::{self, Host, HostError, Platform};
 use crate::keychain::KeychainError;
@@ -56,7 +58,11 @@ pub fn stores_for(host: &dyn Host, config: &Store) -> [CredentialStore; 2] {
 #[derive(Clone, PartialEq, Eq)]
 pub struct StoredCredential {
     pub kept_in: CredentialStore,
-    pub credential: String,
+    /// `Zeroizing` for [`crate::probe::Credential`]'s reason, one step earlier:
+    /// this is Credential text as it came out of a store, before anything has
+    /// understood it, so it is the first buffer on the machine to hold a live
+    /// refresh token and the first worth wiping when it goes.
+    pub credential: Zeroizing<String>,
 }
 
 impl std::fmt::Debug for StoredCredential {
@@ -121,11 +127,11 @@ impl CredentialStore {
     }
 
     /// The Credential here, or `None` when this store holds none.
-    pub fn read(&self, host: &dyn Host) -> Result<Option<String>> {
+    pub fn read(&self, host: &dyn Host) -> Result<Option<Zeroizing<String>>> {
         match self {
             CredentialStore::Keychain { service, account } => {
                 match host.keychain_get(service, account) {
-                    Ok(raw) => Ok(Some(raw)),
+                    Ok(raw) => Ok(Some(Zeroizing::new(raw))),
                     Err(KeychainError::NotFound { .. }) => Ok(None),
                     Err(_) if there_is_no_keychain_here(host) => Ok(None),
                     Err(other) => Err(PerchError::from(other)),
@@ -134,7 +140,7 @@ impl CredentialStore {
             CredentialStore::Plaintext { path } => match host.read_file(path) {
                 Ok(contents) => {
                     tighten_if_loose(host, path);
-                    Ok(Some(contents))
+                    Ok(Some(Zeroizing::new(contents)))
                 }
                 Err(HostError::NotFound { .. }) => Ok(None),
                 Err(err) => Err(PerchError::file_read(path.clone(), err)),
@@ -298,13 +304,13 @@ mod tests {
         let held = read(&host, &store)
             .unwrap()
             .expect("the fallback holds one");
-        assert_eq!(held.credential, CREDENTIAL);
+        assert_eq!(*held.credential, CREDENTIAL);
         assert!(matches!(held.kept_in, CredentialStore::Plaintext { .. }));
 
         // The primary answers, so the primary is believed.
         host.set_keychain_item(&store.keychain_service, &store.keychain_account, "primary");
         let held = read(&host, &store).unwrap().expect("the primary holds one");
-        assert_eq!(held.credential, "primary");
+        assert_eq!(*held.credential, "primary");
         assert!(matches!(held.kept_in, CredentialStore::Keychain { .. }));
     }
 
@@ -322,7 +328,9 @@ mod tests {
 
         host.set_file(&store.credentials_file, CREDENTIAL);
         assert_eq!(
-            read(&host, &store).unwrap().map(|held| held.credential),
+            read(&host, &store)
+                .unwrap()
+                .map(|held| held.credential.to_string()),
             Some(CREDENTIAL.to_string()),
             "a locked keychain must not hide the Credential Claude Code is using"
         );
@@ -369,7 +377,9 @@ mod tests {
 
         for _ in 0..3 {
             assert_eq!(
-                read(&host, &store).unwrap().map(|held| held.credential),
+                read(&host, &store)
+                    .unwrap()
+                    .map(|held| held.credential.to_string()),
                 Some(CREDENTIAL.to_string()),
                 "a loose file is tightened rather than refused"
             );

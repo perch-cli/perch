@@ -386,7 +386,7 @@ pub fn store_of(host: &FakeHost, email: &str) -> probe::Store {
 pub fn credential_of(host: &FakeHost, email: &str) -> Option<String> {
     perch::credentials::read(host, &store_of(host, email))
         .expect("the store could be consulted")
-        .map(|held| held.credential)
+        .map(|held| held.credential.to_string())
 }
 
 /// The registry as it would be read back by the next command Perch runs.

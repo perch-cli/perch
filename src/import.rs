@@ -522,7 +522,7 @@ mod tests {
             assert_eq!(
                 crate::credentials::read(&host, &store)
                     .unwrap()
-                    .map(|held| held.credential),
+                    .map(|held| held.credential.to_string()),
                 Some("held".to_string()),
                 "{platform:?}"
             );

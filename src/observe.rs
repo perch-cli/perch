@@ -24,6 +24,7 @@ use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
 use serde_json::json;
+use zeroize::Zeroizing;
 
 use crate::anthropic::{self, QuotaWindows, Refused};
 use crate::commands::say;
@@ -587,7 +588,10 @@ enum Because {
 
 /// An access token to ask with, and where this reading got it.
 struct Asking {
-    token: String,
+    /// `Zeroizing` for [`probe::Credential`]'s reason: this is a copy of a
+    /// live access token, and the copy would otherwise outlive the reading in
+    /// freed heap.
+    token: Zeroizing<String>,
     /// Whether a Renewal in *this* reading produced it.
     ///
     /// What it decides is whether a refusal from Anthropic is worth renewing
@@ -739,7 +743,7 @@ fn renew_under_the_lock(
         let rotated = probe::credential_after_rotation(
             &credential,
             &fresh.access_token,
-            fresh.refresh_token.as_deref(),
+            fresh.refresh_token.as_ref().map(|token| token.as_str()),
             fresh.expires_at,
             installed,
         )?;
@@ -747,7 +751,10 @@ fn renew_under_the_lock(
             host,
             store,
             &rotated,
-            rotated_away(&refresh_token, fresh.refresh_token.as_deref()),
+            rotated_away(
+                &refresh_token,
+                fresh.refresh_token.as_ref().map(|token| token.as_str()),
+            ),
         )?;
 
         Ok(Asking {

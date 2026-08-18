@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use zeroize::Zeroizing;
 
 use crate::credentials;
 use crate::error::{PerchError, Result};
@@ -92,14 +93,24 @@ pub struct Identity {
 /// A Credential, kept as the exact bytes the keychain holds. Perch copies it
 /// verbatim, so the only fields read out are the ones something needs: to
 /// describe the Account, to ask Anthropic a question as it, and to renew it.
+///
+/// The three secret fields are `Zeroizing`, which is the same answer
+/// [`crate::export`] already gives for the export passphrase and a stronger
+/// case: a refresh token buys access to the Account indefinitely, where the
+/// passphrase is used once and thrown away. Dropping a `String` in Rust returns
+/// its bytes to the allocator untouched, so every Credential this type has ever
+/// held — and it is `Clone`, so there are several — sat readable in freed heap
+/// until something happened to overwrite it, which a core dump or a hibernation
+/// image captures whole. The `Debug` below stops one being *printed*; this stops
+/// one being *left behind*.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Credential {
-    raw: String,
+    raw: Zeroizing<String>,
     /// What proves the caller is this Account for the length of a session.
-    pub access_token: String,
+    pub access_token: Zeroizing<String>,
     /// What buys a fresh access token, and what Anthropic retires when it
     /// Rotates one.
-    pub refresh_token: Option<String>,
+    pub refresh_token: Option<Zeroizing<String>>,
     pub subscription_type: Option<String>,
     /// When the access token stops being accepted, in milliseconds.
     pub expires_at: Option<i64>,
@@ -552,7 +563,7 @@ pub fn read_credential(
 /// they broke. `held_in` names the namespace they came out of, so a refusal
 /// says which Account's store stopped being recognizable.
 pub fn understand_credential(
-    raw: String,
+    raw: Zeroizing<String>,
     held_in: &str,
     installed: &Installed,
 ) -> Result<Credential> {
@@ -582,8 +593,8 @@ pub fn understand_credential(
 
     Ok(Credential {
         raw,
-        access_token,
-        refresh_token: oauth.refresh_token,
+        access_token: Zeroizing::new(access_token),
+        refresh_token: oauth.refresh_token.map(Zeroizing::new),
         subscription_type: oauth.subscription_type,
         expires_at: oauth.expires_at,
     })
@@ -1919,8 +1930,12 @@ mod tests {
     }
 
     fn understood(raw: &str) -> Credential {
-        understand_credential(raw.to_string(), "a test", &version_under_test())
-            .expect("a Credential")
+        understand_credential(
+            Zeroizing::new(raw.to_string()),
+            "a test",
+            &version_under_test(),
+        )
+        .expect("a Credential")
     }
 
     /// Midday on the day the rest of the fixtures are set, in milliseconds.
@@ -1996,8 +2011,11 @@ mod tests {
         .expect("the block is there to renew");
 
         let back = understood(&rotated);
-        assert_eq!(back.access_token, "new-access");
-        assert_eq!(back.refresh_token.as_deref(), Some("new-refresh"));
+        assert_eq!(*back.access_token, "new-access");
+        assert_eq!(
+            back.refresh_token.as_ref().map(|t| t.as_str()),
+            Some("new-refresh")
+        );
         assert_eq!(back.expires_at, Some(NOON + 3_600_000));
         assert_eq!(
             back.subscription_type.as_deref(),
@@ -2019,8 +2037,11 @@ mod tests {
                 .expect("the block is there to renew");
 
         let back = understood(&rotated);
-        assert_eq!(back.refresh_token.as_deref(), Some("still-good"));
-        assert_eq!(back.access_token, "new-access");
+        assert_eq!(
+            back.refresh_token.as_ref().map(|t| t.as_str()),
+            Some("still-good")
+        );
+        assert_eq!(*back.access_token, "new-access");
     }
 
     /// The test above cannot see this: its Credential carries no `expiresAt` at
@@ -2159,7 +2180,7 @@ mod tests {
     #[test]
     fn a_credential_that_is_not_json_names_the_store_it_came_out_of() {
         let refused = understand_credential(
-            "not json at all".to_string(),
+            Zeroizing::new("not json at all".to_string()),
             "the Credential Perch holds for someone@example.com",
             &Installed::unknown("2.1.221"),
         )
@@ -2174,7 +2195,7 @@ mod tests {
     #[test]
     fn a_credential_with_no_oauth_block_is_refused_as_the_wrong_shape() {
         let refused = understand_credential(
-            r#"{"somethingElse": {}}"#.to_string(),
+            Zeroizing::new(r#"{"somethingElse": {}}"#.to_string()),
             "the keychain",
             &Installed::unknown("2.1.221"),
         )
@@ -2189,7 +2210,7 @@ mod tests {
     #[test]
     fn a_credential_with_no_access_token_is_refused_rather_than_used_empty() {
         let refused = understand_credential(
-            r#"{"claudeAiOauth": {"refreshToken": "sk-ant-ort01-x"}}"#.to_string(),
+            Zeroizing::new(r#"{"claudeAiOauth": {"refreshToken": "sk-ant-ort01-x"}}"#.to_string()),
             "the keychain",
             &Installed::unknown("2.1.221"),
         )
@@ -2208,12 +2229,18 @@ mod tests {
         let raw =
             r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-x","refreshToken":"sk-ant-ort01-x"}}"#;
 
-        let credential =
-            understand_credential(raw.to_string(), "the keychain", &version_under_test())
-                .expect("that is a Credential");
+        let credential = understand_credential(
+            Zeroizing::new(raw.to_string()),
+            "the keychain",
+            &version_under_test(),
+        )
+        .expect("that is a Credential");
 
-        assert_eq!(credential.access_token, "sk-ant-oat01-x");
-        assert_eq!(credential.refresh_token.as_deref(), Some("sk-ant-ort01-x"));
+        assert_eq!(*credential.access_token, "sk-ant-oat01-x");
+        assert_eq!(
+            credential.refresh_token.as_ref().map(|t| t.as_str()),
+            Some("sk-ant-ort01-x")
+        );
         assert_eq!(
             credential.as_str(),
             raw,
@@ -2227,8 +2254,8 @@ mod tests {
     #[test]
     fn a_rotation_onto_a_credential_that_is_not_json_is_refused() {
         let broken = Credential {
-            raw: "{ not json".to_string(),
-            access_token: "sk-ant-oat01-old".to_string(),
+            raw: Zeroizing::new("{ not json".to_string()),
+            access_token: Zeroizing::new("sk-ant-oat01-old".to_string()),
             refresh_token: None,
             expires_at: None,
             subscription_type: None,
@@ -2254,8 +2281,8 @@ mod tests {
     #[test]
     fn a_rotation_onto_a_credential_with_no_oauth_block_is_refused() {
         let broken = Credential {
-            raw: r#"{"somethingElse": {}}"#.to_string(),
-            access_token: "sk-ant-oat01-old".to_string(),
+            raw: Zeroizing::new(r#"{"somethingElse": {}}"#.to_string()),
+            access_token: Zeroizing::new("sk-ant-oat01-old".to_string()),
             refresh_token: None,
             expires_at: None,
             subscription_type: None,

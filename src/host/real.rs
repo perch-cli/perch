@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use chrono::{DateTime, Utc};
+use zeroize::Zeroize;
 
 #[cfg(unix)]
 use super::PRIVATE_DIR_MODE;
@@ -564,13 +565,24 @@ impl Links for RealHost {
 
 impl Keys for RealHost {
     fn keychain_get(&self, service: &str, account: &str) -> Result<String, KeychainError> {
-        let execution = security(
+        let mut execution = security(
             &["find-generic-password", "-s", service, "-a", account, "-w"],
             None,
             service,
             account,
         )?;
-        Ok(decode_password_output(&execution.stdout))
+        // Taken out of the `Execution` and wiped there, rather than read from
+        // it and left behind. `security -w` answers with the Credential itself
+        // on stdout, so this buffer is the first thing on the machine to hold a
+        // live refresh token — and an `Execution` is an ordinary struct that
+        // would drop it back to the allocator untouched. The `String` this
+        // returns lands in a `Zeroizing` one frame up
+        // (`CredentialStore::read`); what could not be reached from there is
+        // the buffer the child's output arrived in.
+        let mut stdout = std::mem::take(&mut execution.stdout);
+        let decoded = decode_password_output(&stdout);
+        stdout.zeroize();
+        Ok(decoded)
     }
 
     fn keychain_set(

@@ -292,7 +292,10 @@ fn read_from(
             account.email(),
         ))
     })?;
-    Ok(held.map(|held| held.credential))
+    // Copied out of its `Zeroizing` rather than carried in it: `Export` wipes
+    // both of its maps in its own `Drop` above, and the wrapper this came in
+    // wipes the buffer it is leaving behind.
+    Ok(held.map(|held| held.credential.to_string()))
 }
 
 fn read_the_identity_file(host: &dyn Host, account: &Account) -> Option<String> {
