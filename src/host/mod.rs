@@ -967,7 +967,7 @@ mod tests {
     /// for a reply that is not UTF-8, because a caller that got no answer would
     /// read it as a store holding nothing.
     #[test]
-    fn a_childs_output_is_taken_over_where_it_is_already_text() {
+    fn the_output_of_a_child_is_taken_over_where_it_is_already_text() {
         assert_eq!(
             taken_over(b"sk-ant-oat01-test".to_vec()),
             "sk-ant-oat01-test"
