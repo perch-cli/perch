@@ -208,6 +208,19 @@ pub fn refresh(
     let mut report = Report::default();
     let mut anything_to_keep = false;
 
+    // Once, which is what [`Installed::probed`] promises and what the loop below
+    // was breaking: a `PATH` walk and a `claude --version` subprocess per
+    // Account. `perch list --refresh` over a Group of five spawned five of them,
+    // and `perch watcher run` spawned one every poll round for the life of the
+    // loop. The answer cannot change under a process that is already running,
+    // which is the whole reason the type exists.
+    //
+    // Kept as the failure it may be rather than raised here, because an Account
+    // that is already Quarantined is answered before the version is wanted at
+    // all — and a machine whose Claude Code has been uninstalled must not turn
+    // that answer into a different one.
+    let installed = Installed::probed(host);
+
     for email in emails {
         // A round trip to Anthropic each, over as many Accounts as a Group
         // holds. Said between them rather than only at the write, so a narrowed
@@ -218,7 +231,7 @@ pub fn refresh(
         let Some(account) = registry.account(email).cloned() else {
             continue;
         };
-        let outcome = match observe(host, registry, &account) {
+        let outcome = match observe(host, registry, &account, installed.as_ref()) {
             Ok(windows) => {
                 keep(registry, email, windows, host.now());
                 anything_to_keep = true;
@@ -249,7 +262,12 @@ pub fn refresh(
     report
 }
 
-fn observe(host: &dyn Host, registry: &Registry, account: &Account) -> Step<QuotaWindows> {
+fn observe(
+    host: &dyn Host,
+    registry: &Registry,
+    account: &Account,
+    installed: std::result::Result<&Installed, &PerchError>,
+) -> Step<QuotaWindows> {
     // An Account already known to be beyond repair is not asked again. Its
     // Credential cannot be renewed and no answer would be recorded against it,
     // so a read here would spend an allowance that does not refill early (ADR
@@ -258,12 +276,12 @@ fn observe(host: &dyn Host, registry: &Registry, account: &Account) -> Step<Quot
         return Err(Outcome::Quarantined { why, detail: None });
     }
 
-    let installed = Installed::probed(host)?;
+    let installed = installed.map_err(|err| Outcome::Failed(err.to_string()))?;
     let asked = holding(host, registry, account)?;
     let theirs =
-        |outcome| only_off_a_credential_that_is_theirs(host, outcome, &asked, account, &installed);
+        |outcome| only_off_a_credential_that_is_theirs(host, outcome, &asked, account, installed);
 
-    let asking = usable_token(host, &asked, &installed).map_err(theirs)?;
+    let asking = usable_token(host, &asked, installed).map_err(theirs)?;
     match read_off(host, &asking.token, account) {
         Ok(windows) => return Ok(windows),
         Err(settled @ Turned::Settled(_)) => return Err(settled.settled()),
@@ -302,8 +320,8 @@ fn observe(host: &dyn Host, registry: &Registry, account: &Account) -> Step<Quot
     // Credential that had not run out spends the only refresh token there is —
     // which is exactly why `usable_at` will not renew on suspicion. A refusal
     // from Anthropic is not suspicion.
-    refuse_if_live(host, &asked, &installed).map_err(theirs)?;
-    let renewed = renew_under_the_lock(host, &asked, &installed, Because::AnthropicRefusedIt)
+    refuse_if_live(host, &asked, installed).map_err(theirs)?;
+    let renewed = renew_under_the_lock(host, &asked, installed, Because::AnthropicRefusedIt)
         .map_err(theirs)?;
     read_off(host, &renewed.token, account).map_err(Turned::settled)
 }

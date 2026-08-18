@@ -565,6 +565,50 @@ fn a_refresh_reads_only_the_accounts_it_is_about_to_show() {
     );
 }
 
+/// **`Installed::probed` says "once per command", and a Refresh over a Scope was
+/// asking it once per Account.**
+///
+/// The version is read by walking `PATH` and running `claude --version`, and
+/// the answer cannot change under a process that is already running — which is
+/// the whole reason the type exists rather than the `&str` it was. Asked inside
+/// the loop, `perch list --refresh` over five Accounts spawned five
+/// subprocesses, and `perch watcher run` spawned one every poll round for the
+/// life of the loop.
+#[test]
+fn the_installed_claude_code_is_asked_once_however_many_accounts_are_read() {
+    let host = machine_with_two_accounts();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, FRESH);
+    host.set_keychain_item(&second_service(&host), LOGIN_NAME, SECOND_FRESH);
+    let host = host
+        .with_reply_to(PROFILE_URL, FRESH_TOKEN, 200, &profile_of(EMAIL))
+        .with_reply_to(USAGE_URL, FRESH_TOKEN, 200, USAGE)
+        .with_reply_to(PROFILE_URL, SECOND_TOKEN, 200, &profile_of(SECOND_EMAIL))
+        .with_reply_to(USAGE_URL, SECOND_TOKEN, 200, USAGE);
+    host.forget_effects();
+
+    run_list_refresh(&host, false).0.expect("the reads work");
+
+    let asked = host
+        .effects()
+        .iter()
+        .filter(|effect| {
+            matches!(effect, Effect::Exec { program, args }
+                if program.ends_with("claude") && args.first().is_some_and(|arg| arg == "--version"))
+        })
+        .count();
+    assert_eq!(
+        asked,
+        1,
+        "one `claude --version` for the command, whatever it went on to read: \
+         {:?}",
+        host.effects()
+    );
+    assert!(
+        host.sent_to(USAGE_URL).len() > 1,
+        "and it really did read more than one Account"
+    );
+}
+
 #[test]
 fn figures_are_not_recorded_against_an_account_the_credential_is_not_for() {
     // Somebody ran `claude` and logged in directly, so the live Credential is
