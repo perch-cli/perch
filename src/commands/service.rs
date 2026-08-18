@@ -21,9 +21,9 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use crate::commands::{say, say_json};
+use crate::cycle;
 use crate::error::{EXIT_NOTHING_TO_DO, EXIT_OK, PerchError, Result};
 use crate::host::{Host, Platform};
-use crate::registry::Scope;
 use crate::service::{self, Driven, Unit};
 use crate::{registry, upgrade};
 
@@ -562,8 +562,7 @@ fn nothing_may_act(host: &dyn Host) -> Result<Option<String>> {
     // — the same claim `perch group list` was making until it took the gate on
     // (`commands::group`), and `config::scope_lines` already answers correctly.
     let any = registry.scopes().iter().any(|scope| {
-        let interchangeable = *scope != Scope::Ungrouped || registry.ungrouped.interchangeable;
-        registry.settings(scope).watcher_may_act && interchangeable
+        registry.settings(scope).watcher_may_act && cycle::may_cycle_within(&registry, scope)
     });
     if any {
         return Ok(None);
