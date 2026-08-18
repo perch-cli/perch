@@ -577,10 +577,16 @@ fn clear_the_abandoned(host: &dyn Host, lock: &LockSpec) -> Result<bool> {
         return Ok(true);
     };
 
-    // Listable is the definition of the thing the refusal says this is not. A
-    // directory that would not go is contention, so it falls through to the
-    // ordinary wait rather than ending the command.
-    if host.list_dir(&lock.dir).is_ok() {
+    // Asked as `is_file`, which is the definition of the thing the refusal says
+    // this is: a plain file, and not a directory, a link or an absent path.
+    //
+    // Asked as "can it be listed" it was still wrong for a subset of the cases
+    // it was added for. A directory that cannot be *walked* — one a `sudo
+    // claude` left root-owned inside a Profile, one whose read bit somebody
+    // took away — fails `remove_dir_all` with EACCES and fails `list_dir` with
+    // EACCES too, so it was reported as not being a directory when it is, and
+    // told the user to delete a path by hand where waiting would have done.
+    if !host.is_file(&lock.dir) {
         return Ok(false);
     }
 

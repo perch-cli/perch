@@ -1150,6 +1150,41 @@ fn an_abandoned_lock_that_would_not_be_cleared_is_waited_on_rather_than_declared
     );
 }
 
+/// The case the "can it be listed" test still got wrong: a directory that can
+/// neither be removed nor walked.
+///
+/// A lock left root-owned inside a Profile by a `sudo claude`, or a Profile
+/// whose read bit somebody took away, fails `remove_dir_all` with EACCES and
+/// fails the listing with EACCES too — so it was reported as not being a
+/// directory when it is, and the user was told to delete a path by hand where
+/// waiting one more second would have done. What the refusal claims is that the
+/// path holds a plain file, so that is what it asks.
+#[test]
+fn an_abandoned_lock_that_cannot_even_be_walked_is_still_waited_on_rather_than_declared_broken() {
+    let host = machine_with_two_accounts();
+    let long_ago = host.now() - chrono::Duration::seconds(120);
+    let host = host
+        .with_dir_held_since(REFRESH_LOCK, long_ago)
+        .with_undeletable_file(REFRESH_LOCK, "Permission denied")
+        .with_unreadable_file(REFRESH_LOCK, "Permission denied");
+
+    let (result, _) = run_switch(&host, SECOND_EMAIL);
+
+    let refusal = result.expect_err("the lock never comes free");
+    let said = refusal.to_string();
+    assert!(
+        !said.contains("is not a lock directory"),
+        "a directory nothing can walk is still a directory: {said}"
+    );
+    assert!(
+        host.effects()
+            .iter()
+            .any(|effect| matches!(effect, Effect::Slept { .. })),
+        "so it falls through to the ordinary wait: {:?}",
+        host.effects()
+    );
+}
+
 /// Something at a lock path that is not a lock is said, rather than reported as
 /// a Claude Code that will not let go.
 ///
