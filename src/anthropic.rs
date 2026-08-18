@@ -150,13 +150,35 @@ pub fn utilization(host: &dyn Host, access_token: &str) -> Result<QuotaWindows, 
     Ok(windows)
 }
 
-/// Which Account an access token belongs to, when the reply says.
+/// Which Account an access token belongs to.
 ///
-/// `None` is "the reply did not say" rather than "nobody": a caller weighs
-/// evidence with this, and no evidence is not evidence against.
-pub fn whose(host: &dyn Host, access_token: &str) -> Result<Option<String>, Refused> {
+/// A reply that parses and names nobody is `Unrecognized` rather than an
+/// answer, which is how the other reader in this module treats a shape it does
+/// not know: `windows_in` refuses a drifted window and `reset_time_in` remarks
+/// on a `resets_at` it cannot parse. This one folded "the endpoint named nobody"
+/// together with "the endpoint is not shaped the way Perch believes" and handed
+/// both back as `None` — which [`crate::observe::confirm`] reads as permission
+/// to cache.
+///
+/// So the day Anthropic renamed `email_address`, the ADR 0019 guard would have
+/// become a no-op for every Account, for ever, with nothing printed anywhere.
+/// That is strictly worse than the outage this endpoint's other failure mode
+/// causes, because an outage ends and a rename does not.
+///
+/// It stays a *carve-out* rather than a refusal — `confirm` still goes on to
+/// read Utilization, because drift in a reply is no evidence either way — but
+/// now it says so out loud.
+pub fn whose(host: &dyn Host, access_token: &str) -> Result<String, Refused> {
     let document = read(host, PROFILE_URL, access_token)?;
-    Ok(email_in(&document))
+    email_in(&document).ok_or_else(|| {
+        Refused::Unrecognized(
+            "the profile endpoint named no email address, so whose an access \
+             token is cannot be established — the check that keeps one \
+             Account's figures from being filed under another's is passing \
+             everything through until Perch is taught the new shape"
+                .to_string(),
+        )
+    })
 }
 
 /// Renews an access token, and reports the Rotation when there was one.

@@ -810,7 +810,7 @@ const RATE_LIMITED: &str = "Anthropic is rate-limiting Perch, so nothing about \
 /// having spent quota it never spent, which is the evidence a Cycle ranks on.
 fn confirm(host: &dyn Host, token: &str, account: &Account) -> std::result::Result<(), Turned> {
     match anthropic::whose(host, token) {
-        Ok(Some(email)) if !registry::same_name(&email, account.email()) => {
+        Ok(email) if !registry::same_name(&email, account.email()) => {
             Err(Turned::Settled(Outcome::Failed(format!(
                 "the Credential Perch would ask with belongs to {email} rather \
                  than to {}, so no figure was recorded against it.",
@@ -833,7 +833,17 @@ fn confirm(host: &dyn Host, token: &str, account: &Account) -> std::result::Resu
         // under another's — the plausible wrong answer ADR 0019 says this
         // design cannot afford, arriving on the day Anthropic has a bad
         // afternoon.
-        Err(Refused::Unrecognized(_)) => Ok(()),
+        Err(Refused::Unrecognized(drift)) => {
+            // Said rather than swallowed. The carve-out is deliberate, but a
+            // guard that has switched itself off is worth one line: an endpoint
+            // that renames a field turns this check into a no-op for every
+            // Account for ever, and silence makes that indistinguishable from
+            // the check passing. Once, which is what `note` is for — it is a
+            // remark about the shape of Anthropic's replies rather than about
+            // this Account.
+            host.note(&Refused::Unrecognized(drift).to_string());
+            Ok(())
+        }
         Err(why) => Err(Turned::Settled(getting_ready_refused(why))),
     }
 }
