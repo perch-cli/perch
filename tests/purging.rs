@@ -88,7 +88,18 @@ fn a_purge_takes_every_profile_every_credential_and_the_registry() {
         !host.path_exists(Path::new(PERCH_HOME)),
         "and the directory Perch kept it all in is not there either"
     );
-    assert!(printed.contains("Purged 3 Accounts"), "{printed}");
+    // One line, asserted whole (ADR 0043): how many, and the directory they
+    // were kept in. That every Profile and every Credential went with them is
+    // what a Purge *is* — it was said in the question this was agreed to, and
+    // saying it again afterwards is the ordinary case announcing itself (ADR
+    // 0061).
+    assert!(
+        printed.trim_end().ends_with(&format!(
+            "Purged 3 Accounts, and {} is gone.",
+            perch_home_as_written(&host)
+        )),
+        "{printed}"
+    );
 }
 
 /// Claude Code's own login is Claude Code's. A Purge that logged the user out of
@@ -111,8 +122,15 @@ fn the_login_claude_code_is_running_on_is_left_exactly_where_it_is() {
         Some(IDENTITY_FILE),
         "and the file naming who that is was not touched"
     );
+    // Said where it is load-bearing — in the question this Purge was agreed
+    // to — rather than again in the report, which is every Purge saying what
+    // every Purge does (ADR 0061). Asserted whole, because the claim is the
+    // sentence (ADR 0043).
     assert!(
-        printed.contains("still logged in"),
+        printed.contains(
+            "Claude Code goes on running as whatever it is logged in as — the \
+             live Credential is not Perch's to take away."
+        ),
         "which is said, because it is the one thing a Purge deliberately leaves \
          behind:\n{printed}"
     );

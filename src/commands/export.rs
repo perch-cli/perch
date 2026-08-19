@@ -201,15 +201,19 @@ fn agreed_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<S
     Ok(typed)
 }
 
-/// What was written, and the one thing about it the user has to keep elsewhere.
+/// What was written.
+///
+/// What an Export carries is what an Export is, and keeping the passphrase away
+/// from the file is what the prompt above says while somebody is choosing one
+/// — so neither is said again here, where every run would say it (ADR 0061).
+/// The Accounts that came without a Credential are the one thing this can
+/// report that another Export would not.
 fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
     let accounts = export.accounts();
     say(
         out,
         &format!(
-            "Exported {} to {}, with everything the registry says about them: \
-             their Aliases, their Groups, whether Cycling may choose them, and \
-             what each Group carries.",
+            "Exported {} to {}.",
             crate::commands::accounts(accounts),
             path.display(),
         ),
@@ -233,9 +237,5 @@ fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
         )?;
     }
 
-    say(
-        out,
-        "Keep the passphrase somewhere that is not beside the file. Without it \
-         there is nothing in there, and nothing Perch holds can get it back.",
-    )
+    Ok(())
 }

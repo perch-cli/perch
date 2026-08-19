@@ -315,6 +315,15 @@ fn resolve_group(
     }
 }
 
+/// What the login is for, and the one thing about it somebody mid-session
+/// needs to hear before a browser opens: their Account is not the one being
+/// logged out.
+///
+/// Said here rather than again in the report. Every Add leaves the active
+/// Account exactly where it was, so a second sentence afterwards would be the
+/// ordinary case announcing that it was ordinary (ADR 0061) — and this one is
+/// said at the moment it is load-bearing, which is before the browser rather
+/// than after it.
 fn announcement(registry: &Registry) -> String {
     format!(
         "Logging in to a new Profile.{}",
@@ -349,16 +358,6 @@ fn report(
     }
     let group = group.unwrap_or(registry::NO_GROUP);
     say(out, &format!("Group:  {group}"))?;
-    if let Some(active) = registry.active_account() {
-        say(
-            out,
-            &format!(
-                "{} is still the active Account — use `perch switch` to move.",
-                active.email()
-            ),
-        )?;
-    }
-
     // What the Scope this Account landed in still cannot do, where there is
     // anything to say. An Add is what makes a Scope a set of two or more, which
     // is when the two defaults gating a Cycle start to matter — said as a

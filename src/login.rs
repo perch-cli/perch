@@ -90,6 +90,12 @@ fn run_the_login(
     store: &probe::Store,
     installed: &Installed,
 ) -> Result<Produced> {
+    // Both said on every login, and both kept. Neither narrates a step Perch
+    // took: `purpose` is what the browser about to open is for and which
+    // Account it will not disturb, and the line below is an instruction the
+    // person has to follow before the command can finish. ADR 0061 cuts the
+    // ordinary case announcing that it was ordinary; a thing somebody has to
+    // *do* is not that.
     say(out, purpose)?;
     say(
         out,

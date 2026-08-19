@@ -179,6 +179,12 @@ impl Setting {
 
     /// What the Scope now does, which is the half of the answer the value
     /// itself does not give.
+    ///
+    /// What it does, and never why Perch decided it should. "Being ungrouped is
+    /// the absence of a declaration that Accounts are interchangeable, not a
+    /// weaker form of one" and "anything that changes underneath you only ever
+    /// does so because you said it could" were both Perch defending a design to
+    /// somebody who had just typed the command that accepts it (ADR 0061).
     pub fn what_that_means(self, registry: &Registry, scope: &Scope) -> String {
         let settings = registry.settings(scope);
         let within = scope.within();
@@ -192,11 +198,8 @@ impl Setting {
             }
             Setting::Interchangeable => {
                 "A bare `perch switch` from an Account in no Group switches \
-                 nowhere and says why. Being ungrouped is the absence of a \
-                 declaration that Accounts are interchangeable, not a weaker \
-                 form of one (ADR 0017). It is also what gates the watcher \
-                 there, so nothing acts on those Accounts unasked while it is \
-                 off."
+                 nowhere and says why. It is also what gates the watcher there, \
+                 so nothing acts on those Accounts unasked while it is off."
                     .to_string()
             }
             Setting::Strategy => match settings.strategy {
@@ -219,9 +222,7 @@ impl Setting {
             ),
             Setting::WatcherMayAct => format!(
                 "`perch watcher run` will not act {within}: started on an \
-                 Account there, it says so and exits rather than watching. \
-                 Anything that changes underneath you only ever does so \
-                 because you said it could."
+                 Account there, it says so and exits rather than watching."
             ),
             Setting::WatcherThresholdPercent => format!(
                 "`perch watcher run` Switches {within} once that much of the \

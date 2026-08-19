@@ -394,10 +394,13 @@ fn land_on(
         })
     })?;
 
+    // Which Account, and nothing about its Credential being the live one: a
+    // Landing that succeeded always made it so, and the two arms above are
+    // where one that did not says which half is behind (ADR 0061).
     say(
         out,
         &format!(
-            "{} is the active Account now — its Credential is the live one.",
+            "{} is the active Account now.",
             registry.named_for_the_user(successor.email())
         ),
     )
@@ -510,22 +513,23 @@ fn report(
     consequence: &Consequence,
     deleted: &Deleted,
 ) -> Result<()> {
+    // Silent on the ordinary outcome, which is every Remove that found a
+    // Credential and deleted it: that is what a Remove *is*, so saying it is
+    // the ordinary case announcing that it was ordinary (ADR 0061). The two
+    // outcomes that are not what the guide describes still speak in full — one
+    // destroyed nothing, and one left a Credential where it was.
     let credential = match deleted {
-        Deleted::Credential => "The Credential Perch held for it is deleted, and nothing lists it \
-             or Cycles to it now."
-            .to_string(),
+        Deleted::Credential => String::new(),
         Deleted::NothingWasThere => format!(
-            "Nothing lists it or Cycles to it now. Neither of its Credential \
-             Stores held anything to delete — {}.",
+            " Neither of its Credential Stores held anything to delete — {}.",
             crate::commands::a_store_that_held_nothing(host),
         ),
         Deleted::NothingSharedWith(sharer) => format!(
-            "Nothing lists it or Cycles to it now. The Credential Perch held for \
-             it is still there, because {sharer} keeps its own in the same \
-             Profile and deleting one would take both."
+            " The Credential Perch held for it is still there, because {sharer} \
+             keeps its own in the same Profile and deleting one would take both."
         ),
     };
-    say(out, &format!("Removed {named}. {credential}"))?;
+    say(out, &format!("Removed {named}.{credential}"))?;
     if let Some(alias) = alias {
         say(out, &format!("The Alias `{alias}` is free to use again."))?;
     }

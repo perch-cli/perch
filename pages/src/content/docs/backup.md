@@ -24,9 +24,13 @@ $ perch holdings export ~/perch-backup.age
 This file holds a working Credential for every Account Perch has. It is encrypted with a passphrase you choose, and there is no way into it without one.
 Passphrase:
 Again:
-Exported 3 Accounts to /Users/someone/perch-backup.age, with everything the registry says about them: their Aliases, their Groups, whether Cycling may choose them, and what each Group carries.
-Keep the passphrase somewhere that is not beside the file. Without it there is nothing in there, and nothing Perch holds can get it back.
+Exported 3 Accounts to /Users/someone/perch-backup.age.
 ```
+
+Keep the passphrase somewhere that is not beside the file. Without it there is
+nothing in that file, and nothing Perch holds can get it back — which is what
+the prompt says while you are still choosing one, and why the report does not
+say it again.
 
 **It takes everything and has no target.** There is no per-Account and no
 per-Group form, because a selective export is a partial restore — which is the
@@ -74,11 +78,19 @@ had rather than a pile of nameless logins.
 
 ```
 $ perch holdings import ~/perch-backup.age
-This file is encrypted with the passphrase it was written with. Nothing is restored until it opens.
 Passphrase:
-Imported 3 Accounts from /Users/someone/perch-backup.age, with everything the registry said about them: their Aliases, their Groups, whether Cycling may choose them, and what each Group carries.
-Nothing is active: an Import restores what Perch holds and does not touch what Claude Code is logged in as. `perch switch <target>` makes one of them active.
+Imported 3 Accounts from /Users/someone/perch-backup.age.
 ```
+
+The passphrase is the one the file was written with, asked once rather than
+twice — a passphrase being *chosen* is confirmed because a file nobody can open
+is not found out about until it is needed, and one being *checked* is answered
+by the file itself a moment later. Nothing is restored until it opens.
+
+**Nothing arrives active.** An Import restores what Perch holds and does not
+touch what Claude Code is logged in as, so `perch switch <target>` is what makes
+one of them active. That is true of every Import, which is why it is said here
+rather than by the command.
 
 **It refuses a Perch that already holds an Account**, and names
 `perch holdings purge` as the way to make room. Merging is where every hard case
@@ -129,12 +141,14 @@ Where to write it: /Users/someone/perch-backup.age
 This file holds a working Credential for every Account Perch has. It is encrypted with a passphrase you choose, and there is no way into it without one.
 Passphrase:
 Again:
-Exported 3 Accounts to /Users/someone/perch-backup.age, with everything the registry says about them: their Aliases, their Groups, whether Cycling may choose them, and what each Group carries.
-Keep the passphrase somewhere that is not beside the file. Without it there is nothing in there, and nothing Perch holds can get it back.
+Exported 3 Accounts to /Users/someone/perch-backup.age.
 Type `purge` to give the machine back: purge
-Purged 3 Accounts. Every Profile, every Credential Perch held and /Users/someone/.config/perch are gone, and Perch is holding nothing on this machine.
-Claude Code is still logged in as whatever it was: the live Credential was not Perch's to take away. `perch holdings import` puts an Export back on a machine like this one.
+Purged 3 Accounts, and /Users/someone/.config/perch is gone.
 ```
+
+The question is where a Purge says what it will take and what it will leave, so
+the report afterwards says only what it took. `perch holdings import` is what
+puts an Export back on a machine in that state.
 
 **It takes no target.** Giving up one Account is `perch remove`, which is
 deliberately narrow — two verbs for one act is exactly the ambiguity the shared

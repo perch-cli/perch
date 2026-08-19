@@ -411,7 +411,7 @@ fn agreed(host: &dyn Host, out: &mut dyn Write) -> Result<bool> {
     Ok(answered.as_deref() == Some(THE_WORD))
 }
 
-/// What was given back, and what is still the machine's.
+/// What was given back.
 fn report(host: &dyn Host, out: &mut dyn Write, home: &Path, purged: &Purged) -> Result<()> {
     // Said as what happened rather than as a count, because "Purged 0 Accounts"
     // is not a sentence — and holding none is a real state here: it is what a
@@ -425,14 +425,18 @@ fn report(host: &dyn Host, out: &mut dyn Write, home: &Path, purged: &Purged) ->
                 home.display(),
             ),
             accounts => format!(
-                "Purged {}. Every Profile, every Credential Perch held and {} \
-                 are gone, and Perch is holding nothing on this machine.",
+                "Purged {}, and {} is gone.",
                 crate::commands::accounts(accounts),
                 home.display(),
             ),
         },
     )?;
 
+    // The one thing here that is not what a Purge always does, and the only
+    // thing said beyond the count. What Claude Code is still logged in as, and
+    // that an Import puts an Export back, are both true of every Purge — the
+    // first is said in the question this run was agreed to, which is where it
+    // is load-bearing, and neither is said again afterwards (ADR 0061).
     if purged.credentials < purged.accounts {
         say(
             out,
@@ -444,10 +448,5 @@ fn report(host: &dyn Host, out: &mut dyn Write, home: &Path, purged: &Purged) ->
         )?;
     }
 
-    say(
-        out,
-        "Claude Code is still logged in as whatever it was: the live Credential \
-         was not Perch's to take away. `perch holdings import` puts an Export \
-         back on a machine like this one.",
-    )
+    Ok(())
 }
