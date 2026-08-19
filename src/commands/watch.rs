@@ -1095,8 +1095,25 @@ fn act(
         // A Quarantine has already been written by `switch_to`, so the next
         // round passes the Account over rather than making the same discovery
         // again.
+        //
+        // `Busy` joins them, and it is the one that was actively wrong rather
+        // than merely unhandled. It arrives here from `lock::under` inside
+        // `perform` — Claude Code holding its own refresh or config lock — and
+        // was raised, which the loop catches as `held_before_a_round`. So a
+        // round that read every figure and had already decided to Switch
+        // printed `held   unread unread; threshold unread`, and charged the
+        // **Back-off**, whose whole definition is "questions nobody is
+        // answering". A client that happened to be refreshing therefore dragged
+        // the *Refresh* cadence out towards twenty minutes.
+        //
+        // It belongs beside `ProfileLive` for the same reason that one is here:
+        // it clears itself. The lock is given back, and the round after this
+        // one moves.
         Err(NotSwitched {
-            error: error @ (PerchError::Quarantined { .. } | PerchError::ProfileLive(_)),
+            error:
+                error @ (PerchError::Quarantined { .. }
+                | PerchError::ProfileLive(_)
+                | PerchError::Busy(_)),
             ..
         }) => Ok(Outcome::Refused {
             why: error.to_string(),

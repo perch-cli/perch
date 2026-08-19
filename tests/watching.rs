@@ -1746,3 +1746,49 @@ fn a_check_renews_the_watch_across_the_round_rather_than_only_holding_it() {
          round ran on the hold it started with\n{effects:#?}\n{printed}"
     );
 }
+
+/// A Claude Code holding its own lock is a Switch that could not land, not a
+/// figure that could not be read.
+///
+/// `switch_to` raises `Busy` when `lock::under(probe::locks_for(...))` cannot
+/// take Claude Code's refresh or config lock, and `act` handed that straight
+/// back. The loop catches a raised `Busy` as `held_before_a_round` — written
+/// about the *registry* lock — so a round that had read every figure and
+/// already decided to Switch printed `held  unread unread; threshold unread`,
+/// and charged the Back-off, whose whole definition is "questions nobody is
+/// answering". A client that happened to be refreshing therefore dragged the
+/// Refresh cadence out towards twenty minutes.
+///
+/// It belongs with the other refusals that clear themselves: the lock is given
+/// back, and the round after this one moves.
+#[test]
+fn a_claude_code_holding_its_own_lock_is_a_refusal_rather_than_an_unread_figure() {
+    // One round: the loop's wait advances the clock past the lock's staleness
+    // window, so a second round would find it abandoned and take it over — a
+    // true and different sentence from the one under test.
+    let host = watching(&[86.0], 5.0);
+    // Held now rather than long ago, so it is somebody's rather than abandoned.
+    let holding_since = host.now();
+    let host = host.with_dir_held_since("/Users/someone/.claude.json.lock", holding_since);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a lock somebody is holding does not end the watch");
+    let decisions = decisions(&printed);
+    assert!(!decisions.is_empty(), "{printed}");
+    for decision in &decisions {
+        assert!(
+            decision.contains("refused"),
+            "the round decided and was turned away, rather than reading nothing: {decision}"
+        );
+        assert!(
+            decision.contains("86% used") || decision.contains("88% used"),
+            "and it quotes the figure it read: {decision}"
+        );
+    }
+    assert!(
+        !printed.contains("20m00s"),
+        "the Back-off paces questions nobody answers, and this one was \
+         answered: {printed}"
+    );
+}
