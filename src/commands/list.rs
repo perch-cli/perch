@@ -421,7 +421,7 @@ fn render_human(
     let accounts = &listing::flattened(sections);
     let rows = rows(registry, accounts, now);
     if rows.is_empty() {
-        return say(out, &nothing_here(scope));
+        return say(out, &nothing_here(registry, scope));
     }
 
     // The Group is a column only when the listing spans Groups. Narrowed to
@@ -535,7 +535,14 @@ fn write_row(
 
 /// A listing with nothing in it, said as the state it is rather than as an
 /// empty table.
-fn nothing_here(scope: &Scope) -> String {
+fn nothing_here(registry: &Registry, scope: &Scope) -> String {
+    // A machine holding nothing is diagnosed the same way whichever Scope was
+    // named. "Every Account is in a Group" is a true-sounding sentence about a
+    // machine with no Account to be in one, and narrowing a listing should not
+    // change what Perch says is the matter.
+    if registry.accounts.is_empty() {
+        return "No Accounts yet. `perch add` logs into one in a Profile of its own.".to_string();
+    }
     match scope {
         Scope::Everything => {
             "No Accounts yet. `perch add` logs into one in a Profile of its own.".to_string()
