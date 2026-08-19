@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::credentials;
 use crate::error::{PerchError, Result};
@@ -618,7 +618,7 @@ pub fn credential_after_rotation(
     refresh_token: Option<&str>,
     expires_at: Option<i64>,
     installed: &Installed,
-) -> Result<String> {
+) -> Result<Zeroizing<String>> {
     let mut document: serde_json::Value =
         serde_json::from_str(current.as_str()).map_err(|err| {
             refusal(
@@ -664,8 +664,27 @@ pub fn credential_after_rotation(
         None => block.remove("expiresAt"),
     };
 
-    serde_json::to_string(&document)
-        .map_err(|err| PerchError::Other(format!("could not write the renewed Credential: {err}")))
+    let written = serde_json::to_string(&document)
+        .map(Zeroizing::new)
+        .map_err(|err| PerchError::Other(format!("could not write the renewed Credential: {err}")));
+
+    // The document is still holding both tokens, and dropping a
+    // `serde_json::Value` frees its strings untouched. This is the freshly
+    // Rotated refresh token — the one `anthropic` calls the only copy there is
+    // — so the tree is emptied by hand before it goes, the same way every other
+    // buffer that has held one on this path is.
+    if let Some(block) = document
+        .get_mut(CREDENTIAL_KEY)
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for key in ["accessToken", "refreshToken"] {
+            if let Some(serde_json::Value::String(held)) = block.get_mut(key) {
+                held.zeroize();
+            }
+        }
+    }
+
+    written
 }
 
 /// Reads the Identity out of a store's `.claude.json`.
@@ -2053,7 +2072,7 @@ mod tests {
             Some("max"),
             "what Claude Code recorded about the Account survives a renewal"
         );
-        assert!(rotated.contains("user:inference"), "{rotated}");
+        assert!(rotated.contains("user:inference"), "{}", rotated.as_str());
         assert!(!rotated.contains("old-access") && !rotated.contains("old-refresh"));
     }
 
@@ -2102,7 +2121,7 @@ mod tests {
              nothing about when it expires — not one still carrying the expiry \
              that caused the renewal, which renews again on every command",
         );
-        assert!(!rotated.contains("expiresAt"), "{rotated}");
+        assert!(!rotated.contains("expiresAt"), "{}", rotated.as_str());
     }
 
     /// A `claude` that is there and will not run at all. The refusal names the

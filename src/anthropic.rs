@@ -188,12 +188,18 @@ pub fn whose(host: &dyn Host, access_token: &str) -> Result<String, Refused> {
 
 /// Renews an access token, and reports the Rotation when there was one.
 pub fn renew(host: &dyn Host, refresh_token: &str) -> Result<Fresh, Refused> {
-    let body = json!({
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-        "client_id": CLIENT_ID,
-    })
-    .to_string();
+    // `Zeroizing`, because this body carries the refresh token — the one this
+    // module calls "the most valuable secret in Perch… the only copy there is"
+    // two screens down, where the *reply* is wrapped for exactly that reason.
+    // The request holding it was a plain `String` dropped untouched.
+    let body = Zeroizing::new(
+        json!({
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": CLIENT_ID,
+        })
+        .to_string(),
+    );
     let headers = [("Content-Type", "application/json")];
 
     let response = send(host, &HttpRequest::post(TOKEN_URL, &headers, &body))?;
