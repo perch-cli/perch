@@ -43,23 +43,24 @@
 }
 
 /*
- * Moving between two pages of the guide is cross-faded rather than blanked. The
- * browser does the whole of it: this is a real navigation to a real document, as
- * every page on this site is, and nothing here intercepts a click or swaps a DOM
- * — so Starlight's own theme select, sidebar and search go on starting up the one
- * way they already do. Astro's `<ClientRouter />` would buy element-by-element
- * continuity for the price of a router in the page, and a docs site does not need
- * to be an application to stop flashing white.
+ * Moving between two pages of the guide is cross-faded rather than blanked.
  *
- * A browser without cross-document view transitions navigates exactly as it did
- * before, and one whose reader has asked for less motion is told not to.
+ * This file says what that looks like; `src/components/Head.astro` says what sets
+ * it off. `@view-transition` here is what a full document load animates through,
+ * and it is what the site does on its own — so a reader whose browser runs no
+ * JavaScript, or who arrives at a page cold, still gets it. `<ClientRouter />`
+ * there turns a click into a swap of this document rather than a load of another
+ * one, and hands the swap to the same rules below.
  *
- * The two rules under it are not decoration, and the defaults without them are
- * wrong for this site rather than merely plainer. Left alone, the browser takes
- * the whole viewport as one snapshot and cross-fades it — the header and the
- * sidebar included, which is the thing a reader notices as a flash, because they
- * are the parts that did not change. And it does that over a quarter of a second,
- * while the document it is covering for is served in under a tenth of one: the
+ * A browser without cross-document view transitions navigates as it always did,
+ * and one whose reader has asked for less motion is told not to.
+ *
+ * The rules under it are not decoration, and the defaults without them are wrong
+ * for this site rather than merely plainer. Left alone, the browser takes the
+ * whole viewport as one snapshot and cross-fades it — the header and the sidebar
+ * included, which is the thing a reader notices as a flash, because they are the
+ * parts that did not change. And it does that over a quarter of a second, while
+ * the document it is covering for is served in under a tenth of one: the
  * animation was most of what navigating cost.
  */
 @media (prefers-reduced-motion: no-preference) {
@@ -68,15 +69,20 @@
   }
 
   /*
-   * Named, and so lifted out of the snapshot that crosses: the frame holds still.
-   * The sidebar keeps its own group rather than holding perfectly still, which is
-   * what fades its highlight from the page you left to the page you asked for.
+   * Named, and so lifted out of the snapshot that crosses.
+   *
+   * `.sidebar-pane` rather than the `nav.sidebar` around it, and the difference is
+   * the whole of whether this works: that nav measures 1280x0, because everything
+   * in it is either a button or a fixed-position panel, and a name on a box with
+   * no pixels captures nothing. Its snapshot came out empty, the sidebar's actual
+   * pixels stayed in the root snapshot, and the panel went on fading with the page
+   * while looking for all the world like the rule had simply been ignored.
    */
   header.header {
     view-transition-name: header;
   }
 
-  nav.sidebar {
+  .sidebar-pane {
     view-transition-name: sidebar;
   }
 
@@ -84,5 +90,29 @@
   ::view-transition-old(*),
   ::view-transition-new(*) {
     animation-duration: 120ms;
+  }
+
+  /*
+   * And then told not to animate at all, which naming alone does not do: a named
+   * element still cross-fades its own two snapshots. The header got away with it
+   * because its snapshots are identical, so the fade was invisible. The sidebar's
+   * are not — one item is highlighted in the page you left and another in the page
+   * you asked for — and cross-fading the whole panel to move one highlight is the
+   * navigation appearing to blink. Showing the new one at once is what was wanted
+   * from both of them: the highlight changes, and nothing else in the frame does.
+   */
+  ::view-transition-group(header),
+  ::view-transition-group(sidebar) {
+    animation: none;
+  }
+
+  ::view-transition-old(header),
+  ::view-transition-old(sidebar) {
+    display: none;
+  }
+
+  ::view-transition-new(header),
+  ::view-transition-new(sidebar) {
+    animation: none;
   }
 }

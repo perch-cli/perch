@@ -42,6 +42,14 @@ export default defineConfig({
       // change.
       logo: { src: "../docs/assets/icon.svg" },
       customCss: ["./src/styles/perch.css"],
+      // Two overrides, and both exist for the client-side router: one to put
+      // `<ClientRouter />` in the head, one to keep the search dialog across a
+      // swap. Each renders Starlight's own component rather than replacing it, so
+      // there is no copy of Starlight's markup in this repository to fall behind.
+      components: {
+        Head: "./src/components/Head.astro",
+        Search: "./src/components/Search.astro",
+      },
       social: [
         {
           icon: "github",
