@@ -872,7 +872,8 @@ fn the_ungrouped_say_no_reserve_until_they_are_declared_interchangeable() {
 /// The slot under the table reads top to bottom in the order each sentence
 /// qualifies the one above it: the legend, what a Switch in flight did to it
 /// (ADR 0048), what the Scope has left, whether Cycling may move within it, and
-/// last what is broken and how to repair it.
+/// last what is broken — with the repair closing that block, since it is about
+/// every Account in it (ADR 0061).
 #[test]
 fn the_reserve_sits_between_the_legend_and_the_quarantine_reasons() {
     let host = machine_holding_three_accounts();
@@ -892,8 +893,87 @@ fn the_reserve_sits_between_the_legend_and_the_quarantine_reasons() {
         "the Reserve comes after the Switch note:\n{printed}"
     );
     assert!(
-        at("Reserve:") < at("is Quarantined:"),
+        at("Reserve:") < at("Anthropic would not renew"),
         "and before the reasons anything is broken:\n{printed}"
+    );
+    assert!(
+        at("Anthropic would not renew") < at("perch relogin"),
+        "which the repair closes rather than interleaves:\n{printed}"
+    );
+}
+
+/// The Quarantine reason varies between Accounts and the repair does not, so
+/// the reason is said once per Account and the repair once for the Listing
+/// (ADR 0061).
+///
+/// Three broken Accounts used to mean three copies of the identical
+/// `perch relogin` sentence, under a table that had already said `quarantined`
+/// three times in its State column.
+#[test]
+fn the_repair_is_said_once_however_many_accounts_are_quarantined() {
+    let mut registry = a_group_of(
+        Some("work"),
+        EMAIL,
+        &[(EMAIL, 90.0), (SECOND_EMAIL, 50.0), (THIRD_EMAIL, 10.0)],
+    );
+    for (email, why) in [
+        (EMAIL, Quarantine::RenewalRejected),
+        (SECOND_EMAIL, Quarantine::RotationLost),
+        (THIRD_EMAIL, Quarantine::NoCredential),
+    ] {
+        registry
+            .held_mut(email)
+            .expect("it was just added")
+            .quarantine = Some(why);
+    }
+    let host = machine_holding(&registry);
+
+    let (result, printed) = run_list_in(&host, "work", false);
+
+    result.unwrap();
+    assert_eq!(
+        printed.matches("perch relogin").count(),
+        1,
+        "the repair does not differ between them, so it is said once:\n{printed}"
+    );
+    for email in [EMAIL, SECOND_EMAIL, THIRD_EMAIL] {
+        assert!(
+            printed.contains(email),
+            "and every broken Account is still named:\n{printed}"
+        );
+    }
+    for reason in [
+        "Anthropic would not renew its Credential",
+        "Perch holds no Credential for it",
+    ] {
+        assert_eq!(
+            printed.matches(reason).count(),
+            1,
+            "each with the reason that is its own:\n{printed}"
+        );
+    }
+}
+
+/// And where there is exactly one to name, it is named — a person with one
+/// broken Account learns both why it broke and the command that repairs it,
+/// with nothing left to substitute.
+#[test]
+fn one_quarantined_account_is_told_the_repair_for_itself() {
+    let host = machine_holding_three_accounts();
+
+    let (result, printed) = run_list_in(&host, "work", false);
+
+    result.unwrap();
+    assert!(
+        printed.contains(
+            "overflow@example.com (as `overflow`): Anthropic would not renew its \
+             Credential."
+        ),
+        "the Account, as it is named, and what happened to it:\n{printed}"
+    );
+    assert!(
+        printed.contains("`perch relogin overflow@example.com` logs it in again in place"),
+        "and the repair pointed at the one Account it can be about:\n{printed}"
     );
 }
 

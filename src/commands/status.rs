@@ -142,6 +142,10 @@ fn render_human(
     // Above the figures, because a Quarantined Account's figures describe quota
     // it cannot currently spend: the state is the news, and the numbers are the
     // detail.
+    //
+    // Both halves on one line, and the repair named for the Account it can only
+    // be about: this command answers about exactly one Account (ADR 0053), so
+    // there is no second copy of the repair for it to be one copy too many of.
     if let Some(why) = account.quarantine {
         utilization::write_labeled(
             out,
