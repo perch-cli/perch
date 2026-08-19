@@ -17,10 +17,9 @@ it only chooses between logins you have already made yourself.
 
 ```
 $ perch switch
-Cycling within Group `work`.
-overflow@example.com has the most room: 60% headroom, which is true of every one of its Quota Windows — 7-day is its fullest, as of 4m ago.
-Captured you@example.com's live Credential into its own Profile.
-Switched to overflow@example.com.
+Switched to overflow@example.com, the most room in Group `work`.
+Utilization   5-hour    12%  (as of 4m ago)
+              7-day     40%  (as of 4m ago)
 ```
 
 ## Install

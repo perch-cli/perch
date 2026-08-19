@@ -148,8 +148,8 @@ impl Headroom {
     /// negated, so an earlier time ranks higher, and among Accounts whose reset
     /// had already passed the *stalest* figure won. A six-hour-old reading of
     /// an Account at 10% headroom beat a one-minute-old reading of one at 90%,
-    /// and `chosen_because` announced it as resetting "any moment now" about a
-    /// window that came back hours ago.
+    /// and the sentence beside the choice announced it as resetting "any moment
+    /// now" about a window that came back hours ago.
     ///
     /// An elapsed reset is no longer a fact about when this Account comes back,
     /// so it does not rank as one, and the Account falls to the headroom key
@@ -376,16 +376,75 @@ impl SetAside {
     }
 }
 
+/// What the ranking rested on, which is the whole of what a Switch says about
+/// having chosen for you (ADR 0061).
+///
+/// The basis and not the argument for it: which Account won and on what footing
+/// is what happened, and the figure it beat the others by is Perch defending a
+/// ranking nobody questioned. The figures are still shown — underneath, as the
+/// Utilization the Switch bought — so the number is a line away rather than a
+/// clause away.
+///
+/// A value rather than a sentence, because the two surfaces that say it put it
+/// in different places: the landing line says it beside the Scope the Cycle
+/// stayed inside, and the Watcher's round says it beside the Account it moved
+/// to. One decision, two spellings, so the basis cannot come to differ between
+/// them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Basis {
+    /// The measurement ADR 0012 fixes: the worst Quota Window, and the Account
+    /// whose worst is best. What a Cycle ranks on unless the Group says
+    /// otherwise — and what `soonest-reset` falls back to when nothing it could
+    /// move to has a reset still to come.
+    MostRoom,
+    /// The Strategy's own axis (ADR 0002): of the Accounts with room, the one
+    /// whose fullest window comes back soonest, so perishable quota is spent
+    /// rather than wasted.
+    SoonestReset,
+    /// No figure to rank on at all: nothing has ever been observed of this
+    /// Account, so it was compared with nothing — which the `never observed`
+    /// in the Utilization under it says again, in figures.
+    Unranked,
+}
+
+impl Basis {
+    /// The clause a landing line carries after the Account it landed on:
+    /// "Switched to overflow@example.com, {}."
+    ///
+    /// It names the Scope because that is the claim worth making beside where a
+    /// Cycle landed — that it stayed inside the Group — and a Scope announced
+    /// before the choice was made is announced to somebody who does not yet
+    /// know where they are going (ADR 0061).
+    pub fn in_the(&self, scope: &Scope) -> String {
+        let basis = match self {
+            Basis::MostRoom => "the most room",
+            Basis::SoonestReset => "the soonest reset",
+            Basis::Unranked => "nothing observed to rank on",
+        };
+        format!("{basis} in {}", scope.place())
+    }
+
+    /// The same basis as a sentence about the Account, for the surface that has
+    /// already said where it was looking.
+    fn about(&self, named: &str) -> String {
+        match self {
+            Basis::MostRoom => format!("{named} has the most room."),
+            Basis::SoonestReset => format!("{named} has the soonest reset."),
+            Basis::Unranked => format!("Perch has never observed how full {named} is."),
+        }
+    }
+}
+
 /// The Account a Cycle picked, with what it will say about having picked it.
 #[derive(Debug)]
 pub struct Choice {
     /// Owned, so the caller can go on to write the registry it came from.
     pub account: Account,
-    /// Why this Account won, ready to print before the Switch.
+    /// What this Account won on, for the landing line that names where it
+    /// landed.
+    pub basis: Basis,
+    /// The same thing as a sentence of its own, for the Watcher's round.
     pub because: String,
-    /// What the figures it won on cannot promise, ready to print after (ADR
-    /// 0015). Absent when there were no figures to be stale.
-    pub caveat: Option<String>,
 }
 
 /// Picks the Account to Switch to, or explains why none is worth switching to.
@@ -526,10 +585,11 @@ pub fn choose(
         )));
     };
 
+    let basis = chosen_basis(best, strategy, now);
     Ok(Choice {
         account: best.account.clone(),
-        because: chosen_because(registry, scope, best, strategy, now),
-        caveat: staleness(registry, best),
+        basis,
+        because: basis.about(&registry.named_for_the_user(best.account.email())),
     })
 }
 
@@ -834,61 +894,26 @@ pub fn headroom_in_full(account: &Account, now: DateTime<Utc>) -> String {
     }
 }
 
-/// Why the winner won, in the terms it was actually judged on — which is not
-/// always the terms the Strategy asked for.
+/// What the winner won on, in the terms it was actually judged on — which is
+/// not always the terms the Strategy asked for.
 ///
-/// A choice Perch could not rank the way it was told to is said plainly rather
-/// than dressed up as one it could: the user should know what the choice rested
-/// on before they wonder why it filled up so fast.
-fn chosen_because(
-    registry: &Registry,
-    scope: &Scope,
-    best: &Ranked,
-    strategy: Strategy,
-    now: DateTime<Utc>,
-) -> String {
-    let named = registry.named_for_the_user(best.account.email());
-    let how_to_get_figures = how_to_get_figures(scope);
-    let Some(figure) = best.headroom.as_a_clause(strategy, now) else {
-        return format!(
-            "Perch has never observed how full {named} is, so this was not a \
-             ranked choice — {how_to_get_figures}"
-        );
-    };
-    match strategy {
-        Strategy::MostHeadroom => format!("{named} has the most room: {figure}."),
-        Strategy::SoonestReset if best.headroom.ranked_on_reset(strategy, now).is_some() => {
-            format!("{named} resets soonest: {figure}.")
-        }
-        // Nothing that could be moved to has a reset still to come — an Account
-        // that did would have outranked this one — so the Cycle fell back to
-        // the room it could see rather than switching on nothing.
-        //
-        // Said as "no reset still to come" rather than as "no cached figure",
-        // because the two are not the same absence and the sentence used to
-        // claim the wrong one: a window whose reset elapsed is a figure the
-        // cache holds and `ranked_on_reset` declines, so "no cached figure says
-        // when any of them comes back" contradicted the clause beside it, which
-        // had just quoted the time one of them came back at.
-        Strategy::SoonestReset => format!(
-            "{named} has the most room: {figure}. Nothing that could be moved to \
-             has a reset still to come, so there was no reset time to prefer one \
-             on — {how_to_get_figures}"
-        ),
+/// A choice Perch could not rank the way it was told to is said as the choice
+/// it could make rather than dressed up as one it could not: a Group set to
+/// `soonest-reset` with no reset in sight lands on the most room and says so.
+/// Why the Strategy could not be followed is the argument, and the argument is
+/// what ADR 0061 cuts — the person is told what the ranking rested on, which is
+/// the part they could not have predicted.
+fn chosen_basis(best: &Ranked, strategy: Strategy, now: DateTime<Utc>) -> Basis {
+    // Asked of the same predicate the ranking asked, because a basis given as
+    // the reason has to be the one that decided it.
+    match (&best.headroom, best.headroom.ranked_on_reset(strategy, now)) {
+        (Headroom::Room { .. }, Some(_)) => Basis::SoonestReset,
+        (Headroom::Room { .. }, None) => Basis::MostRoom,
+        // Never observed. An exhausted Account cannot get here — everything
+        // exhausted is answered above, and an unobserved Account outranks a
+        // full one — and it would be unranked in the same way if it did.
+        _ => Basis::Unranked,
     }
-}
-
-/// What the cache cannot promise, said before the user finds out (ADR 0015).
-fn staleness(registry: &Registry, best: &Ranked) -> Option<String> {
-    let Headroom::Room { .. } = best.headroom else {
-        return None;
-    };
-    Some(format!(
-        "That figure is what Perch last observed rather than what Anthropic \
-         says now. If {} turns out fuller than it implied, the figure was \
-         stale — `perch status --refresh` reads a current one.",
-        registry.named_for_the_user(best.account.email()),
-    ))
 }
 
 /// The scope holds Accounts, but none of them is a candidate. Which way each
@@ -1560,9 +1585,10 @@ pub(crate) mod tests {
             "soonest@example.com",
             "quota an hour from being thrown away costs nothing to spend"
         );
-        assert!(
-            choice.because.contains("resets soonest"),
-            "{}",
+        assert_eq!(
+            choice.basis,
+            Basis::SoonestReset,
+            "and what it says it chose on is what it chose on: {}",
             choice.because
         );
     }
@@ -1626,8 +1652,8 @@ pub(crate) mod tests {
     ///
     /// The key is the reset time negated, so an earlier time ranked higher, and
     /// among Accounts whose reset had already passed the *stalest* figure won.
-    /// `chosen_because` then announced it as resetting "any moment now" about a
-    /// window that came back hours ago.
+    /// The sentence beside the choice then announced it as resetting "any
+    /// moment now" about a window that came back hours ago.
     /// Two windows equally full is the ordinary case, not the exotic one:
     /// Anthropic answers in whole percentages, and an Account nothing has been
     /// spent on is at nought everywhere. `max_by` hands back the last of several
@@ -1667,9 +1693,14 @@ pub(crate) mod tests {
             "soonest@example.com",
             "so it is ranked on that window's reset rather than on no reset at all"
         );
-        assert!(
-            choice.because.contains("5-hour") && choice.because.contains("in 60m"),
-            "and the reset it is announced on is that window's: {}",
+        // The window it was ranked on is the one asserted above, and this is
+        // the claim that it was ranked on a reset at all: a `5-hour` read as
+        // carrying no reset would have fallen back to the room it could see,
+        // which is what this basis says it did not do.
+        assert_eq!(
+            choice.basis,
+            Basis::SoonestReset,
+            "so the Account is chosen on that window's reset: {}",
             choice.because
         );
     }
@@ -1695,9 +1726,13 @@ pub(crate) mod tests {
             "fresh@example.com",
             "an elapsed reset is not a claim about when an Account comes back"
         );
-        assert!(
-            choice.because.contains("in 3h"),
-            "and the reset it is announced on is one still to come: {}",
+        // `ranked_on_reset` is the only way to this basis and it declines a
+        // reset already gone, so the basis is the claim that what it ranked on
+        // is still to come.
+        assert_eq!(
+            choice.basis,
+            Basis::SoonestReset,
+            "and the reset it is chosen on is one still to come: {}",
             choice.because
         );
     }
@@ -1720,39 +1755,54 @@ pub(crate) mod tests {
         let choice = cycle(&registry).expect("there is room");
 
         assert_eq!(choice.account.email(), "emptier@example.com");
-        assert!(
-            !choice.because.contains("resets soonest"),
+        assert_eq!(
+            choice.basis,
+            Basis::MostRoom,
             "nothing may claim a reset it has not got: {}",
             choice.because
         );
+
         // The half that was missed when the ranking was fixed: the clause
         // beside the reason read `resets_at` for itself, so it announced a
         // window as coming back "any moment now" an hour after it had, in the
         // same sentence as the explanation that there was no reset to rank on.
+        //
+        // A Switch no longer quotes that clause — it says the basis and leaves
+        // the figures to the lines under it (ADR 0061). The refusal that says
+        // staying put is already the best still quotes it and is exempt, so
+        // the wording is asserted where it is still said: the same two figures,
+        // with the emptier Account the one being stayed on.
+        let staying = preferring(
+            holding(vec![
+                account("emptier@example.com", vec![resetting("5-hour", 20.0, -1)]),
+                account("fuller@example.com", vec![resetting("5-hour", 80.0, -9)]),
+            ]),
+            Strategy::SoonestReset,
+        );
+        let refusal = cycle(&staying)
+            .expect_err("there is nowhere emptier to go")
+            .to_string();
+
         assert!(
-            !choice.because.contains("resets at"),
-            "and the clause quoting the figure may not either: {}",
-            choice.because
+            !refusal.contains("resets at"),
+            "the clause quoting the figure may not claim a reset either: {refusal}"
         );
         assert!(
-            choice.because.contains("has passed"),
-            "it says the reading is stale rather than absent: {}",
-            choice.because
+            refusal.contains("has passed"),
+            "it says the reading is stale rather than absent: {refusal}"
         );
         // The parenthetical `reset_phrase` puts on a time already gone. Two
         // words from "which has passed", it is the same contradiction one
         // bracket further along, and the assertion above walks straight past it.
         assert!(
-            !choice.because.contains("any moment now"),
-            "a window that came back is not one coming back: {}",
-            choice.because
+            !refusal.contains("any moment now"),
+            "a window that came back is not one coming back: {refusal}"
         );
         // And the sentence that follows the clause may not call the figure
         // absent when the clause it follows has just quoted it.
         assert!(
-            !choice.because.contains("No cached figure says when any"),
-            "the cache said exactly when it came back: {}",
-            choice.because
+            !refusal.contains("No cached figure says when any"),
+            "the cache said exactly when it came back: {refusal}"
         );
     }
 
@@ -1963,10 +2013,11 @@ pub(crate) mod tests {
              invent: with no reset time to rank on, switching on the order the \
              Accounts were added would be switching on nothing"
         );
-        assert!(
-            choice.because.contains("no reset time to prefer one on"),
-            "and the fallback is said rather than passed off as the ranking \
-             that was asked for: {}",
+        assert_eq!(
+            choice.basis,
+            Basis::MostRoom,
+            "and the room it fell back to is what it says it chose on, rather \
+             than the ranking that was asked for: {}",
             choice.because
         );
     }

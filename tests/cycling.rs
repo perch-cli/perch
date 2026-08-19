@@ -47,10 +47,12 @@ fn a_bare_switch_lands_on_the_account_with_the_most_room_in_the_group() {
     result.expect("there is somewhere to go");
     assert_eq!(active(&host).as_deref(), Some(THIRD_EMAIL), "{printed}");
     assert_eq!(live_credential(&host).as_deref(), Some(THIRD_CREDENTIAL));
-    assert!(printed.contains("Group `work`"), "{printed}");
     assert!(
-        printed.contains(&format!("Switched to {THIRD_EMAIL}")),
-        "{printed}"
+        printed.contains(&format!(
+            "Switched to {THIRD_EMAIL}, the most room in Group `work`."
+        )),
+        "the landing line names the Account, what it was chosen on, and the \
+         Group the Cycle stayed inside: {printed}"
     );
 }
 
@@ -121,8 +123,20 @@ fn ranking_reads_each_accounts_worst_quota_window() {
     );
 }
 
+/// The specimen ADR 0061 is written around: three lines, each of them something
+/// that happened.
+///
+/// The headroom the ranking was made on used to be quoted here — 60%, and true
+/// of every one of this Account's windows — and the figures underneath are what
+/// say it now. Both windows are shown, so the worst of them is there to be read
+/// rather than argued for, and what the ranking rested on survives beside the
+/// Account it landed on while the defense of it does not.
+///
+/// Counted as well as read, because "and nothing else" is the claim: a
+/// `contains` per line passes just as happily on a rationale sitting between
+/// them.
 #[test]
-fn the_headroom_reported_is_true_of_every_one_of_the_accounts_windows() {
+fn a_bare_switch_says_where_it_landed_and_what_it_bought_and_nothing_else() {
     let host = three_accounts_in_one_group();
     observed(&host, EMAIL, vec![window("5-hour", 99.0)]);
     observed(
@@ -131,15 +145,33 @@ fn the_headroom_reported_is_true_of_every_one_of_the_accounts_windows() {
         vec![window("5-hour", 12.0), window("7-day", 40.0)],
     );
 
-    let (_, printed) = run_cycle(&host);
+    let (result, printed) = run_cycle(&host);
 
-    assert!(
-        printed.contains("60%"),
-        "the number said is the worst window's headroom, not the best one's: {printed}"
+    result.expect("there is somewhere to go");
+    let said: Vec<&str> = printed.lines().collect();
+    assert_eq!(
+        said.len(),
+        3,
+        "a landing line and one line per Quota Window is the whole of it \
+         (ADR 0061): {printed}"
     );
-    assert!(
-        printed.contains("7-day"),
-        "and the window it came from is named: {printed}"
+    assert_eq!(
+        said[0],
+        format!("Switched to {SECOND_EMAIL}, the most room in Group `work`."),
+        "which names the Account and the Group the Cycle stayed inside: {printed}"
+    );
+    for (window, used) in [("5-hour", "12%"), ("7-day", "40%")] {
+        assert!(
+            said[1..]
+                .iter()
+                .any(|line| line.contains(window) && line.contains(used)),
+            "and every window of the Account it landed on reaches the page: {printed}"
+        );
+    }
+    assert_eq!(
+        printed.matches("as of 4m ago").count(),
+        2,
+        "each carrying its own age (ADR 0015): {printed}"
     );
 }
 
@@ -366,8 +398,14 @@ fn a_bare_switch_never_prompts() {
     );
 }
 
+/// A Cycle ranks on the cache and says so by dating what it shows, rather than
+/// by pre-empting a disappointment that has not happened (ADR 0061).
+///
+/// The age is the whole of the promise Perch can make about a cached figure
+/// (ADR 0015), and it is made where the figure is rather than in a paragraph
+/// underneath it.
 #[test]
-fn the_choice_is_reported_as_made_on_cached_figures_that_may_be_stale() {
+fn the_figures_a_choice_was_made_on_are_dated_and_never_read_from_the_network() {
     let host = three_accounts_in_one_group();
     observed(&host, EMAIL, vec![window("5-hour", 96.0)]);
     observed(&host, SECOND_EMAIL, vec![window("5-hour", 18.0)]);
@@ -380,13 +418,9 @@ fn the_choice_is_reported_as_made_on_cached_figures_that_may_be_stale() {
         "the figure it ranked on carries its age: {printed}"
     );
     assert!(
-        printed.contains("fuller"),
-        "landing somewhere fuller than the cache implied is named as staleness \
-         before it happens: {printed}"
-    );
-    assert!(
-        printed.contains("--refresh"),
-        "and the way to a current figure is named: {printed}"
+        !printed.contains("--refresh"),
+        "and a Switch that worked does not send anybody to another command: \
+         {printed}"
     );
     assert!(
         host.http_calls().is_empty(),
@@ -423,8 +457,15 @@ fn an_unobserved_account_is_still_somewhere_to_go_when_the_current_one_is_spent(
     );
     assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL), "{printed}");
     assert!(
+        printed.contains(&format!(
+            "Switched to {SECOND_EMAIL}, nothing observed to rank on in Group `work`."
+        )),
+        "the landing line says it was made on no evidence rather than naming a \
+         basis it did not have: {printed}"
+    );
+    assert!(
         printed.contains("never observed"),
-        "the choice says it was made on no evidence: {printed}"
+        "and the figures under it say the same thing in figures: {printed}"
     );
 }
 

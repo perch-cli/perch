@@ -443,16 +443,6 @@ impl Scope {
             Scope::Group(_) => self.described(),
         }
     }
-
-    /// What a Cycle is about to do, said before it does it.
-    ///
-    /// Built from [`Scope::within`] rather than spelled out arm for arm, which
-    /// is that method's own argument applied to itself: it was the same two
-    /// phrases with "Cycling" in front and a full stop after, in a second match
-    /// that could come to disagree with the first.
-    pub fn announcement(&self) -> String {
-        format!("Cycling {}.", self.within())
-    }
 }
 
 /// The word that addresses the Accounts in no Group as a Scope, on `perch

@@ -755,7 +755,7 @@ pub enum Outcome {
     /// It was, and this is why the Account it landed on won.
     ///
     /// No field for where it went, because the reason names it: the Cycle
-    /// writes "overflow@example.com has the most room: …", and a second place
+    /// writes "overflow@example.com has the most room.", and a second place
     /// saying which Account that was is a second place that can disagree with
     /// the first.
     Switched { because: String },
@@ -1202,7 +1202,7 @@ mod tests {
             round(
                 at(86.0),
                 Outcome::Switched {
-                    because: "overflow@example.com has the most room: 95% headroom.".to_string(),
+                    because: "overflow@example.com has the most room.".to_string(),
                 },
             ),
             round(

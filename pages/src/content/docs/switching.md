@@ -16,7 +16,6 @@ editor extension, the desktop app — with no login flow.
 ```
 $ perch switch overflow
 `overflow` is an Alias for overflow@example.com.
-Captured you@example.com's live Credential into its own Profile.
 Switched to overflow@example.com (as `overflow`).
 Utilization   5-hour    12%  (as of 4m ago)
 ```
@@ -30,6 +29,13 @@ incoming Credential is written to the Default Profile. Then the `oauthAccount`
 block of `.claude.json` is patched to match, and only that block: your project
 history, MCP configuration and settings live in the same file and belong to you
 rather than to the Account (ADR 0001).
+
+The Capture happens on every Switch, without exception, which is why no Switch
+says that it did. What a Switch says is what you could not have predicted:
+where you landed, and what the cache says you have there. The Capture *not*
+happening the ordinary way is said — Claude Code logged out, a live Credential
+belonging to somebody else, bytes nothing can read — because that is the part
+this paragraph does not already tell you.
 
 All three run inside Claude Code's own OAuth refresh locks, taken in Claude
 Code's order — the refresh lock, the legacy config-home lock, then the config
@@ -55,13 +61,9 @@ circumstances (ADR 0011).
 
 ```
 $ perch switch
-Cycling within Group `work`.
-overflow@example.com has the most room: 60% headroom, which is true of every one of its Quota Windows — 7-day is its fullest, as of 4m ago.
-Captured you@example.com's live Credential into its own Profile.
-Switched to overflow@example.com.
+Switched to overflow@example.com, the most room in Group `work`.
 Utilization   5-hour    12%  (as of 4m ago)
               7-day     40%  (as of 4m ago)
-That figure is what Perch last observed rather than what Anthropic says now. If overflow@example.com turns out fuller than it implied, the figure was stale — `perch status --refresh` reads a current one.
 ```
 
 It Cycles **within the current Account's Group** and never leaves it, so a work
@@ -85,21 +87,24 @@ nothing else: an exhausted Account is never chosen however soon it resets.
 
 Ranking reads the cache and never the network, so the figures can be minutes
 old. Landing on an Account that turns out fuller than they implied is the cache
-being stale rather than the Switch going wrong, which is why every Cycle says so
-before you find out.
+being stale rather than the Switch going wrong — which is what the age beside
+every figure is for, and `perch status --refresh` reads a current one. The
+landing line says which Account was chosen and what it was chosen on; the
+argument for why it beat the others is not something a Switch owes you (ADR
+0061).
 
 Three outcomes are honest non-outcomes. They perform no Switch, explain
 themselves, and exit with a code of their own rather than pretending to have
-worked.
+worked. They are also the one place a Cycle is wordy on purpose: nothing
+happened, you cannot see why from the outside, and the next step is not obvious
+(ADR 0061).
 
 ```
 $ perch switch
-Cycling within Group `work`.
 Every Account in Group `work` is exhausted, so there is nowhere useful to Switch. Nothing was changed.
 you@example.com frees up soonest, at 2026-08-04 15:00 UTC (in 3h).   # exit 17
 
 $ perch switch
-Cycling within Group `work`.
 you@example.com is already the best Account in Group `work`, with 90% headroom, which is true of every one of its Quota Windows — 5-hour is its fullest, as of 4m ago. Nothing was changed — `perch list work --refresh` reads current figures.   # exit 15
 
 $ perch switch
