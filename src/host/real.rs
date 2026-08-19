@@ -1862,6 +1862,26 @@ fn touch_now(path: &Path) -> Result<(), HostError> {
 
 #[cfg(test)]
 mod tests {
+    /// The three arms of the mapping a lock turns on. `AlreadyExists` is
+    /// contention and is waited out; everything else is the filesystem refusing
+    /// and is reported — so a mapping that answered the first for both would
+    /// make Perch wait on a failure that is never going to clear.
+    #[test]
+    fn only_an_occupied_name_is_reported_as_contention() {
+        use std::io::{Error, ErrorKind};
+
+        let at = Path::new("/somewhere/taken");
+        assert!(matches!(
+            super::or_already_exists::<()>(Err(Error::from(ErrorKind::AlreadyExists)), at),
+            Err(HostError::AlreadyExists { .. })
+        ));
+        assert!(matches!(
+            super::or_already_exists::<()>(Err(Error::from(ErrorKind::PermissionDenied)), at),
+            Err(HostError::Io(_))
+        ));
+        assert!(super::or_already_exists(Ok(7), at).is_ok_and(|value| value == 7));
+    }
+
     /// The buffer arithmetic a passphrase goes through, driven byte by byte.
     ///
     /// What is being asserted is not only the answer: it is that the answer is

@@ -917,7 +917,7 @@ const CASES: &[Case] = &[
         named: "touching a path that is not there reports NotFound",
         asserts: |host, root, adapter, _now| {
             // `NotFound` is the answer `lock::renew` reads as "the artifact has
-            // gone, so this hold is no longer mine". `touch_now` funnelled every
+            // gone, so this hold is no longer mine". `touch_now` funneled every
             // `utimes` failure into `Io` while the fake resolved first and
             // answered `NotFound`, so the two adapters disagreed about the one
             // variant this port treats as meaningful.
