@@ -1,16 +1,17 @@
 // Assembles the six npm packages a release publishes: one `perch-cli` wrapper,
 // and one platform package per target holding a single executable.
 //
-//   node npm/build.mjs <version> <binaries-dir> <out-dir>
+//   node packaging/npm/build.mjs <version> <binaries-dir> <out-dir>
 //
 // <binaries-dir> holds one directory per Rust target, each containing the
 // executable extracted from that target's release archive.
 //
-// The versions in npm/perch-cli/package.json are all `0.0.0`. They are written
-// here rather than kept in the file because they have to agree exactly — the
-// wrapper depends on its platform packages by exact version, so a mismatch is
-// an install that resolves to a binary from a different release. A number that
-// has to be right in six places is a number no one should be typing.
+// The versions in packaging/npm/perch-cli/package.json are all `0.0.0`. They
+// are written here rather than kept in the file because they have to agree
+// exactly — the wrapper depends on its platform packages by exact version, so
+// a mismatch is an install that resolves to a binary from a different release.
+// A number that has to be right in six places is a number no one should be
+// typing.
 
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -35,7 +36,7 @@ const TARGETS = [
 
 const [version, binariesDir, outDir] = process.argv.slice(2);
 if (!version || !binariesDir || !outDir) {
-  console.error("usage: node npm/build.mjs <version> <binaries-dir> <out-dir>");
+  console.error("usage: node packaging/npm/build.mjs <version> <binaries-dir> <out-dir>");
   process.exit(1);
 }
 
@@ -87,7 +88,7 @@ copyFileSync(join(HERE, "perch-cli", "bin", "perch.js"), join(dir, "bin", "perch
 chmodSync(join(dir, "bin", "perch.js"), 0o755);
 // npm renders this on the package page, and a page with nothing on it is a
 // poor advertisement for a tool asking to hold your credentials.
-copyFileSync(join(HERE, "..", "README.md"), join(dir, "README.md"));
+copyFileSync(join(HERE, "..", "..", "README.md"), join(dir, "README.md"));
 
 wrapper.version = version;
 for (const { pkg } of TARGETS) {

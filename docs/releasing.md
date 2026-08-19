@@ -73,7 +73,7 @@ package*, and a package that has never been published does not exist to
 configure. So the first publish of each of the six is manual:
 
 ```sh
-node npm/build.mjs 0.1.0 <binaries> npm-dist   # or take them from a built release
+node packaging/npm/build.mjs 0.1.0 <binaries> npm-dist   # or take them from a built release
 npm publish ./npm-dist/@perch-cli-darwin-arm64 --access public
 # ... the other four, then:
 npm publish ./npm-dist/perch-cli --access public

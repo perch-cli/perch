@@ -295,7 +295,7 @@ jobs:
             perch.exe -d bins/x86_64-pc-windows-msvc
 
       - name: Assemble the packages
-        run: node npm/build.mjs "${GITHUB_REF_NAME#v}" bins npm-dist
+        run: node packaging/npm/build.mjs "${GITHUB_REF_NAME#v}" bins npm-dist
 
       # Platform packages first: the wrapper depends on each of them by exact
       # version, so publishing it first would leave a window where installing it
