@@ -843,6 +843,19 @@ const CASES: &[Case] = &[
                 Some(elsewhere.clone()),
                 "{adapter}: the link is still a link rather than shadowed"
             );
+
+            // And the other half of what "uses what it points at" means: a
+            // write under the link lands in the target. This is the whole
+            // hazard ADR 0027 names — a Marker written into a Profile's
+            // `sessions` reaching the Default Profile's — and the fake could
+            // not model it, because it stored files at the name it was given
+            // while reading *through* the link.
+            host.create_file_with_mode(&here.join("a-marker"), "written", PRIVATE_FILE_MODE)
+                .expect("a file under it");
+            assert!(
+                host.path_exists(&elsewhere.join("a-marker")),
+                "{adapter}: writing under it writes through it"
+            );
         },
     },
     Case {

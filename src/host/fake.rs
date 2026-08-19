@@ -1320,6 +1320,29 @@ impl FakeHost {
             .insert(path.to_path_buf(), *self.stall.now.borrow());
     }
 
+    /// Where a write physically lands, which is not always where it was
+    /// addressed: a directory *above* the file may be a link, and a real
+    /// filesystem follows it.
+    ///
+    /// [`resolved`](FakeHost::resolved) answers this for a path that already
+    /// exists, and a write is the one case where it does not — the file is
+    /// about to. So the parent is resolved and the name put back on the end.
+    ///
+    /// Without it the fake stored the file at the name it was given while
+    /// `resolved` read *through* the link, so the two disagreed about one path
+    /// and the state ADR 0027 is about could not be built: a Profile whose
+    /// `sessions` is a link into another configuration directory, and a Marker
+    /// written under it landing there rather than here.
+    fn lands_at(&self, path: &Path) -> PathBuf {
+        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+            return path.to_path_buf();
+        };
+        match self.resolved(parent) {
+            Some(at) => at.join(name),
+            None => path.to_path_buf(),
+        }
+    }
+
     /// The file a write is *for*: the path itself, or — for the copy written
     /// beside a target by [`super::replace_via_tmp`] — the target it is about
     /// to be renamed over.
@@ -1482,7 +1505,14 @@ impl port::Files for FakeHost {
         if let Some(detail) = self.fs.unwritable.borrow().get(&intended) {
             return Err(HostError::Other(detail.clone()));
         }
-        self.note_directories_of(path);
+        // Resolved *before* the parents are noted, and the noting is done at
+        // the resolved place. `note_directories_of` inserts every directory
+        // above the file into `fs.dirs`, and `resolved` looks in `dirs` before
+        // `links` — so noting the addressed path first would put a directory
+        // over the very link this is meant to follow, and the write would land
+        // back where it was addressed.
+        let lands_at = self.lands_at(path);
+        self.note_directories_of(&lands_at);
         // Whatever was at the path is taken away first, a link included — the
         // real one leads with `remove_file` and then `create_new`, and its own
         // comment calls that the security property: "anything that can write the
@@ -1498,12 +1528,12 @@ impl port::Files for FakeHost {
         // `sync_all`. A fake that could only refuse before creating anything
         // could not model it, so the cleanup on this path went untested.
         if self.fs.filling.borrow().contains(&intended) {
-            self.fs.files.borrow_mut().insert(
-                path.to_path_buf(),
-                a_prefix_of(contents, contents.len() / 2),
-            );
-            self.fs.modes.borrow_mut().insert(path.to_path_buf(), mode);
-            self.mark_written(path);
+            self.fs
+                .files
+                .borrow_mut()
+                .insert(lands_at.clone(), a_prefix_of(contents, contents.len() / 2));
+            self.fs.modes.borrow_mut().insert(lands_at.clone(), mode);
+            self.mark_written(&lands_at);
             return Err(HostError::Other(
                 "No space left on device (os error 28)".to_string(),
             ));
@@ -1511,9 +1541,9 @@ impl port::Files for FakeHost {
         self.fs
             .files
             .borrow_mut()
-            .insert(path.to_path_buf(), self.as_stored(&intended, contents));
-        self.fs.modes.borrow_mut().insert(path.to_path_buf(), mode);
-        self.mark_written(path);
+            .insert(lands_at.clone(), self.as_stored(&intended, contents));
+        self.fs.modes.borrow_mut().insert(lands_at.clone(), mode);
+        self.mark_written(&lands_at);
         Ok(())
     }
 
@@ -1796,6 +1826,19 @@ impl port::Files for FakeHost {
         if let Some(detail) = self.fs.unwritable.borrow().get(to) {
             return Err(HostError::Other(detail.clone()));
         }
+        // Both ends through any link *above* them, as every write here is, and
+        // for the reason `lands_at` gives: a real `rename(2)` resolves the
+        // directories on the way to each name. It does not resolve the last
+        // component — a link sitting at the target is unlinked rather than
+        // written through, which the arm below is about — and `lands_at` does
+        // not touch the last component either.
+        //
+        // Without this the two sides of one atomic write disagreed: the copy
+        // beside the target landed through the link and the rename looked for
+        // it where it had been addressed, so `write_atomically` under a linked
+        // directory failed with "entity not found".
+        let from = &self.lands_at(from);
+        let to = &self.lands_at(to);
         // `Io`, which is what the real host answers: `rename_replacing`
         // propagates the `ENOENT` rather than naming it, and `NotFound` is
         // load-bearing elsewhere — `CredentialStore::read` reads it as "this
