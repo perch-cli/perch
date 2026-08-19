@@ -349,14 +349,28 @@ fn report(
     }
     let group = group.unwrap_or(registry::NO_GROUP);
     say(out, &format!("Group:  {group}"))?;
-    match registry.active_account() {
-        Some(active) => say(
+    if let Some(active) = registry.active_account() {
+        say(
             out,
             &format!(
                 "{} is still the active Account — use `perch switch` to move.",
                 active.email()
             ),
-        ),
+        )?;
+    }
+
+    // What the Scope this Account landed in still cannot do, where there is
+    // anything to say. An Add is what makes a Scope a set of two or more, which
+    // is when the two defaults gating a Cycle start to matter — said as a
+    // statement of what is now true, beside the line above it, and never as a
+    // question (ADR 0017, ADR 0061).
+    //
+    // Said again on the Add after it, and the one after that, for as long as it
+    // stays true. This is not the prose ADR 0061 cut: that was a command
+    // explaining itself on a path that always runs, and this is a fact about a
+    // Scope that stops being said the moment somebody answers it.
+    match crate::config::what_the_scope_still_needs(registry, &registry.scope_of(added)) {
+        Some(line) => say(out, &line),
         None => Ok(()),
     }
 }

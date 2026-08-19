@@ -47,6 +47,21 @@ default for you to confirm — and a script has nobody to answer it. `--alias
 <name>` names the Account in the same breath, so it never has to be typed as an
 email address.
 
+Where the Add leaves a Scope holding two Accounts or more that nothing may Cycle
+between unasked, it says so and names the Settings that would say otherwise:
+
+```
+$ perch add --no-group
+Added overflow@example.com (Overflow Ltd, max).
+Group:  none
+you@example.com is still the active Account — use `perch switch` to move.
+The Ungrouped Scope now holds 2 Accounts, and nothing Cycles between them unasked: `perch config set ungrouped interchangeable true` and `perch config set ungrouped watcher-may-act true` say it may.
+```
+
+A Group needs only `watcher-may-act`, because a Group is already your statement
+that its Accounts are interchangeable. Either way `perch add` says it rather
+than asking it — see [Configuration](configuration.md).
+
 ## Naming an Account
 
 `perch alias <target> <name>` gives an Account a short name to reach it by, and
