@@ -1696,3 +1696,53 @@ fn a_loop_whose_watch_was_taken_over_stops_rather_than_deciding_beside_it() {
         "and it leaves rather than taking the rounds that were left"
     );
 }
+
+/// The watch is renewed *inside* a round, not only either side of the wait.
+///
+/// `WATCHER_STALE_MILLIS` is the longest wait plus one refresh interval, and
+/// the registry says why: the update interval sits "comfortably inside a round,
+/// so the renewal a round makes always touches". That arithmetic only holds
+/// while a round is short, and the loop's own comment concedes a round "is
+/// bounded by nothing but the network" — two requests per Account at thirty
+/// seconds each, plus a Renewal, over as many candidates as a Scope holds.
+///
+/// Run past the window with nothing touching `.watch.lock`, the next `perch
+/// watcher check` reads the artifact as abandoned and takes the watch out from
+/// under a live Watcher: the two-Watcher state ADR 0040 exists to prevent.
+///
+/// A Check was worse than the loop rather than better. It took the same lock
+/// and `renew` was never called on it anywhere in the process, so the whole of
+/// its round ran on the hold it was granted at the start.
+#[test]
+fn a_check_renews_the_watch_across_the_round_rather_than_only_holding_it() {
+    let lock = "/Users/someone/.config/perch/.watch.lock";
+    // A round that crosses the threshold, behind a keychain that stops to ask.
+    // The slowness is the point: the fake's clock only moves when something
+    // slow happens, so a round that costs nothing is one where every renewal
+    // falls inside the update interval and correctly touches nothing. What has
+    // to be shown is that a round which *does* run long keeps the hold up.
+    // Longer than the sixty seconds the watch's update interval waits before a
+    // renewal touches anything: a dialog nobody answers is exactly the shape
+    // the interval was chosen against.
+    let host = watching(&[86.0], 5.0).with_a_keychain_that_asks_first(70_000);
+    host.forget_effects();
+
+    let (result, printed) = run_watch_once(&host);
+
+    result.expect("the check reads and decides");
+    let effects = host.effects();
+    let switched = effects
+        .iter()
+        .position(|effect| matches!(effect, Effect::KeychainSet { .. }))
+        .expect("the Switch writes the incoming Credential");
+    let renewed_after = effects
+        .iter()
+        .skip(switched)
+        .any(|effect| matches!(effect, Effect::Touched(path) if path.starts_with(lock)));
+
+    assert!(
+        renewed_after,
+        "a Check never renewed the watch anywhere in the process, so its whole \
+         round ran on the hold it started with\n{effects:#?}\n{printed}"
+    );
+}
