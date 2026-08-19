@@ -289,8 +289,16 @@ fn a_credential_a_client_is_holding_is_never_renewed() {
     // from two — the Default Profile and its own — so "a client is running
     // against that Account" left the reader to guess which one to quit. The
     // Switch path has always named the Profile in its refusal.
+    //
+    // Derived rather than spelled, the way `second_service` is and for the same
+    // reason: a path built by joining uses the separator of whatever platform
+    // the build is for, so a hardcoded `/Users/someone/.claude` asserts nothing
+    // on Windows but its own spelling.
+    let default_profile = perch::registry::the_default_profile(&host)
+        .expect("the Default Profile is known")
+        .config_dir;
     assert!(
-        printed.contains("/Users/someone/.claude"),
+        printed.contains(&default_profile.display().to_string()),
         "the refusal names the directory holding the client: {printed}"
     );
 }
