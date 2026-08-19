@@ -1414,8 +1414,23 @@ impl Registry {
         let previous = self.alias_of(email).map(str::to_string);
         self.refuse_a_name_nothing_may_answer_to(NameKind::Alias, alias, previous.as_deref())?;
 
+        // The address as the registry *holds* it, not as it was typed. The
+        // paragraph above is about the lookup — `CAFÉ@example.com` reaches the
+        // Account held as `café@example.com` — and then this stored the
+        // capitalized spelling as the map's value, so the Alias pointed at a
+        // string no `accounts` entry has.
+        //
+        // `target::matched` is where the two come apart: its Account arm hands
+        // back `account.email()` and its Alias arm hands back this value, so one
+        // Target carried the held spelling and the other did not. Every
+        // downstream lookup folds case, which is why nothing breaks today — and
+        // is exactly the shape `is_active`'s own doc spends a paragraph warning
+        // about, one exact `==` away from a wrong answer.
+        let held = self
+            .account(email)
+            .map_or_else(|| email.to_string(), |account| account.email().to_string());
         self.aliases.retain(|_, named| !same_name(named, email));
-        self.aliases.insert(alias.to_string(), email.to_string());
+        self.aliases.insert(alias.to_string(), held);
         Ok(previous)
     }
 
@@ -2061,6 +2076,28 @@ pub fn validate(registry: &Registry) -> Result<()> {
     // `aliases` holding both `work` and `Work` renders one of them in `perch
     // list` and resolves `perch switch work` to the other, and freeing `work`
     // frees neither reliably.
+    // What `checks` is keyed on, which is the one pointer into the Group
+    // namespace nothing was asking about. `record_check` falls back to the name
+    // it was handed when it cannot resolve one — which it has to, because the
+    // Ungrouped Scope is not a declared Group and still keeps a Cooldown — and
+    // `forget_group` only clears entries for names it *can* resolve. So an
+    // entry could outlive every Group that could explain it, pacing a Scope
+    // nothing else in the file mentions.
+    //
+    // Refused here for the reason the dangling-Alias check above is: this
+    // module already declines a dangling `active` and a dangling `aliases`, and
+    // `checks` was the third pointer with no such rule.
+    for named in registry.checks.keys() {
+        if same_name(named, UNGROUPED) || registry.declared_group(named).is_some() {
+            continue;
+        }
+        return Err(PerchError::Invalid(format!(
+            "The registry records a Check against `{named}`, which is neither a \
+             Group Perch holds nor the Accounts in no Group — so the Cooldown it \
+             carries paces nothing."
+        )));
+    }
+
     refuse_two_names_that_differ_only_in_case(NameKind::Group, registry.groups.keys())?;
     refuse_two_names_that_differ_only_in_case(NameKind::Alias, registry.aliases.keys())?;
 
@@ -2917,6 +2954,80 @@ mod tests {
             crate::probe::default_profile_store(&host)
                 .expect("the real Default Profile")
                 .config_dir,
+        );
+    }
+
+    /// A Check recorded against a Group nothing declares is refused, like every
+    /// other pointer in the file.
+    ///
+    /// `active` and `aliases` have had a dangling-pointer rule for as long as
+    /// they have pointed anywhere; `checks` is the third and had none.
+    /// `record_check` keeps the name it was handed when it cannot resolve one —
+    /// which it must, because the Ungrouped Scope is not a declared Group and
+    /// still keeps a Cooldown — and `forget_group` only clears what it can
+    /// resolve, so an entry could outlive every Group that explains it.
+    #[test]
+    fn a_check_against_a_group_nothing_declares_is_not_a_registry() {
+        let mut registry = Registry::default();
+        registry.checks.insert(
+            "a-group-nobody-declared".to_string(),
+            Checked {
+                switched_at: Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap(),
+            },
+        );
+
+        let refused = validate(&registry).expect_err("the Cooldown paces nothing");
+        assert!(
+            refused.to_string().contains("a-group-nobody-declared"),
+            "it names the entry: {refused}"
+        );
+
+        // The Ungrouped Scope keeps one and is not a Group, which is why the
+        // fallback that produces these entries exists at all.
+        registry.checks.clear();
+        registry.checks.insert(
+            UNGROUPED.to_string(),
+            Checked {
+                switched_at: Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap(),
+            },
+        );
+        validate(&registry).expect("the Accounts in no Group Cycle too");
+    }
+
+    /// An Alias points at the address the registry holds, whichever spelling
+    /// was typed to set it.
+    ///
+    /// `name_account` looks the Account up with `same_name`, so
+    /// `CAFÉ@example.com` reaches the Account held as `café@example.com` — and
+    /// then stored the capitalized spelling as the map's value, pointing the
+    /// Alias at a string no `accounts` entry has. `target::matched` hands back
+    /// `account.email()` for an Account and this value for an Alias, so the two
+    /// Targets carried different spellings of one Account.
+    #[test]
+    fn an_alias_points_at_the_address_as_the_registry_holds_it() {
+        let mut registry = Registry::default();
+        registry.upsert(Account {
+            identity: crate::probe::Identity {
+                email: "café@example.com".to_string(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            disabled: false,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        });
+
+        registry
+            .name_account("work", "CAFÉ@example.com")
+            .expect("the name is free and the Account is there");
+
+        assert_eq!(
+            registry.aliases.get("work").map(String::as_str),
+            Some("café@example.com"),
+            "the Alias names the Account, and the Account has one spelling"
         );
     }
 
