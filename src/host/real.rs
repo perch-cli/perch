@@ -116,6 +116,20 @@ const CURL_ARGS: [&str; 7] = [
 const CONNECT_TIMEOUT_SECONDS: u64 = 10;
 const MAX_TIME_SECONDS: u64 = 30;
 
+/// The other bound a reply needs, beside how long it may take.
+///
+/// The two timeouts make a *silent* endpoint a refusal; neither makes a
+/// talkative one. A reply that keeps arriving is bounded only by `max-time`,
+/// and until then the whole of it is buffered by `Command::output` and copied
+/// again into `HttpResponse::body` — once per Account per round, on a
+/// `perch watcher run` that is meant to sit there for weeks.
+///
+/// Only Anthropic and `api.github.com` are ever addressed, so this is
+/// defense in depth rather than a live exposure. Generous for the same reason
+/// the timeouts are: the largest thing Perch reads is a Utilization document,
+/// which is a few kilobytes, and this is four orders of magnitude above it.
+const MAX_REPLY_BYTES: u64 = 8 * 1024 * 1024;
+
 /// The request as a `curl` configuration file, which is what goes in on stdin.
 ///
 /// The URL, the headers and the body all arrive this way so that none of them
@@ -169,7 +183,9 @@ fn curl_config(request: &HttpRequest<'_>) -> Result<String, HostError> {
         }
         None => (CONNECT_TIMEOUT_SECONDS, MAX_TIME_SECONDS),
     };
-    let mut config = format!("connect-timeout = {connect}\nmax-time = {whole}\n");
+    let mut config = format!(
+        "connect-timeout = {connect}\nmax-time = {whole}\nmax-filesize = {MAX_REPLY_BYTES}\n"
+    );
     config.push_str(&format!("url = {}\n", quoted(request.url)));
     for (name, value) in request.headers {
         config.push_str(&format!(
@@ -2250,9 +2266,10 @@ mod tests {
 
         assert!(config.contains("url = \"https://example.test/token\""));
         assert!(config.contains(expected), "{config}");
-        // The two bounds, the URL and the body: one option per line, and a body
-        // carrying quotes and backslashes still occupying exactly one of them.
-        assert_eq!(config.lines().count(), 4, "one option per line: {config}");
+        // The three bounds, the URL and the body: one option per line, and a
+        // body carrying quotes and backslashes still occupying exactly one of
+        // them.
+        assert_eq!(config.lines().count(), 5, "one option per line: {config}");
     }
 
     /// A request that says how long it may take gets that, and one that does
@@ -2267,12 +2284,22 @@ mod tests {
         let ordinary = curl_config(&HttpRequest::get("https://example.test/usage", &[])).unwrap();
         assert!(ordinary.contains("connect-timeout = 10"), "{ordinary}");
         assert!(ordinary.contains("max-time = 30"), "{ordinary}");
+        // The bound the two timeouts do not give: a reply that keeps arriving
+        // is bounded by `max-time` alone, and the whole of it is buffered.
+        assert!(
+            ordinary.contains(&format!("max-filesize = {MAX_REPLY_BYTES}")),
+            "{ordinary}"
+        );
 
         let brief =
             curl_config(&HttpRequest::get("https://example.test/latest", &[]).within(2_000))
                 .unwrap();
         assert!(brief.contains("connect-timeout = 2"), "{brief}");
         assert!(brief.contains("max-time = 2"), "{brief}");
+        assert!(
+            brief.contains(&format!("max-filesize = {MAX_REPLY_BYTES}")),
+            "a request carrying its own time bound still gets the size one: {brief}"
+        );
 
         // Rounded up rather than down. A bound that became zero would be `curl`
         // reading it as no bound at all, which is the opposite of what asking
