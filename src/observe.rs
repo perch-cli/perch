@@ -665,20 +665,26 @@ fn usable_token(
 /// from rather than only the one being written, because a Rotation kills every
 /// copy of it at once.
 fn refuse_if_live(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<()> {
+    // Which directory each client is in, and not only that there is one.
+    // `in_use_from` holds two for the active Account — the Default Profile and
+    // its own — and a refusal that says "a client is running against that
+    // Account" leaves the reader to guess which of the two to quit. The Switch
+    // path has always named the Profile in its own refusal; this one did not.
     let mut running = Vec::new();
     for config_dir in &asked.in_use_from {
-        running.extend(probe::live_clients(host, config_dir, installed)?);
+        for pid in probe::live_clients(host, config_dir, installed)? {
+            running.push(format!("pid {pid} in {}", config_dir.display()));
+        }
     }
     if running.is_empty() {
         return Ok(());
     }
 
-    let pids: Vec<String> = running.iter().map(u32::to_string).collect();
     Err(Outcome::Failed(format!(
-        "its access token has expired and a client is running against that \
-         Account (pid {}), so renewing it would log that session out. The \
-         cached figure is what you see.",
-        pids.join(", ")
+        "its access token has expired and a client is running against it ({}), \
+         so renewing it would log that session out. The cached figure is what \
+         you see.",
+        running.join(", ")
     )))
 }
 

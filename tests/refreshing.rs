@@ -285,6 +285,14 @@ fn a_credential_a_client_is_holding_is_never_renewed() {
     );
     assert!(printed.contains("4242"), "{printed}");
     assert!(printed.contains("cached figure"), "{printed}");
+    // And *which* directory the client is in. The active Account is asked about
+    // from two — the Default Profile and its own — so "a client is running
+    // against that Account" left the reader to guess which one to quit. The
+    // Switch path has always named the Profile in its refusal.
+    assert!(
+        printed.contains("/Users/someone/.claude"),
+        "the refusal names the directory holding the client: {printed}"
+    );
 }
 
 /// A Profile with a Run against it is Live by Perch's own marker (ADR 0027),
