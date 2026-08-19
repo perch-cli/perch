@@ -78,10 +78,14 @@ fn one_check_switches_and_reports_it_in_the_exit_code() {
     let decision = decision(&printed);
     assert!(decision.contains("switched"), "{decision}");
     assert!(decision.contains("86% used"), "what it read: {decision}");
-    assert!(decision.contains("threshold 80%"), "{decision}");
     assert!(
         decision.contains(SECOND_EMAIL),
         "and where it went: {decision}"
+    );
+    assert!(
+        !decision.contains("threshold") && !decision.contains("most room"),
+        "and nothing a scheduler could have read off the guide (ADR 0061): \
+         {decision}"
     );
     assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
     assert!(
@@ -110,7 +114,11 @@ fn a_check_under_the_threshold_exits_fifteen_and_changes_nothing() {
     let decision = decision(&printed);
     assert!(decision.contains("waiting"), "{decision}");
     assert!(decision.contains("40% used"), "{decision}");
-    assert!(decision.contains("under it"), "and why: {decision}");
+    assert_eq!(
+        decision, "2026-08-04T12:00:00Z  waiting   40% used, fullest 5-hour",
+        "and the whole of it, because a round that did what it was asked to do \
+         has nothing to explain (ADR 0061)"
+    );
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
     assert_eq!(
         host.sent_to(USAGE_URL).len(),

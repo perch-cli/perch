@@ -11,11 +11,11 @@ who notices.
 
 ```
 $ perch watcher run
-Watching you@example.com in Group `work`. Reading how full it is every 2m30s, and Switching within the Group when its fullest Quota Window reaches 80% — to an Account at 70% or under, and never twice inside 15 minutes. Ctrl-C stops.
-2026-08-04T12:00:00Z  waiting   you@example.com 40% used, fullest 5-hour; threshold 80% — under it, so nothing was wanted.
-2026-08-04T12:02:30Z  switched  you@example.com 86% used, fullest 5-hour; threshold 80% — over it. Switched — overflow@example.com has the most room.
+Watching you@example.com within Group `work`. Reading how full it is every 2m30s, and Switching within that Scope when its fullest Quota Window reaches 80% — to an Account at 70% or under, and never twice inside 15 minutes. Ctrl-C stops.
+2026-08-04T12:00:00Z  waiting   40% used, fullest 5-hour
+2026-08-04T12:02:30Z  switched  86% used, fullest 5-hour → overflow@example.com
 ^C
-Stopped. The watcher lock is given back, no file of its own was written, and the Account you are on is the one it last Switched to.
+Stopped.
 ```
 
 The watcher acts only where a Scope has said it may, which is off by default —
@@ -36,10 +36,34 @@ keeps its Cooldown in memory, which is exactly the pacing the Cooldown exists to
 impose, undone by being run twice.
 
 **Every decision is printed, including the ones where nothing happens** — which
-are most of them. A line names what was read, the threshold it was read
-against, what was decided and why, so "why did it switch just then" is
-answerable without reading the source. It goes to standard output and no file
-is written or rotated: redirecting it is yours to do.
+are most of them. A line names the figure that was read and what was decided
+about it, so "why did it switch just then" is answerable without reading the
+source. It goes to standard output and no file is written or rotated:
+redirecting it is yours to do.
+
+**The rounds that did what you asked stop at the figure.** `waiting` and
+`switched` are the loop doing exactly what the opening line said it would do, so
+they say what they read and — where it moved — where it went. The threshold is
+in the opening line, once, because it does not change while the loop runs; the
+words "under it" and "over it" are what `waiting` and `switched` already mean.
+**The rounds that refused keep their whole sentence**: `cooling`, `nowhere`,
+`held` and `refused` are rounds where nothing happened and you cannot see why,
+so each of them says why.
+
+**An em dash is where an explanation begins**, and it is on a line only where
+something other than the ordinary happened. Every refusal has one. So does a
+`switched` line that ranked a candidate on a figure it could not re-read this
+round — the one case where a Switch can land you somewhere worse than it left,
+and so the one thing about it worth saying.
+
+**Which Account is on the line only where it changed.** The opening names the
+one being watched and every `switched` line names the one it moved to, so the
+rounds in between do not restate it.
+
+**Stopping changes nothing and leaves nothing behind.** Ctrl-C gives the watcher
+lock back, writes no file of the watcher's own, and leaves you on the Account it
+last Switched to — every time, which is why the line on the way out is one
+word.
 
 **Only the Account you are on is read.** Anthropic allows roughly 28-30 reads
 an hour per Account, and one Account read every two and a half minutes fits
@@ -56,9 +80,9 @@ Window out of is a failed read too — not an Account with nothing used, which i
 the one reading that could never be over any threshold.
 
 ```
-2026-08-04T12:00:00Z  held      you@example.com unread; threshold 80% — nothing current to decide on, so nothing was decided: Anthropic is rate-limiting reads of this Account's usage, so nothing current could be read. Asking again in 2m30s.
-2026-08-04T12:02:30Z  held      you@example.com unread; threshold 80% — nothing current to decide on, so nothing was decided: Anthropic is rate-limiting reads of this Account's usage, so nothing current could be read. Asking again in 5m00s.
-2026-08-04T12:07:30Z  nowhere   you@example.com 100% used, fullest 5-hour; threshold 80% — over it, and nowhere to go: Every Account in Group `work` is exhausted, so there is nowhere useful to Switch. Nothing was changed. overflow@example.com frees up soonest, at 2026-08-04 14:30 UTC (in 3h).
+2026-08-04T12:00:00Z  held      unread — nothing current to decide on, so nothing was decided: Anthropic is rate-limiting reads of this Account's usage, so nothing current could be read. Asking again in 2m30s.
+2026-08-04T12:02:30Z  held      unread — nothing current to decide on, so nothing was decided: Anthropic is rate-limiting reads of this Account's usage, so nothing current could be read. Asking again in 5m00s.
+2026-08-04T12:07:30Z  nowhere   100% used, fullest 5-hour — nowhere to go: Every Account in Group `work` is exhausted, so there is nowhere useful to Switch. Nothing was changed. overflow@example.com frees up soonest, at 2026-08-04 14:30 UTC (in 3h).
 ```
 
 Neither of those ends the watch. Nowhere to go is resolved by waiting, which is
@@ -96,8 +120,8 @@ decided a round:
   cannot use.
 
 ```
-2026-08-04T12:02:30Z  nowhere   you@example.com 86% used, fullest 5-hour; threshold 80% — over it, and nowhere to go: Nothing in Group `work` is worth Switching to yet — overflow@example.com is at 74% used and nothing over 70% is worth moving to. Nothing was changed.
-2026-08-04T12:05:00Z  cooling   you@example.com 86% used, fullest 5-hour; threshold 80% — over it, and too soon to move again: the last Switch was 2 minutes ago and the cooldown leaves at least 15 minutes between two, so nothing moves for another 12 minutes.
+2026-08-04T12:02:30Z  nowhere   86% used, fullest 5-hour — nowhere to go: Nothing in Group `work` is worth Switching to yet — overflow@example.com is at 74% used and nothing over 70% is worth moving to. Nothing was changed.
+2026-08-04T12:05:00Z  cooling   86% used, fullest 5-hour — the last Switch was 2 minutes ago and the cooldown leaves at least 15 minutes between two, so nothing moves for another 12 minutes.
 ```
 
 An Account Perch has never read a figure for is set aside the same way. A
@@ -122,11 +146,11 @@ waits, and takes over the moment that changes (ADR 0040):
 ```
 $ perch watcher run
 Started. Nothing is being decided yet — the next line says what is holding it, and the watcher takes over the moment that changes. Ctrl-C stops.
-2026-08-04T12:00:00Z  held      unread unread; threshold unread — nothing current to decide on, so nothing was decided: you@example.com is in no Group, and nothing has said the Accounts in no Group are interchangeable at all [...] Asking again in 2m30s.
+2026-08-04T12:00:00Z  held      unread — nothing current to decide on, so nothing was decided: you@example.com is in no Group, and nothing has said the Accounts in no Group are interchangeable at all [...] Asking again in 2m30s.
 
 $ perch watcher run
 Started. Nothing is being decided yet — the next line says what is holding it, and the watcher takes over the moment that changes. Ctrl-C stops.
-2026-08-04T12:00:00Z  held      unread unread; threshold unread — nothing current to decide on, so nothing was decided: Group `work` has not been told the watcher may act on it [...] Asking again in 2m30s.
+2026-08-04T12:00:00Z  held      unread — nothing current to decide on, so nothing was decided: Group `work` has not been told the watcher may act on it [...] Asking again in 2m30s.
 ```
 
 `perch watcher check` is the one that exits on these, with the codes in the
@@ -219,11 +243,27 @@ Pick this *or* a Service, not both: a Check that finds a Watcher running exits
 
 ```
 $ perch watcher check
-2026-08-04T12:00:00Z  switched  you@example.com 86% used, fullest 5-hour; threshold 80% — over it. Switched — overflow@example.com has the most room.   # exit 0
+2026-08-04T12:00:00Z  switched  86% used, fullest 5-hour → overflow@example.com   # exit 0
 
 $ perch watcher check
-2026-08-04T12:05:00Z  cooling   overflow@example.com 90% used, fullest 5-hour; threshold 80% — over it, and too soon to move again: the last Switch was 5 minutes ago and the cooldown leaves at least 15 minutes between two, so nothing moves for another 10 minutes.   # exit 15
+2026-08-04T12:05:00Z  cooling   90% used, fullest 5-hour — the last Switch was 5 minutes ago and the cooldown leaves at least 15 minutes between two, so nothing moves for another 10 minutes.   # exit 15
 ```
+
+A check's line is a round's line, cut the same way: the figure it read, where a
+Switch went, and a whole sentence wherever it refused. It prints no opening line
+of its own — there is no run for one to open — so the threshold, the interval
+and the cooldown are not restated for a check either. They are the Scope's
+settings, and [`perch config`](configuration.md) is where they are read back.
+
+**The Account is named where the line is about a particular one**: the Account a
+Switch moved to, and the `perch relogin` that repairs a Quarantined one. A check
+that decided nothing does not name it, because the Account a check reads is
+whichever one is active — `perch status` is the question that answers that, and
+a machine running checks is running them against one Perch.
+
+The stamp stays a full date and time for the same reason: a check's line is
+often the only thing in a cron mailbox, or one line among a month of them in the
+file the crontab above appends to, read cold by somebody who was not there.
 
 It is the same policy as the loop, run once — the same threshold, cooldown and
 margin, and the same refusal to act on a figure it did not just read. **The

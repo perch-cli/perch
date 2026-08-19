@@ -423,16 +423,6 @@ impl Basis {
         };
         format!("{basis} in {}", scope.place())
     }
-
-    /// The same basis as a sentence about the Account, for the surface that has
-    /// already said where it was looking.
-    fn about(&self, named: &str) -> String {
-        match self {
-            Basis::MostRoom => format!("{named} has the most room."),
-            Basis::SoonestReset => format!("{named} has the soonest reset."),
-            Basis::Unranked => format!("Perch has never observed how full {named} is."),
-        }
-    }
 }
 
 /// The Account a Cycle picked, with what it will say about having picked it.
@@ -442,9 +432,13 @@ pub struct Choice {
     pub account: Account,
     /// What this Account won on, for the landing line that names where it
     /// landed.
+    ///
+    /// The one place a Cycle's ranking is said. It used to be said twice — this
+    /// value for `perch switch`, and a sentence of its own for the Watcher's
+    /// round — and ADR 0061 took the second away: a `switched` line names where
+    /// it went and argues nothing about why, so there was nothing left reading
+    /// the sentence.
     pub basis: Basis,
-    /// The same thing as a sentence of its own, for the Watcher's round.
-    pub because: String,
 }
 
 /// Picks the Account to Switch to, or explains why none is worth switching to.
@@ -585,11 +579,9 @@ pub fn choose(
         )));
     };
 
-    let basis = chosen_basis(best, strategy, now);
     Ok(Choice {
         account: best.account.clone(),
-        basis,
-        because: basis.about(&registry.named_for_the_user(best.account.email())),
+        basis: chosen_basis(best, strategy, now),
     })
 }
 
@@ -1588,8 +1580,7 @@ pub(crate) mod tests {
         assert_eq!(
             choice.basis,
             Basis::SoonestReset,
-            "and what it says it chose on is what it chose on: {}",
-            choice.because
+            "and what it says it chose on is what it chose on",
         );
     }
 
@@ -1700,8 +1691,7 @@ pub(crate) mod tests {
         assert_eq!(
             choice.basis,
             Basis::SoonestReset,
-            "so the Account is chosen on that window's reset: {}",
-            choice.because
+            "so the Account is chosen on that window's reset",
         );
     }
 
@@ -1732,8 +1722,7 @@ pub(crate) mod tests {
         assert_eq!(
             choice.basis,
             Basis::SoonestReset,
-            "and the reset it is chosen on is one still to come: {}",
-            choice.because
+            "and the reset it is chosen on is one still to come",
         );
     }
 
@@ -1758,8 +1747,7 @@ pub(crate) mod tests {
         assert_eq!(
             choice.basis,
             Basis::MostRoom,
-            "nothing may claim a reset it has not got: {}",
-            choice.because
+            "nothing may claim a reset it has not got",
         );
 
         // The half that was missed when the ranking was fixed: the clause
@@ -2017,8 +2005,7 @@ pub(crate) mod tests {
             choice.basis,
             Basis::MostRoom,
             "and the room it fell back to is what it says it chose on, rather \
-             than the ranking that was asked for: {}",
-            choice.because
+             than the ranking that was asked for",
         );
     }
 
