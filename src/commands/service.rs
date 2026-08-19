@@ -308,7 +308,24 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
 /// find would bury what it did.
 pub fn take_back_before_a_purge(host: &dyn Host, out: &mut dyn Write) -> Result<bool> {
     let at = service::unit_path(host)?;
+
+    // Asked before the Service question rather than after it, which is where it
+    // used to sit and could not be reached. A Watcher started with `perch
+    // watcher run` in a terminal holds the same lock, is the same hazard — it
+    // Switches Credentials into the Profiles this command is deleting — and is
+    // on a machine where no Service was ever installed, so the early return
+    // below skipped the one check that would have seen it.
+    //
+    // The lock is what answers, for the reason the Service branch below gives
+    // at length: it is held for exactly as long as a Watcher runs and given
+    // back however the process ends.
     if !is_installed(host, at.as_deref())? {
+        if watcher_is_running(host) {
+            return Err(PerchError::Busy(
+                "A Watcher is running, so nothing was purged.\n                 It would go on Switching Credentials into Profiles this command                  is deleting. Stop it — Ctrl-C in the terminal running `perch                  watcher run` — and run this again."
+                    .to_string(),
+            ));
+        }
         return Ok(false);
     }
 
