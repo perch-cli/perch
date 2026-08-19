@@ -1796,7 +1796,12 @@ fn touch_now(path: &Path) -> Result<(), HostError> {
     if outcome == 0 {
         Ok(())
     } else {
-        Err(HostError::Io(std::io::Error::last_os_error()))
+        // Through `or_not_found`, because a path that is not there is the one
+        // failure this port names rather than lumping in with the rest — and
+        // `FakeHost::touch` resolves first and answers `NotFound`, so this was
+        // the two adapters disagreeing about the variant a lock reads as "the
+        // artifact has gone".
+        or_not_found(Err(std::io::Error::last_os_error()), path)
     }
 }
 
@@ -1826,7 +1831,10 @@ fn touch_now(path: &Path) -> Result<(), HostError> {
             std::ptr::null_mut(),
         );
         if handle == INVALID_HANDLE_VALUE {
-            return Err(HostError::Io(std::io::Error::last_os_error()));
+            // `or_not_found` for the reason the unix arm gives: a path that is
+            // not there is the variant a lock reads as "the artifact has gone",
+            // and `ERROR_FILE_NOT_FOUND` arrives here as `ErrorKind::NotFound`.
+            return or_not_found(Err(std::io::Error::last_os_error()), path);
         }
 
         let mut now: FILETIME = std::mem::zeroed();
