@@ -58,7 +58,15 @@ fn a_declared_group_survives_a_restart() {
         },
     );
     assert!(result.is_ok(), "{:?}", result.err());
-    assert!(printed.contains("work"), "{printed}");
+    // One line, and not the two rows saying what governs it. A Group is
+    // declared at the compiled-in defaults every time, so those two rows are
+    // the same two rows on every run — `perch group list` is where they are
+    // read (ADR 0061). What they hold is asserted below, off the registry.
+    assert_eq!(
+        printed.trim_end(),
+        "Declared the Group `work`.",
+        "{printed}"
+    );
 
     let config = *registry_of(&host)
         .group("work")
@@ -634,9 +642,13 @@ fn a_rename_keeps_the_settings_the_group_holds() {
         "and the old name holds nothing: {:?}",
         registry.groups.keys().collect::<Vec<_>>()
     );
-    assert!(
-        printed.contains("day-job") && printed.contains("work"),
-        "the rename says both names:\n{printed}"
+    // Both names and the Accounts that came with them, asserted whole (ADR
+    // 0043) — and no row for the Setting above, which a rename never touches:
+    // reporting it would be Perch describing work it did not do (ADR 0061).
+    assert_eq!(
+        printed.trim_end(),
+        "Renamed the Group `work` to `day-job`, which still holds 3 Accounts.",
+        "{printed}"
     );
 }
 

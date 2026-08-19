@@ -297,7 +297,15 @@ fn nothing_the_export_holds_reaches_standard_output() {
             "`{secret}` was printed: {printed}"
         );
     }
-    assert!(printed.contains(AT), "what was written is said: {printed}");
+    // One line, asserted whole (ADR 0043): how many and where. What an Export
+    // carries is what an Export *is*, and keeping the passphrase away from the
+    // file is what the prompt says while somebody is still choosing one — so
+    // neither is said again after the write (ADR 0061).
+    assert_eq!(
+        printed.trim_end().lines().last(),
+        Some(format!("Exported 3 Accounts to {AT}.").as_str()),
+        "{printed}"
+    );
 }
 
 /// The same on the way out of a failure, which is where a command is most

@@ -135,13 +135,11 @@ so every rule you had set on the old one would have to be typed again.
 ```
 $ perch group rename work day-job
 Renamed the Group `work` to `day-job`, which still holds 3 Accounts.
-  Strategy     soonest-reset
-  Watcher      off (would act at 55%, onto 45% or better, at most every 15m)
 ```
 
-The rules printed under it are the point: they were said about this Group, and
-they are still said about it afterwards. A rename by hand would have left them
-behind on a Group that no longer exists.
+What it says is what a rename by hand would have lost: the Accounts came with
+the name. The rules did too — a rename never touches one, so it does not report
+them, and `perch group list` is where they are read.
 
 A name that an Alias or another Group already answers to is refused before
 anything is written, because Aliases and Group names share one namespace.

@@ -136,8 +136,15 @@ fn the_account_you_were_using_stays_active_and_untouched() {
     assert!(result.is_ok(), "{:?}", result.err());
 
     assert_the_active_account_survived(&host);
+    // Asserted whole, because the claim *is* the sentence (ADR 0043) — and
+    // said once, before the browser opens, rather than again in the report
+    // afterwards: an Add leaves the active Account alone every time, so the
+    // second telling was the ordinary case announcing itself (ADR 0061).
     assert!(
-        printed.contains(EMAIL) && printed.contains("still the active Account"),
+        printed.contains(&format!(
+            "Logging in to a new Profile. {EMAIL} stays active and its session \
+             is untouched."
+        )),
         "the user should be told the session they are in survived:\n{printed}"
     );
     assert!(

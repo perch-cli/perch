@@ -31,7 +31,10 @@ declaration that Accounts are interchangeable rather than a weaker form of one
 ## Adding an Account
 
 `perch add` gains an Account by running a login in a Profile of its own, so the
-Account you are using stays active and its session is untouched (ADR 0009).
+Account you are using stays active and its session is untouched (ADR 0009). It
+says so before the browser opens, which is where that promise is load-bearing,
+and does not say it again afterwards — every Add leaves the active Account
+where it was.
 
 ```
 $ perch add --group work --alias overflow
@@ -51,7 +54,6 @@ between unasked, it says so and names the Settings that would say otherwise:
 $ perch add --no-group
 Added overflow@example.com (Overflow Ltd, max).
 Group:  none
-you@example.com is still the active Account — use `perch switch` to move.
 The Ungrouped Scope now holds 2 Accounts, and nothing Cycles between them unasked: `perch config set ungrouped interchangeable true` and `perch config set ungrouped watcher-may-act true` say it may.
 ```
 
@@ -85,18 +87,29 @@ not spend on something else.
 ```
 $ perch disable spare
 `spare` is an Alias for spare@example.com.
-Disabled spare@example.com (as `spare`). Cycling will not choose it — it stays listed and named, and `perch switch` still switches to it when you name it.
+Disabled spare@example.com (as `spare`).
 
 $ perch enable spare
 `spare` is an Alias for spare@example.com.
-Enabled spare@example.com (as `spare`). It is a Cycle candidate again.
+Enabled spare@example.com (as `spare`).
 ```
 
 A disabled Account is excluded from Cycling and from nothing else. It keeps its
 Alias, its Group and its stored Credential, `perch list` shows it as `disabled`,
 and naming it on `perch switch` still switches to it — so putting it back needs
 no login, only `perch enable`. Removing the Account is the blunt instrument this
-exists to avoid.
+exists to avoid. That is the whole of what the pair promises, and it is promised
+here rather than repeated on every run of either command.
+
+A Quarantined Account is the exception, because none of that promise is true of
+one: its Credential does not work whatever the Cycling pool says, so `perch
+disable` and `perch enable` both say so and name the repair.
+
+```
+$ perch enable spare
+`spare` is an Alias for spare@example.com.
+Enabled spare@example.com (as `spare`). It is Quarantined, though — Anthropic would not renew its Credential — so nothing switches to it, Cycling or you. `perch relogin spare@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
+```
 
 Disabling every Account in a Group is allowed. A bare `perch switch` there then
 reports having no candidate (exit 17) rather than quietly landing you on
@@ -138,18 +151,26 @@ $ perch relogin overflow
 Logging in again to repair overflow@example.com. someone@example.com stays active and its session is untouched.
 Quit Claude Code when the login is done to come back here.
 
-Repaired overflow@example.com (as `overflow`) — it is no longer Quarantined, and is a Cycle candidate again if it was one before.
-Alias:   overflow
-Group:   work
-Cycling: may choose it
+Repaired overflow@example.com (as `overflow`) — it is no longer Quarantined.
 ```
 
 The Account keeps its Alias, its Group, whether Cycling may choose it and its
-place in the listing — only the Credential is replaced. The login runs in a
-directory of its own, so the Account you are working in is untouched throughout,
-including when the login is abandoned, which changes nothing at all. A login as
-a different Account is refused: an Alias you chose for one Account is not handed
-to another because a browser was signed into somebody else.
+place in the listing — only the Credential is replaced. That is why the repair
+does not report the three it left alone; `perch list` is where they are read.
+The login runs in a directory of its own, so the Account you are working in is
+untouched throughout, including when the login is abandoned, which changes
+nothing at all. A login as a different Account is refused: an Alias you chose
+for one Account is not handed to another because a browser was signed into
+somebody else.
+
+The one thing a repair leaves alone that it *does* say is a disabled Account,
+because a working Credential that Cycling still passes over is a second thing to
+undo:
+
+```
+Repaired overflow@example.com (as `overflow`) — it is no longer Quarantined.
+Cycling still will not choose it — it is disabled, which a repair does not undo.
+```
 
 Relogging in the Account you are **on** also makes its fresh Credential the live
 one, because a repair only its own Profile can see would leave the Account broken
@@ -165,9 +186,15 @@ listed, stops being a Cycle candidate, and the Alias it answered to comes free.
 ```
 $ perch remove spare
 `spare` is an Alias for spare@example.com.
-Removed spare@example.com (as `spare`). The Credential Perch held for it is deleted, and nothing lists it or Cycles to it now.
+Removed spare@example.com (as `spare`).
 The Alias `spare` is free to use again.
 ```
+
+Deleting the Credential and dropping the Account out of the listing is what
+every Remove does, so the report does not say it. The two cases where something
+else happened do speak: an Account whose Credential Stores held nothing to
+delete, and one whose Credential is shared with another Account and was left
+where it is.
 
 Removing the Account you are **on** is the case that needs care, because the live
 Credential belongs to it. Perch names the Account it will leave active, lands on
@@ -178,8 +205,8 @@ $ perch remove work
 `work` is an Alias for someone@example.com.
 someone@example.com (as `work`) is the active Account. overflow@example.com (as `overflow`) will be made active first, so nothing is left running as an Account Perch has forgotten — `perch switch <target>` first if you would rather land somewhere else. The login being given up goes with it: holding it again would mean `perch add`.
 Remove someone@example.com (as `work`)? [y/N]: y
-overflow@example.com (as `overflow`) is the active Account now — its Credential is the live one.
-Removed someone@example.com (as `work`). The Credential Perch held for it is deleted, and nothing lists it or Cycles to it now.
+overflow@example.com (as `overflow`) is the active Account now.
+Removed someone@example.com (as `work`).
 The Alias `work` is free to use again.
 ```
 

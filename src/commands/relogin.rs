@@ -183,16 +183,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
         // The held failure first, since a stdout that will not take the line
         // above will not take this one either — and the repair it describes has
         // happened either way.
-        Ok(()) => said.and_then(|()| {
-            say(
-                out,
-                &format!(
-                    "Its fresh Credential is the live one, so {} is working again \
-                     everywhere without a Switch.",
-                    account.email()
-                ),
-            )
-        }),
+        Ok(()) => said.and_then(|()| say(out, "Its fresh Credential is the live one.")),
         Err(stopped) if stopped.is_live => Err(stopped.error.with_note(&format!(
             "The repair stands and {} is working again: its fresh Credential is \
              the live one. What is behind is Claude Code's own record of which \
@@ -450,50 +441,34 @@ fn report(
     if was_quarantined {
         say(
             out,
-            &format!(
-                "\nRepaired {named} — it is no longer Quarantined, and is a Cycle \
-                 candidate again if it was one before."
-            ),
+            &format!("\nRepaired {named} — it is no longer Quarantined."),
         )?;
     } else {
+        // Which is the news. That the Account now holds a fresh Credential is
+        // what every relogin does; that it did not need one is not.
         say(
             out,
-            &format!(
-                "\nLogged {named} in again. It was not Quarantined; now it has a fresh Credential."
-            ),
+            &format!("\nLogged {named} in again. It was not Quarantined."),
         )?;
     }
 
+    // The Alias and the Group are not said, and neither is a Cycling line that
+    // reads "may choose it". A repair leaves all three exactly as it found
+    // them, so a column of them is Perch reassuring somebody about work it did
+    // not do (ADR 0061), and `perch list` is where they are read.
+    //
+    // Disabled is the one of the three that can still surprise: the Credential
+    // works again and Cycling will go on passing the Account over, which is a
+    // second thing to undo and no part of what a repair promises.
     let held = registry
         .account(account.email())
         .expect("the Account was just recorded");
-    labeled(
-        out,
-        "Alias",
-        registry.alias_of(account.email()).unwrap_or("-"),
-    )?;
-    let group = held.group.as_deref().unwrap_or(registry::NO_GROUP);
-    labeled(out, "Group", group)?;
-    labeled(
-        out,
-        "Cycling",
-        if !held.disabled {
-            "may choose it"
-        } else {
-            "will not choose it — it is disabled"
-        },
-    )
-}
-
-/// The three things a repair leaves exactly as it found them, in a column of
-/// their own so they read as a list of what was kept.
-fn labeled(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {
-    // `padded` rather than `{:<9}`, which pads by *characters*. Every label
-    // here is an ASCII literal so the two agree today, and
-    // `utilization::padded` exists because they do not in general — a column
-    // laid out by counting `char`s is one that steps out of line the first time
-    // anything wide or combining goes through it. One way of measuring a column
-    // across Perch, and this was one of two places using the other one.
-    let label = crate::utilization::padded(&format!("{label}:"), 9);
-    say(out, &format!("{label}{value}"))
+    if held.disabled {
+        say(
+            out,
+            "Cycling still will not choose it — it is disabled, which a repair \
+             does not undo.",
+        )?;
+    }
+    Ok(())
 }

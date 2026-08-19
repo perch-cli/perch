@@ -126,8 +126,11 @@ fn run_service(host: &FakeHost, command: WatcherCommand) -> (perch::Result<i32>,
 }
 
 /// The whole arrangement, end to end: a unit where the platform keeps one, the
-/// service manager told about it, and a sentence saying what happens from now
-/// on.
+/// service manager told about it, and a sentence saying what was installed.
+///
+/// Not a sentence about starting at login. Every install that gets this far did
+/// that, so it was the ordinary case announcing that it was ordinary (ADR 0061)
+/// — and the two arms that stop short of it say what did not start.
 #[test]
 fn installing_writes_a_unit_and_starts_it_through_the_service_manager() {
     let host = linux();
@@ -160,7 +163,15 @@ fn installing_writes_a_unit_and_starts_it_through_the_service_manager() {
          starts a stopped unit and does nothing to a running one, which is the \
          state re-installing after an Upgrade is always in"
     );
-    assert!(printed.contains("log in"), "{printed}");
+    // Asserted whole, because the claim is the sentence (ADR 0043): what it
+    // did, and which of this machine's binaries the unit was written against.
+    assert!(
+        printed.contains(&format!(
+            "Installed the Service. It runs {} as a systemd user unit.",
+            host.current_exe().expect("the fixture has one").display()
+        )),
+        "{printed}"
+    );
 }
 
 /// **The property an install rests on.** A service manager that refuses leaves
@@ -339,11 +350,11 @@ fn a_carried_value_a_scheduled_task_cannot_quote_is_refused_on_windows() {
 /// Installing on Windows starts the task, rather than only registering the
 /// trigger that would start it at the next logon.
 ///
-/// `schtasks /Create /SC ONLOGON` writes a trigger and runs nothing, while the
-/// sentence `install` prints is "It starts when you log in, and it is running
-/// now." A `perch watcher status` a second later asks the watcher lock, finds
-/// nothing holding it, and prints "not running" — the two commands
-/// contradicting each other on every fresh install. `/End` first for the reason
+/// `schtasks /Create /SC ONLOGON` writes a trigger and runs nothing, while what
+/// `install` reports is a Service that is there. A `perch watcher status` a
+/// second later asks the watcher lock, finds nothing holding it, and prints
+/// "not running" — the two commands contradicting each other on every fresh
+/// install. `/End` first for the reason
 /// macOS `bootout`s before it bootstraps: a re-install after an Upgrade is the
 /// documented repair, and the task may already be running the old binary.
 #[test]
@@ -535,7 +546,12 @@ fn uninstalling_stops_the_service_and_takes_the_unit_back() {
         "{:?}",
         ran(&host)
     );
-    assert!(printed.contains("`perch watcher run`"), "{printed}");
+    // The whole of what it says, and nothing about what stops starting at
+    // login or about a terminal that was never affected (ADR 0061).
+    assert!(
+        printed.contains("The Service is stopped and its unit is gone."),
+        "{printed}"
+    );
 }
 
 /// The existing code for a request that was already true. A machine with no
