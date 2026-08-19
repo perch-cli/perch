@@ -112,8 +112,17 @@ listed, still named, shown as broken, and shown with the reason.
 
 ```
 $ perch status --refresh
-overflow@example.com is Quarantined: Anthropic would not renew its Credential. `perch relogin overflow@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
+Account       overflow@example.com
+Organization  Overflow Ltd
+Plan          pro
+Quarantine    Anthropic would not renew its Credential. `perch relogin overflow@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
+Utilization   never observed
 ```
+
+`perch status` is about one Account, so it says both halves on the one line it
+has: what happened, and the command that repairs it. A listing shows a set, so
+there the reason is per Account and the repair is said once beneath all of them
+(ADR 0061).
 
 Cycling never chooses a Quarantined Account, and naming one on `perch switch` is
 refused with exit code 19 rather than making a Credential live that does not

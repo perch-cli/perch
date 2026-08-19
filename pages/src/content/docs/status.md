@@ -43,7 +43,8 @@ $ perch list
   spare@example.com     -         none   disabled     9%              5-hour  91%  (as of 2h ago)
 
 * is the active Account.
-overflow@example.com (as `overflow`) is Quarantined: Anthropic would not renew its Credential. `perch relogin overflow@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
+overflow@example.com (as `overflow`): Anthropic would not renew its Credential.
+`perch relogin overflow@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
 ```
 
 **State** says only what has been done to an Account, so it is empty for the one
@@ -79,8 +80,21 @@ An Account nobody has ever read a figure for says `never observed` rather than
 Quarantined Account stays listed and named, so an Account needing attention is
 never mistaken for one that vanished; if it has also been taken out of the
 Cycling pool the State column says both, because enabling a Quarantined Account
-would not repair it. The reason it broke is written out under the table rather
-than squeezed into a column, with the one command that puts it right.
+would not repair it.
+
+The reason it broke is written out under the table rather than squeezed into a
+column — one line per broken Account, since the reason is what differs between
+two of them — and `perch relogin` closes the block once, however many are broken
+(ADR 0061): the repair is the same command whatever broke it. Had all three
+Accounts above been Quarantined, the lines under that table would read:
+
+```
+* is the active Account.
+someone@example.com: Anthropic would not renew its Credential.
+overflow@example.com (as `overflow`): Anthropic Rotated its refresh token and the new one could not be stored, so the one Perch holds is retired.
+spare@example.com: Perch holds no Credential for it.
+`perch relogin <target>` logs one in again in place, keeping its Alias, its Group and whether Cycling may choose it.
+```
 
 ### One Scope of it
 
@@ -100,7 +114,8 @@ Group `work`
 * is the active Account.
 Reserve: 1 of 1 Account has Headroom, the best 58% left (as of 3m ago)
 1 Quarantined, so nothing Cycles to it.
-overflow@example.com (as `overflow`) is Quarantined: Anthropic would not renew its Credential. `perch relogin overflow@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
+overflow@example.com (as `overflow`): Anthropic would not renew its Credential.
+`perch relogin overflow@example.com` logs it in again in place, keeping its Alias, its Group and whether Cycling may choose it.
 ```
 
 The Group column goes, because the heading has already answered it. Narrowed to

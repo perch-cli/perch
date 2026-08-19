@@ -104,13 +104,17 @@ impl Quarantine {
         }
     }
 
-    /// The whole of what is said about a Quarantined Account wherever one is
-    /// shown as broken: which Account, what happened to it, and the one command
-    /// that ends it.
+    /// The whole of what is said about a Quarantined Account where nothing
+    /// around it says any of it: which Account, what happened to it, and the one
+    /// command that ends it.
     ///
     /// Said in one place because every surface owes the same three things. Two
     /// surfaces spelling this out separately would eventually offer two
     /// different repairs for one state.
+    ///
+    /// For a surface showing several at once, [`shown_of`](Quarantine::shown_of)
+    /// is the varying half of this and [`how_to_repair_them`] the invariant one
+    /// (ADR 0061) — still the same two sentences, and still from here.
     ///
     /// `detail` is whatever the failure underneath said, where there was one
     /// worth keeping — a keychain that would not take the Rotated Credential,
@@ -125,6 +129,23 @@ impl Quarantine {
             self.because(),
             how_to_repair(target)
         )
+    }
+
+    /// What is true of this Account and no other: which one it is and what
+    /// happened to it, without the repair.
+    ///
+    /// For a surface that has already said the state — a Listing whose State
+    /// column says `quarantined` on every row it is about — and that says the
+    /// repair once beneath all of them rather than once per Account (ADR 0061).
+    /// What is left is exactly the part that differs between two broken
+    /// Accounts.
+    ///
+    /// No `detail`, which [`said_of`](Quarantine::said_of) takes: a Listing
+    /// renders what the registry recorded, and the registry records a
+    /// `Quarantine` rather than the failure that produced one. The detail exists
+    /// only in the moment a Refresh finds it, which is not this moment.
+    pub fn shown_of(&self, named: &str) -> String {
+        format!("{named}: {}.", self.because())
     }
 
     /// The refusal a command raises rather than acting on a Quarantined
@@ -182,6 +203,26 @@ pub fn how_to_repair(target: &str) -> String {
         "`perch relogin {target}` logs it in again in place, keeping its Alias, \
          its Group and whether Cycling may choose it."
     )
+}
+
+/// The same repair, for however many Accounts are in that state — said once,
+/// because it is the same repair (ADR 0061).
+///
+/// Named where there is exactly one to name, and about the state where there is
+/// more than one: [`how_to_repair`] says "logs *it* in again", which over a set
+/// names one Account and tells somebody holding three broken ones to repair the
+/// first. Nothing where nothing is broken, so a surface can ask without first
+/// asking whether to.
+pub fn how_to_repair_them(targets: &[impl AsRef<str>]) -> Option<String> {
+    match targets {
+        [] => None,
+        [one] => Some(how_to_repair(one.as_ref())),
+        _ => Some(
+            "`perch relogin <target>` logs one in again in place, keeping its \
+             Alias, its Group and whether Cycling may choose it."
+                .to_string(),
+        ),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

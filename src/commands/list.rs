@@ -383,24 +383,30 @@ fn state_of(account: &Account) -> String {
 }
 
 /// What each Quarantined Account is Quarantined for, under the table rather
-/// than in it.
+/// than in it, and the one command that repairs any of them.
 ///
 /// A reason is a sentence and a column is not, and the reason is the half of
 /// the state that says what to do about it — so it is written out in full for
-/// every broken Account, with the one command that repairs it. Nothing is said
-/// at all when nothing is broken, which is the ordinary case.
-fn why_they_are_quarantined(registry: &Registry, accounts: &[&Account]) -> Vec<String> {
-    accounts
-        .iter()
-        .filter_map(|account| {
-            let why = account.quarantine?;
-            Some(why.said_of(
-                &registry.named_for_the_user(account.email()),
-                account.email(),
-                None,
-            ))
-        })
-        .collect()
+/// every broken Account. The repair is not that half: it is the same command
+/// whatever broke and however many Accounts it broke, so it closes the block
+/// once rather than ending each line in it (ADR 0061). The table above has
+/// already said `quarantined` on every row this is about, which is why each of
+/// these lines is a name and a reason and does not say the state again.
+///
+/// Nothing is said at all when nothing is broken, which is the ordinary case,
+/// and the name is the block's rather than the reasons' in it — the last line
+/// of it is a repair, which is not a why.
+fn what_is_broken(registry: &Registry, accounts: &[&Account]) -> Vec<String> {
+    let mut said = Vec::new();
+    let mut broken = Vec::new();
+    for account in accounts {
+        if let Some(why) = account.quarantine {
+            said.push(why.shown_of(&registry.named_for_the_user(account.email())));
+            broken.push(account.email());
+        }
+    }
+    said.extend(registry::how_to_repair_them(&broken));
+    said
 }
 
 fn render_human(
@@ -475,7 +481,7 @@ fn render_human(
         // whether it may.
         footer.push(format!("Cycling {}.", cycling_among_ungrouped(registry)));
     }
-    footer.extend(why_they_are_quarantined(registry, accounts));
+    footer.extend(what_is_broken(registry, accounts));
 
     if !footer.is_empty() {
         say(out, "")?;

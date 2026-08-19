@@ -159,30 +159,21 @@ fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
         ),
     )?;
 
+    // The repair, which is nothing where nothing came back bare, and is the
+    // whole of what this paragraph is for — so it is the condition rather than
+    // a second thing asked after one. The mirror of this in `export.rs` gets
+    // the plural right by not naming an Account at all.
     let bare = export.without_a_credential();
-    if !bare.is_empty() {
+    if let Some(repair) = registry::how_to_repair_them(&bare) {
         say(
             out,
             &format!(
                 "The Export held no Credential for {}, so the {} restored \
-                 without one — Quarantine reason and all. {}",
+                 without one — Quarantine reason and all. {repair}",
                 bare.join(", "),
                 match bare.len() {
                     1 => "Account was",
                     _ => "Accounts were",
-                },
-                // Named only where there is one to name. `how_to_repair` takes
-                // a Target and says "logs *it* in again", so over a list it
-                // told somebody who had just restored three credential-less
-                // Accounts to relogin the first — while the sentence above it
-                // had already agreed its noun with all three. The mirror of
-                // this in `export.rs` gets it right by not naming one.
-                match bare.as_slice() {
-                    [one] => registry::how_to_repair(one),
-                    _ => "`perch relogin <target>` logs one in again in place, \
-                          keeping its Alias, its Group and whether Cycling may \
-                          choose it."
-                        .to_string(),
                 },
             ),
         )?;
