@@ -1,13 +1,13 @@
 name: Pages
 
-# Builds and serves https://perch-cli.github.io/perch/ — the landing page, the
-# installers, and the guide (ADR 0035).
+# Builds and serves https://perch-cli.github.io/perch/ — the front page, the
+# guide, and the installers (ADR 0062).
 #
-# Two sources, one deployment. `packaging/pages/` is copied to the root, so the
-# URL somebody pastes into a terminal does not carry a version and an installer
-# that has to be released to be fixed does not stay broken until the next
-# release. `docs/guide/` is rendered by mdBook into /guide/, from the same
-# markdown GitHub shows — nothing is written twice.
+# One source now, where there used to be two. `pages/` is an Astro and Starlight
+# project that renders the splash page and the guide together, and `pages/public/`
+# is copied to the root of the output verbatim — so the URL somebody pastes into
+# a terminal does not carry a version, and an installer that has to be released
+# to be fixed does not stay broken until the next release.
 #
 # It deploys from main rather than from a release for the same reason it always
 # did: everything here is fixed by a merge.
@@ -15,12 +15,11 @@ on:
   push:
     branches: [main]
     paths:
-      - "packaging/pages/**"
-      - "docs/guide/**"
-      - "docs/book.toml"
-      - "docs/theme/**"
+      - "pages/**"
+      # The logo is imported from where the app icons already live, rather than
+      # copied into the site — so a change to it is a change to the site.
+      - "docs/assets/**"
       - ".github/workflows/pages.yml"
-      - ".github/actions/mdbook/**"
   workflow_dispatch:
 
 permissions:
@@ -51,35 +50,40 @@ jobs:
 
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
-      - uses: ./.github/actions/mdbook
+      # Node 24 and corepack, exactly as ci.yml does it: pnpm's version is
+      # `packageManager` in pages/package.json, so the pull request that was
+      # checked and the deployment that publishes are built by the same one.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
 
-      # The landing page and the installers, at the root. install-test.sh is
-      # excluded: it runs against a fabricated release from a checkout, and is
-      # no part of what anybody downloads.
-      - name: Assemble the site
-        run: |
-          set -eu
-          mkdir -p _site
-          cp packaging/pages/index.html packaging/pages/install.sh packaging/pages/install.ps1 _site/
+      - name: pnpm
+        run: corepack enable pnpm
 
-      # `--dest-dir` is resolved against the working directory rather than
-      # against the book, so this is `_site/guide` at the root of the checkout.
-      - name: Render the guide
-        run: mdbook build docs --dest-dir _site/guide
+      - name: Install
+        working-directory: pages
+        run: pnpm install --frozen-lockfile
 
-      # What the deployment is for, asserted before it becomes the live one.
+      - name: Build the site
+        working-directory: pages
+        run: pnpm build
+
+      # What the deployment is for, asserted before it becomes the live one. The
+      # installers first, because they are the promise that predates the guide:
+      # `public/` lands at the root, and nothing about how the pages are rendered
+      # is allowed to move them.
       - name: The installers are where they are pasted from
+        working-directory: pages
         run: |
           set -eu
-          test -s _site/install.sh
-          test -s _site/install.ps1
-          test -s _site/index.html
-          test -s _site/guide/index.html
-          test -s _site/guide/reference.html
+          test -s dist/install.sh
+          test -s dist/install.ps1
+          test -s dist/index.html
+          test -s dist/reference/index.html
 
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: _site
+          path: pages/dist
 
       - id: deploy
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

@@ -1,4 +1,8 @@
-# Installing
+---
+title: "Installing"
+sidebar:
+  order: 1
+---
 
 Perch is pre-1.0. Every release is real and works, but the command line may
 still change between them, so no channel hands it to you by default — you ask

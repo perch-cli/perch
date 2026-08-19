@@ -1,4 +1,8 @@
-# Configuration
+---
+title: "Configuration"
+sidebar:
+  order: 8
+---
 
 `perch config` changes the rules Perch chooses Accounts by, and asks nothing:
 every capability Perch has is reachable from a script, because it has to be

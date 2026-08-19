@@ -1,0 +1,177 @@
+---
+title: Perch
+description: Run Claude Code as whichever Claude account you want, without going through the login flow again.
+template: splash
+hero:
+  tagline: Run Claude Code as whichever Claude account you want, without going through the login flow again.
+  image:
+    alt: The Perch icon — a perching bird above two switch arrows
+    file: ../../../../docs/assets/icon.svg
+  actions:
+    - text: Install Perch
+      link: "#install"
+      icon: down-caret
+    - text: Read the guide
+      link: "/perch/installing/"
+      icon: right-arrow
+      variant: minimal
+sidebar:
+  # The front page is reached by the site's title and its logo, and it is not a
+  # page of the guide the sidebar lists.
+  hidden: true
+---
+
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+Perch is for one person moving between logins they already hold — their own
+accounts, on their own machine. It creates no accounts and authenticates nobody;
+it only chooses between logins you have already made yourself.
+
+## Quota ran out. Keep working.
+
+`perch switch` with nothing after it takes the Account with the most room left,
+from the Group you said was interchangeable. It asks nothing, because it is what
+you type mid-task.
+
+```
+$ perch switch
+Cycling within Group `work`.
+overflow@example.com has the most room: 60% headroom, which is true of every one of its Quota Windows — 7-day is its fullest, as of 4m ago.
+Captured you@example.com's live Credential into its own Profile.
+Switched to overflow@example.com.
+Utilization   5-hour    12%  (as of 4m ago)
+              7-day     40%  (as of 4m ago)
+```
+
+It lands everywhere at once — every terminal, the editor extension, the desktop
+app. Your memory, settings, plugins and project history do not move: they are
+yours rather than the Account's.
+
+## Or stop being the one who notices
+
+`perch watcher run` reads how full the Account you are on is, prints what it made
+of that, and Switches when it runs low. A loop in one terminal, not a daemon —
+nothing to install, and Ctrl-C is safe wherever it lands.
+
+```
+$ perch watcher run
+Watching you@example.com in Group `work`. Reading how full it is every 2m30s, and Switching within the Group when its fullest Quota Window reaches 80% — to an Account at 70% or under, and never twice inside 15 minutes. Ctrl-C stops.
+2026-08-04T12:00:00Z  waiting   you@example.com 40% used, fullest 5-hour; threshold 80% — under it, so nothing was wanted.
+2026-08-04T12:02:30Z  switched  you@example.com 86% used, fullest 5-hour; threshold 80% — over it. Switched — overflow@example.com has the most room: 95% headroom, which is true of every one of its Quota Windows — 5-hour is its fullest, as of just now.
+^C
+Stopped. Nothing was left behind: the watcher holds no lock, writes no file of its own, and the Account you are on is the one it last Switched to.
+```
+
+Every decision is printed, including the ones where nothing happens — which are
+most of them. Nothing changes underneath you until a Group has been told it may.
+
+## And the rest of it
+
+- `perch status` — who you are and how full, served from cache so it is cheap
+  enough for a shell prompt.
+- `perch add` — gain an Account by logging in, without disturbing the one you are
+  using.
+- `perch run <target>` — launch Claude Code as one Account in one terminal,
+  leaving the active one alone.
+- `perch holdings export` — everything Perch holds, in one encrypted file,
+  readable by the standard `age` command.
+
+## The guide
+
+What each command does, and why it does it that way.
+
+<CardGrid>
+  <LinkCard
+    title="Installing"
+    href="/perch/installing/"
+    description="Homebrew, the installers, npm, by hand, verifying a download, building from source"
+  />
+  <LinkCard
+    title="Accounts"
+    href="/perch/accounts/"
+    description="add, alias, disable, enable, relogin, remove — and what a Quarantine is"
+  />
+  <LinkCard
+    title="Seeing what you have"
+    href="/perch/status/"
+    description="status, list, reading current Utilization, the JSON"
+  />
+  <LinkCard
+    title="Switching, Cycling and Groups"
+    href="/perch/switching/"
+    description="switch, Cycling within a Group, group"
+  />
+  <LinkCard
+    title="Watching"
+    href="/perch/watching/"
+    description="perch watcher run, perch watcher install, and perch watcher check under cron or a systemd timer"
+  />
+  <LinkCard
+    title="Running one Account in one terminal"
+    href="/perch/running/"
+    description="run, Live Profiles, passing arguments through"
+  />
+  <LinkCard
+    title="Backing up and moving machines"
+    href="/perch/backup/"
+    description="holdings export, holdings import, holdings purge"
+  />
+  <LinkCard
+    title="Configuration"
+    href="/perch/configuration/"
+    description="config, Scopes, every Setting"
+  />
+  <LinkCard
+    title="Reference"
+    href="/perch/reference/"
+    description="every command, every exit code, every path and environment variable"
+  />
+</CardGrid>
+
+For the vocabulary these pages use — Account, Profile, Credential, Group, Scope,
+Quota Window, Capture, Rotation, Live Profile — see
+[`CONTEXT.md`](https://github.com/perch-cli/perch/blob/main/CONTEXT.md). For the
+decisions behind them, the numbered ADRs in
+[`docs/adr/`](https://github.com/perch-cli/perch/tree/main/docs/adr).
+
+## Install
+
+Perch is pre-1.0. Every release is real and works, but the command line may still
+change between them, so no channel hands it to you by default — you ask for it by
+name. macOS, Linux and Windows. Claude Code has to be installed already, for
+Perch to have anything to switch between.
+
+On macOS and Linux:
+
+```sh
+curl -fsSL https://perch-cli.github.io/perch/install.sh | sh
+```
+
+On Windows:
+
+```powershell
+irm https://perch-cli.github.io/perch/install.ps1 | iex
+```
+
+With Homebrew:
+
+```sh
+brew tap perch-cli/perch
+brew install perch
+```
+
+With npm — the `dev` tag is deliberate, because there is no `latest` until 1.0:
+
+```sh
+npm install -g perch-cli@dev
+```
+
+Every release carries checksums and signed build provenance:
+[github.com/perch-cli/perch/releases](https://github.com/perch-cli/perch/releases).
+The installers verify both. Installing by hand, checking those yourself and
+building from source are in
+[the install guide](/perch/installing/#by-hand).
+
+Source, issues and the decisions behind all of this:
+[github.com/perch-cli/perch](https://github.com/perch-cli/perch). MIT or
+Apache-2.0, at your option.

@@ -1,14 +1,13 @@
-# Seeing what you have
+---
+title: "Seeing what you have"
+sidebar:
+  order: 3
+---
 
 Two commands answer it, and they answer two different questions. `perch status`
 is about the Account you are on, in detail. `perch list` is about a set of them
 as a table — everything Perch holds, or one Scope of it. Neither touches the
 network unless you ask it to.
-
-- [The Account you are on](#the-account-you-are-on)
-- [Every Account](#every-account)
-- [Reading current Utilization](#reading-current-utilization)
-- [JSON](#json)
 
 ## The Account you are on
 

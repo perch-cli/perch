@@ -2,7 +2,7 @@
 # Runs the real install.sh against a fabricated release and asserts on the
 # advice it prints about PATH.
 #
-#   sh packaging/pages/install-test.sh
+#   sh packaging/install-test.sh
 #
 # The installer's download base is documented as overridable, and curl speaks
 # file://, so a temporary directory holding a tarball and a SHA256SUMS is a
@@ -23,7 +23,10 @@ set -eu
 
 unset CDPATH
 here=$(cd -- "$(dirname -- "$0")" && pwd)
-installer="$here/install.sh"
+# The installer is served from the root of the site, so it lives with the site
+# rather than beside this script (ADR 0062). This is no part of what anybody
+# downloads, which is why it is here and not there.
+installer="$here/../pages/public/install.sh"
 version="v0.0.0-test"
 
 root=$(mktemp -d)

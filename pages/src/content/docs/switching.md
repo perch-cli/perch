@@ -1,12 +1,12 @@
-# Switching, Cycling and Groups
+---
+title: "Switching, Cycling and Groups"
+sidebar:
+  order: 4
+---
 
 `perch switch` with a target moves the whole machine onto an Account you name.
 With no target it picks for you, within the Group the Account you are on belongs
 to. A Group is how you declare which Accounts are interchangeable.
-
-- [Switching](#switching)
-- [Cycling](#cycling)
-- [Managing Groups](#managing-groups)
 
 ## Switching
 

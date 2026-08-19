@@ -4,7 +4,7 @@
 [![Coverage](https://img.shields.io/codecov/c/github/perch-cli/perch?label=coverage)](https://codecov.io/gh/perch-cli/perch)
 [![Latest release](https://img.shields.io/github/v/release/perch-cli/perch?label=release)](https://github.com/perch-cli/perch/releases/latest)
 [![npm](https://img.shields.io/npm/v/perch-cli?label=npm)](https://www.npmjs.com/package/perch-cli)
-[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-blue)](docs/guide/installing.md)
+[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-blue)](pages/src/content/docs/installing.md)
 [![Rust](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fperch-cli%2Fperch%2Fmain%2Frust-toolchain.toml&query=%24.toolchain.channel&label=rust&prefix=v)](rust-toolchain.toml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
@@ -42,7 +42,7 @@ On Windows, `irm https://perch-cli.github.io/perch/install.ps1 | iex`.
 
 Installing by hand, verifying a release's checksum and build provenance, the
 macOS quarantine flag and building from source are all in
-**[the install guide](docs/guide/installing.md)**.
+**[the install guide](pages/src/content/docs/installing.md)**.
 
 ## Getting started
 
@@ -107,24 +107,24 @@ Account in one terminal without changing which is active.
 
 | Command | What it does | More |
 | ------- | ------------ | ---- |
-| `perch status` | the active Account and how full it is | [guide](docs/guide/status.md) |
-| `perch list` | every Account — or one Scope of them — with its Alias, Group, state, Headroom and Utilization, ranked as a Cycle would | [guide](docs/guide/status.md#every-account) |
-| `perch add` | gain an Account by logging in, without disturbing the active one | [guide](docs/guide/accounts.md#adding-an-account) |
-| `perch alias` | name an Account, so no command needs its email address | [guide](docs/guide/accounts.md#naming-an-account) |
-| `perch switch` | make an Account active everywhere, or Cycle within a Group | [guide](docs/guide/switching.md) |
-| `perch watcher` | Cycle automatically when the Account you are on runs low, in a terminal or as a Service | [guide](docs/guide/watching.md) |
-| `perch run` | launch Claude Code as an Account, in this terminal alone | [guide](docs/guide/running.md) |
-| `perch group` | declare which Accounts are interchangeable | [guide](docs/guide/switching.md#managing-groups) |
-| `perch config` | the rules Perch chooses Accounts by | [guide](docs/guide/configuration.md) |
-| `perch disable` / `enable` | keep an Account out of Cycling, or put it back | [guide](docs/guide/accounts.md#keeping-an-account-out-of-cycling) |
-| `perch relogin` | repair an Account whose Credential stopped working | [guide](docs/guide/accounts.md#when-an-account-breaks) |
-| `perch remove` | give up an Account | [guide](docs/guide/accounts.md#giving-up-an-account) |
-| `perch holdings export` / `import` | back up everything Perch holds to one encrypted file, and put it back | [guide](docs/guide/backup.md) |
-| `perch holdings purge` | give the machine back the state it had before Perch | [guide](docs/guide/backup.md#giving-the-machine-back) |
-| `perch upgrade` | replace this Perch with a newer Release, through the channel that installed it | [guide](docs/guide/installing.md#upgrading) |
+| `perch status` | the active Account and how full it is | [guide](pages/src/content/docs/status.md) |
+| `perch list` | every Account — or one Scope of them — with its Alias, Group, state, Headroom and Utilization, ranked as a Cycle would | [guide](pages/src/content/docs/status.md#every-account) |
+| `perch add` | gain an Account by logging in, without disturbing the active one | [guide](pages/src/content/docs/accounts.md#adding-an-account) |
+| `perch alias` | name an Account, so no command needs its email address | [guide](pages/src/content/docs/accounts.md#naming-an-account) |
+| `perch switch` | make an Account active everywhere, or Cycle within a Group | [guide](pages/src/content/docs/switching.md) |
+| `perch watcher` | Cycle automatically when the Account you are on runs low, in a terminal or as a Service | [guide](pages/src/content/docs/watching.md) |
+| `perch run` | launch Claude Code as an Account, in this terminal alone | [guide](pages/src/content/docs/running.md) |
+| `perch group` | declare which Accounts are interchangeable | [guide](pages/src/content/docs/switching.md#managing-groups) |
+| `perch config` | the rules Perch chooses Accounts by | [guide](pages/src/content/docs/configuration.md) |
+| `perch disable` / `enable` | keep an Account out of Cycling, or put it back | [guide](pages/src/content/docs/accounts.md#keeping-an-account-out-of-cycling) |
+| `perch relogin` | repair an Account whose Credential stopped working | [guide](pages/src/content/docs/accounts.md#when-an-account-breaks) |
+| `perch remove` | give up an Account | [guide](pages/src/content/docs/accounts.md#giving-up-an-account) |
+| `perch holdings export` / `import` | back up everything Perch holds to one encrypted file, and put it back | [guide](pages/src/content/docs/backup.md) |
+| `perch holdings purge` | give the machine back the state it had before Perch | [guide](pages/src/content/docs/backup.md#giving-the-machine-back) |
+| `perch upgrade` | replace this Perch with a newer Release, through the channel that installed it | [guide](pages/src/content/docs/installing.md#upgrading) |
 
 Every command has `--help`, and the flags, the exit codes and the paths Perch
-writes are in the [reference](docs/guide/reference.md).
+writes are in the [reference](pages/src/content/docs/reference.md).
 
 ## How it thinks
 
@@ -154,22 +154,22 @@ from them:
 
 ## Guides
 
-[The guide](docs/guide/) is the whole of what each command does, and why it does
-it that way. The same pages, rendered and searchable, are at
-[perch-cli.github.io/perch/guide](https://perch-cli.github.io/perch/guide/):
+[The guide](pages/src/content/docs/) is the whole of what each command does, and
+why it does it that way. The same pages, rendered and searchable, are at
+[perch-cli.github.io/perch](https://perch-cli.github.io/perch/):
 
-- [Installing](docs/guide/installing.md)
-- [Accounts](docs/guide/accounts.md) — adding, naming, keeping out of Cycling,
-  repairing, giving up
-- [Seeing what you have](docs/guide/status.md) — `status`, `list`, Utilization,
-  the JSON
-- [Switching, Cycling and Groups](docs/guide/switching.md)
-- [Watching](docs/guide/watching.md) — the loop, `perch watcher install`, and
-  `perch watcher check` under cron
-- [Running one Account in one terminal](docs/guide/running.md)
-- [Backing up and moving machines](docs/guide/backup.md)
-- [Configuration](docs/guide/configuration.md)
-- [Reference](docs/guide/reference.md) — commands, exit codes, paths
+- [Installing](pages/src/content/docs/installing.md)
+- [Accounts](pages/src/content/docs/accounts.md) — adding, naming, keeping out of
+  Cycling, repairing, giving up
+- [Seeing what you have](pages/src/content/docs/status.md) — `status`, `list`,
+  Utilization, the JSON
+- [Switching, Cycling and Groups](pages/src/content/docs/switching.md)
+- [Watching](pages/src/content/docs/watching.md) — the loop,
+  `perch watcher install`, and `perch watcher check` under cron
+- [Running one Account in one terminal](pages/src/content/docs/running.md)
+- [Backing up and moving machines](pages/src/content/docs/backup.md)
+- [Configuration](pages/src/content/docs/configuration.md)
+- [Reference](pages/src/content/docs/reference.md) — commands, exit codes, paths
 
 ## Design
 
