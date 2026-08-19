@@ -745,6 +745,48 @@ impl Processes for RealHost {
         for (key, value) in env {
             command.env(key, value);
         }
+        // The terminal belongs to the child for as long as it runs, and so do
+        // the keys that interrupt it.
+        //
+        // Ctrl-C is delivered to every process in the foreground group, and
+        // this process is in it. Claude Code handles it — Ctrl-C there clears
+        // the input line rather than exiting — while Perch took the default
+        // disposition and died. The shell's job is `perch`, so the prompt came
+        // back while `claude` was still reading the same tty, two programs
+        // typed at once; and `Claim::drop` never ran, so the session Marker was
+        // left behind for `clients_in` to find and corroborate against a pid
+        // that had gone.
+        //
+        // What an exec wrapper does about that is ignore the signals for the
+        // duration and let the child be the one that acts on them. The child
+        // must not *inherit* the ignoring, which is the trap: a disposition of
+        // `SIG_IGN` survives `exec`, so a `claude` started this way would never
+        // see Ctrl-C at all. So it is put back to the default between the fork
+        // and the exec.
+        #[cfg(unix)]
+        let guarding = {
+            use std::os::unix::process::CommandExt;
+
+            // SAFETY: `signal` is async-signal-safe and is the whole of what
+            // this closure calls, which is the rule for anything between fork
+            // and exec.
+            unsafe {
+                command.pre_exec(|| {
+                    libc::signal(libc::SIGINT, libc::SIG_DFL);
+                    libc::signal(libc::SIGQUIT, libc::SIG_DFL);
+                    Ok(())
+                });
+            }
+
+            // SAFETY: replacing this process's own dispositions with `SIG_IGN`,
+            // and keeping what was there to put back below.
+            let guarding = [libc::SIGINT, libc::SIGQUIT];
+            (
+                guarding,
+                guarding.map(|signal| unsafe { libc::signal(signal, libc::SIG_IGN) }),
+            )
+        };
+
         // Named here for the reason `run` names it: `Command::status`'s error
         // carries no path, so a `claude` that had been uninstalled between
         // Perch finding it and launching it failed a login with "could not
@@ -752,7 +794,28 @@ impl Processes for RealHost {
         // about what was missing or where Perch looked. `commands::run` adds
         // the name back for its own launch; the login path had no equivalent.
         // The kind is kept, so anything matching on `NotFound` still does.
-        let status = command.status().map_err(|err| {
+        let ran = command.status();
+
+        // However the launch ended, including the one that never started. A
+        // process left ignoring Ctrl-C is the same class of mistake as a
+        // terminal left with its echo off, and `read_without_echo` says why it
+        // restores unconditionally.
+        //
+        // `SIG_ERR` is not a disposition — it is what `signal` answers when it
+        // could not install one — so handing it back would install an invalid
+        // handler over whatever was really there.
+        #[cfg(unix)]
+        // SAFETY: restoring exactly the dispositions `signal` reported above.
+        unsafe {
+            let (guarding, previously) = guarding;
+            for (signal, was) in guarding.into_iter().zip(previously) {
+                if was != libc::SIG_ERR {
+                    libc::signal(signal, was);
+                }
+            }
+        }
+
+        let status = ran.map_err(|err| {
             std::io::Error::new(err.kind(), format!("could not run {program}: {err}"))
         })?;
         Ok(ended_as(status))
@@ -1925,6 +1988,48 @@ fn touch_now(path: &Path) -> Result<(), HostError> {
 
 #[cfg(test)]
 mod tests {
+    /// Ctrl-C during a Run belongs to the client, and Perch survives it to put
+    /// its Marker back.
+    ///
+    /// A terminal delivers SIGINT to every process in the foreground group, so
+    /// this process gets one too. Left at the default disposition it died while
+    /// the client was still holding the tty — the shell's prompt returning
+    /// underneath a program still reading it — and `Claim::drop` never ran, so
+    /// the session Marker outlived the Run.
+    ///
+    /// Sent to this process directly rather than to a group, which is what a
+    /// test may do: what is being asserted is the disposition, and a signal
+    /// raised here arrives at the same handler a terminal's would.
+    #[cfg(unix)]
+    #[test]
+    fn an_interrupt_during_a_launch_belongs_to_the_client_and_perch_lives_through_it() {
+        let host = RealHost::new();
+        // A child that outlives the signal below, so the disposition under test
+        // is the one in force *while* something is running.
+        let ran = host.exec_interactive("/bin/sh", &["-c", "kill -INT $PPID; sleep 0"], &[]);
+
+        assert!(
+            ran.is_ok(),
+            "a SIGINT arriving while the child runs is the child's: {ran:?}"
+        );
+
+        // And put back afterwards, or every later Ctrl-C in this process would
+        // be swallowed too. Asked by installing the default and reading back
+        // what was there.
+        // SAFETY: reading the current disposition by replacing it and putting
+        // the answer straight back.
+        let restored = unsafe {
+            let was = libc::signal(libc::SIGINT, libc::SIG_DFL);
+            libc::signal(libc::SIGINT, was);
+            was
+        };
+        assert_ne!(
+            restored,
+            libc::SIG_IGN,
+            "the ignoring is for the launch, not for the rest of the process"
+        );
+    }
+
     /// `curl` is found where it almost always is, and the walk exists for the
     /// machines that do not put it there.
     ///
