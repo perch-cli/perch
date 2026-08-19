@@ -27,7 +27,39 @@ use crate::keychain::{
 /// `PATH` receive an `Authorization: Bearer` header.
 #[cfg(not(windows))]
 fn curl_bin() -> Result<PathBuf, HostError> {
-    Ok(PathBuf::from("/usr/bin/curl"))
+    const USUALLY: &str = "/usr/bin/curl";
+
+    // The absolute path first and almost always, for the reason the paragraph
+    // above gives: nothing earlier on `PATH` gets handed a request carrying an
+    // `Authorization: Bearer` header.
+    //
+    // It was the whole of this function, and on a machine that does not
+    // populate `/usr/bin` — NixOS, and anything else built the same way — that
+    // made every Refresh and every Renewal fail with "could not run
+    // /usr/bin/curl". Perch ships a static Linux binary and an npm package, so
+    // those machines are in the audience whether or not the path is.
+    //
+    // The walk is reached only when the absolute path is *absent*, so no
+    // machine that has `curl` where it is expected is any weaker for it — and
+    // where it is absent there is no safer answer available, only the choice
+    // between a `PATH` walk and not working. The Windows arm has always taken
+    // `%SystemRoot%` from the environment, which anything that can set `PATH`
+    // can set too, so this is the rule that side already lives by.
+    let usually = PathBuf::from(USUALLY);
+    if usually.is_file() {
+        return Ok(usually);
+    }
+
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    std::env::split_paths(&path)
+        .map(|dir| dir.join("curl"))
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(|| {
+            HostError::Other(format!(
+                "curl is not at {USUALLY} and is not on PATH, so Perch cannot \
+                 reach Anthropic. Install curl, or put it on PATH."
+            ))
+        })
 }
 
 /// The same on Windows, where `curl.exe` ships in `System32`. `%SystemRoot%`
@@ -1858,6 +1890,32 @@ fn touch_now(path: &Path) -> Result<(), HostError> {
 
 #[cfg(test)]
 mod tests {
+    /// `curl` is found where it almost always is, and the walk exists for the
+    /// machines that do not put it there.
+    ///
+    /// Asserted as "the absolute path wins where it is present", which is the
+    /// half that carries the security property: nothing earlier on `PATH` is
+    /// ever handed a request bearing an access token on a machine that has
+    /// `curl` where it is expected.
+    #[cfg(not(windows))]
+    #[test]
+    fn curl_is_taken_from_the_absolute_path_wherever_it_is_there() {
+        let found = super::curl_bin().expect("this machine has curl");
+
+        if Path::new("/usr/bin/curl").is_file() {
+            assert_eq!(
+                found,
+                Path::new("/usr/bin/curl"),
+                "the absolute path is preferred, and the walk is the fallback"
+            );
+        } else {
+            assert!(
+                found.is_file() && found.ends_with("curl"),
+                "and where it is not there, the walk found one: {found:?}"
+            );
+        }
+    }
+
     /// The read a passphrase arrives through, driven off a pipe rather than off
     /// standard input — which the suite may not take over, because every other
     /// test in the process is using it.
