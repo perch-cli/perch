@@ -508,6 +508,11 @@ fn a_switch_never_writes_one_accounts_identity_into_anothers_profile() {
     }
 }
 
+/// The Capture is not among them, and that is the decision rather than an
+/// omission: it happens before every Switch without exception (ADR 0006), so
+/// announcing it is the ordinary case announcing that it was ordinary (ADR
+/// 0061). That it happened is asserted where it can be seen — the outgoing
+/// Account's own Profile — rather than by a sentence about it.
 #[test]
 fn the_switch_reports_where_it_landed_and_what_the_cache_says_about_it() {
     let host = machine_with_two_accounts();
@@ -515,12 +520,18 @@ fn the_switch_reports_where_it_landed_and_what_the_cache_says_about_it() {
     let (_, printed) = run_switch(&host, SECOND_EMAIL);
 
     assert!(
-        printed.contains(&format!("Captured {EMAIL}'s live Credential")),
-        "{printed}"
+        printed.contains(&format!("Switched to {SECOND_EMAIL}.")),
+        "an Account somebody named was not chosen, so nothing is said about \
+         choosing it: {printed}"
     );
     assert!(
-        printed.contains(&format!("Switched to {SECOND_EMAIL}")),
-        "{printed}"
+        !printed.contains("Captured"),
+        "and the Capture every Switch makes is silent: {printed}"
+    );
+    assert_eq!(
+        credential_of(&host, EMAIL).as_deref(),
+        Some(CREDENTIAL),
+        "though it did happen — the outgoing Credential is in its own Profile"
     );
     assert!(
         printed.contains("Utilization") && printed.contains("never observed"),

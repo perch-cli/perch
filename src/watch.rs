@@ -772,9 +772,14 @@ pub enum Outcome {
     ///
     /// The Account by name and nothing else about the ranking (ADR 0061). Where
     /// it landed is the one thing about a Switch nobody could have predicted;
-    /// *why that Account won* is Perch defending a ranking to somebody who did
-    /// not question it, and the Cycle's sentence saying so ran to thirty words
-    /// on a line printed every couple of minutes.
+    /// *why that Account won* is an answer to a question nobody asked, on a
+    /// line printed every couple of minutes for as long as the loop runs.
+    ///
+    /// #223 shortened the Cycle's sentence for it — `overflow@example.com has
+    /// the most room.`, down from thirty words — and shortening was not the
+    /// answer here. `perch switch` says the basis because somebody typed it and
+    /// is owed the reason their Account changed under them; a round of a loop
+    /// they set running hours ago is not that moment.
     ///
     /// `unread` is what could not be re-read on the way, and it stays: an
     /// Account ranked on a figure from an hour ago is the one thing that can

@@ -37,9 +37,10 @@ pub struct SwitchArgs {
 /// The Account to switch to, and what deciding on it left to be said.
 struct Decision {
     incoming: Account,
-    /// What the figures the choice was made on cannot promise, said once the
-    /// Switch has landed (ADR 0015).
-    caveat: Option<String>,
+    /// What a Cycle chose this Account on, and the Scope it stayed inside,
+    /// ready to go on the end of the landing line. Absent when somebody named
+    /// the Account, because then nothing was chosen (ADR 0061).
+    chosen: Option<String>,
 }
 
 pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()> {
@@ -52,7 +53,7 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
     // the live Credential under it.
     switch::resolve_a_landing(host, &mut perch, &mut registry)?;
 
-    let Decision { incoming, caveat } = decide(&registry, args.target.as_deref(), host.now(), out)?;
+    let Decision { incoming, chosen } = decide(&registry, args.target.as_deref(), host.now(), out)?;
     let outgoing = registry.active_account().cloned();
 
     // Read once, for the whole command. Both the question below and the Switch
@@ -82,11 +83,14 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
         switch::Reason::Asked,
     )?;
 
-    report(out, &registry, &incoming, &captured, host.now())?;
-    match caveat {
-        Some(caveat) => say(out, &caveat),
-        None => Ok(()),
-    }
+    report(
+        out,
+        &registry,
+        &incoming,
+        chosen.as_deref(),
+        &captured,
+        host.now(),
+    )
 }
 
 /// Which Account this Switch is for, and how it was arrived at.
@@ -113,7 +117,7 @@ fn decide(
                     refuse_a_quarantined_account(registry, &incoming)?;
                     return Ok(Decision {
                         incoming,
-                        caveat: None,
+                        chosen: None,
                     });
                 }
             }
@@ -123,7 +127,6 @@ fn decide(
         None => cycle::scope_for(registry, leaving(registry)?)?,
     };
 
-    say(out, &scope.announcement())?;
     // Nothing is set aside: a Cycle somebody asked for is one they get, and the
     // margin and the cooldown are the watcher's rules for acting unasked
     // (ADR 0013) rather than rules about where a Switch may land.
@@ -134,10 +137,9 @@ fn decide(
         &cycle::SetAside::nothing(),
         now,
     )?;
-    say(out, &choice.because)?;
     Ok(Decision {
+        chosen: Some(choice.basis.in_the(&scope)),
         incoming: choice.account,
-        caveat: choice.caveat,
     })
 }
 
@@ -198,14 +200,18 @@ fn report(
     out: &mut dyn Write,
     registry: &Registry,
     incoming: &Account,
+    chosen: Option<&str>,
     captured: &Captured,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<()> {
     match captured {
-        Captured::Copied { from } => say(
-            out,
-            &format!("Captured {from}'s live Credential into its own Profile."),
-        )?,
+        // Said by nothing, because it happens before every Switch without
+        // exception (ADR 0006) — which is what makes it the ordinary case
+        // announcing that it was ordinary. The reassurance is real and it is
+        // the guide's to give once (ADR 0061). Every other outcome below is a
+        // case where what happened is not what the guide describes, which is
+        // exactly what earns a sentence.
+        Captured::Copied { .. } => {}
         // The one case where a Capture was declined rather than found
         // unnecessary, so it says both what was live and what was spared: the
         // Account Perch believed was active keeps the Credential it already
@@ -259,12 +265,17 @@ fn report(
         )?,
     }
 
+    // Where it landed, and — where the Account was chosen rather than named —
+    // what it was chosen on and the Scope the Cycle stayed inside. One line,
+    // because the guard rail is worth claiming beside the Account it landed on
+    // and the ranking is not worth defending at all (ADR 0061).
+    let named = registry.named_for_the_user(incoming.email());
     say(
         out,
-        &format!(
-            "Switched to {}.",
-            registry.named_for_the_user(incoming.email())
-        ),
+        &match chosen {
+            Some(chosen) => format!("Switched to {named}, {chosen}."),
+            None => format!("Switched to {named}."),
+        },
     )?;
 
     // What the Switch bought, as of the cache and never from the network

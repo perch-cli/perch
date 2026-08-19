@@ -1117,10 +1117,16 @@ fn act(
     }
 
     match switched {
-        // Where it went, and nothing about why it won (ADR 0061). `choice.because`
-        // is the Cycle's ranking rationale — thirty words defending a choice
-        // nobody questioned — and it is dropped here rather than reworded,
-        // which is the same clause `perch switch` no longer prints either.
+        // Where it went, and nothing about why it won (ADR 0061). The Cycle
+        // still answers *what it chose on* — `choice.basis`, which `perch
+        // switch` puts on its landing line — and a round does not ask: nobody
+        // is at the terminal to be owed a reason, and the sentence was printed
+        // every couple of minutes for as long as the loop ran. Dropping the
+        // last reader is what left `Choice` with the basis alone.
+        //
+        // Named as the person named it, like the landing line beside it
+        // (`commands::switch::report`), so an Alias reads the same in the
+        // opening line and in the round that moved off it.
         Ok(_switched) => Ok(Outcome::Switched {
             to: registry.named_for_the_user(choice.account.email()),
             unread,
