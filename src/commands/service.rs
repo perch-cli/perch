@@ -502,13 +502,43 @@ fn is_installed(host: &dyn Host, at: Option<&std::path::Path>) -> Result<bool> {
     }
 }
 
+/// The service-manager binary, spelled the way ADR 0021 asks on the platform
+/// that needs it.
+///
+/// `commands::upgrade::powershell` states the rule and the reason: "A bare name
+/// handed to Windows is searched for in the application directory and *the
+/// current working directory* before `PATH`." `schtasks` is the higher-value
+/// target of the two it applies to — its `/TR` argument is a command line
+/// Windows runs at every logon, so a `schtasks.exe` dropped in a downloads
+/// folder turns `perch watcher install` typed there into attacker-chosen
+/// persistence.
+///
+/// Windows alone. `launchctl` and `systemctl` are found through `PATH`, which
+/// on unix does not include the working directory unless somebody has put it
+/// there, and there is no fixed absolute path for `systemctl` that holds across
+/// distributions — `/bin` on some, `/usr/bin` on others. Spelling one would
+/// trade a hazard this platform does not have for a machine Perch stops
+/// working on.
+fn located(host: &dyn Host, program: &str) -> String {
+    if host.platform() != Platform::Windows {
+        return program.to_string();
+    }
+    match host.env_var("SystemRoot").filter(|root| !root.is_empty()) {
+        Some(root) => format!("{root}\\System32\\{program}.exe"),
+        // Said by the failure rather than refused here: every caller of this
+        // already reports what would not run, and a Windows with no
+        // `SystemRoot` has worse problems than this one.
+        None => program.to_string(),
+    }
+}
+
 /// Whether the service manager says it is running right now.
 fn is_running(host: &dyn Host) -> bool {
     let Some(asking) = service::asking(host.platform(), host.user_id()) else {
         return false;
     };
     let args: Vec<&str> = asking.args.iter().map(String::as_str).collect();
-    host.exec(&asking.program, &args)
+    host.exec(&located(host, &asking.program), &args)
         .map(|ran| ran.succeeded())
         .unwrap_or(false)
 }
@@ -624,7 +654,7 @@ fn nothing_may_act(host: &dyn Host) -> Result<Option<String>> {
 fn drive(host: &dyn Host, steps: Vec<Driven>) -> Result<()> {
     for step in steps {
         let args: Vec<&str> = step.args.iter().map(String::as_str).collect();
-        let ran = host.exec(&step.program, &args);
+        let ran = host.exec(&located(host, &step.program), &args);
         if !step.required {
             continue;
         }

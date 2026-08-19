@@ -1368,3 +1368,44 @@ fn a_purge_refuses_under_a_watcher_run_from_a_terminal_with_no_service_installed
         "nothing was purged: {printed}"
     );
 }
+
+/// On Windows the service-manager binary is spelled out, because a bare name is
+/// searched for in the current working directory first.
+///
+/// `commands::upgrade::powershell` states the rule and ADR 0021 is the rule.
+/// `schtasks` is the higher-value target of the two it covers: its `/TR`
+/// argument is a command line Windows runs at every logon, so a `schtasks.exe`
+/// dropped in a downloads folder turns `perch watcher install` typed there into
+/// attacker-chosen persistence.
+#[test]
+fn windows_runs_the_schtasks_that_ships_with_windows_and_not_whichever_is_nearest() {
+    let system32 = r"C:\Windows\System32\schtasks.exe";
+    let host = watched()
+        .with_platform(Platform::Windows)
+        .with_env("SystemRoot", r"C:\Windows")
+        // Arranged under the absolute name alone. A run that reached for the
+        // bare one finds nothing arranged and fails, which is the assertion.
+        .with_exec(system32, &["/Query", "/TN", r"Perch\Watch"], worked());
+
+    let (result, said) = run_service(&host, WatcherCommand::Status { json: true });
+
+    result.expect("a question");
+    let ran: Vec<String> = host
+        .effects()
+        .iter()
+        .filter_map(|effect| match effect {
+            perch::host::fake::Effect::Exec { program, .. } => Some(program.clone()),
+            _ => None,
+        })
+        .collect();
+
+    assert!(
+        ran.contains(&system32.to_string()),
+        "the binary is spelled out, so the working directory is not searched \
+         first: {ran:?}\n{said}"
+    );
+    assert!(
+        !ran.iter().any(|program| program == "schtasks"),
+        "and the bare name is not used anywhere: {ran:?}"
+    );
+}
