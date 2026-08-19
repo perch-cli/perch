@@ -297,7 +297,10 @@ fn columns(registry: &Registry, account: &Account) -> [String; COLUMNS] {
             .alias_of(account.email())
             .unwrap_or(NOTHING_TO_SAY)
             .to_string(),
-        account.group.clone().unwrap_or_else(|| "none".to_string()),
+        account
+            .group
+            .clone()
+            .unwrap_or_else(|| registry::NO_GROUP.to_string()),
         state_of(account),
         cycle::headroom_phrase(account),
     ]

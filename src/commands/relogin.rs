@@ -472,7 +472,11 @@ fn report(
         "Alias",
         registry.alias_of(account.email()).unwrap_or("-"),
     )?;
-    labeled(out, "Group", held.group.as_deref().unwrap_or("none"))?;
+    labeled(
+        out,
+        "Group",
+        held.group.as_deref().unwrap_or(registry::NO_GROUP),
+    )?;
     labeled(
         out,
         "Cycling",
