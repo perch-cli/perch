@@ -122,6 +122,29 @@ impl Setting {
     /// crosses and this one is only a command line — and both refusals name the
     /// same ranges, from the same constants.
     pub fn write(self, registry: &mut Registry, scope: &Scope, value: &str) -> Result<()> {
+        // The same question `parse` asks, asked again here — and for the reason
+        // this function already gives about `settings_mut` a few lines down: a
+        // `pub fn` on a `pub` type returning a `Result` should refuse rather
+        // than do something nobody asked for.
+        //
+        // What it did without this was write `interchangeable` onto the
+        // Ungrouped Scope when it was handed a *Group*: the Group's `Settings`
+        // were left alone, and the line at the end of this function assigned
+        // `registry.ungrouped.interchangeable` unconditionally. A Setting
+        // applied to a Scope nobody named. Unreachable through
+        // `commands::config`, which calls `parse` first, and unreachable is
+        // where a second caller comes from.
+        if !self.carried_by(scope) {
+            return Err(PerchError::Invalid(format!(
+                "`{}` is the declaration that the Accounts in no Group are \
+                 interchangeable at all, and only they carry it — a Group is \
+                 that declaration rather than something that holds one (ADR \
+                 0002). `perch config set {UNGROUPED} {} <value>` says it.",
+                Setting::Interchangeable.as_str(),
+                Setting::Interchangeable.as_str(),
+            )));
+        }
+
         let mut settings = registry.settings(scope);
         // Carried beside the Settings rather than in them, because a Group has
         // no such line: `parse` has already refused this key on any Scope but
@@ -383,6 +406,35 @@ mod tests {
         assert!(
             refused.to_string().contains(&registry::a_percentage()),
             "refused in the words every other surface uses: {refused}"
+        );
+    }
+
+    /// A Setting the Scope cannot carry is refused rather than written
+    /// somewhere else.
+    ///
+    /// `interchangeable` is the Ungrouped Scope's alone, and `write` never
+    /// asked. Handed a Group it left the Group's Settings untouched and then
+    /// assigned `registry.ungrouped.interchangeable` on the way out — a Setting
+    /// applied to a Scope nobody named. `commands::config` calls `parse` first
+    /// and so cannot reach it, which is the argument for the check rather than
+    /// against it: this function already makes it, one branch further down,
+    /// about `settings_mut`.
+    #[test]
+    fn a_setting_a_group_cannot_carry_is_refused_rather_than_written_elsewhere() {
+        let mut registry = holding_a_group();
+        registry.ungrouped.interchangeable = false;
+
+        let refused = Setting::Interchangeable
+            .write(&mut registry, &work(), "true")
+            .expect_err("a Group is that declaration rather than one that holds it");
+
+        assert!(
+            refused.to_string().contains("interchangeable"),
+            "it names the key: {refused}"
+        );
+        assert!(
+            !registry.ungrouped.interchangeable,
+            "and the Ungrouped Scope, which nobody named, is as it was"
         );
     }
 
