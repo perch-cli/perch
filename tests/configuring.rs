@@ -1026,3 +1026,34 @@ fn a_group_neither_shows_nor_takes_the_declaration_that_is_a_group() {
     result.expect_err("nor answers for it by name");
     assert!(printed.is_empty(), "{printed}");
 }
+
+/// The Ungrouped Scope is named the way a sentence names it, wherever in the
+/// sentence it lands.
+///
+/// `Scope::described` is documented as "the subject of a sentence" and returns
+/// "The Ungrouped Scope" — right at the front of one, and wrong the moment
+/// anything is said before it. Three of `perch config`'s sentences put it in
+/// the middle, so they read "`strategy` on The Ungrouped Scope is now
+/// soonest-reset" and "`foo` is not a Setting The Ungrouped Scope carries."
+///
+/// A Group hid it: "Group `work`" is a name, and a name is spelled the same
+/// wherever it appears, so every one of these sentences reads correctly until
+/// somebody has no Group.
+#[test]
+fn the_ungrouped_scope_is_named_mid_sentence_the_way_a_sentence_names_it() {
+    let host = machine_with_two_accounts();
+
+    let (set, said) = config_set(&host, &["ungrouped", "strategy", "soonest-reset"]);
+    set.expect("the Ungrouped Scope carries a Strategy");
+    assert!(
+        said.contains("on the Ungrouped Scope"),
+        "a capital mid-sentence reads as a different noun: {said}"
+    );
+
+    let (refused, _) = config_get(&host, &["ungrouped", "no-such-key"]);
+    let why = refused.expect_err("there is no such Setting").to_string();
+    assert!(
+        why.contains("Setting the Ungrouped Scope carries"),
+        "and so does the refusal that names it: {why}"
+    );
+}

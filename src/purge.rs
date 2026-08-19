@@ -80,7 +80,7 @@ pub fn refuse_while_anything_is_running(host: &dyn Host, registry: &Registry) ->
     // progress has no Account yet, and a Profile the registry does not hold has
     // no address Perch can put to the user.
     running.extend(
-        what_the_registry_does_not_name(host, registry)
+        what_the_registry_does_not_name(host, registry)?
             .into_iter()
             .filter(|dir| probe::anything_running(host, dir))
             .map(|dir| format!("{}, which no Account of Perch's names", dir.display())),
@@ -106,11 +106,21 @@ pub fn refuse_while_anything_is_running(host: &dyn Host, registry: &Registry) ->
 /// machine. That they were not is how a login in progress came to be deleted by
 /// a Purge that had just asked whether anything was running.
 ///
-/// Silent about a parent that cannot be listed. Absent is the ordinary case for
+/// Silent about a parent that is not *there*. Absent is the ordinary case for
 /// both — no login has been abandoned here, or every Profile the registry names
-/// is every Profile there is — and a directory that genuinely cannot be read is
-/// answered by the deletion pass, which refuses by name.
-fn everything_perch_holds(host: &dyn Host) -> Vec<std::path::PathBuf> {
+/// is every Profile there is.
+///
+/// Every other failure stops the Purge. This used to swallow those too, on the
+/// reasoning that "a directory that genuinely cannot be read is answered by the
+/// deletion pass, which refuses by name" — but that pass walks
+/// [`what_the_registry_does_not_name`], which is this list filtered, so an
+/// unreadable `pending/` answered "there is nothing there" and the deletion pass
+/// had nothing to refuse. `erase` then took the home directory whole, and on
+/// macOS a Credential Store's service name is derived from the directory it
+/// belonged to — so the only names that could ever have reached those keychain
+/// items went with it. A live refresh token, unnameable, under a report saying
+/// the machine had been given back.
+fn everything_perch_holds(host: &dyn Host) -> Result<Vec<std::path::PathBuf>> {
     let mut found = Vec::new();
     for parent in [
         registry::profiles_dir(host),
@@ -119,11 +129,24 @@ fn everything_perch_holds(host: &dyn Host) -> Vec<std::path::PathBuf> {
     .into_iter()
     .flatten()
     {
-        if let Ok(entries) = host.list_dir(&parent) {
-            found.extend(entries);
+        match host.list_dir(&parent) {
+            Ok(entries) => found.extend(entries),
+            Err(crate::host::HostError::NotFound { .. }) => {}
+            Err(err) => {
+                return Err(
+                    PerchError::file_read(parent.clone(), err).with_note(&format!(
+                        "Nothing was purged. Until Perch can list {}, it cannot say \
+                     which Profiles are under it — and a Credential Store is \
+                     named after the directory it belongs to, so a Profile that \
+                     goes unlisted is a Credential that could be left behind \
+                     with nothing left to name it by.",
+                        parent.display(),
+                    )),
+                );
+            }
         }
     }
-    found
+    Ok(found)
 }
 
 /// Deletes every Credential Perch holds, and then everything Perch keeps.
@@ -215,7 +238,7 @@ pub fn erase(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -
 /// have, and a Purge that announced two more than it was asked about would be
 /// answering a question nobody put.
 fn forget_what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) -> Result<()> {
-    for dir in what_the_registry_does_not_name(host, registry) {
+    for dir in what_the_registry_does_not_name(host, registry)? {
         // The same answer `forget_the_credential` gives, and for its reason: a
         // store that cannot even be named is one whose Credential cannot be
         // deleted, and passing over it would report a machine given back while
@@ -253,16 +276,16 @@ fn forget_what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) 
 /// holding Accounts and reporting success on the same machine holding only
 /// their leftovers"), which is the argument for there being one of these rather
 /// than two.
-fn what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) -> Vec<PathBuf> {
+fn what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) -> Result<Vec<PathBuf>> {
     let recorded: Vec<PathBuf> = registry
         .accounts
         .iter()
         .filter_map(|account| account.profile_dir(host).ok())
         .collect();
-    everything_perch_holds(host)
+    Ok(everything_perch_holds(host)?
         .into_iter()
         .filter(|dir| !recorded.contains(dir))
-        .collect()
+        .collect())
 }
 
 /// Empties both of a Profile's Credential Stores, and says whether either held

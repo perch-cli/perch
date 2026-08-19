@@ -679,6 +679,23 @@ mod tests {
         }
     }
 
+    /// A lock somebody else is already holding, planted the way the machine
+    /// would have to produce one.
+    ///
+    /// The parent is made first because `create_dir_exclusive` is `mkdir`
+    /// rather than `mkdir -p`: a lock inside a Profile that does not exist is
+    /// `ENOENT` on a real filesystem, and `take_all` creates that Profile
+    /// before it ever asks for the lock. Planted without it, these cases were
+    /// asserting against a machine that cannot exist — which the fake used to
+    /// allow, because it inserted the path whatever was above it.
+    fn already_held(host: &FakeHost, lock: &LockSpec) {
+        if let Some(parent) = lock.dir.parent() {
+            host.create_dir_all(parent).expect("the Profile is there");
+        }
+        host.create_dir_exclusive(&lock.dir)
+            .expect("nobody was holding it yet");
+    }
+
     #[test]
     fn work_that_outlasts_the_update_interval_says_the_lock_is_still_held() {
         let host = FakeHost::new();
@@ -777,7 +794,7 @@ mod tests {
             // over. Their hold is the one at the path now.
             host.sleep(90_000);
             host.remove_dir_all(&lock.dir).unwrap();
-            host.create_dir_exclusive(&lock.dir).unwrap();
+            already_held(&host, &lock);
             held.renew();
             Ok(())
         });
@@ -821,7 +838,7 @@ mod tests {
             let left = host.modified_at(&lock.dir).expect("the artifact is there");
             if (host.now() - left).num_milliseconds() >= lock.stale_millis {
                 host.remove_dir_all(&lock.dir).unwrap();
-                host.create_dir_exclusive(&lock.dir).unwrap();
+                already_held(host, lock);
             }
         }
 
@@ -1102,7 +1119,7 @@ mod tests {
         let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
         let host = FakeHost::new().with_unreadable_file(&lock.dir, "Permission denied");
         // Held by somebody, and refusing to say when they last said so.
-        host.create_dir_exclusive(&lock.dir).unwrap();
+        already_held(&host, &lock);
 
         let outcome: Result<()> = under(&host, vec![lock.clone()], |_| Ok(()));
 

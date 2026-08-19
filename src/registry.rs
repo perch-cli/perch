@@ -411,6 +411,26 @@ impl Scope {
         }
     }
 
+    /// The Scope in the middle of a sentence *about the Scope itself*: "a
+    /// Setting {} carries", "`strategy` on {} is now …".
+    ///
+    /// [`Scope::described`] with the capital taken off, which is the whole
+    /// difference and the whole point: that one is documented as a subject and
+    /// reads as "The Ungrouped Scope", which is right standing at the front of
+    /// a sentence and wrong everywhere else. `perch config` said "`strategy` on
+    /// The Ungrouped Scope is now soonest-reset" and "`foo` is not a Setting The
+    /// Ungrouped Scope carries."
+    ///
+    /// A Group is unaffected either way — "Group `work`" is a name, and a name
+    /// is spelled the same wherever it appears — which is exactly why this went
+    /// unnoticed: every sentence reads correctly until somebody has no Group.
+    pub fn mentioned(&self) -> String {
+        match self {
+            Scope::Ungrouped => "the Ungrouped Scope".to_string(),
+            Scope::Group(_) => self.described(),
+        }
+    }
+
     /// The Scope as the middle of a sentence about the Accounts in it: "every
     /// Account in {}".
     ///
@@ -679,8 +699,14 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
 /// written at all. The registry already carries one dangling-pointer check for
 /// what this names; a second field would need a second, held by nothing but
 /// care.
+///
+/// `deny_unknown_fields` for the reason [`load`] gives for every other type
+/// here, and this was the one that did not carry it. A `leavign` in a Landing
+/// deserialized as `leaving: None` and said nothing — so the Landing claimed
+/// Perch had been on nobody, and the next Switch's Capture had no Profile to
+/// file the outgoing Credential into.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Active {
     /// Perch is on nobody: a machine that has never Switched, one a removal
     /// left with nowhere to land, or one a repair took off the Account it could
@@ -1388,8 +1414,23 @@ impl Registry {
         let previous = self.alias_of(email).map(str::to_string);
         self.refuse_a_name_nothing_may_answer_to(NameKind::Alias, alias, previous.as_deref())?;
 
+        // The address as the registry *holds* it, not as it was typed. The
+        // paragraph above is about the lookup — `CAFÉ@example.com` reaches the
+        // Account held as `café@example.com` — and then this stored the
+        // capitalized spelling as the map's value, so the Alias pointed at a
+        // string no `accounts` entry has.
+        //
+        // `target::matched` is where the two come apart: its Account arm hands
+        // back `account.email()` and its Alias arm hands back this value, so one
+        // Target carried the held spelling and the other did not. Every
+        // downstream lookup folds case, which is why nothing breaks today — and
+        // is exactly the shape `is_active`'s own doc spends a paragraph warning
+        // about, one exact `==` away from a wrong answer.
+        let held = self
+            .account(email)
+            .map_or_else(|| email.to_string(), |account| account.email().to_string());
         self.aliases.retain(|_, named| !same_name(named, email));
-        self.aliases.insert(alias.to_string(), email.to_string());
+        self.aliases.insert(alias.to_string(), held);
         Ok(previous)
     }
 
@@ -1550,7 +1591,21 @@ pub fn profiles_dir(host: &dyn Host) -> Result<PathBuf> {
 /// Profile, which is what the rule above already claims it is.
 pub fn the_default_profile(host: &dyn Host) -> Result<crate::probe::Store> {
     let told = crate::probe::default_store(host)?;
-    if told.config_dir.starts_with(perch_home(host)?) {
+    let home = perch_home(host)?;
+    // Both sides resolved before they are compared, and through *every* link on
+    // the path rather than one at the end: `starts_with` matches path
+    // components, so a `CLAUDE_CONFIG_DIR` reaching a Profile by another name —
+    // `~/claude` linked at `~/.config/perch/profiles`, or a relative
+    // `PERCH_HOME`, which `perch_home` takes verbatim — is a different string
+    // and slips past. The link that does it is usually a directory *above* the
+    // one named, which is why the last component alone is not enough.
+    //
+    // Past it, a `perch switch` typed in that shell Captures the live
+    // Credential into a Profile another Account may be running against, which
+    // is the failure the paragraph above describes reached by the route it did
+    // not check. `reconcile` resolves this same class the same way.
+    let told_at = crate::host::through_every_link(host, &told.config_dir);
+    if told_at.starts_with(crate::host::through_every_link(host, &home)) {
         return crate::probe::default_profile_store(host);
     }
     Ok(told)
@@ -1996,17 +2051,12 @@ pub fn validate(registry: &Registry) -> Result<()> {
     // hand edit produces — after which `account` and `account_mut` silently act
     // on the first of them, `perch list` renders one Account as two rows, and a
     // Cycle counts it twice when it ranks the Group.
-    let mut held: Vec<&str> = Vec::new();
-    for account in &registry.accounts {
-        if let Some(already) = held.iter().find(|seen| same_name(seen, account.email())) {
-            return Err(PerchError::Invalid(format!(
-                "The registry holds two Accounts spelled `{already}` and `{}`, \
-                 which are one Account — so which entry a command reads, and \
-                 which one it writes, is not decided by anything.",
-                account.email(),
-            )));
-        }
-        held.push(account.email());
+    if let Some((already, again)) = first_collision(registry.accounts.iter().map(Account::email)) {
+        return Err(PerchError::Invalid(format!(
+            "The registry holds two Accounts spelled `{already}` and `{again}`, \
+             which are one Account — so which entry a command reads, and which \
+             one it writes, is not decided by anything."
+        )));
     }
 
     // Two names in the *same* half of the namespace that differ only in case.
@@ -2021,6 +2071,28 @@ pub fn validate(registry: &Registry) -> Result<()> {
     // `aliases` holding both `work` and `Work` renders one of them in `perch
     // list` and resolves `perch switch work` to the other, and freeing `work`
     // frees neither reliably.
+    // What `checks` is keyed on, which is the one pointer into the Group
+    // namespace nothing was asking about. `record_check` falls back to the name
+    // it was handed when it cannot resolve one — which it has to, because the
+    // Ungrouped Scope is not a declared Group and still keeps a Cooldown — and
+    // `forget_group` only clears entries for names it *can* resolve. So an
+    // entry could outlive every Group that could explain it, pacing a Scope
+    // nothing else in the file mentions.
+    //
+    // Refused here for the reason the dangling-Alias check above is: this
+    // module already declines a dangling `active` and a dangling `aliases`, and
+    // `checks` was the third pointer with no such rule.
+    for named in registry.checks.keys() {
+        if same_name(named, UNGROUPED) || registry.declared_group(named).is_some() {
+            continue;
+        }
+        return Err(PerchError::Invalid(format!(
+            "The registry records a Check against `{named}`, which is neither a \
+             Group Perch holds nor the Accounts in no Group — so the Cooldown it \
+             carries paces nothing."
+        )));
+    }
+
     refuse_two_names_that_differ_only_in_case(NameKind::Group, registry.groups.keys())?;
     refuse_two_names_that_differ_only_in_case(NameKind::Alias, registry.aliases.keys())?;
 
@@ -2089,19 +2161,38 @@ fn refuse_two_names_that_differ_only_in_case<'a>(
     kind: NameKind,
     names: impl Iterator<Item = &'a String>,
 ) -> Result<()> {
+    match first_collision(names.map(String::as_str)) {
+        None => Ok(()),
+        Some((already, name)) => Err(PerchError::Invalid(format!(
+            "The registry holds {} `{already}` and `{name}`, which differ only \
+             in case — so which one a Target finds is not decided by anything.",
+            kind.article(),
+        ))),
+    }
+}
+
+/// The first pair of names in a sequence that [`same_name`] cannot tell apart,
+/// earlier one first.
+///
+/// Three loops in this module were this loop: two names in one half of the
+/// namespace, two Accounts spelled alike, and two Aliases given to one Account.
+/// They differ only in the sentence they raise, which is the part worth writing
+/// three times — every one of them says *which* answer is not decided by
+/// anything, and that is different each time.
+///
+/// Quadratic, deliberately. It is a registry: a machine with enough Accounts for
+/// that to matter is one nobody has, and the alternative is a map keyed on a
+/// lowercased copy of every name — which is the allocation this comparison
+/// avoids, spent to save a comparison nobody is waiting on.
+fn first_collision<'a>(names: impl Iterator<Item = &'a str>) -> Option<(&'a str, &'a str)> {
     let mut seen: Vec<&str> = Vec::new();
     for name in names {
         if let Some(already) = seen.iter().find(|held| same_name(held, name)) {
-            return Err(PerchError::Invalid(format!(
-                "The registry holds {} `{already}` and `{name}`, which differ \
-                 only in case — so which one a Target finds is not decided by \
-                 anything.",
-                kind.article(),
-            )));
+            return Some((already, name));
         }
         seen.push(name);
     }
-    Ok(())
+    None
 }
 
 /// Refuses a name in the registry that `declare_group` or `perch alias` would
@@ -2842,6 +2933,118 @@ mod tests {
         );
     }
 
+    /// No directory under Perch's own home is the Default Profile — including
+    /// one reached by another name.
+    ///
+    /// The guard was `told.config_dir.starts_with(perch_home)`, which compares
+    /// path components, so a link anywhere above the directory named makes two
+    /// spellings of one place and only one of them matches. Past it, a `perch
+    /// switch` typed in that shell Captures the live Credential into a Profile
+    /// another Account may be running against and records Perch as active on an
+    /// Account the machine is not on — the failure this function's own doc
+    /// describes, reached by the route it did not check.
+    #[test]
+    fn a_profile_reached_through_a_link_is_still_not_the_default_profile() {
+        let home = "/Users/someone/.config/perch";
+        let host = crate::host::FakeHost::new()
+            // How somebody comes to have this: a shorter name for the Profiles
+            // directory, and a `CLAUDE_CONFIG_DIR` pointing inside it.
+            .with_link(
+                crate::host::Link::Symbolic,
+                format!("{home}/profiles"),
+                "/Users/someone/claude",
+            )
+            .with_env("CLAUDE_CONFIG_DIR", "/Users/someone/claude/work");
+
+        let store = the_default_profile(&host).expect("a Default Profile is known");
+
+        assert!(
+            !store.config_dir.starts_with("/Users/someone/claude"),
+            "a Profile is never the Default Profile, whichever name reaches it: {:?}",
+            store.config_dir
+        );
+        assert_eq!(
+            store.config_dir,
+            crate::probe::default_profile_store(&host)
+                .expect("the real Default Profile")
+                .config_dir,
+        );
+    }
+
+    /// A Check recorded against a Group nothing declares is refused, like every
+    /// other pointer in the file.
+    ///
+    /// `active` and `aliases` have had a dangling-pointer rule for as long as
+    /// they have pointed anywhere; `checks` is the third and had none.
+    /// `record_check` keeps the name it was handed when it cannot resolve one —
+    /// which it must, because the Ungrouped Scope is not a declared Group and
+    /// still keeps a Cooldown — and `forget_group` only clears what it can
+    /// resolve, so an entry could outlive every Group that explains it.
+    #[test]
+    fn a_check_against_a_group_nothing_declares_is_not_a_registry() {
+        let mut registry = Registry::default();
+        registry.checks.insert(
+            "a-group-nobody-declared".to_string(),
+            Checked {
+                switched_at: Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap(),
+            },
+        );
+
+        let refused = validate(&registry).expect_err("the Cooldown paces nothing");
+        assert!(
+            refused.to_string().contains("a-group-nobody-declared"),
+            "it names the entry: {refused}"
+        );
+
+        // The Ungrouped Scope keeps one and is not a Group, which is why the
+        // fallback that produces these entries exists at all.
+        registry.checks.clear();
+        registry.checks.insert(
+            UNGROUPED.to_string(),
+            Checked {
+                switched_at: Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap(),
+            },
+        );
+        validate(&registry).expect("the Accounts in no Group Cycle too");
+    }
+
+    /// An Alias points at the address the registry holds, whichever spelling
+    /// was typed to set it.
+    ///
+    /// `name_account` looks the Account up with `same_name`, so
+    /// `CAFÉ@example.com` reaches the Account held as `café@example.com` — and
+    /// then stored the capitalized spelling as the map's value, pointing the
+    /// Alias at a string no `accounts` entry has. `target::matched` hands back
+    /// `account.email()` for an Account and this value for an Alias, so the two
+    /// Targets carried different spellings of one Account.
+    #[test]
+    fn an_alias_points_at_the_address_as_the_registry_holds_it() {
+        let mut registry = Registry::default();
+        registry.upsert(Account {
+            identity: crate::probe::Identity {
+                email: "café@example.com".to_string(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            disabled: false,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        });
+
+        registry
+            .name_account("work", "CAFÉ@example.com")
+            .expect("the name is free and the Account is there");
+
+        assert_eq!(
+            registry.aliases.get("work").map(String::as_str),
+            Some("café@example.com"),
+            "the Alias names the Account, and the Account has one spelling"
+        );
+    }
+
     /// A key nobody recognizes is a refusal naming it, rather than a value that
     /// quietly did nothing and was then erased.
     ///
@@ -2866,6 +3069,19 @@ mod tests {
             (
                 format!("{{\"version\":{CURRENT_VERSION},\"accounts\":[],\"aliasses\":{{}}}}"),
                 "aliasses",
+            ),
+            // The Landing was the one shape exempt from this, because `Active`
+            // was the one type without the attribute. A transposed `leaving`
+            // deserialized as `None`, which is not nothing: it is the Landing
+            // saying Perch had been on nobody, so the Capture that resumes it
+            // has no Profile to file the outgoing Credential into.
+            (
+                format!(
+                    "{{\"version\":{CURRENT_VERSION},\"accounts\":[],\"active\":\
+                     {{\"landing\":{{\"leavign\":\"one@example.com\",\
+                     \"arriving\":\"two@example.com\"}}}}}}"
+                ),
+                "leavign",
             ),
         ] {
             let host = crate::host::FakeHost::new().with_file(path, &written);

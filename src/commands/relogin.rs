@@ -472,7 +472,8 @@ fn report(
         "Alias",
         registry.alias_of(account.email()).unwrap_or("-"),
     )?;
-    labeled(out, "Group", held.group.as_deref().unwrap_or("none"))?;
+    let group = held.group.as_deref().unwrap_or(registry::NO_GROUP);
+    labeled(out, "Group", group)?;
     labeled(
         out,
         "Cycling",
@@ -487,5 +488,12 @@ fn report(
 /// The three things a repair leaves exactly as it found them, in a column of
 /// their own so they read as a list of what was kept.
 fn labeled(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {
-    say(out, &format!("{:<9}{value}", format!("{label}:")))
+    // `padded` rather than `{:<9}`, which pads by *characters*. Every label
+    // here is an ASCII literal so the two agree today, and
+    // `utilization::padded` exists because they do not in general — a column
+    // laid out by counting `char`s is one that steps out of line the first time
+    // anything wide or combining goes through it. One way of measuring a column
+    // across Perch, and this was one of two places using the other one.
+    let label = crate::utilization::padded(&format!("{label}:"), 9);
+    say(out, &format!("{label}{value}"))
 }

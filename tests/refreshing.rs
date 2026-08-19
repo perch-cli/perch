@@ -285,6 +285,22 @@ fn a_credential_a_client_is_holding_is_never_renewed() {
     );
     assert!(printed.contains("4242"), "{printed}");
     assert!(printed.contains("cached figure"), "{printed}");
+    // And *which* directory the client is in. The active Account is asked about
+    // from two — the Default Profile and its own — so "a client is running
+    // against that Account" left the reader to guess which one to quit. The
+    // Switch path has always named the Profile in its refusal.
+    //
+    // Derived rather than spelled, the way `second_service` is and for the same
+    // reason: a path built by joining uses the separator of whatever platform
+    // the build is for, so a hardcoded `/Users/someone/.claude` asserts nothing
+    // on Windows but its own spelling.
+    let default_profile = perch::registry::the_default_profile(&host)
+        .expect("the Default Profile is known")
+        .config_dir;
+    assert!(
+        printed.contains(&default_profile.display().to_string()),
+        "the refusal names the directory holding the client: {printed}"
+    );
 }
 
 /// A Profile with a Run against it is Live by Perch's own marker (ADR 0027),
@@ -931,5 +947,108 @@ fn a_refresh_mid_landing_reads_the_account_named_rather_than_whatever_is_live() 
         cached_windows(&host, SECOND_EMAIL).is_empty(),
         "and nothing was filed against the Account arriving, which nobody asked \
          about"
+    );
+}
+
+/// A Profile is `profiles_dir` joined with the slugged address, and the slug
+/// flattens everything that is not alphanumeric — so two addresses that differ
+/// only in punctuation derive one directory, and therefore one Credential
+/// Store.
+///
+/// Every path that *acts* as an Account refuses that state before it moves
+/// anything: `perch add`, `perch holdings import`, `perch switch`, `perch run`,
+/// `perch relogin` and `perch remove` each ask. A Renewal did not, and it is the
+/// write ADR 0006 calls unrecoverable — Anthropic retires the old refresh token
+/// when it Rotates, so renewing here spends a token that is not this Account's.
+///
+/// The state is only reachable by hand, because the doors that make an Account
+/// all refuse it. That is exactly why the guard belongs on the write rather
+/// than only on the doors.
+#[test]
+fn an_account_that_shares_a_profile_with_another_is_never_renewed() {
+    let host = machine_with_two_accounts();
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
+    let host = host.with_reply(TOKEN_URL, 200, RENEWED);
+
+    // The second Account, respelled so that it slugs to the same directory as
+    // the active one: `someone@example.com` and `someone@example-com` are two
+    // Accounts to Perch and one Profile to the filesystem.
+    let mut registry = registry_of(&host);
+    let sharer = "someone@example-com";
+    registry
+        .accounts
+        .iter_mut()
+        .find(|account| account.email() == SECOND_EMAIL)
+        .expect("the second Account")
+        .identity
+        .email = sharer.to_string();
+    save_registry(&host, &registry);
+    host.forget_effects();
+
+    let (result, printed) = run_status_refresh(&host, false);
+
+    result.expect("an Account Perch may not renew is not a failed command");
+    assert!(
+        host.sent_to(TOKEN_URL).is_empty(),
+        "a Rotation here would retire a refresh token belonging to {sharer}"
+    );
+    assert!(
+        printed.contains(sharer),
+        "the refusal names the Account it is protecting: {printed}"
+    );
+    assert!(printed.contains("cached figure"), "{printed}");
+}
+
+/// Everything between Anthropic answering and the Rotation being on disk has to
+/// survive a slow store, not only the request itself.
+///
+/// `renew_under_the_lock` wrapped the network call in `Holds::around` and said
+/// why — "a request to Anthropic can take longer than [ten seconds] on its own,
+/// so a renewal that only happens between steps leaves the longest step of all
+/// running under a lock somebody else may take over". Everything *after* it ran
+/// under no renewal at all: on macOS `profile::store_credential` is a `security`
+/// write, a read-back and a supersede of the other store, and a keychain that
+/// stops to ask the user for permission stretches that without bound.
+///
+/// Claude Code's config lock goes stale in ten seconds. Let run out, any client
+/// on the machine is entitled to clear the artifact and take the lock while
+/// Perch is writing the Rotated Credential under it — and Anthropic has already
+/// retired the old refresh token by then, which is the loss ADR 0006 calls
+/// unrecoverable. `switch::perform` wraps its own `store_credential` for exactly
+/// this reason; this path was the one that did not.
+#[test]
+fn a_keychain_dialog_somebody_walked_away_from_does_not_cost_perch_the_locks_a_rotation_needs() {
+    let host = machine_with_two_accounts().with_a_keychain_that_asks_first(20_000);
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
+    let host = host
+        .with_reply(TOKEN_URL, 200, RENEWED)
+        .with_reply_to(PROFILE_URL, RENEWED_TOKEN, 200, &profile_of(EMAIL))
+        .with_reply_to(USAGE_URL, RENEWED_TOKEN, 200, USAGE);
+    host.forget_effects();
+
+    let (result, printed) = run_status_refresh(&host, false);
+
+    result.expect("the Renewal lands");
+    // Asserted as ordering rather than as a count. The fake's clock only moves
+    // when something slow happens, so every renewal before the store falls
+    // inside the update interval and touches nothing — which is exactly right,
+    // and leaves "was the hold kept up *across the write*" as the only question
+    // the effects can answer.
+    let effects = host.effects();
+    let wrote = effects
+        .iter()
+        .position(|effect| matches!(effect, Effect::KeychainSet { .. }))
+        .expect("the Rotation is stored");
+    let renewed_after = effects
+        .iter()
+        .skip(wrote)
+        .any(|effect| matches!(effect, Effect::Touched(path) if path.starts_with(CONFIG_LOCK)));
+
+    assert!(
+        renewed_after,
+        "the hold is renewed across the store rather than only across the \
+         request, so a keychain dialog nobody answered does not hand the lock \
+         to a client mid-Rotation\n{:#?}\n{printed}",
+        effects
     );
 }

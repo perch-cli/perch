@@ -23,6 +23,7 @@
 //! process Perch starts is.
 
 use crate::host::{Execution, double_quoted};
+use zeroize::Zeroizing;
 
 /// The `security` binary. Never a build of Perch, never a crate — see ADR 0008.
 pub const SECURITY_BIN: &str = "/usr/bin/security";
@@ -94,15 +95,20 @@ pub fn add_command_line(
     service: &str,
     account: &str,
     secret: &str,
-) -> Result<String, KeychainError> {
+) -> Result<Zeroizing<String>, KeychainError> {
     inert("the keychain service name", service)?;
     inert("the keychain account name", account)?;
-    Ok(format!(
+    // `Zeroizing`, because this line holds the Credential — hex-encoded, which
+    // is an encoding and not a protection. The read path goes to the trouble of
+    // wiping `security`'s stdout and `StoredCredential` is `Zeroizing`
+    // throughout, so the invariant is explicit everywhere except the write that
+    // puts a Credential *there*, which is the one direction that had none.
+    Ok(Zeroizing::new(format!(
         "add-generic-password -U -s {} -a {} -X {}\n",
         double_quoted(service),
         double_quoted(account),
-        hex_encode(secret.as_bytes()),
-    ))
+        hex_encode(secret.as_bytes()).as_str(),
+    )))
 }
 
 /// Refuses a value that would be punctuation rather than a value.
@@ -131,13 +137,18 @@ pub fn write_path_for(command_line: &str) -> WritePath {
     }
 }
 
-pub fn hex_encode(bytes: &[u8]) -> String {
+pub fn hex_encode(bytes: &[u8]) -> Zeroizing<String> {
     use std::fmt::Write;
 
     // Written into the buffer rather than formatted into a `String` per byte,
     // which is a transient allocation for every one of the several thousand a
-    // Credential runs to.
-    let mut out = String::with_capacity(bytes.len() * 2);
+    // Credential runs to — and every one of those would have been a fragment of
+    // the Credential in freed heap.
+    //
+    // The buffer is reserved at the full width for the same reason, so it never
+    // grows: a `Vec` that reallocates copies and frees the old block untouched,
+    // which is what `export::Wiping` exists to avoid one module over.
+    let mut out = Zeroizing::new(String::with_capacity(bytes.len() * 2));
     for byte in bytes {
         let _ = write!(out, "{byte:02X}");
     }
@@ -225,12 +236,17 @@ mod tests {
     fn a_hex_reply_carries_its_trailing_newline_through_the_decode() {
         let credential = "{\"a\":1}\n";
         let encoded = hex_encode(credential.as_bytes());
-        assert_eq!(decode_password_output(&format!("{encoded}\n")), credential);
+        assert_eq!(
+            decode_password_output(&format!("{}\n", encoded.as_str())),
+            credential
+        );
     }
 
     /// The `-i` line for an ordinary write, which every test below is about.
     fn line(service: &str, account: &str, secret: &str) -> String {
-        add_command_line(service, account, secret).expect("ordinary names")
+        add_command_line(service, account, secret)
+            .expect("ordinary names")
+            .to_string()
     }
 
     #[test]

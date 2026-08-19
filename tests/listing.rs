@@ -1240,3 +1240,26 @@ fn the_utilization_figures_line_up_down_the_column_across_unalike_accounts() {
         "the same window's percentage is in the same column on both: {printed}"
     );
 }
+
+/// A machine holding nothing is diagnosed the same way whichever Scope was
+/// named.
+///
+/// `perch list` on an empty machine says "No Accounts yet"; `perch list
+/// ungrouped` said "Every Account is in a Group", which is a true-sounding
+/// sentence about a machine with no Account to be in one. Narrowing a listing
+/// should change what it shows, not what Perch says is the matter.
+#[test]
+fn narrowing_a_listing_on_an_empty_machine_does_not_change_the_diagnosis() {
+    let host = machine_holding(&Registry::default());
+
+    let (bare, everything) = run_list(&host, false);
+    bare.expect("an empty machine is not a failed listing");
+    let (narrowed, ungrouped) = run_list_in(&host, "ungrouped", false);
+    narrowed.expect("nor is a narrowed one");
+
+    assert!(everything.contains("No Accounts yet"), "{everything}");
+    assert!(
+        ungrouped.contains("No Accounts yet"),
+        "there is no Account to be in a Group: {ungrouped}"
+    );
+}

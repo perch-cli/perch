@@ -106,7 +106,7 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     // Held rather than refused outright, and `20` is already the code that says
     // so: a scheduler reading it comes back at the next Check, which is exactly
     // right for a lock somebody else is holding now.
-    let _watching_alone = match lock::take_all(host, vec![registry::watcher_lock_spec(host)?]) {
+    let mut watching_alone = match lock::take_all(host, vec![registry::watcher_lock_spec(host)?]) {
         Ok(held) => held,
         Err(PerchError::Busy(why)) => {
             say(out, &watch::held_line(&why, None, host.now()))?;
@@ -123,6 +123,7 @@ pub fn check(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         Watcher::Check,
         &mut Recently::nothing(),
         &mut Backoff::none(),
+        &mut watching_alone,
     ) {
         Ok(turn) => turn,
         // The one outcome that reached a check without a line, and the one most
@@ -209,54 +210,58 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
             return handed_over(out);
         }
 
-        let (waiting_for, spoken) =
-            match one_round(host, Watcher::Loop, &mut recently, &mut backoff) {
-                Ok(Turn::Decided(round)) => {
-                    let waiting_for = round.waiting_for();
-                    let line = round.line(host.now());
-                    match round.held_because() {
-                        // The wait this round announced *is* what it will do next,
-                        // so it is what the coalescing compares: a back-off that has
-                        // doubled has changed the line, and a changed line is said.
-                        Some(why) => (waiting_for, Spoken::held(why, Some(waiting_for), line)),
-                        None => (waiting_for, Spoken::Decided(line)),
-                    }
+        let (waiting_for, spoken) = match one_round(
+            host,
+            Watcher::Loop,
+            &mut recently,
+            &mut backoff,
+            &mut watching_alone,
+        ) {
+            Ok(Turn::Decided(round)) => {
+                let waiting_for = round.waiting_for();
+                let line = round.line(host.now());
+                match round.held_because() {
+                    // The wait this round announced *is* what it will do next,
+                    // so it is what the coalescing compares: a back-off that has
+                    // doubled has changed the line, and a changed line is said.
+                    Some(why) => (waiting_for, Spoken::held(why, Some(waiting_for), line)),
+                    None => (waiting_for, Spoken::Decided(line)),
                 }
-                // The machine is not arranged for watching: no active Account, an
-                // ungrouped one nobody has declared interchangeable, or a Scope that
-                // has not said the watcher may act. ADR 0013 stopped the loop on
-                // these; ADR 0040 holds it instead, because a supervisor respawns a
-                // deliberate exit until it gives up on the unit, and launchd cannot
-                // be told otherwise.
-                //
-                // Nothing is charged to the back-off, and the ordinary interval is
-                // waited: this round asked the registry rather than Anthropic, and
-                // pacing a loop on a question that costs nothing would be pacing it
-                // on nothing. Nothing was read and nothing was decided, which is
-                // exactly what a hold is.
-                Ok(Turn::NotArranged(why)) => {
-                    let why = why.to_string();
-                    let line =
-                        watch::held_line(&why, Some(watch::REFRESH_INTERVAL_MILLIS), host.now());
-                    (
-                        watch::REFRESH_INTERVAL_MILLIS,
-                        Spoken::held(&why, Some(watch::REFRESH_INTERVAL_MILLIS), line),
-                    )
-                }
-                // Another `perch` holding the registry is an ordinary event, not a
-                // fault: this loop runs for hours beside the commands a person
-                // types, and `perch status --refresh` holds the lock across every
-                // Renewal and every read it makes — comfortably longer than the few
-                // seconds `lock::take` waits. Ending the watcher over that would
-                // mean a `perch status` could stop it, silently, and the machine
-                // would go unwatched until somebody noticed.
-                //
-                // So it is held like any other round that could not read: counted
-                // against the back-off, said out loud with when it will try again,
-                // and gone round again (ADR 0013, ADR 0018).
-                Err(PerchError::Busy(why)) => held_before_a_round(&mut backoff, &why, host.now()),
-                Err(other) => return Err(other),
-            };
+            }
+            // The machine is not arranged for watching: no active Account, an
+            // ungrouped one nobody has declared interchangeable, or a Scope that
+            // has not said the watcher may act. ADR 0013 stopped the loop on
+            // these; ADR 0040 holds it instead, because a supervisor respawns a
+            // deliberate exit until it gives up on the unit, and launchd cannot
+            // be told otherwise.
+            //
+            // Nothing is charged to the back-off, and the ordinary interval is
+            // waited: this round asked the registry rather than Anthropic, and
+            // pacing a loop on a question that costs nothing would be pacing it
+            // on nothing. Nothing was read and nothing was decided, which is
+            // exactly what a hold is.
+            Ok(Turn::NotArranged(why)) => {
+                let why = why.to_string();
+                let line = watch::held_line(&why, Some(watch::REFRESH_INTERVAL_MILLIS), host.now());
+                (
+                    watch::REFRESH_INTERVAL_MILLIS,
+                    Spoken::held(&why, Some(watch::REFRESH_INTERVAL_MILLIS), line),
+                )
+            }
+            // Another `perch` holding the registry is an ordinary event, not a
+            // fault: this loop runs for hours beside the commands a person
+            // types, and `perch status --refresh` holds the lock across every
+            // Renewal and every read it makes — comfortably longer than the few
+            // seconds `lock::take` waits. Ending the watcher over that would
+            // mean a `perch status` could stop it, silently, and the machine
+            // would go unwatched until somebody noticed.
+            //
+            // So it is held like any other round that could not read: counted
+            // against the back-off, said out loud with when it will try again,
+            // and gone round again (ADR 0013, ADR 0018).
+            Err(PerchError::Busy(why)) => held_before_a_round(&mut backoff, &why, host.now()),
+            Err(other) => return Err(other),
+        };
 
         say_it(out, &mut holding, spoken, host.now())?;
 
@@ -678,6 +683,7 @@ fn one_round(
     watcher: Watcher,
     recently: &mut Recently,
     backoff: &mut Backoff,
+    watching_alone: &mut crate::lock::Held<'_>,
 ) -> Result<Turn> {
     // Adoption is the first thing a round asks the machine for, and on a machine
     // Perch has never run on it is the first thing that can refuse: no Claude
@@ -715,6 +721,19 @@ fn one_round(
     // the code the refusal earned, because a scheduler has to be told.
     let settled = match switch::resolve_a_landing(host, &mut perch, &mut registry) {
         Ok(settled) => settled,
+        // `Busy` passed through untouched, exactly as the adoption lock above
+        // is, and for the reason written there: both callers already answer it
+        // and they answer it differently. Wrapped as `NotArranged` it became
+        // `Err(why)` out of `check`, which `main` writes to standard *error* —
+        // so the one promise this module makes about a Check ("the line goes to
+        // standard output for cron to capture") was broken by the very failure
+        // the arm below it was added to close for the other lock. A cron
+        // mailbox capturing stdout got a silent round.
+        //
+        // A held round rather than a refusal, unlike the `Busy` a Switch
+        // raises: this one arrives before anything has been read, so there is
+        // no figure and nothing was decided. "Held" is what that is.
+        Err(busy @ PerchError::Busy(_)) => return Err(busy),
         Err(unsettled) => return Ok(Turn::NotArranged(unsettled)),
     };
 
@@ -744,6 +763,13 @@ fn one_round(
 
     // The one Account Refreshed, and nearly all of the network this loop
     // spends (ADR 0013).
+    //
+    // Renewed either side of it, for the reason the loop renews either side of
+    // the wait: the watch goes stale in the longest wait plus one round, an
+    // arithmetic that only holds while a round is short, and a round is bounded
+    // by nothing but the network. Up to six requests at thirty seconds each go
+    // out under this call alone.
+    watching_alone.renew();
     let report = observe::refresh(
         host,
         &mut perch,
@@ -751,6 +777,7 @@ fn one_round(
         std::slice::from_ref(&email),
         &installed,
     );
+    watching_alone.renew();
     // Worth saying and not worth holding a decision over: the figure this round
     // decides on is the one that was just read, whether or not it survived to
     // the next round — which will read its own.
@@ -791,6 +818,21 @@ fn one_round(
         // Read, and carrying no Quota Window Perch could make anything of. Not
         // a reading of zero: an answer that says nothing about how full an
         // Account is says nothing about whether to leave it.
+        //
+        // Unreachable, and written out anyway for the reason `refused_the
+        // _reading`'s empty-attempts branch is. `Fullest::of` answers `None`
+        // only where `observed_utilization` does, and by here
+        // `refused_the_reading` has established `Outcome::Observed` — which
+        // means `keep` stored a non-empty window set, because
+        // `anthropic::utilization` refuses an empty one as
+        // `Refused::Unrecognized` and that arrives as `Outcome::Failed`. So the
+        // reachable path says "the usage endpoint named no Quota Window", from
+        // `anthropic`, and this sentence is the second one for a state that
+        // produces the first.
+        //
+        // Kept because `Fullest::of` returns an `Option` and something has to
+        // answer it, and a hold is the only safe answer: acting on an Account
+        // whose fullness is unknown is the one thing this round may never do.
         return held(
             "Anthropic answered without a Quota Window Perch could read, so \
              there was no figure to decide on."
@@ -830,6 +872,7 @@ fn one_round(
                     recently,
                     &cooled,
                     &installed,
+                    watching_alone,
                 )?;
                 (fullest, outcome)
             }
@@ -930,6 +973,7 @@ fn act(
     recently: &mut Recently,
     cooled: &Cooled<'_>,
     probed: &Result<probe::Installed>,
+    watching_alone: &mut crate::lock::Held<'_>,
 ) -> Result<Outcome> {
     let scope = watching.scope.clone();
     let outgoing = watching.account.clone();
@@ -963,6 +1007,11 @@ fn act(
         Err(not_idle) => return watch::refused_or_raised(not_idle),
     };
 
+    // The burst, and the longest thing a round does: one read per candidate,
+    // each bounded only at thirty seconds, over as many as the Scope holds. It
+    // is the accumulation the watch's staleness window was never derived
+    // against, so the hold is kept up either side of it.
+    watching_alone.renew();
     let read = observe::refresh(
         host,
         perch,
@@ -970,6 +1019,7 @@ fn act(
         &addresses_of(&considered(registry, watching, cooled, &idle)),
         probed,
     );
+    watching_alone.renew();
     // What could not be read, carried into the sentence that says where the
     // watcher went: an Account ranked on a figure from an hour ago is the one
     // thing that can make this Switch land somewhere worse than it left, so it
@@ -1007,6 +1057,21 @@ fn act(
     // beside it is inside it: the Check that made this Switch is recorded before
     // the Switch is, so that one save carries both (ADR 0013). This round used
     // to sequence that itself, and it was the second of two callers doing so.
+    // A Switch waits on Claude Code's three locks and writes through a keychain
+    // that may stop to ask, which is the other step in a round with no bound of
+    // its own.
+    watching_alone.renew();
+    // One instant for both arrangements. `watcher.reason` is stamped as an
+    // argument, so a Check's Cooldown started when the Switch *began*, while
+    // `recently.switched(host.now())` below started the loop's when it *ended* —
+    // and a Switch that waits on Claude Code's locks and a keychain dialog is a
+    // minute or more of daylight between them. The two are meant to be one
+    // behavior (ADR 0040), and this is the only pacing figure that differed.
+    //
+    // The beginning rather than the end, because that is the one already
+    // written down: `switch_to` puts `Checked { switched_at }` in the same save
+    // as the Switch, and it is what paces the next scheduled Check.
+    let acted_at = host.now();
     let switched = switch::switch_to(
         host,
         perch,
@@ -1014,8 +1079,9 @@ fn act(
         &installed,
         &choice.account,
         Some(&outgoing),
-        watcher.reason(&scope, host.now()),
+        watcher.reason(&scope, acted_at),
     );
+    watching_alone.renew();
 
     // Only a Switch that happened starts a cooldown. A round that was refused or
     // found nowhere to go has changed nothing, and making it wait would be
@@ -1032,7 +1098,7 @@ fn act(
         Err(not_switched) => not_switched.moved,
     };
     if moved {
-        recently.switched(host.now());
+        recently.switched(acted_at);
     }
 
     match switched {
@@ -1068,8 +1134,25 @@ fn act(
         // A Quarantine has already been written by `switch_to`, so the next
         // round passes the Account over rather than making the same discovery
         // again.
+        //
+        // `Busy` joins them, and it is the one that was actively wrong rather
+        // than merely unhandled. It arrives here from `lock::under` inside
+        // `perform` — Claude Code holding its own refresh or config lock — and
+        // was raised, which the loop catches as `held_before_a_round`. So a
+        // round that read every figure and had already decided to Switch
+        // printed `held   unread unread; threshold unread`, and charged the
+        // **Back-off**, whose whole definition is "questions nobody is
+        // answering". A client that happened to be refreshing therefore dragged
+        // the *Refresh* cadence out towards twenty minutes.
+        //
+        // It belongs beside `ProfileLive` for the same reason that one is here:
+        // it clears itself. The lock is given back, and the round after this
+        // one moves.
         Err(NotSwitched {
-            error: error @ (PerchError::Quarantined { .. } | PerchError::ProfileLive(_)),
+            error:
+                error @ (PerchError::Quarantined { .. }
+                | PerchError::ProfileLive(_)
+                | PerchError::Busy(_)),
             ..
         }) => Ok(Outcome::Refused {
             why: error.to_string(),

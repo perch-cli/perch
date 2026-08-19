@@ -463,9 +463,17 @@ fn delete_the_credential_and_its_profile(
         // has been told they are now relying on it.
         let forgotten = kept_in.forget(host).map_err(|error| {
             let so_far = match anything_was_there {
+                // Said as the state it is rather than as a Quarantine, which
+                // this is not: a Quarantine is a thing the registry *records*,
+                // carrying the reason it happened, and nothing here records one
+                // — the failure leaves `run` before `registry.forget` and before
+                // any save, exactly as the paragraph above intends. A user told
+                // their Account was Quarantined and then shown `perch list`
+                // rendering it as healthy has been told about a state Perch does
+                // not hold.
                 true => format!(
                     "{}'s Credential has already been taken out of its other \
-                     store, so it is Quarantined until this finishes",
+                     store, so a Switch onto it may no longer work",
                     account.email(),
                 ),
                 false => format!("Nothing was removed — {} is still held", account.email()),

@@ -524,6 +524,15 @@ struct Asked {
     /// refresh token for an *Account* rather than for a file: every copy of
     /// that Credential dies together, wherever it is being held from.
     in_use_from: Vec<PathBuf>,
+    /// The other Account whose Profile this one derives too, where there is one.
+    ///
+    /// A Profile is `profiles_dir` joined with the slugged address, and the slug
+    /// flattens everything that is not alphanumeric — so `user+work@example.com`
+    /// and `user.work@example.com` share one directory and therefore one
+    /// Credential Store. Every path that *acts* as an Account asks about this
+    /// (`add`, `import`, `switch`, `run`, `relogin`, `remove`); a Renewal is the
+    /// one write that did not, and it is the write ADR 0006 calls unrecoverable.
+    shares_its_profile_with: Option<String>,
 }
 
 /// Which store holds the Credential to ask with.
@@ -553,6 +562,13 @@ struct Asked {
 /// on each of their doors.
 fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<Asked> {
     let its_own_profile = account.profile_dir(host)?;
+    let shares_its_profile_with = registry
+        .accounts
+        .iter()
+        .find(|held| {
+            held.email() != account.email() && registry::same_profile(held.email(), account.email())
+        })
+        .map(|held| held.email().to_string());
     let settled_on_it = matches!(
         registry.active(),
         registry::Active::Settled(active) if registry::same_name(active, account.email())
@@ -569,6 +585,7 @@ fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<As
             store,
             its_own_profile: false,
             arriving_in_a_landing: false,
+            shares_its_profile_with,
         })
     } else {
         Ok(Asked {
@@ -580,6 +597,7 @@ fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<As
                 registry::Active::Landing { arriving, .. }
                     if registry::same_name(arriving, account.email())
             ),
+            shares_its_profile_with,
         })
     }
 }
@@ -647,20 +665,26 @@ fn usable_token(
 /// from rather than only the one being written, because a Rotation kills every
 /// copy of it at once.
 fn refuse_if_live(host: &dyn Host, asked: &Asked, installed: &Installed) -> Step<()> {
+    // Which directory each client is in, and not only that there is one.
+    // `in_use_from` holds two for the active Account — the Default Profile and
+    // its own — and a refusal that says "a client is running against that
+    // Account" leaves the reader to guess which of the two to quit. The Switch
+    // path has always named the Profile in its own refusal; this one did not.
     let mut running = Vec::new();
     for config_dir in &asked.in_use_from {
-        running.extend(probe::live_clients(host, config_dir, installed)?);
+        for pid in probe::live_clients(host, config_dir, installed)? {
+            running.push(format!("pid {pid} in {}", config_dir.display()));
+        }
     }
     if running.is_empty() {
         return Ok(());
     }
 
-    let pids: Vec<String> = running.iter().map(u32::to_string).collect();
     Err(Outcome::Failed(format!(
-        "its access token has expired and a client is running against that \
-         Account (pid {}), so renewing it would log that session out. The \
-         cached figure is what you see.",
-        pids.join(", ")
+        "its access token has expired and a client is running against it ({}), \
+         so renewing it would log that session out. The cached figure is what \
+         you see.",
+        running.join(", ")
     )))
 }
 
@@ -701,13 +725,36 @@ fn renew_under_the_lock(
     installed: &Installed,
     because: Because,
 ) -> Step<Asking> {
+    // Every path that acts as an Account refuses a shared Profile first, and
+    // this was the one write that did not — so a single `perch status
+    // --refresh` over the wrong pair retired the other Account's refresh token,
+    // which ADR 0006 calls unrecoverable. Here rather than at the two callers
+    // because this is the one door every Renewal goes through, and the registry
+    // cannot change underneath it: `perch` is held for the whole command.
+    //
+    // A refusal for this Account alone rather than for the command, which is
+    // what ADR 0018 asks of everything in this module: the other Accounts in the
+    // Scope are readable and their figures are not this one's to lose.
+    if let Some(sharer) = &asked.shares_its_profile_with {
+        return Err(Outcome::Failed(format!(
+            "its access token has expired and it shares one Profile — and so one \
+             Credential Store — with {sharer}, because their addresses differ \
+             only in characters a Profile directory does not keep apart. \
+             Renewing may Rotate, which would retire a refresh token that is not \
+             this Account's to spend. The cached figure is what you see."
+        )));
+    }
+
     let store = &asked.store;
     lock::under(host, probe::locks_for(store), |held| {
         let mut holds = lock::Holds::of(held, perch);
         // Both of the questions asked before the locks were taken, asked again
         // now that nothing can change the answer underneath Perch.
         refuse_if_live(host, asked, installed)?;
-        let credential = credential_in(host, asked, installed)?;
+        // Renewed around the read for the same reason as the write below: a
+        // keychain read is a `security` subprocess, and one that stops to ask
+        // the user for permission takes as long as they take to answer.
+        let credential = holds.around(|| credential_in(host, asked, installed))?;
         if because == Because::ItSaysItRanOut && credential.usable_at(host.now()) {
             // Somebody else renewed it while Perch queued for the lock, so this
             // reading did not. Said so rather than reported as a Renewal: what
@@ -754,22 +801,39 @@ fn renew_under_the_lock(
         let renewal = holds.around(|| anthropic::renew(host, &refresh_token));
         let fresh = renewal.map_err(not_renewed)?;
 
-        let rotated = probe::credential_after_rotation(
-            &credential,
-            &fresh.access_token,
-            fresh.refresh_token.as_ref().map(|token| token.as_str()),
-            fresh.expires_at,
-            installed,
-        )?;
-        store_it(
-            host,
-            store,
-            &rotated,
-            rotated_away(
-                &refresh_token,
+        // Inside `around` for the reason the network call above is, and the
+        // reason `switch::perform` wraps its own `store_credential`: this is not
+        // a fast step. On macOS `profile::store_credential` is a `security`
+        // write, a read-back and a supersede of the other store — three
+        // subprocesses, and a keychain that stops to ask the user for permission
+        // stretches it without bound. The config-file lock goes stale in ten
+        // seconds, so left unrenewed any Claude Code on the machine becomes
+        // entitled to clear the artifact and take the lock *while Perch is
+        // writing the Rotated Credential under it*.
+        //
+        // Which is the one write ADR 0006 calls unrecoverable: Anthropic has
+        // already retired the old refresh token by the time this runs, so
+        // everything from here to the store is Perch making sure the Rotation is
+        // not lost. It was the longest step in the function and the only one
+        // holding nothing.
+        holds.around(|| {
+            let rotated = probe::credential_after_rotation(
+                &credential,
+                &fresh.access_token,
                 fresh.refresh_token.as_ref().map(|token| token.as_str()),
-            ),
-        )?;
+                fresh.expires_at,
+                installed,
+            )?;
+            store_it(
+                host,
+                store,
+                &rotated,
+                rotated_away(
+                    &refresh_token,
+                    fresh.refresh_token.as_ref().map(|token| token.as_str()),
+                ),
+            )
+        })?;
 
         Ok(Asking {
             token: fresh.access_token,

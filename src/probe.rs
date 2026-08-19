@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::credentials;
 use crate::error::{PerchError, Result};
@@ -618,7 +618,7 @@ pub fn credential_after_rotation(
     refresh_token: Option<&str>,
     expires_at: Option<i64>,
     installed: &Installed,
-) -> Result<String> {
+) -> Result<Zeroizing<String>> {
     let mut document: serde_json::Value =
         serde_json::from_str(current.as_str()).map_err(|err| {
             refusal(
@@ -664,8 +664,27 @@ pub fn credential_after_rotation(
         None => block.remove("expiresAt"),
     };
 
-    serde_json::to_string(&document)
-        .map_err(|err| PerchError::Other(format!("could not write the renewed Credential: {err}")))
+    let written = serde_json::to_string(&document)
+        .map(Zeroizing::new)
+        .map_err(|err| PerchError::Other(format!("could not write the renewed Credential: {err}")));
+
+    // The document is still holding both tokens, and dropping a
+    // `serde_json::Value` frees its strings untouched. This is the freshly
+    // Rotated refresh token — the one `anthropic` calls the only copy there is
+    // — so the tree is emptied by hand before it goes, the same way every other
+    // buffer that has held one on this path is.
+    if let Some(block) = document
+        .get_mut(CREDENTIAL_KEY)
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for key in ["accessToken", "refreshToken"] {
+            if let Some(serde_json::Value::String(held)) = block.get_mut(key) {
+                held.zeroize();
+            }
+        }
+    }
+
+    written
 }
 
 /// Reads the Identity out of a store's `.claude.json`.
@@ -951,8 +970,39 @@ impl Drop for Claim<'_> {
 pub fn claim<'a>(host: &'a dyn Host, config_dir: &Path) -> Result<Claim<'a>> {
     let pid = host.process_id();
     let marker = session_marker_at(config_dir, pid);
+    let sessions = sessions_dir(config_dir);
 
-    host.create_dir_all(&sessions_dir(config_dir))
+    // A `sessions` that is a link is refused rather than written through.
+    //
+    // `create_dir_all` at a link to a directory succeeds and uses the target,
+    // and every write under it lands there — so a Profile whose `sessions` is
+    // linked into the Default Profile takes this Marker with it. That is the
+    // state `reconcile::HELD_BACK` names in as many words ("its own Run's
+    // marker would land in the Default Profile") and `reconcile::sweep` exists
+    // to repair, and a Run reaches this before the sweep does: `commands::run`
+    // claims first on purpose (ADR 0027), because until the Marker exists
+    // nothing on the machine knows the Run is happening.
+    //
+    // Written through the link, the Marker makes the *Default Profile* report a
+    // live corroborated client, which refuses every Capture, Switch and Renewal
+    // on the machine for as long as the Run lasts. Then the sweep takes the link
+    // away, `Claim::drop` removes a path that no longer resolves, and the Marker
+    // is left behind in a directory it was never about.
+    //
+    // Refused rather than repaired here: what to do about a crossed Profile is
+    // Reconcile's, and this module has no idea whether the caller can afford
+    // the repair.
+    if matches!(host.link_target(&sessions), Ok(Some(_))) {
+        return Err(PerchError::Other(format!(
+            "{} is a link rather than a directory of its own, so recording that \
+             a client is running here would write the marker into whatever it \
+             points at — and that directory would report this Run as its own. \
+             Nothing was launched.",
+            sessions.display()
+        )));
+    }
+
+    host.create_dir_all(&sessions)
         .and_then(|()| {
             crate::host::write_atomically(host, &marker, &session_marker(pid, host.now()))
         })
@@ -2022,7 +2072,7 @@ mod tests {
             Some("max"),
             "what Claude Code recorded about the Account survives a renewal"
         );
-        assert!(rotated.contains("user:inference"), "{rotated}");
+        assert!(rotated.contains("user:inference"), "{}", rotated.as_str());
         assert!(!rotated.contains("old-access") && !rotated.contains("old-refresh"));
     }
 
@@ -2071,7 +2121,7 @@ mod tests {
              nothing about when it expires — not one still carrying the expiry \
              that caused the renewal, which renews again on every command",
         );
-        assert!(!rotated.contains("expiresAt"), "{rotated}");
+        assert!(!rotated.contains("expiresAt"), "{}", rotated.as_str());
     }
 
     /// A `claude` that is there and will not run at all. The refusal names the

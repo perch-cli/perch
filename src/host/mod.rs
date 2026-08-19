@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 
 use crate::keychain::KeychainError;
+use zeroize::Zeroizing;
 
 /// Behind a feature so it stays out of the binary somebody downloads. It is
 /// only ever reached from a test, and the tests are integration tests — they
@@ -656,7 +657,13 @@ pub trait Terminal {
     /// echo off and back on again is a platform primitive, which is what this
     /// port is for. A platform with no way to hide what is typed refuses rather
     /// than showing it (ADR 0014).
-    fn read_secret(&self) -> Result<Option<String>, HostError>;
+    ///
+    /// `Zeroizing` in the signature rather than left to the caller, which is
+    /// where it used to be: `commands::ask_secret` wrapped the answer and its
+    /// comment claimed the wrapped buffer was the one the terminal was read
+    /// into. It was not, and nothing about the type said so. An adapter owes
+    /// this now, and the obligation is written where an adapter has to read it.
+    fn read_secret(&self) -> Result<Option<Zeroizing<String>>, HostError>;
 
     /// Says something the user should know that is not the answer to what they
     /// asked: a Credential written to the store Perch would rather not have
@@ -791,6 +798,56 @@ pub(crate) fn through_any_link(host: &dyn Host, path: &Path) -> PathBuf {
     }
 }
 
+/// The same, following every link on the path rather than only one at the end.
+///
+/// [`through_any_link`] answers about the last component, which is the question
+/// a Reconcile asks — it holds the entry it is about. "Is this path inside that
+/// directory?" is a different question, and a link *above* the last component
+/// defeats a components-wise `starts_with` just as thoroughly: `~/claude` linked
+/// at `~/.config/perch/profiles` makes `~/claude/work` and
+/// `~/.config/perch/profiles/work` one directory with two spellings.
+///
+/// Bounded rather than trusting the filesystem to be acyclic, the way
+/// `FakeHost::resolved` is: two links pointing at each other are a loop, and a
+/// path this cannot settle in eight passes is answered as far as it got. The
+/// caller is comparing rather than opening, so a partial answer is a comparison
+/// that fails closed.
+pub(crate) fn through_every_link(host: &dyn Host, path: &Path) -> PathBuf {
+    const FOLLOWED: usize = 8;
+
+    let mut at = path.to_path_buf();
+    for _ in 0..FOLLOWED {
+        match deepest_link_on(host, &at) {
+            Some(followed) => at = followed,
+            None => return at,
+        }
+    }
+    at
+}
+
+/// The deepest component of `path` that is a link, replaced by what it points
+/// at and the rest of the path put back on the end. `None` when none of them is
+/// a link, which is what ends the walk above.
+fn deepest_link_on(host: &dyn Host, path: &Path) -> Option<PathBuf> {
+    let mut beneath = PathBuf::new();
+    let mut at = path.to_path_buf();
+    loop {
+        if let Ok(Some(target)) = host.link_target(&at) {
+            let resolved = match target.is_absolute() {
+                true => target,
+                false => at.parent().unwrap_or(Path::new("")).join(target),
+            };
+            return Some(resolved.join(&beneath));
+        }
+        let name = at.file_name()?;
+        beneath = Path::new(name).join(&beneath);
+        at = at.parent()?.to_path_buf();
+        if at.as_os_str().is_empty() {
+            return None;
+        }
+    }
+}
+
 /// The whole of writing beside a file and moving the result over it, including
 /// what is done about a write that did not land.
 ///
@@ -829,6 +886,66 @@ pub fn replace_via_tmp(
 
 #[cfg(test)]
 mod tests {
+    /// Following every link on a path, which is the question "is this inside
+    /// that directory?" needs and [`through_any_link`] does not answer: the
+    /// link that makes two spellings of one place is usually a directory
+    /// *above* the one named.
+    #[test]
+    fn every_link_on_the_way_is_followed_and_not_only_the_last() {
+        let host = FakeHost::new().with_link(
+            Link::Symbolic,
+            "/Users/someone/.config/perch/profiles",
+            "/Users/someone/claude",
+        );
+
+        assert_eq!(
+            through_every_link(&host, Path::new("/Users/someone/claude/work")),
+            Path::new("/Users/someone/.config/perch/profiles/work"),
+            "the link is two components up, and the rest of the path goes back on"
+        );
+        assert_eq!(
+            through_every_link(&host, Path::new("/Users/someone/elsewhere")),
+            Path::new("/Users/someone/elsewhere"),
+            "a path with no link on it is itself"
+        );
+        // A relative path runs out of parents at the empty one rather than at
+        // the root, which is the other way this walk has to know it is done.
+        assert_eq!(
+            through_every_link(&host, Path::new("neither/is/this")),
+            Path::new("neither/is/this"),
+        );
+    }
+
+    /// A link's target may be written relative to where the link sits, which is
+    /// how `ln -s` records one unless it was given an absolute path.
+    #[test]
+    fn a_link_written_relative_to_itself_resolves_against_where_it_sits() {
+        let host = FakeHost::new().with_link(Link::Symbolic, "elsewhere", "/Users/someone/here");
+
+        assert_eq!(
+            through_every_link(&host, Path::new("/Users/someone/here/inside")),
+            Path::new("/Users/someone/elsewhere/inside"),
+        );
+    }
+
+    /// Two links pointing at each other are a loop, and the walk is bounded
+    /// rather than trusting the filesystem not to contain one. The caller is
+    /// comparing rather than opening, so an answer that got part way is a
+    /// comparison that fails closed.
+    #[test]
+    fn a_loop_of_links_gives_up_rather_than_hanging() {
+        let host = FakeHost::new()
+            .with_link(Link::Symbolic, "/b", "/a")
+            .with_link(Link::Symbolic, "/a", "/b");
+
+        let settled = through_every_link(&host, Path::new("/a"));
+
+        assert!(
+            settled == Path::new("/a") || settled == Path::new("/b"),
+            "it stops somewhere on the loop rather than spinning: {settled:?}"
+        );
+    }
+
     use super::*;
     use crate::host::fake::Effect;
 

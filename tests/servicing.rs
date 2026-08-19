@@ -1334,3 +1334,78 @@ fn installing_on_a_machine_perch_has_never_run_on_makes_room_for_the_log() {
         "the directory the unit points its output at is there: {printed}"
     );
 }
+
+/// The same guard, on the machine it could never reach: one where nobody ever
+/// installed a Service.
+///
+/// `perch watcher run` in a terminal is a Watcher. It holds the same lock, and
+/// it Switches Credentials into the Profiles a Purge is deleting — but the
+/// guard opened by asking whether a Service was *installed* and returned early
+/// when it was not, so the lock question below it ran on exactly the machines
+/// that already had a Service and never on the ones that did not.
+#[test]
+fn a_purge_refuses_under_a_watcher_run_from_a_terminal_with_no_service_installed() {
+    let host = mac().with_answers(&["n", "purge"]);
+    // No `perch watcher install` — this machine has never had one.
+    let _still_watching = perch::lock::take_all(
+        &host,
+        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+    )
+    .expect("nobody else holds it");
+
+    let (result, printed) = run_purge(&host);
+
+    let refusal = result.expect_err("nothing may be deleted underneath a Watcher");
+    assert_eq!(refusal.exit_code(), EXIT_HELD, "{refusal}");
+    assert!(
+        refusal.to_string().contains("Watcher is running"),
+        "and it names what is running rather than a Service nobody installed: {refusal}"
+    );
+    assert!(
+        perch::registry::load(&host)
+            .expect("whatever is there is readable")
+            .is_some(),
+        "nothing was purged: {printed}"
+    );
+}
+
+/// On Windows the service-manager binary is spelled out, because a bare name is
+/// searched for in the current working directory first.
+///
+/// `commands::upgrade::powershell` states the rule and ADR 0021 is the rule.
+/// `schtasks` is the higher-value target of the two it covers: its `/TR`
+/// argument is a command line Windows runs at every logon, so a `schtasks.exe`
+/// dropped in a downloads folder turns `perch watcher install` typed there into
+/// attacker-chosen persistence.
+#[test]
+fn windows_runs_the_schtasks_that_ships_with_windows_and_not_whichever_is_nearest() {
+    let system32 = r"C:\Windows\System32\schtasks.exe";
+    let host = watched()
+        .with_platform(Platform::Windows)
+        .with_env("SystemRoot", r"C:\Windows")
+        // Arranged under the absolute name alone. A run that reached for the
+        // bare one finds nothing arranged and fails, which is the assertion.
+        .with_exec(system32, &["/Query", "/TN", r"Perch\Watch"], worked());
+
+    let (result, said) = run_service(&host, WatcherCommand::Status { json: true });
+
+    result.expect("a question");
+    let ran: Vec<String> = host
+        .effects()
+        .iter()
+        .filter_map(|effect| match effect {
+            perch::host::fake::Effect::Exec { program, .. } => Some(program.clone()),
+            _ => None,
+        })
+        .collect();
+
+    assert!(
+        ran.contains(&system32.to_string()),
+        "the binary is spelled out, so the working directory is not searched \
+         first: {ran:?}\n{said}"
+    );
+    assert!(
+        !ran.iter().any(|program| program == "schtasks"),
+        "and the bare name is not used anywhere: {ran:?}"
+    );
+}

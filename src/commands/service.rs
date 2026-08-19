@@ -308,7 +308,24 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
 /// find would bury what it did.
 pub fn take_back_before_a_purge(host: &dyn Host, out: &mut dyn Write) -> Result<bool> {
     let at = service::unit_path(host)?;
+
+    // Asked before the Service question rather than after it, which is where it
+    // used to sit and could not be reached. A Watcher started with `perch
+    // watcher run` in a terminal holds the same lock, is the same hazard — it
+    // Switches Credentials into the Profiles this command is deleting — and is
+    // on a machine where no Service was ever installed, so the early return
+    // below skipped the one check that would have seen it.
+    //
+    // The lock is what answers, for the reason the Service branch below gives
+    // at length: it is held for exactly as long as a Watcher runs and given
+    // back however the process ends.
     if !is_installed(host, at.as_deref())? {
+        if watcher_is_running(host) {
+            return Err(PerchError::Busy(
+                "A Watcher is running, so nothing was purged.\n                 It would go on Switching Credentials into Profiles this command                  is deleting. Stop it — Ctrl-C in the terminal running `perch                  watcher run` — and run this again."
+                    .to_string(),
+            ));
+        }
         return Ok(false);
     }
 
@@ -485,13 +502,43 @@ fn is_installed(host: &dyn Host, at: Option<&std::path::Path>) -> Result<bool> {
     }
 }
 
+/// The service-manager binary, spelled the way ADR 0021 asks on the platform
+/// that needs it.
+///
+/// `commands::upgrade::powershell` states the rule and the reason: "A bare name
+/// handed to Windows is searched for in the application directory and *the
+/// current working directory* before `PATH`." `schtasks` is the higher-value
+/// target of the two it applies to — its `/TR` argument is a command line
+/// Windows runs at every logon, so a `schtasks.exe` dropped in a downloads
+/// folder turns `perch watcher install` typed there into attacker-chosen
+/// persistence.
+///
+/// Windows alone. `launchctl` and `systemctl` are found through `PATH`, which
+/// on unix does not include the working directory unless somebody has put it
+/// there, and there is no fixed absolute path for `systemctl` that holds across
+/// distributions — `/bin` on some, `/usr/bin` on others. Spelling one would
+/// trade a hazard this platform does not have for a machine Perch stops
+/// working on.
+fn located(host: &dyn Host, program: &str) -> String {
+    if host.platform() != Platform::Windows {
+        return program.to_string();
+    }
+    match host.env_var("SystemRoot").filter(|root| !root.is_empty()) {
+        Some(root) => format!("{root}\\System32\\{program}.exe"),
+        // Said by the failure rather than refused here: every caller of this
+        // already reports what would not run, and a Windows with no
+        // `SystemRoot` has worse problems than this one.
+        None => program.to_string(),
+    }
+}
+
 /// Whether the service manager says it is running right now.
 fn is_running(host: &dyn Host) -> bool {
     let Some(asking) = service::asking(host.platform(), host.user_id()) else {
         return false;
     };
     let args: Vec<&str> = asking.args.iter().map(String::as_str).collect();
-    host.exec(&asking.program, &args)
+    host.exec(&located(host, &asking.program), &args)
         .map(|ran| ran.succeeded())
         .unwrap_or(false)
 }
@@ -607,7 +654,7 @@ fn nothing_may_act(host: &dyn Host) -> Result<Option<String>> {
 fn drive(host: &dyn Host, steps: Vec<Driven>) -> Result<()> {
     for step in steps {
         let args: Vec<&str> = step.args.iter().map(String::as_str).collect();
-        let ran = host.exec(&step.program, &args);
+        let ran = host.exec(&located(host, &step.program), &args);
         if !step.required {
             continue;
         }

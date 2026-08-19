@@ -22,6 +22,7 @@
 //! back what it had already placed.
 
 use std::collections::BTreeMap;
+use zeroize::Zeroizing;
 
 use crate::error::{PerchError, Result};
 use crate::export::Export;
@@ -290,12 +291,24 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
             // compose. Where it carries none, one is composed — a Profile
             // without this file Carries nothing, so every Run against it would
             // meet the onboarding dialog afresh (ADR 0003).
-            let identity_file = export
-                .identity_file_for(account.email())
-                .cloned()
-                .unwrap_or_else(|| {
-                    probe::fresh_identity_file(&account.identity.oauth_account_block())
-                });
+            // `Zeroizing`, because `Export::drop` goes to the trouble of
+            // wiping `identity_files` and this cloned a copy out from under it.
+            // A `.claude.json` is not only onboarding state: `login.rs` says
+            // why it is held like a Credential — "an MCP server entry routinely
+            // carries an API key in its `env` block" — so a plain `String` here
+            // outlived the guard and was dropped untouched.
+            //
+            // The composed fallback is not secret, and is wrapped anyway: one
+            // type for one value is what stops the next reader having to work
+            // out which of the two arms they are holding.
+            let identity_file = Zeroizing::new(
+                export
+                    .identity_file_for(account.email())
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        probe::fresh_identity_file(&account.identity.oauth_account_block())
+                    }),
+            );
             placements.push((
                 account.email().to_string(),
                 store,

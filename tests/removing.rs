@@ -198,6 +198,13 @@ fn a_removal_that_fails_after_landing_still_records_who_is_live() {
 /// say "Nothing was removed" in that case, which is a claim about a Credential
 /// that is gone — and the Account it is about is one `perch switch` can no
 /// longer use.
+///
+/// What it said instead was that the Account "is Quarantined", which is a claim
+/// about the *registry*: a Quarantine is a state Perch records, carrying the
+/// reason it happened, and this path records none — the failure leaves `run`
+/// before `registry.forget` and before any save, which is what makes running
+/// the command again the answer. So the user was told a word, ran `perch list`,
+/// and saw a healthy Account.
 #[test]
 fn a_removal_that_emptied_one_store_and_not_the_other_does_not_say_nothing_happened() {
     let host = machine_with_two_accounts().with_answers(&["y"]);
@@ -216,7 +223,7 @@ fn a_removal_that_emptied_one_store_and_not_the_other_does_not_say_nothing_happe
         "one of the two stores is already empty: {said}"
     );
     assert!(
-        said.contains("Quarantined") && said.contains("perch remove"),
+        said.contains("may no longer work") && said.contains("perch remove"),
         "so the user is told what state the Account is in and how to finish: \
          {said}"
     );
@@ -224,6 +231,22 @@ fn a_removal_that_emptied_one_store_and_not_the_other_does_not_say_nothing_happe
         holds(&host, EMAIL),
         "and the Account is still in the registry, so running it again finishes \
          the job: {printed}"
+    );
+    // The other half of saying it plainly: whatever the sentence claims, the
+    // registry has to agree with it. It records no Quarantine here, so the
+    // sentence must not name one.
+    assert!(
+        !said.contains("Quarantined"),
+        "a Quarantine is a state Perch records, and this path records none: {said}"
+    );
+    assert_eq!(
+        registry_of(&host)
+            .account(EMAIL)
+            .expect("the Account is still held")
+            .quarantine,
+        None,
+        "and `perch list` would render it as healthy, which is what the \
+         sentence now says"
     );
 }
 

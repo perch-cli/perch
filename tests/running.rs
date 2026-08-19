@@ -971,3 +971,47 @@ fn a_run_marks_its_profile_live_before_it_touches_anything_in_it() {
          {touched:?}"
     );
 }
+
+/// A Profile whose `sessions` is a link into another configuration directory is
+/// refused rather than written through.
+///
+/// `create_dir_all` at a link to a directory succeeds and uses the target, so
+/// every write under it lands there. `reconcile::sweep` exists to take that link
+/// away — its comment names this exact hazard, "its own Run's marker would land
+/// in the Default Profile" — but a Run claims *before* it reconciles, and on
+/// purpose (ADR 0027): until the Marker exists nothing on the machine knows the
+/// Run is happening, so a `perch remove` in another terminal would be free to
+/// delete the Profile out from under it.
+///
+/// Claimed through the link, the Marker makes the Default Profile report a live
+/// corroborated client, which refuses every Capture, Switch and Renewal on the
+/// machine for as long as the Run lasts. Then the sweep removes the link and
+/// `Claim::drop` deletes a path that no longer resolves, leaving the Marker
+/// behind in a directory it was never about.
+#[test]
+fn a_run_whose_sessions_is_a_link_is_refused_rather_than_marking_somewhere_else() {
+    let profile = profile_string(SECOND_EMAIL);
+    // A *live* link, which is the hazard. A dangling one is refused by
+    // `create_dir_all` itself and says something else entirely.
+    let host = machine_with_shared_state()
+        .with_file(shared("sessions/33.json"), "{}")
+        .with_link(
+            perch::host::Link::Symbolic,
+            shared("sessions"),
+            format!("{profile}/sessions"),
+        );
+    host.forget_effects();
+
+    let (result, _) = run_run(&host, SECOND_EMAIL);
+
+    let refused = result.expect_err("a linked sessions is not this Profile's to record in");
+    let said = refused.to_string();
+    assert!(
+        said.contains("is a link"),
+        "the refusal says what is wrong with the Profile: {said}"
+    );
+    assert!(
+        host.file(shared("sessions/700.json")).is_none(),
+        "and no marker was written into the directory it pointed at: {said}"
+    );
+}

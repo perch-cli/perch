@@ -817,6 +817,182 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "making a directory at a link uses what it points at",
+        asserts: |host, root, adapter, _now| {
+            // The state ADR 0027 is about: a Profile whose `sessions` is a link
+            // into another configuration directory. `probe::claim` does
+            // `create_dir_all` on that path, so what this answers decides
+            // whether the Marker lands in the Profile or somewhere else — and
+            // the fake used to insert a directory *shadowing* the link, which
+            // is a third behavior no filesystem has.
+            let elsewhere = root.join("another-profile-sessions");
+            let here = root.join("sessions");
+            host.create_dir_all(&elsewhere)
+                .expect("somewhere to point at");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
+            host.link(Link::Symbolic, &elsewhere, &here)
+                .expect("the link is made");
+
+            host.create_dir_all(&here)
+                .expect("a directory that is already there is not a failure");
+
+            assert_eq!(
+                host.link_target(&here).expect("it is there"),
+                Some(elsewhere.clone()),
+                "{adapter}: the link is still a link rather than shadowed"
+            );
+
+            // And the other half of what "uses what it points at" means: a
+            // write under the link lands in the target. This is the whole
+            // hazard ADR 0027 names — a Marker written into a Profile's
+            // `sessions` reaching the Default Profile's — and the fake could
+            // not model it, because it stored files at the name it was given
+            // while reading *through* the link.
+            host.create_file_with_mode(&here.join("a-marker"), "written", PRIVATE_FILE_MODE)
+                .expect("a file under it");
+            assert!(
+                host.path_exists(&elsewhere.join("a-marker")),
+                "{adapter}: writing under it writes through it"
+            );
+        },
+    },
+    Case {
+        named: "making a directory where a file already sits is refused",
+        asserts: |host, root, adapter, _now| {
+            // The third answer `create_dir_all` has, and the one the fake had
+            // no branch for at all: `mkdir` answers EEXIST and the `is_dir` it
+            // falls back on says no, so this fails rather than succeeding
+            // quietly or replacing what is there. Reachable wherever a Profile
+            // holds a regular file at a name Perch expects a directory at — a
+            // botched restore, or a `sessions` crossed by a hard link.
+            let occupied = root.join("not-a-directory");
+            host.create_file_with_mode(&occupied, "a file", PRIVATE_FILE_MODE)
+                .expect("the file");
+
+            let refused = host.create_dir_all(&occupied);
+
+            assert!(
+                refused.is_err(),
+                "{adapter}: a file is not a directory to make, got {refused:?}"
+            );
+            assert_eq!(
+                host.read_file(&occupied).ok().as_deref(),
+                Some("a file"),
+                "{adapter}: and it is left exactly as it was"
+            );
+        },
+    },
+    Case {
+        named: "making a directory at a link to nothing is refused",
+        asserts: |host, root, adapter, _now| {
+            // `mkdir` answers EEXIST and the `is_dir` that `create_dir_all`
+            // falls back on follows the link and finds nothing — so this is the
+            // one shape of `mkdir -p` that fails on a path nothing occupies.
+            let gone = root.join("target-that-was-removed");
+            let dangling = root.join("points-at-nothing");
+            host.create_dir_all(&gone).expect("somewhere to point at");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
+            host.link(Link::Symbolic, &gone, &dangling)
+                .expect("the link is made");
+            host.remove_dir_all(&gone).expect("and then it goes");
+
+            let refused = host.create_dir_all(&dangling);
+
+            assert!(
+                refused.is_err(),
+                "{adapter}: a link to nothing is not a directory to make, got {refused:?}"
+            );
+        },
+    },
+    Case {
+        named: "an exclusive directory is mkdir rather than mkdir -p",
+        asserts: |host, root, adapter, _now| {
+            // The fake inserted the path whatever was above it, so a lock could
+            // be taken inside a Profile that does not exist — and a behavior
+            // test could then show a Switch proceeding under a lock the machine
+            // would have refused to give it.
+            let missing = root.join("no-such-profile");
+            match host.create_dir_exclusive(&missing.join(".oauth_refresh.lock")) {
+                Err(HostError::NotFound { .. }) => {}
+                other => panic!("{adapter}: expected NotFound, got {other:?}"),
+            }
+            assert!(
+                !host.path_exists(&missing),
+                "{adapter}: and the parent was not invented on the way"
+            );
+        },
+    },
+    Case {
+        named: "touching a path that is not there reports NotFound",
+        asserts: |host, root, adapter, _now| {
+            // `NotFound` is the answer `lock::renew` reads as "the artifact has
+            // gone, so this hold is no longer mine". `touch_now` funneled every
+            // `utimes` failure into `Io` while the fake resolved first and
+            // answered `NotFound`, so the two adapters disagreed about the one
+            // variant this port treats as meaningful.
+            match host.touch(&root.join("no-such-artifact")) {
+                Err(HostError::NotFound { .. }) => {}
+                other => panic!("{adapter}: expected NotFound, got {other:?}"),
+            }
+        },
+    },
+    Case {
+        named: "a link onto an occupied name reports AlreadyExists",
+        asserts: |host, root, adapter, _now| {
+            // The variant this port treats as meaning contention rather than
+            // breakage — `mod.rs` calls it "the whole of what makes a lock a
+            // lock". The real host let `?` flatten EEXIST into `Io` while the
+            // fake answered `AlreadyExists`, so a caller that branched on it
+            // would have been written against the fake and been wrong on the
+            // machine.
+            let target = root.join("something-to-point-at");
+            let taken = root.join("already-here");
+            host.create_file_with_mode(&target, "x", PRIVATE_FILE_MODE)
+                .expect("the target");
+            host.create_file_with_mode(&taken, "in the way", PRIVATE_FILE_MODE)
+                .expect("something at the name");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
+
+            match host.link(Link::Symbolic, &target, &taken) {
+                Err(HostError::AlreadyExists { .. }) => {}
+                other => panic!("{adapter}: expected AlreadyExists, got {other:?}"),
+            }
+        },
+    },
+    Case {
+        named: "removing a link refuses anything that is not one",
+        asserts: |host, root, adapter, _now| {
+            // The one call whose whole contract is that it only ever takes away
+            // Perch's own share. Asserted here rather than only against the
+            // fake, because that is how the Windows arm came to read the
+            // attributes purely to choose between `remove_dir` and
+            // `remove_file` and then remove whatever was at the name: the
+            // refusal was proven by the adapter that had it, on every platform
+            // including the one that did not.
+            let plain = root.join("the-persons-own-file");
+            host.create_file_with_mode(&plain, "not Perch's", PRIVATE_FILE_MODE)
+                .expect("the file");
+
+            let refused = host.remove_link(&plain);
+
+            assert!(
+                refused.is_err(),
+                "{adapter}: a plain file is not a link, got {refused:?}"
+            );
+            assert_eq!(
+                host.read_file(&plain).ok().as_deref(),
+                Some("not Perch's"),
+                "{adapter}: and it is still there"
+            );
+        },
+    },
+    Case {
         named: "a kind this platform will not make is refused rather than substituted",
         asserts: |host, root, adapter, _now| {
             // A junction is Windows' link for a directory and exists nowhere

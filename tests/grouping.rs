@@ -783,3 +783,32 @@ fn listing_the_groups_reads_alongside_another_perch_rather_than_waiting_on_it() 
     assert!(printed.contains("work"), "{printed}");
     drop(held);
 }
+
+/// A word that could never be a Group is told why, rather than offered a
+/// `perch group add` the next command refuses.
+///
+/// `global` is the sharpest case, because `registry::validate_name` reserves it
+/// *specifically* so that "Declare it with `perch group add global`" can never
+/// be made as an offer — and `no_such_group`, which `group remove`, `group
+/// rename` and `group move` all reach, was making it. Typing the offered
+/// command back gets a refusal, which is a dead end wherever it happens.
+#[test]
+fn a_name_no_group_could_have_is_refused_rather_than_offered_as_one_to_declare() {
+    let host = machine_with_two_accounts();
+
+    for name in ["global", "ungrouped", "none", "my group", ""] {
+        let (result, _) = run_group(
+            &host,
+            GroupCommand::Remove {
+                name: name.to_string(),
+            },
+        );
+
+        let refused = result.expect_err("no Group is called that, and none could be");
+        let said = refused.to_string();
+        assert!(
+            !said.contains(&format!("perch group add {name}")),
+            "offering a command the next one refuses is a dead end: {said}"
+        );
+    }
+}

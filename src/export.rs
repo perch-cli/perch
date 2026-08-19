@@ -375,13 +375,66 @@ pub fn seal(export: &Export, passphrase: &str) -> Result<String> {
     // image, and a plain overwrite of memory nothing reads again is something a
     // compiler may elide. `Zeroizing` takes the `Vec` rather than copying it, so
     // what is wiped is the buffer `to_vec` produced.
-    let plain = Zeroizing::new(
-        serde_json::to_vec(export)
-            .map_err(|err| PerchError::Other(format!("could not serialize the Export: {err}")))?,
-    );
+    // Serialized *into* a buffer this function owns rather than handed one
+    // `to_vec` grew for itself. `Vec` grows by allocating a bigger block,
+    // copying, and freeing the old one — so a document that doubles four times
+    // leaves four buffers in freed heap, each holding a prefix of every
+    // Credential on the machine, and `Zeroizing` wipes only the last of them.
+    // Which is the very thing the paragraph above says this is here to prevent.
+    let mut plain = Wiping::with_room_for(export);
+    serde_json::to_writer(&mut plain, export)
+        .map_err(|err| PerchError::Other(format!("could not serialize the Export: {err}")))?;
 
-    age::encrypt_and_armor(&recipient(passphrase), &plain)
+    age::encrypt_and_armor(&recipient(passphrase), &plain.held)
         .map_err(|err| PerchError::Other(format!("could not encrypt the Export: {err}")))
+}
+
+/// A buffer that wipes whatever it abandons on the way to being big enough.
+///
+/// The one thing a plain `Zeroizing<Vec<u8>>` cannot promise: it wipes the
+/// buffer it is *holding* when it drops, and says nothing about the ones the
+/// `Vec` outgrew and freed along the way. Every one of those holds a prefix of
+/// the document, and this document is every Credential on the machine in
+/// cleartext.
+struct Wiping {
+    held: Zeroizing<Vec<u8>>,
+}
+
+impl Wiping {
+    /// Sized so the ordinary Export never grows at all: the serialized form is
+    /// a little larger than the sum of what it carries, and this is generous
+    /// about "a little". Growing is still handled, because a guess is a guess.
+    fn with_room_for(export: &Export) -> Self {
+        let carried: usize = export
+            .credentials
+            .values()
+            .chain(export.identity_files.values())
+            .map(String::len)
+            .sum();
+        Self {
+            held: Zeroizing::new(Vec::with_capacity(carried * 2 + 8 * 1024)),
+        }
+    }
+}
+
+impl std::io::Write for Wiping {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if self.held.len() + bytes.len() > self.held.capacity() {
+            let wanted = (self.held.capacity() * 2).max(self.held.len() + bytes.len());
+            let mut grown = Vec::with_capacity(wanted);
+            grown.extend_from_slice(&self.held);
+            // The move is made here rather than left to `Vec`, which would free
+            // the old block untouched. This is the whole point of the type.
+            let mut abandoned = std::mem::replace(&mut *self.held, grown);
+            abandoned.zeroize();
+        }
+        self.held.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 /// The other direction: what an `age` file holds, given the passphrase it was
@@ -413,6 +466,11 @@ pub fn unseal(sealed: &str, passphrase: &str) -> Result<Export> {
     identity.set_max_work_factor(MAX_WORK_FACTOR);
 
     // The same buffer coming the other way, and wiped for the same reason.
+    //
+    // Only the buffer handed back, unlike `seal`, which owns the one it fills:
+    // whatever `age::decrypt` grew and freed on the way to producing this is
+    // inside that crate and not Perch's to wipe. Said rather than left implied,
+    // because the two directions look symmetrical and are not.
     let plain = Zeroizing::new(age::decrypt(&identity, sealed.as_bytes()).map_err(would_not_open)?);
 
     // Both versions first, off a shape that is only the versions, and before
@@ -550,6 +608,70 @@ fn secret(passphrase: &str) -> SecretString {
 
 #[cfg(test)]
 mod tests {
+    /// The buffer an Export is serialized into grows by hand, wiping what it
+    /// leaves behind — so a document bigger than the room reserved for it is
+    /// still one buffer at the end rather than a trail of them in freed heap.
+    ///
+    /// Driven past the reserve deliberately: the ordinary Export never grows,
+    /// which is exactly why the growing path is the one nothing would otherwise
+    /// exercise.
+    #[test]
+    fn a_document_larger_than_the_buffer_reserved_for_it_is_still_written_whole() {
+        use std::io::Write;
+
+        let mut buffer = Wiping {
+            held: Zeroizing::new(Vec::with_capacity(8)),
+        };
+        let written = "every Credential on the machine, at length. ".repeat(200);
+
+        for piece in written.as_bytes().chunks(7) {
+            buffer
+                .write_all(piece)
+                .expect("a buffer that always accepts");
+        }
+        buffer.flush().expect("nothing to flush");
+
+        assert_eq!(
+            std::str::from_utf8(&buffer.held).expect("what went in"),
+            written,
+            "everything written comes back, however many times it grew"
+        );
+        assert!(
+            buffer.held.capacity() > 8,
+            "and it did grow, or this asserted nothing"
+        );
+    }
+
+    /// The reserve is measured from what the Export actually carries, so the
+    /// ordinary one never reaches the growing path at all.
+    #[test]
+    fn an_ordinary_export_is_written_without_the_buffer_growing_once() {
+        let export = Export {
+            version: CURRENT_VERSION,
+            registry: crate::registry::Registry::default(),
+            credentials: [(
+                "someone@example.com".to_string(),
+                "a credential".to_string(),
+            )]
+            .into(),
+            identity_files: [(
+                "someone@example.com".to_string(),
+                "{\"oauthAccount\":{}}".to_string(),
+            )]
+            .into(),
+        };
+
+        let buffer = Wiping::with_room_for(&export);
+        let reserved = buffer.held.capacity();
+        let sealed = seal(&export, "correct horse battery staple").expect("it seals");
+
+        assert!(!sealed.is_empty());
+        assert!(
+            reserved > 8 * 1024,
+            "the reserve is generous about a document nobody can size in advance"
+        );
+    }
+
     use super::*;
     use crate::probe::Identity;
     use crate::registry::Quarantine;

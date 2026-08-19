@@ -1151,3 +1151,38 @@ fn a_terminal_that_goes_away_at_the_last_question_does_not_lose_the_export() {
         "with nothing purged"
     );
 }
+
+/// A Purge that cannot list one of the two parents it walks stops, rather than
+/// reading "cannot be listed" as "there is nothing there".
+///
+/// `everything_perch_holds` swallowed every `list_dir` failure on the reasoning
+/// that an unreadable directory would be caught by the deletion pass, which
+/// refuses a Profile it cannot name. But that pass walks the very list this
+/// builds, so an unlistable `pending/` produced an empty set and there was
+/// nothing left to refuse. The home directory then went whole — and a
+/// Credential Store's service name is derived from the directory it belongs to,
+/// so the only name that could ever have reached a keychain item under
+/// `pending/` went with it: a live refresh token, unnameable, under a report
+/// saying the machine had been given back.
+#[test]
+fn a_directory_perch_cannot_list_stops_the_purge_rather_than_reading_as_empty() {
+    let host = a_machine_to_give_back();
+    let pending = Path::new(PERCH_HOME).join("pending");
+    host.create_dir_all(&pending).expect("the parent is there");
+    let host = host.with_unlistable_dir(&pending, "Permission denied (os error 13)");
+
+    let (outcome, printed) = run_purge(&host);
+
+    let refused = outcome.expect_err("a directory Perch cannot read is not an empty one");
+    let said = refused.to_string();
+    assert!(
+        said.contains("pending"),
+        "the refusal names the directory it could not walk: {said}"
+    );
+    assert_eq!(
+        registry_on(&host).map(|registry| registry.accounts.len()),
+        Some(3),
+        "and nothing was purged: {printed}"
+    );
+    assert_eq!(credential_of(&host, EMAIL).as_deref(), Some(CREDENTIAL));
+}
