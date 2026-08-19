@@ -411,6 +411,26 @@ impl Scope {
         }
     }
 
+    /// The Scope in the middle of a sentence *about the Scope itself*: "a
+    /// Setting {} carries", "`strategy` on {} is now …".
+    ///
+    /// [`Scope::described`] with the capital taken off, which is the whole
+    /// difference and the whole point: that one is documented as a subject and
+    /// reads as "The Ungrouped Scope", which is right standing at the front of
+    /// a sentence and wrong everywhere else. `perch config` said "`strategy` on
+    /// The Ungrouped Scope is now soonest-reset" and "`foo` is not a Setting The
+    /// Ungrouped Scope carries."
+    ///
+    /// A Group is unaffected either way — "Group `work`" is a name, and a name
+    /// is spelled the same wherever it appears — which is exactly why this went
+    /// unnoticed: every sentence reads correctly until somebody has no Group.
+    pub fn mentioned(&self) -> String {
+        match self {
+            Scope::Ungrouped => "the Ungrouped Scope".to_string(),
+            Scope::Group(_) => self.described(),
+        }
+    }
+
     /// The Scope as the middle of a sentence about the Accounts in it: "every
     /// Account in {}".
     ///

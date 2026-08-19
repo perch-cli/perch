@@ -85,7 +85,7 @@ impl Setting {
             ))),
             None => Err(PerchError::Invalid(format!(
                 "`{name}` is not a Setting {} carries. The ones it carries are {}.",
-                scope.described(),
+                scope.mentioned(),
                 listed(&vocabulary(scope)),
             ))),
         }

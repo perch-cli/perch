@@ -117,7 +117,7 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
             let now = key.of(registry, &scope);
             Ok(vec![
                 changed(
-                    &format!("`{}` on {}", key.as_str(), scope.described()),
+                    &format!("`{}` on {}", key.as_str(), scope.mentioned()),
                     &was,
                     &now,
                 ),
@@ -136,7 +136,7 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
                     "`perch config set {first} {second}` names {} and a key, but \
                      nothing to set it to. `perch config set <scope> <key> \
                      <value>` sets one.",
-                    scope.described(),
+                    scope.mentioned(),
                 )))
             }
             // A key where the Scope goes is the form that set a value
