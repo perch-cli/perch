@@ -1,5 +1,20 @@
 # The guide is written once and the site renders it
 
+> **Superseded by ADR 0062.** mdBook is replaced by Astro and Starlight, and the
+> landing page is no longer hand-written — one project renders the front page and
+> the guide together. Two things below are void: the section headed "The landing
+> page is not part of the book", and mdBook as what renders the guide, along with
+> the pin and the stylesheet that answered for it. The guide moved to
+> `pages/src/content/docs/`, which was never the part that mattered.
+>
+> The reasoning is not what was found wrong. The two costs named here are the
+> real ones and the theme was correctly identified as the second; 0062 only found
+> that a stylesheet could not pay it, because what the reader was reacting to was
+> two artifacts rather than one plain theme. What survives entire is the sentence
+> this document is named for — the guide is written once and the site renders it —
+> and so does the constraint underneath all of it: the installers are served from
+> the root of the deployment, from URLs that do not move.
+
 The site existed because the installers needed a versionless URL to be served
 from (ADR 0028, ADR 0031). That is a real job and it went on doing it, but it
 meant the front page of a program somebody might want to read about was an
