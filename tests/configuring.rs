@@ -168,8 +168,11 @@ fn the_soonest_resetting_account_is_chosen_when_the_group_says_to_prefer_it() {
          nothing that would not have been lost anyway: {printed}"
     );
     assert!(
-        printed.contains("resets soonest"),
-        "the choice is explained in the terms it was judged on: {printed}"
+        printed.contains(&format!(
+            "Switched to {SECOND_EMAIL}, the soonest reset in Group `work`."
+        )),
+        "and the landing line says what it chose on, in the terms it was judged \
+         on, beside the Scope it stayed inside: {printed}"
     );
 }
 
@@ -194,9 +197,11 @@ fn the_soonest_resetting_strategy_falls_back_to_room_when_no_figure_says_when_an
          can see is what is left to choose on: {printed}"
     );
     assert!(
-        printed.contains("no reset time to prefer one on"),
-        "and the fallback is said rather than passed off as the ranking that \
-         was asked for: {printed}"
+        printed.contains(&format!(
+            "Switched to {THIRD_EMAIL}, the most room in Group `work`."
+        )),
+        "and the landing line says the room it fell back to rather than \
+         passing the choice off as the ranking that was asked for: {printed}"
     );
 }
 
