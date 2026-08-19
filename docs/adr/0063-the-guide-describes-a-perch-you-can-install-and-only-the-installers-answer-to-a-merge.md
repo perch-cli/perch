@@ -52,6 +52,26 @@ so for one release cycle the honest answer is `main`, and the workflow says so i
 its own log rather than failing. It is a rule and not a stopgap — a repository
 whose tags were all deleted gets the same sensible answer.
 
+## The release calls it rather than announcing it
+
+`release.yml` creates the GitHub Release with `GITHUB_TOKEN`, and GitHub will not
+start a workflow from an event that token made. So a `release: [published]` trigger
+on the Pages workflow is not merely inelegant — it never fires, and it fails by
+doing nothing at all, which is the failure this repository keeps writing tests to
+avoid. It was written that way first and caught by somebody asking whether the
+thing would work.
+
+The rule was already documented here. `release-plz.yml` says it about pushes, and
+it is the reason the tag is pushed with a real token rather than the automatic one:
+a tag pushed with `GITHUB_TOKEN` would sit on `main` with nothing watching. The
+same sentence covers Releases.
+
+So `release.yml` calls this workflow as its last job, and that is better than the
+event would have been anyway: the call comes after the artifacts are uploaded, so
+the guide is never live describing a release nobody can download yet. A workflow
+called by another gets no more permission than the caller grants it, so the calling
+job names the three the deploy needs.
+
 ## What still watches it
 
 `ci.yml`'s `site` job goes on building `pages/` from the branch on every pull

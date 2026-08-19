@@ -8,18 +8,29 @@ name: Pages
 #
 # Two things are published here and they do not answer to the same clock, which is
 # the whole shape of this file (ADR 0063). The guide describes a Perch somebody can
-# install, so it comes from the newest release and moves when a release is
-# published. The installers are pasted into terminals from a URL with no version in
-# it, so they come from `main` and move when a merge fixes one — an installer that
-# had to wait for a release would stay broken until then.
+# install, so it comes from the newest release and moves when `release.yml` calls
+# this workflow. The installers are pasted into terminals from a URL with no
+# version in it, so they come from `main` and move when a merge fixes one — an
+# installer that had to wait for a release would stay broken until then.
 #
 # So a run checks out the release, then puts `main`'s `pages/public/` back on top,
-# and what it deploys is the release's site carrying the current installers. Both
-# triggers below produce that same whole site; the second one exists so an
-# installer fix reaches the URL it is pasted from without waiting.
+# and what it deploys is the release's site carrying the current installers. Every
+# way in produces that same whole site: the push trigger exists so an installer fix
+# reaches the URL it is pasted from without waiting, and it is the assembly rather
+# than the trigger that decides what goes out.
 on:
-  release:
-    types: [published]
+  # A release publishes the guide, and it does so by `release.yml` calling this
+  # workflow rather than by an event of its own. That is not a stylistic choice:
+  # `release.yml` creates the Release with GITHUB_TOKEN, and GitHub will not start
+  # a workflow from an event that token made — the same rule release-plz.yml
+  # documents about pushes, and the reason the tag it pushes needs a real token. A
+  # `release: [published]` trigger here would have sat there looking correct and
+  # never once fired.
+  #
+  # Being called rather than triggered also puts this after the Release's
+  # artifacts are uploaded, so the guide never describes a Perch that cannot yet
+  # be downloaded — which is the whole claim of ADR 0063.
+  workflow_call:
   # The installers, and nothing else. This file is deliberately not among the
   # paths: what a run publishes is the release's site carrying `main`'s two
   # installers, so a change to how that is assembled changes neither, and a run
@@ -64,11 +75,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # The newest release that carries a site, which is not always the newest
-      # release: the site moved into `pages/` after v0.2.0 was cut, so until the
-      # first release containing it, the answer is `main` and this says so out
-      # loud. It is a rule rather than a stopgap — a repository whose tags have all
-      # been deleted gets the same sensible answer.
       # The branch's tip, by hash, before anything moves the working tree off it.
       # A name would do until it did not: which local and remote-tracking refs the
       # checkout action leaves behind is its business rather than this file's, and
@@ -77,6 +83,11 @@ jobs:
         id: main
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+      # The newest release that carries a site, which is not always the newest
+      # release: the site moved into `pages/` after v0.2.0 was cut, so until the
+      # first release containing it, the answer is `main` and this says so out
+      # loud. It is a rule rather than a stopgap — a repository whose tags have all
+      # been deleted gets the same sensible answer.
       - name: Which Perch the guide describes
         id: source
         run: |

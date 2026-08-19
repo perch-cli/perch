@@ -158,12 +158,14 @@ and the guide together, and `pages/public/` is copied to the root of the output
 verbatim. Nothing on the site is written twice — the guide the site serves is the
 markdown GitHub shows, in `pages/src/content/docs/`.
 
-It publishes on two events, because the site's two halves keep different time
-(ADR 0063). **A published release** rebuilds everything: the guide describes a
-Perch somebody can install, so between releases it does not move — a typo fixed
-in the guide is live at the next release and not before. **A push to `main` that
-touches the installers** rebuilds too: they are pasted from a URL with no version
-in it, so a merge has to be able to fix one.
+It publishes twice over, because the site's two halves keep different time
+(ADR 0063). **A release** rebuilds everything: the guide describes a Perch somebody
+can install, so between releases it does not move — a typo fixed in the guide is
+live at the next release and not before. `release.yml` does that by calling
+`pages.yml` as its last job, after the artifacts are uploaded; it cannot be an
+event, because a Release created with `GITHUB_TOKEN` starts no workflow. **A push
+to `main` that touches the installers** rebuilds too: they are pasted from a URL
+with no version in it, so a merge has to be able to fix one.
 
 Changing this workflow does not publish anything, deliberately — it cannot change
 either half of what goes out. Use **Run workflow** to apply a change to how the
