@@ -41,3 +41,48 @@
 :root[data-theme="light"] {
   --sl-color-text-invert: var(--sl-color-white);
 }
+
+/*
+ * Moving between two pages of the guide is cross-faded rather than blanked. The
+ * browser does the whole of it: this is a real navigation to a real document, as
+ * every page on this site is, and nothing here intercepts a click or swaps a DOM
+ * — so Starlight's own theme select, sidebar and search go on starting up the one
+ * way they already do. Astro's `<ClientRouter />` would buy element-by-element
+ * continuity for the price of a router in the page, and a docs site does not need
+ * to be an application to stop flashing white.
+ *
+ * A browser without cross-document view transitions navigates exactly as it did
+ * before, and one whose reader has asked for less motion is told not to.
+ *
+ * The two rules under it are not decoration, and the defaults without them are
+ * wrong for this site rather than merely plainer. Left alone, the browser takes
+ * the whole viewport as one snapshot and cross-fades it — the header and the
+ * sidebar included, which is the thing a reader notices as a flash, because they
+ * are the parts that did not change. And it does that over a quarter of a second,
+ * while the document it is covering for is served in under a tenth of one: the
+ * animation was most of what navigating cost.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  @view-transition {
+    navigation: auto;
+  }
+
+  /*
+   * Named, and so lifted out of the snapshot that crosses: the frame holds still.
+   * The sidebar keeps its own group rather than holding perfectly still, which is
+   * what fades its highlight from the page you left to the page you asked for.
+   */
+  header.header {
+    view-transition-name: header;
+  }
+
+  nav.sidebar {
+    view-transition-name: sidebar;
+  }
+
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 120ms;
+  }
+}
