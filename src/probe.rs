@@ -951,8 +951,39 @@ impl Drop for Claim<'_> {
 pub fn claim<'a>(host: &'a dyn Host, config_dir: &Path) -> Result<Claim<'a>> {
     let pid = host.process_id();
     let marker = session_marker_at(config_dir, pid);
+    let sessions = sessions_dir(config_dir);
 
-    host.create_dir_all(&sessions_dir(config_dir))
+    // A `sessions` that is a link is refused rather than written through.
+    //
+    // `create_dir_all` at a link to a directory succeeds and uses the target,
+    // and every write under it lands there — so a Profile whose `sessions` is
+    // linked into the Default Profile takes this Marker with it. That is the
+    // state `reconcile::HELD_BACK` names in as many words ("its own Run's
+    // marker would land in the Default Profile") and `reconcile::sweep` exists
+    // to repair, and a Run reaches this before the sweep does: `commands::run`
+    // claims first on purpose (ADR 0027), because until the Marker exists
+    // nothing on the machine knows the Run is happening.
+    //
+    // Written through the link, the Marker makes the *Default Profile* report a
+    // live corroborated client, which refuses every Capture, Switch and Renewal
+    // on the machine for as long as the Run lasts. Then the sweep takes the link
+    // away, `Claim::drop` removes a path that no longer resolves, and the Marker
+    // is left behind in a directory it was never about.
+    //
+    // Refused rather than repaired here: what to do about a crossed Profile is
+    // Reconcile's, and this module has no idea whether the caller can afford
+    // the repair.
+    if matches!(host.link_target(&sessions), Ok(Some(_))) {
+        return Err(PerchError::Other(format!(
+            "{} is a link rather than a directory of its own, so recording that \
+             a client is running here would write the marker into whatever it \
+             points at — and that directory would report this Run as its own. \
+             Nothing was launched.",
+            sessions.display()
+        )));
+    }
+
+    host.create_dir_all(&sessions)
         .and_then(|()| {
             crate::host::write_atomically(host, &marker, &session_marker(pid, host.now()))
         })
