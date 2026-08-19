@@ -19,6 +19,11 @@ sidebar:
   # The front page is reached by the site's title and its logo, and it is not a
   # page of the guide the sidebar lists.
   hidden: true
+# Every other page's tab reads `<page> | Perch`, which on the page named Perch is
+# `Perch | Perch`. A `title` here replaces Starlight's rather than adding to it.
+head:
+  - tag: title
+    content: Perch
 ---
 
 import { CardGrid, LinkCard } from "@astrojs/starlight/components";
