@@ -50,6 +50,14 @@ small: **the guide is written once and the site renders it.** Also unchanged: th
 site deploys from `main`, because everything here is still fixed by a merge, and
 the installers are still served from the root of the deployment.
 
+> **Amended by ADR 0063.** The clause about deploying from `main` is void, and
+> carrying it forward from ADR 0035 without reopening it was the mistake: it was
+> true of the installers and had stopped being true of the guide, which was
+> describing a Perch nobody could install. The guide is published by a release
+> now, the installers still by a merge, and one run assembles both. Everything
+> else here stands, the installers at the root of the deployment included — that
+> is the half of the sentence that was right.
+
 ## Where the guide lives
 
 `pages/src/content/docs/`, which is a move, and the move is the point of this

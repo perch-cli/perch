@@ -1,24 +1,29 @@
 name: Pages
 
 # Builds and serves https://perch-cli.github.io/perch/ — the front page, the
-# guide, and the installers (ADR 0062).
+# guide, and the installers (ADR 0062, ADR 0063).
 #
-# One source now, where there used to be two. `pages/` is an Astro and Starlight
-# project that renders the splash page and the guide together, and `pages/public/`
-# is copied to the root of the output verbatim — so the URL somebody pastes into
-# a terminal does not carry a version, and an installer that has to be released
-# to be fixed does not stay broken until the next release.
+# `pages/` is an Astro and Starlight project that renders the splash page and the
+# guide together, and `pages/public/` is copied to the root of the output verbatim.
 #
-# It deploys from main rather than from a release for the same reason it always
-# did: everything here is fixed by a merge.
+# Two things are published here and they do not answer to the same clock, which is
+# the whole shape of this file (ADR 0063). The guide describes a Perch somebody can
+# install, so it comes from the newest release and moves when a release is
+# published. The installers are pasted into terminals from a URL with no version in
+# it, so they come from `main` and move when a merge fixes one — an installer that
+# had to wait for a release would stay broken until then.
+#
+# So a run checks out the release, then puts `main`'s `pages/public/` back on top,
+# and what it deploys is the release's site carrying the current installers. Both
+# triggers below produce that same whole site; the second one exists so an
+# installer fix reaches the URL it is pasted from without waiting.
 on:
+  release:
+    types: [published]
   push:
     branches: [main]
     paths:
-      - "pages/**"
-      # The logo is imported from where the app icons already live, rather than
-      # copied into the site — so a change to it is a change to the site.
-      - "docs/assets/**"
+      - "pages/public/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -44,15 +49,65 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
+      # The whole history, because this job resolves a tag and reads two refs out
+      # of one clone. `ref: main` explicitly: a release event checks out the tag by
+      # default, and the installers have to come from the branch either way.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: main
+          fetch-depth: 0
           persist-credentials: false
+
+      # The newest release that carries a site, which is not always the newest
+      # release: the site moved into `pages/` after v0.2.0 was cut, so until the
+      # first release containing it, the answer is `main` and this says so out
+      # loud. It is a rule rather than a stopgap — a repository whose tags have all
+      # been deleted gets the same sensible answer.
+      # The branch's tip, by hash, before anything moves the working tree off it.
+      # A name would do until it did not: which local and remote-tracking refs the
+      # checkout action leaves behind is its business rather than this file's, and
+      # a hash cannot be pointed at something else by a later step.
+      - name: Where main is
+        id: main
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Which Perch the guide describes
+        id: source
+        run: |
+          set -eu
+          for tag in $(git tag --sort=-v:refname); do
+            if git cat-file -e "$tag:pages/astro.config.ts" 2>/dev/null; then
+              echo "ref=$tag" >> "$GITHUB_OUTPUT"
+              echo "The guide is built from $tag, and the installers from main." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          done
+          echo "::notice::No release carries pages/ yet, so the guide is built from main. The next release fixes this on its own."
+          echo "ref=main" >> "$GITHUB_OUTPUT"
+          echo "No release carries a site yet, so the guide is built from main." >> "$GITHUB_STEP_SUMMARY"
+
+      # The release's tree, entire — its guide, its splash page, its Astro
+      # configuration, its lockfile. Taking `pages/` alone would leave the logo
+      # `astro.config.ts` imports from `docs/assets/` coming from the branch, and a
+      # site assembled from two commits is one no checkout can reproduce.
+      - name: The release the guide describes
+        run: git checkout --detach "${{ steps.source.outputs.ref }}"
+
+      # And then the two files that are the exception, from the branch. These are
+      # the only things `main` publishes, because these are the only things whose
+      # URL somebody has already pasted into a terminal.
+      - name: The installers, from main
+        run: |
+          set -eu
+          git checkout ${{ steps.main.outputs.sha }} -- pages/public/install.sh pages/public/install.ps1
+          git --no-pager diff --stat HEAD -- pages/public || true
 
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       # Node 24 and corepack, exactly as ci.yml does it: pnpm's version is
       # `packageManager` in pages/package.json, so the pull request that was
-      # checked and the deployment that publishes are built by the same one.
+      # checked and the deployment that publishes are built by the same one — the
+      # release's one, here, which is the point.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
@@ -72,6 +127,10 @@ jobs:
       # installers first, because they are the promise that predates the guide:
       # `public/` lands at the root, and nothing about how the pages are rendered
       # is allowed to move them.
+      #
+      # The last two are what says the guide was rendered at all, so a release
+      # whose `pages/` is somehow empty fails here rather than replacing the site
+      # with two shell scripts.
       - name: The installers are where they are pasted from
         working-directory: pages
         run: |
@@ -80,6 +139,16 @@ jobs:
           test -s dist/install.ps1
           test -s dist/index.html
           test -s dist/reference/index.html
+
+      # And that the installers really are the branch's, which is the one thing
+      # about this assembly that could go wrong silently: a checkout that failed to
+      # overlay them would deploy the release's copies and look identical.
+      - name: The installers really are main's
+        run: |
+          set -eu
+          for installer in install.sh install.ps1; do
+            git show "${{ steps.main.outputs.sha }}:pages/public/$installer" | diff - "pages/dist/$installer"
+          done
 
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:

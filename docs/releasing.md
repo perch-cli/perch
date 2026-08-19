@@ -152,12 +152,25 @@ judgment call. Worth revisiting at the same time: Apple notarization, which
 
 ## The site, and the installers on it
 
-<https://perch-cli.github.io/perch/> is built by `pages.yml` on every push to
-`main` that touches what it is made of, out of one source (ADR 0062): `pages/`
-is an Astro and Starlight project that renders the front page and the guide
-together, and `pages/public/` is copied to the root of the output verbatim.
-Nothing on the site is written twice — the guide the site serves is the markdown
-GitHub shows, in `pages/src/content/docs/`.
+<https://perch-cli.github.io/perch/> is built by `pages.yml` out of one source
+(ADR 0062): `pages/` is an Astro and Starlight project that renders the front page
+and the guide together, and `pages/public/` is copied to the root of the output
+verbatim. Nothing on the site is written twice — the guide the site serves is the
+markdown GitHub shows, in `pages/src/content/docs/`.
+
+It publishes on two events, because the site's two halves keep different time
+(ADR 0063). **A published release** rebuilds everything: the guide describes a
+Perch somebody can install, so between releases it does not move — a typo fixed
+in the guide is live at the next release and not before. **A push to `main` that
+touches the installers** rebuilds too: they are pasted from a URL with no version in it, so a merge has to be
+able to fix one.
+
+Either event runs the same recipe. The newest release that carries a `pages/`
+directory is checked out entire, `main`'s two installers are put back on top, and
+the run diffs them against `main` before deploying — an overlay that failed
+silently would publish the release's copies and look identical. Until the first
+release carrying `pages/`, there is no such tag and the workflow builds the guide
+from `main`, saying so in its log.
 
 The installers live on `main` rather than inside a release on purpose: the URL
 somebody pastes into a terminal should not carry a version, and an installer
@@ -169,10 +182,10 @@ whatever else the site grows, those two do not move.
 Enable it once, under **Settings → Pages → Source: GitHub Actions**.
 
 What the site is built from is pinned by `pages/pnpm-lock.yaml`, and pnpm's own
-version by `packageManager` in `pages/package.json` — so the renderer a pull
-request is checked with is the one the site is built with, and `pnpm install
---frozen-lockfile` refuses anything else. CI's `site` job runs the same three
-commands this does:
+version by `packageManager` in `pages/package.json` — so `pnpm install
+--frozen-lockfile` refuses anything else, and the deploy uses the release's
+lockfile rather than the branch's. CI's `site` job builds the branch on every pull
+request, which proves the *next* release's site builds. To run it yourself:
 
 ```sh
 cd pages

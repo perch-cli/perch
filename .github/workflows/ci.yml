@@ -262,9 +262,12 @@ jobs:
           Write-Output "install.ps1 parses cleanly"
 
   # The site is built on every pull request, for the same reason the installers
-  # are checked on one: `pages.yml` deploys from main, so main is the first place
-  # a site that will not build would otherwise be found — and the deployment it
-  # breaks is the one serving the installers.
+  # are checked on one: a site that will not build should be found on the pull
+  # request that broke it rather than by a deploy that cannot run.
+  #
+  # What this proves is the *next* release's site, not the one being served:
+  # `pages.yml` publishes the guide from the newest release and only the
+  # installers from main (ADR 0063). That is the check that was wanted either way.
   #
   # What gives this teeth is what Starlight refuses: a page with no `title` in
   # its frontmatter, and — because of the one plugin this site has — a relative
