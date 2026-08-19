@@ -521,6 +521,17 @@ impl Files for RealHost {
                     path: path.to_path_buf(),
                 })
             }
+            // A parent that is not there is `ENOENT`, and it is the other
+            // variant this port names. Flattened into `Io` it read as "the
+            // filesystem refused", which `lock::take` reports rather than
+            // waits out — the right outcome for the wrong stated reason, and
+            // the fake answered `NotFound` for it.
+            //
+            // Named for the *parent*, because the path itself is the one thing
+            // that is certainly absent here and saying so would be no news.
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(HostError::NotFound {
+                path: path.parent().unwrap_or(path).to_path_buf(),
+            }),
             Err(err) => Err(HostError::Io(err)),
         }
     }

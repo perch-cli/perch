@@ -896,6 +896,24 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "an exclusive directory is mkdir rather than mkdir -p",
+        asserts: |host, root, adapter, _now| {
+            // The fake inserted the path whatever was above it, so a lock could
+            // be taken inside a Profile that does not exist — and a behavior
+            // test could then show a Switch proceeding under a lock the machine
+            // would have refused to give it.
+            let missing = root.join("no-such-profile");
+            match host.create_dir_exclusive(&missing.join(".oauth_refresh.lock")) {
+                Err(HostError::NotFound { .. }) => {}
+                other => panic!("{adapter}: expected NotFound, got {other:?}"),
+            }
+            assert!(
+                !host.path_exists(&missing),
+                "{adapter}: and the parent was not invented on the way"
+            );
+        },
+    },
+    Case {
         named: "touching a path that is not there reports NotFound",
         asserts: |host, root, adapter, _now| {
             // `NotFound` is the answer `lock::renew` reads as "the artifact has

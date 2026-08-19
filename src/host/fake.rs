@@ -715,6 +715,12 @@ impl FakeHost {
     /// A lock artifact, in other words: the age is what decides whether the
     /// holder is taken to be alive or to have died holding it.
     pub fn with_dir_held_since(self, path: impl AsRef<Path>, since: DateTime<Utc>) -> Self {
+        // The directories above it too, as `with_link` and `with_file` do. A
+        // lock inside a Profile that does not exist is a world no machine can
+        // produce — `create_dir_exclusive` is `mkdir`, and `take_all` makes the
+        // Profile before it ever asks for the lock — and a fixture that plants
+        // one is a test asserting against a state its subject will never meet.
+        self.note_directories_of(path.as_ref());
         self.fs
             .dirs
             .borrow_mut()
@@ -1719,6 +1725,22 @@ impl port::Files for FakeHost {
         if self.fs.links.borrow().contains_key(path) || self.path_exists(path) {
             return Err(HostError::AlreadyExists {
                 path: path.to_path_buf(),
+            });
+        }
+        // `mkdir` and not `mkdir -p`, which this used to be by omission: the
+        // path went into `fs.dirs` whatever was above it, so a lock could be
+        // taken at `<profile>/.oauth_refresh.lock` for a Profile that does not
+        // exist. `std::fs::create_dir` answers `ENOENT` for that, so a behavior
+        // test could show a Switch proceeding under a lock the machine would
+        // have refused to give it.
+        let parent = path.parent().filter(|at| !at.as_os_str().is_empty());
+        if let Some(parent) = parent
+            && self
+                .resolved(parent)
+                .is_none_or(|at| !self.fs.dirs.borrow().contains(&at))
+        {
+            return Err(HostError::NotFound {
+                path: parent.to_path_buf(),
             });
         }
         self.fs.dirs.borrow_mut().insert(path.to_path_buf());
