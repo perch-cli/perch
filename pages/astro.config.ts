@@ -41,6 +41,10 @@ export default defineConfig({
       // source for one file, and the guide moving was enough movement for one
       // change.
       logo: { src: "../docs/assets/icon.svg" },
+      // Starlight's default, said out loud because this one is not a file in
+      // `public/`: `src/pages/favicon.svg.ts` is the route that serves it, and
+      // the default left implicit is what made a tab show a broken image.
+      favicon: "/favicon.svg",
       customCss: ["./src/styles/perch.css"],
       // Two overrides, and both exist for the client-side router: one to put
       // `<ClientRouter />` in the head, one to keep the search dialog across a
