@@ -1948,11 +1948,8 @@ mod tests {
     #[test]
     fn a_passphrase_longer_than_the_buffer_survives_being_grown() {
         let long = "correct horse battery staple ".repeat(50);
-        assert!(
-            long.len() > 512,
-            "the growth path is the point: {}",
-            long.len()
-        );
+        let past_the_reserved_room = long.len() > 512;
+        assert!(past_the_reserved_room, "the growth path is the point");
         assert_eq!(typed(&format!("{long}\n")), Some(long));
     }
 

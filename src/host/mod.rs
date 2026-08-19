@@ -886,6 +886,60 @@ pub fn replace_via_tmp(
 
 #[cfg(test)]
 mod tests {
+    /// Following every link on a path, which is the question "is this inside
+    /// that directory?" needs and [`through_any_link`] does not answer: the
+    /// link that makes two spellings of one place is usually a directory
+    /// *above* the one named.
+    #[test]
+    fn every_link_on_the_way_is_followed_and_not_only_the_last() {
+        let host = FakeHost::new().with_link(
+            Link::Symbolic,
+            "/Users/someone/.config/perch/profiles",
+            "/Users/someone/claude",
+        );
+
+        assert_eq!(
+            through_every_link(&host, Path::new("/Users/someone/claude/work")),
+            Path::new("/Users/someone/.config/perch/profiles/work"),
+            "the link is two components up, and the rest of the path goes back on"
+        );
+        assert_eq!(
+            through_every_link(&host, Path::new("/Users/someone/elsewhere")),
+            Path::new("/Users/someone/elsewhere"),
+            "a path with no link on it is itself"
+        );
+    }
+
+    /// A link's target may be written relative to where the link sits, which is
+    /// how `ln -s` records one unless it was given an absolute path.
+    #[test]
+    fn a_link_written_relative_to_itself_resolves_against_where_it_sits() {
+        let host = FakeHost::new().with_link(Link::Symbolic, "elsewhere", "/Users/someone/here");
+
+        assert_eq!(
+            through_every_link(&host, Path::new("/Users/someone/here/inside")),
+            Path::new("/Users/someone/elsewhere/inside"),
+        );
+    }
+
+    /// Two links pointing at each other are a loop, and the walk is bounded
+    /// rather than trusting the filesystem not to contain one. The caller is
+    /// comparing rather than opening, so an answer that got part way is a
+    /// comparison that fails closed.
+    #[test]
+    fn a_loop_of_links_gives_up_rather_than_hanging() {
+        let host = FakeHost::new()
+            .with_link(Link::Symbolic, "/b", "/a")
+            .with_link(Link::Symbolic, "/a", "/b");
+
+        let settled = through_every_link(&host, Path::new("/a"));
+
+        assert!(
+            settled == Path::new("/a") || settled == Path::new("/b"),
+            "it stops somewhere on the loop rather than spinning: {settled:?}"
+        );
+    }
+
     use super::*;
     use crate::host::fake::Effect;
 
