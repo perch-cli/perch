@@ -189,6 +189,20 @@ fn move_account(registry: &mut Registry, target: &AccountTarget, group: &str) ->
 /// `perch config` and `perch list` address Groups too, and answer a typo with
 /// this same sentence rather than one of their own.
 pub(crate) fn no_such_group(registry: &Registry, name: &str) -> PerchError {
+    // A word that could never be a Group is told so, rather than offered a
+    // `perch group add` that the next command refuses. `global` is the sharpest
+    // case: `registry::validate_name` reserves it *specifically* so that
+    // "Declare it with `perch group add global`" can never be made as an
+    // offer — and this function, which every one of `group remove`, `group
+    // rename` and `group move` reaches, was making it.
+    //
+    // Asked here rather than at each caller, which is where the two ad-hoc
+    // `means_global` guards in `list` and `config` came from: one door, and
+    // whatever `validate_name` refuses is refused in its own words.
+    if let Err(why) = registry::validate_name(registry::NameKind::Group, name) {
+        return PerchError::NotFound(format!("No Group called `{name}`. {why}"));
+    }
+
     let declared: Vec<String> = registry.groups.keys().cloned().collect();
     let help = match target::suggestion(&declared, name) {
         // A near miss is a typo far more often than it is a Group somebody
