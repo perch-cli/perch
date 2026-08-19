@@ -45,19 +45,29 @@ fn curl_bin() -> Result<PathBuf, HostError> {
     // between a `PATH` walk and not working. The Windows arm has always taken
     // `%SystemRoot%` from the environment, which anything that can set `PATH`
     // can set too, so this is the rule that side already lives by.
-    let usually = PathBuf::from(USUALLY);
+    curl_at(
+        Path::new(USUALLY),
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )
+}
+
+/// The choice itself, given the two places to look. Split from the caller above
+/// so a test can drive all three answers: this machine has `curl` where it is
+/// expected, so the branch that matters is the one it can never reach.
+#[cfg(not(windows))]
+fn curl_at(usually: &Path, path: &std::ffi::OsStr) -> Result<PathBuf, HostError> {
     if usually.is_file() {
-        return Ok(usually);
+        return Ok(usually.to_path_buf());
     }
 
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    std::env::split_paths(&path)
+    std::env::split_paths(path)
         .map(|dir| dir.join("curl"))
         .find(|candidate| candidate.is_file())
         .ok_or_else(|| {
             HostError::Other(format!(
-                "curl is not at {USUALLY} and is not on PATH, so Perch cannot \
-                 reach Anthropic. Install curl, or put it on PATH."
+                "curl is not at {} and is not on PATH, so Perch cannot reach \
+                 Anthropic. Install curl, or put it on PATH.",
+                usually.display()
             ))
         })
 }
@@ -875,22 +885,31 @@ fn split_reply(stdout: &str) -> Result<HttpResponse, HostError> {
 }
 
 /// One line from standard input, or `None` at end of it.
+///
+/// Through the same reader the secret prompt uses, which is not a tidiness
+/// question. This was `stdin().lock()`, an 8 KiB `BufReader` owned by the
+/// process, while [`read_secret`](RealHost::read_secret) reads the descriptor
+/// directly — and `perch holdings purge` asks a word, then a path, then an
+/// Export passphrase. Two readers on one descriptor is the buffered one
+/// swallowing bytes the unbuffered one then never sees: on a terminal it
+/// usually stops at the line, and "usually" is not a property to hand the
+/// passphrase prompt.
+///
+/// The `Zeroizing` the shared reader hands back costs nothing here and is
+/// dropped by the copy out. Wiping a line that was never secret is not wrong;
+/// two ways of reading one descriptor is.
 fn read_a_line() -> Result<Option<String>, HostError> {
-    use std::io::BufRead;
-
-    let mut line = String::new();
-    let read = std::io::stdin().lock().read_line(&mut line)?;
-    if read == 0 {
-        return Ok(None);
-    }
-    Ok(Some(line.trim_end_matches(['\r', '\n']).to_string()))
+    Ok(a_line_from(one_byte_of_standard_input)?.map(|line| line.to_string()))
 }
 
-/// The same, for the one answer that must not outlive the question: a buffer
-/// that is wiped when it is dropped, and that never leaves a copy behind.
+/// One line from wherever the bytes come from, into a buffer that is wiped when
+/// it is dropped and never leaves a copy behind.
 ///
-/// [`read_a_line`] cannot be that, and `ask_secret`'s own comment used to claim
-/// it was — "the buffer that gets wiped is the one the terminal was read into,
+/// Both prompts come through here — the plain one and the secret one — so that
+/// one descriptor has one reader. What the wiping is *for* is the secret one.
+///
+/// `read_a_line` used to be a `BufRead::read_line` into a `String`, and
+/// `ask_secret`'s own comment claimed that was enough — "the buffer that gets wiped is the one the terminal was read into,
 /// not a second copy of it beside the first". It is two copies. `read_line`
 /// grows a `String` by reallocating, so a passphrase longer than the last
 /// capacity leaves fragments of itself in freed heap; and the `trim_end_matches`
@@ -900,7 +919,7 @@ fn read_a_line() -> Result<Option<String>, HostError> {
 /// only by hand — wiping what it abandons — and trimmed in place before it
 /// becomes the `String` the caller keeps. Every buffer the passphrase ever sits
 /// in is wiped.
-fn a_secret_line_from(
+fn a_line_from(
     mut next: impl FnMut() -> Result<Option<u8>, HostError>,
 ) -> Result<Option<Zeroizing<String>>, HostError> {
     // Longer than any passphrase anybody types, so the growth below is a
@@ -1083,7 +1102,7 @@ fn read_without_echo() -> Result<Option<Zeroizing<String>>, HostError> {
     let hidden = unsafe { libc::tcsetattr(terminal, libc::TCSAFLUSH, &hiding) } == 0;
 
     let typed = if hidden {
-        a_secret_line_from(one_byte_of_standard_input)
+        a_line_from(one_byte_of_standard_input)
     } else {
         Err(HostError::Io(std::io::Error::last_os_error()))
     };
@@ -1166,7 +1185,7 @@ fn read_without_echo() -> Result<Option<Zeroizing<String>>, HostError> {
 
         let hidden = SetConsoleMode(console, showing & !ENABLE_ECHO_INPUT) != 0;
         let typed = if hidden {
-            a_secret_line_from(one_byte_of_standard_input)
+            a_line_from(one_byte_of_standard_input)
         } else {
             Err(HostError::Io(std::io::Error::last_os_error()))
         };
@@ -1909,27 +1928,41 @@ mod tests {
     /// `curl` is found where it almost always is, and the walk exists for the
     /// machines that do not put it there.
     ///
-    /// Asserted as "the absolute path wins where it is present", which is the
-    /// half that carries the security property: nothing earlier on `PATH` is
-    /// ever handed a request bearing an access token on a machine that has
-    /// `curl` where it is expected.
+    /// All three answers, driven off a scratch directory rather than off this
+    /// machine — which has `curl` at `/usr/bin`, and so can never reach the two
+    /// branches that matter.
     #[cfg(not(windows))]
     #[test]
-    fn curl_is_taken_from_the_absolute_path_wherever_it_is_there() {
-        let found = super::curl_bin().expect("this machine has curl");
+    fn curl_is_taken_from_the_absolute_path_and_then_from_the_walk() {
+        let root = std::env::temp_dir().join(format!("perch-curl-{}", std::process::id()));
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).expect("a scratch directory");
+        let usually = root.join("usr-bin-curl");
+        let on_path = bin.join("curl");
 
-        if Path::new("/usr/bin/curl").is_file() {
-            assert_eq!(
-                found,
-                Path::new("/usr/bin/curl"),
-                "the absolute path is preferred, and the walk is the fallback"
-            );
-        } else {
-            assert!(
-                found.is_file() && found.ends_with("curl"),
-                "and where it is not there, the walk found one: {found:?}"
-            );
-        }
+        // Neither: a refusal that names both places rather than one.
+        let refused = super::curl_at(&usually, bin.as_os_str())
+            .expect_err("no curl anywhere is not something to guess at");
+        let said = refused.to_string();
+        assert!(said.contains("PATH"), "{said}");
+        assert!(said.contains(&usually.display().to_string()), "{said}");
+
+        // On PATH only: the walk is what the machines without `/usr/bin` need.
+        std::fs::write(&on_path, "#!/bin/sh\n").expect("a curl on PATH");
+        assert_eq!(
+            super::curl_at(&usually, bin.as_os_str()).expect("the walk finds it"),
+            on_path
+        );
+
+        // Both: the absolute path wins, which is what keeps anything earlier on
+        // PATH from being handed a request bearing an access token.
+        std::fs::write(&usually, "#!/bin/sh\n").expect("a curl where it belongs");
+        assert_eq!(
+            super::curl_at(&usually, bin.as_os_str()).expect("it is there"),
+            usually
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// The read a passphrase arrives through, driven off a pipe rather than off
@@ -1995,7 +2028,7 @@ mod tests {
     /// not do.
     fn typed(input: &str) -> Option<String> {
         let mut bytes = input.bytes().collect::<std::collections::VecDeque<u8>>();
-        super::a_secret_line_from(|| Ok(bytes.pop_front()))
+        super::a_line_from(|| Ok(bytes.pop_front()))
             .expect("the bytes are text")
             .map(|secret| secret.to_string())
     }

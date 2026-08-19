@@ -347,10 +347,8 @@ fn report(
     if let Some(alias) = alias {
         say(out, &format!("Alias:  {alias}"))?;
     }
-    say(
-        out,
-        &format!("Group:  {}", group.unwrap_or(registry::NO_GROUP)),
-    )?;
+    let group = group.unwrap_or(registry::NO_GROUP);
+    say(out, &format!("Group:  {group}"))?;
     match registry.active_account() {
         Some(active) => say(
             out,

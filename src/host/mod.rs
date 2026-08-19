@@ -908,6 +908,12 @@ mod tests {
             Path::new("/Users/someone/elsewhere"),
             "a path with no link on it is itself"
         );
+        // A relative path runs out of parents at the empty one rather than at
+        // the root, which is the other way this walk has to know it is done.
+        assert_eq!(
+            through_every_link(&host, Path::new("neither/is/this")),
+            Path::new("neither/is/this"),
+        );
     }
 
     /// A link's target may be written relative to where the link sits, which is
