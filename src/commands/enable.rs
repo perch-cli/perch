@@ -11,10 +11,12 @@
 //! and asking for a state the Account is already in says so rather than
 //! failing, because a script that runs twice has not done anything wrong.
 //!
-//! Every outcome says what the state now means as well as what changed, because
-//! the whole point of the command is a promise about what a disabled Account
-//! still is — and that promise is not made about a Quarantined one, whose
-//! Credential does not work whatever the Cycling pool says.
+//! What the pair says is what it changed, and nothing about what a disabled
+//! Account still is: that promise holds after every run of either command, so
+//! it is the guide's to make once (ADR 0061). The exception is a Quarantined
+//! Account, which is promised nothing — its Credential does not work whatever
+//! the Cycling pool says, and being told it was enabled without being told that
+//! is being told the smaller half.
 
 use std::io::Write;
 
@@ -51,8 +53,9 @@ pub fn run(host: &dyn Host, command: EnableCommand, out: &mut dyn Write) -> Resu
 }
 
 /// Moves one Account in or out of the Cycling pool, touching nothing else about
-/// it. Returns what to tell the user: what changed, and what the state it is
-/// now in means for them.
+/// it. Returns what to tell the user, which is what changed — and, where the
+/// Account is Quarantined, the one thing that makes the change not mean what it
+/// says.
 fn set(registry: &mut Registry, target: &AccountTarget, command: &EnableCommand) -> Result<String> {
     let named = registry.named_for_the_user(&target.email);
     let candidate = matches!(command, EnableCommand::Enable { .. });
@@ -68,28 +71,32 @@ fn set(registry: &mut Registry, target: &AccountTarget, command: &EnableCommand)
         (_, true) => format!("Enabled {named}."),
     };
     Ok(format!(
-        "{changed} {}",
-        what_that_means(candidate, quarantine, &target.email)
+        "{changed}{}",
+        what_the_quarantine_still_denies(quarantine, &target.email)
     ))
 }
 
-/// What the Account's state now means, which is where the honesty lives.
+/// The one thing about the Account's state that the verb did not already say.
 ///
-/// A disabled Account is promised everything Cycling is not. A Quarantined one
-/// is promised nothing its Credential cannot deliver: whether it is in the
-/// Cycling pool and whether it works at all are separate facts with separate
-/// fixes, and enabling it is not one of them.
-fn what_that_means(candidate: bool, quarantine: Option<Quarantine>, target: &str) -> String {
-    match (candidate, quarantine) {
-        (_, Some(why)) => format!(
-            "It is Quarantined, though — {} — so nothing switches to it, Cycling \
-             or you. {}",
+/// A Quarantined Account is promised nothing its Credential cannot deliver:
+/// whether it is in the Cycling pool and whether it works at all are separate
+/// facts with separate fixes, and enabling it is not one of them. So this is
+/// said whichever way the pair was asked, and it is said in full — an Account
+/// that will not be switched to at all is a refusal wearing an outcome's
+/// clothes.
+///
+/// Nothing is said about an Account that is not Quarantined. What Cycling does
+/// with a disabled Account, and that a disabled one stays listed and named, are
+/// true after every single run of these two commands — which is what makes them
+/// the guide's to establish rather than the command's to repeat (ADR 0061).
+fn what_the_quarantine_still_denies(quarantine: Option<Quarantine>, target: &str) -> String {
+    match quarantine {
+        Some(why) => format!(
+            " It is Quarantined, though — {} — so nothing switches to it, \
+             Cycling or you. {}",
             why.because(),
             registry::how_to_repair(target),
         ),
-        (true, None) => "It is a Cycle candidate again.".to_string(),
-        (false, None) => "Cycling will not choose it — it stays listed and named, and `perch \
-             switch` still switches to it when you name it."
-            .to_string(),
+        None => String::new(),
     }
 }

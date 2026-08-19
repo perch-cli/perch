@@ -275,6 +275,11 @@ fn a_credential_lands_in_the_store_this_machines_claude_code_would_use() {
 /// Being active is a claim about which Credential is in this machine's Default
 /// Profile, and an Import puts none there. Whatever Claude Code was logged in as
 /// goes on running until the user Switches.
+///
+/// Asserted as the two data it is about, and no longer as a `perch switch` in
+/// the report: nothing arrives active on any Import, so pointing at the Switch
+/// was Perch pre-empting a disappointment on every run of the command (ADR
+/// 0061). The guide is where an Import is described, and it says so.
 #[test]
 fn nothing_is_made_active_by_an_import() {
     let sealed = an_export_of_a_whole_machine();
@@ -286,13 +291,12 @@ fn nothing_is_made_active_by_an_import() {
     let (outcome, printed) = run_import(&host, AT);
     outcome.expect("the import lands");
 
-    assert_eq!(*registry_of(&host).active(), Active::Nobody);
+    assert_eq!(*registry_of(&host).active(), Active::Nobody, "{printed}");
     assert_eq!(
         host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME),
         live_before,
-        "the live Credential is not an Import's to replace"
+        "the live Credential is not an Import's to replace: {printed}"
     );
-    assert!(printed.contains("perch switch"), "{printed}");
 }
 
 /// The same rule, for the other claim a registry makes about right now.
@@ -735,7 +739,15 @@ fn nothing_the_export_holds_reaches_standard_output() {
             "`{secret}` was printed: {printed}"
         );
     }
-    assert!(printed.contains(AT), "what was read is said: {printed}");
+    // One line, asserted whole (ADR 0043): how many and from where. That
+    // nothing arrives active, and that an Import carries the whole registry,
+    // are true of every Import — so the guide is where they are established
+    // rather than here (ADR 0061).
+    assert_eq!(
+        printed.trim_end().lines().last(),
+        Some(format!("Imported 3 Accounts from {AT}.").as_str()),
+        "{printed}"
+    );
 }
 
 /// The pair is the point: what a Purge gives back, an Import puts back. Asserted

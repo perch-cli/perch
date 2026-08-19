@@ -190,7 +190,7 @@ same policy, same decision log. Perch writes the unit and hands the job over.
 
 ```
 $ perch watcher install
-Installed the Service. It runs /opt/homebrew/bin/perch as a LaunchAgent. It starts when you log in, and it is running now.
+Installed the Service. It runs /opt/homebrew/bin/perch as a LaunchAgent.
 Its decisions go to /Users/you/.config/perch/watch.log.
 
 $ perch watcher status
@@ -201,8 +201,14 @@ Its decisions go to /Users/you/.config/perch/watch.log.
 A Watcher is running on this machine and holds the watcher lock.
 
 $ perch watcher uninstall
-The Service is stopped and its unit is gone. Nothing starts at login any more, and `perch watcher run` in a terminal is unaffected.
+The Service is stopped and its unit is gone.
 ```
+
+An install that succeeds has started the Service and arranged for it to start
+again when you log in, so it says neither; an install that could not start it
+says so and names the repair. An uninstall that succeeds has stopped it and
+taken the unit back, and leaves `perch watcher run` in a terminal exactly as it
+found it.
 
 **At login, and yours rather than the machine's.** Never a system service and
 never at boot: every Profile Perch holds is under your home directory, and on

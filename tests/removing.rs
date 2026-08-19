@@ -65,6 +65,16 @@ fn removing_an_account_forgets_it_and_deletes_the_credential_perch_held() {
         !listed.contains(SECOND_EMAIL),
         "a removed Account stops appearing in the listing:\n{listed}"
     );
+
+    // And the report is one line, asserted whole (ADR 0043). Every Remove that
+    // finds a Credential deletes it and leaves nothing listing or Cycling to
+    // the Account — the ordinary case announcing that it was ordinary (ADR
+    // 0061). What that sentence promised is asserted above, off the machine.
+    assert_eq!(
+        printed.trim_end().lines().last(),
+        Some(format!("Removed {SECOND_EMAIL}.").as_str()),
+        "{printed}"
+    );
 }
 
 #[test]
@@ -576,13 +586,19 @@ fn a_removal_that_found_no_credential_does_not_claim_to_have_deleted_one() {
 
     result.expect("the Account is still forgotten");
     assert!(!holds(&host, SECOND_EMAIL), "{printed}");
+    // Asserted whole, because the claim is the sentence (ADR 0043). A Remove
+    // that deletes a Credential says nothing about it — that is what every
+    // Remove does (ADR 0061) — so this is one of the two outcomes that speaks
+    // at all, and what it must not do is claim a deletion that never happened.
     assert!(
-        !printed.contains("is deleted"),
-        "nothing was deleted, so nothing says it was:\n{printed}"
-    );
-    assert!(
-        printed.contains("$USER"),
-        "and the reason a Credential might still be out there is named:\n{printed}"
+        printed.contains(&format!(
+            "Removed {SECOND_EMAIL}. Neither of its Credential Stores held \
+             anything to delete — on macOS a keychain item is filed under \
+             `$USER`, so one written under a different login name is still \
+             there."
+        )),
+        "nothing was deleted, so nothing says it was, and the reason a \
+         Credential might still be out there is named:\n{printed}"
     );
 }
 

@@ -252,12 +252,50 @@ fn disabling_a_quarantined_account_promises_no_switch_that_would_not_work() {
     let (result, printed) = disable_account(&host, SECOND_EMAIL);
 
     result.expect("an Account can leave the pool whatever its Credential is doing");
+    // The one thing either half of this pair says beyond what it changed, and
+    // the reason it is exempt: an Account nothing will switch to is a refusal
+    // wearing an outcome's clothes, so it keeps its explanation and its remedy
+    // (ADR 0061).
     assert!(
-        !printed.contains("still switches to it"),
+        printed.contains("It is Quarantined, though")
+            && printed.contains("so nothing switches to it, Cycling or you."),
         "the promise disabling makes about naming an Account is exactly the one \
-         Quarantine breaks, so it is not made here: {printed}"
+         Quarantine breaks, so what is said here is the breakage: {printed}"
     );
-    assert!(printed.contains("Quarantined"), "{printed}");
+    assert!(
+        printed.contains(&format!("perch relogin {SECOND_EMAIL}")),
+        "and the repair, which is the other half of a refusal: {printed}"
+    );
+}
+
+/// **What ADR 0061 leaves of these two.** A healthy Account is told what
+/// changed and nothing else.
+///
+/// What Cycling does with a disabled Account, and that a disabled one stays
+/// listed and named and can still be switched to by name, are true after every
+/// single run of `perch disable` — which is what makes them the guide's to
+/// establish rather than this command's to repeat.
+#[test]
+fn a_healthy_account_is_told_what_changed_and_nothing_about_what_that_means() {
+    let host = machine_with_two_accounts();
+
+    let (result, printed) = disable_account(&host, SECOND_EMAIL);
+
+    result.expect("it leaves the pool");
+    assert_eq!(
+        printed.trim_end().lines().last(),
+        Some(format!("Disabled {SECOND_EMAIL}.").as_str()),
+        "and nothing else: {printed}"
+    );
+
+    let (result, printed) = enable_account(&host, SECOND_EMAIL);
+
+    result.expect("it comes back");
+    assert_eq!(
+        printed.trim_end().lines().last(),
+        Some(format!("Enabled {SECOND_EMAIL}.").as_str()),
+        "nor the other way: {printed}"
+    );
 }
 
 #[test]

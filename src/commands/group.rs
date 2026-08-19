@@ -74,24 +74,23 @@ pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Resul
     }
 
     only_the_registry(host, out, |registry| match command {
+        // What it declared, and not what governs it. A Group is declared at
+        // the compiled-in defaults every time, so the two rows would be the
+        // same two rows on every run — `perch group list` is where they are
+        // read (ADR 0061).
         GroupCommand::Add { name } => {
             registry.declare_group(&name)?;
-            let mut said = vec![format!("Declared the Group `{name}`.")];
-            said.extend(configuration_lines(registry, &Scope::Group(name)));
-            Ok(said)
+            Ok(vec![format!("Declared the Group `{name}`.")])
         }
         GroupCommand::Remove { name } => {
             let removed = remove(registry, &name)?;
             Ok(vec![format!("Removed the Group `{removed}`.")])
         }
-        GroupCommand::Rename { from, to } => {
-            let renamed = rename(registry, &from, &to)?;
-            let mut said = vec![renamed];
-            // What it carries, because keeping it is the whole of what this
-            // command is for: the Settings are the part a rename by hand loses.
-            said.extend(configuration_lines(registry, &Scope::Group(to)));
-            Ok(said)
-        }
+        // The Accounts it still holds are said by `rename` itself, because a
+        // rename could have lost them and did not. Its Settings are not: a
+        // rename never touches one, so printing them is Perch reporting work
+        // it did not do (ADR 0061).
+        GroupCommand::Rename { from, to } => Ok(vec![rename(registry, &from, &to)?]),
         GroupCommand::Move { target, group } => {
             let account = target::resolve_account(registry, &target)?;
             let moved = move_account(registry, &account, &group)?;
@@ -278,22 +277,14 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
 /// No line naming which of them the Scope declared itself, because it declared
 /// all of them: a Scope holds its own full Settings and there is nothing above
 /// it for one to have come from (ADR 0051).
-fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scope) -> Result<()> {
-    for line in configuration_lines(registry, scope) {
-        say(out, &line)?;
-    }
-    Ok(())
-}
-
-/// The same two rows as lines, for the callers that cannot write them
-/// themselves.
 ///
-/// `perch group add` and `perch group rename` go through
-/// [`crate::commands::only_the_registry`] (ADR 0057), which hands the change no
-/// writer — so what they have to say comes back as words and is said after the
-/// save. The two readers above still write theirs directly, because they have a
-/// writer and nothing to save.
-fn configuration_lines(registry: &Registry, scope: &Scope) -> Vec<String> {
+/// One function again rather than a `configuration_lines` beside it. That
+/// second half existed because `perch group add` and `perch group rename` went
+/// through [`crate::commands::only_the_registry`] (ADR 0057), which hands the
+/// change no writer, so what those two had to say had to come back as words —
+/// and neither says it any more (ADR 0061). What is left is one caller with a
+/// writer of its own.
+fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scope) -> Result<()> {
     let settings = registry.settings(scope);
     let strategy = labeled("Strategy", settings.strategy.as_str());
     // The whole policy rather than the threshold alone: a summary that named
@@ -332,7 +323,8 @@ fn configuration_lines(registry: &Registry, scope: &Scope) -> Vec<String> {
         ),
         (false, _) => format!("off (would act {acting})"),
     };
-    vec![strategy, labeled("Watcher", &watcher)]
+    say(out, &strategy)?;
+    say(out, &labeled("Watcher", &watcher))
 }
 
 fn write_line(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {

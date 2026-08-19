@@ -69,6 +69,58 @@ fn a_repair_replaces_the_credential_and_clears_the_quarantine() {
     );
 }
 
+/// **What ADR 0061 leaves of the report.** What was repaired, and nothing about
+/// the Alias, the Group or a Cycling state that reads "may choose it".
+///
+/// A repair leaves all three exactly as it found them, so a column of them was
+/// Perch reassuring somebody about work it did not do — and `perch list` is
+/// where they are read. The test above is what holds them to being kept.
+#[test]
+fn a_repair_says_what_it_repaired_and_nothing_about_what_it_left_alone() {
+    let host = broken_second_account();
+
+    let (result, printed) = run_relogin(&host, "overflow");
+
+    result.expect("the Account is repaired");
+    // The last line, asserted whole (ADR 0043) — which is a stronger claim than
+    // three greps for the labels that used to follow it, because it fails on
+    // anything appended rather than only on the wording that was cut.
+    assert_eq!(
+        printed.trim_end().lines().last(),
+        Some(
+            format!("Repaired {SECOND_EMAIL} (as `overflow`) — it is no longer Quarantined.")
+                .as_str()
+        ),
+        "{printed}"
+    );
+}
+
+/// The one of the three that can still surprise, and the reason it is the
+/// exception.
+///
+/// The Credential works again and Cycling will go on passing the Account over
+/// — a second thing to undo, and no part of what a repair promises. So it is
+/// said, where "may choose it" is not: this is the case the guide cannot have
+/// told anybody about in advance.
+#[test]
+fn a_repaired_account_that_is_still_disabled_is_told_so() {
+    let host = broken_second_account();
+    disable_account(&host, "overflow")
+        .0
+        .expect("taken out of Cycling");
+
+    let (result, printed) = run_relogin(&host, "overflow");
+
+    result.expect("the Account is repaired");
+    assert!(
+        printed.contains(
+            "Cycling still will not choose it — it is disabled, which a repair \
+             does not undo."
+        ),
+        "{printed}"
+    );
+}
+
 #[test]
 fn a_repair_keeps_the_alias_the_group_the_cycling_state_and_the_place() {
     let host = broken_second_account();

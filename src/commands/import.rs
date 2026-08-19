@@ -129,13 +129,13 @@ fn read_the_file(host: &dyn Host, path: &Path) -> Result<String> {
 /// Export it mirrors: a passphrase being *chosen* is confirmed because a file
 /// nobody can open is not discovered until it is needed, and a passphrase being
 /// *checked* is answered by the file itself a moment later.
+///
+/// And asked bare, which is the second place. The Export's prompt is preceded
+/// by what the passphrase is protecting, because somebody choosing one has a
+/// decision to make and no way back from it; there is no decision here, and a
+/// preamble before every Import would be prose earning its place from the
+/// question rather than from the answer (ADR 0061).
 fn the_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<String>> {
-    say(
-        out,
-        "This file is encrypted with the passphrase it was written with. Nothing \
-         is restored until it opens.",
-    )?;
-
     ask_passphrase(host, out, "Passphrase: ")?.ok_or_else(|| {
         PerchError::Invalid(
             "No passphrase was typed, and there is no way into an Export without \
@@ -145,15 +145,19 @@ fn the_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<Stri
     })
 }
 
-/// What arrived, and the one thing the user has to do next.
+/// What arrived.
+///
+/// Nothing arrives active on any Import and an Import carries the whole
+/// registry on every one, so neither is said here: both are what the guide
+/// establishes once rather than what this repeats (ADR 0061). The Accounts the
+/// file held no Credential for are the one thing this can report that another
+/// Import would not.
 fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
     let accounts = export.accounts();
     say(
         out,
         &format!(
-            "Imported {} from {}, with everything the registry said about them: \
-             their Aliases, their Groups, whether Cycling may choose them, and \
-             what each Group carries.",
+            "Imported {} from {}.",
             crate::commands::accounts(accounts),
             path.display(),
         ),
@@ -179,10 +183,5 @@ fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
         )?;
     }
 
-    say(
-        out,
-        "Nothing is active: an Import restores what Perch holds and does not \
-         touch what Claude Code is logged in as. `perch switch <target>` makes \
-         one of them active.",
-    )
+    Ok(())
 }

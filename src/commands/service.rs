@@ -27,7 +27,7 @@ use crate::host::{Host, Platform};
 use crate::service::{self, Driven, Unit};
 use crate::{registry, upgrade};
 
-/// Writes the unit, starts it, and says what will happen from now on.
+/// Writes the unit, starts it, and says what it did.
 ///
 /// Idempotent, and that is a feature rather than a leniency: re-running it is
 /// the documented repair for a unit whose binary has moved, which `perch
@@ -97,10 +97,19 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         )));
     }
 
+    // What it did and which binary it baked in, and nothing about starting at
+    // login: an install that succeeded always did that, and the failure arms
+    // above are where a Service that is not running says so (ADR 0061).
+    //
+    // The log stays, and the two are not the same kind of line. Where a
+    // Service writes is derived from `PERCH_HOME` and differs by platform, so
+    // it is a datum the person could not have predicted rather than a step
+    // being narrated — and it is the one thing they need in order to read what
+    // the Service goes on to decide.
     say(
         out,
         &format!(
-            "{} {} as {}. It starts when you log in, and it is running now.",
+            "{} {} as {}.",
             match replaced {
                 true => "Replaced the Service, and it now runs",
                 false => "Installed the Service. It runs",
@@ -146,12 +155,11 @@ pub fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
 
     match installed {
         true => {
-            say(
-                out,
-                "The Service is stopped and its unit is gone. Nothing starts \
-                 at login any more, and `perch watcher run` in a terminal is \
-                 unaffected.",
-            )?;
+            // Nothing about what stops starting at login and nothing about
+            // the terminal being unaffected: an uninstall that succeeded
+            // always did the first, and the second is a worry Perch was
+            // pre-empting rather than a thing that happened (ADR 0061).
+            say(out, "The Service is stopped and its unit is gone.")?;
             Ok(EXIT_OK)
         }
         // The existing code for a request that was already true, which is what
@@ -365,11 +373,7 @@ pub fn take_back_before_a_purge(host: &dyn Host, out: &mut dyn Write) -> Result<
             .map_err(|err| PerchError::file_write(at, err))?;
     }
 
-    say(
-        out,
-        "The Service is stopped and its unit is gone, before anything else was \
-         touched.",
-    )?;
+    say(out, "The Service is stopped and its unit is gone.")?;
     Ok(true)
 }
 
