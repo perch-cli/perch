@@ -198,7 +198,7 @@ fn a_client_that_starts_during_the_lock_wait_is_refused_and_the_loop_carries_on(
 /// switched and silence for the rest would be a log that cannot answer "was it
 /// even awake".
 #[test]
-fn every_round_prints_one_line_naming_the_figure_the_threshold_and_the_outcome() {
+fn every_round_prints_one_line_naming_the_figure_and_the_outcome() {
     let host = watching(&[40.0, 45.0, 52.0], 5.0);
 
     let (result, printed) = run_watch(&host);
@@ -210,13 +210,44 @@ fn every_round_prints_one_line_naming_the_figure_the_threshold_and_the_outcome()
         assert!(decision.contains("waiting"), "{decision}");
         assert!(decision.contains(used), "the figure it read: {decision}");
         assert!(decision.contains("5-hour"), "and which window: {decision}");
-        assert!(decision.contains("threshold 80%"), "{decision}");
-        assert!(decision.contains("under it"), "and why: {decision}");
     }
     assert!(
         printed.contains("Stopped."),
         "and it says it has stopped: {printed}"
     );
+}
+
+/// **ADR 0061.** The claim this used to make was that every round quotes the
+/// threshold; the claim it makes now is stronger. The threshold is said once
+/// for the whole run, in the opening line, because it does not change within
+/// one — and a run of any length says it exactly as many times as a run of one
+/// round does.
+///
+/// Three rounds here, and eight hours of them would be the same assertion: the
+/// count is of the run rather than of the rounds.
+#[test]
+fn the_threshold_is_said_once_for_the_whole_run_and_that_once_is_the_opening() {
+    let host = watching(&[40.0, 45.0, 52.0], 5.0);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a watcher that was stopped ended cleanly");
+    assert_eq!(
+        printed.matches("80%").count(),
+        1,
+        "the whole run names the threshold once: {printed}"
+    );
+    let opening = printed.lines().next().expect("the opening line");
+    assert!(
+        opening.contains("reaches 80%"),
+        "and the opening is where: {opening}"
+    );
+    for decision in decisions(&printed) {
+        assert!(
+            !decision.contains("threshold"),
+            "no round re-derives what the opening declared: {decision}"
+        );
+    }
 }
 
 /// One Account watched continuously fits inside the hourly allowance; a Group
@@ -303,11 +334,11 @@ fn crossing_the_threshold_switches_and_the_line_says_what_it_switched_on() {
     let switched = &decisions[1];
     assert!(switched.contains("switched"), "{switched}");
     assert!(switched.contains("86% used"), "what it read: {switched}");
-    assert!(switched.contains("threshold 80%"), "{switched}");
     assert!(switched.contains(SECOND_EMAIL), "where it went: {switched}");
     assert!(
-        switched.contains("most room"),
-        "and why that Account won: {switched}"
+        !switched.contains("most room"),
+        "and not why that Account won, which is Perch defending a ranking \
+         nobody questioned (ADR 0061): {switched}"
     );
 
     assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
@@ -718,8 +749,12 @@ fn two_switches_never_happen_closer_together_than_the_cooldown() {
     );
     for decision in cooling {
         assert!(decision.contains("90% used"), "what it read: {decision}");
-        assert!(decision.contains("threshold 80%"), "{decision}");
         assert!(decision.contains("15 minutes"), "the cooldown: {decision}");
+        assert!(
+            decision.contains("so nothing moves"),
+            "and when it lifts, because a refusal keeps its whole sentence \
+             (ADR 0036, ADR 0061): {decision}"
+        );
     }
 }
 
@@ -1146,8 +1181,9 @@ fn a_landing_in_flight_leaves_the_opening_line_naming_nobody() {
     let decisions = decisions(&printed);
     assert_eq!(decisions.len(), 1, "{printed}");
     assert!(
-        decisions[0].contains(EMAIL) && decisions[0].contains("waiting"),
-        "and that line names the Account, because by then one is established: {}",
+        decisions[0].contains("waiting") && decisions[0].contains("42% used"),
+        "and that line decides, because by then there is an Account to decide \
+         about: {}",
         decisions[0]
     );
 }

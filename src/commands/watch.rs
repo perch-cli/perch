@@ -297,27 +297,33 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
     stopped(out)
 }
 
-/// What the loop says on the way out.
+/// What the loop says on the way out, which is that it is out.
 ///
-/// It no longer promises that nothing was left behind. A Watcher holds the
-/// watcher lock for as long as it runs (ADR 0040), and that promise was written
-/// when there was nothing to hold — so it says what is true instead: the lock is
-/// given back, and everything else is as it was.
+/// It used to add three reassurances: the lock is given back, no file of its
+/// own was written, and the Account you are on is the one it last Switched to.
+/// All three are true, and all three are true of *every* stop without
+/// exception — which is ADR 0061's definition of predictable, and the same case
+/// that cut the Capture line from `perch switch`. The reassurance is real and
+/// it is the guide's to establish once rather than this line's to repeat at the
+/// end of every run.
+///
+/// [`handed_over`] is not this line and does not shrink with it: a loop that
+/// stops because somebody else took the watch is a stop nobody asked for, which
+/// is a refusal, and a refusal says why.
 fn stopped(out: &mut dyn Write) -> Result<()> {
-    say(
-        out,
-        "Stopped. The watcher lock is given back, no file of its own was \
-         written, and the Account you are on is the one it last Switched to.",
-    )
+    say(out, "Stopped.")
 }
 
 /// What the loop says when it leaves because it is no longer the Watcher.
 ///
-/// Not [`stopped`], because the two promises that line makes are not both true
-/// here: the lock is *not* given back — it is somebody else's now, and giving
-/// back a lock another process holds is how one loss becomes two — and nobody
-/// asked this loop to stop. What is true is the same last sentence, so it is
-/// the one kept.
+/// Not [`stopped`], and it keeps the prose that line gave up. A stop somebody
+/// asked for is the ordinary case, and ADR 0061 cut it to the word; this is a
+/// loop leaving because another one took the watch, which nobody asked for and
+/// nobody watching the log could work out — a refusal, and a refusal says why.
+///
+/// What it says is also not what `stopped` used to: the lock is *not* given
+/// back here. It is somebody else's now, and giving back a lock another process
+/// holds is how one loss becomes two.
 fn handed_over(out: &mut dyn Write) -> Result<()> {
     say(
         out,
@@ -461,6 +467,17 @@ fn say_it(
 /// 0040). The loop starts anyway and holds, so this says what it *would* be
 /// doing and leaves the reason it is not to the first round's held line — which
 /// is the line that will repeat, and the one that says when it will ask again.
+///
+/// **Both openings survive ADR 0061 whole, and the first grew load-bearing
+/// under it.** The header is now the only place the threshold, the interval,
+/// the ceiling and the cooldown are said, because no round re-derives them —
+/// once for the run rather than once every two and a half minutes is the whole
+/// of what that decision asked for. `Ctrl-C stops.` stays for the same reason
+/// it is here at all: a foreground loop that holds a lock and prints for hours
+/// is one somebody has to be told the way out of, and once is where it belongs.
+/// The quiet opening stays because it is the refusal shape rather than the
+/// ordinary one — nothing is being decided, the reader cannot see why, and the
+/// sentence is what stops a holding Watcher reading as a broken one.
 fn opening(host: &dyn Host) -> Result<String> {
     // Read rather than insisted on, for the reason the round beneath it holds
     // rather than exits: a machine with no Claude Code login has nothing to
@@ -795,7 +812,6 @@ fn one_round(
     let mut held = |why: String| {
         let waiting_for = backoff.could_not_read();
         Ok(Turn::Decided(Round {
-            email: email.clone(),
             fullest: None,
             threshold: watching.policy.threshold,
             outcome: Outcome::Held {
@@ -879,7 +895,6 @@ fn one_round(
         },
     };
     Ok(Turn::Decided(Round {
-        email,
         fullest: Some(fullest),
         threshold: watching.policy.threshold,
         outcome,
@@ -1102,8 +1117,13 @@ fn act(
     }
 
     match switched {
+        // Where it went, and nothing about why it won (ADR 0061). `choice.because`
+        // is the Cycle's ranking rationale — thirty words defending a choice
+        // nobody questioned — and it is dropped here rather than reworded,
+        // which is the same clause `perch switch` no longer prints either.
         Ok(_switched) => Ok(Outcome::Switched {
-            because: also(choice.because, &unread),
+            to: registry.named_for_the_user(choice.account.email()),
+            unread,
         }),
         // Nothing was changed, so there is nothing to look at and nothing to
         // repair — a client holding the outgoing Profile, most often, which

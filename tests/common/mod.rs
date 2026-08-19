@@ -567,12 +567,29 @@ pub fn answering(host: FakeHost, token: &str, email: &str, trace: &[f64]) -> Fak
 
 /// The decision lines, which is everything printed but the line that says what
 /// is being watched and the line that says it stopped.
+///
+/// Found by the shape a round's line opens with — the stamp, the word it is
+/// read by, and then the figure it decided on. It used to be found by the word
+/// `threshold`, which ADR 0061 took off the round line altogether: left as it
+/// was, this would have found no decisions at all, and every assertion about
+/// one would have passed vacuously over an empty list.
 pub fn decisions(printed: &str) -> Vec<String> {
     printed
         .lines()
-        .filter(|line| line.contains("threshold"))
+        .filter(|line| is_a_decision(line))
         .map(str::to_string)
         .collect()
+}
+
+/// Whether a line is a round's. The heartbeat a long hold prints once an hour
+/// and the line that says a hold is over share the stamp and the column, and
+/// neither is a decision — so the figure is what tells them apart, said as
+/// `40% used, …` or as the `unread` that stands in for one.
+fn is_a_decision(line: &str) -> bool {
+    let Some((_, rest)) = line.split_once("Z  ") else {
+        return false;
+    };
+    rest.contains("% used") || rest.split_whitespace().nth(1) == Some("unread")
 }
 
 /// Runs `perch alias`, returning what it printed alongside how it ended.

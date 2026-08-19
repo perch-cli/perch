@@ -7,9 +7,16 @@
 //!
 //! The decision log is the whole of the evidence that the policy works. It is
 //! what makes "why did it switch just then" answerable without reading the
-//! source, so a line names the figure that was read, the threshold it was read
-//! against, what was decided, and why — in that order, every time, whatever was
-//! decided. A rotated logfile is what a daemon needs because nobody is
+//! source, so a line names the figure that was read and what was decided about
+//! it — in that order, every time.
+//!
+//! What follows the figure is where ADR 0061 cut. `waiting` and `switched` are
+//! the loop doing what the opening line said it would do, so they stop there:
+//! the threshold is the header's to declare once, and a verdict the status word
+//! already gives is a verdict said twice. `cooling`, `nowhere`, `held` and
+//! `refused` are refusals — nothing happened, and the reader cannot see why —
+//! so they keep their sentence whole, which is ADR 0036 preserved rather than
+//! disturbed. A rotated logfile is what a daemon needs because nobody is
 //! watching; this is a loop somebody is watching, so it goes to standard output
 //! and redirection is their call.
 //!
@@ -461,8 +468,17 @@ impl Fullest {
         }
     }
 
-    /// Said beside the threshold it is being judged against, so the figure and
-    /// the verdict on the same line cannot disagree.
+    /// Worded against the threshold it is being judged by, so the figure and
+    /// the status word cannot disagree.
+    ///
+    /// The threshold no longer appears on the line (ADR 0061), and the widening
+    /// [`percentage_against`] still earns its place: the contradiction
+    /// simply moved a line up. `waiting  80% used` under a header declaring
+    /// "when its fullest Quota Window reaches 80%" is the same flat
+    /// self-contradiction as `80% used … threshold 80% — under it` was, read
+    /// against the one place the threshold is now said.
+    ///
+    /// [`percentage_against`]: crate::utilization::percentage_against
     fn as_a_clause(&self, threshold: u8) -> String {
         format!(
             "{}% used, fullest {}",
@@ -752,13 +768,19 @@ pub enum Outcome {
     /// Nothing was read of the candidates: a round that may not act has no
     /// business spending an allowance on figures it cannot use.
     Cooling { why: String },
-    /// It was, and this is why the Account it landed on won.
+    /// It was, and this is where it went.
     ///
-    /// No field for where it went, because the reason names it: the Cycle
-    /// writes "overflow@example.com has the most room: …", and a second place
-    /// saying which Account that was is a second place that can disagree with
-    /// the first.
-    Switched { because: String },
+    /// The Account by name and nothing else about the ranking (ADR 0061). Where
+    /// it landed is the one thing about a Switch nobody could have predicted;
+    /// *why that Account won* is Perch defending a ranking to somebody who did
+    /// not question it, and the Cycle's sentence saying so ran to thirty words
+    /// on a line printed every couple of minutes.
+    ///
+    /// `unread` is what could not be re-read on the way, and it stays: an
+    /// Account ranked on a figure from an hour ago is the one thing that can
+    /// make a Switch land somewhere worse than it left, which is exactly the
+    /// case the guide does not describe.
+    Switched { to: String, unread: Vec<String> },
     /// It was, and there was nowhere worth going — every candidate exhausted,
     /// or none of them a candidate at all. Nothing to fix and nothing to
     /// retry: the answer is to wait, so the loop does.
@@ -863,14 +885,19 @@ pub fn refused_or_raised(not_idle: NotIdle) -> Result<Outcome> {
 /// what came of it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Round {
-    /// The Account that was Refreshed, which is the active one and only ever
-    /// the active one (ADR 0013).
-    pub email: String,
-    /// How full it was, as this round read it. Absent when the read failed,
-    /// which is the whole of why nothing was decided.
+    /// How full the Account was, as this round read it. Absent when the read
+    /// failed, which is the whole of why nothing was decided.
+    ///
+    /// Which Account is not held here and is not on the line. It is the active
+    /// one and only ever the active one (ADR 0013), the opening line names it,
+    /// and every `switched` line names the one it changed to — so a round
+    /// repeating it was the log restating what the two lines around it had
+    /// already established (ADR 0061).
     pub fullest: Option<Fullest>,
-    /// The Group's `watcher-threshold-percent`, quoted because a decision
-    /// nobody can see the threshold of is a decision nobody can argue with.
+    /// The Group's `watcher-threshold-percent`. No longer quoted on the line —
+    /// the opening the loop prints declares it once, and it does not change
+    /// within a run (ADR 0061) — but still carried, because it is what the
+    /// figure beside it is worded against: see [`Fullest::as_a_clause`].
     pub threshold: u8,
     pub outcome: Outcome,
 }
@@ -923,15 +950,25 @@ impl Round {
     }
 
     /// The decision line, as it is printed: one line, whatever happened.
+    ///
+    /// The stamp, the word it is read by, the figure it was decided on — and
+    /// then whatever this particular round has that the header did not already
+    /// say. For most rounds that is nothing (ADR 0061).
+    ///
+    /// The stamp stays a whole RFC 3339 instant rather than a wall clock. The
+    /// guide's own scheduled setup appends every `perch watcher check` to one
+    /// file — `perch watcher check >> ~/.local/state/perch-watch.log` — read
+    /// cold days later, and a Service runs the loop across midnight. A time
+    /// with no date is ambiguous in exactly the place the log is read by
+    /// somebody who was not there. It is twelve characters of datum, and this
+    /// decision was about prose.
     pub fn line(&self, now: DateTime<Utc>) -> String {
         format!(
-            "{}  {:<8}  {} {}; threshold {}% — {}",
+            "{}  {:<8}  {}{}",
             now.to_rfc3339_opts(SecondsFormat::Secs, true),
             self.outcome.word(),
-            self.email,
             self.figure(),
-            self.threshold,
-            one_line(&self.reason()),
+            self.tail(),
         )
     }
 
@@ -944,42 +981,61 @@ impl Round {
         }
     }
 
-    /// Why the outcome is the outcome. The Switch and the dead end quote the
-    /// Cycle's own words, so the reason the watcher gives for landing somewhere
-    /// is the reason `perch switch` would have given for landing there.
-    fn reason(&self) -> String {
+    /// What this round has to add to the figure, and for most rounds nothing.
+    ///
+    /// The split ADR 0061 drew. A `waiting` round is the loop finding the
+    /// ordinary case and the status word has already said so; a `switched`
+    /// round adds where it went, which is the one thing about it nobody could
+    /// have predicted. The four refusals add their whole sentence, because
+    /// nothing happened and the next step is not obvious from the fact that
+    /// nothing did.
+    ///
+    /// The em dash is the mark of the second kind: prose follows it, and it is
+    /// on a line only where something other than the ordinary happened.
+    fn tail(&self) -> String {
         match &self.outcome {
-            Outcome::Waiting => "under it, so nothing was wanted.".to_string(),
-            Outcome::Cooling { why } => format!("over it, and too soon to move again: {why}"),
-            Outcome::Switched { because } => format!("over it. Switched — {because}"),
-            Outcome::Nowhere { why } => format!("over it, and nowhere to go: {why}"),
+            Outcome::Waiting => String::new(),
+            Outcome::Switched { to, unread } => match unread.is_empty() {
+                true => format!(" → {to}"),
+                false => format!(" → {to}{}", explaining(&unread.join(" "))),
+            },
+            Outcome::Cooling { why } => explaining(why),
+            Outcome::Nowhere { why } => explaining(&format!("nowhere to go: {why}")),
             Outcome::Held {
                 why,
                 retrying_in: Some(millis),
-            } => format!(
+            } => explaining(&format!(
                 "nothing current to decide on, so nothing was decided: {why} \
                  Asking again in {}.",
                 how_long(*millis),
-            ),
+            )),
             Outcome::Held {
                 why,
                 retrying_in: None,
-            } => format!("nothing current to decide on, so nothing was decided: {why}"),
-            Outcome::Refused { why } => {
-                format!("over it, and the Switch was turned away: {why}")
-            }
+            } => explaining(&format!(
+                "nothing current to decide on, so nothing was decided: {why}"
+            )),
+            Outcome::Refused { why } => explaining(&format!("the Switch was turned away: {why}")),
         }
     }
+}
+
+/// A refusal's sentence, attached to the figure it explains.
+///
+/// One shape for all four of them, so a log is one column of stamps and words
+/// with the same mark wherever prose begins.
+fn explaining(said: &str) -> String {
+    format!(" — {}", one_line(said))
 }
 
 /// A hold that happened before there was a [`Round`] to hold.
 ///
 /// The loop cannot always get as far as reading the registry — another `perch`
-/// may be holding it — and a round that never learned which Account it was
-/// watching has no Account to name and no threshold to quote. Said in the same
-/// shape as every other line so a log stays one column of timestamps and words,
-/// with the fields it does not have said as unread rather than left blank,
-/// which is how [`Round::figure`] already says a figure that was not read.
+/// may be holding it — so there is no figure and there was never an Account to
+/// read one for. Said in the same shape as every other line so a log stays one
+/// column of timestamps and words, with the figure it does not have said as
+/// unread rather than left blank, which is how [`Round::figure`] already says a
+/// figure that was not read.
 /// `retrying_in` is `None` where nothing here decides when the next reading is,
 /// which is a `perch watcher check`: it is exiting, and when it comes back is
 /// whatever scheduled it to say. The same distinction [`Outcome::Held`] already
@@ -991,10 +1047,10 @@ pub fn held_line(why: &str, retrying_in: Option<u64>, now: DateTime<Utc>) -> Str
         None => String::new(),
     };
     format!(
-        "{}  {:<8}  unread unread; threshold unread — {}",
+        "{}  {:<8}  unread{}",
         now.to_rfc3339_opts(SecondsFormat::Secs, true),
         "held",
-        one_line(&format!(
+        explaining(&format!(
             "nothing current to decide on, so nothing was decided: \
              {why}{asking_again}",
         )),
@@ -1023,7 +1079,6 @@ mod tests {
 
     fn round(fullest: Option<Fullest>, outcome: Outcome) -> Round {
         Round {
-            email: "someone@example.com".to_string(),
             fullest,
             threshold: 80,
             outcome,
@@ -1186,12 +1241,138 @@ mod tests {
         })
     }
 
-    /// Every line answers the same four questions, whatever it decided —
-    /// otherwise the log is only readable for the rounds that did something,
-    /// and those are the rounds least in need of explaining.
+    /// Every line opens the same way, whatever it decided — otherwise the log
+    /// is only skimmable for the rounds that did something, and those are the
+    /// rounds least in need of finding.
     #[test]
-    fn every_decision_names_the_figure_the_threshold_the_outcome_and_the_reason() {
-        let decisions = [
+    fn every_decision_opens_with_the_stamp_the_word_and_the_figure() {
+        for decision in one_of_each_outcome() {
+            let line = decision.line(now());
+
+            assert!(line.starts_with("2026-08-04T12:00:00Z"), "{line}");
+            assert!(line.contains(decision.outcome.word()), "{line}");
+            assert!(!line.trim_end().is_empty(), "{line}");
+            assert!(
+                !line.contains('\n'),
+                "a reason on a second line stops being attached to the decision \
+                 it explains: {line}"
+            );
+        }
+    }
+
+    /// **ADR 0061.** The threshold is the header's to declare, once, and it does
+    /// not change within a run. Repeating it on every round put it on the log
+    /// five hundred times a day beside a figure that was the only thing
+    /// differing between two consecutive lines.
+    #[test]
+    fn no_round_line_quotes_the_threshold() {
+        for decision in one_of_each_outcome() {
+            let line = decision.line(now());
+
+            assert!(
+                !line.contains("threshold"),
+                "the header said it once, and this line is not the header: {line}"
+            );
+        }
+        assert!(
+            !held_line("Another `perch` holds the registry.", None, now()).contains("threshold"),
+            "including the hold that happened before there was a round to hold"
+        );
+    }
+
+    /// **ADR 0061**, the other half. `waiting` and `switched` are the loop doing
+    /// what the header said it would do, so they stop at the figure: no verdict
+    /// clause, and no argument for a ranking nobody questioned.
+    #[test]
+    fn the_two_predictable_outcomes_are_data_and_stop_at_the_figure() {
+        assert_eq!(
+            round(at(42.0), Outcome::Waiting).line(now()),
+            "2026-08-04T12:00:00Z  waiting   42% used, fullest 5-hour",
+        );
+        assert_eq!(
+            round(
+                at(86.0),
+                Outcome::Switched {
+                    to: "overflow@example.com".to_string(),
+                    unread: Vec::new(),
+                },
+            )
+            .line(now()),
+            "2026-08-04T12:00:00Z  switched  86% used, fullest 5-hour → \
+             overflow@example.com",
+            "and a Switch still names where it went, which is the one thing \
+             about it nobody could have predicted",
+        );
+    }
+
+    /// A Switch that ranked on a figure it could not re-read is the one thing
+    /// that can land somewhere worse than it left, so it is said — which is the
+    /// same rule one level down: silence on the path that always runs, prose on
+    /// the paths that do not.
+    #[test]
+    fn a_switch_that_could_not_read_a_candidate_says_so_and_still_names_where_it_went() {
+        let line = round(
+            at(86.0),
+            Outcome::Switched {
+                to: "overflow@example.com".to_string(),
+                unread: vec![
+                    "spare@example.com could not be read, so its figure is the one Perch had."
+                        .to_string(),
+                ],
+            },
+        )
+        .line(now());
+
+        assert!(line.contains("→ overflow@example.com"), "{line}");
+        assert!(
+            line.contains("spare@example.com could not be read"),
+            "{line}"
+        );
+        assert!(!line.contains('\n'), "{line}");
+    }
+
+    /// The refusals keep their prose whole (ADR 0036): nothing happened, and a
+    /// reader who cannot see why is a reader watching a Watcher that appears to
+    /// have given up. Three of the four here; `held` is the one with tests of
+    /// its own, because it is the one that also says when it will ask again.
+    #[test]
+    fn every_refusal_still_says_what_is_holding_it() {
+        let cooling = round(
+            at(86.0),
+            Outcome::Cooling {
+                why: "the last Switch was 4 minutes ago and the cooldown leaves \
+                      at least 15 minutes between two, so nothing moves for \
+                      another 11 minutes."
+                    .to_string(),
+            },
+        )
+        .line(now());
+        assert!(cooling.contains("so nothing moves for another 11 minutes"));
+
+        let nowhere = round(
+            at(86.0),
+            Outcome::Nowhere {
+                why: "every Account in Group `work` is exhausted.".to_string(),
+            },
+        )
+        .line(now());
+        assert!(nowhere.contains("nowhere to go"), "{nowhere}");
+        assert!(nowhere.contains("is exhausted"), "{nowhere}");
+
+        let refused = round(
+            at(86.0),
+            Outcome::Refused {
+                why: "a client is running against that Profile.".to_string(),
+            },
+        )
+        .line(now());
+        assert!(refused.contains("turned away"), "{refused}");
+        assert!(refused.contains("a client is running"), "{refused}");
+    }
+
+    /// One of each, for the claims that hold whatever the round decided.
+    fn one_of_each_outcome() -> Vec<Round> {
+        vec![
             round(at(42.0), Outcome::Waiting),
             round(
                 at(86.0),
@@ -1202,7 +1383,8 @@ mod tests {
             round(
                 at(86.0),
                 Outcome::Switched {
-                    because: "overflow@example.com has the most room: 95% headroom.".to_string(),
+                    to: "overflow@example.com".to_string(),
+                    unread: Vec::new(),
                 },
             ),
             round(
@@ -1224,22 +1406,7 @@ mod tests {
                     why: "a client is running against that Profile.".to_string(),
                 },
             ),
-        ];
-
-        for decision in decisions {
-            let line = decision.line(now());
-
-            assert!(line.starts_with("2026-08-04T12:00:00Z"), "{line}");
-            assert!(line.contains(decision.outcome.word()), "{line}");
-            assert!(line.contains("threshold 80%"), "{line}");
-            assert!(line.contains("someone@example.com"), "{line}");
-            assert!(!line.trim_end().is_empty(), "{line}");
-            assert!(
-                !line.contains('\n'),
-                "a reason on a second line stops being attached to the decision \
-                 it explains: {line}"
-            );
-        }
+        ]
     }
 
     /// A round that read nothing says so. The figure Perch already had is not
@@ -1257,10 +1424,7 @@ mod tests {
         .line(now());
 
         assert!(line.contains("unread"), "{line}");
-        assert!(
-            !line.contains('%') || line.contains("threshold 80%"),
-            "{line}"
-        );
+        assert!(!line.contains('%'), "{line}");
         assert!(line.contains("rate-limiting"), "{line}");
     }
 
@@ -1316,7 +1480,8 @@ mod tests {
             Outcome::Waiting,
             Outcome::Cooling { why: String::new() },
             Outcome::Switched {
-                because: String::new(),
+                to: String::new(),
+                unread: Vec::new(),
             },
             Outcome::Nowhere { why: String::new() },
             Outcome::Held {
@@ -1393,7 +1558,8 @@ mod tests {
             Outcome::Waiting,
             Outcome::Cooling { why: String::new() },
             Outcome::Switched {
-                because: String::new(),
+                to: String::new(),
+                unread: Vec::new(),
             },
             Outcome::Nowhere { why: String::new() },
             Outcome::Refused { why: String::new() },
@@ -1800,10 +1966,11 @@ mod tests {
         assert_eq!(unnameable.exit_code(), crate::error::EXIT_INVALID);
     }
 
-    /// Every line answers the same four questions, and a cooling round is a
-    /// round like any other.
+    /// A Cooldown is a refusal, so it keeps its sentence whole — and that
+    /// sentence names the rule as well as the wait, because a `perch watcher
+    /// check` prints no header and its one line is the whole of the cron mail.
     #[test]
-    fn a_cooling_round_says_it_is_over_the_threshold_and_why_nothing_moved() {
+    fn a_cooling_round_says_what_it_read_and_when_the_cooldown_lifts() {
         let line = round(
             at(86.0),
             Outcome::Cooling {
@@ -1817,8 +1984,8 @@ mod tests {
 
         assert!(line.contains("cooling"), "{line}");
         assert!(line.contains("86% used"), "{line}");
-        assert!(line.contains("threshold 80%"), "{line}");
-        assert!(line.contains("too soon to move again"), "{line}");
+        assert!(line.contains("at least 15 minutes between two"), "{line}");
+        assert!(line.contains("another 11 minutes"), "{line}");
         assert!(!line.contains('\n'), "{line}");
     }
 }
