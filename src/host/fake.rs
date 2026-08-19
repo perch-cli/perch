@@ -31,6 +31,7 @@ use super::{
 // this file.
 use crate::keychain::KeychainError;
 use port::{Environment as _, Files as _, Processes as _};
+use zeroize::Zeroizing;
 
 /// One effect the fake was asked to perform, in order.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2260,10 +2261,15 @@ impl port::Terminal for FakeHost {
         Ok(self.terminal.answers.borrow_mut().pop_front())
     }
 
-    fn read_secret(&self) -> Result<Option<String>, HostError> {
+    fn read_secret(&self) -> Result<Option<Zeroizing<String>>, HostError> {
         self.record(Effect::AskedInSecret);
         self.while_they_answer();
-        Ok(self.terminal.secrets.borrow_mut().pop_front())
+        Ok(self
+            .terminal
+            .secrets
+            .borrow_mut()
+            .pop_front()
+            .map(Zeroizing::new))
     }
 }
 

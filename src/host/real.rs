@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use chrono::{DateTime, Utc};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 #[cfg(unix)]
 use super::PRIVATE_DIR_MODE;
@@ -742,7 +742,7 @@ impl Terminal for RealHost {
         read_a_line()
     }
 
-    fn read_secret(&self) -> Result<Option<String>, HostError> {
+    fn read_secret(&self) -> Result<Option<Zeroizing<String>>, HostError> {
         read_without_echo()
     }
 }
@@ -808,6 +808,112 @@ fn read_a_line() -> Result<Option<String>, HostError> {
     Ok(Some(line.trim_end_matches(['\r', '\n']).to_string()))
 }
 
+/// The same, for the one answer that must not outlive the question: a buffer
+/// that is wiped when it is dropped, and that never leaves a copy behind.
+///
+/// [`read_a_line`] cannot be that, and `ask_secret`'s own comment used to claim
+/// it was — "the buffer that gets wiped is the one the terminal was read into,
+/// not a second copy of it beside the first". It is two copies. `read_line`
+/// grows a `String` by reallocating, so a passphrase longer than the last
+/// capacity leaves fragments of itself in freed heap; and the `trim_end_matches`
+/// after it allocates a fresh `String` and drops the original untouched.
+///
+/// So the bytes are collected into one buffer that is reserved up front, grown
+/// only by hand — wiping what it abandons — and trimmed in place before it
+/// becomes the `String` the caller keeps. Every buffer the passphrase ever sits
+/// in is wiped.
+fn read_a_secret_line() -> Result<Option<Zeroizing<String>>, HostError> {
+    a_secret_line_from(one_byte_of_standard_input)
+}
+
+/// The whole of the above except where the bytes come from, so the buffer
+/// arithmetic can be driven by a test. Standard input cannot be: this is a
+/// library the behavior suite links, and a test that fed the real descriptor
+/// would be reading whatever the harness left on it.
+fn a_secret_line_from(
+    mut next: impl FnMut() -> Result<Option<u8>, HostError>,
+) -> Result<Option<Zeroizing<String>>, HostError> {
+    // Longer than any passphrase anybody types, so the growth below is a
+    // guard against being wrong rather than the ordinary path.
+    const ROOM: usize = 512;
+
+    let mut bytes = Zeroizing::new(Vec::with_capacity(ROOM));
+    let mut anything = false;
+    while let Some(byte) = next()? {
+        anything = true;
+        if byte == b'\n' {
+            break;
+        }
+        if bytes.len() == bytes.capacity() {
+            // `Vec` would copy into the new allocation and free the old one
+            // untouched, which is the whole failure this function is about. So
+            // the move is made here and the buffer left behind is wiped.
+            let mut grown = Vec::with_capacity(bytes.capacity() * 2);
+            grown.extend_from_slice(&bytes);
+            let mut abandoned = std::mem::replace(&mut *bytes, grown);
+            abandoned.zeroize();
+        }
+        bytes.push(byte);
+    }
+    if !anything {
+        return Ok(None);
+    }
+
+    // In place, so the trimmed bytes are gone rather than left behind a shorter
+    // copy of themselves.
+    while bytes.last() == Some(&b'\r') {
+        bytes.pop();
+    }
+
+    let text = std::str::from_utf8(&bytes)
+        .map_err(|err| HostError::Other(format!("what was typed is not text: {err}")))?;
+    let mut secret = Zeroizing::new(String::with_capacity(text.len()));
+    secret.push_str(text);
+    Ok(Some(secret))
+}
+
+/// One byte of standard input, straight off the descriptor.
+///
+/// Not through `stdin().lock()`, whose 8 KiB `BufReader` belongs to the process:
+/// read that way, the passphrase stays in a buffer nothing wipes for the rest of
+/// the run, however carefully the copy handed back is looked after.
+#[cfg(unix)]
+fn one_byte_of_standard_input() -> Result<Option<u8>, HostError> {
+    let mut byte = 0u8;
+    // SAFETY: a one-byte buffer this frame owns, and this process's own
+    // standard input.
+    let read = unsafe {
+        libc::read(
+            libc::STDIN_FILENO,
+            std::ptr::from_mut(&mut byte).cast::<libc::c_void>(),
+            1,
+        )
+    };
+    match read {
+        -1 => Err(HostError::Io(std::io::Error::last_os_error())),
+        0 => Ok(None),
+        _ => Ok(Some(byte)),
+    }
+}
+
+/// The same on Windows, which has no descriptor to read and so goes through the
+/// buffered handle.
+///
+/// The copy this leaves in that buffer is a gap the unix arm does not have, and
+/// it is `std`'s rather than Perch's: `stdin()` is buffered and there is no
+/// unbuffered handle to ask for. What is fixed here either way is the
+/// reallocation and the second copy above, which are the ones this code owned.
+#[cfg(windows)]
+fn one_byte_of_standard_input() -> Result<Option<u8>, HostError> {
+    use std::io::Read;
+
+    let mut byte = [0u8; 1];
+    match std::io::stdin().lock().read(&mut byte)? {
+        0 => Ok(None),
+        _ => Ok(Some(byte[0])),
+    }
+}
+
 /// Whether the terminal was echoing before Perch turned it off, and so whether
 /// an interrupted read owes it an `ECHO` back on.
 ///
@@ -836,7 +942,7 @@ static WAS_ECHOING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// async-signal-safe, and re-raising rather than exiting means a parent still
 /// sees a process that died of SIGINT.
 #[cfg(unix)]
-fn read_without_echo() -> Result<Option<String>, HostError> {
+fn read_without_echo() -> Result<Option<Zeroizing<String>>, HostError> {
     use std::os::fd::AsRawFd;
     use std::sync::atomic::Ordering::Relaxed;
 
@@ -903,7 +1009,7 @@ fn read_without_echo() -> Result<Option<String>, HostError> {
     let hidden = unsafe { libc::tcsetattr(terminal, libc::TCSAFLUSH, &hiding) } == 0;
 
     let typed = if hidden {
-        read_a_line()
+        read_a_secret_line()
     } else {
         Err(HostError::Io(std::io::Error::last_os_error()))
     };
@@ -937,7 +1043,7 @@ fn read_without_echo() -> Result<Option<String>, HostError> {
 /// the default handler still ends the process — all this one does is put the
 /// echo back before it does.
 #[cfg(windows)]
-fn read_without_echo() -> Result<Option<String>, HostError> {
+fn read_without_echo() -> Result<Option<Zeroizing<String>>, HostError> {
     use std::sync::atomic::Ordering::Relaxed;
     use windows_sys::Win32::Foundation::{FALSE, INVALID_HANDLE_VALUE, TRUE};
     use windows_sys::Win32::System::Console::{
@@ -986,7 +1092,7 @@ fn read_without_echo() -> Result<Option<String>, HostError> {
 
         let hidden = SetConsoleMode(console, showing & !ENABLE_ECHO_INPUT) != 0;
         let typed = if hidden {
-            read_a_line()
+            read_a_secret_line()
         } else {
             Err(HostError::Io(std::io::Error::last_os_error()))
         };
@@ -1002,7 +1108,7 @@ fn read_without_echo() -> Result<Option<String>, HostError> {
 /// above; this is the branch that keeps the third from silently printing an
 /// export passphrase into somebody's scrollback.
 #[cfg(not(any(unix, windows)))]
-fn read_without_echo() -> Result<Option<String>, HostError> {
+fn read_without_echo() -> Result<Option<Zeroizing<String>>, HostError> {
     Err(HostError::Other(
         "this platform has no way to stop the terminal showing what is typed, \
          and a passphrase must never be shown"
@@ -1716,6 +1822,57 @@ fn touch_now(path: &Path) -> Result<(), HostError> {
 
 #[cfg(test)]
 mod tests {
+    /// The buffer arithmetic a passphrase goes through, driven byte by byte.
+    ///
+    /// What is being asserted is not only the answer: it is that the answer is
+    /// reached without leaving a copy behind. `read_line` into a `String` and a
+    /// `trim_end_matches(...).to_string()` after it produce the same text and
+    /// two un-wiped buffers, which is what `ask_secret` used to claim it did
+    /// not do.
+    fn typed(input: &str) -> Option<String> {
+        let mut bytes = input.bytes().collect::<std::collections::VecDeque<u8>>();
+        super::a_secret_line_from(|| Ok(bytes.pop_front()))
+            .expect("the bytes are text")
+            .map(|secret| secret.to_string())
+    }
+
+    #[test]
+    fn a_secret_line_is_what_was_typed_without_what_the_return_key_left() {
+        assert_eq!(typed("hunter2\n"), Some("hunter2".to_string()));
+        assert_eq!(typed("hunter2\r\n"), Some("hunter2".to_string()));
+        // No newline at all: the input ended, and what was typed still counts.
+        assert_eq!(typed("hunter2"), Some("hunter2".to_string()));
+    }
+
+    #[test]
+    fn end_of_input_is_nobody_answering_rather_than_an_empty_answer() {
+        assert_eq!(typed(""), None);
+        // A bare Return is somebody answering with nothing, which is a
+        // different thing and the one `perch holdings purge` reads as a yes.
+        assert_eq!(typed("\n"), Some(String::new()));
+    }
+
+    /// The growth path, which is the part with something to get wrong: past the
+    /// reserved room the buffer is moved by hand so the one it leaves can be
+    /// wiped, and a `Vec` that reallocated itself would have skipped that.
+    #[test]
+    fn a_passphrase_longer_than_the_buffer_survives_being_grown() {
+        let long = "correct horse battery staple ".repeat(50);
+        assert!(
+            long.len() > 512,
+            "the growth path is the point: {}",
+            long.len()
+        );
+        assert_eq!(typed(&format!("{long}\n")), Some(long));
+    }
+
+    /// Multi-byte text is read a byte at a time, so a character split across
+    /// two reads has to survive being reassembled.
+    #[test]
+    fn a_passphrase_is_not_assumed_to_be_ascii() {
+        assert_eq!(typed("pässwörd–✓\n"), Some("pässwörd–✓".to_string()));
+    }
+
     use super::*;
 
     /// The one piece of parsing on the path every Renewal and every Utilization

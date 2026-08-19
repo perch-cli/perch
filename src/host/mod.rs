@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 
 use crate::keychain::KeychainError;
+use zeroize::Zeroizing;
 
 /// Behind a feature so it stays out of the binary somebody downloads. It is
 /// only ever reached from a test, and the tests are integration tests — they
@@ -656,7 +657,13 @@ pub trait Terminal {
     /// echo off and back on again is a platform primitive, which is what this
     /// port is for. A platform with no way to hide what is typed refuses rather
     /// than showing it (ADR 0014).
-    fn read_secret(&self) -> Result<Option<String>, HostError>;
+    ///
+    /// `Zeroizing` in the signature rather than left to the caller, which is
+    /// where it used to be: `commands::ask_secret` wrapped the answer and its
+    /// comment claimed the wrapped buffer was the one the terminal was read
+    /// into. It was not, and nothing about the type said so. An adapter owes
+    /// this now, and the obligation is written where an adapter has to read it.
+    fn read_secret(&self) -> Result<Option<Zeroizing<String>>, HostError>;
 
     /// Says something the user should know that is not the answer to what they
     /// asked: a Credential written to the store Perch would rather not have

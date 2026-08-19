@@ -97,10 +97,11 @@ pub fn ask_secret(
         .read_secret()
         .map_err(|err| PerchError::Other(format!("could not read your answer: {err}")))?;
     writeln!(out).map_err(write_failed)?;
-    // Wrapped where Perch first owns it, and `Zeroizing::new` takes the `String`
-    // rather than copying it — so the buffer that gets wiped is the one the
-    // terminal was read into, not a second copy of it beside the first.
-    Ok(answered.map(Zeroizing::new))
+    // Already wiped-on-drop when it arrives, because the port says so. This used
+    // to wrap it here and claim "the buffer that gets wiped is the one the
+    // terminal was read into" — which was false of the adapter underneath, and
+    // was a claim no signature made anybody keep.
+    Ok(answered)
 }
 
 /// Refuses to go on if the registry lock went stale while a question was
