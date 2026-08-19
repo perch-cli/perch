@@ -818,6 +818,21 @@ fn one_round(
         // Read, and carrying no Quota Window Perch could make anything of. Not
         // a reading of zero: an answer that says nothing about how full an
         // Account is says nothing about whether to leave it.
+        //
+        // Unreachable, and written out anyway for the reason `refused_the
+        // _reading`'s empty-attempts branch is. `Fullest::of` answers `None`
+        // only where `observed_utilization` does, and by here
+        // `refused_the_reading` has established `Outcome::Observed` — which
+        // means `keep` stored a non-empty window set, because
+        // `anthropic::utilization` refuses an empty one as
+        // `Refused::Unrecognized` and that arrives as `Outcome::Failed`. So the
+        // reachable path says "the usage endpoint named no Quota Window", from
+        // `anthropic`, and this sentence is the second one for a state that
+        // produces the first.
+        //
+        // Kept because `Fullest::of` returns an `Option` and something has to
+        // answer it, and a hold is the only safe answer: acting on an Account
+        // whose fullness is unknown is the one thing this round may never do.
         return held(
             "Anthropic answered without a Quota Window Perch could read, so \
              there was no figure to decide on."
