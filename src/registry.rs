@@ -2051,17 +2051,12 @@ pub fn validate(registry: &Registry) -> Result<()> {
     // hand edit produces — after which `account` and `account_mut` silently act
     // on the first of them, `perch list` renders one Account as two rows, and a
     // Cycle counts it twice when it ranks the Group.
-    let mut held: Vec<&str> = Vec::new();
-    for account in &registry.accounts {
-        if let Some(already) = held.iter().find(|seen| same_name(seen, account.email())) {
-            return Err(PerchError::Invalid(format!(
-                "The registry holds two Accounts spelled `{already}` and `{}`, \
-                 which are one Account — so which entry a command reads, and \
-                 which one it writes, is not decided by anything.",
-                account.email(),
-            )));
-        }
-        held.push(account.email());
+    if let Some((already, again)) = first_collision(registry.accounts.iter().map(Account::email)) {
+        return Err(PerchError::Invalid(format!(
+            "The registry holds two Accounts spelled `{already}` and `{again}`, \
+             which are one Account — so which entry a command reads, and which \
+             one it writes, is not decided by anything."
+        )));
     }
 
     // Two names in the *same* half of the namespace that differ only in case.
@@ -2166,19 +2161,38 @@ fn refuse_two_names_that_differ_only_in_case<'a>(
     kind: NameKind,
     names: impl Iterator<Item = &'a String>,
 ) -> Result<()> {
+    match first_collision(names.map(String::as_str)) {
+        None => Ok(()),
+        Some((already, name)) => Err(PerchError::Invalid(format!(
+            "The registry holds {} `{already}` and `{name}`, which differ only \
+             in case — so which one a Target finds is not decided by anything.",
+            kind.article(),
+        ))),
+    }
+}
+
+/// The first pair of names in a sequence that [`same_name`] cannot tell apart,
+/// earlier one first.
+///
+/// Three loops in this module were this loop: two names in one half of the
+/// namespace, two Accounts spelled alike, and two Aliases given to one Account.
+/// They differ only in the sentence they raise, which is the part worth writing
+/// three times — every one of them says *which* answer is not decided by
+/// anything, and that is different each time.
+///
+/// Quadratic, deliberately. It is a registry: a machine with enough Accounts for
+/// that to matter is one nobody has, and the alternative is a map keyed on a
+/// lowercased copy of every name — which is the allocation this comparison
+/// avoids, spent to save a comparison nobody is waiting on.
+fn first_collision<'a>(names: impl Iterator<Item = &'a str>) -> Option<(&'a str, &'a str)> {
     let mut seen: Vec<&str> = Vec::new();
     for name in names {
         if let Some(already) = seen.iter().find(|held| same_name(held, name)) {
-            return Err(PerchError::Invalid(format!(
-                "The registry holds {} `{already}` and `{name}`, which differ \
-                 only in case — so which one a Target finds is not decided by \
-                 anything.",
-                kind.article(),
-            )));
+            return Some((already, name));
         }
         seen.push(name);
     }
-    Ok(())
+    None
 }
 
 /// Refuses a name in the registry that `declare_group` or `perch alias` would
