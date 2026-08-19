@@ -363,6 +363,28 @@ fn the_landing_page_leads_into_the_guide() {
     }
 }
 
+/// A page's frontmatter and the body under it: the lines between the opening
+/// `---` and the next one, and everything after that.
+///
+/// Read line by line rather than by splitting on `"---\n"`, which is the same
+/// reason every other helper here uses `lines()`: git hands a Windows checkout
+/// CRLF, so a `\n` in a pattern is a test that passes on two platforms and fails
+/// on the third — as this one did.
+fn frontmatter_and_body(markdown: &str) -> Option<(Vec<&str>, Vec<&str>)> {
+    let mut lines = markdown.lines();
+    if lines.next()?.trim_end() != "---" {
+        return None;
+    }
+    let mut frontmatter = Vec::new();
+    loop {
+        let line = lines.next()?;
+        if line.trim_end() == "---" {
+            return Some((frontmatter, lines.collect()));
+        }
+        frontmatter.push(line);
+    }
+}
+
 /// Starlight requires `title` in frontmatter and renders it as the page's `h1`
 /// (ADR 0062). A page without one does not build; a page with one *and* an `#`
 /// heading of its own says its title twice, which builds and is wrong.
@@ -370,32 +392,27 @@ fn the_landing_page_leads_into_the_guide() {
 fn every_page_says_its_title_in_frontmatter() {
     for page in pages_of_the_site() {
         let text = read(&guide().join(&page));
-        let frontmatter = text
-            .strip_prefix("---\n")
-            .and_then(|rest| rest.split_once("\n---"))
-            .map(|(frontmatter, _)| frontmatter)
+        let (frontmatter, _) = frontmatter_and_body(&text)
             .unwrap_or_else(|| panic!("{page} opens with frontmatter, and Starlight needs it to"));
         assert!(
             frontmatter
-                .lines()
+                .iter()
                 .any(|line| line.starts_with("title:") && line.len() > "title:".len() + 1),
             "{page} has frontmatter that does not say a title, and Starlight renders the title as the h1"
         );
     }
 }
 
-/// The other half of the same rule.
+/// The other half of the same rule. This asks for the frontmatter too rather than
+/// carrying on without it, because a fallback to the whole document is how the
+/// half above came to be the only one that noticed it was missing.
 #[test]
 fn no_page_says_its_title_a_second_time_as_a_heading() {
     for page in pages_of_the_site() {
         let text = read(&guide().join(&page));
-        // Past the frontmatter, whose `---` fence is not a heading of any level.
-        let body = text
-            .strip_prefix("---\n")
-            .and_then(|rest| rest.split_once("\n---"))
-            .map(|(_, body)| body)
-            .unwrap_or(&text);
-        for line in prose(body) {
+        let (_, body) = frontmatter_and_body(&text)
+            .unwrap_or_else(|| panic!("{page} opens with frontmatter, and Starlight needs it to"));
+        for line in prose(&body.join("\n")) {
             assert!(
                 !line.starts_with("# "),
                 "{page} opens a level-one heading — Starlight renders the frontmatter title as the h1, so this one is the title said twice"
