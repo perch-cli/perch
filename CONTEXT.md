@@ -27,6 +27,17 @@ Aliases and Group names share one namespace, so neither can shadow the other.
 An Account answers to one Alias at a time.
 _Avoid_: nickname, label, tag
 
+**Adoption**:
+The Claude Code login already on the machine becoming the first Account Perch
+holds, on whichever command is run first — bar an Import and a Purge, which
+would each be making an Account on the way to giving one up. Not a step somebody
+takes: Perch asks for no login it does not need (ADR 0009), so the Account
+arrives without ever being added. What separates it from adding one is that
+nothing was logged into: the Credential was already there, and Adoption copies
+it into a Profile of its own. Happens once for the Holdings it begins — only a
+Purge undoes it, and the next command after one adopts again.
+_Avoid_: init, setup, onboarding, import, first run
+
 **Remove**:
 Giving one Account up for good: Perch forgets it, deletes the Credential it was
 holding and frees the Alias it answered to, so nothing lists it and nothing

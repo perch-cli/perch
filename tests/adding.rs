@@ -1043,3 +1043,136 @@ fn a_login_perch_is_driving_survives_a_command_run_in_another_terminal() {
         "and the Account it produced is held: {printed}"
     );
 }
+
+/// A Scope that has just grown to two Accounts holds a set nothing may Cycle
+/// between unasked, because `watcher-may-act` is false on every Scope until
+/// somebody says otherwise (ADR 0017). The Add says what is now true and names
+/// the Setting that would say yes — it does not ask, because a consent gate
+/// collected in the middle of adding an Account is not the yes the guide
+/// promises.
+#[test]
+fn an_add_that_makes_a_group_a_set_says_what_that_group_still_cannot_do() {
+    let host = ready_for_a_third_in("work");
+
+    let (result, printed) = run_add(&host, add_to_group("work"));
+
+    result.expect("the third Account is added");
+    assert!(
+        printed.contains("perch config set work watcher-may-act true"),
+        "the Setting and the Scope it is said about are both named:\n{printed}"
+    );
+    assert!(
+        !printed.contains("interchangeable"),
+        "a Group *is* the declaration that its Accounts are interchangeable \
+         (ADR 0002), so there is no second yes to name:\n{printed}"
+    );
+}
+
+/// The same question asked of the other Scope there is, which needs two yeses
+/// rather than one: being ungrouped is the absence of a declaration that those
+/// Accounts are interchangeable, not a weaker form of one (ADR 0017).
+#[test]
+fn an_add_that_makes_the_ungrouped_scope_a_set_names_both_settings_it_needs() {
+    let host = ready_to_add();
+
+    let (result, printed) = run_add(&host, no_group());
+
+    result.expect("the second Account is added");
+    assert!(
+        printed.contains("perch config set ungrouped interchangeable true"),
+        "the declaration comes first, because it is the one that has to:\n{printed}"
+    );
+    assert!(
+        printed.contains("perch config set ungrouped watcher-may-act true"),
+        "and the grant that lets the watcher act on them:\n{printed}"
+    );
+}
+
+/// A Scope somebody has already permitted is told nothing: the line exists to
+/// say what is missing, and nothing is.
+#[test]
+fn an_add_into_a_scope_that_may_already_be_acted_on_says_nothing_about_settings() {
+    let host = ready_for_a_third_in("work");
+    config_set(&host, &["work", "watcher-may-act", "true"])
+        .0
+        .expect("the Group is told the watcher may act on it");
+
+    let (result, printed) = run_add(&host, add_to_group("work"));
+
+    result.expect("the third Account is added");
+    assert!(
+        !printed.contains("perch config set"),
+        "nothing is missing, so nothing is said:\n{printed}"
+    );
+}
+
+/// And neither is the Scope that has just gained its first Account. One
+/// Account is not a set worth Cycling within, and a rule for choosing has
+/// nothing to say to a set of one.
+#[test]
+fn an_add_that_leaves_a_scope_holding_one_account_says_nothing_about_settings() {
+    let host = ready_to_add();
+
+    let (result, printed) = run_add(&host, add_to_group("work"));
+
+    result.expect("the second Account is added, in a Group of its own");
+    assert!(
+        !printed.contains("perch config set"),
+        "`work` holds one Account, and there is nothing to Cycle between:\n{printed}"
+    );
+}
+
+/// The line is a statement rather than a question. `add` asks about the Group
+/// and nothing else, so a `--no-group` add with no terminal to answer on still
+/// completes — and still says what the Scope it grew cannot do.
+#[test]
+fn the_line_is_said_rather_than_asked_about() {
+    let host = ready_to_add().without_terminal();
+
+    let (result, printed) = run_add(&host, no_group());
+
+    result.expect("nothing was waiting on an answer");
+    assert!(
+        printed.contains("perch config set ungrouped watcher-may-act true"),
+        "{printed}"
+    );
+    assert!(
+        !printed.contains('?'),
+        "a consent gate is not collected in the middle of an Add:\n{printed}"
+    );
+}
+
+/// And said again on the Add after that one, for as long as it stays true. A
+/// Scope that has not been answered has not stopped being unanswered because
+/// somebody added a third Account to it — this is a fact about the Scope rather
+/// than a command explaining itself on a path that always runs (ADR 0061).
+#[test]
+fn a_scope_that_stays_unanswered_is_told_again_on_the_add_after_that() {
+    let host = ready_for_a_third_in("work");
+    run_add(&host, add_to_group("work"))
+        .0
+        .expect("the third Account is added");
+    let host = host.with_login(login_producing(
+        SPARE,
+        leaked(&SECOND_IDENTITY_FILE.replace(SECOND_EMAIL, "fourth@example.com")),
+    ));
+
+    let (result, printed) = run_add(&host, add_to_group("work"));
+
+    result.expect("the fourth Account is added");
+    assert!(
+        printed.contains("perch config set work watcher-may-act true"),
+        "still true, so still said:\n{printed}"
+    );
+    assert!(printed.contains("3 Accounts"), "and counted:\n{printed}");
+}
+
+/// A machine holding a second Account in one Group, with a third login waiting
+/// — so the Add under test is the one that makes that Group a set of two.
+fn ready_for_a_third_in(group: &str) -> FakeHost {
+    let host = ready_to_add();
+    run_add(&host, add_to_group(group))
+        .0
+        .expect("the second Account is added");
+    host.with_login(login_producing(THIRD_CREDENTIAL, THIRD_IDENTITY_FILE))
+}

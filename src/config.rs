@@ -232,6 +232,85 @@ impl Setting {
     }
 }
 
+/// What a Scope that has just grown still needs said about it before anything
+/// Cycles within it unasked, or `None` where it needs nothing.
+///
+/// A second Account in one Scope is the moment two deliberate defaults start to
+/// matter: `watcher-may-act` is false on every Scope, and the Accounts in no
+/// Group need `interchangeable` as well, because being ungrouped is the absence
+/// of a declaration that they are interchangeable rather than a weaker form of
+/// one (ADR 0017). Both are correct, and neither used to be said anywhere near
+/// the command that makes them relevant — the Scope simply held two
+/// interchangeable-looking Accounts and quietly did nothing with them.
+///
+/// **Said and never asked.** `watcher-may-act` is a consent gate, and a yes
+/// collected in the middle of adding an Account is not the yes Perch promises
+/// when it says nothing changes underneath you until you say it may. So this
+/// returns a statement of what is now true, which is [`crate::commands::add`]'s
+/// to print beside the rest of what it did (ADR 0061).
+///
+/// Asked of a Scope rather than of a Group with the Ungrouped case bolted on:
+/// they are the same question, and the only difference is how many Settings
+/// come back.
+///
+/// Silent below two Accounts, because a rule for choosing has nothing to say to
+/// a set of one — which is the same reason no Setting is carried by an Account.
+///
+/// **It does not repeat [`ONLY_WHILE_IT_RUNS`], and that is deliberate.** Every
+/// sentence saying what `watcher-may-act` *does* carries that caveat, because a
+/// Scope that may be acted on is not a service that has been switched on (ADR
+/// 0013). This sentence says the opposite — that the Setting is off and nothing
+/// is happening — and the sentence about what turning it on means is
+/// [`Setting::what_that_means`], which is printed by the very `perch config
+/// set` named here. So the caveat arrives at the moment it becomes true rather
+/// than three clauses early, in a command whose report ADR 0061 keeps to what
+/// it did.
+///
+/// **And it counts what the Scope holds rather than what a Cycle could choose.**
+/// [`Scope::accounts`] is the one idea of that set, and the narrower count would
+/// be a second: a Disabled or Quarantined Account beside the new one is still a
+/// pair a Cycle can move *between*, since either can be the one being left, and
+/// both states are reversible by a command that says nothing about Settings.
+pub fn what_the_scope_still_needs(registry: &Registry, scope: &Scope) -> Option<String> {
+    let held = scope.accounts(registry).len();
+    if held < 2 {
+        return None;
+    }
+
+    // The declaration before the grant, which is the order `perch watcher run`
+    // refuses in and for the same reason: somebody who has said neither is told
+    // about the declaration first, because that is the one that has to come
+    // first. `may_cycle_within` rather than a second reading of
+    // `interchangeable` — it is the one place that answers what a Group is
+    // exempt from, and a copy of it here would be a second idea of that.
+    let mut needed = Vec::new();
+    if !crate::cycle::may_cycle_within(registry, scope) {
+        needed.push(Setting::Interchangeable);
+    }
+    if !registry.settings(scope).watcher_may_act {
+        needed.push(Setting::WatcherMayAct);
+    }
+    if needed.is_empty() {
+        return None;
+    }
+
+    // Named from the vocabulary rather than spelled here, for the reason at the
+    // top of this module: `interchangeable` has been renamed once already, and
+    // a surface printing the old word is a surface telling somebody to type
+    // something `perch config set` refuses.
+    let says: Vec<String> = needed
+        .iter()
+        .map(|key| format!("`perch config set {} {} true`", scope.word(), key.as_str()))
+        .collect();
+    Some(format!(
+        "{} now holds {}, and nothing Cycles between them unasked: {} {} it may.",
+        scope.described(),
+        crate::commands::accounts(held),
+        says.join(" and "),
+        if says.len() == 1 { "says" } else { "say" },
+    ))
+}
+
 /// The keys one Scope carries, in the order they are offered.
 pub fn vocabulary(scope: &Scope) -> Vec<&'static str> {
     SETTINGS
@@ -524,6 +603,88 @@ mod tests {
             .expect_err("there is no such Group");
 
         assert!(error.to_string().contains("work"), "{error}");
+    }
+
+    /// A Scope that has grown to two Accounts is told what it still cannot do,
+    /// and what it is told is the Settings it is actually missing — one for a
+    /// Group, two for the Accounts in no Group, and the declaration named
+    /// before the grant (ADR 0017).
+    #[test]
+    fn a_scope_of_two_is_told_the_yeses_it_is_still_missing() {
+        let mut registry = holding_a_group();
+        registry.upsert(in_group("one@example.com", Some("work")));
+        registry.upsert(in_group("two@example.com", Some("work")));
+        registry.upsert(in_group("three@example.com", None));
+        registry.upsert(in_group("four@example.com", None));
+
+        let said = what_the_scope_still_needs(&registry, &work()).expect("a Group of two");
+        assert!(said.contains("2 Accounts"), "{said}");
+        assert!(
+            said.contains(&format!(
+                "`perch config set work {} true`",
+                Setting::WatcherMayAct.as_str()
+            )),
+            "{said}"
+        );
+        assert!(
+            !said.contains(Setting::Interchangeable.as_str()),
+            "a Group *is* that declaration (ADR 0002): {said}"
+        );
+
+        let said =
+            what_the_scope_still_needs(&registry, &Scope::Ungrouped).expect("and a pair with none");
+        let declaration = said
+            .find(Setting::Interchangeable.as_str())
+            .expect("the declaration is named");
+        let grant = said
+            .find(Setting::WatcherMayAct.as_str())
+            .expect("and the grant beside it");
+        assert!(
+            declaration < grant,
+            "the declaration has to come first, so it is said first: {said}"
+        );
+    }
+
+    /// The line says what is missing, so a Scope missing nothing says nothing —
+    /// and neither does a set of one, which is not a set a rule for choosing has
+    /// anything to say to.
+    #[test]
+    fn a_scope_that_is_permitted_or_holds_one_account_is_told_nothing() {
+        let mut registry = holding_a_group();
+        registry.upsert(in_group("one@example.com", Some("work")));
+        assert_eq!(
+            what_the_scope_still_needs(&registry, &work()),
+            None,
+            "one Account is not a set worth Cycling within"
+        );
+
+        registry.upsert(in_group("two@example.com", Some("work")));
+        Setting::WatcherMayAct
+            .write(&mut registry, &work(), "true")
+            .unwrap();
+        assert_eq!(
+            what_the_scope_still_needs(&registry, &work()),
+            None,
+            "nothing is missing, so nothing is said"
+        );
+    }
+
+    /// An Account held by nothing but its email address and the Group it is in,
+    /// which is all the question above asks about.
+    fn in_group(email: &str, group: Option<&str>) -> crate::registry::Account {
+        crate::registry::Account {
+            identity: crate::probe::Identity {
+                email: email.to_string(),
+                organization_name: None,
+                organization_uuid: None,
+                account_uuid: None,
+            },
+            plan: None,
+            disabled: false,
+            quarantine: None,
+            group: group.map(str::to_string),
+            utilization: None,
+        }
     }
 
     #[test]
