@@ -846,6 +846,32 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "making a directory where a file already sits is refused",
+        asserts: |host, root, adapter, _now| {
+            // The third answer `create_dir_all` has, and the one the fake had
+            // no branch for at all: `mkdir` answers EEXIST and the `is_dir` it
+            // falls back on says no, so this fails rather than succeeding
+            // quietly or replacing what is there. Reachable wherever a Profile
+            // holds a regular file at a name Perch expects a directory at — a
+            // botched restore, or a `sessions` crossed by a hard link.
+            let occupied = root.join("not-a-directory");
+            host.create_file_with_mode(&occupied, "a file", PRIVATE_FILE_MODE)
+                .expect("the file");
+
+            let refused = host.create_dir_all(&occupied);
+
+            assert!(
+                refused.is_err(),
+                "{adapter}: a file is not a directory to make, got {refused:?}"
+            );
+            assert_eq!(
+                host.read_file(&occupied).ok().as_deref(),
+                Some("a file"),
+                "{adapter}: and it is left exactly as it was"
+            );
+        },
+    },
+    Case {
         named: "making a directory at a link to nothing is refused",
         asserts: |host, root, adapter, _now| {
             // `mkdir` answers EEXIST and the `is_dir` that `create_dir_all`
