@@ -231,6 +231,14 @@ impl Holding {
             Some(said) if said.said == saying => {
                 if (now - said.last_said).num_milliseconds() >= STILL_HOLDING_MILLIS {
                     said.last_said = now;
+                    // Marked as having suppressed something, because it has:
+                    // what this arm says is the *short* form, in place of the
+                    // full line the round would otherwise have printed. Left
+                    // unmarked, a hold whose only unsaid round was this hourly
+                    // heartbeat ended with `released` answering `None` and no
+                    // "the hold is over after …" line at all — the one shape of
+                    // hold that ended in silence.
+                    said.suppressed = true;
                     return Speak::StillHolding { since: said.since };
                 }
                 said.suppressed = true;
