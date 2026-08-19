@@ -162,8 +162,12 @@ It publishes on two events, because the site's two halves keep different time
 (ADR 0063). **A published release** rebuilds everything: the guide describes a
 Perch somebody can install, so between releases it does not move — a typo fixed
 in the guide is live at the next release and not before. **A push to `main` that
-touches the installers** rebuilds too: they are pasted from a URL with no version in it, so a merge has to be
-able to fix one.
+touches the installers** rebuilds too: they are pasted from a URL with no version
+in it, so a merge has to be able to fix one.
+
+Changing this workflow does not publish anything, deliberately — it cannot change
+either half of what goes out. Use **Run workflow** to apply a change to how the
+site is assembled.
 
 Either event runs the same recipe. The newest release that carries a `pages/`
 directory is checked out entire, `main`'s two installers are put back on top, and

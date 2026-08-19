@@ -20,11 +20,17 @@ name: Pages
 on:
   release:
     types: [published]
+  # The installers, and nothing else. This file is deliberately not among the
+  # paths: what a run publishes is the release's site carrying `main`'s two
+  # installers, so a change to how that is assembled changes neither, and a run
+  # that republishes an identical artifact spends a live deployment on the thing
+  # that serves those installers. Applying a fix to the assembly is what
+  # `workflow_dispatch` is for, and a fix worth applying is one somebody is
+  # watching.
   push:
     branches: [main]
     paths:
       - "pages/public/**"
-      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:

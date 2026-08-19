@@ -75,3 +75,12 @@ on.
 **Deploying the whole site from the release.** That is this document, minus the
 installers, and the installers are the reason the site is served from the root of
 a deployment at all.
+
+**Publishing when the workflow itself changes.** It was among the trigger paths
+while the site was built from the branch, where it belonged: the file was part of
+what produced the output. It is not any more. What goes out is the release's site
+carrying `main`'s installers, and changing how those two are assembled changes
+neither — so the run would replace the live site with a byte-identical copy of
+itself, and spend a deployment of the thing that serves the installers to do it.
+Applying a change to the assembly is `workflow_dispatch`, which is the difference
+between a deploy somebody chose and a deploy that happened.
