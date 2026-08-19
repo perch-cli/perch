@@ -413,3 +413,22 @@ jobs:
 
           git commit -m "perch ${GITHUB_REF_NAME#v}"
           git push "https://x-access-token:${TAP_TOKEN}@github.com/perch-cli/homebrew-perch.git" HEAD:main
+
+  # The site, once the Release exists and everything it holds can be downloaded.
+  # The guide describes a Perch somebody can install (ADR 0063), so a release is
+  # what publishes it — and this is the release doing that, rather than an event
+  # this workflow cannot raise: a Release created with GITHUB_TOKEN starts no
+  # workflow of its own.
+  #
+  # `pages.yml` deploys the guide from the newest release that carries a site and
+  # the installers from main, so it does not need to be told which tag this is. It
+  # is safe on a re-run: the same tag produces the same site.
+  site:
+    needs: release
+    # A called workflow gets no more than the caller grants it, and the deploy job
+    # inside asks for exactly these three.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml

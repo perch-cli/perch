@@ -1,0 +1,21 @@
+---
+// Starlight's search, kept across a router swap rather than rebuilt.
+//
+// Starlight builds the Pagefind UI inside a `DOMContentLoaded` listener, and that
+// event fires once per document — so with a client-side router every swapped-in
+// search dialog is an empty `#starlight__search` that nothing ever fills. This
+// persists the element that was built instead of replacing it.
+//
+// The wrapper is `display: contents` because Starlight's own `site-search` is:
+// the button and the dialog are laid out by the header's flex container, and a
+// wrapper that took part in that layout would move them.
+import Default from "@astrojs/starlight/components/Search.astro";
+---
+
+<div transition:persist="site-search" class="persisted-search"><Default /></div>
+
+<style>
+  .persisted-search {
+    display: contents;
+  }
+</style>

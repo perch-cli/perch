@@ -523,11 +523,11 @@ pub fn installer_for(platform: Platform) -> (&'static str, &'static str) {
     match platform {
         Platform::Windows => (
             "perch-upgrade.ps1",
-            include_str!("../packaging/pages/install.ps1"),
+            include_str!("../pages/public/install.ps1"),
         ),
         _ => (
             "perch-upgrade.sh",
-            include_str!("../packaging/pages/install.sh"),
+            include_str!("../pages/public/install.sh"),
         ),
     }
 }

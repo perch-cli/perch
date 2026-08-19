@@ -236,8 +236,8 @@ jobs:
       - name: shellcheck
         if: runner.os == 'Linux'
         run: |
-          shellcheck --shell=sh packaging/pages/install.sh
-          shellcheck --shell=sh packaging/pages/install-test.sh
+          shellcheck --shell=sh pages/public/install.sh
+          shellcheck --shell=sh packaging/install-test.sh
           shellcheck --shell=sh packaging/homebrew/formula.sh
 
       # Runs the real install.sh against a fabricated release and asserts on
@@ -246,7 +246,7 @@ jobs:
       # check is binding by design and would refuse a fabricated archive.
       - name: install.sh advises correctly
         if: runner.os == 'Linux'
-        run: sh packaging/pages/install-test.sh
+        run: sh packaging/install-test.sh
 
       - name: PowerShell parses
         if: runner.os == 'Windows'
@@ -254,35 +254,61 @@ jobs:
         run: |
           $errors = $null
           [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path packaging/pages/install.ps1), [ref]$null, [ref]$errors) | Out-Null
+            (Resolve-Path pages/public/install.ps1), [ref]$null, [ref]$errors) | Out-Null
           if ($errors.Count -gt 0) {
             $errors | ForEach-Object { Write-Output "::error::$_" }
             exit 1
           }
           Write-Output "install.ps1 parses cleanly"
 
-  # The guide is rendered on every pull request, for the same reason the
-  # installers are checked on one: `pages.yml` deploys from main, so main is the
-  # first place a book that will not build would otherwise be found — and the
-  # deployment it breaks is the one serving the installers.
+  # The site is built on every pull request, for the same reason the installers
+  # are checked on one: a site that will not build should be found on the pull
+  # request that broke it rather than by a deploy that cannot run.
   #
-  # `create-missing = false` in docs/book.toml is what gives this teeth: a
-  # chapter pointing at a file nobody wrote fails here rather than being
-  # invented as an empty page. The rest of what could go quietly wrong — a page
-  # missing from SUMMARY.md, a link to a heading that has been reworded — is
-  # `tests/publication.rs`, which runs with the other suites.
-  guide:
+  # What this proves is the *next* release's site, not the one being served:
+  # `pages.yml` publishes the guide from the newest release and only the
+  # installers from main (ADR 0063). That is the check that was wanted either way.
+  #
+  # What gives this teeth is what Starlight refuses: a page with no `title` in
+  # its frontmatter, and — because of the one plugin this site has — a relative
+  # markdown link naming a page that is not there (ADR 0062). The rest of what
+  # could go quietly wrong, a README pointing at a page that moved or an
+  # installer URL that grew a prefix, is `tests/publication.rs`, which runs with
+  # the other suites.
+  site:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: pages
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/mdbook
+      # Node 24 for the reason release.yml is on it, and because Astro 7 wants
+      # 22.12 or newer.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
 
-      - name: The guide renders
-        run: mdbook build docs --dest-dir _site/guide
+      # Which pnpm is `packageManager` in pages/package.json, and corepack is
+      # what reads it — so CI and the deploy take their version from the one
+      # place, and no third-party action is added to the supply chain to do it.
+      - name: pnpm
+        run: corepack enable pnpm
+
+      # --frozen-lockfile is what replaced the mdBook tarball's `sha256`: the
+      # lockfile carries an integrity hash for the whole tree, and this refuses
+      # to install anything else.
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Types, lint and formatting
+        run: pnpm check
+
+      - name: The site builds
+        run: pnpm build
 
   # Which lines the suites reach, reported to Codecov and shown as the README's
   # badge. One platform rather than three: coverage is a property of the code
@@ -360,7 +386,7 @@ jobs:
   # alternative was letting a description edit skip this matrix and report
   # green on a commit whose real verdict was red.
   success:
-    needs: [check, installers, guide]
+    needs: [check, installers, site]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -375,7 +401,7 @@ jobs:
             echo "installers concluded: ${{ needs.installers.result }}"
             exit 1
           fi
-          if [ "${{ needs.guide.result }}" != "success" ]; then
-            echo "guide concluded: ${{ needs.guide.result }}"
+          if [ "${{ needs.site.result }}" != "success" ]; then
+            echo "site concluded: ${{ needs.site.result }}"
             exit 1
           fi

@@ -47,3 +47,26 @@ updates:
         update-types:
           - minor
           - patch
+
+  # The site (ADR 0062). `npm` is the ecosystem that covers pnpm — there is no
+  # `pnpm` to write here — and it is scoped to `/pages`, which is the only
+  # directory in this repository that is a JavaScript project and the only place
+  # a `package.json` may appear.
+  #
+  # `build` and one grouped pull request, for the same reasons the cargo entry
+  # above gives: the type has to be one CI's Conventional Commits check accepts,
+  # and the lockfile is the unit that gets reviewed.
+  - package-ecosystem: npm
+    directory: /pages
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope
+    labels:
+      - ready-for-human
+    groups:
+      site-minor-patch:
+        update-types:
+          - minor
+          - patch

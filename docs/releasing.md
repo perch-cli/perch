@@ -152,11 +152,31 @@ judgment call. Worth revisiting at the same time: Apple notarization, which
 
 ## The site, and the installers on it
 
-<https://perch-cli.github.io/perch/> is built by `pages.yml` on every push to
-`main` that touches what it is made of, out of two sources (ADR 0035):
-`packaging/pages/` is copied to the root, and `docs/guide/` is rendered by
-mdBook into `/guide/`. Nothing on the site is written twice — the guide the
-site serves is the markdown GitHub shows.
+<https://perch-cli.github.io/perch/> is built by `pages.yml` out of one source
+(ADR 0062): `pages/` is an Astro and Starlight project that renders the front page
+and the guide together, and `pages/public/` is copied to the root of the output
+verbatim. Nothing on the site is written twice — the guide the site serves is the
+markdown GitHub shows, in `pages/src/content/docs/`.
+
+It publishes twice over, because the site's two halves keep different time
+(ADR 0063). **A release** rebuilds everything: the guide describes a Perch somebody
+can install, so between releases it does not move — a typo fixed in the guide is
+live at the next release and not before. `release.yml` does that by calling
+`pages.yml` as its last job, after the artifacts are uploaded; it cannot be an
+event, because a Release created with `GITHUB_TOKEN` starts no workflow. **A push
+to `main` that touches the installers** rebuilds too: they are pasted from a URL
+with no version in it, so a merge has to be able to fix one.
+
+Changing this workflow does not publish anything, deliberately — it cannot change
+either half of what goes out. Use **Run workflow** to apply a change to how the
+site is assembled.
+
+Either event runs the same recipe. The newest release that carries a `pages/`
+directory is checked out entire, `main`'s two installers are put back on top, and
+the run diffs them against `main` before deploying — an overlay that failed
+silently would publish the release's copies and look identical. Until the first
+release carrying `pages/`, there is no such tag and the workflow builds the guide
+from `main`, saying so in its log.
 
 The installers live on `main` rather than inside a release on purpose: the URL
 somebody pastes into a terminal should not carry a version, and an installer
@@ -167,13 +187,31 @@ whatever else the site grows, those two do not move.
 
 Enable it once, under **Settings → Pages → Source: GitHub Actions**.
 
-mdBook is pinned by version and by hash in `.github/actions/mdbook`, which both
-`pages.yml` and CI use, so the renderer a pull request is checked with is the
-one the site is built with. To render it locally:
+What the site is built from is pinned by `pages/pnpm-lock.yaml`, and pnpm's own
+version by `packageManager` in `pages/package.json` — so `pnpm install
+--frozen-lockfile` refuses anything else, and the deploy uses the release's
+lockfile rather than the branch's. CI's `site` job builds the branch on every pull
+request, which proves the *next* release's site builds. To run it yourself:
 
 ```sh
-mdbook serve docs --open
+cd pages
+corepack enable pnpm      # once per machine; pnpm's version comes from package.json
+pnpm install --frozen-lockfile
+pnpm check                # types, oxlint, oxfmt
+pnpm dev                  # or `pnpm build` for what the deploy uploads
 ```
+
+pnpm will not install a package published within the last twenty-four hours,
+which is its own protection rather than a setting this repository chose, and it is
+kept. So every dependency in `pages/package.json` is a caret range rather than an
+exact pin: the range says what the site needs, and the gate picks the newest
+version inside it that it is willing to install. "The latest" therefore means the
+latest release that has been in the world long enough for somebody else to have
+noticed something wrong with it.
+
+An exact pin on a release published today is the one thing that turns that guard
+into a broken build — `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`, on every command,
+including `pnpm dev`. Widen the range rather than excluding the package.
 
 Both installers verify the archive against the release's `SHA256SUMS`, and
 then, only if `gh` is installed *and logged in*, against the signed build

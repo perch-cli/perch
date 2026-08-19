@@ -1,4 +1,8 @@
-# Watching
+---
+title: "Watching"
+sidebar:
+  order: 5
+---
 
 `perch watcher run` does the Cycling for you. It is a loop in this terminal that
 reads how full the Account you are on is, says what it made of that, and
@@ -209,7 +213,7 @@ they printed.
 Pick this *or* a Service, not both: a Check that finds a Watcher running exits
 `20` and does nothing, so a machine with both gets a cron mailbox full of them.
 
-```cron
+```
 */5 * * * * perch watcher check >> ~/.local/state/perch-watch.log 2>&1
 ```
 

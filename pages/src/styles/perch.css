@@ -1,0 +1,118 @@
+/*
+ * The one thing carried over from the stylesheet that used to correct mdBook
+ * (ADR 0062): Perch's accent, said in Starlight's own accent scale rather than
+ * applied to selectors of Starlight's.
+ *
+ * The pair is #b45309 in light and #f0b429 in dark, and each lands on the
+ * variable its theme uses for text — `--sl-color-accent` in light,
+ * `--sl-color-accent-high` in dark, which is what Starlight's props.css points
+ * `--sl-color-text-accent` at in each. The other two tones of each scale follow
+ * the lightness pattern Starlight's own scales use, so everything built out of
+ * them — buttons, the active sidebar item, aside borders, the hero — stays
+ * coherent.
+ *
+ * Nothing else from that file is here. The font stack, the rule under every h2
+ * and the heading weights were corrections to mdBook's defaults, and re-applying
+ * corrections to a theme chosen for its defaults is how a site arrives back
+ * where it started. Transcripts still wrap rather than scroll, and that is
+ * `expressiveCode.defaultProps.wrap` in astro.config.ts — the renderer's own
+ * option, which sets the overflow it would otherwise fight over.
+ */
+
+/* Dark, which is Starlight's unqualified `:root`. */
+:root {
+  --sl-color-accent-low: hsl(42, 54%, 16%);
+  --sl-color-accent: hsl(42, 82%, 38%);
+  --sl-color-accent-high: hsl(42, 87%, 55%);
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: hsl(26, 88%, 91%);
+  --sl-color-accent: hsl(26, 90%, 37%);
+  --sl-color-accent-high: hsl(26, 85%, 22%);
+}
+
+/*
+ * Light's accent is dark enough to read as text on white, which is what it is
+ * for — and that leaves Starlight's default of black text on top of it, where it
+ * is a button's background, at a contrast nobody should have to read. White is
+ * the way round that works for this accent.
+ */
+:root[data-theme="light"] {
+  --sl-color-text-invert: var(--sl-color-white);
+}
+
+/*
+ * Moving between two pages of the guide is cross-faded rather than blanked.
+ *
+ * This file says what that looks like; `src/components/Head.astro` says what sets
+ * it off. `@view-transition` here is what a full document load animates through,
+ * and it is what the site does on its own — so a reader whose browser runs no
+ * JavaScript, or who arrives at a page cold, still gets it. `<ClientRouter />`
+ * there turns a click into a swap of this document rather than a load of another
+ * one, and hands the swap to the same rules below.
+ *
+ * A browser without cross-document view transitions navigates as it always did,
+ * and one whose reader has asked for less motion is told not to.
+ *
+ * The rules under it are not decoration, and the defaults without them are wrong
+ * for this site rather than merely plainer. Left alone, the browser takes the
+ * whole viewport as one snapshot and cross-fades it — the header and the sidebar
+ * included, which is the thing a reader notices as a flash, because they are the
+ * parts that did not change. And it does that over a quarter of a second, while
+ * the document it is covering for is served in under a tenth of one: the
+ * animation was most of what navigating cost.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  @view-transition {
+    navigation: auto;
+  }
+
+  /*
+   * Named, and so lifted out of the snapshot that crosses.
+   *
+   * `.sidebar-pane` rather than the `nav.sidebar` around it, and the difference is
+   * the whole of whether this works: that nav measures 1280x0, because everything
+   * in it is either a button or a fixed-position panel, and a name on a box with
+   * no pixels captures nothing. Its snapshot came out empty, the sidebar's actual
+   * pixels stayed in the root snapshot, and the panel went on fading with the page
+   * while looking for all the world like the rule had simply been ignored.
+   */
+  header.header {
+    view-transition-name: header;
+  }
+
+  .sidebar-pane {
+    view-transition-name: sidebar;
+  }
+
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 120ms;
+  }
+
+  /*
+   * And then told not to animate at all, which naming alone does not do: a named
+   * element still cross-fades its own two snapshots. The header got away with it
+   * because its snapshots are identical, so the fade was invisible. The sidebar's
+   * are not — one item is highlighted in the page you left and another in the page
+   * you asked for — and cross-fading the whole panel to move one highlight is the
+   * navigation appearing to blink. Showing the new one at once is what was wanted
+   * from both of them: the highlight changes, and nothing else in the frame does.
+   */
+  ::view-transition-group(header),
+  ::view-transition-group(sidebar) {
+    animation: none;
+  }
+
+  ::view-transition-old(header),
+  ::view-transition-old(sidebar) {
+    display: none;
+  }
+
+  ::view-transition-new(header),
+  ::view-transition-new(sidebar) {
+    animation: none;
+  }
+}

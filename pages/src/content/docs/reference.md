@@ -1,8 +1,8 @@
-# Reference
-
-- [Commands](#commands)
-- [Exit codes](#exit-codes)
-- [Where things are](#where-things-are)
+---
+title: "Reference"
+sidebar:
+  order: 9
+---
 
 ## Commands
 

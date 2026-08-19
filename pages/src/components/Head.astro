@@ -1,0 +1,14 @@
+---
+// Starlight's own `<head>`, plus Astro's client-side router.
+//
+// `Head` is where a tag has to go to be in the head of every page, and
+// `<ClientRouter />` is what turns a click into a swap of this document rather
+// than a load of another one. `perch.css` still says what the transition looks
+// like and which parts of the frame sit out of it; this only changes what sets it
+// off, and the site still animates a cold load without any of it.
+import Default from "@astrojs/starlight/components/Head.astro";
+import { ClientRouter } from "astro:transitions";
+---
+
+<Default />
+<ClientRouter />

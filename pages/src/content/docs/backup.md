@@ -1,13 +1,14 @@
-# Backing up, moving machines, and giving the machine back
+---
+title: "Backing up, moving machines, and giving the machine back"
+sidebar:
+  label: "Backing up and moving machines"
+  order: 7
+---
 
 Three commands under one noun, and they are each other's inverse. Your Holdings
 are everything Perch holds on this machine: an export writes them to one
 encrypted file, an import puts them back, and a purge gives them up, leaving the
 machine as it was before Perch (ADR 0014).
-
-- [Backing up everything](#backing-up-everything)
-- [Moving to another machine](#moving-to-another-machine)
-- [Giving the machine back](#giving-the-machine-back)
 
 ## Backing up everything
 

@@ -1,4 +1,8 @@
-# Running one Account in one terminal
+---
+title: "Running one Account in one terminal"
+sidebar:
+  order: 6
+---
 
 `perch run <target>` launches Claude Code as an Account without changing which
 one is active. It is the other half of `switch`: a Switch is about the whole

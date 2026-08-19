@@ -1,14 +1,11 @@
-# Accounts
+---
+title: "Accounts"
+sidebar:
+  order: 2
+---
 
 An Account is one Claude login Perch holds. This is how you gain one, name one,
 keep one out of Cycling, repair one and give one up.
-
-- [Adopting the login you already have](#adopting-the-login-you-already-have)
-- [Adding an Account](#adding-an-account)
-- [Naming an Account](#naming-an-account)
-- [Keeping an Account out of Cycling](#keeping-an-account-out-of-cycling)
-- [When an Account breaks](#when-an-account-breaks)
-- [Giving up an Account](#giving-up-an-account)
 
 ## Adopting the login you already have
 
