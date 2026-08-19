@@ -1792,3 +1792,34 @@ fn a_claude_code_holding_its_own_lock_is_a_refusal_rather_than_an_unread_figure(
          answered: {printed}"
     );
 }
+
+/// A Check says what happened on standard output, including when what happened
+/// was a lock somebody else was holding.
+///
+/// The module promises it in as many words — "the line goes to standard output
+/// for cron to capture" — and an arm was added to keep that promise for the
+/// registry lock. Claude Code's locks reach the same round by a different
+/// route: `resolve_a_landing` takes them to settle a Landing before anything is
+/// read, and every failure out of it was wrapped as `NotArranged`, which a
+/// Check raises. `main` writes that to standard *error*, so a cron job
+/// capturing standard output got a silent round for the one outcome most
+/// likely to recur.
+#[test]
+fn a_check_held_settling_a_landing_says_so_on_standard_output() {
+    let host = watching(&[86.0], 5.0);
+    // A Switch that died between writing the Landing down and moving anything,
+    // so the next round has one to settle (ADR 0048).
+    a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+    // And a Claude Code holding the lock that settling it needs.
+    let holding_since = host.now();
+    let host = host.with_dir_held_since("/Users/someone/.claude.json.lock", holding_since);
+
+    let (result, printed) = run_watch_once(&host);
+
+    let code = result.expect("a lock somebody is holding is not a failed check");
+    assert_eq!(code, perch::error::EXIT_HELD, "{printed}");
+    assert!(
+        printed.contains("lock"),
+        "the line goes to standard output, and says what was holding it: {printed:?}"
+    );
+}

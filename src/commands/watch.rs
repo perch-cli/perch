@@ -721,6 +721,19 @@ fn one_round(
     // the code the refusal earned, because a scheduler has to be told.
     let settled = match switch::resolve_a_landing(host, &mut perch, &mut registry) {
         Ok(settled) => settled,
+        // `Busy` passed through untouched, exactly as the adoption lock above
+        // is, and for the reason written there: both callers already answer it
+        // and they answer it differently. Wrapped as `NotArranged` it became
+        // `Err(why)` out of `check`, which `main` writes to standard *error* —
+        // so the one promise this module makes about a Check ("the line goes to
+        // standard output for cron to capture") was broken by the very failure
+        // the arm below it was added to close for the other lock. A cron
+        // mailbox capturing stdout got a silent round.
+        //
+        // A held round rather than a refusal, unlike the `Busy` a Switch
+        // raises: this one arrives before anything has been read, so there is
+        // no figure and nothing was decided. "Held" is what that is.
+        Err(busy @ PerchError::Busy(_)) => return Err(busy),
         Err(unsettled) => return Ok(Turn::NotArranged(unsettled)),
     };
 
