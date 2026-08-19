@@ -1046,6 +1046,17 @@ fn act(
     // that may stop to ask, which is the other step in a round with no bound of
     // its own.
     watching_alone.renew();
+    // One instant for both arrangements. `watcher.reason` is stamped as an
+    // argument, so a Check's Cooldown started when the Switch *began*, while
+    // `recently.switched(host.now())` below started the loop's when it *ended* —
+    // and a Switch that waits on Claude Code's locks and a keychain dialog is a
+    // minute or more of daylight between them. The two are meant to be one
+    // behavior (ADR 0040), and this is the only pacing figure that differed.
+    //
+    // The beginning rather than the end, because that is the one already
+    // written down: `switch_to` puts `Checked { switched_at }` in the same save
+    // as the Switch, and it is what paces the next scheduled Check.
+    let acted_at = host.now();
     let switched = switch::switch_to(
         host,
         perch,
@@ -1053,7 +1064,7 @@ fn act(
         &installed,
         &choice.account,
         Some(&outgoing),
-        watcher.reason(&scope, host.now()),
+        watcher.reason(&scope, acted_at),
     );
     watching_alone.renew();
 
@@ -1072,7 +1083,7 @@ fn act(
         Err(not_switched) => not_switched.moved,
     };
     if moved {
-        recently.switched(host.now());
+        recently.switched(acted_at);
     }
 
     match switched {
