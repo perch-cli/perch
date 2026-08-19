@@ -798,6 +798,56 @@ pub(crate) fn through_any_link(host: &dyn Host, path: &Path) -> PathBuf {
     }
 }
 
+/// The same, following every link on the path rather than only one at the end.
+///
+/// [`through_any_link`] answers about the last component, which is the question
+/// a Reconcile asks — it holds the entry it is about. "Is this path inside that
+/// directory?" is a different question, and a link *above* the last component
+/// defeats a components-wise `starts_with` just as thoroughly: `~/claude` linked
+/// at `~/.config/perch/profiles` makes `~/claude/work` and
+/// `~/.config/perch/profiles/work` one directory with two spellings.
+///
+/// Bounded rather than trusting the filesystem to be acyclic, the way
+/// `FakeHost::resolved` is: two links pointing at each other are a loop, and a
+/// path this cannot settle in eight passes is answered as far as it got. The
+/// caller is comparing rather than opening, so a partial answer is a comparison
+/// that fails closed.
+pub(crate) fn through_every_link(host: &dyn Host, path: &Path) -> PathBuf {
+    const FOLLOWED: usize = 8;
+
+    let mut at = path.to_path_buf();
+    for _ in 0..FOLLOWED {
+        match deepest_link_on(host, &at) {
+            Some(followed) => at = followed,
+            None => return at,
+        }
+    }
+    at
+}
+
+/// The deepest component of `path` that is a link, replaced by what it points
+/// at and the rest of the path put back on the end. `None` when none of them is
+/// a link, which is what ends the walk above.
+fn deepest_link_on(host: &dyn Host, path: &Path) -> Option<PathBuf> {
+    let mut beneath = PathBuf::new();
+    let mut at = path.to_path_buf();
+    loop {
+        if let Ok(Some(target)) = host.link_target(&at) {
+            let resolved = match target.is_absolute() {
+                true => target,
+                false => at.parent().unwrap_or(Path::new("")).join(target),
+            };
+            return Some(resolved.join(&beneath));
+        }
+        let name = at.file_name()?;
+        beneath = Path::new(name).join(&beneath);
+        at = at.parent()?.to_path_buf();
+        if at.as_os_str().is_empty() {
+            return None;
+        }
+    }
+}
+
 /// The whole of writing beside a file and moving the result over it, including
 /// what is done about a write that did not land.
 ///

@@ -1556,7 +1556,21 @@ pub fn profiles_dir(host: &dyn Host) -> Result<PathBuf> {
 /// Profile, which is what the rule above already claims it is.
 pub fn the_default_profile(host: &dyn Host) -> Result<crate::probe::Store> {
     let told = crate::probe::default_store(host)?;
-    if told.config_dir.starts_with(perch_home(host)?) {
+    let home = perch_home(host)?;
+    // Both sides resolved before they are compared, and through *every* link on
+    // the path rather than one at the end: `starts_with` matches path
+    // components, so a `CLAUDE_CONFIG_DIR` reaching a Profile by another name —
+    // `~/claude` linked at `~/.config/perch/profiles`, or a relative
+    // `PERCH_HOME`, which `perch_home` takes verbatim — is a different string
+    // and slips past. The link that does it is usually a directory *above* the
+    // one named, which is why the last component alone is not enough.
+    //
+    // Past it, a `perch switch` typed in that shell Captures the live
+    // Credential into a Profile another Account may be running against, which
+    // is the failure the paragraph above describes reached by the route it did
+    // not check. `reconcile` resolves this same class the same way.
+    let told_at = crate::host::through_every_link(host, &told.config_dir);
+    if told_at.starts_with(crate::host::through_every_link(host, &home)) {
         return crate::probe::default_profile_store(host);
     }
     Ok(told)
@@ -2845,6 +2859,44 @@ mod tests {
         assert_eq!(
             host.mode_of(perch_home(&host).unwrap()),
             Some(crate::host::PRIVATE_DIR_MODE)
+        );
+    }
+
+    /// No directory under Perch's own home is the Default Profile — including
+    /// one reached by another name.
+    ///
+    /// The guard was `told.config_dir.starts_with(perch_home)`, which compares
+    /// path components, so a link anywhere above the directory named makes two
+    /// spellings of one place and only one of them matches. Past it, a `perch
+    /// switch` typed in that shell Captures the live Credential into a Profile
+    /// another Account may be running against and records Perch as active on an
+    /// Account the machine is not on — the failure this function's own doc
+    /// describes, reached by the route it did not check.
+    #[test]
+    fn a_profile_reached_through_a_link_is_still_not_the_default_profile() {
+        let home = "/Users/someone/.config/perch";
+        let host = crate::host::FakeHost::new()
+            // How somebody comes to have this: a shorter name for the Profiles
+            // directory, and a `CLAUDE_CONFIG_DIR` pointing inside it.
+            .with_link(
+                crate::host::Link::Symbolic,
+                format!("{home}/profiles"),
+                "/Users/someone/claude",
+            )
+            .with_env("CLAUDE_CONFIG_DIR", "/Users/someone/claude/work");
+
+        let store = the_default_profile(&host).expect("a Default Profile is known");
+
+        assert!(
+            !store.config_dir.starts_with("/Users/someone/claude"),
+            "a Profile is never the Default Profile, whichever name reaches it: {:?}",
+            store.config_dir
+        );
+        assert_eq!(
+            store.config_dir,
+            crate::probe::default_profile_store(&host)
+                .expect("the real Default Profile")
+                .config_dir,
         );
     }
 
