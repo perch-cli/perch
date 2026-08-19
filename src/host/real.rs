@@ -418,6 +418,25 @@ fn or_not_found<T>(result: std::io::Result<T>, path: &Path) -> Result<T, HostErr
     }
 }
 
+/// The same, for the answer a lock turns on: something is already at this name.
+///
+/// `HostError::AlreadyExists` is load-bearing at this port — `mod.rs` calls it
+/// "the whole of what makes a lock a lock" — and `make_link` was letting `?`
+/// flatten `EEXIST` into `HostError::Io`, while `FakeHost::link` answered the
+/// variant. Nothing branches on it there today, so this is the gap being closed
+/// before a caller is written against the fake and is wrong on the machine.
+fn or_already_exists<T>(result: std::io::Result<T>, path: &Path) -> Result<T, HostError> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+            Err(HostError::AlreadyExists {
+                path: path.to_path_buf(),
+            })
+        }
+        Err(err) => Err(HostError::Io(err)),
+    }
+}
+
 /// The same three arms where a missing file is not a failure at all: `None`.
 ///
 /// What every removal here wants, since a path that is already gone is the state
@@ -1258,8 +1277,8 @@ fn create_file_with_mode(path: &Path, contents: &str, _mode: u32) -> Result<(), 
 #[cfg(not(windows))]
 fn make_link(kind: Link, target: &Path, at: &Path) -> Result<(), HostError> {
     match kind {
-        Link::Symbolic => Ok(std::os::unix::fs::symlink(target, at)?),
-        Link::Hard => Ok(std::fs::hard_link(target, at)?),
+        Link::Symbolic => or_already_exists(std::os::unix::fs::symlink(target, at), at),
+        Link::Hard => or_already_exists(std::fs::hard_link(target, at), at),
         Link::Junction => Err(HostError::Other(
             "a directory junction is a Windows link, and this is not Windows".to_string(),
         )),
@@ -1280,10 +1299,12 @@ fn make_link(kind: Link, target: &Path, at: &Path) -> Result<(), HostError> {
         // Which of the two symlink calls is the target's business: Windows
         // records in the link whether it names a directory, and a file symlink
         // pointing at a directory does not resolve.
-        Link::Symbolic if target.is_dir() => Ok(std::os::windows::fs::symlink_dir(target, at)?),
-        Link::Symbolic => Ok(std::os::windows::fs::symlink_file(target, at)?),
-        Link::Junction => Ok(junction::create(target, at)?),
-        Link::Hard => Ok(std::fs::hard_link(target, at)?),
+        Link::Symbolic if target.is_dir() => {
+            or_already_exists(std::os::windows::fs::symlink_dir(target, at), at)
+        }
+        Link::Symbolic => or_already_exists(std::os::windows::fs::symlink_file(target, at), at),
+        Link::Junction => or_already_exists(junction::create(target, at), at),
+        Link::Hard => or_already_exists(std::fs::hard_link(target, at), at),
     }
 }
 

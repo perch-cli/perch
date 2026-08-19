@@ -896,6 +896,31 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "a link onto an occupied name reports AlreadyExists",
+        asserts: |host, root, adapter, _now| {
+            // The variant this port treats as meaning contention rather than
+            // breakage — `mod.rs` calls it "the whole of what makes a lock a
+            // lock". The real host let `?` flatten EEXIST into `Io` while the
+            // fake answered `AlreadyExists`, so a caller that branched on it
+            // would have been written against the fake and been wrong on the
+            // machine.
+            let target = root.join("something-to-point-at");
+            let taken = root.join("already-here");
+            host.create_file_with_mode(&target, "x", PRIVATE_FILE_MODE)
+                .expect("the target");
+            host.create_file_with_mode(&taken, "in the way", PRIVATE_FILE_MODE)
+                .expect("something at the name");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
+
+            match host.link(Link::Symbolic, &target, &taken) {
+                Err(HostError::AlreadyExists { .. }) => {}
+                other => panic!("{adapter}: expected AlreadyExists, got {other:?}"),
+            }
+        },
+    },
+    Case {
         named: "removing a link refuses anything that is not one",
         asserts: |host, root, adapter, _now| {
             // The one call whose whole contract is that it only ever takes away
