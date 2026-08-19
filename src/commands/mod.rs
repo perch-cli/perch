@@ -310,12 +310,8 @@ pub fn refuse_a_quarantined_account(
 /// Group (ADR 0017), so it is never a heading that reads like one.
 pub const IN_NO_GROUP: &str = "In no Group";
 
-/// What Cycling will not do with those Accounts until it is told it may (ADR
-/// 0017), as a clause both surfaces that show them finish a sentence with. One
-/// sentence, because two would sooner or later say two different things.
-pub const CYCLING_AMONG_UNGROUPED: &str = "only moves between these when you say it may";
-
-/// The same rule, and then what it currently answers.
+/// What Cycling will not do with the Accounts in no Group until it is told it
+/// may (ADR 0017), and then what it currently answers.
 ///
 /// The constant on its own prints the same words whether the declaration has
 /// been made or not, so the one Setting gating the whole Scope is not readable
@@ -336,7 +332,7 @@ pub const CYCLING_AMONG_UNGROUPED: &str = "only moves between these when you say
 /// could have gone on confidently printing a word `perch config set` refuses.
 pub fn cycling_among_ungrouped(registry: &crate::registry::Registry) -> String {
     format!(
-        "{CYCLING_AMONG_UNGROUPED} — `{}` is {}",
+        "only moves between these when you say it may — `{}` is {}",
         crate::config::Setting::Interchangeable.as_str(),
         registry.ungrouped.interchangeable
     )
