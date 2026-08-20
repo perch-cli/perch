@@ -44,20 +44,11 @@ Every comment in `src/` and `tests/` says one of four things:
    carry it. `EXIT_OK: i32 = 0` needs one; `0` is a convention, not a meaning.
 4. **The citation.** Which decision in `docs/adr/` settled this.
 
-What the code does is not on the list. A comment that reads the syntax back is
-deleted, not trimmed.
-
-### Strict and straight
+*What the code does* is not on the list, and is deleted rather than trimmed.
 
 State the fact. No rhetoric, no restatement for effect, no sentence whose work is
-emphasis. "150s is 24 reads an hour", not "which is the same arithmetic read the
-other way".
-
-Perch's vocabulary is not jargon. `CONTEXT.md`'s nouns — Account, Credential,
-Headroom, Landing, Quarantine — are the shortest correct way to say the thing.
-Use them.
-
-### Three tiers, and each argues once
+emphasis. `CONTEXT.md`'s nouns — Account, Credential, Headroom — are vocabulary
+rather than jargon, and the shortest correct phrasing available.
 
 | | job | cap |
 | --- | --- | --- |
@@ -65,83 +56,20 @@ Use them.
 | `///` | the item's contract, and why it has this shape | 5 lines |
 | `//` | a local surprise, at the site | 3 lines |
 
-**Argued once, at the widest scope that owns it.** What the header says is not
-said again at a site.
+Argued once, at the widest scope that owns it: what the header says is not said
+again at a site. **Over the cap is not a long comment — it is a decision with no
+ADR.** Write the ADR, cite it, cut the comment to the fact. Do not reflow to fit.
 
-**Over the cap is not a long comment — it is a decision with no ADR.** Write the
-ADR, cite it, and cut the comment to the fact. Do not reflow to fit.
+A decision is cited once per file. Present tense only: a rejected alternative
+stays, stated as a live alternative, and what the code *used to do* goes. A
+test's name is its claim, so a test carries a comment only where the fixture
+surprises.
 
-### A decision is cited once per file
+This binds comments, not documents. `src/` states facts, `docs/adr/` makes the
+case, `CONTEXT.md` defines terms — a deliberate split, not an oversight.
 
-The header cites what governs the module. A site cites only a decision it is
-itself the subject of: the constant that decision fixed, the branch it added.
-Never both. `src/watch.rs` cites ADR 0013 eleven times; once is the rule.
-
-### Perch's own past is not a comment
-
-Present tense. A comment describes the code as it stands.
-
-A **rejected alternative stays**, stated as a live alternative — "Claude Code
-jitters the same wait; Perch takes these locks once per command, so a fixed wait
-has nothing to spread out."
-
-**What the code used to do goes**, whatever it was defending. `used to`, `no
-longer`, `was never`, `the old`: that is git history's job.
-
-### Tests
-
-A test's name is its claim, because a failure prints the name.
-`a_refresh_that_fails_across_a_threshold_crossing_never_switches` needs no doc
-comment restating it.
-
-A test carries a comment only where the fixture is surprising — which trace
-crosses the threshold, why this Credential is spent — under the 3-line cap.
-
-### This binds comments, not documents
-
-`src/` states facts. `docs/adr/` makes the case. `CONTEXT.md` defines terms. The
-ADRs keep their prose deliberately: an argument compressed to bullets stops being
-answerable by the next reader, which is what ADR 0043 exists to prevent. Do not
-apply this section to `docs/` or `CONTEXT.md`.
-
-### Worked examples
-
-**Keeps as written.** `src/lock.rs`, `WAIT_MILLIS` — three lines, a rejected
-alternative, no history:
-
-```rust
-/// How long to wait between attempts. Claude Code jitters the same wait; Perch
-/// takes these locks once per command rather than in a loop, so a fixed wait
-/// has nothing to spread out.
-```
-
-**Rephrases.** `src/watch.rs`, `REFRESH_INTERVAL_MILLIS` — eleven lines to four.
-ADR 0013 goes because the module header holds it; ADR 0015 stays because the
-constant is its subject:
-
-```rust
-/// How long the watcher waits between Refreshing the Account it is on.
-///
-/// 150s is 24 reads an hour. The endpoint allows 28-30 per Account (ADR 0015),
-/// so a concurrent `perch status --refresh` still fits. Refreshes one Account:
-/// at 24/hour each, a Group of two is already at the limit.
-```
-
-**Deletes.** `src/watch.rs`, above `still_holding_line` — narrates what a
-decision used to require, then argues with it. Nine lines go; the fact that
-survives is that a hold is said once, with its citation:
-
-```rust
-/// ADR 0013 had every held round say which failure held it, and a hold whose
-/// line said neither that nor when it would ask again "reads as a watcher that
-/// has given up". That was written about a person watching a terminal, where the
-/// repeated line *is* the proof of life.
-```
-
-### CI checks two of these
-
-The line caps and one-citation-per-file are a script. The four kinds and the
-history rule are judgment. **Passing the check is not passing the standard.**
+Worked examples, the reasoning behind each clause, and what CI can check:
+`docs/agents/comments.md`.
 
 ## Agent skills
 
