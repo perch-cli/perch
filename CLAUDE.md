@@ -1,17 +1,28 @@
-## Nobody is using this yet
+## The Holdings survive an upgrade
 
-Perch has no installed base — not the author, not anyone else. Nothing on any
-machine has to keep working.
+The CLI surface moves freely: commands, flags, output prose, exit codes and the
+shape of `--json`. Rename it, move it, cut it, and mark the entry
+`[**breaking**]` in `CHANGELOG.md`. Exit codes and `--json` are read by a script
+rather than by a person, so that entry is the only warning there will be.
 
-So breaking changes are free, and are the preferred answer. Do not write
-migration code, compatibility shims, deprecation periods, format upgraders, or
-"a registry an older Perch wrote" fallbacks. Change the format, change the
-paths, change the flags, and update the tests and docs to match. If a change
-would need a migration to be safe for users, it does not — there are none.
+The Holdings do not. A Profile, a Credential, the registry naming them and an
+Export carrying all three are what a changelog entry cannot give back, so a
+change to any of their shapes lands as a migration or as a
+refusal-with-instructions — never as a file this Perch reads wrong. A Credential
+Store is derived from its Profile's path, so moving `profiles/` is not a rename.
 
-Forward-looking guards that cost nothing are still worth it: refusing a registry
-written by a *newer* Perch, for instance, is about the future rather than the
-past. Reading what an older Perch wrote is not.
+Which of the two is decided by what the refusal costs. An Export is a backup and
+the Perch that wrote it can still open it, so an Export this build does not
+understand is refused, naming the version that wrote it. A registry holds Groups,
+Aliases and Settings that exist nowhere else, and starting over means logging in
+to every Account — so a registry migrates forward from every version Perch has
+written.
+
+Both turn on one number: when the shape of the registry or of an Export moves,
+its `version` moves with it. A shape that changes under a version that does not
+is the one failure neither the migration nor the refusal can catch.
+
+The case, and what 1.0 leaves open: ADR the-holdings-outlive-a-perch.
 
 ## Perch writes American English
 
