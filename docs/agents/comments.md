@@ -109,6 +109,34 @@ can carry, so unbounded they would trade prose for slugs. `src/watch.rs` cites
 ADR 0013 eleven times today and `src/commands/watch.rs` cites ADR 0040 eighteen;
 a decision appearing eleven times in one file marks nothing.
 
+**Slugs, not numbers.** Identity on the number made a renumber a tree-wide
+rewrite — 1,500 sites across 158 files, every one of them moving even where the
+decision did not. On the slug, a merge moves only the citations whose decision
+actually moved. The number survives as a sort key so the directory reads as a
+table of contents; it is in no citation, because identity that shows up in a
+citation has not moved.
+
+One name rather than two. A short slug beside a long title is a second register,
+and the next session has to know which of them a reader wants — so the titles are
+short and the slug is the title. The 30-character cap is hard rather than a
+target: a target drifts across eleven passes, and unlike a comment cap this one
+has no "write the ADR" escape hatch. Hyphenation is what lets a check tell
+`ADR the-host-port-is-wide` from the `ADR` in `## Flag ADR conflicts`.
+
+Never a path, so never clickable — that is the cost, paid because the set is
+contiguous from 0001 and adding a document renumbers every one after it. Markdown
+gets no dialect of its own for the same reason: one form, six file types.
+
+**Who a citation is for.** An agent reading the tree. So the guide never says
+`ADR`, and neither does anything Perch says to a person: a user reading a refusal
+cannot follow the citation and did not ask for it. `CHANGELOG.md` is the other
+exemption, in the other direction — it records what happened on a date, so a
+number there is not a citation and may name a document that is gone.
+
+Checked once the tree is converted, by `tests/citing.rs`: a slug resolving to
+exactly one file, a filename tail matching its H1, a slug within cap and
+hyphenated, and nothing citing a number.
+
 **Present tense.** The same rule an ADR follows: state what stands, not the route
 to it. A rejected alternative is timeless and stays. Perch's own former behavior
 is a commit, not an alternative.
