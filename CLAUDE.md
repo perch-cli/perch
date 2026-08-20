@@ -68,8 +68,7 @@ surprises.
 This binds comments, not documents. `src/` states facts, `docs/adr/` makes the
 case, `CONTEXT.md` defines terms — a deliberate split, not an oversight.
 
-Worked examples, the reasoning behind each clause, and what CI can check:
-`docs/agents/comments.md`.
+Worked examples and the reasoning behind each clause: `docs/agents/comments.md`.
 
 ## Agent skills
 

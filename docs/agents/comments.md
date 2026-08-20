@@ -113,6 +113,11 @@ a decision appearing eleven times in one file marks nothing.
 to it. A rejected alternative is timeless and stays. Perch's own former behavior
 is a commit, not an alternative.
 
+This is where the deletions are. A comment that merely echoes the line below it
+is nearly absent from this tree — a sweep looking for one finds almost nothing
+and walks past the real defect, which is a comment narrating what Perch used to
+do, or an argument sitting over its cap. Aim there.
+
 **Test names.** A failure prints the name, not the comment, so the name is the
 one that has to work. `a_refresh_that_fails_across_a_threshold_crossing_never_switches`
 needs nothing above it.
@@ -121,25 +126,3 @@ needs nothing above it.
 answerable by the next reader, which is what ADR 0043 exists to prevent. The
 ADRs keep their prose on purpose. Written down so no session "fixes" them to
 match this rule.
-
-## The scale this was measured against
-
-| | |
-| --- | --- |
-| `src` | 42,213 lines — `///` 10,414, `//!` 949, `//` 4,152 |
-| `tests` | 26,844 lines — `///` 3,666, `//!` 325, `//` 725 |
-| Comment lines narrating Perch's past | 268 (`used to`, `no longer`, `was never`, `the old`) |
-| Comments echoing the line below them | 3, in all of `src` |
-| Citation sites in `src` + `tests` | 953 |
-
-The third row is the surprise, and it redirects the work. *What the code does* is
-nearly absent from this tree, so the deletion pressure is the history lines and
-the argument over the cap — not prose narrating syntax.
-
-## What is enforced
-
-The caps and one-citation-per-file are mechanical. The four kinds and the present
-tense rule are judgment and cannot be checked. Tracked at
-[#260](https://github.com/perch-cli/perch/issues/260).
-
-**Passing a check is not passing the standard.**
