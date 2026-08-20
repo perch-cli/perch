@@ -70,6 +70,23 @@ case, `CONTEXT.md` defines terms — a deliberate split, not an oversight.
 
 Worked examples and the reasoning behind each clause: `docs/agents/comments.md`.
 
+## A citation names a slug
+
+A decision is cited as `ADR <slug>`: `(ADR the-tui-does-not-write)`. The slug is
+the document's H1 kebab-cased, and is the tail of its filename in `docs/adr/` —
+at most 30 characters, always hyphenated, never one word. The numeric prefix is a
+sort key: it appears in no citation, and the document is found by globbing
+`docs/adr/*-<slug>.md`.
+
+One form everywhere — Rust, Markdown, TOML, YAML, TypeScript — and never a path
+or a link, because the set is contiguous from 0001 and adding a document moves
+every number after it. A citation names a document, never a section.
+
+A citation addresses an agent reading the tree, so two places never carry one:
+the guide under `pages/src/content/docs/`, and anything Perch says to a person.
+
+Worked examples and the reasoning: `docs/agents/comments.md`.
+
 ## Agent skills
 
 ### Issue tracker
