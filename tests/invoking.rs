@@ -107,6 +107,24 @@ impl Scratch {
         machine
     }
 
+    /// A machine whose registry an older Perch wrote: the document v0.2.0's own
+    /// serde produced, so what the binary meets is a shape a release actually
+    /// wrote rather than this tree's memory of one.
+    fn holding_what_v0_2_0_wrote(by: &str) -> Scratch {
+        let machine = Scratch::untouched(by);
+        fs::create_dir_all(machine.home()).expect("a scratch home can be made");
+        fs::write(
+            machine.home().join("registry.json"),
+            include_str!("fixtures/registry-v0.2.0.json"),
+        )
+        .expect("the registry can be written");
+        machine
+    }
+
+    fn registry(&self) -> String {
+        fs::read_to_string(self.home().join("registry.json")).expect("the registry is there")
+    }
+
     fn home(&self) -> PathBuf {
         self.root.join("perch")
     }
@@ -536,4 +554,41 @@ fn row_for<'a>(listing: &'a str, email: &str) -> &'a str {
         .lines()
         .find(|line| line.contains(email))
         .unwrap_or_else(|| panic!("`{email}` is listed:\n{listing}"))
+}
+
+/// End to end, through the process: the wound this repairs was that every
+/// registry any published Perch wrote came back as serde's words about an
+/// unknown field. A listing is the cheapest command that proves one is read, and
+/// the file left behind is the proof the step is paid once
+/// (ADR a-registry-comes-forward).
+#[test]
+fn a_registry_a_published_perch_wrote_is_read_and_written_forward() {
+    let machine = Scratch::holding_what_v0_2_0_wrote("older-registry");
+
+    let ran = perch(&machine, &["list"]);
+
+    assert_eq!(ran.code, EXIT_OK, "{}", ran.err);
+    assert!(ran.out.contains("work@example.com"), "{}", ran.out);
+    assert!(
+        ran.out.contains("disabled"),
+        "the Account it had disabled still is: {}",
+        ran.out
+    );
+    assert!(
+        ran.err.contains("brought forward"),
+        "and the rewrite is said on stderr rather than in the listing: {:?}",
+        ran.err
+    );
+
+    let written = machine.registry();
+    assert!(written.contains("\"version\": 2"), "{written}");
+    assert!(!written.contains("\"global\""), "{written}");
+
+    let again = perch(&machine, &["list"]);
+    assert_eq!(again.code, EXIT_OK, "{}", again.err);
+    assert!(
+        again.err.is_empty(),
+        "and the next run has nothing to say: {:?}",
+        again.err
+    );
 }

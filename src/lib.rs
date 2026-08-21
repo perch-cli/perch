@@ -24,6 +24,7 @@ pub mod keychain;
 pub mod listing;
 pub mod lock;
 pub mod login;
+pub mod migration;
 pub mod observe;
 pub mod probe;
 pub mod profile;

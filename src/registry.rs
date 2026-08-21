@@ -1420,31 +1420,71 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     // The version first, off a shape that is only the version. A newer Perch is
     // exactly the thing that writes a value this build has no variant for, and
     // reading the document first fails on that with serde's own words.
-    if let Some(version) = crate::error::claimed_version(&contents)
-        && version > CURRENT_VERSION
-    {
-        return Err(crate::error::written_by_a_newer_perch(
-            &path.display().to_string(),
-            "registry",
-            version,
-            CURRENT_VERSION,
-        ));
+    match crate::error::claimed_version(&contents) {
+        Some(version) if version > CURRENT_VERSION => {
+            return Err(crate::error::written_by_a_newer_perch(
+                &path.display().to_string(),
+                "registry",
+                version,
+                CURRENT_VERSION,
+            ));
+        }
+        Some(version) if version < crate::migration::EARLIEST_VERSION => {
+            return Err(no_perch_wrote(path, Some(version)));
+        }
+        None if crate::migration::says_no_version(&contents) => {
+            return Err(no_perch_wrote(path, None));
+        }
+        _ => {}
     }
+
+    // In memory here and written back by `migration::bring_forward`, because
+    // every path that writes holds the lock before it reads.
+    let forwarded = crate::migration::forward(&contents)?;
 
     // Strictly, so a key nobody recognizes is a refusal naming it rather than a
     // value that quietly did nothing. Every type here is Perch's own — Claude
     // Code's `.claude.json` is read through `probe`'s lenient shapes instead.
-    let registry: Registry = serde_json::from_str(&contents).map_err(|err| {
-        PerchError::Malformed {
-            path: path.display().to_string(),
-            detail: err.to_string(),
-        }
-        .with_note(&the_file_to_edit(path))
-    })?;
+    let registry: Registry = serde_json::from_str(forwarded.as_deref().unwrap_or(&contents))
+        .map_err(|err| {
+            PerchError::Malformed {
+                path: path.display().to_string(),
+                detail: err.to_string(),
+            }
+            .with_note(&the_file_to_edit(path))
+        })?;
 
     validate(&registry).map_err(|refusal| refusal.with_note(&the_file_to_edit(path)))?;
 
     Ok(Some(with_every_claimed_group_declared(registry)))
+}
+
+/// The refusal for a registry claiming a version no Perch has stamped, or none
+/// (ADR a-registry-comes-forward).
+///
+/// Neither names a shape, and a document whose shape is unstated half-parses
+/// rather than refusing.
+fn no_perch_wrote(path: &Path, claimed: Option<u32>) -> PerchError {
+    // Without the path, which `Malformed` has already said.
+    let what = match claimed {
+        Some(version) => format!(
+            "it says it is registry version {version}, and no Perch has written \
+             that."
+        ),
+        None => "it does not say which registry version it is, and every Perch \
+                 has written one."
+            .to_string(),
+    };
+    PerchError::Malformed {
+        path: path.display().to_string(),
+        detail: what,
+    }
+    .with_note(&format!(
+        "The version says which shape the rest of the file is in, so Perch will \
+         not guess at it. This build reads versions {} through {CURRENT_VERSION}.\n{}",
+        crate::migration::EARLIEST_VERSION,
+        the_file_to_edit(path),
+    ))
 }
 
 /// Where to put right something only a hand edit could have put wrong.

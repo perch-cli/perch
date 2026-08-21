@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "active": "work@example.com",
+  "accounts": [
+    {
+      "identity": {
+        "email": "work@example.com",
+        "account_uuid": "uuid-work@example.com",
+        "organization_name": "Acme",
+        "organization_uuid": "org-1"
+      },
+      "plan": "max",
+      "enabled": true,
+      "group": "work"
+    },
+    {
+      "identity": {
+        "email": "old@example.com",
+        "account_uuid": "uuid-old@example.com",
+        "organization_name": "Acme",
+        "organization_uuid": "org-1"
+      },
+      "enabled": false
+    }
+  ],
+  "aliases": {
+    "w": "work@example.com"
+  },
+  "groups": {
+    "work": {
+      "strategy": "most-headroom",
+      "watcher_may_act": true,
+      "watcher_threshold_percent": 80,
+      "watcher_cooldown_minutes": 15,
+      "watcher_margin_percent": 10,
+      "watcher_no_return": true
+    }
+  },
+  "global": {
+    "cycle_ungrouped": true
+  },
+  "checks": {
+    "work": {
+      "switched_at": "2026-08-11T10:00:00Z",
+      "switched_off": "old@example.com"
+    }
+  }
+}

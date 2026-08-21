@@ -24,6 +24,32 @@ use crate::registry::{self, Account, Registry};
 /// which answers the same question about its own shape.
 pub const CURRENT_VERSION: u32 = 1;
 
+/// The registry half of an Export, in the shape this build reads
+/// (ADR a-registry-comes-forward).
+///
+/// On the field rather than the unsealed document: this half holds no secret,
+/// and every Credential beside it would be a `String` nothing wipes.
+fn coming_forward<'de, D>(deserializer: D) -> std::result::Result<Registry, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+
+    let document = serde_json::Value::deserialize(deserializer)?;
+    let text = serde_json::to_string(&document).map_err(D::Error::custom)?;
+    // The same floor `registry::load` holds: a version no Perch stamped names no
+    // shape, and an Import writes what it read back out under the current one.
+    if crate::migration::below_the_earliest(&text) {
+        return Err(D::Error::custom(format!(
+            "the registry inside says it is a version no Perch has written, so \
+             Perch will not read it as version {}",
+            crate::registry::CURRENT_VERSION,
+        )));
+    }
+    let forwarded = crate::migration::forward(&text).map_err(D::Error::custom)?;
+    serde_json::from_str(forwarded.as_deref().unwrap_or(&text)).map_err(D::Error::custom)
+}
+
 /// The most scrypt work [`unseal`] will spend opening one file, as `log2(N)`.
 ///
 /// Fixed rather than measured here, so whether an Export opens is not a question
@@ -52,6 +78,7 @@ pub struct Export {
     /// Cycling may choose it, why it is Quarantined, and what each Group
     /// carries. Written whole rather than field by field, so a Setting added to
     /// a Group is in the next Export without anybody putting it there.
+    #[serde(deserialize_with = "coming_forward")]
     pub registry: Registry,
     /// Every Credential Perch holds, by the address of the Account it belongs
     /// to. Absent for an Account whose stores held nothing, which is how a
@@ -774,6 +801,57 @@ mod tests {
             !refused.to_string().contains("not valid JSON"),
             "a file that is perfectly good JSON is not reported as corrupt: {refused}"
         );
+    }
+
+    /// The case the two above cannot cover: every published Perch wrote an
+    /// envelope at the current version around a registry at version 1, so
+    /// neither guard fires and nothing is ahead of anything.
+    #[test]
+    fn an_export_holding_a_registry_an_older_perch_wrote_opens() {
+        let older = format!(
+            r#"{{"version":{CURRENT_VERSION},"registry":{{"version":1,"active":"someone@example.com","accounts":[{{"identity":{{"email":"someone@example.com","account_uuid":null,"organization_name":null,"organization_uuid":null}},"enabled":false}}],"groups":{{"work":{{"watcher_may_act":true}}}},"global":{{"cycle_ungrouped":true,"settings":{{"strategy":"soonest-reset","watcher_may_act":false,"watcher_threshold_percent":85,"watcher_cooldown_minutes":15,"watcher_margin_percent":10,"watcher_no_return":true}}}}}},"credentials":{{}}}}"#
+        );
+        let sealed =
+            age::encrypt_and_armor(&recipient(PASSPHRASE), older.as_bytes()).expect("it seals");
+
+        let opened = unseal(&sealed, PASSPHRASE).expect("an Export of a published Perch opens");
+
+        assert_eq!(opened.registry.version, crate::registry::CURRENT_VERSION);
+        let account = opened
+            .registry
+            .account("someone@example.com")
+            .expect("the Account travels");
+        assert!(
+            account.disabled,
+            "and so does its having been kept out of Cycling"
+        );
+        let work = opened.registry.group("work").expect("the Group travels");
+        assert_eq!(
+            work.strategy,
+            crate::registry::Strategy::SoonestReset,
+            "with what it Inherited from Global"
+        );
+        assert!(opened.registry.ungrouped.interchangeable);
+    }
+
+    /// The floor, on the half that has one. An Import writes what it read back
+    /// out at the current version, so a registry claiming a version no Perch
+    /// stamped would be relabeled rather than refused.
+    #[test]
+    fn a_registry_claiming_a_version_no_perch_wrote_is_refused_inside_an_export_too() {
+        for claimed in ["0", "null"] {
+            let bare = format!(
+                r#"{{"version":{CURRENT_VERSION},"registry":{{"version":{claimed},"accounts":[]}},"credentials":{{}}}}"#
+            );
+            let sealed =
+                age::encrypt_and_armor(&recipient(PASSPHRASE), bare.as_bytes()).expect("it seals");
+
+            let refused = unseal(&sealed, PASSPHRASE).expect_err("no Perch wrote that");
+            assert!(
+                refused.to_string().contains("no Perch has written"),
+                "{refused}"
+            );
+        }
     }
 
     /// The registry inside carries its own version, and it is the half holding
