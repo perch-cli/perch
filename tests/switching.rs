@@ -2023,6 +2023,42 @@ fn a_keychain_dialog_somebody_walked_away_from_does_not_cost_perch_its_registry_
     );
 }
 
+/// A live Credential matching neither the Account Perch is on nor the one its
+/// Identity names — somebody logged into a second Account with `claude` itself,
+/// and that session Rotated. Perch cannot tell whose Rotation it is holding, so
+/// it refuses; the branch had no test, and its remedy named two commands that
+/// both meet this same refusal again.
+#[test]
+fn a_live_credential_nothing_accounts_for_names_the_repair_that_clears_it() {
+    let host = machine_with_two_accounts();
+
+    // The Identity names the second Account, and the Credential beside it is
+    // neither Account's stored copy.
+    host.set_file(IDENTITY_PATH, SECOND_IDENTITY_FILE);
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, THIRD_CREDENTIAL);
+    host.forget_effects();
+
+    let (result, printed) = run_switch(&host, SECOND_EMAIL);
+
+    let error = result.expect_err("Perch cannot say whose Rotation that is");
+    assert_eq!(error.exit_code(), EXIT_CONFLICT, "{error}");
+    let said = error.to_string();
+    assert!(
+        said.contains(&format!("perch relogin {EMAIL}")),
+        "the repair named is the one that lands in the Default Profile — the \
+         Account Perch is on, which is the one a Capture files under: {said}"
+    );
+    assert!(
+        !said.contains(&format!("perch switch {SECOND_EMAIL}")),
+        "and not a Switch, which re-enters this same refusal: {said}"
+    );
+    assert_eq!(
+        host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
+        Some(THIRD_CREDENTIAL),
+        "nothing was written over: {printed}"
+    );
+}
+
 /// The other side of the same rule. The Capture writes into the *outgoing*
 /// Account's store, so a Profile it shares is one whose other Account's
 /// Credential the Capture takes away — with nothing left to tell the two apart.

@@ -850,18 +850,18 @@ fn held_by(host: &dyn Host, account: &Account) -> Option<Zeroizing<String>> {
 /// The refusal for a live Credential an Identity names somebody else for, where
 /// that somebody else is an Account Perch holds and is not holding this.
 fn the_identity_is_not_corroborated(outgoing: &Account, named: &str) -> String {
+    let outgoing = outgoing.email();
     format!(
         "The Identity beside the live Credential names {named}, but the live \
          Credential is not the one Perch holds for {named} either — and Perch is \
-         on {}, so it cannot tell whose Rotation this is.\n\
-         It may be {}'s, made after a Switch that could not finish writing the \
-         Identity: writing over it would destroy the only good copy, so nothing \
-         was changed.\n\
-         It may be {named}'s, Rotated since. `perch switch {named}` files it \
-         under the Account the Identity names; `perch relogin` replaces it with \
-         a fresh login for whichever Account you meant.",
-        outgoing.email(),
-        outgoing.email(),
+         on {outgoing}, so it cannot tell whose Rotation this is.\n\
+         It may be {outgoing}'s, made after a Switch that could not finish \
+         writing the Identity: writing over it would destroy the only good copy, \
+         so nothing was changed.\n\
+         It may be {named}'s, Rotated since.\n\
+         Either way, `perch relogin {outgoing}` is the way through: a Capture \
+         files the live Credential under the Account Perch is on, so that is the \
+         one whose fresh login replaces what is there."
     )
 }
 
