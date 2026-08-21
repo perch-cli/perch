@@ -468,6 +468,19 @@ pub fn described(platform: Platform) -> &'static str {
     }
 }
 
+/// The same arrangement as a word a script branches on rather than reads.
+///
+/// Names the arrangement and not the operating system: what a caller does with
+/// this answer turns on which thing is running the Watcher, and `Platform::Other`
+/// says nothing (ADR a-command-names-its-noun).
+pub fn arrangement(platform: Platform) -> &'static str {
+    match platform {
+        Platform::MacOs => "launchagent",
+        Platform::Other => "systemd",
+        Platform::Windows => "scheduled-task",
+    }
+}
+
 /// Where somebody reads the decision log on this platform, as the line that tells them.
 pub fn log_is_at(platform: Platform, log: Option<&Path>) -> String {
     match (platform, log) {

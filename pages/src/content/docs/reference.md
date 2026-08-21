@@ -56,7 +56,7 @@ above.
 `perch upgrade` is the same once it has handed the work to a Channel: what
 `brew` or `npm` exited with is what Perch exits with. `perch upgrade --check`
 exits 0 whether or not there is a newer Release — it is a question, and
-answering it is success either way, so branch on `--json`'s `upgradeAvailable`
+answering it is success either way, so branch on `--json`'s `upgrade_available`
 rather than on the code.
 
 `perch watcher status` is the same shape of question and exits 0 whether or not

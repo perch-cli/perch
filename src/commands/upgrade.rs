@@ -185,7 +185,7 @@ fn check(
                 "installed": installed,
                 "newest": newest,
                 "channel": channel.map(Channel::word),
-                "upgradeAvailable": behind,
+                "upgrade_available": behind,
             }),
         );
     }

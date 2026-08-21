@@ -956,7 +956,7 @@ fn the_binary_is_read_back_out_of_a_plist_that_had_to_be_escaped_to_write() {
          as a binary that has gone: {said}"
     );
     assert_eq!(
-        reported["binaryExists"], true,
+        reported["binary_exists"], true,
         "which is what the answer turns on: {said}"
     );
 }

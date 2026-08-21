@@ -164,11 +164,15 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
                 "installed": installed,
                 "running": running,
                 "watching": watching,
-                "platform": service::described(platform),
+                "platform": service::arrangement(platform),
                 "unit": at.as_ref().map(|at| at.to_string_lossy()),
                 "binary": recorded.as_ref().map(|at| at.to_string_lossy()),
-                "binaryExists": binary_is_there,
-                "log": service::log_is_at(platform, log.as_deref()),
+                "binary_exists": binary_is_there,
+                // The path alone, and `null` where there is no file to open —
+                // on systemd there never is. The sentence a person reads is
+                // beside it rather than in its place.
+                "log": log.as_ref().map(|at| at.to_string_lossy()),
+                "log_said": service::log_is_at(platform, log.as_deref()),
             }),
         )
         .map(|()| EXIT_OK);
