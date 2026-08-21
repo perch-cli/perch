@@ -1,42 +1,13 @@
-//! What a Service *is*: where its unit goes, what the unit says, and which
-//! commands drive the machine's own service manager
-//! (ADR the-machine-runs-the-watcher).
+//! What a Service *is*: where its unit goes, what the unit says, and which commands
+//! drive the machine's own service manager.
 //!
-//! A Service is the Watcher, run for you by the machine's service manager,
-//! started when you log in. Perch never backgrounds itself — it writes a unit
-//! and hands the job over, which is the same "scheduling is the operating
-//! system's job" ADR a-watcher-knob-is-arithmetic settled, with the one thing
-//! added that ADR a-watcher-knob-is-arithmetic refused: a unit file Perch will
-//! write and take back.
+//! A LaunchAgent on macOS, a `systemd --user` unit on Linux, a Scheduled Task on
+//! Windows, all per-user and started at login (ADR the-machine-runs-the-watcher).
+//! Nothing here reaches the filesystem: what a Service *does* is
+//! [`crate::commands::service`]'s.
 //!
-//! Nothing here reaches the filesystem or spawns anything. What a Service *does*
-//! is [`crate::commands::service`]'s; what one *says* is here, where three
-//! platforms' worth of quoting can be argued with in a unit test.
-//!
-//! # The three arrangements
-//!
-//! | Platform | Unit | Started by |
-//! |---|---|---|
-//! | macOS | a LaunchAgent plist in `~/Library/LaunchAgents` | `launchctl bootstrap gui/<uid>` |
-//! | Linux | a `systemd --user` unit in `~/.config/systemd/user` | `systemctl --user enable --now` |
-//! | Windows | a Scheduled Task registered on logon | `schtasks /Create /SC ONLOGON` |
-//!
-//! All three are **per-user and start at login**, never at boot. Every Profile
-//! Perch holds is under one person's home directory, and on macOS there is no
-//! unlocked keychain before somebody logs in
-//! (ADR claude-code-chooses-the-store) — so a system-wide arrangement would be
-//! a Watcher with nothing it could read.
-//!
-//! [`Platform::Other`] is read as Linux throughout, which is a claim worth
-//! making out loud rather than leaving to a `_` arm. Perch builds for five
-//! Targets and two of them are `-unknown-linux-musl`
-//! (ADR a-linux-build-is-static), so the set of machines that are neither macOS
-//! nor Windows and are running a Perch is exactly the set running Linux. The
-//! rest of the codebase already reads it that way —
-//! `commands::a_store_that_held_nothing` decides a Credential Store on
-//! macOS-or-not — and this module says `systemd` where that one says a file. A
-//! sixth Target on a platform with a different service manager is the thing
-//! that would make this wrong, and it would make [`Platform`] wrong first.
+//! [`Platform::Other`] is read as Linux throughout, because two of Perch's five Targets
+//! are `-unknown-linux-musl` (ADR a-linux-build-is-static).
 
 use std::path::{Path, PathBuf};
 
@@ -46,60 +17,36 @@ use crate::upgrade::Channel;
 
 /// What the unit is called, on every platform that wants a name.
 ///
-/// Reverse-DNS because launchd requires it of a Label and uses it as the
-/// identity `bootout` is given; the other two take the same string in their own
-/// shape so that one grep over a machine finds all three.
+/// Reverse-DNS because launchd requires it of a Label; the other two take the same
+/// string in their own shape, so one grep over a machine finds all three.
 pub const LABEL: &str = "cli.perch.watch";
 
-/// What the Windows task is called. A folder rather than a bare name, so
-/// `schtasks /Query /TN Perch` lists what Perch put there and nothing else.
+/// What the Windows task is called. A folder rather than a bare name, so `schtasks
+/// /Query /TN Perch` lists what Perch put there and nothing else.
 pub const TASK_NAME: &str = r"Perch\Watch";
 
 /// What the systemd unit is called, which is also its file name.
 pub const UNIT_NAME: &str = "perch-watch.service";
 
-/// How long a service manager waits for a stopping Watcher to finish, in
-/// seconds.
+/// How long a service manager waits for a stopping Watcher, in seconds.
 ///
-/// Pinned rather than inherited, and the same number on every platform. systemd
-/// allows ninety seconds by default and launchd twenty, which would have given
-/// one machine four times another's room to finish a Switch that was already
-/// under way. What has to fit inside it is a Capture, a Credential write and an
-/// Identity patch, each under Claude Code's locks — seconds, not tens of them —
-/// so thirty is generous everywhere without leaving a wedged Watcher sitting
-/// there for a minute and a half.
+/// Pinned rather than inherited, because systemd allows ninety and launchd twenty. What
+/// has to fit inside it is a Capture, a Credential write and an Identity patch under
+/// Claude Code's locks.
 pub const STOP_GRACE_SECONDS: u32 = 30;
 
-/// How long a supervisor leaves it before starting the Watcher again, in
-/// seconds.
+/// How long a supervisor leaves it before starting the Watcher again.
 ///
-/// It should almost never be used: the Watcher holds rather than exiting
-/// (ADR the-machine-runs-the-watcher), so the ordinary reasons a loop used to
-/// stop no longer stop it. What is left is a genuine failure — a Switch that
-/// moved and then failed — and coming straight back at a machine that is part
-/// way through one would be the supervisor deciding what to do next about
-/// something nobody has looked at.
+/// Rarely reached, because the Watcher holds rather than exiting. What is left is a
+/// genuine failure, and coming straight back at a machine part way through a Switch
+/// would be deciding about something nobody has seen.
 pub const RESTART_SECONDS: u32 = 30;
 
-/// How many failed starts inside [`GIVE_UP_AFTER_SECONDS`] before systemd stops
-/// trying and leaves the unit failed.
+/// How many failed starts inside [`GIVE_UP_AFTER_SECONDS`] leave the unit failed.
 ///
-/// A Watcher holds rather than exiting on everything it can hold on
-/// (ADR the-machine-runs-the-watcher), so a Service that will not *start* is a
-/// machine somebody has to look at: a registry that will not parse, a Claude
-/// Code that cannot be probed, a home directory that has gone. Restarting into
-/// that for ever is a loop nobody ever sees, because the only place it is
-/// visible is a log nobody is reading.
-///
-/// systemd's own defaults would never trip here — five starts inside ten
-/// seconds, against a `RestartSec` of thirty — so the window is set from the
-/// restart interval rather than left to be inherited. Five tries spans two
-/// minutes; five minutes of window catches them with room to spare, and
-/// `systemctl --user status perch-watch` then says `failed` and why.
-///
-/// launchd has no equivalent and gets `ThrottleInterval` alone, which bounds how
-/// fast it retries but not how long. That is a real difference between the two
-/// platforms rather than something worth emulating with a wrapper.
+/// A Service that will not *start* is a machine somebody has to look at. The window is
+/// derived from [`RESTART_SECONDS`], because systemd's own five starts inside ten
+/// seconds could never trip against a restart of thirty.
 pub const GIVE_UP_AFTER: u32 = 5;
 
 /// The window those failures have to fall inside, in seconds.
@@ -107,12 +54,9 @@ pub const GIVE_UP_AFTER_SECONDS: u32 = 300;
 
 /// The relationship between the three that makes the limit reachable at all.
 ///
-/// A compile-time assertion rather than a test, because it is a fact about three
-/// constants and nothing runs to discover it: a window narrower than the tries
-/// it is counting is a limit systemd can never reach, which is the *default*
-/// this exists to override and would be a silent return to restarting for ever.
-/// Changing `RESTART_SECONDS` without changing this fails the build, which is
-/// the whole point of putting it here.
+/// A compile-time assertion rather than a test, because nothing runs to discover it: a
+/// window narrower than the tries it counts is a limit systemd can never reach, which
+/// is a silent return to restarting for ever.
 const _: () = assert!(
     GIVE_UP_AFTER_SECONDS > RESTART_SECONDS * GIVE_UP_AFTER,
     "the start-limit window has to be wider than the restarts it counts"
@@ -120,27 +64,15 @@ const _: () = assert!(
 
 /// The environment a unit carries over from the shell that installed it.
 ///
-/// Both are read from the process environment and are typically set in a shell
-/// profile that no service manager will ever source
-/// (ADR the-machine-runs-the-watcher). A Service silently watching
-/// `~/.config/perch` while its owner works out of `PERCH_HOME=~/work/perch`
-/// would be reporting, correctly and uselessly, that there is nothing to do.
-///
-/// Named rather than "everything that is set", which is the same bargain
-/// [`crate::carry`] makes about `.claude.json`: a unit that captured the whole
-/// environment would bake a `PATH`, an `SSH_AUTH_SOCK` and whatever secret the
-/// shell happened to be holding into a file on disk.
+/// Named rather than "everything that is set", which is [`crate::carry`]'s bargain
+/// about `.claude.json`: a unit that captured the whole environment would bake whatever
+/// secret the installing shell held into a file on disk.
 pub const CARRIED: [&str; 2] = ["PERCH_HOME", "CLAUDE_CONFIG_DIR"];
 
-/// Where the decision log goes on a platform whose service manager will not
-/// keep one.
+/// Where the decision log goes on a platform whose service manager will not keep one.
 ///
-/// Inside Perch's home, which is what makes it Perch's to remove: a Purge
-/// sweeps it with everything else Perch holds
-/// (ADR the-machine-runs-the-watcher). On Linux there is no such file — systemd
-/// captures standard output into the journal, which rotates it, retains it and
-/// answers `journalctl --user -u perch-watch -f` without Perch knowing the word
-/// journal.
+/// Inside Perch's home, which is what makes it Perch's to remove. Linux has none:
+/// systemd captures standard output into the journal.
 pub fn log_path(host: &dyn Host) -> Result<Option<PathBuf>> {
     match host.platform() {
         Platform::Other => Ok(None),
@@ -165,35 +97,18 @@ pub fn unit_path(host: &dyn Host) -> Result<Option<PathBuf>> {
                 .join("user")
                 .join(UNIT_NAME),
         ),
-        // A Scheduled Task is registered rather than written: it lives in
-        // Windows' own store, and `schtasks` is the whole of the interface to
-        // it. There is no file for Perch to put anywhere, which is why every
-        // caller has to answer `None` rather than assuming a path.
+        // A Scheduled Task is registered rather than written: it lives in Windows' own
+        // store, so there is no file for Perch to put anywhere and every caller has to
+        // answer `None` rather than assuming a path.
         Platform::Windows => None,
     })
 }
 
-/// The binary a unit should name, which is not always the one that is running.
+/// The binary a unit should name, which is not always the running one.
 ///
-/// A unit names an absolute path and is read months later by a service manager
-/// that will not search a `PATH`. Two Channels make that path a question rather
-/// than a lookup (ADR an-upgrade-asks-its-channel,
-/// ADR the-machine-runs-the-watcher):
-///
-/// **Homebrew**: `current_exe` resolves symlinks, so the running binary is
-/// `…/Cellar/perch/0.2.0/bin/perch` — **version-stamped**, and gone the next
-/// time `brew upgrade` runs. The symlink in the prefix's `bin` is the stable
-/// name across every Release, so that is what the unit gets. This is the one
-/// place where resolving the path is exactly the wrong thing to do.
-///
-/// **npm**: the opposite, and it needs no work. What is on `PATH` is a
-/// JavaScript shim that execs the platform package, and a unit naming it would
-/// need `node` on a `PATH` no `systemd --user` unit has — but `current_exe` is
-/// already the platform binary the shim exec'd, so the running path is the right
-/// one and resolving is what got us there.
-///
-/// Everything else — the installer, an unpacked archive, a `cargo build` — is
-/// wherever it is, and wherever it is, is what the unit says.
+/// The most stable path that runs without a shell, per Channel
+/// (ADR an-upgrade-asks-its-channel) rather than a `canonicalize`: Homebrew's is a
+/// Cellar path gone at the next upgrade, npm's a shim that needs `node`.
 pub fn binary_for_the_unit(exe: &Path, channel: Option<&Channel>) -> PathBuf {
     match channel {
         Some(Channel::Homebrew { prefix }) => prefix.join("bin").join("perch"),
@@ -201,29 +116,25 @@ pub fn binary_for_the_unit(exe: &Path, channel: Option<&Channel>) -> PathBuf {
     }
 }
 
-/// What a unit is being written from: everything that has to be true of it
-/// months after the command that wrote it has been forgotten.
+/// What a unit is being written from: everything that has to be true of it months after
+/// the command that wrote it has been forgotten.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unit {
     /// The binary the service manager will run, absolute and stable.
     pub binary: PathBuf,
-    /// The environment carried over from the shell that installed it, in
-    /// [`CARRIED`] order and only where actually set.
+    /// The environment carried over from the shell that installed it, in [`CARRIED`]
+    /// order and only where actually set.
     pub environment: Vec<(String, String)>,
-    /// Where standard output goes, or `None` where the service manager keeps it
-    /// (which is Linux, and the journal).
+    /// Where standard output goes, or `None` where the service manager keeps it (which
+    /// is Linux, and the journal).
     pub log: Option<PathBuf>,
     /// Which session a LaunchAgent is bootstrapped into.
     pub user_id: Option<u32>,
-    /// Whose Scheduled Task a Windows Service is, and `None` where the machine
-    /// will not say.
+    /// Whose Scheduled Task this is, and `None` where the machine will not say.
     ///
-    /// Read off the machine rather than left as `%USERNAME%` for `schtasks` to
-    /// expand, because nothing expands it: `%VAR%` is `cmd.exe`'s notation, and
-    /// these arguments go to `CreateProcess` with no shell between
-    /// (ADR a-crate-must-not-cost-a-seam). `schtasks` received the ten
-    /// characters and refused the account name, so `perch watcher install`
-    /// rolled back and Windows never got a Service at all.
+    /// Read off the machine rather than left as `%USERNAME%`, because nothing expands
+    /// it: `%VAR%` is `cmd.exe`'s notation, and these arguments go to `CreateProcess`
+    /// with no shell between (ADR a-crate-must-not-cost-a-seam).
     pub user_name: Option<String>,
 }
 
@@ -242,13 +153,9 @@ impl Unit {
 
     /// A LaunchAgent, which launchd reads as a property list.
     ///
-    /// `KeepAlive` rather than `RunAtLoad` alone, because the point of a
-    /// Service is that it is still there tomorrow: `RunAtLoad` starts it once,
-    /// and `KeepAlive` is what starts it again. The Watcher holds rather than
-    /// exiting on everything that is not a genuine failure
-    /// (ADR the-machine-runs-the-watcher), so this is not the respawn-forever
-    /// loop it would have been against ADR a-watcher-knob-is-arithmetic's
-    /// watcher.
+    /// `KeepAlive` rather than `RunAtLoad` alone, because `RunAtLoad` starts it once
+    /// and the point of a Service is that it is still there tomorrow. Safe because the
+    /// Watcher holds rather than exiting.
     fn plist(&self) -> String {
         let environment = match self.environment.is_empty() {
             true => String::new(),
@@ -264,9 +171,8 @@ impl Unit {
                     .collect::<String>()
             ),
         };
-        // Both streams to one file, and deliberately: the decision log is the
-        // evidence the policy works, and a refusal that landed in a second file
-        // would be the one line missing from the sequence somebody is reading.
+        // Both streams to one file: a refusal that landed in a second one would be the
+        // line missing from the sequence somebody is reading.
         let log = match &self.log {
             Some(path) => format!(
                 "\n\t<key>StandardOutPath</key>\n\t<string>{path}</string>\n\
@@ -309,19 +215,9 @@ impl Unit {
 
     /// Refuses a Unit carrying something the platform's format cannot hold.
     ///
-    /// Every one of these formats is line-oriented or shell-parsed, and Perch
-    /// already has an answer for that shape: [`crate::host::inert`], which
-    /// guards the curl config and `security`'s stdin. The unit file is the third
-    /// such protocol and was the one that skipped the check — so a `PERCH_HOME`
-    /// with a newline in it closed `Environment=` and wrote whatever followed as
-    /// further unit directives, into a file systemd loads at every login. That
-    /// is arbitrary code, persisted, out of a variable a script set.
-    ///
-    /// Quoting handles the rest on the two platforms that keep a file
-    /// ([`systemd_quoted`], [`xml_escaped`]). Windows is refused more widely
-    /// because there is nothing to quote *with*: `schtasks /TR` hands the string
-    /// to `cmd.exe`, which has no escape for a `"` inside one and expands
-    /// `%VAR%` when the task runs rather than when it is written.
+    /// Each of these formats is line-oriented or shell-parsed, so a `PERCH_HOME` with a
+    /// newline in it would write further directives into a file systemd loads at every
+    /// login. Windows is refused more widely.
     pub fn refuse_what_the_format_cannot_hold(&self, platform: Platform) -> Result<()> {
         let mut values: Vec<(String, String)> = vec![(
             "Perch's own path".to_string(),
@@ -361,14 +257,9 @@ impl Unit {
 
     /// A `systemd --user` unit.
     ///
-    /// `Type=simple` because the Watcher is the process: it does not fork, does
-    /// not write a pid file, and does not background itself — which is the
-    /// whole of ADR the-machine-runs-the-watcher's arrangement, said in one
-    /// word.
-    ///
-    /// Standard output is left alone, so systemd captures it into the journal.
-    /// That is the one platform where ADR a-watcher-knob-is-arithmetic's "the
-    /// decision log goes to standard output" needs nothing added to it at all.
+    /// `Type=simple` because the Watcher *is* the process: it does not fork, does not
+    /// write a pid file, and does not background itself. Standard output is left alone,
+    /// so systemd captures it into the journal.
     fn systemd_unit(&self) -> String {
         let environment = self
             .environment
@@ -407,12 +298,9 @@ impl Unit {
 
     /// What a Windows Scheduled Task is told to run.
     ///
-    /// Wrapped in a `cmd /c` for two things `schtasks` cannot express on its
-    /// own: the environment, which a task has no field for at all, and the
-    /// redirection, which is the only way a task's standard output is kept
-    /// anywhere.
-    ///
-    /// Appending rather than truncating, so a log survives a logout.
+    /// Wrapped in a `cmd /c` for the two things `schtasks` cannot express: the
+    /// environment, which a task has no field for, and the redirection, which is the
+    /// only way its output is kept. Appending, so a log survives a logout.
     pub fn windows_command(&self) -> String {
         let environment = self
             .environment
@@ -430,22 +318,20 @@ impl Unit {
     }
 }
 
-/// One command run against the machine's service manager, as the program and
-/// the arguments to give it.
+/// One command run against the machine's service manager.
 ///
-/// A type rather than a tuple, because these are the calls that make a machine
-/// start running something at every login, and every one of them is asserted
-/// against in a test that reads like the shell line it stands for.
+/// A type rather than a tuple: these are the calls that make a machine start running
+/// something at every login, and each is asserted against as the shell line it stands
+/// for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Driven {
     pub program: String,
     pub args: Vec<String>,
     /// Whether the whole act fails when this one does.
     ///
-    /// The tidying-up steps are not. `systemctl --user disable` on a unit that
-    /// was never enabled, and `launchctl bootout` on one that is not loaded,
-    /// both fail — and both mean "it is already not running", which is what an
-    /// `uninstall` was asked for. A step that must work says so.
+    /// The tidying-up steps are not: `systemctl --user disable` on a unit that was
+    /// never enabled and `launchctl bootout` on one that is not loaded both fail, and
+    /// both mean "it is already not running".
     pub required: bool,
 }
 
@@ -465,9 +351,9 @@ impl Driven {
         }
     }
 
-    /// The command as somebody would have typed it, for the line that says what
-    /// failed — the same sentence `perch upgrade` prints about the installer it
-    /// drives, and so the same function.
+    /// The command as somebody would have typed it, for the line that says what failed
+    /// — the sentence `perch upgrade` prints about the installer it drives, and so the
+    /// same function.
     pub fn as_typed(&self) -> String {
         crate::host::as_typed(Path::new(&self.program), &self.args)
     }
@@ -476,10 +362,9 @@ impl Driven {
 /// What has to be run to start the Service, after the unit is in place.
 pub fn starting(platform: Platform, unit: &Unit, at: Option<&Path>) -> Vec<Driven> {
     match platform {
-        // Bootstrapped into the logged-in session rather than `load`ed, which
-        // has been the deprecated spelling since 10.10. `bootout` first, because
-        // bootstrapping over something already loaded fails — and it is allowed
-        // to fail, because "not loaded" is the ordinary case on a first install.
+        // Bootstrapped into the logged-in session rather than `load`ed, the deprecated
+        // spelling since 10.10. `bootout` first, because bootstrapping over something
+        // loaded fails — and allowed to fail on a first install.
         Platform::MacOs => {
             let domain = format!("gui/{}", unit.user_id.unwrap_or_default());
             let path = at
@@ -490,40 +375,17 @@ pub fn starting(platform: Platform, unit: &Unit, at: Option<&Path>) -> Vec<Drive
                 Driven::must("launchctl", &["bootstrap", &domain, &path]),
             ]
         }
-        // `daemon-reload` before `enable`, because systemd will not have read a
-        // unit file that did not exist when it last looked. `--now` is what
-        // makes an install something that has already happened rather than
-        // something that happens next time you log in.
-        //
-        // And `restart` after it, because `enable --now` starts a unit that is
-        // *stopped* and does nothing to one that is already running. Re-running
-        // the install is the documented repair after an Upgrade
-        // (ADR an-upgrade-asks-its-channel), and there the unit is always
-        // already running — so `perch watcher install` said "Replaced the
-        // Service, and it now runs /usr/local/bin/perch" while the old process
-        // image went on running until the next logout. `binary_for_the_unit`
-        // deliberately keeps the path stable for Homebrew and npm, so `status`'
-        // "it names X, which is not there any more" could never catch it
-        // either. May fail: a unit that was not running is started by
-        // `enable --now` above and has nothing left for this to do.
+        // `daemon-reload` first, because systemd has not read a unit that did not exist
+        // when it last looked; `--now` makes an install something that has happened;
+        // `restart`, because `enable --now` leaves a running unit alone.
         Platform::Other => vec![
             Driven::must("systemctl", &["--user", "daemon-reload"]),
             Driven::must("systemctl", &["--user", "enable", "--now", UNIT_NAME]),
             Driven::may_fail("systemctl", &["--user", "restart", UNIT_NAME]),
         ],
-        // `/NP` is what keeps a console window off the desktop at every login:
-        // it registers the task to run without a stored password, which Windows
-        // runs non-interactively. `/RU` names the user whose home the Profiles
-        // are under, and `/F` is what makes a re-install a replacement rather
-        // than a collision.
-        //
-        // The user is named by [`Unit::user_name`], which is a value read off
-        // the machine. A `%USERNAME%` here was ten characters `schtasks` took
-        // verbatim — there is no shell in front of it to expand one — so the
-        // account name was refused and the install rolled back every time. A
-        // machine that will not say leaves the pair off entirely and lets
-        // `schtasks` register the task under whoever is running it, which is
-        // the same answer `%USERNAME%` was reaching for.
+        // `/NP` keeps a console window off the desktop by registering the task without
+        // a stored password, `/RU` names the user whose home the Profiles are under,
+        // and `/F` makes a re-install a replacement.
         Platform::Windows => {
             let command = unit.windows_command();
             let mut args = vec!["/Create", "/TN", TASK_NAME, "/SC", "ONLOGON"];
@@ -531,19 +393,9 @@ pub fn starting(platform: Platform, unit: &Unit, at: Option<&Path>) -> Vec<Drive
                 args.extend(["/RU", user, "/NP"]);
             }
             args.extend(["/TR", &command, "/F"]);
-            // And run it, because `/Create /SC ONLOGON` registers a trigger and
-            // never starts anything. Without this, `perch watcher install`
-            // printed "it is running now" and a `perch watcher status` a second
-            // later printed "not running" — the two commands contradicting each
-            // other on every fresh Windows install, because `status` asks the
-            // watcher lock and there was nothing holding it until the next
-            // logon.
-            //
-            // `/End` first for the same reason macOS `bootout`s before it
-            // bootstraps: a re-install after an Upgrade is the documented repair
-            // and the task may already be running the old binary. Both may fail
-            // — "not running" is the ordinary case on a first install, and it is
-            // what `/End` is being asked to make true.
+            // And run it, because `/Create /SC ONLOGON` starts nothing, so nothing
+            // would hold the watcher lock `status` asks until the next logon. `/End`
+            // first, as macOS `bootout`s before it bootstraps.
             vec![
                 Driven::must("schtasks", &args),
                 Driven::may_fail("schtasks", &["/End", "/TN", TASK_NAME]),
@@ -555,11 +407,9 @@ pub fn starting(platform: Platform, unit: &Unit, at: Option<&Path>) -> Vec<Drive
 
 /// What has to be run to stop the Service and take it back.
 ///
-/// Every step may fail, and that is the shape of an `uninstall` rather than an
-/// oversight: each one is "make sure this is not running", and a machine where
-/// it is already not running is a machine where the command has nothing to do.
-/// What decides whether an `uninstall` succeeded is whether the unit is gone
-/// afterwards, which the caller asks separately.
+/// Every step may fail, because each one is "make sure this is not running". What
+/// decides whether an `uninstall` succeeded is whether the unit is gone afterwards,
+/// which the caller asks separately.
 pub fn stopping(platform: Platform, user_id: Option<u32>) -> Vec<Driven> {
     match platform {
         Platform::MacOs => vec![Driven::may_fail(
@@ -573,16 +423,9 @@ pub fn stopping(platform: Platform, user_id: Option<u32>) -> Vec<Driven> {
             Driven::may_fail("systemctl", &["--user", "disable", "--now", UNIT_NAME]),
             Driven::may_fail("systemctl", &["--user", "daemon-reload"]),
         ],
-        // `/End` before `/Delete`, and it is the step that was missing.
-        // `/Delete` unregisters the task; it does not terminate the instance the
-        // scheduler already started, and there is no flag on it that does. So a
-        // `stopping` that was only the delete left a Watcher running against a
-        // machine whose Service had just been reported stopped — and made
-        // `schtasks /Query` answer "no such task", which is what the callers ask
-        // to find out whether it worked.
-        //
-        // A task that is registered and not running fails this, which is the
-        // ordinary case and is why every step here may fail.
+        // `/End` before `/Delete`, which unregisters the task without terminating the
+        // instance the scheduler started — and makes `schtasks /Query` answer "no such
+        // task", which is how the callers ask whether it worked.
         Platform::Windows => vec![
             Driven::may_fail("schtasks", &["/End", "/TN", TASK_NAME]),
             Driven::may_fail("schtasks", &["/Delete", "/TN", TASK_NAME, "/F"]),
@@ -592,13 +435,11 @@ pub fn stopping(platform: Platform, user_id: Option<u32>) -> Vec<Driven> {
 
 /// What has to be run to ask whether the Service is running right now.
 ///
-/// `None` where the question is answered by the unit file being there, which is
-/// every platform Perch does not support a service manager on.
+/// `None` where the question is answered by the unit file being there, which is every
+/// platform Perch does not support a service manager on.
 pub fn asking(platform: Platform, user_id: Option<u32>) -> Option<Driven> {
-    // Every platform has one, so this is `Option` for the caller's sake rather
-    // than for a platform's: `status` asks before it knows whether anything is
-    // installed, and an answer of "nothing to run" is a shape it has to handle
-    // either way.
+    // Every platform has one, so this is `Option` for the caller's sake rather than for
+    // a platform's: `status` asks before it knows whether anything is installed.
     match platform {
         Platform::MacOs => Some(Driven::may_fail(
             "launchctl",
@@ -615,13 +456,10 @@ pub fn asking(platform: Platform, user_id: Option<u32>) -> Option<Driven> {
     }
 }
 
-/// What to call the arrangement when saying it out loud, in the platform's own
-/// word.
+/// What to call the arrangement when saying it out loud, in the platform's own word.
 ///
-/// "Service" is the domain term and is what the command is called, but the
-/// sentence telling somebody where to look has to use the word their machine
-/// uses — `journalctl` will not help a mac and `launchctl` means nothing on
-/// Linux.
+/// Service is the domain term, and the sentence telling somebody where to look has to
+/// use the word their machine uses.
 pub fn described(platform: Platform) -> &'static str {
     match platform {
         Platform::MacOs => "a LaunchAgent",
@@ -630,8 +468,7 @@ pub fn described(platform: Platform) -> &'static str {
     }
 }
 
-/// Where somebody reads the decision log on this platform, as the line that
-/// tells them.
+/// Where somebody reads the decision log on this platform, as the line that tells them.
 pub fn log_is_at(platform: Platform, log: Option<&Path>) -> String {
     match (platform, log) {
         (Platform::Other, _) => "journalctl --user -u perch-watch -f".to_string(),
@@ -642,9 +479,8 @@ pub fn log_is_at(platform: Platform, log: Option<&Path>) -> String {
 
 /// The five characters a property list cannot carry raw.
 ///
-/// A plist is XML, and a home directory really can hold an `&`. Escaped rather
-/// than refused, because what is being escaped is somebody's own path and the
-/// refusal would be about a machine they cannot change.
+/// A plist is XML, and a home directory really can hold an `&`. Escaped rather than
+/// refused, because the refusal would be about a machine somebody cannot change.
 fn xml_escaped(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -656,19 +492,9 @@ fn xml_escaped(value: &str) -> String {
 
 /// The binary a unit names, read back out of the text of one.
 ///
-/// Beside the two functions that wrote it, because reading a unit and writing
-/// one are the same format twice and the reader is the only thing that can
-/// establish the writer was right. Apart, the escaping had a test and the
-/// unescaping had none, and no test anywhere could put a path in one end and
-/// take it out of the other.
-///
-/// The text rather than the file: what a unit *says* is here and reaching the
-/// filesystem is [`crate::commands::service`]'s, so a path with an `&` in it
-/// can be argued with in a unit test instead of on somebody's machine.
-///
-/// `None` for a unit Perch does not recognize — one somebody has edited into
-/// another shape — which it declines to make claims about rather than guessing
-/// at. Windows is `None` always, and never reaches here: it keeps no file.
+/// Beside the functions that wrote it, because the reader is the only thing that can
+/// establish the writer was right. `None` for a unit Perch does not recognize, and
+/// always for Windows, which keeps no file.
 pub fn binary_in(platform: Platform, unit: &str) -> Option<PathBuf> {
     match platform {
         Platform::Other => unit
@@ -677,19 +503,9 @@ pub fn binary_in(platform: Platform, unit: &str) -> Option<PathBuf> {
             .and_then(|line| line.strip_suffix(" watcher run"))
             .and_then(systemd_unquoted)
             .map(PathBuf::from),
-        // The first `<string>` inside `ProgramArguments`, which is the program —
-        // and then the two after it, which are what say the unit runs the
-        // Watcher.
-        //
-        // The systemd arm above has always required its ` watcher run`, and this
-        // one took whatever came first regardless. So a plist somebody had
-        // edited to run `perch list` was reported by `perch watcher status` as
-        // "It runs /usr/local/bin/perch", and the drift check beside it made a
-        // claim about a unit Perch does not recognize — which is the answer
-        // `None` exists to give.
-        //
-        // Bounded by `</array>`, so a `<string>` belonging to a later key —
-        // `StandardOutPath` is one — is never read as an argument.
+        // The first `<string>` inside `ProgramArguments` is the program, and the two
+        // after it are required as the systemd arm requires its ` watcher run`. Bounded
+        // by `</array>`, so a later key is never read.
         Platform::MacOs => {
             let array = unit.split("<key>ProgramArguments</key>").nth(1)?;
             let array = array.split("</array>").next()?;
@@ -707,27 +523,16 @@ pub fn binary_in(platform: Platform, unit: &str) -> Option<PathBuf> {
     }
 }
 
-/// Where a unit actually sends the decision log, read back out of the text of
-/// one.
+/// Where a unit actually sends the decision log, read out of the text of one.
 ///
-/// Beside [`binary_in`] and for its reason: `status` asks what the *installed*
-/// unit says rather than what one written now would say, because the two coming
-/// apart is the whole of what it is asking. The log path is derived from
-/// `PERCH_HOME` at the moment it is read (see [`log_path`]), so a Service
-/// installed under one `PERCH_HOME` and a `perch watcher status` run under
-/// another disagreed silently: the line named a file nothing writes to while the
-/// real log went on filling up somewhere else.
-///
-/// `None` where there is nothing to read it out of — a unit that names no log
-/// file, and Windows, which registers a task rather than writing a unit. Linux
-/// answers `None` too and loses nothing by it: standard output goes to the
-/// journal there, and [`log_is_at`] says so without consulting a path.
+/// Beside [`binary_in`] and for its reason: [`log_path`] derives its answer from
+/// `PERCH_HOME` as it stands now, so a `status` run under another would name a file
+/// nothing writes to. `None` for Windows, Linux, and a unit naming none.
 pub fn log_in(platform: Platform, unit: &str) -> Option<PathBuf> {
     match platform {
         Platform::MacOs => {
-            // Bounded by the next `<key>`, so a `StandardOutPath` somebody
-            // deleted the value of never reads the *following* key's string as
-            // the log's path.
+            // Bounded by the next `<key>`, so a `StandardOutPath` somebody deleted the
+            // value of never reads the following key's string as the log's path.
             let value = unit.split("<key>StandardOutPath</key>").nth(1)?;
             let value = value.split("<key>").next()?;
             let path = value.split("<string>").nth(1)?.split("</string>").next()?;
@@ -739,16 +544,9 @@ pub fn log_in(platform: Platform, unit: &str) -> Option<PathBuf> {
 
 /// A value as a systemd unit can hold one, which is quoted.
 ///
-/// Three characters and not one: `"` and `\` end and escape the quoted string,
-/// and `%` is a *specifier* systemd expands before it ever runs anything — so a
-/// path Perch wrote verbatim came back as something else, or refused the unit
-/// outright with "Failed to resolve specifier". Unquoted, a path with a space in
-/// it — `/opt/My Tools/perch`, an npm prefix under a home somebody put a space
-/// in — was split on the whitespace and systemd ran `/opt/My`, which installs
-/// cleanly and never comes up.
-///
-/// Its inverse is [`systemd_unquoted`], beside it for the reason [`binary_in`]
-/// gives: the reader is the only thing that can establish the writer was right.
+/// Three characters and not one: `"` and `\` end and escape the quoted string, and `%`
+/// is a *specifier* systemd expands before it runs anything. Unquoted, a path with a
+/// space in it installs cleanly and never comes up.
 fn systemd_quoted(value: &str) -> String {
     let mut quoted = String::with_capacity(value.len() + 2);
     quoted.push('"');
@@ -766,8 +564,8 @@ fn systemd_quoted(value: &str) -> String {
     quoted
 }
 
-/// The inverse of [`systemd_quoted`]. `None` for anything not written by it,
-/// which [`binary_in`] answers as a unit Perch does not recognize.
+/// The inverse of [`systemd_quoted`]. `None` for anything not written by it, which
+/// [`binary_in`] answers as a unit Perch does not recognize.
 fn systemd_unquoted(value: &str) -> Option<String> {
     let inner = value.strip_prefix('"')?.strip_suffix('"')?;
     let mut read = String::with_capacity(inner.len());
@@ -793,8 +591,8 @@ fn unescaped(value: &str) -> String {
         .replace("&quot;", "\"")
         .replace("&gt;", ">")
         .replace("&lt;", "<")
-        // Last, so that an `&amp;lt;` in somebody's path survives the round trip
-        // rather than becoming a `<` on the way back.
+        // Last, so an `&amp;lt;` in somebody's path survives the round trip rather than
+        // becoming a `<` on the way back.
         .replace("&amp;", "&")
 }
 
@@ -812,25 +610,14 @@ mod tests {
         }
     }
 
-    /// A path written into a unit is the path read back out of it, on both
-    /// platforms that keep one.
-    ///
-    /// The pair is what `perch service status` rests on: it asks whether the
-    /// installed unit and the machine have come apart, and a reader that
-    /// disagreed with the writer would answer that question wrongly in the one
-    /// direction nobody would check — reporting drift on a machine where
-    /// nothing had moved. The `&` is the case that made this worth asserting:
-    /// it is the character a home directory really can hold, it is escaped on
-    /// the way in, and it is the one the unescaping has to undo last.
     #[test]
     fn a_path_written_into_a_unit_is_the_path_read_back_out_of_it() {
         for path in [
             "/usr/local/bin/perch",
             "/Users/some & one/bin/perch",
             "/Users/o'brien/<perch>/\"bin\"/perch",
-            // An escape sequence spelled out in somebody's own path, which
-            // comes back as the five characters they typed rather than as the
-            // one it names.
+            // An escape sequence spelled out in somebody's own path, which comes back
+            // as the five characters they typed rather than as the one it names.
             "/Users/someone/&amp;lt;/perch",
         ] {
             for platform in [Platform::MacOs, Platform::Other] {
@@ -850,10 +637,6 @@ mod tests {
         }
     }
 
-    /// A unit somebody has edited into a shape Perch does not recognize is one
-    /// it declines to make a claim about. `status` reads the answer as "cannot
-    /// say", which is the honest one — a guess here would report drift against
-    /// a binary nobody named.
     #[test]
     fn a_unit_perch_does_not_recognize_is_not_guessed_at() {
         assert_eq!(binary_in(Platform::MacOs, "<plist></plist>"), None);
@@ -863,11 +646,6 @@ mod tests {
             None,
             "a unit running something other than the Watcher loop names no Perch",
         );
-        // The same claim on the other platform that keeps a file, which had
-        // never been made there: the mac arm took the first `<string>` and
-        // asked nothing about the two after it, so a plist edited to run
-        // `perch list` was reported as "It runs /bin/perch" and then checked
-        // for drift against a unit Perch does not recognize.
         assert_eq!(
             binary_in(
                 Platform::MacOs,
@@ -893,14 +671,6 @@ mod tests {
         );
     }
 
-    /// The correction that matters most, and the one a reasonable
-    /// implementation gets backwards.
-    ///
-    /// `current_exe` resolves symlinks, so under Homebrew the running binary is
-    /// inside a Cellar directory named after the version installed today. A unit
-    /// pointing there works until the next `brew upgrade` and then names a path
-    /// that is not there — a Service that silently stops coming up, months after
-    /// anybody typed anything.
     #[test]
     fn a_homebrew_unit_names_the_stable_symlink_rather_than_the_versioned_cellar() {
         let named = binary_for_the_unit(
@@ -917,13 +687,6 @@ mod tests {
         );
     }
 
-    /// The mirror, and the reason this is a rule per Channel rather than one
-    /// call to `canonicalize` or one refusal to make one.
-    ///
-    /// npm puts a JavaScript shim on `PATH` and the shim execs the platform
-    /// package — so the *running* binary is already the real one, and naming it
-    /// is right. Naming what is on `PATH` instead would need `node` on a `PATH`
-    /// no `systemd --user` unit has.
     #[test]
     fn an_npm_unit_names_the_platform_binary_the_shim_already_exec_d() {
         let running = Path::new(
@@ -943,8 +706,6 @@ mod tests {
         assert_eq!(binary_for_the_unit(running, None), running.to_path_buf());
     }
 
-    /// The stop grace is the same on both platforms that have one, because what
-    /// has to fit inside it is the same Switch.
     #[test]
     fn both_unit_formats_pin_the_same_stop_grace_rather_than_inheriting_one() {
         let unit = a_unit();
@@ -961,11 +722,6 @@ mod tests {
         );
     }
 
-    /// A Service that cannot *start* is a machine somebody has to look at, and
-    /// restarting into that for ever is a loop nobody ever sees. systemd's own
-    /// defaults would never trip it — five starts inside ten seconds against a
-    /// `RestartSec` of thirty — so the window is derived from the restart
-    /// interval rather than inherited.
     #[test]
     fn a_systemd_unit_gives_up_rather_than_restarting_into_a_failure_for_ever() {
         let systemd = a_unit()
@@ -976,9 +732,6 @@ mod tests {
         assert!(systemd.contains("StartLimitIntervalSec=300"), "{systemd}");
     }
 
-    /// The two the unit carries, and nothing else. A unit that captured the
-    /// whole environment would bake whatever secret the installing shell was
-    /// holding into a file on disk.
     #[test]
     fn only_the_named_environment_is_carried_into_a_unit() {
         let unit = Unit {
@@ -1000,8 +753,6 @@ mod tests {
         );
     }
 
-    /// A unit with nothing to carry says nothing about the environment, rather
-    /// than carrying an empty block that a reader would take for a statement.
     #[test]
     fn a_unit_with_nothing_to_carry_carries_no_environment_block() {
         let unit = a_unit();
@@ -1019,8 +770,6 @@ mod tests {
         );
     }
 
-    /// A plist is XML and a home directory can hold an `&`. Unescaped, the unit
-    /// is not a property list at all and launchd refuses the whole thing.
     #[test]
     fn a_path_holding_xml_is_escaped_rather_than_written_raw() {
         let unit = Unit {
@@ -1036,9 +785,6 @@ mod tests {
         );
     }
 
-    /// Linux writes no log path at all: standard output goes to the journal,
-    /// which is the one platform where ADR a-watcher-knob-is-arithmetic's
-    /// decision needs nothing added.
     #[test]
     fn linux_keeps_no_logfile_because_the_journal_already_does() {
         assert!(
@@ -1053,8 +799,6 @@ mod tests {
         );
     }
 
-    /// macOS keeps one, and both streams go to the same file so that a refusal
-    /// and the decision it interrupted read in order.
     #[test]
     fn macos_sends_both_streams_to_one_file_inside_perchs_own_home() {
         let unit = Unit {
@@ -1074,11 +818,6 @@ mod tests {
         );
     }
 
-    /// The install writes it and `status` reads it back — the round trip
-    /// [`binary_in`] already had, for the other thing a unit bakes in.
-    ///
-    /// A path with an `&` in it, because that is the character the plist has to
-    /// escape and the reader has to put back.
     #[test]
     fn the_log_a_plist_names_is_read_back_out_of_the_plist_that_names_it() {
         let at = PathBuf::from("/Users/someone/R&D/perch/watch.log");
@@ -1091,9 +830,6 @@ mod tests {
         assert_eq!(log_in(Platform::MacOs, &plist), Some(at));
     }
 
-    /// The one it must not answer: a plist with the key and no value takes the
-    /// *next* key's string where nothing bounds the read, which would name
-    /// somebody's binary as their log file.
     #[test]
     fn a_plist_that_names_no_log_is_answered_with_none_rather_than_the_next_value() {
         let emptied = "<key>StandardOutPath</key>\n\t<key>Program</key>\n\t\
@@ -1103,14 +839,6 @@ mod tests {
         assert_eq!(log_in(Platform::MacOs, "<dict></dict>"), None);
     }
 
-    /// What every unit format is told to run, asserted on all three at once.
-    ///
-    /// The one string a Service is for, and the one no platform's own test was
-    /// claiming: the plist carries it as a second `<string>`, systemd as the
-    /// tail of `ExecStart`, and Windows inside a `cmd /c`. Three spellings of
-    /// one fact is how two of them come to name a verb the binary stopped
-    /// answering to (ADR a-command-names-its-noun), which is a Service that
-    /// installs cleanly and then fails at every login.
     #[test]
     fn every_unit_format_runs_the_watcher_loop_by_the_name_the_binary_answers_to() {
         let unit = a_unit();
@@ -1136,9 +864,6 @@ mod tests {
         );
     }
 
-    /// The flag that keeps a console window off somebody's desktop at every
-    /// login, which is the whole of why a Scheduled Task is registered this way
-    /// rather than as an interactive one.
     #[test]
     fn a_windows_task_is_registered_to_run_without_a_console() {
         let driven = starting(Platform::Windows, &a_unit(), None);
@@ -1164,12 +889,6 @@ mod tests {
         );
     }
 
-    /// A machine that will not say who is running the install registers the
-    /// task under whoever that is, which is what naming them was reaching for.
-    ///
-    /// `/NP` goes with `/RU` rather than standing alone: it says the task runs
-    /// without a stored password *for that account*, and there is no account
-    /// here for it to be about.
     #[test]
     fn a_windows_task_names_no_user_where_the_machine_will_not_say_who_it_is() {
         let unit = Unit {
@@ -1184,8 +903,6 @@ mod tests {
         assert!(!line.contains("/NP"), "{line}");
     }
 
-    /// Windows has no field for an environment and no capture of standard
-    /// output, so both are folded into the command the task runs.
     #[test]
     fn a_windows_task_carries_its_environment_and_its_log_in_the_command() {
         let unit = Unit {
@@ -1207,8 +924,6 @@ mod tests {
         );
     }
 
-    /// A LaunchAgent is bootstrapped into the logged-in session, which is what
-    /// makes it start at login and never at boot.
     #[test]
     fn a_launchagent_goes_into_the_logged_in_session_and_boots_out_of_it_first() {
         let unit = a_unit();
@@ -1229,9 +944,6 @@ mod tests {
         assert!(driven[1].required, "this one is the install");
     }
 
-    /// Every step of an uninstall may fail, because every one of them is "make
-    /// sure this is not running" and a machine where it already is not is one
-    /// where there was nothing to do.
     #[test]
     fn nothing_an_uninstall_runs_is_required_to_succeed() {
         for platform in [Platform::MacOs, Platform::Other, Platform::Windows] {
@@ -1245,8 +957,6 @@ mod tests {
         }
     }
 
-    /// systemd is reloaded before it is asked to enable something, because it
-    /// has not read a unit file that did not exist when it last looked.
     #[test]
     fn systemd_is_reloaded_before_it_is_asked_about_a_unit_that_is_new() {
         let driven = starting(Platform::Other, &a_unit(), None);
@@ -1262,9 +972,6 @@ mod tests {
         );
     }
 
-    /// Never a system unit, on any platform. Every Profile is under one
-    /// person's home directory, and on macOS there is no unlocked keychain
-    /// before somebody logs in.
     #[test]
     fn nothing_is_ever_installed_outside_the_users_own_session() {
         for platform in [Platform::MacOs, Platform::Other, Platform::Windows] {

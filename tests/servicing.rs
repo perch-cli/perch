@@ -1,18 +1,13 @@
-//! Behavior: `perch watcher install`, `uninstall` and `status` — having the
-//! machine run the Watcher for you.
+//! Behavior: `perch watcher install`, `uninstall` and `status` — having the machine run
+//! the Watcher for you.
 //!
-//! The unit files themselves are argued with in `src/service.rs`'s unit tests,
-//! where three platforms' worth of quoting can be read side by side. What is
-//! asserted here is the part that touches a machine: that a unit is written
-//! where the platform keeps one, that the service manager is actually driven,
-//! that a failure leaves nothing behind, and that the two commands which meet a
-//! running Service — a Purge and an Upgrade — do the thing
-//! ADR the-machine-runs-the-watcher says they owe it.
+//! The unit files themselves are argued with in `src/service.rs`'s unit tests. What is
+//! asserted here is the part that touches a machine, and what a Purge and an Upgrade
+//! owe a running Service (ADR the-machine-runs-the-watcher).
 //!
-//! Three properties are what this command is for, and each has a test that fails
-//! if it stops holding: a Service belongs to one person and is refused to root,
-//! an install that fails installs nothing, and a Purge never deletes a Profile
-//! while something is still Switching Credentials into it.
+//! Three properties, each with a test that fails if it stops holding: a Service is
+//! refused to root, an install that fails installs nothing, and a Purge never deletes a
+//! Profile while something is still Switching Credentials into it.
 
 mod common;
 
@@ -26,14 +21,11 @@ use perch::host::{Execution, FakeHost, Platform};
 /// Where a `systemd --user` unit goes on the fixture's machine.
 const UNIT: &str = "/Users/someone/.config/systemd/user/perch-watch.service";
 
-/// Where this platform keeps the unit, asked of the code under test rather than
-/// spelled out.
+/// Where this platform keeps the unit, asked of the code under test.
 ///
-/// `PathBuf::join` renders with `\` on Windows, so a hard-coded forward-slash
-/// path matches the *file* — `FakeHost` normalizes what it stores — but not the
-/// **argument** `launchctl` is handed, which is compared as a string. A fixture
-/// that spelled it out therefore passed everywhere except the Windows runner,
-/// which is the one place nobody is looking.
+/// `PathBuf::join` renders with `\` on Windows, so a hard-coded forward-slash path
+/// matches the *file* — `FakeHost` normalizes what it stores — but not the **argument**
+/// `launchctl` is handed, which is compared as a string.
 fn unit_at(host: &FakeHost) -> std::path::PathBuf {
     perch::service::unit_path(host)
         .expect("home is known")
@@ -73,9 +65,9 @@ fn failed(saying: &str) -> Execution {
 
 /// A Linux machine whose `systemctl` answers, which is the ordinary case.
 ///
-/// The platform is set after the fixture has built the machine, which is the
-/// idiom the reconciling and importing suites already use: what `watched()`
-/// arranges is Accounts and Groups, and none of that is platform-shaped.
+/// The platform is set after the fixture has built the machine, which is the idiom the
+/// reconciling and importing suites already use: what `watched()` arranges is Accounts
+/// and Groups, and none of that is platform-shaped.
 fn linux() -> FakeHost {
     watched()
         .with_platform(Platform::Other)
@@ -92,9 +84,9 @@ fn linux() -> FakeHost {
         )
 }
 
-/// A macOS machine whose `launchctl` answers. The fixture's own platform, so
-/// nothing about the Credential Store shifts under a command that empties one —
-/// which is why the Purge tests are here rather than on the Linux fixture.
+/// A macOS machine whose `launchctl` answers. The fixture's own platform, so nothing
+/// about the Credential Store shifts under a command that empties one — which is why
+/// the Purge tests are here rather than on the Linux fixture.
 fn mac() -> FakeHost {
     let host = watched().with_exec(
         "launchctl",
@@ -125,13 +117,6 @@ fn run_service(host: &FakeHost, command: WatcherCommand) -> (perch::Result<i32>,
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
-/// The whole arrangement, end to end: a unit where the platform keeps one, the
-/// service manager told about it, and a sentence saying what was installed.
-///
-/// Not a sentence about starting at login. Every install that gets this far did
-/// that, so it was the ordinary case announcing that it was ordinary
-/// (ADR perch-says-what-it-did) — and the two arms that stop short of it say
-/// what did not start.
 #[test]
 fn installing_writes_a_unit_and_starts_it_through_the_service_manager() {
     let host = linux();
@@ -164,9 +149,8 @@ fn installing_writes_a_unit_and_starts_it_through_the_service_manager() {
          starts a stopped unit and does nothing to a running one, which is the \
          state re-installing after an Upgrade is always in"
     );
-    // Asserted whole, because the claim is the sentence
-    // (ADR perch-says-what-it-did): what it did, and which of this machine's
-    // binaries the unit was written against.
+    // Asserted whole, because the claim is the sentence (ADR perch-says-what-it-did):
+    // what it did, and which of this machine's binaries the unit was written against.
     assert!(
         printed.contains(&format!(
             "Installed the Service. It runs {} as a systemd user unit.",
@@ -176,10 +160,6 @@ fn installing_writes_a_unit_and_starts_it_through_the_service_manager() {
     );
 }
 
-/// **The property an install rests on.** A service manager that refuses leaves
-/// a unit file behind that would start at the next login having never been
-/// checked — so the file is taken back, and the command says the machine is
-/// unchanged.
 #[test]
 fn an_install_the_service_manager_refuses_leaves_no_unit_behind() {
     let host = watched()
@@ -208,13 +188,6 @@ fn an_install_the_service_manager_refuses_leaves_no_unit_behind() {
     );
 }
 
-/// A unit file is a line-oriented format, and Perch already has an answer for
-/// that shape — `host::inert`, which guards the curl config and `security`'s
-/// stdin. The unit was the third such protocol and the one that skipped it.
-///
-/// A `PERCH_HOME` with a newline in it closed `Environment=` and wrote whatever
-/// followed as further unit directives, into a file systemd loads at every
-/// login: arbitrary code, persisted, out of a variable a script set.
 #[test]
 fn a_carried_value_that_would_write_its_own_directive_is_refused_before_anything_is_installed() {
     let host = linux().with_env("PERCH_HOME", "/tmp/perch\nExecStartPre=/bin/sh -c evil");
@@ -234,13 +207,6 @@ fn a_carried_value_that_would_write_its_own_directive_is_refused_before_anything
     assert!(ran(&host).is_empty(), "and nothing was run");
 }
 
-/// **The same door, reached the other way.** An Upgrade rewrites the unit
-/// against the binary the Channel just moved (ADR an-upgrade-asks-its-channel),
-/// and it does it from a `describe` that re-reads `PERCH_HOME` and
-/// `CLAUDE_CONFIG_DIR` out of the environment `perch upgrade` was run in. That
-/// path assembled the sequence by hand and dropped the guard above, so the
-/// value refused at install time went straight into a file systemd loads at
-/// every login — the same arbitrary code, persisted, one command over.
 #[test]
 fn an_upgrade_refuses_to_rewrite_the_unit_with_a_value_no_unit_can_hold() {
     let host = linux();
@@ -248,8 +214,8 @@ fn an_upgrade_refuses_to_rewrite_the_unit_with_a_value_no_unit_can_hold() {
         .0
         .expect("a Service is installed before the Upgrade");
     let installed = host.read_file(std::path::Path::new(UNIT)).expect("a unit");
-    // The environment changes between the install and the Upgrade, which is what
-    // a `PERCH_HOME` exported in a shell profile after the fact looks like.
+    // The environment changes between the install and the Upgrade, which is what a
+    // `PERCH_HOME` exported in a shell profile after the fact looks like.
     let host = host
         .with_env("PERCH_HOME", "/tmp/perch\nExecStartPre=/bin/sh -c evil")
         .with_reply(
@@ -284,13 +250,6 @@ fn an_upgrade_refuses_to_rewrite_the_unit_with_a_value_no_unit_can_hold() {
     );
 }
 
-/// A path with a space in it is ordinary — an npm prefix under a home somebody
-/// put a space in, `/opt/My Tools` — and systemd splits `ExecStart=` on
-/// whitespace. Written unquoted, the unit installed cleanly, systemd ran
-/// `/opt/My`, and the Service never came up.
-///
-/// `%` is the other half: systemd expands a specifier before it runs anything,
-/// so a path carrying one came back as something else or failed to load.
 #[test]
 fn a_path_a_shell_would_split_survives_the_unit_it_is_written_into() {
     for awkward in [
@@ -317,14 +276,6 @@ fn a_path_a_shell_would_split_survives_the_unit_it_is_written_into() {
     }
 }
 
-/// Windows is refused more widely than the two platforms that keep a file,
-/// because there is nothing to quote *with*.
-///
-/// `schtasks /TR` hands the command to `cmd.exe`, which has no escape for a `"`
-/// inside a quoted string and expands `%VAR%` when the task runs rather than
-/// when it is written. So a `"` in a carried value closed the command and
-/// everything after it became `cmd` syntax — registered to run at every logon,
-/// long after the process that set the variable was gone.
 #[test]
 fn a_carried_value_a_scheduled_task_cannot_quote_is_refused_on_windows() {
     for hostile in ["x\" && evil.exe && set \"y=", "%APPDATA%"] {
@@ -336,8 +287,8 @@ fn a_carried_value_a_scheduled_task_cannot_quote_is_refused_on_windows() {
 
         let refusal = result.expect_err("a Scheduled Task cannot hold this");
         assert_eq!(refusal.exit_code(), EXIT_INVALID);
-        // Whichever value it reaches first — the log path is derived from
-        // `PERCH_HOME`, so it carries the same character — and why.
+        // Whichever value it reaches first — the log path is derived from `PERCH_HOME`,
+        // so it carries the same character — and why.
         assert!(
             refusal.to_string().contains("Scheduled Task"),
             "it says what cannot hold it: {refusal}"
@@ -349,22 +300,12 @@ fn a_carried_value_a_scheduled_task_cannot_quote_is_refused_on_windows() {
     }
 }
 
-/// Installing on Windows starts the task, rather than only registering the
-/// trigger that would start it at the next logon.
-///
-/// `schtasks /Create /SC ONLOGON` writes a trigger and runs nothing, while what
-/// `install` reports is a Service that is there. A `perch watcher status` a
-/// second later asks the watcher lock, finds nothing holding it, and prints
-/// "not running" — the two commands contradicting each other on every fresh
-/// install. `/End` first for the reason
-/// macOS `bootout`s before it bootstraps: a re-install after an Upgrade is the
-/// documented repair, and the task may already be running the old binary.
 #[test]
 fn installing_on_windows_starts_the_task_rather_than_only_registering_it() {
     let host = watched().with_platform(Platform::Windows);
-    // `schtasks /Create` carries a command built out of this machine's own
-    // paths, so the only honest way to arrange an answer for it is to let the
-    // install say what it would run — the same trick the test above uses.
+    // `schtasks /Create` carries a command built out of this machine's own paths, so
+    // the only honest way to arrange an answer for it is to let the install say what it
+    // would run — the same trick the test above uses.
     let _ = run_service(&host, WatcherCommand::Install);
     for effect in host.effects() {
         if let Effect::Exec { program, args } = effect {
@@ -377,8 +318,8 @@ fn installing_on_windows_starts_the_task_rather_than_only_registering_it() {
     let (result, printed) = run_service(&host, WatcherCommand::Install);
 
     result.expect("the service manager answered");
-    // The `/Query` that asks whether one is already registered comes first and
-    // is not part of the install; these three are.
+    // The `/Query` that asks whether one is already registered comes first and is not
+    // part of the install; these three are.
     let driven = ran(&host);
     let registered = driven
         .iter()
@@ -394,10 +335,6 @@ fn installing_on_windows_starts_the_task_rather_than_only_registering_it() {
     );
 }
 
-/// A unit Perch did not write is one it declines to make claims about rather
-/// than guessing at — and now that `ExecStart=` is quoted, "did not write it"
-/// includes the unquoted spelling and a `%` that is a specifier rather than a
-/// doubled literal.
 #[test]
 fn a_unit_in_a_shape_perch_does_not_write_names_no_binary() {
     for foreign in [
@@ -413,23 +350,14 @@ fn a_unit_in_a_shape_perch_does_not_write_names_no_binary() {
     }
 }
 
-/// The other half of the same rule, and the case it was getting wrong: taking
-/// the unit back is only right where this install *made* it.
-///
-/// Re-running is the documented repair after an Upgrade, so the ordinary way to
-/// reach a failed start is with a working Service already installed — and the
-/// unit has already been overwritten by the time the start is attempted.
-/// Removing it there takes away the Service that was there, under a sentence
-/// promising Perch is unchanged: a `systemctl --user` with no session bus over
-/// SSH silently uninstalled a Watcher that had been running for months.
 #[test]
 fn a_start_that_fails_over_a_service_that_was_working_leaves_the_unit_where_it_is() {
     let host = linux();
     run_service(&host, WatcherCommand::Install)
         .0
         .expect("the first install works");
-    // The same machine, with the service manager no longer answering — an SSH
-    // session with no user bus is the ordinary way to reach this.
+    // The same machine, with the service manager no longer answering — an SSH session
+    // with no user bus is the ordinary way to reach this.
     let host = host.with_exec(
         "systemctl",
         &["--user", "enable", "--now", "perch-watch.service"],
@@ -453,9 +381,6 @@ fn a_start_that_fails_over_a_service_that_was_working_leaves_the_unit_where_it_i
     );
 }
 
-/// **A Service belongs to one person.** Every Profile is under a home
-/// directory, so one installed under `sudo` would watch root's registry — which
-/// is empty — while the person who typed it wondered why nothing switched.
 #[test]
 fn a_service_is_refused_to_root_rather_than_installed_for_the_wrong_person() {
     let host = linux().as_superuser();
@@ -472,9 +397,6 @@ fn a_service_is_refused_to_root_rather_than_installed_for_the_wrong_person() {
     assert!(ran(&host).is_empty(), "and nothing was run");
 }
 
-/// Re-running is the documented repair for a Service whose binary moved, which
-/// an Upgrade does every time it routes through Homebrew or npm
-/// (ADR an-upgrade-asks-its-channel).
 #[test]
 fn installing_twice_replaces_the_unit_rather_than_refusing() {
     let host = linux();
@@ -492,15 +414,6 @@ fn installing_twice_replaces_the_unit_rather_than_refusing() {
     assert!(host.path_exists(std::path::Path::new(UNIT)));
 }
 
-/// The same claim on the platform that keeps no file to look for.
-///
-/// `replaced` was read off `unit_path`, which is `None` on Windows because the
-/// task lives in Windows' own store — so it was false by construction there,
-/// and a re-install over a working Scheduled Task reported "Installed the
-/// Service" every time. Worse than the wrong word: a `schtasks /Create` that
-/// then failed took the rollback arm written for an install that *made*
-/// something, which is the one the comment above it says must not run over an
-/// install that was already there.
 #[test]
 fn installing_twice_on_windows_says_it_replaced_what_was_already_registered() {
     let host = watched().with_platform(Platform::Windows).with_exec(
@@ -508,10 +421,9 @@ fn installing_twice_on_windows_says_it_replaced_what_was_already_registered() {
         &["/Query", "/TN", r"Perch\Watch"],
         worked(),
     );
-    // `schtasks /Create` carries a command built out of this machine's own
-    // paths, so the only honest way to arrange an answer for it is to let the
-    // install say what it would run. The first one fails for want of exactly
-    // that; everything it tried is then given one.
+    // `schtasks /Create` carries a command built out of this machine's own paths, so
+    // the only way to arrange an answer is to let the install say what it would run:
+    // the first fails for want of exactly that.
     let _ = run_service(&host, WatcherCommand::Install);
     for effect in host.effects() {
         if let Effect::Exec { program, args } = effect {
@@ -549,17 +461,14 @@ fn uninstalling_stops_the_service_and_takes_the_unit_back() {
         "{:?}",
         ran(&host)
     );
-    // The whole of what it says, and nothing about what stops starting at
-    // login or about a terminal that was never affected
-    // (ADR perch-says-what-it-did).
+    // The whole of what it says, and nothing about what stops starting at login or
+    // about a terminal that was never affected.
     assert!(
         printed.contains("The Service is stopped and its unit is gone."),
         "{printed}"
     );
 }
 
-/// The existing code for a request that was already true. A machine with no
-/// Service is the machine an `uninstall` was asked to produce.
 #[test]
 fn uninstalling_what_was_never_installed_is_nothing_to_do_rather_than_a_failure() {
     let host = linux();
@@ -570,9 +479,6 @@ fn uninstalling_what_was_never_installed_is_nothing_to_do_rather_than_a_failure(
     assert!(printed.contains("no Service installed"), "{printed}");
 }
 
-/// A question, and answering it is success either way — the bargain
-/// `perch upgrade --check` already makes, which is why a script branches on
-/// `--json` rather than on the code.
 #[test]
 fn status_succeeds_whether_or_not_anything_is_installed() {
     let host = linux();
@@ -591,9 +497,6 @@ fn status_succeeds_whether_or_not_anything_is_installed() {
     assert!(said.contains("is running"), "{said}");
 }
 
-/// The two questions a machine can answer differently, and the reason `status`
-/// asks both: a Service that is installed and stopped, and a `perch watcher
-/// run` somebody typed in a terminal, are different states with the same shape.
 #[test]
 fn status_tells_an_installed_service_apart_from_a_watcher_that_is_running() {
     let host = linux();
@@ -610,8 +513,8 @@ fn status_tells_an_installed_service_apart_from_a_watcher_that_is_running() {
         "nothing holds the watcher lock: {said}"
     );
 
-    // Somebody takes the watcher lock — a `perch watcher run` in another
-    // terminal, or the Service having got as far as starting.
+    // Somebody takes the watcher lock — a `perch watcher run` in another terminal, or
+    // the Service having got as far as starting.
     let _held = perch::lock::take_all(
         &host,
         vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
@@ -626,14 +529,6 @@ fn status_tells_an_installed_service_apart_from_a_watcher_that_is_running() {
     );
 }
 
-/// And it answers at once, which is the whole difference between asking whether
-/// a lock is held and asking to hold it.
-///
-/// `status` used to answer by taking the watcher lock and giving it back, and
-/// the only way to get a refusal out of `take` is to sit through its four
-/// one-second waits. So the *healthy* machine was the slow one — a Service
-/// running is the machine this command exists for — and it printed nothing at
-/// all for four seconds. A Purge paid the same on its way to the same question.
 #[test]
 fn status_asks_whether_a_watcher_holds_the_lock_rather_than_waiting_for_it() {
     let host = linux();
@@ -661,9 +556,6 @@ fn status_asks_whether_a_watcher_holds_the_lock_rather_than_waiting_for_it() {
     );
 }
 
-/// A Service that names a binary an Upgrade has since moved is the failure
-/// `status` exists to make visible — it comes up silently broken at the next
-/// login otherwise.
 #[test]
 fn status_says_when_the_unit_names_a_binary_that_is_no_longer_there() {
     let host = linux();
@@ -671,8 +563,8 @@ fn status_says_when_the_unit_names_a_binary_that_is_no_longer_there() {
         .0
         .expect("installed");
 
-    // What `brew upgrade` does to a Cellar path, and what an npm install does to
-    // a platform package: the binary the unit names stops existing.
+    // What `brew upgrade` does to a Cellar path, and what an npm install does to a
+    // platform package: the binary the unit names stops existing.
     let unit = host
         .read_file(std::path::Path::new(UNIT))
         .expect("the unit is readable");
@@ -693,14 +585,6 @@ fn status_says_when_the_unit_names_a_binary_that_is_no_longer_there() {
     );
 }
 
-/// The log a Service writes to is the one baked into its unit at install time,
-/// not the one a `perch watcher status` would derive right now.
-///
-/// `status` already reads the *binary* back out of the installed unit, on the
-/// argument that whether the two have come apart is the whole question. The log
-/// line beside it was recomputing from `PERCH_HOME` as it stands this minute, so
-/// a machine whose `PERCH_HOME` changed after the install was told, confidently,
-/// about a file nothing writes to.
 #[test]
 fn status_says_where_the_installed_service_actually_writes_its_log() {
     let host = mac().with_env("PERCH_HOME", "/Users/someone/elsewhere");
@@ -708,16 +592,16 @@ fn status_says_where_the_installed_service_actually_writes_its_log() {
         .0
         .expect("installed");
 
-    // A `PERCH_HOME` exported in a shell profile after the fact, or a `status`
-    // run from a terminal that never had it set. The Service goes on writing
-    // where it was installed to write either way.
+    // A `PERCH_HOME` exported in a shell profile after the fact, or a `status` run from
+    // a terminal that never had it set. The Service goes on writing where it was
+    // installed to write either way.
     let host = host.without_env("PERCH_HOME");
 
     let (_, said) = run_service(&host, WatcherCommand::Status { json: false });
 
     // Joined rather than spelled out, because `service::log_path` joins and the
-    // separator it joins with is the *running* machine's — a `\` under the
-    // Windows runner, whatever platform the fixture reports.
+    // separator it joins with is the *running* machine's — a `\` under the Windows
+    // runner, whatever platform the fixture reports.
     let at = std::path::Path::new("/Users/someone/elsewhere").join("watch.log");
     assert!(
         said.contains(&*at.to_string_lossy()),
@@ -725,10 +609,6 @@ fn status_says_where_the_installed_service_actually_writes_its_log() {
     );
 }
 
-/// Said rather than refused, for the reason ADR a-watcher-knob-is-arithmetic
-/// gives about a Margin at or above a Threshold: refusing would make the order
-/// two `perch config set`s are typed in matter. A Service with no grant holds
-/// harmlessly and takes over the moment one is given.
 #[test]
 fn installing_with_no_grant_anywhere_succeeds_and_says_the_service_will_hold() {
     let host = linux();
@@ -746,14 +626,6 @@ fn installing_with_no_grant_anywhere_succeeds_and_says_the_service_will_hold() {
     );
 }
 
-/// The lock is read by trying to take it, and only one way of failing to take it
-/// means somebody is holding it.
-///
-/// Read as "any failure is a holder", a lock that could not be taken because the
-/// filesystem refused told the user a Watcher is running on a machine where none
-/// is — and on Windows, where the lock is the only evidence there is, made the
-/// Service look like it was running too. `Busy` is the answer that means
-/// contention, and Perch tells it from a fault everywhere else it asks.
 #[test]
 fn a_watcher_lock_that_will_not_be_taken_at_all_is_not_a_watcher_that_is_running() {
     let spec = perch::registry::watcher_lock_spec(&linux()).expect("home is known");
@@ -775,22 +647,14 @@ fn a_watcher_lock_that_will_not_be_taken_at_all_is_not_a_watcher_that_is_running
     );
 }
 
-/// A grant said about the Ungrouped Accounts is not on its own enough for the
-/// Watcher to act on them: `interchangeable` is the declaration that has to
-/// come first, and without it every round holds (ADR a-group-is-a-declaration).
-///
-/// Read from `watcher-may-act` alone, this line stayed silent on a machine where
-/// the Watcher can never act — telling somebody their Service was arranged when
-/// it was one `perch config set` short of it. The same claim `perch group list`
-/// was making until it took the gate on.
 #[test]
 fn a_grant_the_watcher_will_never_act_on_still_says_the_service_will_hold() {
     let host = linux();
     config_set(&host, &["work", "watcher-may-act", "false"])
         .0
         .expect("the Group takes the permission back");
-    // The only grant on the machine, and one the Watcher declines: nothing has
-    // said the Accounts in no Group are interchangeable at all.
+    // The only grant on the machine, and one the Watcher declines: nothing has said the
+    // Accounts in no Group are interchangeable at all.
     config_set(&host, &["ungrouped", "watcher-may-act", "true"])
         .0
         .expect("the Ungrouped Accounts take the permission");
@@ -805,15 +669,10 @@ fn a_grant_the_watcher_will_never_act_on_still_says_the_service_will_hold() {
     );
 }
 
-/// **The hazard a Purge exists to avoid, one level up.** A Watcher is the one
-/// process that writes Credentials without being asked, and a supervised one
-/// comes straight back — so it is stopped before anything is deleted, and the
-/// consent covers it (ADR a-removal-lands-first's shape,
-/// ADR the-machine-runs-the-watcher's rule).
 #[test]
 fn a_purge_stops_the_service_before_it_deletes_anything() {
-    // Declining the Export and then typing the word, which is what a Purge
-    // actually asks for.
+    // Declining the Export and then typing the word, which is what a Purge actually
+    // asks for.
     let host = mac().with_answers(&["n", "purge"]);
     run_service(&host, WatcherCommand::Install)
         .0
@@ -838,16 +697,14 @@ fn a_purge_stops_the_service_before_it_deletes_anything() {
     );
 }
 
-/// And where it will not stop, the Purge refuses rather than deleting Profiles
-/// underneath a process that is still Switching into them.
 #[test]
 fn a_purge_refuses_rather_than_deleting_under_a_service_that_will_not_stop() {
     let host = mac().with_answers(&["n", "purge"]);
     run_service(&host, WatcherCommand::Install)
         .0
         .expect("installed");
-    // Told to stop, and still there afterwards: `launchctl print` answers, which
-    // is how the machine says the Service is still loaded.
+    // Told to stop, and still there afterwards: `launchctl print` answers, which is how
+    // the machine says the Service is still loaded.
     let host = host
         .with_exec(
             "launchctl",
@@ -874,26 +731,14 @@ fn a_purge_refuses_rather_than_deleting_under_a_service_that_will_not_stop() {
     );
 }
 
-/// **The service manager's answer is one step away from the question.** What
-/// this guard is about is a *Watcher* writing a captured Credential into a
-/// Profile the Purge is deleting, and a stopped unit is not the same fact: a
-/// systemd unit reads `inactive` while the process it started is still winding
-/// down mid-Switch, and on Windows `schtasks /Query` answers whether the task
-/// *exists* — which `/Delete` has just made false whether or not it terminated
-/// the instance, because there is no flag on `/Delete` that terminates one.
-///
-/// The watcher lock is the fact itself: a Watcher holds it for exactly as long
-/// as one runs, and gives it back however the process ends. `status` has asked
-/// it that way for as long as it has been asked; this copy of the question was
-/// judging by the unit alone.
 #[test]
 fn a_purge_refuses_while_a_watcher_still_holds_the_watch() {
     let host = mac().with_answers(&["n", "purge"]);
     run_service(&host, WatcherCommand::Install)
         .0
         .expect("installed");
-    // The Service stops cleanly and the machine says so — and a Watcher is
-    // still holding the watch, which is the state the unit cannot report.
+    // The Service stops cleanly and the machine says so — and a Watcher is still
+    // holding the watch, which is the state the unit cannot report.
     let host = host.with_exec(
         "launchctl",
         &["print", "gui/501/cli.perch.watch"],
@@ -915,9 +760,6 @@ fn a_purge_refuses_while_a_watcher_still_holds_the_watch() {
     );
 }
 
-/// `/Delete` unregisters a task; it does not stop the instance the scheduler
-/// already started, and nothing else in `stopping` would. So `/End` runs first
-/// — the step whose absence is what made the guard above reachable at all.
 #[test]
 fn stopping_a_windows_task_ends_the_running_instance_before_unregistering_it() {
     let driven: Vec<String> = perch::service::stopping(Platform::Windows, None)
@@ -934,10 +776,6 @@ fn stopping_a_windows_task_ends_the_running_instance_before_unregistering_it() {
     );
 }
 
-/// macOS keeps its unit somewhere else and is driven by something else, and the
-/// same three properties hold. Asserted because the platform split is the whole
-/// of what this feature is, and one arm of it going untested is one arm of it
-/// being written from memory.
 #[test]
 fn a_mac_gets_a_launchagent_in_its_own_place_bootstrapped_into_its_own_session() {
     let host = mac();
@@ -963,8 +801,8 @@ fn a_mac_gets_a_launchagent_in_its_own_place_bootstrapped_into_its_own_session()
 
 // ---- what an Upgrade owes a running Service -------------------------------
 
-/// A machine whose newest published Release is newer than this build, installed
-/// by Homebrew — the Channel `perch upgrade` hands the work to
+/// A machine whose newest published Release is newer than this build, installed by
+/// Homebrew — the Channel `perch upgrade` hands the work to
 /// (ADR an-upgrade-asks-its-channel).
 fn upgradable() -> FakeHost {
     mac()
@@ -986,12 +824,6 @@ fn upgrading(host: &FakeHost) -> (perch::Result<i32>, String) {
     (outcome, String::from_utf8(out).expect("it said text"))
 }
 
-/// **The failure A7 was written to prevent, arriving through a different door.**
-///
-/// `brew` and `npm` have never heard of a unit file, and on Unix the running
-/// Service keeps the inode of the binary it started with — so an Upgrade nobody
-/// followed up leaves a Service running yesterday's Perch until the next login.
-/// The Upgrade re-points the unit and restarts it onto the new binary.
 #[test]
 fn an_upgrade_restarts_the_service_onto_the_binary_it_just_moved() {
     let host = upgradable();
@@ -1019,17 +851,14 @@ fn an_upgrade_restarts_the_service_onto_the_binary_it_just_moved() {
     );
 }
 
-/// The Upgrade is what succeeded; the Service is a follow-up. A refresh that
-/// fails is a warning with a one-command repair rather than a reason to report
-/// an Upgrade that did happen as one that did not.
 #[test]
 fn a_service_that_will_not_restart_is_a_warning_rather_than_a_failed_upgrade() {
     let host = upgradable();
     run_service(&host, WatcherCommand::Install)
         .0
         .expect("a Service is installed before the Upgrade");
-    // The service manager stops answering between the install and the Upgrade,
-    // which is what a `launchctl` refusing a GUI domain over SSH looks like.
+    // The service manager stops answering between the install and the Upgrade, which is
+    // what a `launchctl` refusing a GUI domain over SSH looks like.
     let plist = unit_at(&host);
     host.set_exec(
         "launchctl",
@@ -1050,13 +879,6 @@ fn a_service_that_will_not_restart_is_a_warning_rather_than_a_failed_upgrade() {
     );
 }
 
-/// **An Upgrade that did not happen owes the Service nothing.** `brew` and `npm`
-/// report a refusal as an exit code rather than as an error — a pinned formula,
-/// a network that is down, an `npm` without permission — and Perch passes that
-/// code through. Left unchecked, the follow-up ran anyway: the watcher was
-/// bounced onto the binary it was already running, and the Upgrade printed "The
-/// Service was restarted, and now runs …" beside the non-zero code saying it
-/// had not.
 #[test]
 fn a_channel_that_refused_the_upgrade_leaves_the_service_where_it_is() {
     let host = upgradable();
@@ -1088,8 +910,6 @@ fn a_channel_that_refused_the_upgrade_leaves_the_service_where_it_is() {
     );
 }
 
-/// Most machines have no Service, and an Upgrade on one must not go looking for
-/// a service manager or say anything about one.
 #[test]
 fn an_upgrade_with_no_service_installed_says_nothing_about_one() {
     let host = upgradable();
@@ -1107,14 +927,6 @@ fn an_upgrade_with_no_service_installed_says_nothing_about_one() {
 
 // ---- reading back what was written ----------------------------------------
 
-/// **A round trip through Perch's own plist.** `status` reads the binary back
-/// out of the installed unit rather than recomputing it, because the question it
-/// answers is whether the unit and the machine have come apart — and a value
-/// worked out again from the machine agrees with the machine by construction.
-///
-/// Both halves are hand-rolled: Perch writes the XML and Perch parses it. A path
-/// holding an `&` is escaped on the way in and has to survive the way out, or
-/// `status` reports a binary that is missing when it is not.
 #[test]
 fn the_binary_is_read_back_out_of_a_plist_that_had_to_be_escaped_to_write() {
     let awkward = "/Users/some & one/bin/perch";
@@ -1149,9 +961,6 @@ fn the_binary_is_read_back_out_of_a_plist_that_had_to_be_escaped_to_write() {
     );
 }
 
-/// The same question on the platform that keeps no file at all. Windows holds
-/// the task itself, so there is nothing to read a binary back out of, and
-/// `status` says what it knows rather than guessing.
 #[test]
 fn windows_keeps_the_task_itself_so_status_reads_no_unit_file() {
     let host = watched().with_platform(Platform::Windows).with_exec(
@@ -1181,13 +990,6 @@ fn windows_keeps_the_task_itself_so_status_reads_no_unit_file() {
     );
 }
 
-/// A registered task and a Watcher holding the watch is the whole of what
-/// Windows can be asked, so it is what "running" is answered from there.
-///
-/// `schtasks /Query` succeeds whenever the task *exists*, which is the same
-/// query `installed` is read off — so a `running` computed from it was true by
-/// construction, and a logon task that had not fired since boot reported itself
-/// as running to the prose and to the `--json` a script branches on.
 #[test]
 fn a_windows_task_is_running_when_a_watcher_is_actually_holding_the_watch() {
     let host = watched().with_platform(Platform::Windows).with_exec(
@@ -1209,8 +1011,6 @@ fn a_windows_task_is_running_when_a_watcher_is_actually_holding_the_watch() {
     assert_eq!(reported["watching"], true, "{said}");
 }
 
-/// What the service manager said is what the user needs, and some of them say it
-/// on standard output rather than standard error.
 #[test]
 fn a_service_manager_that_explains_itself_on_stdout_is_still_quoted() {
     let host = watched().with_platform(Platform::Other).with_exec(
@@ -1233,9 +1033,6 @@ fn a_service_manager_that_explains_itself_on_stdout_is_still_quoted() {
     );
 }
 
-/// A machine Perch holds nothing on yet is one `watcher status` still answers
-/// about — it is a question, and "no Service, and no registry either" is an
-/// answer.
 #[test]
 fn status_answers_on_a_machine_perch_holds_nothing_on() {
     let host = FakeHost::new();
@@ -1251,12 +1048,10 @@ fn status_answers_on_a_machine_perch_holds_nothing_on() {
     );
 }
 
-/// The prose `status` prints, which is what a person reads — the JSON tests
-/// above assert the same facts for a script, and the two renderers can disagree.
 #[test]
 fn status_in_prose_names_the_binary_the_watcher_and_the_missing_grant() {
-    // A binary that is actually there, so this exercises the arm that names it
-    // rather than the one that reports it gone — which
+    // A binary that is actually there, so this exercises the arm that names it rather
+    // than the one that reports it gone — which
     // `status_says_when_the_unit_names_a_binary_that_is_no_longer_there` covers.
     let host = mac()
         .with_file("/usr/local/bin/perch", "")
@@ -1269,8 +1064,8 @@ fn status_in_prose_names_the_binary_the_watcher_and_the_missing_grant() {
         .0
         .expect("the Group takes the permission back");
 
-    // Somebody is watching — a `perch watcher run` in another terminal, or the
-    // Service having got as far as taking the lock.
+    // Somebody is watching — a `perch watcher run` in another terminal, or the Service
+    // having got as far as taking the lock.
     let _held = perch::lock::take_all(
         &host,
         vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
@@ -1292,9 +1087,6 @@ fn status_in_prose_names_the_binary_the_watcher_and_the_missing_grant() {
     );
 }
 
-/// A service manager that is not on `PATH` at all is a different failure from
-/// one that refused, and the message has to say which — "no such program" on its
-/// own reads as a Perch that is broken.
 #[test]
 fn a_service_manager_that_is_not_installed_says_so_rather_than_failing_blankly() {
     // No `with_exec` for `systemctl`, so the fake has no such program.
@@ -1317,16 +1109,6 @@ fn a_service_manager_that_is_not_installed_says_so_rather_than_failing_blankly()
     );
 }
 
-/// The Service writes its decisions into a file inside Perch's home, and the
-/// install is what has to put that directory there.
-///
-/// Perch's home is made on the way to the first lock Perch takes, and an
-/// install takes none — so on a machine where Claude Code is logged in and
-/// Perch has never run, the directory the unit points its output at simply was
-/// not there. `cmd /c … >> "…\watch.log"` cannot open a redirect into a
-/// directory that does not exist, so the Windows task failed at every logon
-/// without saying anything, and launchd cannot open a `StandardOutPath` there
-/// either.
 #[test]
 fn installing_on_a_machine_perch_has_never_run_on_makes_room_for_the_log() {
     let host = logged_in_machine().with_exec(
@@ -1357,14 +1139,6 @@ fn installing_on_a_machine_perch_has_never_run_on_makes_room_for_the_log() {
     );
 }
 
-/// The same guard, on the machine it could never reach: one where nobody ever
-/// installed a Service.
-///
-/// `perch watcher run` in a terminal is a Watcher. It holds the same lock, and
-/// it Switches Credentials into the Profiles a Purge is deleting — but the
-/// guard opened by asking whether a Service was *installed* and returned early
-/// when it was not, so the lock question below it ran on exactly the machines
-/// that already had a Service and never on the ones that did not.
 #[test]
 fn a_purge_refuses_under_a_watcher_run_from_a_terminal_with_no_service_installed() {
     let host = mac().with_answers(&["n", "purge"]);
@@ -1391,22 +1165,14 @@ fn a_purge_refuses_under_a_watcher_run_from_a_terminal_with_no_service_installed
     );
 }
 
-/// On Windows the service-manager binary is spelled out, because a bare name is
-/// searched for in the current working directory first.
-///
-/// `commands::upgrade::powershell` states the rule and
-/// ADR a-crate-must-not-cost-a-seam is the rule. `schtasks` is the higher-value
-/// target of the two it covers: its `/TR` argument is a command line Windows
-/// runs at every logon, so a `schtasks.exe` dropped in a downloads folder turns
-/// `perch watcher install` typed there into attacker-chosen persistence.
 #[test]
 fn windows_runs_the_schtasks_that_ships_with_windows_and_not_whichever_is_nearest() {
     let system32 = r"C:\Windows\System32\schtasks.exe";
     let host = watched()
         .with_platform(Platform::Windows)
         .with_env("SystemRoot", r"C:\Windows")
-        // Arranged under the absolute name alone. A run that reached for the
-        // bare one finds nothing arranged and fails, which is the assertion.
+        // Arranged under the absolute name alone. A run that reached for the bare one
+        // finds nothing arranged and fails, which is the assertion.
         .with_exec(system32, &["/Query", "/TN", r"Perch\Watch"], worked());
 
     let (result, said) = run_service(&host, WatcherCommand::Status { json: true });
