@@ -14,8 +14,9 @@ happen.
 
 Figures cached under the wrong Account would not look wrong. They would look
 like that Account having spent quota it never spent, which is the evidence a
-Cycle ranks on (ADR 0012) and the evidence a person reads before switching. It
-is the one kind of wrong answer this design cannot afford: a plausible one.
+Cycle ranks on (ADR headroom-is-the-worst-window) and the evidence a person
+reads before switching. It is the one kind of wrong answer this design cannot
+afford: a plausible one.
 
 A reply that names nobody is not evidence of anything, and does not stop the
 read — the same rule liveness already follows, where a Profile is Live because
@@ -26,9 +27,9 @@ reason to stop reading Utilization at all.
 ## Consequences
 
 A refresh spends two requests per Account rather than one. Only the second
-counts against the usage allowance ADR 0015 is about, and the first is spent
-before it rather than after, so an Account that turns out not to be the one
-expected costs nothing from the allowance that matters.
+counts against the usage allowance ADR a-figure-carries-its-age is about, and
+the first is spent before it rather than after, so an Account that turns out not
+to be the one expected costs nothing from the allowance that matters.
 
 Perch has an early sighting of a live Credential that has changed underneath it.
 Nothing acts on that yet — the refusal names the Account the token really

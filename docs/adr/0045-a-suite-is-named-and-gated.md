@@ -1,6 +1,7 @@
 # A suite is named and gated
 
-> **Carried out in #158.** Like ADR 0041, ADR 0042 and ADR 0044, this is the
+> **Carried out in #158.** Like ADR using-it-is-the-proof,
+> ADR perch-does-not-draw and ADR the-binary-proves-its-surface, this is the
 > artifact of a planning effort rather than of a change, so it landed ahead of
 > the work it describes instead of beside it. The tree now matches it: the three
 > files carry the names below, and the rule about where a test lives is in
@@ -31,9 +32,11 @@ agree, and a stated policy of breaking anything at will — a repository that
 breaks freely is one that leans on its suite to notice.
 
 Nor is the figure stable enough to indict. Three decisions already taken remove
-**9,896 lines** before this one touches anything: ADR 0041 deletes 6,604 with
-Dogfood, roughly 2,400 of it unit tests, and ADR 0042 deletes 3,292 with the
-Config tab. ADR 0044 adds `tests/invoking.rs` back. The ratio moves by a point.
+**9,896 lines** before this one touches anything: ADR using-it-is-the-proof
+deletes 6,604 with Dogfood, roughly 2,400 of it unit tests, and
+ADR perch-does-not-draw deletes 3,292 with the Config tab.
+ADR the-binary-proves-its-surface adds `tests/invoking.rs` back. The ratio moves
+by a point.
 
 **So size is not what is wrong here, and no suite is removed by this ADR.** The
 two subsystems this sweep has deleted were indicted by conceptual arguments —
@@ -51,20 +54,22 @@ by how they are named produces three kinds — not one rule with a ragged edge.
 **Behavior.** What a command does, driving real command code against
 `FakeHost`. Twenty-six of them. Named for the behavior, which is not the same as
 named for the command: `exporting` happens to be one command, but `carrying`
-(ADR 0003), `storing` (ADR 0020), `reconciling` (ADR 0026) and `naming` are
-mechanics no single command owns, and no per-command rule could have produced
-them. The clearest evidence the rule is behavior and not command is `perch
-status`, which is asserted across three files — `status.rs` for what it shows,
-`listing.rs` for `list` and `--group`, `refreshing.rs` for `--refresh`. Under a
-per-command rule that is a defect. Under this one it is three behaviors that
-share a verb, which is what they are.
+(ADR everything-but-the-account), `storing` (ADR claude-code-chooses-the-store),
+`reconciling` (ADR everything-but-the-account) and `naming` are mechanics no
+single command owns, and no per-command rule could have produced them. The
+clearest evidence the rule is behavior and not command is `perch status`, which
+is asserted across three files — `status.rs` for what it shows, `listing.rs` for
+`list` and `--group`, `refreshing.rs` for `--refresh`. Under a per-command rule
+that is a defect. Under this one it is three behaviors that share a verb, which
+is what they are.
 
 **Correspondence.** That two artifacts which must agree, do. Six of them:
 `conformance` asks the two `Host` adapters the same questions; the four
 `contract_*` suites ask whether the probe's beliefs still match the installed
-Claude Code (ADR 0007); `publishing` asks whether the site still matches the
-repository that publishes it (ADR 0035). These assert a relationship, not a
-behavior, and none of them drives a command against a fake.
+Claude Code (ADR an-assumption-is-probed); `publishing` asks whether the site
+still matches the repository that publishes it (ADR one-thing-renders-the-site).
+These assert a relationship, not a behavior, and none of them drives a command
+against a fake.
 
 The gating axis cuts across this and does not define it. `contract_*` is held
 back by a feature and its failures are news about upstream; `conformance` is
@@ -72,15 +77,16 @@ ungated and its failures are ordinary faults in the change that caused them —
 `conformance.rs`'s own header draws that line and draws it correctly. Two suites
 can assert the same *kind* of thing and mean different things by failing.
 
-**Surface.** What the binary accepts and returns. One of them, `tests/invoking.rs`
-from ADR 0044, which is on the record as explicitly not a behavior suite: *the
-surface, never the behavior behind it.*
+**Surface.** What the binary accepts and returns. One of them,
+`tests/invoking.rs` from ADR the-binary-proves-its-surface, which is on the
+record as explicitly not a behavior suite: *the surface, never the behavior
+behind it.*
 
 The naming signal is **a gerund for what Perch does, a noun for a
 correspondence**. Behavior and Surface are both Perch doing something, so
-`invoking.rs` keeps the name ADR 0044 gave it. That leaves three files misnamed
-against a rule the other thirty already follow, and they are renamed rather than
-excused:
+`invoking.rs` keeps the name ADR the-binary-proves-its-surface gave it. That
+leaves three files misnamed against a rule the other thirty already follow, and
+they are renamed rather than excused:
 
 | now              | becomes           | why                                    |
 | ---------------- | ----------------- | -------------------------------------- |
@@ -156,9 +162,9 @@ changes rather than when Claude Code does, are live and are #156's. Placing a
 suite in a taxonomy is not the same as approving how it runs.
 
 **Whether `browsing.rs` survives.** It is a behavior suite under this ADR and
-will be a smaller one once ADR 0042's Config tab goes, but whether the picker
-exists at all is #151's, blocked on #147. If the picker goes, so does the file,
-and nothing here objects.
+will be a smaller one once ADR perch-does-not-draw's Config tab goes, but
+whether the picker exists at all is #151's, blocked on #147. If the picker goes,
+so does the file, and nothing here objects.
 
 **What the commands are.** #145 may redraw the command surface entirely. That is
 the strongest argument for naming binaries after behaviors rather than commands:
@@ -171,13 +177,14 @@ Three renames, and no change to any assertion.
 
 `tests/common/mod.rs`'s header gains the rule about where a test lives.
 
-`CONTEXT.md` loses its **Proving it works** heading. ADR 0041 empties it of all
-seven entries, and this ADR declines to refill it — the same call ADR 0042, ADR
-0043 and ADR 0044 each made in turn, on the same grounds. Behavior,
-Correspondence and Surface are terms a contributor holds, not terms somebody
-using Perch holds, and the glossary is for the second kind. They live in this ADR
-and in the header, which are the places a person writing a test is already
-looking. An empty heading would be worse than a deleted one.
+`CONTEXT.md` loses its **Proving it works** heading. ADR using-it-is-the-proof
+empties it of all seven entries, and this ADR declines to refill it — the same
+call ADR perch-does-not-draw, ADR perch-says-what-it-did and
+ADR the-binary-proves-its-surface each made in turn, on the same grounds.
+Behavior, Correspondence and Surface are terms a contributor holds, not terms
+somebody using Perch holds, and the glossary is for the second kind. They live
+in this ADR and in the header, which are the places a person writing a test is
+already looking. An empty heading would be worse than a deleted one.
 
 > **Reversed in part by #204.** The heading is back, holding **Behavior** alone,
 > with Correspondence and Surface named inside that entry rather than given ones
@@ -191,9 +198,10 @@ two things that could threaten it: #142, which passed by refusing to move
 behavior off the fakes, and this ticket. Behavior stays where it is, `host::fake`
 remains the only way it is driven, and there is nothing left watching.
 
-This ADR supersedes nothing. ADR 0043 governs what an assertion must claim, ADR
-0044 governs the level a claim is made at, and this governs where a test lives
-and what its file is called. Three axes, no overlap.
+This ADR supersedes nothing. ADR perch-says-what-it-did governs what an
+assertion must claim, ADR the-binary-proves-its-surface governs the level a
+claim is made at, and this governs where a test lives and what its file is
+called. Three axes, no overlap.
 
 The shape is re-affirmed rather than left alone, which is the point. A reader who
 counts 24,565 lines and thirty-three binaries and finds no reasoning is entitled

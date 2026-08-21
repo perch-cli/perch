@@ -1,7 +1,7 @@
 /*
  * The one thing carried over from the stylesheet that used to correct mdBook
- * (ADR 0062): Perch's accent, said in Starlight's own accent scale rather than
- * applied to selectors of Starlight's.
+ * (ADR one-thing-renders-the-site): Perch's accent, said in Starlight's own
+ * accent scale rather than applied to selectors of Starlight's.
  *
  * The pair is #b45309 in light and #f0b429 in dark, and each lands on the
  * variable its theme uses for text — `--sl-color-accent` in light,

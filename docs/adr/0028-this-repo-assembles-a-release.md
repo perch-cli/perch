@@ -11,9 +11,9 @@ Everything downstream of the archives. The name and shape of every Artifact,
 what an installer does when a checksum fails, whether the npm package downloads
 its binary in a postinstall script or declares one optional dependency per
 Target, whether the Homebrew formula builds from source. Those are not
-incidental: they are most of the decisions in ADR 0029 through 0031, and each
-one would have been settled by whatever the generator emitted rather than by
-anybody here.
+incidental: they are most of the decisions in ADR a-linux-build-is-static and
+ADR this-repo-assembles-a-release, and each one would have been settled by
+whatever the generator emitted rather than by anybody here.
 
 The concrete cost of that is visible in two places. A generated npm package
 fetches its binary at install time, which stops working under `npm ci

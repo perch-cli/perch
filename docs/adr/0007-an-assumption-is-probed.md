@@ -1,12 +1,12 @@
 # An assumption is probed
 
-> **Amended by ADR 0050**, in one sentence and with no supersession. The closing
-> paragraph named "contract tests" as what finds drift in CI. That suite has
-> been re-gated on consent and no longer exists under that name, and the flag it
-> sat behind was never what caught drift anyway — the weekly scheduled run is.
-> The sentence below is rewritten to name it. Everything else here stands:
-> probing rather than assuming, and refusing at runtime, is exactly as sound
-> after that decision as before.
+> **Amended by ADR an-assumption-is-probed**, in one sentence and with no
+> supersession. The closing paragraph named "contract tests" as what finds drift
+> in CI. That suite has been re-gated on consent and no longer exists under that
+> name, and the flag it sat behind was never what caught drift anyway — the
+> weekly scheduled run is. The sentence below is rewritten to name it.
+> Everything else here stands: probing rather than assuming, and refusing at
+> runtime, is exactly as sound after that decision as before.
 
 Every decision recorded so far rests on reverse-engineered internals: the
 keychain service-name hash, the three-lock refresh protocol, the shape of

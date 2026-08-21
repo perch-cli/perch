@@ -1,5 +1,5 @@
 //! Behavior tests for the `.claude.json` keys a Run copies into the Profile it
-//! is about to launch (ADR 0003).
+//! is about to launch (ADR everything-but-the-account).
 //!
 //! This is the one file Reconcile cannot link, because it holds the Account as
 //! well as the person — so what belongs to the person crosses key by key, by a
@@ -133,9 +133,9 @@ fn onboarding_tips_and_notifications_cross_into_a_fresh_profile() {
     );
 }
 
-/// What ADR 0003 was written for: the trust and the tool approvals of the
-/// repository the person is standing in, so a second Account in the same
-/// terminal does not re-approve them one dialog at a time.
+/// What ADR everything-but-the-account was written for: the trust and the tool
+/// approvals of the repository the person is standing in, so a second Account
+/// in the same terminal does not re-approve them one dialog at a time.
 #[test]
 fn the_project_entry_for_this_directory_crosses() {
     let host = machine();
@@ -185,7 +185,7 @@ fn the_directory_the_run_was_typed_in_is_the_one_that_crosses() {
 
 /// The whole reason the set is named rather than inverted. A Profile keeps its
 /// own Account, and the figures Anthropic gave for somebody else's subscription
-/// would be shown under this Account's name (ADR 0019).
+/// would be shown under this Account's name (ADR a-figure-names-its-account).
 #[test]
 fn nothing_keyed_to_the_other_account_crosses() {
     let host = machine();
@@ -313,9 +313,10 @@ fn a_profile_used_after_the_default_one_is_what_is_copied() {
     );
 }
 
-/// The precondition ADR 0003 puts on the write. A client rewrites this file
-/// wholesale on its way out, so anything Perch spliced into it while one was
-/// running would be thrown away — or worse, written over what the client had.
+/// The precondition ADR everything-but-the-account puts on the write. A client
+/// rewrites this file wholesale on its way out, so anything Perch spliced into
+/// it while one was running would be thrown away — or worse, written over what
+/// the client had.
 #[test]
 fn nothing_is_written_while_a_client_is_running_against_that_profile() {
     let host = machine();
@@ -340,10 +341,10 @@ fn nothing_is_written_while_a_client_is_running_against_that_profile() {
 }
 
 /// The same precondition, read from the other end. A Run makes the Profile it
-/// launches Live (ADR 0027), and it does so *before* it Carries — so the Carry
-/// has to discount the Run's own claim, or it would meet that claim and refuse
-/// its own write, silently, on every Run, leaving every first Run of an Account
-/// to the onboarding questions.
+/// launches Live (ADR a-run-is-one-shot), and it does so *before* it Carries —
+/// so the Carry has to discount the Run's own claim, or it would meet that
+/// claim and refuse its own write, silently, on every Run, leaving every first
+/// Run of an Account to the onboarding questions.
 ///
 /// The claim comes first because until the Marker exists nothing on the machine
 /// knows this Run is happening: a `perch remove` in another terminal asks

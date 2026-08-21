@@ -80,7 +80,7 @@ pub fn ask_a_word(host: &dyn Host, out: &mut dyn Write, question: &str) -> Resul
 }
 
 /// The same, for a question whose answer the terminal must never show — the
-/// passphrase an Export is encrypted with (ADR 0014).
+/// passphrase an Export is encrypted with (ADR the-holdings-go-out-sealed).
 ///
 /// The newline afterwards is Perch's to write, because the one the terminal
 /// would have written is the one that was suppressed: with echo off, the Return
@@ -109,10 +109,10 @@ pub fn ask_secret(
 ///
 /// The counterpart to [`only_the_registry`], which is the door for commands
 /// that never wait at all. This is the guard for the ones that must wait while
-/// holding the lock, and ADR 0057 sets out why a third set — `add` and
-/// `relogin`, whose wait is a browser rather than a person — needs neither:
-/// they take the lock after the wait, so there is no hold old enough to have
-/// gone stale.
+/// holding the lock, and ADR one-door-to-the-registry sets out why a third set
+/// — `add` and `relogin`, whose wait is a browser rather than a person — needs
+/// neither: they take the lock after the wait, so there is no hold old enough
+/// to have gone stale.
 ///
 /// A question put to a person is the one wait in Perch with no bound on it —
 /// somebody may answer in a second or walk away and answer after lunch — so it
@@ -130,10 +130,11 @@ pub fn ask_secret(
 /// "removed", "purged", "exported".
 ///
 /// A general failure rather than `Busy`, which reads as the obvious tidy-up and
-/// is not (ADR 0036). Nothing *has* been written here — this is asked before
-/// the first irreversible thing — so the promise `Busy` makes would hold; what
-/// does not hold is folding this together with the two other sentences about a
-/// lost hold, one of which is reached after a Credential has moved.
+/// is not (ADR a-refusal-is-a-promise). Nothing *has* been written here — this
+/// is asked before the first irreversible thing — so the promise `Busy` makes
+/// would hold; what does not hold is folding this together with the two other
+/// sentences about a lost hold, one of which is reached after a Credential has
+/// moved.
 pub fn still_ours(perch: &mut crate::lock::Held<'_>, did: &str) -> Result<()> {
     perch.renew();
     if perch.still_held() {
@@ -151,15 +152,16 @@ pub fn still_ours(perch: &mut crate::lock::Held<'_>, did: &str) -> Result<()> {
 /// under Perch's own lock, saved only where the change was accepted, and said
 /// afterwards.
 ///
-/// The counterpart to [`still_ours`], and the pair is the whole of ADR 0057.
-/// Perch holds the registry lock in three shapes. A command that waits — for a
-/// browser, or for an answer — either takes the lock *after* the wait, which
-/// `add` and `relogin` can do because they hold nothing worth guarding until
-/// the login comes back, or holds it *across* the wait and guards it with
-/// `still_ours`, which `remove`, `purge`, `import` and `export` must do because
-/// the question they ask is about the registry already in their hands. This is
-/// the third shape: no wait at all, so nothing to guard against, and the lock is
-/// held for exactly the span between reading and writing.
+/// The counterpart to [`still_ours`], and the pair is the whole of
+/// ADR one-door-to-the-registry. Perch holds the registry lock in three shapes.
+/// A command that waits — for a browser, or for an answer — either takes the
+/// lock *after* the wait, which `add` and `relogin` can do because they hold
+/// nothing worth guarding until the login comes back, or holds it *across* the
+/// wait and guards it with `still_ours`, which `remove`, `purge`, `import` and
+/// `export` must do because the question they ask is about the registry already
+/// in their hands. This is the third shape: no wait at all, so nothing to guard
+/// against, and the lock is held for exactly the span between reading and
+/// writing.
 ///
 /// **`change` is handed no [`Host`], and that is the point rather than a
 /// convenience.** It is what makes the shape checkable instead of merely
@@ -212,7 +214,7 @@ pub fn ask_passphrase(
 }
 
 /// Refuses the two commands that need a passphrase when there is no terminal to
-/// type one at (ADR 0014).
+/// type one at (ADR the-holdings-go-out-sealed).
 ///
 /// There is deliberately no flag that answers ahead of time, which is what makes
 /// this a refusal rather than a fallback: a passphrase passed as an argument
@@ -254,20 +256,21 @@ pub fn accounts(count: usize) -> String {
 /// Both callers said the macOS half unconditionally: "on macOS a keychain item
 /// is filed under `$USER`, so one written under a different login name is still
 /// there." Off macOS there is no keychain and no filing under `$USER` — a
-/// Credential lives in a file inside the Profile (ADR 0020) — so the one
-/// sentence explaining where a Credential might still be pointed at a place
-/// that does not exist, on the two commands whose whole promise is that
-/// something is gone.
+/// Credential lives in a file inside the Profile
+/// (ADR claude-code-chooses-the-store) — so the one sentence explaining where a
+/// Credential might still be pointed at a place that does not exist, on the two
+/// commands whose whole promise is that something is gone.
 ///
 /// One function rather than a copy in each, because the two are answering the
 /// same question and the day a third store is added is the day the copies
 /// disagree.
 pub fn a_store_that_held_nothing(host: &dyn Host) -> &'static str {
     match host.platform() {
-        // Perch derives the keychain item's account name from `$USER` (ADR
-        // 0008), so a Profile written under one login name keeps its Credential
-        // where a Perch running under another will not look — which is the one
-        // way an empty store here is not the same as an empty Account.
+        // Perch derives the keychain item's account name from `$USER`
+        // (ADR claude-code-chooses-the-store), so a Profile written under one
+        // login name keeps its Credential where a Perch running under another
+        // will not look — which is the one way an empty store here is not the
+        // same as an empty Account.
         crate::host::Platform::MacOs => {
             "on macOS a keychain item is filed under `$USER`, so one written \
              under a different login name is still there"
@@ -307,11 +310,12 @@ pub fn refuse_a_quarantined_account(
 }
 
 /// What the Accounts in no Group are shown under. Being in no Group is not a
-/// Group (ADR 0017), so it is never a heading that reads like one.
+/// Group (ADR a-group-is-a-declaration), so it is never a heading that reads
+/// like one.
 pub const IN_NO_GROUP: &str = "In no Group";
 
 /// What Cycling will not do with the Accounts in no Group until it is told it
-/// may (ADR 0017), and then what it currently answers.
+/// may (ADR a-group-is-a-declaration), and then what it currently answers.
 ///
 /// The constant on its own prints the same words whether the declaration has
 /// been made or not, so the one Setting gating the whole Scope is not readable

@@ -1,21 +1,21 @@
 # A human performs, Perch judges, and attendance is never assumed
 
-> **Superseded by ADR 0041.** The removal landed in #148, so there is no Phase
-> left to attend and the rules below have no subject. Two of them are
-> worth more than the suite was and are
-> named in ADR 0041 as ideas deliberately released rather than overlooked: the
-> Preflight's figure, and the refusal to let a verdict be a keystroke. One thing
-> here is *not* repealed — `Host::is_interactive` survives untouched, because
-> `add`, `remove`, `purge`, `tui` and `upgrade` all use it. Left here as
-> written, because a future harness that asks a person to do anything will meet
-> both of these problems again.
+> **Superseded by ADR using-it-is-the-proof.** The removal landed in #148, so
+> there is no Phase left to attend and the rules below have no subject. Two of
+> them are worth more than the suite was and are named in
+> ADR using-it-is-the-proof as ideas deliberately released rather than
+> overlooked: the Preflight's figure, and the refusal to let a verdict be a
+> keystroke. One thing here is *not* repealed — `Host::is_interactive` survives
+> untouched, because `add`, `remove`, `purge`, `tui` and `upgrade` all use it.
+> Left here as written, because a future harness that asks a person to do
+> anything will meet both of these problems again.
 
-ADR 0037 left four things unproved and closed one of them. What is left needs a
-person: a browser round trip to log an Account in, a real Claude Code launched
-and then quit. Phase zero can already hand the terminal over — `repair` takes an
-`out` and calls `Perch::interactive` for each Quarantined Account — but a Phase
-cannot. Its signature is `fn(&Perch<'_>) -> Proof`: no writer, no reader, nothing
-to ask a question with.
+ADR the-binary-proves-its-surface left four things unproved and closed one of
+them. What is left needs a person: a browser round trip to log an Account in, a
+real Claude Code launched and then quit. Phase zero can already hand the
+terminal over — `repair` takes an `out` and calls `Perch::interactive` for each
+Quarantined Account — but a Phase cannot. Its signature is
+`fn(&Perch<'_>) -> Proof`: no writer, no reader, nothing to ask a question with.
 
 So the phases that are left are not a phase-writing exercise. They are a change
 to what a Phase *is*, and that change has two halves worth writing down, because
@@ -29,9 +29,9 @@ against a Profile, wait, and ask: *does it say `alice@example.com`? [y/N]*.
 It is refused. A verdict that is a keystroke cannot be told apart from a `y`
 typed to get out of the way, on the fourth browser round trip, at eleven at
 night — and it is precisely the fourth round trip at eleven at night that a
-suite like this is run on. A suite whose red can be typed away is the suite ADR
-0037 describes as having its red ignored within a month, arrived at from the
-other direction.
+suite like this is run on. A suite whose red can be typed away is the suite
+ADR the-binary-proves-its-surface describes as having its red ignored within a
+month, arrived at from the other direction.
 
 It is also unnecessary, which is what makes refusing it cheap. Nearly everything
 a person would lean in and check is on disk by the time they would check it: the
@@ -82,8 +82,8 @@ hang.
 
 ## What it costs: the figure becomes a ceiling
 
-The Preflight's figure is the sentence ADR 0037 built the Preflight around, and
-this weakens it. It is worth being exact about how.
+The Preflight's figure is the sentence ADR the-binary-proves-its-surface built
+the Preflight around, and this weakens it. It is worth being exact about how.
 
 A Renewal only reaches Anthropic when the access token has actually run out —
 `renew_under_the_lock` hands back the stored token untouched where
@@ -91,7 +91,8 @@ A Renewal only reaches Anthropic when the access token has actually run out —
 decide when it runs, and its gate is "is this Account's token stale?", which
 `Needs` cannot express: the registry holds identity, plan, quarantine, group and
 cached Utilization, and expiry is not among them. It lives on the Credential, in
-the Credential Store, which on macOS is a `security` call per Account (ADR 0008).
+the Credential Store, which on macOS is a `security` call per Account
+(ADR claude-code-chooses-the-store).
 
 Computing the gate in the Preflight would make the figure exact and open every
 run on a Mac with a row of keychain prompts, before anything has been proved.

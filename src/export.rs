@@ -1,4 +1,4 @@
-//! Everything Perch holds, as one `age` file (ADR 0014).
+//! Everything Perch holds, as one `age` file (ADR the-holdings-go-out-sealed).
 //!
 //! Two halves, and they are separate on purpose. **Gathering** reads the
 //! registry and every Credential out of the stores they live in — an effect,
@@ -42,8 +42,9 @@ pub const CURRENT_VERSION: u32 = 1;
 /// opens is a question about the pair of machines it traveled between. An
 /// Export written on a desktop and carried to a laptop, or opened inside a
 /// container with less CPU than the one that wrote it, was refused on that
-/// alone. ADR 0014 wants this file to outlive the machine that wrote it, and it
-/// cannot do that while what opens it depends on the machine that opens it.
+/// alone. ADR the-holdings-go-out-sealed wants this file to outlive the machine
+/// that wrote it, and it cannot do that while what opens it depends on the
+/// machine that opens it.
 ///
 /// 22 is where `age`'s own guidance tops out, and is comfortably above
 /// [`WORK_FACTOR`], since 2^22 scrypt rounds want four gigabytes to themselves.
@@ -100,8 +101,9 @@ pub struct Export {
     /// can honestly write — and a *missing* key is a document that never said
     /// anything about Credentials at all. Defaulted, it unsealed happily,
     /// `place` put nothing anywhere, and the Import reported every Account
-    /// "restored without one" and exited 0: the partial restore ADR 0014 exists
-    /// to prevent, wearing a success's clothes.
+    /// "restored without one" and exited 0: the partial restore
+    /// ADR the-holdings-go-out-sealed exists to prevent, wearing a success's
+    /// clothes.
     pub credentials: BTreeMap<String, String>,
     /// Each Account's own `.claude.json`, by the address of the Account it
     /// belongs to.
@@ -111,9 +113,10 @@ pub struct Export {
     /// Claude Code writes an `oauthAccount` block carrying fields beyond the
     /// four the registry records, and a Switch prefers that block verbatim over
     /// one Perch composes. An Export without it restores every Account into the
-    /// degraded state [`crate::adopt`] goes out of its way to keep the first one
-    /// out of. It is also what a Run Carries from, so a Profile arriving without
-    /// one meets the onboarding dialog on every single Run (ADR 0003).
+    /// degraded state [`crate::adopt`] goes out of its way to keep the first
+    /// one out of. It is also what a Run Carries from, so a Profile arriving
+    /// without one meets the onboarding dialog on every single Run
+    /// (ADR everything-but-the-account).
     #[serde(default)]
     pub identity_files: BTreeMap<String, String>,
 }
@@ -205,12 +208,13 @@ pub fn gather(host: &dyn Host, registry: &Registry) -> Result<Export> {
 ///
 /// For the active Account the live Credential is in the Default Profile, and it
 /// is ahead of the copy in its own Profile — which only catches up when a
-/// Switch away Captures it (ADR 0006). A Renewal Rotates the live copy and
-/// Anthropic retires the refresh token it replaced, so reading the Profile copy
-/// for the one Account the user is actually working in wrote the single token
-/// in the file most likely to be dead already. `perch watcher run` Renews that
-/// Account every few minutes, which makes it the ordinary case rather than the
-/// unlucky one, and the user would find out on the day they needed it.
+/// Switch away Captures it (ADR a-switch-is-written-down-first). A Renewal
+/// Rotates the live copy and Anthropic retires the refresh token it replaced,
+/// so reading the Profile copy for the one Account the user is actually working
+/// in wrote the single token in the file most likely to be dead already.
+/// `perch watcher run` Renews that Account every few minutes, which makes it
+/// the ordinary case rather than the unlucky one, and the user would find out
+/// on the day they needed it.
 ///
 /// The live copy is only taken on the evidence [`crate::switch::capture`]
 /// requires before it copies that same Credential anywhere: the Default
@@ -240,13 +244,13 @@ fn the_live_store(
     account: &Account,
 ) -> Result<Option<crate::probe::Store>> {
     // A *settled* registry, rather than `is_active`, which answers a Landing
-    // with the Account being **left** (ADR 0048). A Switch killed between
-    // storing the arriving Credential and patching the Identity leaves exactly
-    // that state, and `is_active` then said yes for the leaving Account while
-    // the live store held the arriving one's Credential — so the Export filed
-    // one Account's refresh token under the other's address and dropped the
-    // genuine copy of it. Restoring that gives two Accounts one token, and the
-    // first Renewal Rotates it and kills the other.
+    // with the Account being **left** (ADR a-switch-is-written-down-first). A
+    // Switch killed between storing the arriving Credential and patching the
+    // Identity leaves exactly that state, and `is_active` then said yes for the
+    // leaving Account while the live store held the arriving one's Credential —
+    // so the Export filed one Account's refresh token under the other's address
+    // and dropped the genuine copy of it. Restoring that gives two Accounts one
+    // token, and the first Renewal Rotates it and kills the other.
     //
     // Every command that acts on the live Credential settles a Landing before
     // reading who is active, and `perch holdings export` now does too. This is
@@ -311,14 +315,15 @@ impl Export {
 
     /// The Credential this Export carries for one Account, if it carries one.
     ///
-    /// Keyed the way an address is compared everywhere else — `registry::same_name`
-    /// folds case — rather than by the `BTreeMap` lookup the key type offers.
-    /// An Export is a file a person may write themselves with `age -a -p` (ADR
-    /// 0014), and one keying a credential `ONE@example.com` beside an account
-    /// entry `one@example.com` is one where the two halves of an Import
-    /// disagreed: placement found the Credential and put it down, and the report
-    /// afterwards said the Account had been "restored without one" and sent its
-    /// owner to `perch relogin` for an Account that was fine.
+    /// Keyed the way an address is compared everywhere else —
+    /// `registry::same_name` folds case — rather than by the `BTreeMap` lookup
+    /// the key type offers. An Export is a file a person may write themselves
+    /// with `age -a -p` (ADR the-holdings-go-out-sealed), and one keying a
+    /// credential `ONE@example.com` beside an account entry `one@example.com`
+    /// is one where the two halves of an Import disagreed: placement found the
+    /// Credential and put it down, and the report afterwards said the Account
+    /// had been "restored without one" and sent its owner to `perch relogin`
+    /// for an Account that was fine.
     ///
     /// Here rather than at either caller, because the disagreement was the two
     /// of them asking the same question two ways.
@@ -354,13 +359,13 @@ fn by_name<'a>(held: &'a BTreeMap<String, String>, email: &str) -> Option<&'a St
 
 /// The `age` file, as the text that goes in it.
 ///
-/// **`age`, taken as a crate** (ADR 0025): encryption sits on neither of Perch's
-/// seams — it is not an effect the Host port carries, and it is not shared with
-/// Claude Code, so nothing here has to be bug-compatible with anything. What
-/// decided it is that the result can be decrypted by the standard `age` command:
-/// this file is meant to outlive the machine it was written on, and one readable
-/// only by the tool that wrote it is a worse backup than one whose format
-/// somebody else maintains.
+/// **`age`, taken as a crate** (ADR a-crate-must-not-cost-a-seam): encryption
+/// sits on neither of Perch's seams — it is not an effect the Host port
+/// carries, and it is not shared with Claude Code, so nothing here has to be
+/// bug-compatible with anything. What decided it is that the result can be
+/// decrypted by the standard `age` command: this file is meant to outlive the
+/// machine it was written on, and one readable only by the tool that wrote it
+/// is a worse backup than one whose format somebody else maintains.
 ///
 /// **Armored**, which is `age`'s own text encoding of the same file and is read
 /// back by the same `age -d`. Two things fall out of it and both are wanted: the
@@ -457,12 +462,12 @@ pub fn unseal(sealed: &str, passphrase: &str) -> Result<Export> {
     // *decryption* — about a second of work here, plus four doublings. So an
     // Export written on a fast desktop and opened on a slow laptop, or inside a
     // CPU-limited container, was refused for no reason but the pair of machines
-    // it traveled between. That is the one property ADR 0014 is about: this
-    // file is meant to outlive the machine that wrote it, so what will open it
-    // cannot be a function of the machine that opens it. 22 is where `age`'s own
-    // guidance tops out, and is above `WORK_FACTOR`, which is what `seal`
-    // spends — pinned there for the same reason, and for the floor `age`'s
-    // calibration does not have.
+    // it traveled between. That is the one property
+    // ADR the-holdings-go-out-sealed is about: this file is meant to outlive
+    // the machine that wrote it, so what will open it cannot be a function of
+    // the machine that opens it. 22 is where `age`'s own guidance tops out, and
+    // is above `WORK_FACTOR`, which is what `seal` spends — pinned there for
+    // the same reason, and for the floor `age`'s calibration does not have.
     identity.set_max_work_factor(MAX_WORK_FACTOR);
 
     // The same buffer coming the other way, and wiped for the same reason.
@@ -834,9 +839,10 @@ mod tests {
         );
     }
 
-    /// A forgotten passphrase means the Export is gone, and re-login is the only
-    /// path back — the trade ADR 0014 made deliberately. What matters here is
-    /// that it is *said* rather than reported as a corrupt file.
+    /// A forgotten passphrase means the Export is gone, and re-login is the
+    /// only path back — the trade ADR the-holdings-go-out-sealed made
+    /// deliberately. What matters here is that it is *said* rather than
+    /// reported as a corrupt file.
     #[test]
     fn the_wrong_passphrase_opens_nothing_and_says_which_failure_it_is() {
         let sealed = seal(&an_export(), PASSPHRASE).expect("it seals");

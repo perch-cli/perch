@@ -13,10 +13,10 @@
 //!
 //! What the pair says is what it changed, and nothing about what a disabled
 //! Account still is: that promise holds after every run of either command, so
-//! it is the guide's to make once (ADR 0061). The exception is a Quarantined
-//! Account, which is promised nothing — its Credential does not work whatever
-//! the Cycling pool says, and being told it was enabled without being told that
-//! is being told the smaller half.
+//! it is the guide's to make once (ADR perch-says-what-it-did). The exception
+//! is a Quarantined Account, which is promised nothing — its Credential does
+//! not work whatever the Cycling pool says, and being told it was enabled
+//! without being told that is being told the smaller half.
 
 use std::io::Write;
 
@@ -88,7 +88,8 @@ fn set(registry: &mut Registry, target: &AccountTarget, command: &EnableCommand)
 /// Nothing is said about an Account that is not Quarantined. What Cycling does
 /// with a disabled Account, and that a disabled one stays listed and named, are
 /// true after every single run of these two commands — which is what makes them
-/// the guide's to establish rather than the command's to repeat (ADR 0061).
+/// the guide's to establish rather than the command's to repeat
+/// (ADR perch-says-what-it-did).
 fn what_the_quarantine_still_denies(quarantine: Option<Quarantine>, target: &str) -> String {
     match quarantine {
         Some(why) => format!(

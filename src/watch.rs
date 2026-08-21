@@ -1,24 +1,26 @@
 //! The watcher's round: what it read, what it decided, and why it said so.
 //!
-//! `perch watcher run` is a loop in a terminal, not a daemon (ADR 0013).
-//! Everything that follows from that is here: how often it asks, what it asks
-//! about, and the one line it prints for every answer — including the answers
-//! where nothing happens, which are most of them.
+//! `perch watcher run` is a loop in a terminal, not a daemon
+//! (ADR a-watcher-knob-is-arithmetic). Everything that follows from that is
+//! here: how often it asks, what it asks about, and the one line it prints for
+//! every answer — including the answers where nothing happens, which are most
+//! of them.
 //!
 //! The decision log is the whole of the evidence that the policy works. It is
 //! what makes "why did it switch just then" answerable without reading the
 //! source, so a line names the figure that was read and what was decided about
 //! it — in that order, every time.
 //!
-//! What follows the figure is where ADR 0061 cut. `waiting` and `switched` are
-//! the loop doing what the opening line said it would do, so they stop there:
-//! the threshold is the header's to declare once, and a verdict the status word
-//! already gives is a verdict said twice. `cooling`, `nowhere`, `held` and
-//! `refused` are refusals — nothing happened, and the reader cannot see why —
-//! so they keep their sentence whole, which is ADR 0036 preserved rather than
-//! disturbed. A rotated logfile is what a daemon needs because nobody is
-//! watching; this is a loop somebody is watching, so it goes to standard output
-//! and redirection is their call.
+//! What follows the figure is where ADR perch-says-what-it-did cut. `waiting`
+//! and `switched` are the loop doing what the opening line said it would do, so
+//! they stop there: the threshold is the header's to declare once, and a
+//! verdict the status word already gives is a verdict said twice. `cooling`,
+//! `nowhere`, `held` and `refused` are refusals — nothing happened, and the
+//! reader cannot see why — so they keep their sentence whole, which is
+//! ADR a-refusal-is-a-promise preserved rather than disturbed. A rotated
+//! logfile is what a daemon needs because nobody is watching; this is a loop
+//! somebody is watching, so it goes to standard output and redirection is their
+//! call.
 //!
 //! Nothing here reaches the network or the filesystem. What a round *does* is
 //! [`crate::commands::watch`]'s; what a round *means* is here, where it can be
@@ -33,15 +35,16 @@ use crate::switch::NotIdle;
 /// How long the watcher waits between Refreshing the Account it is on.
 ///
 /// Anthropic's usage endpoint allows roughly 28-30 reads an hour per Account
-/// (ADR 0015). Two and a half minutes is twenty-four of them, which leaves room
-/// for the `perch status --refresh` somebody types while the watcher is running
-/// rather than spending the whole allowance on the loop and having the user's
-/// own question refused.
+/// (ADR a-figure-carries-its-age). Two and a half minutes is twenty-four of
+/// them, which leaves room for the `perch status --refresh` somebody types
+/// while the watcher is running rather than spending the whole allowance on the
+/// loop and having the user's own question refused.
 ///
 /// It is the Refresh of **one** Account, and the case for that is the same
 /// arithmetic read the other way: at twenty-four an hour each, a Group of two
 /// would already be at the limit and a Group of four past it. Said here,
-/// because this is the number it is the reason for (ADR 0013).
+/// because this is the number it is the reason for
+/// (ADR a-watcher-knob-is-arithmetic).
 pub const REFRESH_INTERVAL_MILLIS: u64 = 150_000;
 
 /// The longest the loop will leave between two Refreshes, however long a
@@ -53,7 +56,8 @@ pub const REFRESH_INTERVAL_MILLIS: u64 = 150_000;
 /// the only way the watcher finds out is by asking: a loop that had backed off
 /// to an hour would come back long after the crossing it was left running for.
 /// Twenty minutes is the order of thing a five-hour window forgives — fifteen
-/// is what the cooldown was set at on the same reasoning (ADR 0013).
+/// is what the cooldown was set at on the same reasoning
+/// (ADR a-watcher-knob-is-arithmetic).
 pub const LONGEST_WAIT_MILLIS: u64 = REFRESH_INTERVAL_MILLIS * 8;
 
 /// How often that is, for the line that says what the loop is about to do.
@@ -152,19 +156,19 @@ impl Backoff {
 /// An hour, which is twenty-four ordinary rounds. Long enough that a hold
 /// lasting a working day is twenty-odd lines rather than a thousand, and short
 /// enough that a log opened at any point has recent evidence the watcher is
-/// still awake (ADR 0040).
+/// still awake (ADR the-machine-runs-the-watcher).
 pub const STILL_HOLDING_MILLIS: i64 = 3_600_000;
 
 /// What to say about a hold, given what has already been said about it.
 ///
-/// ADR 0013 had every held round say which failure held it, and a hold whose
-/// line said neither that nor when it would ask again "reads as a watcher that
-/// has given up". That was written about a person watching a terminal, where the
-/// repeated line *is* the proof of life. A Service writes to a log nobody reads
-/// until something is wrong, and a permission hold repeats until somebody
-/// changes a setting — possibly for weeks. At one line every two and a half
-/// minutes, what five hundred and seventy-six identical lines a day bury is the
-/// one line that matters.
+/// ADR a-watcher-knob-is-arithmetic had every held round say which failure held
+/// it, and a hold whose line said neither that nor when it would ask again
+/// "reads as a watcher that has given up". That was written about a person
+/// watching a terminal, where the repeated line *is* the proof of life. A
+/// Service writes to a log nobody reads until something is wrong, and a
+/// permission hold repeats until somebody changes a setting — possibly for
+/// weeks. At one line every two and a half minutes, what five hundred and
+/// seventy-six identical lines a day bury is the one line that matters.
 ///
 /// So the proof of life moves from repetition to duration: a hold says itself in
 /// full when it starts, says how long it has been going once an hour, and says
@@ -195,8 +199,8 @@ pub struct Holding {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Said {
     /// What is holding it, and when it said it would ask again — both, because
-    /// both are what ADR 0013 requires a held line to carry, and a hold that has
-    /// changed either of them has changed.
+    /// both are what ADR a-watcher-knob-is-arithmetic requires a held line to
+    /// carry, and a hold that has changed either of them has changed.
     ///
     /// The interval is in here rather than left out as an implementation
     /// detail, and it is the whole reason this is a pair. Keyed on the reason
@@ -287,11 +291,11 @@ impl Holding {
     /// or `None` where there was nothing to end, or where nothing went unsaid
     /// under it.
     ///
-    /// The way out is always said, which is the half of ADR 0013's rule that
-    /// survives untouched: the ordinary decision line prints whatever this round
-    /// decided, and this adds what the silence before it was. A hold that never
-    /// suppressed a line needs no such sentence — every round of it is already
-    /// in the log.
+    /// The way out is always said, which is the half of
+    /// ADR a-watcher-knob-is-arithmetic's rule that survives untouched: the
+    /// ordinary decision line prints whatever this round decided, and this adds
+    /// what the silence before it was. A hold that never suppressed a line
+    /// needs no such sentence — every round of it is already in the log.
     pub fn released(&mut self, now: DateTime<Utc>) -> Option<Duration> {
         let said = self.said.take()?;
         match said.suppressed {
@@ -335,7 +339,8 @@ fn for_how_long(span: Duration) -> String {
     }
 }
 
-/// The least wall-clock the watcher leaves between two Switches (ADR 0046).
+/// The least wall-clock the watcher leaves between two Switches
+/// (ADR a-watcher-knob-is-arithmetic).
 ///
 /// A constant rather than a Setting, on the same test [`REFRESH_INTERVAL_MILLIS`]
 /// is a constant by: a five-hour window moves slowly enough that fifteen minutes
@@ -347,7 +352,7 @@ fn for_how_long(span: Duration) -> String {
 pub const COOLDOWN_MINUTES: u32 = 15;
 
 /// How far under the threshold a candidate has to sit before moving to it is
-/// worth doing, in percentage points (ADR 0046).
+/// worth doing, in percentage points (ADR a-watcher-knob-is-arithmetic).
 ///
 /// Relative to the threshold rather than an absolute figure, so it tracks the
 /// threshold as it changes: "10 points under" still means something once
@@ -361,7 +366,8 @@ pub const COOLDOWN_MINUTES: u32 = 15;
 /// threshold would be full enough to leave and clear enough to arrive at.
 pub const MARGIN_PERCENT: u8 = 10;
 
-/// The rule a Group gives the watcher for Switching within it (ADR 0046).
+/// The rule a Group gives the watcher for Switching within it
+/// (ADR a-watcher-knob-is-arithmetic).
 ///
 /// One number, because only one of the watcher's four pacing questions turned
 /// out to be anyone's: *when* a move is wanted. How often one may happen and how
@@ -408,7 +414,8 @@ impl Policy {
 /// A function rather than a method on [`Policy`], because it takes nothing from
 /// one: a `cooldown()` that never touched the Policy it was asked of would have
 /// two callers threading a Policy through to reach a constant, which is the
-/// dead parameter ADR 0046 has just finished removing four of.
+/// dead parameter ADR a-watcher-knob-is-arithmetic has just finished removing
+/// four of.
 pub fn cooldown() -> Duration {
     Duration::minutes(i64::from(COOLDOWN_MINUTES))
 }
@@ -417,9 +424,9 @@ pub fn cooldown() -> Duration {
 ///
 /// One window rather than all of them, and always the fullest: being blocked by
 /// any window blocks you completely, so the fullest is the one that decides
-/// when the Account stops being usable (ADR 0012). It is the same window the
-/// Cycle ranks candidates on, which is what stops the watcher acting on one
-/// measure and choosing on another.
+/// when the Account stops being usable (ADR headroom-is-the-worst-window). It
+/// is the same window the Cycle ranks candidates on, which is what stops the
+/// watcher acting on one measure and choosing on another.
 ///
 /// It is a [`WindowUtilization`](crate::registry::WindowUtilization) with the
 /// reset time taken off rather than the window itself, and deliberately: a
@@ -471,12 +478,13 @@ impl Fullest {
     /// Worded against the threshold it is being judged by, so the figure and
     /// the status word cannot disagree.
     ///
-    /// The threshold no longer appears on the line (ADR 0061), and the widening
-    /// [`percentage_against`] still earns its place: the contradiction
-    /// simply moved a line up. `waiting  80% used` under a header declaring
-    /// "when its fullest Quota Window reaches 80%" is the same flat
-    /// self-contradiction as `80% used … threshold 80% — under it` was, read
-    /// against the one place the threshold is now said.
+    /// The threshold no longer appears on the line
+    /// (ADR perch-says-what-it-did), and the widening [`percentage_against`]
+    /// still earns its place: the contradiction simply moved a line up.
+    /// `waiting  80% used` under a header declaring "when its fullest Quota
+    /// Window reaches 80%" is the same flat self-contradiction as
+    /// `80% used … threshold 80% — under it` was, read against the one place
+    /// the threshold is now said.
     ///
     /// [`percentage_against`]: crate::utilization::percentage_against
     fn as_a_clause(&self, threshold: u8) -> String {
@@ -492,28 +500,32 @@ impl Fullest {
 /// enough that moving off it is wanted.
 ///
 /// Not a witness — it carries the figure, which is the thing a witness by
-/// definition does not do (ADR 0055). It is what [`Fullest::crossed`] answers
-/// with, and the only thing a [`Cooled`] can be earned from. The figure travels
-/// inside it because everything after the crossing quotes that number, and a
-/// second copy read from somewhere else is a second copy that can disagree.
+/// definition does not do (ADR an-ordering-is-a-type). It is what
+/// [`Fullest::crossed`] answers with, and the only thing a [`Cooled`] can be
+/// earned from. The figure travels inside it because everything after the
+/// crossing quotes that number, and a second copy read from somewhere else is a
+/// second copy that can disagree.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Crossed {
     fullest: Fullest,
 }
 
-/// Why nothing may move yet, though the Threshold was crossed (ADR 0046).
+/// Why nothing may move yet, though the Threshold was crossed
+/// (ADR a-watcher-knob-is-arithmetic).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cooling {
     pub why: String,
 }
 
-/// A crossing whose Cooldown is spent, so this round may Switch (ADR 0046).
+/// A crossing whose Cooldown is spent, so this round may Switch
+/// (ADR a-watcher-knob-is-arithmetic).
 ///
 /// A witness on the terms [`switch::Settled`](crate::switch::Settled) sets out
-/// (ADR 0055), with the one thing in it the ask established: it borrows the
-/// [`Crossed`] it was earned from, so it is proof about *that* crossing and
-/// cannot outlive it. The one funnel that produces candidate addresses takes
-/// one, so reading a candidate inside a Cooldown does not compile.
+/// (ADR an-ordering-is-a-type), with the one thing in it the ask established:
+/// it borrows the [`Crossed`] it was earned from, so it is proof about *that*
+/// crossing and cannot outlive it. The one funnel that produces candidate
+/// addresses takes one, so reading a candidate inside a Cooldown does not
+/// compile.
 #[derive(Debug)]
 pub struct Cooled<'a>(&'a Crossed);
 
@@ -554,13 +566,13 @@ impl Cooled<'_> {
 /// The one thing carried from one round to the next: when the watcher last
 /// Switched.
 ///
-/// Where it is carried is the loop's and the check's one difference (ADR 0013).
-/// The loop keeps it in memory and nowhere else, which is the whole of why
-/// `perch watcher run` still "writes no file of its own": a cooldown is about
-/// the loop somebody is running, not about the machine, and two watchers would
-/// be two people watching with one pacing the other's decisions. Stopping the
-/// loop and starting it again is a person saying "go on then", and it starts
-/// with nothing to wait for.
+/// Where it is carried is the loop's and the check's one difference
+/// (ADR a-watcher-knob-is-arithmetic). The loop keeps it in memory and nowhere
+/// else, which is the whole of why `perch watcher run` still "writes no file of
+/// its own": a cooldown is about the loop somebody is running, not about the
+/// machine, and two watchers would be two people watching with one pacing the
+/// other's decisions. Stopping the loop and starting it again is a person
+/// saying "go on then", and it starts with nothing to wait for.
 ///
 /// A `perch watcher check` is a fresh process every time and the sequence of
 /// them is the watcher, so there is no memory for it to be carried in and it
@@ -687,12 +699,13 @@ pub struct Considered {
 /// saying why.
 ///
 /// The margin is what refuses a destination nearly as full as the Account being
-/// left (ADR 0046): at an 80% threshold nothing is moved to unless it is at 70%
-/// or better. Two Accounts do not trade places — usage climbs on the one you are
-/// on and stands still on the ones you are not, so without the margin they walk
-/// upward together and every move lands you somewhere with almost nothing left.
-/// Setting the candidate aside turns that round into `Exhausted` instead, which
-/// is the true answer: there is nowhere better to go.
+/// left (ADR a-watcher-knob-is-arithmetic): at an 80% threshold nothing is
+/// moved to unless it is at 70% or better. Two Accounts do not trade places —
+/// usage climbs on the one you are on and stands still on the ones you are not,
+/// so without the margin they walk upward together and every move lands you
+/// somewhere with almost nothing left. Setting the candidate aside turns that
+/// round into `Exhausted` instead, which is the true answer: there is nowhere
+/// better to go.
 ///
 /// It is applied by setting candidates aside rather than by second guessing the
 /// winner, because the Strategy is entitled to rank whatever clears the bar — a
@@ -770,10 +783,11 @@ pub enum Outcome {
     Cooling { why: String },
     /// It was, and this is where it went.
     ///
-    /// The Account by name and nothing else about the ranking (ADR 0061). Where
-    /// it landed is the one thing about a Switch nobody could have predicted;
-    /// *why that Account won* is an answer to a question nobody asked, on a
-    /// line printed every couple of minutes for as long as the loop runs.
+    /// The Account by name and nothing else about the ranking
+    /// (ADR perch-says-what-it-did). Where it landed is the one thing about a
+    /// Switch nobody could have predicted; *why that Account won* is an answer
+    /// to a question nobody asked, on a line printed every couple of minutes
+    /// for as long as the loop runs.
     ///
     /// #223 shortened the Cycle's sentence for it — `overflow@example.com has
     /// the most room.`, down from thirty words — and shortening was not the
@@ -792,7 +806,8 @@ pub enum Outcome {
     Nowhere { why: String },
     /// The figures could not be read, so nothing was decided on the ones Perch
     /// already had. A Switch made on a cached figure is a Switch the user could
-    /// have made themselves without leaving a process running (ADR 0013).
+    /// have made themselves without leaving a process running
+    /// (ADR a-watcher-knob-is-arithmetic).
     ///
     /// The only outcome that carries how long the loop then waits, because it
     /// is the only one where that is not the ordinary interval — and a hold
@@ -809,8 +824,9 @@ pub enum Outcome {
     },
     /// A Switch was wanted, was attempted, and was turned away without
     /// changing anything — a client running against the Profile the Capture
-    /// would write into, most often (ADR 0027). Distinct from a dead end,
-    /// because this one is about the machine rather than about the quota.
+    /// would write into, most often (ADR a-profile-is-live-by-evidence).
+    /// Distinct from a dead end, because this one is about the machine rather
+    /// than about the quota.
     ///
     /// Only where waiting is an answer: a client that will exit, or an Account
     /// this round found unusable and Quarantined, which the next round passes
@@ -821,7 +837,8 @@ pub enum Outcome {
 }
 
 impl Outcome {
-    /// What a single check reports to whatever scheduled it (ADR 0013).
+    /// What a single check reports to whatever scheduled it
+    /// (ADR a-watcher-knob-is-arithmetic).
     ///
     /// The existing table rather than a code per outcome: a scheduler branches
     /// on what it can do about the answer, and three of the six outcomes leave
@@ -861,7 +878,7 @@ impl Outcome {
 }
 
 /// What a round makes of a liveness ask that did not come back Idle: an outcome
-/// it can report, or a failure it has to raise (ADR 0055).
+/// it can report, or a failure it has to raise (ADR an-ordering-is-a-type).
 ///
 /// Every variant answered by name, with no catch-all — a fourth way for the ask
 /// to fail breaks the build here until the round says which of the two it is.
@@ -894,15 +911,16 @@ pub struct Round {
     /// failed, which is the whole of why nothing was decided.
     ///
     /// Which Account is not held here and is not on the line. It is the active
-    /// one and only ever the active one (ADR 0013), the opening line names it,
-    /// and every `switched` line names the one it changed to — so a round
-    /// repeating it was the log restating what the two lines around it had
-    /// already established (ADR 0061).
+    /// one and only ever the active one (ADR a-watcher-knob-is-arithmetic), the
+    /// opening line names it, and every `switched` line names the one it
+    /// changed to — so a round repeating it was the log restating what the two
+    /// lines around it had already established (ADR perch-says-what-it-did).
     pub fullest: Option<Fullest>,
     /// The Group's `watcher-threshold-percent`. No longer quoted on the line —
     /// the opening the loop prints declares it once, and it does not change
-    /// within a run (ADR 0061) — but still carried, because it is what the
-    /// figure beside it is worded against: see [`Fullest::as_a_clause`].
+    /// within a run (ADR perch-says-what-it-did) — but still carried, because
+    /// it is what the figure beside it is worded against: see
+    /// [`Fullest::as_a_clause`].
     pub threshold: u8,
     pub outcome: Outcome,
 }
@@ -939,10 +957,11 @@ impl Round {
 
     /// What held this round, or `None` where it decided something.
     ///
-    /// What the loop keys its coalescing on (ADR 0040): two consecutive rounds
-    /// held by the same thing are one hold, and the second of them is not worth
-    /// a line. Read off the outcome rather than kept beside it, so the reason
-    /// that is compared is the reason that would have been printed.
+    /// What the loop keys its coalescing on (ADR the-machine-runs-the-watcher):
+    /// two consecutive rounds held by the same thing are one hold, and the
+    /// second of them is not worth a line. Read off the outcome rather than
+    /// kept beside it, so the reason that is compared is the reason that would
+    /// have been printed.
     pub fn held_because(&self) -> Option<&str> {
         match &self.outcome {
             Outcome::Held { why, .. } => Some(why),
@@ -958,7 +977,7 @@ impl Round {
     ///
     /// The stamp, the word it is read by, the figure it was decided on — and
     /// then whatever this particular round has that the header did not already
-    /// say. For most rounds that is nothing (ADR 0061).
+    /// say. For most rounds that is nothing (ADR perch-says-what-it-did).
     ///
     /// The stamp stays a whole RFC 3339 instant rather than a wall clock. The
     /// guide's own scheduled setup appends every `perch watcher check` to one
@@ -988,12 +1007,12 @@ impl Round {
 
     /// What this round has to add to the figure, and for most rounds nothing.
     ///
-    /// The split ADR 0061 drew. A `waiting` round is the loop finding the
-    /// ordinary case and the status word has already said so; a `switched`
-    /// round adds where it went, which is the one thing about it nobody could
-    /// have predicted. The four refusals add their whole sentence, because
-    /// nothing happened and the next step is not obvious from the fact that
-    /// nothing did.
+    /// The split ADR perch-says-what-it-did drew. A `waiting` round is the loop
+    /// finding the ordinary case and the status word has already said so; a
+    /// `switched` round adds where it went, which is the one thing about it
+    /// nobody could have predicted. The four refusals add their whole sentence,
+    /// because nothing happened and the next step is not obvious from the fact
+    /// that nothing did.
     ///
     /// The em dash is the mark of the second kind: prose follows it, and it is
     /// on a line only where something other than the ordinary happened.
@@ -1097,7 +1116,7 @@ mod tests {
 
     /// The whole of what the coalescing is for: a hold that repeats says itself
     /// once, and the rounds that follow it are silence rather than five hundred
-    /// identical lines a day (ADR 0040).
+    /// identical lines a day (ADR the-machine-runs-the-watcher).
     #[test]
     fn a_hold_that_has_not_changed_is_said_once_rather_than_every_round() {
         let mut holding = Holding::nothing();
@@ -1265,10 +1284,10 @@ mod tests {
         }
     }
 
-    /// **ADR 0061.** The threshold is the header's to declare, once, and it does
-    /// not change within a run. Repeating it on every round put it on the log
-    /// five hundred times a day beside a figure that was the only thing
-    /// differing between two consecutive lines.
+    /// **ADR perch-says-what-it-did.** The threshold is the header's to
+    /// declare, once, and it does not change within a run. Repeating it on
+    /// every round put it on the log five hundred times a day beside a figure
+    /// that was the only thing differing between two consecutive lines.
     #[test]
     fn no_round_line_quotes_the_threshold() {
         for decision in one_of_each_outcome() {
@@ -1285,9 +1304,10 @@ mod tests {
         );
     }
 
-    /// **ADR 0061**, the other half. `waiting` and `switched` are the loop doing
-    /// what the header said it would do, so they stop at the figure: no verdict
-    /// clause, and no argument for a ranking nobody questioned.
+    /// **ADR perch-says-what-it-did**, the other half. `waiting` and `switched`
+    /// are the loop doing what the header said it would do, so they stop at the
+    /// figure: no verdict clause, and no argument for a ranking nobody
+    /// questioned.
     #[test]
     fn the_two_predictable_outcomes_are_data_and_stop_at_the_figure() {
         assert_eq!(
@@ -1336,10 +1356,11 @@ mod tests {
         assert!(!line.contains('\n'), "{line}");
     }
 
-    /// The refusals keep their prose whole (ADR 0036): nothing happened, and a
-    /// reader who cannot see why is a reader watching a Watcher that appears to
-    /// have given up. Three of the four here; `held` is the one with tests of
-    /// its own, because it is the one that also says when it will ask again.
+    /// The refusals keep their prose whole (ADR a-refusal-is-a-promise):
+    /// nothing happened, and a reader who cannot see why is a reader watching a
+    /// Watcher that appears to have given up. Three of the four here; `held` is
+    /// the one with tests of its own, because it is the one that also says when
+    /// it will ask again.
     #[test]
     fn every_refusal_still_says_what_is_holding_it() {
         let cooling = round(
@@ -1473,7 +1494,8 @@ mod tests {
     }
 
     /// What a check reports to whatever scheduled it, over every outcome there
-    /// is: five codes, four of them the table's already (ADR 0013).
+    /// is: five codes, four of them the table's already
+    /// (ADR a-watcher-knob-is-arithmetic).
     ///
     /// Written as a match rather than a list, so an outcome added later cannot
     /// reach a scheduler without somebody deciding what it means to one — and
@@ -1702,7 +1724,8 @@ mod tests {
         crate::registry::Scope::Group("work".to_string())
     }
 
-    /// The Group's default, and the two constants read off it (ADR 0046).
+    /// The Group's default, and the two constants read off it
+    /// (ADR a-watcher-knob-is-arithmetic).
     #[test]
     fn the_default_policy_moves_you_at_eighty_and_only_onto_seventy_or_better() {
         let policy = policy();
@@ -1895,10 +1918,10 @@ mod tests {
         assert_eq!(crossed.fullest().window, "5-hour");
     }
 
-    /// The Cooldown is asked of the crossing, and a crossing inside one earns no
-    /// [`Cooled`] — which is what the candidates are read behind. A round that
-    /// may not act spends nothing finding out where it would have gone (ADR
-    /// 0046).
+    /// The Cooldown is asked of the crossing, and a crossing inside one earns
+    /// no [`Cooled`] — which is what the candidates are read behind. A round
+    /// that may not act spends nothing finding out where it would have gone
+    /// (ADR a-watcher-knob-is-arithmetic).
     #[test]
     fn a_crossing_inside_the_cooldown_is_not_cooled_and_says_which_rule_held_it() {
         let crossed = at(86.0).unwrap().crossed(80).unwrap();

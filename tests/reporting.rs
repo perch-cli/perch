@@ -128,11 +128,12 @@ fn json_carries_an_observation_time_on_every_utilization_figure() {
 }
 
 /// A machine mid-Landing is indistinguishable from a healthy one, which is half
-/// of why the hazard survived: nobody looks (ADR 0048). So status says a Switch
-/// was in flight and not recorded — as a line and as a `--json` field — and it
-/// **exits 0**, because status reports what it found rather than judging it
-/// (ADR 0018) and a state the next Switch settles by itself should not fail
-/// somebody's shell prompt.
+/// of why the hazard survived: nobody looks
+/// (ADR a-switch-is-written-down-first). So status says a Switch was in flight
+/// and not recorded — as a line and as a `--json` field — and it **exits 0**,
+/// because status reports what it found rather than judging it
+/// (ADR a-figure-carries-its-age) and a state the next Switch settles by itself
+/// should not fail somebody's shell prompt.
 #[test]
 fn status_says_a_switch_was_in_flight_and_not_recorded_and_still_exits_zero() {
     let host = machine_with_two_accounts();
@@ -200,9 +201,9 @@ fn a_switch_in_flight_from_nobody_is_still_reported_and_still_exits_zero() {
 /// of it: the `*` a listing draws is on the Account Perch was on rather than one
 /// it can establish is live.
 ///
-/// Said at every breadth the listing has (ADR 0053), off the one sentence and
-/// the one field both documents share — narrowing to a Scope narrows which
-/// Accounts are shown and not which facts are true of them.
+/// Said at every breadth the listing has (ADR the-listing-owns-the-set), off
+/// the one sentence and the one field both documents share — narrowing to a
+/// Scope narrows which Accounts are shown and not which facts are true of them.
 #[test]
 fn a_switch_in_flight_is_said_by_the_listing_at_every_breadth() {
     let host = machine_with_two_accounts();
@@ -312,9 +313,10 @@ fn json_says_a_figure_has_never_been_observed_rather_than_reporting_zero() {
 /// prompt, and that earned its keep against a document which — under the flag
 /// that widened this command to a Group — also answered about a set: the
 /// duplicate was insurance against reaching into the wrong shape. This document
-/// answers about exactly one Account and cannot be anything else (ADR 0053), so
-/// there is no wrong shape left to reach into and the same figure written twice
-/// is two places for one answer to go stale from.
+/// answers about exactly one Account and cannot be anything else
+/// (ADR the-listing-owns-the-set), so there is no wrong shape left to reach
+/// into and the same figure written twice is two places for one answer to go
+/// stale from.
 #[test]
 fn the_document_carries_the_utilization_under_the_account_and_nowhere_else() {
     let host = adopted_machine(OBSERVED_THREE_MINUTES_AGO);

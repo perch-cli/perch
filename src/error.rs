@@ -44,7 +44,7 @@ pub const EXIT_PROFILE_LIVE: i32 = 16;
 pub const EXIT_NO_CANDIDATE: i32 = 17;
 /// Exit code for a bare Cycle among Accounts nobody has declared
 /// interchangeable — the ungrouped pool, with the setting that governs it off
-/// (ADR 0017).
+/// (ADR a-group-is-a-declaration).
 pub const EXIT_NOT_INTERCHANGEABLE: i32 = 18;
 /// Exit code for something asked of an Account whose Credential no longer works.
 /// Distinct from every other refusal because the repair is distinct: no amount
@@ -52,14 +52,16 @@ pub const EXIT_NOT_INTERCHANGEABLE: i32 = 18;
 pub const EXIT_QUARANTINED: i32 = 19;
 /// Exit code for a check that decided nothing because it had no current figure
 /// to decide on: `perch watcher check` held, and the Refresh it held for failed
-/// (ADR 0013). Distinct from having nowhere to go, because a scheduler retrying
-/// shortly needs to tell the two apart — only one of them resolves itself.
+/// (ADR a-watcher-knob-is-arithmetic). Distinct from having nowhere to go,
+/// because a scheduler retrying shortly needs to tell the two apart — only one
+/// of them resolves itself.
 pub const EXIT_HELD: i32 = 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PerchError {
     /// The probe does not recognize the installed Claude Code well enough to
-    /// touch anything. Names the assumption that failed (ADR 0007).
+    /// touch anything. Names the assumption that failed
+    /// (ADR an-assumption-is-probed).
     #[error("Perch declined to act: {assumption} ({detail}), Claude Code {version}")]
     ProbeRefused {
         assumption: String,
@@ -68,7 +70,8 @@ pub enum PerchError {
     },
 
     /// The keychain could not be consulted at all. Deliberately distinct from
-    /// "not found", which reads as an Account having vanished (ADR 0008).
+    /// "not found", which reads as an Account having vanished
+    /// (ADR claude-code-chooses-the-store).
     #[error("Keychain unavailable: {0}")]
     KeychainUnavailable(String),
 
@@ -119,7 +122,7 @@ pub enum PerchError {
     NoCandidate(String),
 
     /// A bare Cycle from an Account whose interchangeability nobody has
-    /// declared. Names both ways to declare it (ADR 0017).
+    /// declared. Names both ways to declare it (ADR a-group-is-a-declaration).
     #[error("{0}")]
     NotInterchangeable(String),
 
@@ -329,7 +332,8 @@ impl From<KeychainError> for PerchError {
             // variant added later would otherwise be folded into "unavailable"
             // silently, and "the keychain could not be consulted at all" is
             // deliberately distinct from every other thing that can go wrong
-            // with one (ADR 0008). One arm is the price of the compiler asking.
+            // with one (ADR claude-code-chooses-the-store). One arm is the
+            // price of the compiler asking.
             KeychainError::Unavailable { detail } => PerchError::KeychainUnavailable(detail),
         }
     }
@@ -569,7 +573,8 @@ mod tests {
 
     /// A keychain with no such item and a keychain that will not answer are
     /// different problems with different repairs, and this conversion is where
-    /// that distinction is either kept or lost (ADR 0008).
+    /// that distinction is either kept or lost
+    /// (ADR claude-code-chooses-the-store).
     #[test]
     fn a_missing_item_is_not_found_and_anything_else_is_the_keychain_being_unavailable() {
         let missing: PerchError = KeychainError::NotFound {

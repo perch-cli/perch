@@ -1,17 +1,19 @@
 //! Behavior: `perch config set` and `perch config get`.
 //!
 //! Perch has to be complete over SSH and in CI, so every capability is
-//! available non-interactively (ADR 0011) — this is the one that changes how a
-//! Group behaves. The tests are as much about the refusals as the settings: a
-//! key or a value Perch does not understand is answered with the ones it does,
-//! because a script that mistyped a setting must not go on believing it took.
+//! available non-interactively (ADR perch-does-not-draw) — this is the one that
+//! changes how a Group behaves. The tests are as much about the refusals as the
+//! settings: a key or a value Perch does not understand is answered with the
+//! ones it does, because a script that mistyped a setting must not go on
+//! believing it took.
 //!
 //! A Group's Strategy decides which Account a bare `perch switch` lands on, and
 //! the global ungrouped-Cycling setting decides whether it may land anywhere at
-//! all from an Account in no Group (ADR 0017). The watcher's fields govern
-//! `perch watcher run` and nothing else, which is asserted here too: setting
-//! them switches nothing on, because nothing acts on them until somebody runs
-//! the loop (ADR 0013). What the loop then does with them is `watching.rs`.
+//! all from an Account in no Group (ADR a-group-is-a-declaration). The
+//! watcher's fields govern `perch watcher run` and nothing else, which is
+//! asserted here too: setting them switches nothing on, because nothing acts on
+//! them until somebody runs the loop (ADR a-watcher-knob-is-arithmetic). What
+//! the loop then does with them is `watching.rs`.
 
 mod common;
 
@@ -51,7 +53,7 @@ fn active(host: &FakeHost) -> Option<String> {
 
 /// The Settings a Group holds, which are the whole of what a Cycle there
 /// follows: there is nothing above a Scope for a value to have come from
-/// (ADR 0051).
+/// (ADR a-setting-names-its-scope).
 fn group_config(host: &FakeHost, name: &str) -> perch::registry::Settings {
     registry_of(host).settings(&perch::registry::Scope::Group(name.to_string()))
 }
@@ -79,14 +81,17 @@ fn a_groups_setting_is_set_from_a_script_and_read_back() {
 }
 
 /// The one key one Scope carries. It is said about the Accounts in no Group
-/// like every other Setting, because that is the Scope it governs (ADR 0051).
+/// like every other Setting, because that is the Scope it governs
+/// (ADR a-setting-names-its-scope).
 #[test]
 fn the_declaration_the_ungrouped_accounts_carry_is_set_and_read_back() {
     let host = machine_with_two_accounts();
 
     let (result, _) = config_set(&host, &["ungrouped", "interchangeable", "true"]);
 
-    result.expect("`interchangeable` is the Ungrouped Scope's to carry (ADR 0017)");
+    result.expect(
+        "`interchangeable` is the Ungrouped Scope's to carry (ADR a-group-is-a-declaration)",
+    );
     assert!(registry_of(&host).ungrouped.interchangeable);
 
     let (result, printed) = config_get(&host, &["ungrouped", "interchangeable"]);
@@ -126,7 +131,7 @@ fn every_setting_reads_back_in_the_form_that_would_set_it_again() {
     assert!(
         !printed.contains("work interchangeable"),
         "and no line a Group could not take back: a Group is the declaration \
-         that its Accounts are interchangeable (ADR 0051): {printed}"
+         that its Accounts are interchangeable (ADR a-setting-names-its-scope): {printed}"
     );
     for line in printed.lines().filter(|line| !line.trim().is_empty()) {
         let words: Vec<&str> = line.split_whitespace().collect();
@@ -210,8 +215,9 @@ fn the_soonest_resetting_strategy_still_measures_headroom_by_the_worst_window() 
     let host = three_accounts_in_one_group();
     observed(&host, EMAIL, vec![window("5-hour", 96.0)]);
     // Resets soonest by a distance, and is exhausted on a window that is not
-    // the one you hit first. ADR 0012 fixes how headroom is measured; the
-    // Strategy is a separate axis on top of it, not a way round it.
+    // the one you hit first. ADR headroom-is-the-worst-window fixes how
+    // headroom is measured; the Strategy is a separate axis on top of it, not a
+    // way round it.
     observed(
         &host,
         SECOND_EMAIL,
@@ -276,7 +282,7 @@ fn cycling_among_ungrouped_accounts_is_off_until_it_is_turned_on() {
         printed.trim(),
         "ungrouped interchangeable false",
         "being ungrouped is the absence of a declaration that Accounts are \
-         interchangeable, not a weaker form of one (ADR 0017)"
+         interchangeable, not a weaker form of one (ADR a-group-is-a-declaration)"
     );
 }
 
@@ -301,7 +307,7 @@ fn the_watchers_fields_are_stored_and_govern_a_loop_that_has_to_be_run() {
     assert!(
         printed.contains("Nothing here starts one"),
         "a Group that may be acted on is not a Watcher that has been switched \
-         on (ADR 0013, ADR 0040): {printed}"
+         on (ADR a-watcher-knob-is-arithmetic, ADR the-machine-runs-the-watcher): {printed}"
     );
     assert!(
         printed.contains("perch watcher install"),
@@ -322,7 +328,7 @@ fn the_watchers_fields_are_stored_and_govern_a_loop_that_has_to_be_run() {
         active(&host).as_deref(),
         Some(EMAIL),
         "permission is not a process: configuring a Group switches nothing \
-         until `perch watcher run` is running (ADR 0013)"
+         until `perch watcher run` is running (ADR a-watcher-knob-is-arithmetic)"
     );
 }
 
@@ -337,12 +343,12 @@ fn the_watchers_may_act_field_is_off_until_it_is_asked_for() {
         printed.trim(),
         "work watcher-may-act false",
         "a Group only ever changes underneath someone because they said it \
-         could (ADR 0002), and the line says which Group that is"
+         could (ADR a-group-is-a-declaration), and the line says which Group that is"
     );
 }
 
-/// The default ADR 0046 names, as `perch config get` reports it. A default is a
-/// promise, and this is where it is kept.
+/// The default ADR a-watcher-knob-is-arithmetic names, as `perch config get`
+/// reports it. A default is a promise, and this is where it is kept.
 #[test]
 fn a_group_starts_with_the_watcher_policy_the_adr_names() {
     let host = three_accounts_in_one_group();
@@ -384,9 +390,9 @@ fn a_watcher_number_out_of_range_is_refused_with_the_range_it_accepts() {
     );
 }
 
-/// The three the Watcher shed (ADR 0046). A departed Setting is refused in the
-/// same words any other unknown key is — there is no half-life in which it is
-/// still typed and quietly ignored.
+/// The three the Watcher shed (ADR a-watcher-knob-is-arithmetic). A departed
+/// Setting is refused in the same words any other unknown key is — there is no
+/// half-life in which it is still typed and quietly ignored.
 #[test]
 fn the_settings_the_watcher_shed_are_no_longer_keys_a_scope_carries() {
     let host = three_accounts_in_one_group();
@@ -436,9 +442,9 @@ fn an_unknown_key_is_refused_and_names_the_ones_a_group_carries() {
 }
 
 /// A `set` naming a key and a value and no Scope is the form that used to set a
-/// value everywhere, and there is no everywhere (ADR 0051). The refusal names
-/// the Scopes, because "name a Scope" is no use to somebody who does not know
-/// what theirs are called.
+/// value everywhere, and there is no everywhere
+/// (ADR a-setting-names-its-scope). The refusal names the Scopes, because "name
+/// a Scope" is no use to somebody who does not know what theirs are called.
 #[test]
 fn a_set_naming_a_key_but_no_scope_is_refused_and_names_the_scopes_there_are() {
     let host = three_accounts_in_one_group();
@@ -492,10 +498,11 @@ fn a_set_naming_neither_a_scope_nor_a_key_is_answered_about_the_scope() {
 
 /// The word somebody types when they mean *everywhere*. There is no
 /// everywhere, and the refusal is where they find that out — a better place
-/// than a Setting that appeared to take (ADR 0051). Left to fall through it
-/// would be answered with "Declare it with `perch group add global`", after
-/// which a Group by that name takes every later `perch config set global …`
-/// quietly and leaves every other Scope as it was.
+/// than a Setting that appeared to take (ADR a-setting-names-its-scope). Left
+/// to fall through it would be answered with "Declare it with
+/// `perch group add global`", after which a Group by that name takes every
+/// later `perch config set global …` quietly and leaves every other Scope as it
+/// was.
 #[test]
 fn naming_global_as_a_scope_says_there_is_no_such_scope_rather_than_offering_a_group() {
     let host = three_accounts_in_one_group();
@@ -528,8 +535,9 @@ fn naming_global_as_a_scope_says_there_is_no_such_scope_rather_than_offering_a_g
 }
 
 /// The same word, refused as a Group name and as an Alias, for the same reason
-/// (ADR 0051). Kept reserved because somebody typing it means something Perch
-/// does not have, and a Group quietly answering to it would take the value.
+/// (ADR a-setting-names-its-scope). Kept reserved because somebody typing it
+/// means something Perch does not have, and a Group quietly answering to it
+/// would take the value.
 #[test]
 fn global_is_still_a_reserved_word_and_the_refusal_says_why() {
     let host = machine_with_two_accounts();
@@ -849,9 +857,9 @@ fn a_group_name_with_a_space_in_it_is_refused_rather_than_breaking_the_round_tri
 }
 
 /// A Setting is said about the Scope it governs, and reaches no other
-/// (ADR 0051). There is no layer for a value to arrive by, so the Group nobody
-/// said anything about is at the compiled-in default rather than at somebody
-/// else's number.
+/// (ADR a-setting-names-its-scope). There is no layer for a value to arrive by,
+/// so the Group nobody said anything about is at the compiled-in default rather
+/// than at somebody else's number.
 #[test]
 fn a_setting_said_about_one_scope_reaches_no_other() {
     let host = three_accounts_in_one_group();
@@ -877,7 +885,7 @@ fn a_setting_said_about_one_scope_reaches_no_other() {
 
 /// The grant is the one this matters most for: consent said about one Scope
 /// authorizes that Scope, and a Group declared afterwards is a Group nobody has
-/// said anything about (ADR 0051).
+/// said anything about (ADR a-setting-names-its-scope).
 #[test]
 fn a_group_declared_after_a_grant_is_not_covered_by_it() {
     let host = three_accounts_in_one_group();
@@ -922,9 +930,10 @@ fn every_line_names_the_scope_it_is_about() {
     }
 }
 
-/// The Accounts in no Group are a Scope (ADR 0017, amended), so Cycling among
-/// them reads a Strategy somebody can set rather than one compiled into Perch —
-/// and the Scope is addressed the way every other one is.
+/// The Accounts in no Group are a Scope (ADR a-group-is-a-declaration,
+/// amended), so Cycling among them reads a Strategy somebody can set rather
+/// than one compiled into Perch — and the Scope is addressed the way every
+/// other one is.
 #[test]
 fn the_ungrouped_accounts_are_a_scope_that_can_be_addressed() {
     let host = machine_with_two_accounts();

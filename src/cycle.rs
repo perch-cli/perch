@@ -3,23 +3,23 @@
 //! Two rules, and everything here follows from them.
 //!
 //! An Account's headroom is its **worst** Quota Window, and the Account whose
-//! worst is best wins (ADR 0012). Being blocked by any window blocks you
-//! completely, so this is the only ranking that measures what actually stops
-//! work: when Perch says 40% headroom, that is true of every window and nothing
-//! surprising blocks you five minutes later.
+//! worst is best wins (ADR headroom-is-the-worst-window). Being blocked by any
+//! window blocks you completely, so this is the only ranking that measures what
+//! actually stops work: when Perch says 40% headroom, that is true of every
+//! window and nothing surprising blocks you five minutes later.
 //!
 //! How headroom is *measured* is fixed. Which Account to prefer is the Group's
 //! to say, and is a separate axis on top of it: the most headroom, or the
 //! soonest-resetting window so perishable quota is spent rather than wasted
-//! (ADR 0002). A Strategy reorders the candidates and cannot promote one that
-//! the measurement rules out, so an exhausted Account is never chosen however
-//! soon it comes back.
+//! (ADR a-group-is-a-declaration). A Strategy reorders the candidates and
+//! cannot promote one that the measurement rules out, so an exhausted Account
+//! is never chosen however soon it comes back.
 //!
-//! A Cycle never leaves the Scope it started in (ADR 0002). A work subscription
-//! running dry must not land on a personal Account, so the Scope is a Group —
-//! the declaration that a set of Accounts is interchangeable — or the ungrouped
-//! Accounts, which are a Scope only when they have been declared
-//! interchangeable (ADR 0017).
+//! A Cycle never leaves the Scope it started in (ADR a-group-is-a-declaration).
+//! A work subscription running dry must not land on a personal Account, so the
+//! Scope is a Group — the declaration that a set of Accounts is interchangeable
+//! — or the ungrouped Accounts, which are a Scope only when they have been
+//! declared interchangeable (ADR a-group-is-a-declaration).
 //!
 //! The three honest non-outcomes matter as much as the choice. Every Account
 //! exhausted, already on the best one, and nobody having declared these
@@ -27,8 +27,8 @@
 //! exit with a code of their own rather than pretending to have worked.
 //!
 //! Nothing here reaches the network or the filesystem: ranking is on the cached
-//! figures and their ages (ADR 0015), which is what makes it a pure decision
-//! that can be argued with in a unit test.
+//! figures and their ages (ADR a-figure-carries-its-age), which is what makes
+//! it a pure decision that can be argued with in a unit test.
 
 use chrono::{DateTime, Utc};
 
@@ -41,9 +41,10 @@ use crate::utilization;
 /// Which Account a Scope prefers when more than one would serve.
 ///
 /// Read from the Settings the Scope itself holds — there is nothing above it to
-/// fall back to (ADR 0051). The Accounts in no Group are still not a Group, but
-/// they are a Scope, so what they Cycle by is something a person can say rather
-/// than a constant compiled into Perch (ADR 0017, amended).
+/// fall back to (ADR a-setting-names-its-scope). The Accounts in no Group are
+/// still not a Group, but they are a Scope, so what they Cycle by is something
+/// a person can say rather than a constant compiled into Perch
+/// (ADR a-group-is-a-declaration, amended).
 fn strategy(registry: &Registry, scope: &Scope) -> Strategy {
     registry.settings(scope).strategy
 }
@@ -70,7 +71,7 @@ pub fn scope_for(registry: &Registry, leaving: &Account) -> Result<Scope> {
 }
 
 /// How full an Account is, measured its only honest way: by the Quota Window
-/// that is fullest (ADR 0012).
+/// that is fullest (ADR headroom-is-the-worst-window).
 #[derive(Debug, Clone, PartialEq)]
 enum Headroom {
     /// Every Quota Window has at least this much room left.
@@ -102,11 +103,11 @@ impl Headroom {
     ///
     /// The Strategy reorders Accounts that have room and does nothing else. It
     /// cannot promote one over an Account with more evidence behind it, which
-    /// is what keeps it an axis on top of ADR 0012's measurement rather than a
-    /// way round it. Hence four tiers rather than three: soonest-reset ranks on
-    /// a reset time where Perch has one and falls back to the room it can see
-    /// where it has not, because the Strategy says which figure to prefer and
-    /// not which figures to invent.
+    /// is what keeps it an axis on top of ADR headroom-is-the-worst-window's
+    /// measurement rather than a way round it. Hence four tiers rather than
+    /// three: soonest-reset ranks on a reset time where Perch has one and falls
+    /// back to the room it can see where it has not, because the Strategy says
+    /// which figure to prefer and not which figures to invent.
     ///
     /// Nothing compares a reset time against a percentage. They only ever meet
     /// as tiers, and a tie inside one is broken by the order the Accounts were
@@ -141,15 +142,16 @@ impl Headroom {
     /// Whether this Account's fullest window has a reset that has not happened
     /// yet.
     ///
-    /// A cached figure outlives the window it describes (ADR 0015), so a
-    /// `resets_at` in the past is ordinary rather than strange — it means the
-    /// window has already come back and the percentage beside it is stale. What
-    /// made that a bug is the direction it sorted: the key is the reset time
-    /// negated, so an earlier time ranks higher, and among Accounts whose reset
-    /// had already passed the *stalest* figure won. A six-hour-old reading of
-    /// an Account at 10% headroom beat a one-minute-old reading of one at 90%,
-    /// and the sentence beside the choice announced it as resetting "any moment
-    /// now" about a window that came back hours ago.
+    /// A cached figure outlives the window it describes
+    /// (ADR a-figure-carries-its-age), so a `resets_at` in the past is ordinary
+    /// rather than strange — it means the window has already come back and the
+    /// percentage beside it is stale. What made that a bug is the direction it
+    /// sorted: the key is the reset time negated, so an earlier time ranks
+    /// higher, and among Accounts whose reset had already passed the *stalest*
+    /// figure won. A six-hour-old reading of an Account at 10% headroom beat a
+    /// one-minute-old reading of one at 90%, and the sentence beside the choice
+    /// announced it as resetting "any moment now" about a window that came back
+    /// hours ago.
     ///
     /// An elapsed reset is no longer a fact about when this Account comes back,
     /// so it does not rank as one, and the Account falls to the headroom key
@@ -242,8 +244,8 @@ impl Headroom {
 ///
 /// Named against the Scope the Cycle was looking in, because that is where the
 /// missing figures are: a refresh reads the Accounts it is about to show and no
-/// others (ADR 0053), so the listing narrowed to this Scope is the one that
-/// reads exactly the Accounts this sentence is about.
+/// others (ADR the-listing-owns-the-set), so the listing narrowed to this Scope
+/// is the one that reads exactly the Accounts this sentence is about.
 fn how_to_get_figures(scope: &Scope) -> String {
     format!(
         "`perch list {} --refresh` reads current figures.",
@@ -251,8 +253,9 @@ fn how_to_get_figures(scope: &Scope) -> String {
     )
 }
 
-/// The Quota Window that decides how full an Account is: its fullest (ADR
-/// 0012), or `None` for one nothing has ever been observed of.
+/// The Quota Window that decides how full an Account is: its fullest
+/// (ADR headroom-is-the-worst-window), or `None` for one nothing has ever been
+/// observed of.
 ///
 /// Public because the watcher compares the Account it is on against a
 /// threshold, and that comparison has to be against the same figure the ranking
@@ -338,13 +341,14 @@ struct Ranked<'a> {
 /// Accounts this Cycle may not land on, whatever the ranking makes of them, and
 /// the one sentence that says why.
 ///
-/// The Cycle has no opinion about them. The watcher's margin (ADR 0046) is
-/// policy about *when* a move is worth making, which is a different question
-/// from which Account is best, and answering both here would put a watcher's
-/// clock inside the ranking that every `perch switch` uses.
-/// They arrive as a list so that the ranking never lands on one, and with a
-/// sentence so that the refusal — when they turn out to be all of them — says
-/// what set them aside rather than claiming the Group is empty.
+/// The Cycle has no opinion about them. The watcher's margin
+/// (ADR a-watcher-knob-is-arithmetic) is policy about *when* a move is worth
+/// making, which is a different question from which Account is best, and
+/// answering both here would put a watcher's clock inside the ranking that
+/// every `perch switch` uses. They arrive as a list so that the ranking never
+/// lands on one, and with a sentence so that the refusal — when they turn out
+/// to be all of them — says what set them aside rather than claiming the Group
+/// is empty.
 ///
 /// A `perch switch` the user typed sets nothing aside: [`SetAside::nothing`].
 #[derive(Debug, Clone, Default)]
@@ -377,7 +381,7 @@ impl SetAside {
 }
 
 /// What the ranking rested on, which is the whole of what a Switch says about
-/// having chosen for you (ADR 0061).
+/// having chosen for you (ADR perch-says-what-it-did).
 ///
 /// The basis and not the argument for it: which Account won and on what footing
 /// is what happened, and the figure it beat the others by is Perch defending a
@@ -392,14 +396,14 @@ impl SetAside {
 /// them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Basis {
-    /// The measurement ADR 0012 fixes: the worst Quota Window, and the Account
-    /// whose worst is best. What a Cycle ranks on unless the Group says
-    /// otherwise — and what `soonest-reset` falls back to when nothing it could
-    /// move to has a reset still to come.
+    /// The measurement ADR headroom-is-the-worst-window fixes: the worst Quota
+    /// Window, and the Account whose worst is best. What a Cycle ranks on
+    /// unless the Group says otherwise — and what `soonest-reset` falls back to
+    /// when nothing it could move to has a reset still to come.
     MostRoom,
-    /// The Strategy's own axis (ADR 0002): of the Accounts with room, the one
-    /// whose fullest window comes back soonest, so perishable quota is spent
-    /// rather than wasted.
+    /// The Strategy's own axis (ADR a-group-is-a-declaration): of the Accounts
+    /// with room, the one whose fullest window comes back soonest, so
+    /// perishable quota is spent rather than wasted.
     SoonestReset,
     /// No figure to rank on at all: nothing has ever been observed of this
     /// Account, so it was compared with nothing — which the `never observed`
@@ -414,7 +418,7 @@ impl Basis {
     /// It names the Scope because that is the claim worth making beside where a
     /// Cycle landed — that it stayed inside the Group — and a Scope announced
     /// before the choice was made is announced to somebody who does not yet
-    /// know where they are going (ADR 0061).
+    /// know where they are going (ADR perch-says-what-it-did).
     pub fn in_the(&self, scope: &Scope) -> String {
         let basis = match self {
             Basis::MostRoom => "the most room",
@@ -435,9 +439,9 @@ pub struct Choice {
     ///
     /// The one place a Cycle's ranking is said. It used to be said twice — this
     /// value for `perch switch`, and a sentence of its own for the Watcher's
-    /// round — and ADR 0061 took the second away: a `switched` line names where
-    /// it went and argues nothing about why, so there was nothing left reading
-    /// the sentence.
+    /// round — and ADR perch-says-what-it-did took the second away: a
+    /// `switched` line names where it went and argues nothing about why, so
+    /// there was nothing left reading the sentence.
     pub basis: Basis,
 }
 
@@ -533,9 +537,9 @@ pub fn choose(
     // `soonest-reset` Group whose active Account resets in an hour stayed on it
     // at 95% full while an empty Account sat behind it resetting in four —
     // because tier three sorts on the reset time and nothing else, and the
-    // Account you are on was being ranked in it. That is the failure ADR 0013
-    // sets candidates aside to prevent, reached through the staying-put check
-    // instead of through a post-hoc veto.
+    // Account you are on was being ranked in it. That is the failure
+    // ADR a-watcher-knob-is-arithmetic sets candidates aside to prevent,
+    // reached through the staying-put check instead of through a post-hoc veto.
     //
     // Applied to the *choice* and not only to the veto, which is the half that
     // was missing. Whether to move and where to move were asked of two
@@ -598,13 +602,14 @@ fn measured_against(here: Option<&Headroom>) -> Option<&Headroom> {
 
 /// Whether moving from `here` to `other` would gain anything.
 ///
-/// Both orderings, and the second is the one that matters. A Strategy says which
-/// of the places worth going is preferred; it does not get to say that nowhere is
-/// worth going. Asked on the Strategy's ranking alone, a `soonest-reset` Group
-/// whose active Account resets in an hour stayed on it at 95% full while an empty
-/// Account sat behind it resetting in four — because tier three sorts on the
-/// reset time and nothing else, and the Account you are on was being ranked in
-/// it. That is the failure ADR 0013 sets candidates aside to prevent, reached
+/// Both orderings, and the second is the one that matters. A Strategy says
+/// which of the places worth going is preferred; it does not get to say that
+/// nowhere is worth going. Asked on the Strategy's ranking alone, a
+/// `soonest-reset` Group whose active Account resets in an hour stayed on it at
+/// 95% full while an empty Account sat behind it resetting in four — because
+/// tier three sorts on the reset time and nothing else, and the Account you are
+/// on was being ranked in it. That is the failure
+/// ADR a-watcher-knob-is-arithmetic sets candidates aside to prevent, reached
 /// through the staying-put check instead of through a post-hoc veto.
 ///
 /// One predicate, because [`choose`] and [`ranked`] both need it and two
@@ -628,11 +633,11 @@ fn worth_leaving_for(
 /// of the running. So the two share the measurement and the Strategy rather
 /// than each sorting on its own idea of which Account is better, because two
 /// orders would be a listing that put one Account at the top and a `perch
-/// switch` that landed on another (ADR 0049).
+/// switch` that landed on another (ADR the-listing-owns-the-set).
 ///
-/// A Cycle never leaves the scope it started in (ADR 0002), so there is no
-/// ranking over every Account Perch holds: this is per scope, and a listing
-/// spanning several is those rankings one after another.
+/// A Cycle never leaves the scope it started in (ADR a-group-is-a-declaration),
+/// so there is no ranking over every Account Perch holds: this is per scope,
+/// and a listing spanning several is those rankings one after another.
 pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> Vec<&'a Account> {
     let strategy = strategy(registry, scope);
     let accounts = scope.accounts(registry);
@@ -700,8 +705,8 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
 /// left included. [`choose`] excludes it unconditionally whatever it has been
 /// observed to hold, so the listing put an Account at the top that a bare
 /// `perch switch` would never land on: the disagreement between the two orders
-/// this function exists to prevent (ADR 0049), surviving in the one state a
-/// fresh machine is always in.
+/// this function exists to prevent (ADR the-listing-owns-the-set), surviving in
+/// the one state a fresh machine is always in.
 type Place = ((u8, u8, u8), f64);
 
 fn place(
@@ -729,8 +734,8 @@ fn place(
     // unconditionally, so `perch switch` answered "the only Account here that
     // is not exhausted is the one you are on" while `perch list` showed one of
     // the exhausted ones on the top row: the disagreement between the two
-    // orders this function exists to prevent (ADR 0049), in the state a fresh
-    // machine is always in.
+    // orders this function exists to prevent (ADR the-listing-owns-the-set), in
+    // the state a fresh machine is always in.
     let worth = u8::from(
         !staying
             && !headroom.is_exhausted()
@@ -753,12 +758,13 @@ pub fn is_a_candidate(account: &Account) -> bool {
 
 /// Whether anything has declared the Accounts in this Scope interchangeable.
 ///
-/// Always true of a Group, which is that declaration (ADR 0002). The Accounts in
-/// no Group are a Scope only because somebody declared them interchangeable
-/// (ADR 0017), and until they do, every surface has to decline the same things
-/// about them — ranking them, and saying what they have left between them. Asked
-/// in one place so the listing and the figures above it cannot end up
-/// disagreeing about whether they are a set.
+/// Always true of a Group, which is that declaration
+/// (ADR a-group-is-a-declaration). The Accounts in no Group are a Scope only
+/// because somebody declared them interchangeable
+/// (ADR a-group-is-a-declaration), and until they do, every surface has to
+/// decline the same things about them — ranking them, and saying what they have
+/// left between them. Asked in one place so the listing and the figures above
+/// it cannot end up disagreeing about whether they are a set.
 pub fn may_cycle_within(registry: &Registry, scope: &Scope) -> bool {
     match scope {
         Scope::Group(_) => true,
@@ -825,7 +831,8 @@ pub enum HowMuchIsLeft {
     NeverObserved,
 }
 
-/// Which of those three an Account is, measured the one honest way (ADR 0012).
+/// Which of those three an Account is, measured the one honest way
+/// (ADR headroom-is-the-worst-window).
 pub fn how_much_is_left(account: &Account) -> HowMuchIsLeft {
     match headroom_of(account) {
         Headroom::Room { percent, .. } => HowMuchIsLeft::Room(percent),
@@ -854,8 +861,9 @@ pub fn headroom_document(account: &Account) -> serde_json::Value {
     serde_json::json!({ "state": state, "percent": percent })
 }
 
-/// How much of an Account is left to spend, with the Quota Window the figure was
-/// taken from and the age of the observation it came from (ADR 0015).
+/// How much of an Account is left to spend, with the Quota Window the figure
+/// was taken from and the age of the observation it came from
+/// (ADR a-figure-carries-its-age).
 ///
 /// The long form of [`headroom_phrase`], for the surface that gives an Account a
 /// block of its own rather than a column: naming the fullest window is what
@@ -893,8 +901,8 @@ pub fn headroom_in_full(account: &Account, now: DateTime<Utc>) -> String {
 /// it could make rather than dressed up as one it could not: a Group set to
 /// `soonest-reset` with no reset in sight lands on the most room and says so.
 /// Why the Strategy could not be followed is the argument, and the argument is
-/// what ADR 0061 cuts — the person is told what the ranking rested on, which is
-/// the part they could not have predicted.
+/// what ADR perch-says-what-it-did cuts — the person is told what the ranking
+/// rested on, which is the part they could not have predicted.
 fn chosen_basis(best: &Ranked, strategy: Strategy, now: DateTime<Utc>) -> Basis {
     // Asked of the same predicate the ranking asked, because a basis given as
     // the reason has to be the one that decided it.
@@ -930,9 +938,10 @@ fn everyone_is_exhausted(
     now: DateTime<Utc>,
 ) -> String {
     // `> now` for the reason `ranked_on_reset` gives for the half of this that
-    // has Room: a cached figure outlives the window it describes (ADR 0015), so
-    // an elapsed `resets_at` is not a fact about when this Account comes back —
-    // it is a window that already came back, under a percentage that is stale.
+    // has Room: a cached figure outlives the window it describes
+    // (ADR a-figure-carries-its-age), so an elapsed `resets_at` is not a fact
+    // about when this Account comes back — it is a window that already came
+    // back, under a percentage that is stale.
     //
     // Taken as one, it sorted the wrong way twice over. `min_by_key` picked the
     // *earliest* reset, so among Accounts whose windows had all come back the
@@ -1141,12 +1150,13 @@ pub(crate) mod tests {
     /// The listing and the choice are one order, in the state a fresh machine
     /// is always in: no Account observed at all.
     ///
-    /// `here` is a *measured* Headroom, so it is `None` until something has been
-    /// read — and a `None` there used to let the staying-put rule fall away for
-    /// every Account, the one being left included. `choose` excludes that
-    /// Account whatever has been observed of it, so the top row of the listing
-    /// was an Account a bare `perch switch` would never land on, which is the
-    /// disagreement `ranked` exists to prevent (ADR 0049).
+    /// `here` is a *measured* Headroom, so it is `None` until something has
+    /// been read — and a `None` there used to let the staying-put rule fall
+    /// away for every Account, the one being left included. `choose` excludes
+    /// that Account whatever has been observed of it, so the top row of the
+    /// listing was an Account a bare `perch switch` would never land on, which
+    /// is the disagreement `ranked` exists to prevent
+    /// (ADR the-listing-owns-the-set).
     #[test]
     fn the_account_being_left_is_never_the_top_row_even_where_nothing_has_been_observed() {
         let registry = holding(vec![
@@ -1178,7 +1188,7 @@ pub(crate) mod tests {
     /// Account being left. `choose` drops them from `landable` unconditionally:
     /// `perch switch` said "the only Account here that is not exhausted is the
     /// one you are on" while `perch list` put one of the exhausted ones on the
-    /// top row — two orders over one Scope (ADR 0049).
+    /// top row — two orders over one Scope (ADR the-listing-owns-the-set).
     #[test]
     fn an_exhausted_account_never_outranks_the_one_being_left() {
         let registry = holding(vec![
@@ -1591,9 +1601,10 @@ pub(crate) mod tests {
     /// nothing else. So the Account that resets soonest was the Account you
     /// stayed on, however full it was and however empty the alternative.
     ///
-    /// This is the failure ADR 0013 sets candidates aside to prevent, reached
-    /// from the other end: the watcher wants off a 95%-full Account, the margin
-    /// sets nothing aside, and the Cycle then reports there is nowhere to go.
+    /// This is the failure ADR a-watcher-knob-is-arithmetic sets candidates
+    /// aside to prevent, reached from the other end: the watcher wants off a
+    /// 95%-full Account, the margin sets nothing aside, and the Cycle then
+    /// reports there is nowhere to go.
     #[test]
     fn soonest_reset_never_pins_you_to_a_full_account_because_it_comes_back_first() {
         let registry = preferring(
@@ -1637,9 +1648,10 @@ pub(crate) mod tests {
         );
     }
 
-    /// A cached figure outlives the window it describes (ADR 0015), so a
-    /// `resets_at` in the past is ordinary — it means the window has already
-    /// come back and the percentage beside it is stale.
+    /// A cached figure outlives the window it describes
+    /// (ADR a-figure-carries-its-age), so a `resets_at` in the past is ordinary
+    /// — it means the window has already come back and the percentage beside it
+    /// is stale.
     ///
     /// The key is the reset time negated, so an earlier time ranked higher, and
     /// among Accounts whose reset had already passed the *stalest* figure won.
@@ -1756,10 +1768,10 @@ pub(crate) mod tests {
         // same sentence as the explanation that there was no reset to rank on.
         //
         // A Switch no longer quotes that clause — it says the basis and leaves
-        // the figures to the lines under it (ADR 0061). The refusal that says
-        // staying put is already the best still quotes it and is exempt, so
-        // the wording is asserted where it is still said: the same two figures,
-        // with the emptier Account the one being stayed on.
+        // the figures to the lines under it (ADR perch-says-what-it-did). The
+        // refusal that says staying put is already the best still quotes it and
+        // is exempt, so the wording is asserted where it is still said: the
+        // same two figures, with the emptier Account the one being stayed on.
         let staying = preferring(
             holding(vec![
                 account("emptier@example.com", vec![resetting("5-hour", 20.0, -1)]),
@@ -2149,8 +2161,9 @@ pub(crate) mod tests {
 /// The cases come from a small congruential generator rather than a property
 /// crate: a fixed seed, printed in every failure, so a failing case is one that
 /// can be reproduced by running the same test rather than one that has to be
-/// caught again (ADR 0025 — a crate where it does not cost a seam, and a
-/// dev-dependency for twenty lines of arithmetic is not that).
+/// caught again (ADR a-crate-must-not-cost-a-seam — a crate where it does not
+/// cost a seam, and a dev-dependency for twenty lines of arithmetic is not
+/// that).
 #[cfg(test)]
 mod properties {
     use super::tests::*;

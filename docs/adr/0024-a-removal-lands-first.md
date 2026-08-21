@@ -13,18 +13,19 @@ deleted rows would leave the machine running as an Account Perch no longer holds
 
 So Perch names the Account it will leave active, and lands on it first. The
 successor is an Account in the same Group where there is one, because a Group is
-the user's own statement that these Accounts are interchangeable (ADR 0002);
-otherwise it is any Account Perch holds, which is a forced choice rather than a
-Cycle leaving its scope — it is named in front of the user and does not happen
-until they agree to it. A Quarantined Account is never the successor, because its
-Credential does not work, and neither is a disabled one, because never being
-chosen for you is the whole of what disabled means and this is Perch choosing.
+the user's own statement that these Accounts are interchangeable
+(ADR a-group-is-a-declaration); otherwise it is any Account Perch holds, which
+is a forced choice rather than a Cycle leaving its scope — it is named in front
+of the user and does not happen until they agree to it. A Quarantined Account is
+never the successor, because its Credential does not work, and neither is a
+disabled one, because never being chosen for you is the whole of what disabled
+means and this is Perch choosing.
 
 The successor is not ranked on how full it is. Cycling ranks because it chooses
-unasked and has to justify itself (ADR 0012); this choice is named in front of
-the user and does not happen until they agree to it, so `perch switch` is the
-answer to wanting a different one and a ranking here would only be a second
-place for the ranking to disagree with itself.
+unasked and has to justify itself (ADR headroom-is-the-worst-window); this
+choice is named in front of the user and does not happen until they agree to it,
+so `perch switch` is the answer to wanting a different one and a ranking here
+would only be a second place for the ranking to disagree with itself.
 
 Landing is a `make_live` and not a Switch: no Capture. What is live is the
 Credential of the Account being given up, and Capturing it would copy it into a
@@ -41,8 +42,9 @@ name left to reach it by — cannot happen.
 
 Two Profiles are refused rather than written: the Account's own, and — when
 there is a successor to land on — the Default Profile, which is where the
-landing has to be written and which a client may be running against (ADR 0005).
-It is the same pair `perch relogin` refuses for the same reason.
+landing has to be written and which a client may be running against
+(ADR a-profile-is-live-by-evidence). It is the same pair `perch relogin` refuses
+for the same reason.
 
 ## Considered Options
 
@@ -70,5 +72,5 @@ Both cases ask before they act, which makes `perch remove` the second command
 after `perch add` that has something to say on a machine with nobody at the
 terminal. It is answered the same way: `--yes` agrees in advance, and without a
 terminal and without the flag the removal is refused rather than assumed
-(ADR 0011). End of input is a no — a pipe that closed must never read as
-agreement to delete a Credential.
+(ADR perch-does-not-draw). End of input is a no — a pipe that closed must never
+read as agreement to delete a Credential.

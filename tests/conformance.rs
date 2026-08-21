@@ -25,10 +25,10 @@
 //! feature because the only processes it reads are its own.
 //!
 //! Ungated, unlike `your_machine.rs`. That one is held back because its outcome
-//! is not this repository's to determine (ADR 0050). This asks whether Perch's
-//! two adapters still agree with each other, in scratch directories of its own,
-//! and a failure here is a fault in the change that caused it — so it runs on
-//! every pull request, on every platform CI has.
+//! is not this repository's to determine (ADR an-assumption-is-probed). This
+//! asks whether Perch's two adapters still agree with each other, in scratch
+//! directories of its own, and a failure here is a fault in the change that
+//! caused it — so it runs on every pull request, on every platform CI has.
 
 use std::path::{Path, PathBuf};
 
@@ -137,7 +137,7 @@ struct Case {
     /// because that is what a scratch directory drives, so the clock cannot be
     /// reached from inside a case — the driver, which holds the concrete
     /// adapter, reads it and passes it. Cases that do not need it take `_now`
-    /// (ADR 0056).
+    /// (ADR the-port-fits-the-machine).
     asserts: fn(&dyn Filesystem, &Path, &str, DateTime<Utc>),
 }
 
@@ -300,7 +300,7 @@ const CASES: &[Case] = &[
                 assert_eq!(
                     host.file_mode(&path).ok().flatten(),
                     Some(PRIVATE_FILE_MODE),
-                    "{adapter}: the owner and nobody else (ADR 0020)"
+                    "{adapter}: the owner and nobody else (ADR claude-code-chooses-the-store)"
                 );
                 // The half this case has always been named for and never
                 // asked. A Credential at 0600 inside a directory anybody may
@@ -518,9 +518,10 @@ const CASES: &[Case] = &[
     Case {
         named: "an absent directory is NotFound rather than empty",
         asserts: |host, root, adapter, _now| {
-            // Load-bearing: `probe::clients_in` is built on this distinction, so
-            // a fake answering `Ok(vec![])` would silently disarm ADR 0022 —
-            // "nothing is running" and "nowhere to look" are different answers.
+            // Load-bearing: `probe::clients_in` is built on this distinction,
+            // so a fake answering `Ok(vec![])` would silently disarm
+            // ADR a-profile-is-live-by-evidence — "nothing is running" and
+            // "nowhere to look" are different answers.
             match host.list_dir(&root.join("no-such-directory")) {
                 Err(HostError::NotFound { .. }) => {}
                 other => panic!("{adapter}: expected NotFound, got {other:?}"),
@@ -692,8 +693,9 @@ const CASES: &[Case] = &[
     },
     // The property every share rests on, and the one a copy would fail: what is
     // read through the link is what the Default Profile holds *now*, not what
-    // it held when Reconcile made it (ADR 0026). "a read follows a symbolic
-    // link" above only reads a file that was already written.
+    // it held when Reconcile made it (ADR everything-but-the-account). "a read
+    // follows a symbolic link" above only reads a file that was already
+    // written.
     Case {
         named: "a write after the link is made is read through it",
         asserts: |host, root, adapter, _now| {
@@ -819,12 +821,13 @@ const CASES: &[Case] = &[
     Case {
         named: "making a directory at a link uses what it points at",
         asserts: |host, root, adapter, _now| {
-            // The state ADR 0027 is about: a Profile whose `sessions` is a link
-            // into another configuration directory. `probe::claim` does
-            // `create_dir_all` on that path, so what this answers decides
-            // whether the Marker lands in the Profile or somewhere else — and
-            // the fake used to insert a directory *shadowing* the link, which
-            // is a third behavior no filesystem has.
+            // The state ADR everything-but-the-account is about: a Profile
+            // whose `sessions` is a link into another configuration directory.
+            // `probe::claim` does `create_dir_all` on that path, so what this
+            // answers decides whether the Marker lands in the Profile or
+            // somewhere else — and the fake used to insert a directory
+            // *shadowing* the link, which is a third behavior no filesystem
+            // has.
             let elsewhere = root.join("another-profile-sessions");
             let here = root.join("sessions");
             host.create_dir_all(&elsewhere)
@@ -846,10 +849,10 @@ const CASES: &[Case] = &[
 
             // And the other half of what "uses what it points at" means: a
             // write under the link lands in the target. This is the whole
-            // hazard ADR 0027 names — a Marker written into a Profile's
-            // `sessions` reaching the Default Profile's — and the fake could
-            // not model it, because it stored files at the name it was given
-            // while reading *through* the link.
+            // hazard ADR everything-but-the-account names — a Marker written
+            // into a Profile's `sessions` reaching the Default Profile's — and
+            // the fake could not model it, because it stored files at the name
+            // it was given while reading *through* the link.
             host.create_file_with_mode(&here.join("a-marker"), "written", PRIVATE_FILE_MODE)
                 .expect("a file under it");
             assert!(
@@ -1079,7 +1082,7 @@ const CASES: &[Case] = &[
 ];
 
 /// A run in which every link case skipped is a run that checked nothing about
-/// the half of this port that ADR 0026 turns on.
+/// the half of this port that ADR everything-but-the-account turns on.
 fn refuse_a_run_with_no_links_in_it(made: &[Link]) {
     assert!(
         made.iter()

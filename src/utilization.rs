@@ -2,11 +2,11 @@
 //!
 //! Every surface that shows Utilization renders it from cache, and shows each
 //! figure with its age so a stale number is visibly stale rather than quietly
-//! wrong (ADR 0015). Only a `--refresh` fetches — on either surface — and it
-//! fetches before rendering rather than while: nothing here reaches the network.
-//! `status` and `list` both have to say the same thing about the same figure,
-//! so how a figure reads lives here rather than being spelled out again by each
-//! of them.
+//! wrong (ADR a-figure-carries-its-age). Only a `--refresh` fetches — on either
+//! surface — and it fetches before rendering rather than while: nothing here
+//! reaches the network. `status` and `list` both have to say the same thing
+//! about the same figure, so how a figure reads lives here rather than being
+//! spelled out again by each of them.
 
 use std::io::Write;
 
@@ -35,8 +35,9 @@ use crate::registry::{Account, CachedUtilization};
 /// would have arrived at whichever of the three was nearest.
 ///
 /// `unicode-width` sits on no seam — the width of a string is a pure function
-/// of it — which is the test ADR 0025 actually sets, and a hand-rolled table of
-/// East Asian widths would be the same data kept by hand, going wrong quietly.
+/// of it — which is the test ADR a-crate-must-not-cost-a-seam actually sets,
+/// and a hand-rolled table of East Asian widths would be the same data kept by
+/// hand, going wrong quietly.
 pub fn cells(text: &str) -> usize {
     UnicodeWidthStr::width(text)
 }
@@ -164,8 +165,9 @@ pub fn lines_with_resets(account: &Account, now: DateTime<Utc>, width: usize) ->
 }
 
 /// One row per Quota Window, however each surface says the window itself, with
-/// the age of the observation on every one of them (ADR 0015) — or the single
-/// line that says nothing has ever been observed.
+/// the age of the observation on every one of them
+/// (ADR a-figure-carries-its-age) — or the single line that says nothing has
+/// ever been observed.
 fn rows(
     account: &Account,
     now: DateTime<Utc>,
@@ -188,7 +190,7 @@ fn rows(
 
 /// The cached Utilization as a script reads it: every figure carries its own
 /// observation time, so the script can decide for itself whether the number is
-/// fresh enough (ADR 0015).
+/// fresh enough (ADR a-figure-carries-its-age).
 pub fn document(account: &Account, now: DateTime<Utc>) -> serde_json::Value {
     match account.observed_utilization() {
         Some(cached) => json!({
@@ -311,7 +313,8 @@ pub fn age_phrase(observed_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
 /// carried their own copy of the same boundaries. They have already drifted
 /// apart once over exactly that: the handover to the hour form was moved in one
 /// and left in the other, so an age that grew by a second fell by half an hour,
-/// on the line ADR 0015 has a reader judging a figure's trustworthiness by.
+/// on the line ADR a-figure-carries-its-age has a reader judging a figure's
+/// trustworthiness by.
 ///
 /// Minutes as far as two hours, which is where the minute form and the hour
 /// form first agree; anywhere earlier they disagree across the boundary. The
@@ -570,7 +573,8 @@ mod tests {
     /// figure gets older. `wait_phrase` was moved off the ninety-minute
     /// handover and this was left on it, so a figure read at 89m59s said "90m
     /// ago" and the same figure a second later said "2h ago" — half an hour
-    /// fresher, on the line ADR 0015 has a reader judging the number by.
+    /// fresher, on the line ADR a-figure-carries-its-age has a reader judging
+    /// the number by.
     #[test]
     fn an_age_never_falls_as_the_figure_gets_older() {
         let now = at(12, 0);

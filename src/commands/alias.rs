@@ -9,9 +9,9 @@
 //! has a name replaces it, and says which name it gave up.
 //!
 //! Both forms are told the Account first and the name second, because the thing
-//! a command acts on is its first argument (ADR 0054). So `--unset` frees
-//! whatever Alias the Account it names answers to, which is the same act
-//! reached by the Alias itself or by the email address behind it.
+//! a command acts on is its first argument (ADR a-command-names-its-noun). So
+//! `--unset` frees whatever Alias the Account it names answers to, which is the
+//! same act reached by the Alias itself or by the email address behind it.
 
 use std::io::Write;
 

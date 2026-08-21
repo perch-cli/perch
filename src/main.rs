@@ -72,9 +72,10 @@ enum Command {
     /// Read and change how Cycling behaves, one Scope at a time.
     ///
     /// Every setting is reachable from a script, because Perch has to be
-    /// complete over SSH and in CI (ADR 0011). A Setting is said about the
-    /// Scope it governs and there is nothing above them (ADR 0051), so a `set`
-    /// is always `<scope> <key> <value>` — where a Scope is a Group by name, or
+    /// complete over SSH and in CI (ADR perch-does-not-draw). A Setting is said
+    /// about the Scope it governs and there is nothing above them
+    /// (ADR a-setting-names-its-scope), so a `set` is always
+    /// `<scope> <key> <value>` — where a Scope is a Group by name, or
     /// `ungrouped` for the Accounts in no Group.
     ///
     /// A bare `perch config get` reads every Scope there is; a `set` that names
@@ -118,10 +119,10 @@ enum Command {
     /// Everything Perch holds on this machine: write it out, put it back, or
     /// give it up.
     ///
-    /// Every Profile, every Credential Perch holds, the registry naming them and
-    /// what each Group carries — the counterpart to an Installation, which is
-    /// what a Channel left. None of the three takes a Target, because none of
-    /// them is about one Account (ADR 0014).
+    /// Every Profile, every Credential Perch holds, the registry naming them
+    /// and what each Group carries — the counterpart to an Installation, which
+    /// is what a Channel left. None of the three takes a Target, because none
+    /// of them is about one Account (ADR the-holdings-go-out-sealed).
     Holdings {
         #[command(subcommand)]
         action: HoldingsCommand,
@@ -174,10 +175,11 @@ enum Command {
 
     /// Show every Account with its Alias, Group, state and cached Utilization.
     ///
-    /// The one place that answers "what do I have", at every breadth (ADR
-    /// 0053): bare it is every Account Perch holds, and a Scope narrows it to
-    /// the Accounts you could Cycle between — where you would land before you
-    /// switch. Renders from cache unless you ask it to fetch.
+    /// The one place that answers "what do I have", at every breadth
+    /// (ADR the-listing-owns-the-set): bare it is every Account Perch holds,
+    /// and a Scope narrows it to the Accounts you could Cycle between — where
+    /// you would land before you switch. Renders from cache unless you ask it
+    /// to fetch.
     List {
         /// Which Accounts to show: a Group by name, or `ungrouped` for the
         /// Accounts in no Group. Without one, every Account Perch holds.
@@ -217,9 +219,10 @@ enum Command {
 
     /// Show the active Account and its cached Utilization.
     ///
-    /// The Account you are on and nothing else (ADR 0053) — a set of Accounts
-    /// is `perch list`, at whatever breadth. Renders from cache unless you ask
-    /// it to fetch, so it is cheap enough for a shell prompt.
+    /// The Account you are on and nothing else (ADR the-listing-owns-the-set) —
+    /// a set of Accounts is `perch list`, at whatever breadth. Renders from
+    /// cache unless you ask it to fetch, so it is cheap enough for a shell
+    /// prompt.
     Status {
         /// Read current Utilization from Anthropic first.
         ///
@@ -239,13 +242,14 @@ enum Command {
 
     /// Replace this Perch with a newer Release.
     ///
-    /// Through whatever Channel installed it (ADR 0039): a Homebrew
-    /// Installation is handed to `brew upgrade perch` and an npm one to `npm
-    /// update -g perch-cli`, because their binaries are theirs to replace and
-    /// writing over one is reverted or thrown away at the next thing they do.
-    /// Only a binary the installer script put where it puts them — `~/.local/bin`,
-    /// `%LOCALAPPDATA%\Perch\bin` on Windows, or `$PERCH_INSTALL_DIR` — is
-    /// replaced by Perch itself, using that same installer.
+    /// Through whatever Channel installed it (ADR an-upgrade-asks-its-channel):
+    /// a Homebrew Installation is handed to `brew upgrade perch` and an npm one
+    /// to `npm update -g perch-cli`, because their binaries are theirs to
+    /// replace and writing over one is reverted or thrown away at the next
+    /// thing they do. Only a binary the installer script put where it puts them
+    /// — `~/.local/bin`, `%LOCALAPPDATA%\Perch\bin` on Windows, or
+    /// `$PERCH_INSTALL_DIR` — is replaced by Perch itself, using that same
+    /// installer.
     ///
     /// A binary anywhere else — unpacked from the Release page by hand, most
     /// likely — is refused rather than written over, and `--channel` says which
@@ -287,16 +291,17 @@ enum Command {
 
     /// Cycle on your behalf when the Account you are on runs low.
     ///
-    /// Three arrangements and one behavior (ADR 0040): `run` is a loop you can
-    /// see and kill, `install` hands that same loop to the machine's own service
-    /// manager, and `check` is one round for a scheduler to fire. One of them at
-    /// a time, and the policy is the same in all three.
+    /// Three arrangements and one behavior (ADR the-machine-runs-the-watcher):
+    /// `run` is a loop you can see and kill, `install` hands that same loop to
+    /// the machine's own service manager, and `check` is one round for a
+    /// scheduler to fire. One of them at a time, and the policy is the same in
+    /// all three.
     ///
     /// Only the active Account is read, and only within a Scope that has been
     /// told the watcher may act on it — `perch config set <group>
     /// watcher-may-act true` for a Group, or the same for `ungrouped` where
     /// `interchangeable` is on as well, because being interchangeable at all is
-    /// its own yes (ADR 0017).
+    /// its own yes (ADR a-group-is-a-declaration).
     Watcher {
         #[command(subcommand)]
         action: WatcherCommand,
@@ -359,9 +364,9 @@ fn main() {
 
     // Before the parser, because clap answers `--version` by printing and
     // exiting, and the line underneath it has to come from somewhere with a
-    // Host to ask (ADR 0039). What it says is `upgrade::version_report`'s, so
-    // that the shape the Homebrew formula asserts on is held still somewhere a
-    // test can reach.
+    // Host to ask (ADR an-upgrade-asks-its-channel). What it says is
+    // `upgrade::version_report`'s, so that the shape the Homebrew formula
+    // asserts on is held still somewhere a test can reach.
     if version_asked_for(&typed) {
         let _ = write!(out, "{}", perch::upgrade::version_report(&host));
         let _ = out.flush();
@@ -460,8 +465,8 @@ fn main() {
         // And the fourth, whose code is not simply "it worked" on two of its
         // five arms: a `check` reports what it decided, so a scheduler can tell
         // a Switch from a figure that could not be read without parsing the
-        // line (ADR 0013), and `uninstall` reports 15 for a machine that
-        // already had no Service.
+        // line (ADR a-watcher-knob-is-arithmetic), and `uninstall` reports 15
+        // for a machine that already had no Service.
         Command::Watcher { action } => watcher::run(&host, action, &mut out),
     };
 
@@ -553,7 +558,7 @@ mod tests {
     /// and nothing that would narrow the restore or answer the passphrase ahead
     /// of time. There is no `--force` either — a machine that already holds an
     /// Account is refused rather than merged, and a flag would be the merge
-    /// wearing a shortcut's clothes (ADR 0014).
+    /// wearing a shortcut's clothes (ADR the-holdings-go-out-sealed).
     #[test]
     fn an_import_takes_a_path_and_nothing_else() {
         assert!(Cli::try_parse_from(["perch", "holdings", "import", "/tmp/perch.age"]).is_ok());
@@ -686,9 +691,10 @@ mod tests {
 
     /// An Export takes everything and has no target: a selective one is a
     /// partial restore, which is the failure the file exists to prevent wearing
-    /// a feature's clothes. So a path is the whole of the surface — and there is
-    /// no flag carrying a passphrase either, because an argument sits in the
-    /// process table for anything on the machine to read (ADR 0014).
+    /// a feature's clothes. So a path is the whole of the surface — and there
+    /// is no flag carrying a passphrase either, because an argument sits in the
+    /// process table for anything on the machine to read
+    /// (ADR the-holdings-go-out-sealed).
     #[test]
     fn an_export_takes_a_path_and_nothing_else() {
         assert!(Cli::try_parse_from(["perch", "holdings", "export", "/tmp/perch.age"]).is_ok());

@@ -51,7 +51,7 @@ one takes nothing away that is not still there, and the refusal can say which
 version wrote the file, which is a better answer than a partial read. This is
 already the shape `export.rs` argues for its own two version fields, and the
 reason an Export is meant to outlive the machine it was written on
-(ADR export-is-encrypted-with-a-required-passphrase).
+(ADR the-holdings-go-out-sealed).
 
 A registry holds Groups, Aliases and Settings that were typed by hand and exist
 nowhere else. Refusing one leaves starting over as the only route, and starting

@@ -2,12 +2,13 @@
 //!
 //! Making an Account active is a Capture of the outgoing Credential into its
 //! own Profile, a write of the incoming one to the Default Profile, and a patch
-//! of the Identity to match — in that order, under Claude Code's locks (ADR
-//! 0006). One precondition stands over the three: **Perch does not move the
-//! live Credential until it has written down that it is about to** (ADR 0048).
-//! That record is a [`Landing`] in the registry, written between the first step
-//! and the second, and [`resolve_a_landing`] is what a later Switch does with
-//! one it finds. The order is not a preference:
+//! of the Identity to match — in that order, under Claude Code's locks
+//! (ADR a-switch-is-written-down-first). One precondition stands over the
+//! three: **Perch does not move the live Credential until it has written down
+//! that it is about to** (ADR a-switch-is-written-down-first). That record is a
+//! [`Landing`] in the registry, written between the first step and the second,
+//! and [`resolve_a_landing`] is what a later Switch does with one it finds. The
+//! order is not a preference:
 //!
 //! - Capturing **first** is what stops a Switch poisoning the Account it
 //!   leaves. Anthropic retires a refresh token when it Rotates one, so the copy
@@ -18,9 +19,9 @@
 //!   names an Account whose Credential Perch can put back.
 //!
 //! Shared State is not touched. No Reconcile, no `projects[<cwd>]`: those are
-//! the Run path (ADR 0003, ADR 0010) and a Switch needs none of it, which is
-//! exactly why memory, settings, plugins and project history follow the person
-//! across Accounts for free.
+//! the Run path (ADR everything-but-the-account, ADR a-run-is-one-shot) and a
+//! Switch needs none of it, which is exactly why memory, settings, plugins and
+//! project history follow the person across Accounts for free.
 //!
 //! **[`switch_to`] is the way in, and the only one.** The three steps, the
 //! Landing, the Quarantine a failure discovered, which Account is active
@@ -67,8 +68,9 @@ pub enum Captured {
     /// Only where the store *answered*. One that would not is not this: it says
     /// nothing about what it holds, so declining there would be skipping the
     /// Capture of a Credential nobody established was bad, and the Switch
-    /// writing over it a moment later would be the loss ADR 0006 exists to
-    /// prevent. That is a refusal, in [`capture`].
+    /// writing over it a moment later would be the loss
+    /// ADR a-switch-is-written-down-first exists to prevent. That is a refusal,
+    /// in [`capture`].
     Unreadable { outgoing: String, why: String },
     /// Perch holds no active Account, so there was nothing to Capture into.
     NoOutgoing,
@@ -88,13 +90,14 @@ pub enum Captured {
 /// records it carries.
 ///
 /// Not a label for a log line. A scheduled `perch watcher check` is one of a
-/// sequence of processes with no memory between them, so what paces the next one
-/// has to be on the registry — and it has to reach the registry in the *same*
-/// save as the Switch it paces, or a Check that moved and then failed leaves no
-/// record of having moved and the next one is free to move straight back: the
-/// "cooldown that did not survive the process" ADR 0013 names. Told here rather
-/// than sequenced by the caller, that ordering stops being a comment somebody
-/// has to honor and becomes a fact of the call.
+/// sequence of processes with no memory between them, so what paces the next
+/// one has to be on the registry — and it has to reach the registry in the
+/// *same* save as the Switch it paces, or a Check that moved and then failed
+/// leaves no record of having moved and the next one is free to move straight
+/// back: the "cooldown that did not survive the process"
+/// ADR a-watcher-knob-is-arithmetic names. Told here rather than sequenced by
+/// the caller, that ordering stops being a comment somebody has to honor and
+/// becomes a fact of the call.
 #[derive(Debug)]
 pub enum Reason {
     /// `perch switch` — somebody asked for this one.
@@ -104,17 +107,19 @@ pub enum Reason {
     /// [`Recently`](crate::watch::Recently) that process is already holding, so
     /// nothing about this Switch is written down beyond the Switch itself.
     ///
-    /// Named for the arrangement rather than for the Watcher, because a Check is
-    /// a Watcher too — all three arrangements are (ADR 0040) — and it mirrors the
-    /// `Watcher::Loop` this is made from.
+    /// Named for the arrangement rather than for the Watcher, because a Check
+    /// is a Watcher too — all three arrangements are
+    /// (ADR the-machine-runs-the-watcher) — and it mirrors the `Watcher::Loop`
+    /// this is made from.
     ///
     /// It reaches the registry as [`Reason::Asked`] does, and it is an arm of its
     /// own so that a loop has one to pass: given only "asked" and "checked" it
     /// would have had to claim one of them, and claiming the second is a loop
     /// writing a Check nothing scheduled.
     Loop,
-    /// `perch watcher check` — the Watcher moved unasked, and the Scope it moved
-    /// within records the Check that did it, in the same save (ADR 0013).
+    /// `perch watcher check` — the Watcher moved unasked, and the Scope it
+    /// moved within records the Check that did it, in the same save
+    /// (ADR a-watcher-knob-is-arithmetic).
     ///
     /// The one arm that makes this enum more than a sentence, and
     /// [`record_the_switch`] is where it is honored.
@@ -174,9 +179,10 @@ impl From<NotSwitched> for PerchError {
 /// something has to be written down beside it, this writes it in the right
 /// order.
 ///
-/// `registry` is expected to be settled — [`resolve_a_landing`] is a step of the
-/// command rather than of this call, because four commands take it before they
-/// read which Account is active and only one of them Switches (ADR 0048).
+/// `registry` is expected to be settled — [`resolve_a_landing`] is a step of
+/// the command rather than of this call, because four commands take it before
+/// they read which Account is active and only one of them Switches
+/// (ADR a-switch-is-written-down-first).
 ///
 /// `installed` is read once by the caller and passed in: a `perch switch` asks
 /// [`already_landed`] about the same Claude Code first, and a Watcher asks
@@ -236,17 +242,18 @@ fn record_the_switch(
 /// Between the Landing being written down and [`Landing::record`] there is a
 /// machine that may be acting as one Account while Perch's own record names
 /// another: the write to the Default Profile is the second of the three steps,
-/// and the patch after it can fail. That gap is the whole of what ADR 0006 is
-/// about — the next Switch Captures the live Credential into the Profile the
-/// registry names, and where that is the wrong Account its only good copy is
-/// gone.
+/// and the patch after it can fail. That gap is the whole of what
+/// ADR a-switch-is-written-down-first is about — the next Switch Captures the
+/// live Credential into the Profile the registry names, and where that is the
+/// wrong Account its only good copy is gone.
 ///
-/// What closes it is that the gap is **written down before it opens** (ADR
-/// 0048). [`perform`] saves an [`Active::Landing`] naming both Accounts after
-/// the Capture and before the Credential moves, so a Perch that arrives on this
-/// state — because this process died in it, or because the registry could not
-/// be written afterwards — knows which two Accounts the live Credential could
-/// belong to instead of believing the stale answer.
+/// What closes it is that the gap is **written down before it opens**
+/// (ADR a-switch-is-written-down-first). [`perform`] saves an
+/// [`Active::Landing`] naming both Accounts after the Capture and before the
+/// Credential moves, so a Perch that arrives on this state — because this
+/// process died in it, or because the registry could not be written afterwards
+/// — knows which two Accounts the live Credential could belong to instead of
+/// believing the stale answer.
 ///
 /// So there is no way to read what a Switch found without recording it first.
 /// `record` consumes the Landing and hands back the [`Captured`]; what it
@@ -279,9 +286,9 @@ impl Landing {
     ///
     /// Asked before the write because a Switch that happened starts a Cooldown
     /// whether or not it finished, and the Cooldown has to reach the registry
-    /// in the same save as everything else (ADR 0013). It is a question about
-    /// the machine rather than about what the caller must now do, which is what
-    /// separates it from everything `record` keeps.
+    /// in the same save as everything else (ADR a-watcher-knob-is-arithmetic).
+    /// It is a question about the machine rather than about what the caller
+    /// must now do, which is what separates it from everything `record` keeps.
     fn moved(&self) -> bool {
         self.incoming_is_live
     }
@@ -401,9 +408,10 @@ fn record_active(
 /// Under them, not before them: the liveness refusal is a statement about a
 /// moment, and taking a lock can take seconds. A `claude` started during that
 /// wait is one the refusal never saw, and the Switch would then replace the
-/// Credential that session is holding — the mid-task logout ADR 0005 exists to
-/// prevent. Once the locks are held, nothing can change the answer, which is
-/// the only condition under which asking is worth anything.
+/// Credential that session is holding — the mid-task logout
+/// ADR a-profile-is-live-by-evidence exists to prevent. Once the locks are
+/// held, nothing can change the answer, which is the only condition under which
+/// asking is worth anything.
 struct Prepared {
     installed: Installed,
     store: Store,
@@ -418,7 +426,7 @@ struct Prepared {
 /// found active, and [`resolve_a_landing`] is what makes that answer worth
 /// anything on a machine where a Switch was interrupted. Handed a stale
 /// `outgoing`, the Capture files the live Credential under the wrong Account,
-/// which is the one loss ADR 0006 exists to prevent.
+/// which is the one loss ADR a-switch-is-written-down-first exists to prevent.
 ///
 /// `perch` is the caller's hold on the registry, renewed alongside Claude Code's
 /// locks for the same reason and against the same hazard. It is held from before
@@ -488,12 +496,13 @@ fn perform(
             .around(|| capture(host, &prepared, incoming, outgoing, registry))
             .map_err(|error| error.with_note(&nothing_happened(outgoing)))?;
 
-        // After the Capture and before the Credential moves (ADR 0048). Later
-        // than the Capture because the Capture is safe to crash inside — it
-        // writes the live Credential into the Profile of the Account the
-        // registry already names, which is where that Credential belongs — and
-        // because a Landing written earlier would be one every refusal at step
-        // one then had to remember to take back.
+        // After the Capture and before the Credential moves
+        // (ADR a-switch-is-written-down-first). Later than the Capture because
+        // the Capture is safe to crash inside — it writes the live Credential
+        // into the Profile of the Account the registry already names, which is
+        // where that Credential belongs — and because a Landing written earlier
+        // would be one every refusal at step one then had to remember to take
+        // back.
         holds
             .around_a_registry_write(|perch| {
                 write_it_down(host, perch, registry, &leaving, incoming)
@@ -530,7 +539,8 @@ fn perform(
 /// perch lock, which is the only argument for one, and that argument is
 /// self-defeating: it puts two writers on one fact. The Landing exists to
 /// describe a disagreement between the registry and the machine, and the two
-/// halves of one fact should not be readable apart (ADR 0048).
+/// halves of one fact should not be readable apart
+/// (ADR a-switch-is-written-down-first).
 ///
 /// The in-memory registry is put back where a save fails, so a caller that goes
 /// on to write it — `record`, saving a Quarantine — cannot put a Landing on
@@ -558,12 +568,12 @@ fn write_it_down(
 /// replaces.
 ///
 /// Every Switch Captures first, because the live Credential is the only good
-/// copy of the outgoing Account's (ADR 0006). A `perch relogin` of the Account
-/// you are on is the one case where that is false in both directions: the
-/// Credential about to be replaced belongs to the Account being repaired, and a
-/// login has already replaced it. Capturing here would write the broken copy
-/// over the fresh one — the one mistake this design cannot recover from,
-/// arriving as tidiness.
+/// copy of the outgoing Account's (ADR a-switch-is-written-down-first). A
+/// `perch relogin` of the Account you are on is the one case where that is
+/// false in both directions: the Credential about to be replaced belongs to the
+/// Account being repaired, and a login has already replaced it. Capturing here
+/// would write the broken copy over the fresh one — the one mistake this design
+/// cannot recover from, arriving as tidiness.
 ///
 /// The Credential written is the one in the Account's own Profile, read back
 /// out of it rather than passed in, so the same store that a `perch switch`
@@ -581,14 +591,14 @@ fn write_it_down(
 /// Written in here, it told a `perch remove` about "this Account's repaired
 /// Credential" — nothing was being repaired, and what lands is the successor's.
 ///
-/// It writes a Landing, as [`perform`] does and for the reason ADR 0048 gives
-/// for guarding both doors: skipping the Capture is what makes this different
-/// going in, and it makes no difference coming out. The same two writes, the
-/// same gap, and `perch remove` of the active Account is the door somebody
-/// walks through while deleting things. The caller records who is active
-/// afterwards — that is not this to sequence — but a `make_live` that moved
-/// nothing takes its own Landing back, because the caller writes nothing on
-/// that path at all.
+/// It writes a Landing, as [`perform`] does and for the reason
+/// ADR a-switch-is-written-down-first gives for guarding both doors: skipping
+/// the Capture is what makes this different going in, and it makes no
+/// difference coming out. The same two writes, the same gap, and `perch remove`
+/// of the active Account is the door somebody walks through while deleting
+/// things. The caller records who is active afterwards — that is not this to
+/// sequence — but a `make_live` that moved nothing takes its own Landing back,
+/// because the caller writes nothing on that path at all.
 ///
 /// `installed` is the caller's rather than probed here, for [`Installed`]'s own
 /// reason — once per command, since the answer cannot change under a process
@@ -620,12 +630,13 @@ pub fn make_live(
         // ago, across a browser round trip, and taking these locks can take
         // seconds more. A `claude` started in that gap is one no earlier answer
         // saw, and what happens next replaces the very Credential it is holding
-        // — the mid-task logout ADR 0005 exists to prevent, reached by the one
-        // path that writes the Default Profile without Capturing first.
+        // — the mid-task logout ADR a-profile-is-live-by-evidence exists to
+        // prevent, reached by the one path that writes the Default Profile
+        // without Capturing first.
         //
         // The Default Profile alone. The Account's own Profile is only read
         // here, and reading a Credential takes nothing away from the session
-        // using it (ADR 0027).
+        // using it (ADR a-profile-is-live-by-evidence).
         let mut holds = lock::Holds::of(held, perch);
 
         holds.around(|| refuse_if_live_in(host, &store.config_dir, whose, installed))?;
@@ -686,28 +697,30 @@ pub struct NotLanded {
 }
 
 /// No Landing is in flight, so the registry a reader is about to ask about is
-/// one that tells the truth about who is active (ADR 0048).
+/// one that tells the truth about who is active
+/// (ADR a-switch-is-written-down-first).
 ///
-/// **The witness, defined once here and referred to everywhere else** (ADR
-/// 0055). A witness is a value that exists only as proof that an ask was made:
-/// nothing to substitute, and nothing in it that the ask did not establish. This
-/// one and [`Idle`] are empty; [`Cooled`](crate::watch::Cooled) borrows the
-/// crossing it is proof about, because it is proof about *that* crossing rather
-/// than about crossings in general.
+/// **The witness, defined once here and referred to everywhere else**
+/// (ADR an-ordering-is-a-type). A witness is a value that exists only as proof
+/// that an ask was made: nothing to substitute, and nothing in it that the ask
+/// did not establish. This one and [`Idle`] are empty;
+/// [`Cooled`](crate::watch::Cooled) borrows the crossing it is proof about,
+/// because it is proof about *that* crossing rather than about crossings in
+/// general.
 ///
 /// Each is the negative of a term the glossary already has — this one of a
 /// [`Landing`] — so nothing is promoted. The steps that must come after an ask
 /// take its witness as an argument, so an ordering that was a comment somebody
 /// had to honor becomes an arity they cannot skip.
 ///
-/// Two things earn this one, and they mean the same thing: [`resolve_a_landing`]
-/// settles a Landing it found, and [`nothing_in_flight`] finds there was none to
-/// settle. Only the first needs the registry lock, and ADR 0055 is where a third
-/// would have to be argued for.
+/// Two things earn this one, and they mean the same thing:
+/// [`resolve_a_landing`] settles a Landing it found, and [`nothing_in_flight`]
+/// finds there was none to settle. Only the first needs the registry lock, and
+/// ADR an-ordering-is-a-type is where a third would have to be argued for.
 pub struct Settled(());
 
 /// The same witness, for a reader that has a Landing to *check* rather than one
-/// to settle (ADR 0055).
+/// to settle (ADR an-ordering-is-a-type).
 ///
 /// A `perch watcher run` says what it is about to watch before it starts
 /// watching, off a registry it has not taken the lock on — and a Landing in
@@ -735,7 +748,8 @@ pub fn nothing_in_flight(registry: &Registry) -> Option<Settled> {
 /// what keeps [`capture`] the function it was always written to be: `capture`
 /// answers *is there a Rotation to save*, and this answers *who is active*.
 /// Those are different questions, and the declines in `capture` are what it
-/// looks like when one function is made to answer both (ADR 0048).
+/// looks like when one function is made to answer both
+/// (ADR a-switch-is-written-down-first).
 ///
 /// The live Credential carries no owner — `claudeAiOauth` is a pair of tokens,
 /// an expiry, a scope list and a subscription type, and no address — so this is
@@ -759,11 +773,12 @@ pub fn resolve_a_landing(
     let store = registry::the_default_profile(host)?;
 
     // Under Claude Code's own locks, which is how every other reading of the
-    // live Credential is taken (ADR 0006). The evidence here is byte-equality
-    // against copies Perch holds, so a Rotation lands on the one thing that can
-    // settle a Landing and leaves nothing on the machine that says whose those
-    // bytes are — a `Conflict` no later run can clear, because every later run
-    // re-reads the same rotated bytes. ADR 0048 accepts a Rotation *since the
+    // live Credential is taken (ADR a-switch-is-written-down-first). The
+    // evidence here is byte-equality against copies Perch holds, so a Rotation
+    // lands on the one thing that can settle a Landing and leaves nothing on
+    // the machine that says whose those bytes are — a `Conflict` no later run
+    // can clear, because every later run re-reads the same rotated bytes.
+    // ADR a-switch-is-written-down-first accepts a Rotation *since the
     // interruption* defeating resolution; it does not have to accept one Perch
     // could have locked out, and read outside the locks a Claude Code refresh
     // landing during this very read did exactly that.
@@ -973,21 +988,22 @@ pub fn already_landed(host: &dyn Host, installed: &Installed, account: &Account)
 /// remove` degrades rather than deleting into it, which is the way back out of
 /// one; a Switch was the consumer with no guard at all.
 ///
-/// What a Switch would do there is the one disagreement ADR 0006 exists to keep
-/// impossible. `prepare` reads the shared store and gets whichever Account's
-/// Credential is in it, `store_credential` writes *that* into the Default
-/// Profile, and `patch_identity` then writes the Identity of the Account that
-/// was asked for. The machine acts as one Account while Claude Code displays
-/// the other and the registry records the other, and nothing afterwards can
-/// tell which of the two the live Credential belongs to.
+/// What a Switch would do there is the one disagreement
+/// ADR a-switch-is-written-down-first exists to keep impossible. `prepare`
+/// reads the shared store and gets whichever Account's Credential is in it,
+/// `store_credential` writes *that* into the Default Profile, and
+/// `patch_identity` then writes the Identity of the Account that was asked for.
+/// The machine acts as one Account while Claude Code displays the other and the
+/// registry records the other, and nothing afterwards can tell which of the two
+/// the live Credential belongs to.
 ///
 /// Two more commands do the same thing by other routes and had no guard either.
 /// `perch relogin` writes the fresh Credential into the shared store, which
 /// destroys the other Account's refresh token with nothing said — the one loss
-/// ADR 0006 calls unrecoverable — and then makes it live under the repaired
-/// Account's name. `perch run` launches a client against the shared directory,
-/// so the session runs as whichever Credential is in it while Perch has just
-/// printed the other Account's name.
+/// ADR a-switch-is-written-down-first calls unrecoverable — and then makes it
+/// live under the repaired Account's name. `perch run` launches a client
+/// against the shared directory, so the session runs as whichever Credential is
+/// in it while Perch has just printed the other Account's name.
 ///
 /// Not asked by `perch remove` or by the landing it makes: that is the escape
 /// hatch, and a refusal there would be Perch holding both Accounts hostage to a
@@ -1022,19 +1038,21 @@ fn prepare(
     //
     // The Capture writes the live Credential into the outgoing Account's
     // Profile, and a client running there is holding that file — writing under
-    // it is the mid-task logout ADR 0005 exists to prevent. The incoming
-    // Account's Profile is only ever *read* from, and reading a Credential to
-    // copy it into the Default Profile takes nothing away from the session that
-    // is using it (ADR 0027). Refusing that as well would make a Run and a
-    // Switch lock each other out for no reason: an Account you are running in
-    // one terminal is exactly the Account you would want active in the others.
+    // it is the mid-task logout ADR a-profile-is-live-by-evidence exists to
+    // prevent. The incoming Account's Profile is only ever *read* from, and
+    // reading a Credential to copy it into the Default Profile takes nothing
+    // away from the session that is using it
+    // (ADR a-profile-is-live-by-evidence). Refusing that as well would make a
+    // Run and a Switch lock each other out for no reason: an Account you are
+    // running in one terminal is exactly the Account you would want active in
+    // the others.
     if let Some(outgoing) = outgoing {
         refuse_if_live(host, outgoing, &installed)?;
     }
 
-    // From whichever of the Profile's two Credential Stores holds one (ADR
-    // 0020): an Account is switchable to as long as its Credential is
-    // somewhere Claude Code would have looked.
+    // From whichever of the Profile's two Credential Stores holds one
+    // (ADR claude-code-chooses-the-store): an Account is switchable to as long
+    // as its Credential is somewhere Claude Code would have looked.
     let held = credentials::read(host, &incoming.store(host)?)?.ok_or_else(|| {
         PerchError::Quarantined {
             why: Quarantine::NoCredential,
@@ -1150,17 +1168,19 @@ fn capture(
     // as evidence of ownership it says the live Credential is the outgoing
     // Account's, and the write below then files the *incoming* Account's
     // Credential into the outgoing Account's Profile — over the only copy of a
-    // refresh token that Account had, which is the one loss ADR 0006 exists to
-    // prevent. Running the same `perch switch` again after it failed to record
-    // itself is enough to reach it.
+    // refresh token that Account had, which is the one loss
+    // ADR a-switch-is-written-down-first exists to prevent. Running the same
+    // `perch switch` again after it failed to record itself is enough to reach
+    // it.
     if live.as_str() == prepared.credential.as_str() {
         return Ok(Captured::NothingToSave);
     }
 
-    // `incoming` and `outgoing` being one Account is the repair for a Switch that
-    // stopped between step two and step three, and the check above has already
-    // taken the case where it has nothing to do. ADR 0027 expects the Capture to
-    // run here — "X is the outgoing Account there as well as the incoming one".
+    // `incoming` and `outgoing` being one Account is the repair for a Switch
+    // that stopped between step two and step three, and the check above has
+    // already taken the case where it has nothing to do.
+    // ADR a-profile-is-live-by-evidence expects the Capture to run here — "X is
+    // the outgoing Account there as well as the incoming one".
     //
     // What is left is a live Credential that is this Account's Profile copy
     // neither, and there are two readings — this Account Rotated while it was
@@ -1185,15 +1205,16 @@ fn capture(
     {
         // And corroborated, because an Identity naming somebody else is the one
         // piece of evidence here that Perch does not write and that goes stale
-        // in a state Perch itself produces. `Landing::record` files the incoming
-        // Account as active whenever its Credential went live, including when
-        // step three failed — so a Switch to B whose `patch_identity` failed
-        // leaves the registry saying B and `.claude.json` still saying A. B then
-        // runs and Rotates. On the next `perch switch C`, this branch read A,
-        // declined the Capture, and the write below put C's Credential over B's
-        // Rotation: the one loss ADR 0006 exists to prevent, reached by
-        // believing a file Perch had just failed to update. The report even said
-        // the live Credential was A's and "not kept", which was untrue.
+        // in a state Perch itself produces. `Landing::record` files the
+        // incoming Account as active whenever its Credential went live,
+        // including when step three failed — so a Switch to B whose
+        // `patch_identity` failed leaves the registry saying B and
+        // `.claude.json` still saying A. B then runs and Rotates. On the next
+        // `perch switch C`, this branch read A, declined the Capture, and the
+        // write below put C's Credential over B's Rotation: the one loss
+        // ADR a-switch-is-written-down-first exists to prevent, reached by
+        // believing a file Perch had just failed to update. The report even
+        // said the live Credential was A's and "not kept", which was untrue.
         //
         // So the Identity is decisive only where something else agrees with it.
         // An address Perch does not hold is a login made outside Perch, whose
@@ -1316,7 +1337,8 @@ fn the_live_credential_is_unaccounted_for(account: &Account) -> String {
 }
 
 /// Step three: `.claude.json` comes to name the Account whose Credential is now
-/// live — that key of it, and nothing else of it (ADR 0001).
+/// live — that key of it, and nothing else of it
+/// (ADR everything-but-the-account).
 fn patch_identity(host: &dyn Host, prepared: &Prepared) -> Result<()> {
     let file = &prepared.store.identity_file;
     let patched = match host.read_file(file) {
@@ -1344,7 +1366,8 @@ fn patch_identity(host: &dyn Host, prepared: &Prepared) -> Result<()> {
 /// Its own Profile holds the block Claude Code wrote when that Account logged
 /// in, which carries fields beyond the Identity Perch records — so that block
 /// is preferred verbatim, and one is composed only for the Accounts that have
-/// none, such as the login adoption took over (ADR 0009).
+/// none, such as the login adoption took over
+/// (ADR a-login-perch-does-not-need).
 fn identity_block_for(host: &dyn Host, incoming: &Account) -> Result<String> {
     let kept = incoming.store(host)?.identity_file;
     let held = host
@@ -1356,14 +1379,16 @@ fn identity_block_for(host: &dyn Host, incoming: &Account) -> Result<String> {
 }
 
 /// The Profile that was asked about is not a Live Profile: nothing is running
-/// against the Credential a write would go under (ADR 0005).
+/// against the Credential a write would go under
+/// (ADR a-profile-is-live-by-evidence).
 ///
-/// A witness on the terms [`Settled`] sets out (ADR 0055) — the negative of a
-/// **Live Profile**, constructible only by [`refuse_if_live`], and taken as an
-/// argument by whatever must not happen before the ask.
+/// A witness on the terms [`Settled`] sets out (ADR an-ordering-is-a-type) —
+/// the negative of a **Live Profile**, constructible only by
+/// [`refuse_if_live`], and taken as an argument by whatever must not happen
+/// before the ask.
 pub struct Idle(());
 
-/// Every way the liveness ask can fail, by name (ADR 0055).
+/// Every way the liveness ask can fail, by name (ADR an-ordering-is-a-type).
 ///
 /// Named one at a time rather than collapsed into a [`PerchError`] because two
 /// of the three are not refusals at all, and a caller deciding what to do next
@@ -1398,7 +1423,8 @@ impl From<NotIdle> for PerchError {
     }
 }
 
-/// Refuses to touch a Profile something else is holding (ADR 0005).
+/// Refuses to touch a Profile something else is holding
+/// (ADR a-profile-is-live-by-evidence).
 ///
 /// Public because two callers ask it *before* they spend something rather than
 /// after. `perch relogin` asks before a browser round trip — a Profile Perch
@@ -1469,8 +1495,8 @@ pub fn refuse_if_live_anywhere(
 
     if let Some(whose) = the_default_profile_too {
         // Its Credential is the one a running client is holding, and this would
-        // replace it rather than renew it — the mid-task logout ADR 0005 exists
-        // to prevent.
+        // replace it rather than renew it — the mid-task logout
+        // ADR a-profile-is-live-by-evidence exists to prevent.
         refuse_if_live_in(
             host,
             &registry::the_default_profile(host)?.config_dir,
@@ -1706,9 +1732,10 @@ mod tests {
     /// is.
     ///
     /// Without it the next scheduled Check saw no cooldown and was free to move
-    /// straight back — the "cooldown that did not survive the process" ADR 0013
-    /// names. It was the Watcher's to sequence and the Watcher's alone, so
-    /// nothing said what would happen if the other caller ever needed it.
+    /// straight back — the "cooldown that did not survive the process"
+    /// ADR a-watcher-knob-is-arithmetic names. It was the Watcher's to sequence
+    /// and the Watcher's alone, so nothing said what would happen if the other
+    /// caller ever needed it.
     ///
     /// Asserted off the file rather than off the registry in hand, because "one
     /// save carries both" is a claim about what reached disk.
@@ -1787,7 +1814,7 @@ mod tests {
     }
 
     /// The one way the liveness ask fails before it has anywhere to ask about,
-    /// and the one that had no coverage at all (ADR 0055).
+    /// and the one that had no coverage at all (ADR an-ordering-is-a-type).
     ///
     /// An Account recorded under an address no Profile directory can be named
     /// after never reaches a `sessions` directory to read, so it is neither Idle

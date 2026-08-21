@@ -1,12 +1,13 @@
 # Platform primitives are linked rather than shelled out
 
-ADR 0008 says Perch drives `/usr/bin/security` rather than linking a keychain
-crate, and a reader arriving at `libc` and `windows-sys` in `Cargo.toml` will
-reasonably ask what changed. Nothing did: ADR 0008's argument is specific and
-does not generalize. macOS anchors a keychain item's access control to the binary
-that created it, so linking would make every Perch build a different creator and
-turn a silent read into a modal prompt after an upgrade. No such property attaches
-to asking whether a process is alive.
+ADR a-crate-must-not-cost-a-seam says Perch drives `/usr/bin/security` rather
+than linking a keychain crate, and a reader arriving at `libc` and `windows-sys`
+in `Cargo.toml` will reasonably ask what changed. Nothing did:
+ADR a-crate-must-not-cost-a-seam's argument is specific and does not generalize.
+macOS anchors a keychain item's access control to the binary that created it, so
+linking would make every Perch build a different creator and turn a silent read
+into a modal prompt after an upgrade. No such property attaches to asking
+whether a process is alive.
 
 Perch needs three primitives its portable standard library does not offer:
 whether a process exists, whether there is a terminal, and setting a directory's
@@ -33,19 +34,19 @@ audits. The `filetime` crate would package the whole thing and was left out to
 avoid a fourth dependency for one function; that is a one-line reversal if the
 hand-rolled version proves awkward.
 
-Shelling out remains the rule where ADR 0008's actual argument applies. `security`
-is still driven as a subprocess, and so is `curl` — by an absolute path per
-platform, because that path is a security property rather than a convenience:
-`Command::new("curl")` would let anything earlier on `PATH` receive an
-`Authorization: Bearer` header.
+Shelling out remains the rule where ADR a-crate-must-not-cost-a-seam's actual
+argument applies. `security` is still driven as a subprocess, and so is `curl` —
+by an absolute path per platform, because that path is a security property
+rather than a convenience: `Command::new("curl")` would let anything earlier on
+`PATH` receive an `Authorization: Bearer` header.
 
 ## Amended: a fourth primitive, and the rule holding
 
 `perch export` prompts for a passphrase, and a passphrase must not be echoed as
-it is typed (ADR 0014) — which the portable standard library has no way to ask
-for. So the count above is four rather than three: process existence, a
-directory's modification time, echo suppression, and the terminal test that was
-deleted in favor of `std::io::IsTerminal`.
+it is typed (ADR the-holdings-go-out-sealed) — which the portable standard
+library has no way to ask for. So the count above is four rather than three:
+process existence, a directory's modification time, echo suppression, and the
+terminal test that was deleted in favor of `std::io::IsTerminal`.
 
 It is decided the same way, which is the point of recording it here rather than
 quietly adding a crate. The whole of it is `ECHO` off, one line, `ECHO` back on:

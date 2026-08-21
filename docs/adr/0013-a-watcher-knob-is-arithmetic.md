@@ -1,8 +1,8 @@
 # A Watcher knob is arithmetic
 
-> **Superseded in part by ADR 0040.** `perch service install` now writes a unit
-> the machine's own service manager owns, so the Watcher can be run for you at
-> login. The title is no longer true.
+> **Superseded in part by ADR the-machine-runs-the-watcher.**
+> `perch service install` now writes a unit the machine's own service manager
+> owns, so the Watcher can be run for you at login. The title is no longer true.
 >
 > Three things below were repealed and are named here so nobody implements them
 > from this record: the loop no longer **stops** when a grant is withdrawn — `14`
@@ -15,11 +15,11 @@
 > unchanged.
 >
 > Everything else stands exactly as written, and is still the governing record
-> for it: polling only the active Account, the two-and-a-half-minute interval and
-> why it is a constant, the Back-off curve, the Cooldown, the Margin, the
-> no-return, what a Check records and why, and the whole exit-code table. ADR
-> 0040 says which of this record's arguments it kept and which one it found had
-> already been spent.
+> for it: polling only the active Account, the two-and-a-half-minute interval
+> and why it is a constant, the Back-off curve, the Cooldown, the Margin, the
+> no-return, what a Check records and why, and the whole exit-code table.
+> ADR the-machine-runs-the-watcher says which of this record's arguments it kept
+> and which one it found had already been spent.
 
 Someone rotating between subscriptions wants to stop noticing that they ran out.
 That needs something watching utilization and switching when a threshold is
@@ -32,9 +32,10 @@ cron or a systemd timer. A group's configuration says whether the watcher may
 act on it, and that is off by default.
 
 A managed background daemon was rejected. It would mutate credentials while
-nobody is watching — every hazard in ADR 0006 firing unattended — and would need
-service lifecycle management on three platforms, in exchange for convenience the
-user's own scheduler already provides. Scheduling is the operating system's job.
+nobody is watching — every hazard in ADR a-switch-is-written-down-first firing
+unattended — and would need service lifecycle management on three platforms, in
+exchange for convenience the user's own scheduler already provides. Scheduling
+is the operating system's job.
 
 ## Consequences
 
@@ -47,14 +48,15 @@ It must also not flip-flop. A cooldown between switches and a margin around the
 threshold are required, so two accounts hovering near the line do not ping-pong.
 
 Everything the watcher does is a Switch, so it captures the outgoing credential
-first (ADR 0006), takes Claude Code's locks, and never refreshes a live
-profile's token (ADR 0005). Running while Claude Code is working is the normal
-case, not the exception.
+first (ADR a-switch-is-written-down-first), takes Claude Code's locks, and never
+refreshes a live profile's token (ADR a-profile-is-live-by-evidence). Running
+while Claude Code is working is the normal case, not the exception.
 
 ## Amended: the numbers this asked for
 
-> **Superseded in full by ADR 0046.** This section — and only this section — is
-> no longer the governing record. Everything above it stands exactly as written.
+> **Superseded in full by ADR a-watcher-knob-is-arithmetic.** This section — and
+> only this section — is no longer the governing record. Everything above it
+> stands exactly as written.
 >
 > The claim that decayed is that the cooldown, the margin and the no-return are
 > "per-group configuration beside `watcher-threshold-percent`, not constants".
@@ -67,9 +69,9 @@ case, not the exception.
 > "a second lock on the same door" understated it.
 >
 > The margin's *mechanism* is unchanged and still described correctly here: it
-> sets candidates aside before the strategy ranks them. Its *rationale* is wrong.
-> Two Accounts do not trade places — they walk upward together, and ADR 0046 says
-> why that matters.
+> sets candidates aside before the strategy ranks them. Its *rationale* is
+> wrong. Two Accounts do not trade places — they walk upward together, and
+> ADR a-watcher-knob-is-arithmetic says why that matters.
 >
 > Nothing else below moved. The interval and why it is a constant, the back-off
 > curve, the cooldown living in the loop while a `--once` Check records it against
@@ -83,9 +85,10 @@ with rather than a set of constants discovered in the source.
 **It polls only the active account.** One account watched continuously fits
 inside the ~28-30 requests per hour comfortably. Candidates are ranked at the
 moment a decision is taken, not kept warm — they are idle by definition then,
-so ADR 0005 permits renewing them. Polling every account in the group instead
-would spend every account's budget to keep figures fresh that are read only at
-a threshold crossing, and would make the size of a group a scaling limit.
+so ADR a-profile-is-live-by-evidence permits renewing them. Polling every
+account in the group instead would spend every account's budget to keep figures
+fresh that are read only at a threshold crossing, and would make the size of a
+group a scaling limit.
 
 **It polls every two and a half minutes.** Twenty-four reads an hour, which
 sits inside the ~28-30 the endpoint allows with room left for the `perch status
@@ -101,13 +104,14 @@ switch made on evidence the user already had; a held decision costs nothing,
 and a wrong switch costs a capture, a credential write, and possibly an account
 more exhausted than the one it left.
 
-This is the one place the watcher diverges from every other surface. ADR 0018
-has a refresh degrade the display rather than fail the command, and ADR 0015
-has everything served from cache, because those surfaces show a person a number
-they will judge for themselves. The watcher shows nobody anything; it acts. A
-reply that arrived but carries no quota window perch can read is a failed
-refresh too, and not a reading of zero — an account with nothing used is the
-one reading that can never be over any threshold.
+This is the one place the watcher diverges from every other surface.
+ADR a-figure-carries-its-age has a refresh degrade the display rather than fail
+the command, and ADR a-figure-carries-its-age has everything served from cache,
+because those surfaces show a person a number they will judge for themselves.
+The watcher shows nobody anything; it acts. A reply that arrived but carries no
+quota window perch can read is a failed refresh too, and not a reading of zero —
+an account with nothing used is the one reading that can never be over any
+threshold.
 
 **Back-off doubles from the interval and stops at twenty minutes.** It starts
 at the ordinary two and a half rather than under it, so no retry ever asks
@@ -186,12 +190,13 @@ only move onto an account with nothing used at all, which is a coherent thing to
 ask for; refusing it would make the order two `perch config set`s are typed in
 matter.
 
-**It never acts on an ungrouped account.** `cycle-ungrouped` (ADR 0017) lets a
-bare `perch switch` cycle among accounts in no group; it grants the watcher
-nothing. Permission to switch when asked and permission to switch while nobody
-is looking are different grants, and the second has no owner when there is no
-group to carry it. `perch watch` started on an ungrouped account says so and
-exits rather than idling forever having decided nothing.
+**It never acts on an ungrouped account.** `cycle-ungrouped`
+(ADR a-group-is-a-declaration) lets a bare `perch switch` cycle among accounts
+in no group; it grants the watcher nothing. Permission to switch when asked and
+permission to switch while nobody is looking are different grants, and the
+second has no owner when there is no group to carry it. `perch watch` started on
+an ungrouped account says so and exits rather than idling forever having decided
+nothing.
 
 **Both grants are read every round, not only at the first.** Either can be
 taken back while the loop is sleeping: a `perch switch` in another terminal can
@@ -203,11 +208,12 @@ the ungrouped account and `14` for the group, as at the first round.
 
 **A Switch that changed nothing is a decision; one that changed something and
 then failed stops the loop.** A Capture refused because a client is running
-against the outgoing Profile (ADR 0027) leaves the machine exactly as it was
-and clears itself when that client exits, so it is printed and the loop goes on
-watching. A Switch that made the incoming Credential live and then failed has
-left the machine part way through, and a watcher that carried on polling would
-be deciding what to do next about a machine nobody has looked at.
+against the outgoing Profile (ADR a-profile-is-live-by-evidence) leaves the
+machine exactly as it was and clears itself when that client exits, so it is
+printed and the loop goes on watching. A Switch that made the incoming
+Credential live and then failed has left the machine part way through, and a
+watcher that carried on polling would be deciding what to do next about a
+machine nobody has looked at.
 
 **Its decision log goes to standard output.** This is a loop in a terminal the
 user can see; a rotated logfile is what a daemon needs because nobody is

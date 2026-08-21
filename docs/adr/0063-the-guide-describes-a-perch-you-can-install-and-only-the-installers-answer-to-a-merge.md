@@ -1,9 +1,10 @@
 # The guide describes a Perch you can install, and only the installers answer to a merge
 
 Two documents said the site deploys from `main`, and both said it as an aside.
-ADR 0035 said it because everything on the site was fixed by a merge, and ADR
-0062 carried the sentence forward without reopening it. Neither noticed that it
-had stopped being true of half of what the site publishes.
+ADR one-thing-renders-the-site said it because everything on the site was fixed
+by a merge, and ADR one-thing-renders-the-site carried the sentence forward
+without reopening it. Neither noticed that it had stopped being true of half of
+what the site publishes.
 
 What it costs was measurable rather than theoretical. Five days after v0.2.0 was
 released, `main` was fifty commits past it and five of those were breaking:
@@ -21,10 +22,10 @@ published, and between releases it does not move.
 
 The installers are pasted into a terminal from a URL with no version in it, and
 that URL is in terminal histories, in the README, and in the install guide. They
-are published when a merge fixes one. This is not a preference: an installer that
-had to wait for a release to be corrected would stay broken until then, which is
-the whole reason the site exists at the root rather than inside a release
-(ADR 0028, ADR 0031).
+are published when a merge fixes one. This is not a preference: an installer
+that had to wait for a release to be corrected would stay broken until then,
+which is the whole reason the site exists at the root rather than inside a
+release (ADR this-repo-assembles-a-release).
 
 Nothing else is published by a merge. A typo fixed in the guide waits for the
 next release, and that is the cost of this document, stated where somebody will

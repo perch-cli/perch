@@ -19,8 +19,8 @@ use crate::keychain::{
 };
 
 /// The `curl` binary. Perch shells out for the same reason it shells out to
-/// `security` (ADR 0008): the machine already has one, and a linked HTTP client
-/// would be a second TLS story to keep current.
+/// `security` (ADR a-crate-must-not-cost-a-seam): the machine already has one,
+/// and a linked HTTP client would be a second TLS story to keep current.
 ///
 /// Always by absolute path, because the path is a security property rather
 /// than a convenience: `Command::new("curl")` would let anything earlier on
@@ -93,8 +93,8 @@ fn curl_bin() -> Result<PathBuf, HostError> {
 /// hang. Perch has no thread it can abandon a request from: `perch watcher run`
 /// waits out every read in its round. A connection that is open and silent
 /// would otherwise stop it indefinitely — which is worse than the network
-/// being down, because ADR 0018 has an answer for that one and no answer for a
-/// loop that never comes back to be told.
+/// being down, because ADR a-figure-carries-its-age has an answer for that one
+/// and no answer for a loop that never comes back to be told.
 ///
 /// Generous rather than tight: what is on the other side is a request Perch
 /// would rather complete than retry, and both numbers are far longer than a
@@ -151,11 +151,12 @@ fn curl_config(request: &HttpRequest<'_>) -> Result<String, HostError> {
     // `double_quoted` makes a value a token and says so: it does not make one
     // inert, because a configuration file is read a line at a time and there is
     // no escape for a newline to be quoted into. `security` has refused these
-    // where they enter since ADR 0008; the `curl` half of the same invariant
-    // was never written, and an access token is a value Perch reads out of a
-    // JSON file it does not own — where `\n` is a legal escape. A token
-    // carrying one would end the `header` line and begin whatever the rest of
-    // it spelled, and `output =` writes a file while `url =` fetches one.
+    // where they enter since ADR claude-code-chooses-the-store; the `curl` half
+    // of the same invariant was never written, and an access token is a value
+    // Perch reads out of a JSON file it does not own — where `\n` is a legal
+    // escape. A token carrying one would end the `header` line and begin
+    // whatever the rest of it spelled, and `output =` writes a file while
+    // `url =` fetches one.
     super::inert("the URL", request.url)?;
     for (name, value) in request.headers {
         super::inert(&format!("the {name} header"), value)?;
@@ -277,13 +278,14 @@ fn run(program: &Path, args: &[&str], stdin: Option<&str>) -> std::io::Result<Ex
 /// How a process that has finished ended, as the one number a caller can pass
 /// on as its own exit code.
 ///
-/// A code where the process exited with one. Where it did not it was killed by a
-/// signal, and the shell's own convention is the honest answer: 128 plus the
+/// A code where the process exited with one. Where it did not it was killed by
+/// a signal, and the shell's own convention is the honest answer: 128 plus the
 /// signal, which is what `$?` reports for that same death and therefore what
-/// anything wrapping `perch run` is already written to read (ADR 0010). The `-1`
-/// [`Execution`] uses is for the captured executions Perch only ever asks
-/// `succeeded()` of; a status that *becomes* Perch's exit code has to say more
-/// than "not zero", and -1 leaves the shell reporting 255 for a Ctrl-C.
+/// anything wrapping `perch run` is already written to read
+/// (ADR a-run-is-one-shot). The `-1` [`Execution`] uses is for the captured
+/// executions Perch only ever asks `succeeded()` of; a status that *becomes*
+/// Perch's exit code has to say more than "not zero", and -1 leaves the shell
+/// reporting 255 for a Ctrl-C.
 #[cfg(unix)]
 fn ended_as(status: std::process::ExitStatus) -> i32 {
     use std::os::unix::process::ExitStatusExt;
@@ -343,7 +345,8 @@ fn security(
 /// ```
 ///
 /// — so a substring search for "error" misses exactly the failures the check
-/// exists to catch, which is the silent-write case ADR 0008 is about.
+/// exists to catch, which is the silent-write case
+/// ADR claude-code-chooses-the-store is about.
 fn said_something_went_wrong(stderr: &str) -> bool {
     stderr
         .lines()
@@ -436,9 +439,9 @@ impl Environment for RealHost {
         Ok(std::fs::canonicalize(&launched).unwrap_or(launched))
     }
 
-    /// Linked rather than shelled out to (ADR 0021): the whole of it is one
-    /// `geteuid`, and `id -u` would be a process spawned to answer a question
-    /// the C library already holds.
+    /// Linked rather than shelled out to (ADR a-crate-must-not-cost-a-seam):
+    /// the whole of it is one `geteuid`, and `id -u` would be a process spawned
+    /// to answer a question the C library already holds.
     ///
     /// The *effective* uid rather than the real one, because that is the
     /// identity the filesystem will judge every write by, and the one launchd
@@ -450,7 +453,7 @@ impl Environment for RealHost {
     }
 
     /// Windows has no uid: a logon task names the user it runs as, and there is
-    /// nothing here to quote or to refuse (ADR 0040).
+    /// nothing here to quote or to refuse (ADR the-machine-runs-the-watcher).
     #[cfg(not(unix))]
     fn user_id(&self) -> Option<u32> {
         None
@@ -527,7 +530,8 @@ impl Files for RealHost {
 
     /// Written beside and moved into place, so the file that ends up at `path`
     /// is one that was created 0600 rather than one that was tightened
-    /// afterwards — even where something looser was already there (ADR 0020).
+    /// afterwards — even where something looser was already there
+    /// (ADR claude-code-chooses-the-store).
     ///
     /// The choreography itself is [`super::replace_via_tmp`], shared with the
     /// non-secret writes: two copies of it would let the failure cleanup drift
@@ -689,8 +693,9 @@ impl Keys for RealHost {
                 // is done anyway because the alternative is `security`
                 // truncating the write mid-argument without saying so, which
                 // stores a corrupt Credential nothing notices until some Switch
-                // later (ADR 0008) — but it is said out loud, because an
-                // invariant with a silent exception is not an invariant.
+                // later (ADR claude-code-chooses-the-store) — but it is said
+                // out loud, because an invariant with a silent exception is not
+                // an invariant.
                 self.note(
                     "A Credential was too large for `security`'s stdin buffer, so it was \
                      given to it as a command-line argument instead. While that ran, any \
@@ -1082,10 +1087,11 @@ static WAS_ECHOING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// The same, with the terminal not showing what is typed.
 ///
 /// The whole of it is `ECHO` off, one line, `ECHO` back on — a platform
-/// primitive linked rather than taken as a crate, which is what ADR 0021
-/// decided for the last two of these. The mode is restored whatever the read
-/// did, because a terminal left with its echo off outlives the process that
-/// turned it off and every shell after it types blind.
+/// primitive linked rather than taken as a crate, which is what
+/// ADR a-crate-must-not-cost-a-seam decided for the last two of these. The mode
+/// is restored whatever the read did, because a terminal left with its echo off
+/// outlives the process that turned it off and every shell after it types
+/// blind.
 ///
 /// "Whatever the read did" has to include Ctrl-C, which is not something the
 /// read does. Only `perch watcher run` takes SIGINT over
@@ -1319,7 +1325,8 @@ fn rename_replacing(from: &Path, to: &Path) -> std::io::Result<()> {
 /// owner may enter.
 ///
 /// The mode is given to `mkdir` rather than applied afterwards, so a directory
-/// that will hold a Credential is never briefly open (ADR 0020).
+/// that will hold a Credential is never briefly open
+/// (ADR claude-code-chooses-the-store).
 #[cfg(unix)]
 fn create_private_dir_all(path: &Path) -> Result<(), HostError> {
     use std::os::unix::fs::DirBuilderExt;
@@ -1428,8 +1435,8 @@ fn make_link(kind: Link, target: &Path, at: &Path) -> Result<(), HostError> {
 /// which is the failure the other two kinds exist to be tried after. Junctions
 /// are a reparse point the standard library does not write, so that one is the
 /// `junction` crate's: hand-writing a `REPARSE_DATA_BUFFER` is exactly the
-/// class of `unsafe` ADR 0021 declined to write, and it sits behind this port
-/// either way (ADR 0025).
+/// class of `unsafe` ADR a-crate-must-not-cost-a-seam declined to write, and it
+/// sits behind this port either way (ADR a-crate-must-not-cost-a-seam).
 #[cfg(windows)]
 fn make_link(kind: Link, target: &Path, at: &Path) -> Result<(), HostError> {
     match kind {
@@ -1535,17 +1542,19 @@ fn interrupted() -> bool {
 /// from the default handler, which would kill the process where it stands.
 ///
 /// Perch links the platform's own primitive rather than taking a crate for it
-/// (ADR 0021): the whole of the unix half is two `signal` calls, and the whole
-/// of the Windows half is one `SetConsoleCtrlHandler`.
+/// (ADR a-crate-must-not-cost-a-seam): the whole of the unix half is two
+/// `signal` calls, and the whole of the Windows half is one
+/// `SetConsoleCtrlHandler`.
 ///
-/// **`SIGTERM` as well as `SIGINT`, and this is what a Service rests on** (ADR
-/// 0040). `SIGINT` is what a person types; `SIGTERM` is what systemd and launchd
-/// send to stop a unit, and its default action is immediate death. Unhandled, a
-/// `systemctl --user stop` arriving mid-Switch would kill Perch between the
-/// incoming Credential reaching the Default Profile and the Identity being
-/// patched — a Landing nobody wrote down, which is the one state ADR 0006's
-/// ordering exists to make impossible. Both mean the same thing to the loop, so
-/// both set the same flag and are answered at the same place: the wait.
+/// **`SIGTERM` as well as `SIGINT`, and this is what a Service rests on**
+/// (ADR the-machine-runs-the-watcher). `SIGINT` is what a person types;
+/// `SIGTERM` is what systemd and launchd send to stop a unit, and its default
+/// action is immediate death. Unhandled, a `systemctl --user stop` arriving
+/// mid-Switch would kill Perch between the incoming Credential reaching the
+/// Default Profile and the Identity being patched — a Landing nobody wrote
+/// down, which is the one state ADR a-switch-is-written-down-first's ordering
+/// exists to make impossible. Both mean the same thing to the loop, so both set
+/// the same flag and are answered at the same place: the wait.
 ///
 /// The handler stands down after one signal, so a **second** of either kills the
 /// process the way it always did. The first asks the loop to finish what it is
@@ -1728,7 +1737,7 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
 /// `proc_pidinfo` rather than `sysctl KERN_PROC_PID`, because the libc crate
 /// carries a vetted declaration of the former for Apple and none of the
 /// latter's `kinfo_proc` — and hand-writing that struct is precisely the
-/// `unsafe` ADR 0021 exists to avoid.
+/// `unsafe` ADR a-crate-must-not-cost-a-seam exists to avoid.
 #[cfg(target_os = "macos")]
 fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
     // SAFETY: `proc_bsdinfo` is plain old data, so an all-zero value is a valid
@@ -1739,7 +1748,8 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
     // SAFETY: the buffer is the `info` above and `size` is that same type's
     // size, so the kernel cannot write past it. That the two agree is exactly
     // what the vetted `libc` declaration buys — a hand-written `kinfo_proc`
-    // getting the size wrong is the class of mistake ADR 0021 declined to risk.
+    // getting the size wrong is the class of mistake
+    // ADR a-crate-must-not-cost-a-seam declined to risk.
     let written = unsafe {
         libc::proc_pidinfo(
             pid as libc::c_int,
@@ -1775,8 +1785,8 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
 /// its exit for as long as anything holds a handle, and `GetProcessTimes`
 /// answers for it the whole while — but an exited process is a gone one here,
 /// as it is on unix once reaped, because a start time exists to corroborate a
-/// session marker (ADR 0022) and a process that has exited corroborates
-/// nothing.
+/// session marker (ADR a-profile-is-live-by-evidence) and a process that has
+/// exited corroborates nothing.
 #[cfg(windows)]
 fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
     use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, STILL_ACTIVE};
@@ -2304,10 +2314,10 @@ mod tests {
     /// It has to outwait a coarse filesystem timestamp, and there is no faking
     /// that — but a second of wall clock is a price rather than a claim, and
     /// this touches nothing outside a directory of its own in `temp_dir`, so
-    /// there is nothing here to hold back (ADR 0050). Ungated with
-    /// `lock::exclusivity`, which is the other one that was waiting on a clock:
-    /// the two together are a second or two on a six-second suite, and Cargo
-    /// parallelizes within the binary.
+    /// there is nothing here to hold back (ADR a-suite-is-named-and-gated).
+    /// Ungated with `lock::exclusivity`, which is the other one that was
+    /// waiting on a clock: the two together are a second or two on a six-second
+    /// suite, and Cargo parallelizes within the binary.
     #[test]
     fn touch_moves_a_directorys_modification_time_forward() {
         let host = RealHost::new();
@@ -2416,7 +2426,7 @@ mod tests {
     /// Both in the configuration rather than in `CURL_ARGS`, which is where
     /// they were: the upgrade check on `perch --version` is a line nobody asked
     /// for, and thirty seconds of a black-holed network is a great deal to
-    /// spend on one (ADR 0039).
+    /// spend on one (ADR an-upgrade-asks-its-channel).
     #[test]
     fn a_request_may_carry_its_own_bound_and_otherwise_gets_the_ordinary_one() {
         let ordinary = curl_config(&HttpRequest::get("https://example.test/usage", &[])).unwrap();

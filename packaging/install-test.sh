@@ -24,8 +24,8 @@ set -eu
 unset CDPATH
 here=$(cd -- "$(dirname -- "$0")" && pwd)
 # The installer is served from the root of the site, so it lives with the site
-# rather than beside this script (ADR 0062). This is no part of what anybody
-# downloads, which is why it is here and not there.
+# rather than beside this script (ADR one-thing-renders-the-site). This is no
+# part of what anybody downloads, which is why it is here and not there.
 installer="$here/../pages/public/install.sh"
 version="v0.0.0-test"
 
@@ -197,9 +197,9 @@ fi" ;;
     expect "installed to $install_dir/perch"
 
     # The shim PATH deliberately has no `gh` on it, so every case here is also
-    # the skipped-provenance case — and ADR 0039 says the one check that did
-    # not happen is the one that most has to be said out loud. Silence here
-    # reads exactly like a check that passed.
+    # the skipped-provenance case — and ADR an-upgrade-asks-its-channel says the
+    # one check that did not happen is the one that most has to be said out
+    # loud. Silence here reads exactly like a check that passed.
     expect "provenance not checked"
 
     # The Unix installer writes nothing but the install directory. Anything

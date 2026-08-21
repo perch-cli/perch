@@ -1,15 +1,16 @@
 # The binary proves its surface
 
-> **Carried out in #155.** Like ADR 0041 and ADR 0042, this is the artifact of
-> a planning effort rather than of a change, so it landed ahead of the work it
-> describes instead of beside it. The tree now matches it: `tests/invoking.rs`
-> is there, and it holds the line drawn below.
+> **Carried out in #155.** Like ADR using-it-is-the-proof and
+> ADR perch-does-not-draw, this is the artifact of a planning effort rather than
+> of a change, so it landed ahead of the work it describes instead of beside it.
+> The tree now matches it: `tests/invoking.rs` is there, and it holds the line
+> drawn below.
 
-ADR 0041 removed the Dogfood suite, and named one thing that went with it and
-did not close: *argv, exit codes and rendered lines do not close at all — nobody
-notices a broken `conflicts_with` or an unmapped exit code by using a tool
-correctly. But these were never Dogfood's to hold: they need a suite that drives
-the binary, and they are decided elsewhere.*
+ADR using-it-is-the-proof removed the Dogfood suite, and named one thing that
+went with it and did not close: *argv, exit codes and rendered lines do not
+close at all — nobody notices a broken `conflicts_with` or an unmapped exit code
+by using a tool correctly. But these were never Dogfood's to hold: they need a
+suite that drives the binary, and they are decided elsewhere.*
 
 This is elsewhere. A suite drives the binary. It is much smaller than that
 sentence suggests, and the reason it is small is the whole of what is worth
@@ -53,13 +54,14 @@ Twenty-seven commits have touched `main.rs`. Two of them were deep reviews — #
 and #116, eighteen findings between them — and neither found a wiring defect.
 #116's only change to `main.rs` was help-text prose.
 
-The temptation is to read that as ADR 0043 read its own count: the defect class
-has no track record, so decline. It does not carry, and the difference is worth
-being precise about. ADR 0043 could count because the reviews it was counting
-*read prose*; their findings were evidence about prose. Nothing has ever driven
-this binary. An empty ledger here says nobody has looked, which is not the same
-claim at all, and treating it as one would be the reasoning that lets an unlit
-room stay unlit because nothing has been seen in it.
+The temptation is to read that as ADR perch-says-what-it-did read its own count:
+the defect class has no track record, so decline. It does not carry, and the
+difference is worth being precise about. ADR perch-says-what-it-did could count
+because the reviews it was counting *read prose*; their findings were evidence
+about prose. Nothing has ever driven this binary. An empty ledger here says
+nobody has looked, which is not the same claim at all, and treating it as one
+would be the reasoning that lets an unlit room stay unlit because nothing has
+been seen in it.
 
 So the finding is real. What it is worth is capped by what it is: twenty match
 arms of three lines each, changing about twice a year, in a file every reviewer
@@ -101,11 +103,12 @@ Not something like Dogfood — the same object. A suite held back by a feature
 flag, dependent on what happens to be installed on the machine, proving
 behavior that 24,500 lines of ungated behavior tests already prove, at a level
 where a failure reports an exit code and a blob of stdout instead of naming the
-assertion that broke. ADR 0041 removed exactly that shape eleven days ago, and
-the argument that removed it does not weaken for the suite being written in a
-different file. A stand-in loses to what it stands in for, and for behavior the
-thing it would stand in for is the fake-driven suite, which is faster, hermetic,
-runs on every platform, and says what it means when it fails.
+assertion that broke. ADR using-it-is-the-proof removed exactly that shape
+eleven days ago, and the argument that removed it does not weaken for the suite
+being written in a different file. A stand-in loses to what it stands in for,
+and for behavior the thing it would stand in for is the fake-driven suite, which
+is faster, hermetic, runs on every platform, and says what it means when it
+fails.
 
 **So the line is: this suite asserts the surface, never the behavior behind
 it.** The operational form of that line, the one to hold against the pressure to
@@ -121,13 +124,14 @@ for every integration test, so `Command::new(env!("CARGO_BIN_EXE_perch"))` is
 the built binary with nothing added to the manifest.
 
 `assert_cmd` is the ecosystem's answer and would give better failure output.
-It is declined, and not on dependency-count grounds — ADR 0025 takes a crate
-where it costs no seam, and a test helper costs none. It is declined on ADR
-0043's, which has just finished deciding that an assertion states the claim it
-makes. `predicates`' combinator style is a second grammar for writing
-assertions, arriving in the same month as the rule that says there is one. A
-helper returning the exit code, standard output and standard error says the same
-things in the idiom the other thirty test binaries already use.
+It is declined, and not on dependency-count grounds —
+ADR a-crate-must-not-cost-a-seam takes a crate where it costs no seam, and a
+test helper costs none. It is declined on ADR perch-says-what-it-did's, which
+has just finished deciding that an assertion states the claim it makes.
+`predicates`' combinator style is a second grammar for writing assertions,
+arriving in the same month as the rule that says there is one. A helper
+returning the exit code, standard output and standard error says the same things
+in the idiom the other thirty test binaries already use.
 
 ## What each level claims
 
@@ -152,11 +156,11 @@ it on macOS, Ubuntu and Windows with everything else. It costs a process spawn
 per case against a binary the build has already produced. The coverage job takes
 the default feature set and instruments the binary target, so its lines count.
 
-`CONTEXT.md` gains nothing. ADR 0041 is about to empty its **Proving it works**
-section, every entry of which describes Dogfood, and an empty section is not a
-reason to fill one. Vocabulary is the surface this whole sweep is judged by, and
-a test file is not a domain concept — nobody using Perch has to hold it. What
-that section becomes is #143's.
+`CONTEXT.md` gains nothing. ADR using-it-is-the-proof is about to empty its
+**Proving it works** section, every entry of which describes Dogfood, and an
+empty section is not a reason to fill one. Vocabulary is the surface this whole
+sweep is judged by, and a test file is not a domain concept — nobody using Perch
+has to hold it. What that section becomes is #143's.
 
 `main.rs` is not restructured. Making dispatch a pure function so it could be
 asserted in-process would introduce a seam to serve a test, and the binary

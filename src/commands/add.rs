@@ -1,10 +1,11 @@
 //! `perch add` — a second Account, without costing you the session you are in.
 //!
 //! Every Profile after the first is created by launching a login inside it
-//! (ADR 0009). The active Account is never read, never written, and never
-//! logged out: the login happens in a config directory of its own, and the
-//! Credential it produces is moved into a Profile afterwards. Which Account it
-//! turned out to be is read back from the login rather than asked for.
+//! (ADR a-login-perch-does-not-need). The active Account is never read, never
+//! written, and never logged out: the login happens in a config directory of
+//! its own, and the Credential it produces is moved into a Profile afterwards.
+//! Which Account it turned out to be is read back from the login rather than
+//! asked for.
 //!
 //! Nothing reaches the registry until the login has produced an Account Perch
 //! can name, so an abandoned login costs a directory that is then removed and
@@ -71,7 +72,8 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     // the other Perches shut out. The copy above was read before a login that
     // may have taken minutes, and writing it back would revert whatever else
     // ran in the meantime — a `perch switch` in another terminal, most
-    // damagingly, whose `active` the next Capture depends on (ADR 0006).
+    // damagingly, whose `active` the next Capture depends on
+    // (ADR a-switch-is-written-down-first).
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
     refuse_an_account_perch_already_holds(host, &registry, &pending.identity)?;
     registry.refuse_taken_names(args.alias.as_deref(), group.as_deref())?;
@@ -245,7 +247,7 @@ fn refuse_an_account_perch_already_holds(
 ///
 /// The organization is offered and never assumed: three subscriptions bought
 /// personally each carry their own organization, so inferring from it would
-/// split exactly the case Groups exist to serve (ADR 0002).
+/// split exactly the case Groups exist to serve (ADR a-group-is-a-declaration).
 fn resolve_group(
     host: &dyn Host,
     out: &mut dyn Write,
@@ -321,9 +323,9 @@ fn resolve_group(
 ///
 /// Said here rather than again in the report. Every Add leaves the active
 /// Account exactly where it was, so a second sentence afterwards would be the
-/// ordinary case announcing that it was ordinary (ADR 0061) — and this one is
-/// said at the moment it is load-bearing, which is before the browser rather
-/// than after it.
+/// ordinary case announcing that it was ordinary (ADR perch-says-what-it-did) —
+/// and this one is said at the moment it is load-bearing, which is before the
+/// browser rather than after it.
 fn announcement(registry: &Registry) -> String {
     format!(
         "Logging in to a new Profile.{}",
@@ -362,12 +364,12 @@ fn report(
     // anything to say. An Add is what makes a Scope a set of two or more, which
     // is when the two defaults gating a Cycle start to matter — said as a
     // statement of what is now true, beside the line above it, and never as a
-    // question (ADR 0017, ADR 0061).
+    // question (ADR a-group-is-a-declaration, ADR perch-says-what-it-did).
     //
     // Said again on the Add after it, and the one after that, for as long as it
-    // stays true. This is not the prose ADR 0061 cut: that was a command
-    // explaining itself on a path that always runs, and this is a fact about a
-    // Scope that stops being said the moment somebody answers it.
+    // stays true. This is not the prose ADR perch-says-what-it-did cut: that
+    // was a command explaining itself on a path that always runs, and this is a
+    // fact about a Scope that stops being said the moment somebody answers it.
     match crate::config::what_the_scope_still_needs(registry, &registry.scope_of(added)) {
         Some(line) => say(out, &line),
         None => Ok(()),

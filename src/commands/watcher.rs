@@ -1,10 +1,10 @@
 //! `perch watcher` — the Watcher, in each of the arrangements it comes in (ADR
-//! 0047).
+//! a-command-names-its-noun).
 //!
-//! Three arrangements and one behavior (ADR 0040), which the surface used to
-//! split three ways: a bare verb, a flag on it, and a tree of its own. One noun
-//! and five verbs is that same domain model, written down where a person types
-//! it.
+//! Three arrangements and one behavior (ADR the-machine-runs-the-watcher),
+//! which the surface used to split three ways: a bare verb, a flag on it, and a
+//! tree of its own. One noun and five verbs is that same domain model, written
+//! down where a person types it.
 //!
 //! `run` and `check` are the loop and one round of it, and are
 //! [`crate::commands::watch`]'s. `install`, `uninstall` and `status` are about
@@ -13,8 +13,9 @@
 //! [`crate::commands::service`]'s.
 //!
 //! `check` is a verb rather than the flag it was, because it changes both the
-//! meaning of the exit code and the lifetime of the command, which is ADR
-//! 0047's test. What it exits with is ADR 0013's table, unchanged.
+//! meaning of the exit code and the lifetime of the command, which is
+//! ADR a-command-names-its-noun's test. What it exits with is
+//! ADR a-watcher-knob-is-arithmetic's table, unchanged.
 
 use std::io::Write;
 
@@ -27,12 +28,14 @@ use crate::host::Host;
 pub enum WatcherCommand {
     /// Watch the Account you are on, and Cycle when it runs low.
     ///
-    /// A loop in this terminal rather than a daemon (ADR 0013): it runs until
-    /// you stop it with Ctrl-C, and leaves nothing behind when you do. Only the
-    /// active Account is read, and only within a Scope that has been told the
-    /// watcher may act on it — `perch config set <group> watcher-may-act true`
-    /// for a Group, or the same for `ungrouped` where `interchangeable` is on
-    /// as well, because being interchangeable at all is its own yes (ADR 0017).
+    /// A loop in this terminal rather than a daemon
+    /// (ADR a-watcher-knob-is-arithmetic): it runs until you stop it with
+    /// Ctrl-C, and leaves nothing behind when you do. Only the active Account
+    /// is read, and only within a Scope that has been told the watcher may act
+    /// on it — `perch config set <group> watcher-may-act true` for a Group, or
+    /// the same for `ungrouped` where `interchangeable` is on as well, because
+    /// being interchangeable at all is its own yes
+    /// (ADR a-group-is-a-declaration).
     ///
     /// Every decision is printed as it is made, including the ones where
     /// nothing happens, which are most of them. They go to standard output, so
@@ -51,11 +54,12 @@ pub enum WatcherCommand {
     /// Have this machine run the Watcher for you, starting when you log in.
     ///
     /// The same loop `perch watcher run` runs, supervised by the machine's own
-    /// service manager rather than by a terminal you have to keep open (ADR
-    /// 0040): a LaunchAgent on macOS, a `systemd --user` unit on Linux, a
-    /// Scheduled Task on Windows. Perch never backgrounds itself and there is
-    /// no `--detach` — it writes a unit and hands the job over, because
-    /// scheduling and supervision are the operating system's.
+    /// service manager rather than by a terminal you have to keep open
+    /// (ADR the-machine-runs-the-watcher): a LaunchAgent on macOS, a
+    /// `systemd --user` unit on Linux, a Scheduled Task on Windows. Perch never
+    /// backgrounds itself and there is no `--detach` — it writes a unit and
+    /// hands the job over, because scheduling and supervision are the operating
+    /// system's.
     ///
     /// Always yours rather than the machine's, and always at login rather than
     /// at boot: every Profile Perch holds is under your home directory, and on

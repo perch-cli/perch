@@ -443,8 +443,9 @@ fn a_name_is_one_name_however_it_is_capitalized_in_any_language() {
 }
 
 /// The whole of what makes the flipped argument order a superset rather than a
-/// swap (ADR 0054): `--unset` takes a Target, so the person who knows only the
-/// email address can free a name they would otherwise have had to know first.
+/// swap (ADR a-command-names-its-noun): `--unset` takes a Target, so the person
+/// who knows only the email address can free a name they would otherwise have
+/// had to know first.
 #[test]
 fn unsetting_by_email_frees_the_alias_the_account_answers_to() {
     let host = machine_with_a_named_second_account();

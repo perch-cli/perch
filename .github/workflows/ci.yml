@@ -109,7 +109,7 @@ jobs:
       # A dependency that nothing imports is compile time and audit surface for
       # no call site, and it is invisible: nothing fails when the last use of a
       # crate is deleted. This is the check that would have caught ratatui and
-      # crossterm sitting unused (ADR 0016).
+      # crossterm sitting unused (ADR a-crate-must-not-cost-a-seam).
       - name: Unused dependencies
         if: runner.os == 'Linux'
         run: |
@@ -143,9 +143,10 @@ jobs:
       # instead, so an outage upstream does not turn every pull request red.
       #
       # The installer is pinned by checksum but the version deliberately is not:
-      # ADR 0007 wants the beliefs asserted against whatever Claude Code is
-      # current, so pinning the version would freeze the drift this job exists
-      # to detect. Pin the code that runs, float the product it installs.
+      # ADR an-assumption-is-probed wants the beliefs asserted against whatever
+      # Claude Code is current, so pinning the version would freeze the drift
+      # this job exists to detect. Pin the code that runs, float the product it
+      # installs.
       #
       # When this step fails on a checksum, Anthropic has almost certainly just
       # updated install.sh. Diff it, satisfy yourself, then bump INSTALL_SHA.
@@ -199,11 +200,11 @@ jobs:
 
       # The suite that is held back because it needs the developer's own machine
       # — the installed Claude Code, the real `~/.claude`, and on macOS the real
-      # login keychain (ADR 0007, ADR 0050). A runner is the one machine that
-      # can be asked for that consent, so this is where it is asked, and drift
-      # is found here rather than by a user being logged out by a background
-      # auto-update. Kept as a step of its own so a failure here reads as
-      # upstream drift rather than as a fault in the pull request.
+      # login keychain (ADR an-assumption-is-probed). A runner is the one
+      # machine that can be asked for that consent, so this is where it is
+      # asked, and drift is found here rather than by a user being logged out by
+      # a background auto-update. Kept as a step of its own so a failure here
+      # reads as upstream drift rather than as a fault in the pull request.
       #
       # --nocapture so the "skipping:" lines are visible: a suite that skipped
       # itself and a suite that asserted look identical otherwise.
@@ -281,14 +282,15 @@ jobs:
   #
   # What this proves is the *next* release's site, not the one being served:
   # `pages.yml` publishes the guide from the newest release and only the
-  # installers from main (ADR 0063). That is the check that was wanted either way.
+  # installers from main (ADR one-thing-renders-the-site). That is the check
+  # that was wanted either way.
   #
   # What gives this teeth is what Starlight refuses: a page with no `title` in
   # its frontmatter, and — because of the one plugin this site has — a relative
-  # markdown link naming a page that is not there (ADR 0062). The rest of what
-  # could go quietly wrong, a README pointing at a page that moved or an
-  # installer URL that grew a prefix, is `tests/publication.rs`, which runs with
-  # the other suites.
+  # markdown link naming a page that is not there
+  # (ADR one-thing-renders-the-site). The rest of what could go quietly wrong, a
+  # README pointing at a page that moved or an installer URL that grew a prefix,
+  # is `tests/publication.rs`, which runs with the other suites.
   site:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -357,9 +359,10 @@ jobs:
 
       # The default feature set, deliberately. `your_machine.rs` is held back
       # by `required-features` because its outcome is the developer's machine's
-      # to decide rather than this repository's (ADR 0050), and instrumenting it
-      # here would count the lines it covers on a runner where it is compiled
-      # out — a figure that moved with the runner rather than with the tests.
+      # to decide rather than this repository's (ADR an-assumption-is-probed),
+      # and instrumenting it here would count the lines it covers on a runner
+      # where it is compiled out — a figure that moved with the runner rather
+      # than with the tests.
       - name: Coverage
         run: cargo llvm-cov --locked --lcov --output-path lcov.info
 

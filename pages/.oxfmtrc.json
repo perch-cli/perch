@@ -1,8 +1,8 @@
 {
   // The guide is prose, hand-wrapped, and read as markdown on GitHub as well as
-  // rendered here (ADR 0062). A formatter re-padding its tables would be
-  // rewriting content this project only renders, so it formats the site's own
-  // code and configuration and leaves the guide alone.
+  // rendered here (ADR one-thing-renders-the-site). A formatter re-padding its
+  // tables would be rewriting content this project only renders, so it formats
+  // the site's own code and configuration and leaves the guide alone.
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "ignorePatterns": ["src/content/**"]
 }

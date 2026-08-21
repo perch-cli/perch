@@ -2,16 +2,17 @@
 //! script.
 //!
 //! Perch has to be complete over SSH and in CI, so every capability it has is
-//! reachable non-interactively (ADR 0011). This is the one that changes the
-//! rules rather than the state: which Account a Cycle prefers, whether the
-//! watcher may act, and whether the ungrouped Accounts may be Cycled among at
-//! all.
+//! reachable non-interactively (ADR perch-does-not-draw). This is the one that
+//! changes the rules rather than the state: which Account a Cycle prefers,
+//! whether the watcher may act, and whether the ungrouped Accounts may be
+//! Cycled among at all.
 //!
-//! **A Setting is said about the Scope it governs** (ADR 0051). A Scope — each
-//! Group, and the Accounts in no Group taken together — holds its own full
-//! Settings, and there is nothing above it: what nobody has said anything about
-//! is the compiled-in default rather than somebody else's value. Nothing is two
-//! layers deep and an Account carries nothing at all.
+//! **A Setting is said about the Scope it governs**
+//! (ADR a-setting-names-its-scope). A Scope — each Group, and the Accounts in
+//! no Group taken together — holds its own full Settings, and there is nothing
+//! above it: what nobody has said anything about is the compiled-in default
+//! rather than somebody else's value. Nothing is two layers deep and an Account
+//! carries nothing at all.
 //!
 //! So every `set` is `<scope> <key> <value>`, and a `set` that names no Scope is
 //! refused rather than landing somewhere. There is no word for "everywhere" —
@@ -25,12 +26,12 @@
 //! vocabulary and a script needs no parser.
 //!
 //! The watcher's two fields say whether `perch watcher run` may Switch within a
-//! Scope and at what Utilization it does (ADR 0046). Every message that
-//! describes the watcher *acting* says the same thing about what it is not: a
-//! Scope that may be acted on is not a service that has been switched on,
-//! because nothing acts on it unless somebody is running the loop. The one
-//! message that need not is the one saying the watcher may not act on this
-//! Scope at all.
+//! Scope and at what Utilization it does (ADR a-watcher-knob-is-arithmetic).
+//! Every message that describes the watcher *acting* says the same thing about
+//! what it is not: a Scope that may be acted on is not a service that has been
+//! switched on, because nothing acts on it unless somebody is running the loop.
+//! The one message that need not is the one saying the watcher may not act on
+//! this Scope at all.
 //!
 //! What a Setting *is* — its name, which Scope carries it, the values it takes
 //! and what having set it means — is [`crate::config`]'s, because surfaces that
@@ -87,9 +88,10 @@ pub fn run(host: &dyn Host, command: ConfigCommand, out: &mut dyn Write) -> Resu
     // Same rule `perch status` states for itself and `perch list` follows.
     match command {
         // The half that writes changes the registry and reaches nothing else,
-        // which is the whole of what `only_the_registry` is for (ADR 0057). The
-        // shape was written here first and lived here alone; `enable`, `alias`
-        // and `group` were spelling it out by hand.
+        // which is the whole of what `only_the_registry` is for
+        // (ADR one-door-to-the-registry). The shape was written here first and
+        // lived here alone; `enable`, `alias` and `group` were spelling it out
+        // by hand.
         ConfigCommand::Set { words } => {
             only_the_registry(host, out, |registry| set(registry, &words))
         }
@@ -140,8 +142,9 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
                 )))
             }
             // A key where the Scope goes is the form that set a value
-            // everywhere, and there is no everywhere (ADR 0051) — answered as
-            // the missing subject it is.
+            // everywhere, and there is no everywhere
+            // (ADR a-setting-names-its-scope) — answered as the missing subject
+            // it is.
             Err(_) if Setting::parse_quietly(first).is_some() => {
                 Err(no_scope_was_named(registry, first, second))
             }
@@ -262,7 +265,8 @@ fn a_setting_is_not_a_scope(word: &str) -> Option<PerchError> {
 }
 
 /// Two words with no Scope among them, which is the form that set a value
-/// everywhere until there was no everywhere to set it at (ADR 0051).
+/// everywhere until there was no everywhere to set it at
+/// (ADR a-setting-names-its-scope).
 fn no_scope_was_named(registry: &Registry, key: &str, value: &str) -> PerchError {
     PerchError::Invalid(format!(
         "`perch config set {key} {value}` names no Scope, and every Setting is \
@@ -335,7 +339,7 @@ mod tests {
     }
 
     /// Every Setting has a subject, and a `set` that names none is refused
-    /// rather than landing somewhere (ADR 0051).
+    /// rather than landing somewhere (ADR a-setting-names-its-scope).
     #[test]
     fn a_set_that_names_no_scope_is_refused_and_names_the_scopes() {
         let mut registry = holding_a_group();
@@ -389,7 +393,7 @@ mod tests {
 
     /// The grant is the one that matters most: a Group declared after somebody
     /// let the watcher into another one is a Group nobody has said anything
-    /// about (ADR 0051).
+    /// about (ADR a-setting-names-its-scope).
     #[test]
     fn a_group_declared_later_is_not_reached_by_a_grant_made_earlier() {
         let mut registry = holding_a_group();

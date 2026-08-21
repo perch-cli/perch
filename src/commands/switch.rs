@@ -10,8 +10,9 @@
 //! With no Target the Account is chosen rather than named — a Cycle within the
 //! current Account's Group ([`crate::cycle`]), which is the command someone
 //! types mid-task when quota just ran out. It asks nothing, under any
-//! circumstances (ADR 0011). What it chose is what `perch list` shows: the
-//! ranking is made once and printed rather than drawn (ADR 0049).
+//! circumstances (ADR perch-does-not-draw). What it chose is what `perch list`
+//! shows: the ranking is made once and printed rather than drawn
+//! (ADR the-listing-owns-the-set).
 
 use std::io::Write;
 
@@ -39,7 +40,8 @@ struct Decision {
     incoming: Account,
     /// What a Cycle chose this Account on, and the Scope it stayed inside,
     /// ready to go on the end of the landing line. Absent when somebody named
-    /// the Account, because then nothing was chosen (ADR 0061).
+    /// the Account, because then nothing was chosen
+    /// (ADR perch-says-what-it-did).
     chosen: Option<String>,
 }
 
@@ -47,10 +49,10 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
     // Before anything is decided, because everything after this reads which
-    // Account is active and a registry holding a Landing does not know (ADR
-    // 0048). A step of its own: the Cycle below picks a Scope from the Account
-    // Perch is on, `already_there` compares against it, and the Capture files
-    // the live Credential under it.
+    // Account is active and a registry holding a Landing does not know
+    // (ADR a-switch-is-written-down-first). A step of its own: the Cycle below
+    // picks a Scope from the Account Perch is on, `already_there` compares
+    // against it, and the Capture files the live Credential under it.
     switch::resolve_a_landing(host, &mut perch, &mut registry)?;
 
     let Decision { incoming, chosen } = decide(&registry, args.target.as_deref(), host.now(), out)?;
@@ -58,9 +60,10 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
 
     // Read once, for the whole command. Both the question below and the Switch
     // after it name the Claude Code they were reading in anything they refuse
-    // (ADR 0007), and each used to ask it for itself — so one `perch switch`
-    // ran `claude --version` twice, walking `PATH` and spawning a subprocess
-    // each time, for a sentence neither of them usually prints.
+    // (ADR an-assumption-is-probed), and each used to ask it for itself — so
+    // one `perch switch` ran `claude --version` twice, walking `PATH` and
+    // spawning a subprocess each time, for a sentence neither of them usually
+    // prints.
     let installed = Installed::probed(host)?;
 
     already_there(host, &installed, &registry, &incoming)?;
@@ -72,7 +75,7 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
     //
     // `Reason::Asked` is the whole of what this caller differs by: somebody
     // typed this, so there is nothing to pace and nothing else to write down
-    // beside it (ADR 0013).
+    // beside it (ADR a-watcher-knob-is-arithmetic).
     let Switched { captured, .. } = switch::switch_to(
         host,
         &mut perch,
@@ -129,7 +132,8 @@ fn decide(
 
     // Nothing is set aside: a Cycle somebody asked for is one they get, and the
     // margin and the cooldown are the watcher's rules for acting unasked
-    // (ADR 0013) rather than rules about where a Switch may land.
+    // (ADR a-watcher-knob-is-arithmetic) rather than rules about where a Switch
+    // may land.
     let choice = cycle::choose(
         registry,
         &scope,
@@ -206,11 +210,12 @@ fn report(
 ) -> Result<()> {
     match captured {
         // Said by nothing, because it happens before every Switch without
-        // exception (ADR 0006) — which is what makes it the ordinary case
-        // announcing that it was ordinary. The reassurance is real and it is
-        // the guide's to give once (ADR 0061). Every other outcome below is a
-        // case where what happened is not what the guide describes, which is
-        // exactly what earns a sentence.
+        // exception (ADR a-switch-is-written-down-first) — which is what makes
+        // it the ordinary case announcing that it was ordinary. The reassurance
+        // is real and it is the guide's to give once
+        // (ADR perch-says-what-it-did). Every other outcome below is a case
+        // where what happened is not what the guide describes, which is exactly
+        // what earns a sentence.
         Captured::Copied { .. } => {}
         // The one case where a Capture was declined rather than found
         // unnecessary, so it says both what was live and what was spared: the
@@ -268,7 +273,8 @@ fn report(
     // Where it landed, and — where the Account was chosen rather than named —
     // what it was chosen on and the Scope the Cycle stayed inside. One line,
     // because the guard rail is worth claiming beside the Account it landed on
-    // and the ranking is not worth defending at all (ADR 0061).
+    // and the ranking is not worth defending at all
+    // (ADR perch-says-what-it-did).
     let named = registry.named_for_the_user(incoming.email());
     say(
         out,
@@ -279,7 +285,7 @@ fn report(
     )?;
 
     // What the Switch bought, as of the cache and never from the network
-    // (ADR 0015): the figures are shown with their age so a stale one reads as
-    // stale rather than as a promise.
+    // (ADR a-figure-carries-its-age): the figures are shown with their age so a
+    // stale one reads as stale rather than as a promise.
     utilization::write_figures(out, incoming, now)
 }

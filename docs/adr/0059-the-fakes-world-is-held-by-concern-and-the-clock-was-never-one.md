@@ -33,10 +33,10 @@ record, and unlike the other one it does not expire: the multiplier
 
 ### And neither does the partition it proposed
 
-ADR 0056's Consequences says the nine concerns partition these 40 fields 38
-ways, with `effects` and `while_waiting` left over. They do not. Ten fields were
-read outside their own concern, and five private helpers straddled concerns —
-the last of them not over a field at all, which is worse:
+ADR the-port-fits-the-machine's Consequences says the nine concerns partition
+these 40 fields 38 ways, with `effects` and `while_waiting` left over. They do
+not. Ten fields were read outside their own concern, and five private helpers
+straddled concerns — the last of them not over a field at all, which is worse:
 
 ```
 record             → effects                                called from 7 of 9 concerns
@@ -46,10 +46,10 @@ while_they_answer  → answering_takes_millis, now, while_waiting
 intended           → Processes::process_id()                Files calling a second concern's method
 ```
 
-This is ADR 0056's own thesis arriving in the state. The machine's surfaces are
-entangled, and a copy of the world is entangled in the same places — `Files` and
-`Links` cross-read in *both* directions, which is exactly why that ADR minted
-`Filesystem: Files + Links`.
+This is ADR the-port-fits-the-machine's own thesis arriving in the state. The
+machine's surfaces are entangled, and a copy of the world is entangled in the
+same places — `Files` and `Links` cross-read in *both* directions, which is
+exactly why that ADR minted `Filesystem: Files + Links`.
 
 ## The finding the design turns on
 
@@ -114,17 +114,18 @@ stay private helpers on `FakeHost`. Measured after the change, three of the nine
 `port::Waiting` both take `stall.now` and `stall.somebody_else`, and
 `port::Processes` reads `environment.home` — and the helpers carry the rest.
 Giving the sub-structs methods would turn every one of those into real coupling:
-passing a clock into the filesystem, which ADR 0056 refused at the trait level.
+passing a clock into the filesystem, which ADR the-port-fits-the-machine refused
+at the trait level.
 
 **The port is qualified, and the state gets the nouns.** All nine trait names
 plus `Filesystem` are the names of the concerns whose state this is, so
 `use super as port;` resolves the collision. The impl headers read `impl
 port::Files for FakeHost`, and the bare `Filesystem` is the world. This is
-deliberately not a second vocabulary — ADR 0056 spent real effort making those
-nine names canonical, and inventing `Disk`, `Wire` and `Person` for the same
-nine things is the drift its glossary section refuses. `port::Files` at the
-header is informative on its own: it says *this is the surface*, where the bare
-noun says *this is the world*.
+deliberately not a second vocabulary — ADR the-port-fits-the-machine spent real
+effort making those nine names canonical, and inventing `Disk`, `Wire` and
+`Person` for the same nine things is the drift its glossary section refuses.
+`port::Files` at the header is informative on its own: it says *this is the
+surface*, where the bare noun says *this is the world*.
 
 **`RefCell` stays per field.** All 39 keep their own; `home` stays a bare
 `PathBuf`. `somebody_else_arrives` carries this comment for a reason — *"Taken
@@ -174,21 +175,23 @@ tree and of a reader having to know the answer before writing the fixture. The
 grouping is for whoever edits `fake.rs`; the flat surface is for everybody else.
 
 **`CONTEXT.md`.** `Stall`, `Filesystem` and *concern struct* are words about how
-Perch is built rather than about what Perch does, which is the line ADR 0056's
-glossary section already drew.
+Perch is built rather than about what Perch does, which is the line
+ADR the-port-fits-the-machine's glossary section already drew.
 
 ## Consequences
 
 - A new arrangement has to choose a struct, which is the same question a new
-  `Host` method already answers under ADR 0056 — and it is answered once, in
-  the field list, rather than by scanning 40 names for a neighbor.
+  `Host` method already answers under ADR the-port-fits-the-machine — and it is
+  answered once, in the field list, rather than by scanning 40 names for a
+  neighbor.
 - The cost this ADR pays down is per *arrangement*, not per method. That is the
   measurement to re-run if this is ever revisited: count the fields that arrive
   without a `Host` method, not the methods.
-- ADR 0056's Consequences is amended in place rather than superseded. Its core
-  finding is strengthened by what the fake's state turned out to look like, and
-  ADR 0046 and ADR 0051 both set the precedent for refusing to supersede a
-  mostly-correct record.
+- ADR the-port-fits-the-machine's Consequences is amended in place rather than
+  superseded. Its core finding is strengthened by what the fake's state turned
+  out to look like, and ADR a-watcher-knob-is-arithmetic and
+  ADR a-setting-names-its-scope both set the precedent for refusing to supersede
+  a mostly-correct record.
 - There is no `Clock` struct and there should not be one. If a future field
   looks like the clock's, the test is whether the site that writes it also takes
   `somebody_else` — if it does, it belongs to the stall.

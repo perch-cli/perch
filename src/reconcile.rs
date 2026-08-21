@@ -1,10 +1,10 @@
 //! Making every piece of Shared State reachable from the Profile a Run is
-//! about to launch (ADR 0026).
+//! about to launch (ADR everything-but-the-account).
 //!
 //! A Run is the one path where a Profile is a live configuration directory
-//! rather than storage (ADR 0010), so it is the one path that has to do this. A
-//! Switch does not: it leaves the Default Profile where it is, and Shared State
-//! follows the person by never having moved.
+//! rather than storage (ADR a-run-is-one-shot), so it is the one path that has
+//! to do this. A Switch does not: it leaves the Default Profile where it is,
+//! and Shared State follows the person by never having moved.
 //!
 //! Two rules, and everything here is one of them:
 //!
@@ -36,7 +36,7 @@ use crate::{probe, profile};
 /// Profile's clients and its own Run's marker would land in the Default
 /// Profile — so one client would make every Profile Live at once, and the
 /// refusals that protect a Live Profile would fire for every Account on the
-/// machine (ADR 0027).
+/// machine (ADR everything-but-the-account).
 ///
 /// `.oauth_refresh.lock` is the directory's too, and is the same class of
 /// mistake with a worse ending. It is the only one of Claude Code's three locks
@@ -53,9 +53,9 @@ use crate::{probe, profile};
 /// configuration directories sharing one lock, each reading the other's mtime
 /// as its own.
 ///
-/// So the denylist ADR 0026 wrote as two entries is four, and the last two are
-/// one rule — an entry that answers a question about *this* directory means
-/// nothing in another one.
+/// So the denylist ADR everything-but-the-account wrote as two entries is four,
+/// and the last two are one rule — an entry that answers a question about
+/// *this* directory means nothing in another one.
 pub const HELD_BACK: [&str; 4] = [
     probe::CREDENTIALS_FILE,
     probe::IDENTITY_FILE,
@@ -298,9 +298,10 @@ const WILL_NOT_GO: &str = "That link is Perch's own and is being replaced, so wh
 ///
 /// An entry deleted from the Default Profile is not enumerated, so nothing else
 /// here would ever look at the link that used to share it — and a link to
-/// nothing is not inert. Claude Code takes its locks by `mkdir` (ADR 0001), and
-/// `mkdir` at a dangling link fails exactly as it does when the lock is held,
-/// so one left behind is a Profile whose client waits for a lock nobody holds.
+/// nothing is not inert. Claude Code takes its locks by `mkdir`
+/// (ADR claude-code-chooses-the-store), and `mkdir` at a dangling link fails
+/// exactly as it does when the lock is held, so one left behind is a Profile
+/// whose client waits for a lock nobody holds.
 ///
 /// Only links, only ones pointing into the Default Profile, and only ones
 /// pointing at something that has gone. Everything else in a Profile is
@@ -331,7 +332,7 @@ fn sweep(host: &dyn Host, shared: &Path, into: &Path) -> Result<()> {
         // question: a Profile whose Credential Store is a link into the Default
         // Profile has no Credential of its own, so a Capture or a relogin
         // writing into it writes into the live store; and a `sessions` link
-        // makes every Profile Live at once (ADR 0027).
+        // makes every Profile Live at once (ADR everything-but-the-account).
         if held_back(&at) || !host.path_exists(&at) {
             unlink(host, &at)?;
         }
@@ -357,7 +358,7 @@ fn refused(at: &Path, why: &str, remedy: &str) -> PerchError {
     PerchError::Other(format!(
         "`{entry}` could not be made reachable from {}: {why}.\n\n\
          Perch shares by linking and never by copying, because a copy diverges the \
-         moment it is edited (ADR 0026) — so the Run is refused rather than served \
+         moment it is edited (ADR everything-but-the-account) — so the Run is refused rather than served \
          one. {remedy}",
         at.parent().unwrap_or(at).display(),
     ))

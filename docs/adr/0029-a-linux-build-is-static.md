@@ -20,8 +20,9 @@ build works on a runner with no musl packages installed at all and the
 `musl-tools` step is belt and braces rather than a requirement.
 
 Nothing is dynamically loaded. On Linux a Credential lives in a file inside the
-Profile (ADR 0020), not in a system keyring, so there is no libsecret to link
-against — the one thing that would have made a static binary genuinely worse.
+Profile (ADR claude-code-chooses-the-store), not in a system keyring, so there
+is no libsecret to link against — the one thing that would have made a static
+binary genuinely worse.
 
 And musl's allocator, which is the reason performance-sensitive programs avoid
 it, is arithmetic Perch never does: it reads a registry, writes a credential,

@@ -14,11 +14,12 @@ git_release_enable = false
 git_tag_enable = true
 git_tag_name = "v{{ version }}"
 
-# What keeps Perch off crates.io (ADR 0030). It has to live here rather than in
-# Cargo.toml, and the difference is not cosmetic: `publish = false` in Cargo.toml
-# reads to release-plz as "this package is not one of mine", so it skips the
-# package outright — no version decision, no changelog, no release pull request,
-# and no error saying so. The job goes green and nothing happens.
+# What keeps Perch off crates.io (ADR this-repo-assembles-a-release). It has to
+# live here rather than in Cargo.toml, and the difference is not cosmetic:
+# `publish = false` in Cargo.toml reads to release-plz as "this package is not
+# one of mine", so it skips the package outright — no version decision, no
+# changelog, no release pull request, and no error saying so. The job goes green
+# and nothing happens.
 #
 # Here it means what it says. release-plz still decides the version, writes the
 # changelog and pushes the tag; it just does not run `cargo publish`.

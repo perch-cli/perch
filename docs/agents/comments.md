@@ -31,15 +31,16 @@ Before:
 /// How long the watcher waits between Refreshing the Account it is on.
 ///
 /// Anthropic's usage endpoint allows roughly 28-30 reads an hour per Account
-/// (ADR 0015). Two and a half minutes is twenty-four of them, which leaves room
-/// for the `perch status --refresh` somebody types while the watcher is running
-/// rather than spending the whole allowance on the loop and having the user's
-/// own question refused.
+/// (ADR a-figure-carries-its-age). Two and a half minutes is twenty-four of
+/// them, which leaves room for the `perch status --refresh` somebody types
+/// while the watcher is running rather than spending the whole allowance on the
+/// loop and having the user's own question refused.
 ///
 /// It is the Refresh of **one** Account, and the case for that is the same
 /// arithmetic read the other way: at twenty-four an hour each, a Group of two
 /// would already be at the limit and a Group of four past it. Said here,
-/// because this is the number it is the reason for (ADR 0013).
+/// because this is the number it is the reason for
+/// (ADR a-watcher-knob-is-arithmetic).
 ```
 
 After:
@@ -47,9 +48,10 @@ After:
 ```rust
 /// How long the watcher waits between Refreshing the Account it is on.
 ///
-/// 150s is 24 reads an hour. The endpoint allows 28-30 per Account (ADR 0015),
-/// so a concurrent `perch status --refresh` still fits. Refreshes one Account:
-/// at 24/hour each, a Group of two is already at the limit.
+/// 150s is 24 reads an hour. The endpoint allows 28-30 per Account
+/// (ADR a-figure-carries-its-age), so a concurrent `perch status --refresh`
+/// still fits. Refreshes one Account: at 24/hour each, a Group of two is
+/// already at the limit.
 ```
 
 What went, and why each was filling rather than fact: *"the same arithmetic read
@@ -58,23 +60,23 @@ because this is the number it is the reason for"* justifies the comment's own
 placement. *"somebody types"* and *"the user's own question refused"* dramatize a
 constraint the numbers already carry. Every figure survives.
 
-ADR 0013 goes because the module header already cites it — one citation per file.
-ADR 0015 stays because this constant is what that decision is about, and the
-header does not mention it.
+ADR a-watcher-knob-is-arithmetic goes because the module header already cites it
+— one citation per file. ADR a-figure-carries-its-age stays because this
+constant is what that decision is about, and the header does not mention it.
 
 ### Deletes
 
 `src/watch.rs`, above `still_holding_line`. Nine lines, gone whole:
 
 ```rust
-/// ADR 0013 had every held round say which failure held it, and a hold whose
-/// line said neither that nor when it would ask again "reads as a watcher that
-/// has given up". That was written about a person watching a terminal, where the
-/// repeated line *is* the proof of life. A Service writes to a log nobody reads
-/// until something is wrong, and a permission hold repeats until somebody
-/// changes a setting — possibly for weeks. At one line every two and a half
-/// minutes, what five hundred and seventy-six identical lines a day bury is the
-/// one line that matters.
+/// ADR a-watcher-knob-is-arithmetic had every held round say which failure held
+/// it, and a hold whose line said neither that nor when it would ask again
+/// "reads as a watcher that has given up". That was written about a person
+/// watching a terminal, where the repeated line *is* the proof of life. A
+/// Service writes to a log nobody reads until something is wrong, and a
+/// permission hold repeats until somebody changes a setting — possibly for
+/// weeks. At one line every two and a half minutes, what five hundred and
+/// seventy-six identical lines a day bury is the one line that matters.
 ```
 
 It fails twice over. It narrates what a decision *used to* require and then
@@ -106,8 +108,9 @@ Reflowing a long comment to fit is the one response the rule forbids.
 
 **One citation per file.** The caps make a citation the cheapest thing a comment
 can carry, so unbounded they would trade prose for slugs. `src/watch.rs` cites
-ADR 0013 eleven times today and `src/commands/watch.rs` cites ADR 0040 eighteen;
-a decision appearing eleven times in one file marks nothing.
+ADR a-watcher-knob-is-arithmetic eleven times today and `src/commands/watch.rs`
+cites ADR the-machine-runs-the-watcher eighteen; a decision appearing eleven
+times in one file marks nothing.
 
 **Slugs, not numbers.** Identity on the number made a renumber a tree-wide
 rewrite — 1,500 sites across 158 files, every one of them moving even where the
@@ -117,11 +120,11 @@ table of contents; it is in no citation, because identity that shows up in a
 citation has not moved.
 
 One name rather than two. A short slug beside a long title is a second register,
-and the next session has to know which of them a reader wants — so the titles are
-short and the slug is the title. The 30-character cap is hard rather than a
+and the next session has to know which of them a reader wants — so the titles
+are short and the slug is the title. The 30-character cap is hard rather than a
 target: a target drifts across eleven passes, and unlike a comment cap this one
 has no "write the ADR" escape hatch. Hyphenation is what lets a check tell
-`ADR the-host-port-is-wide` from the `ADR` in `## Flag ADR conflicts`.
+`ADR the-port-fits-the-machine` from the `ADR` in `## Flag ADR conflicts`.
 
 Never a path, so never clickable — that is the cost, paid because the set is
 contiguous from 0001 and adding a document renumbers every one after it. Markdown
@@ -133,13 +136,17 @@ cannot follow the citation and did not ask for it. `CHANGELOG.md` is the other
 exemption, in the other direction — it records what happened on a date, so a
 number there is not a citation and may name a document that is gone.
 
-Checked once the tree is converted, by `tests/citing.rs`: a slug resolving to
-exactly one file, a filename tail matching its H1, a slug within cap and
-hyphenated, and nothing citing a number.
+Checked by `tests/citing.rs`: a slug resolving to exactly one file, a slug
+within cap and hyphenated, and nothing citing a number. Two exemptions stand
+until the area passes run — the guide, which loses its `ADR` mentions rather
+than gaining slugs, and `docs/research/adr-inventory.md`, a dated read of the 64
+documents that indexes them by the number. *A filename tail matches its H1*
+waits for the set to be final, because the documents that merge away keep the
+titles they have.
 
-**Present tense.** The same rule an ADR follows: state what stands, not the route
-to it. A rejected alternative is timeless and stays. Perch's own former behavior
-is a commit, not an alternative.
+**Present tense.** The same rule an ADR follows: state what stands, not the
+route to it. A rejected alternative is timeless and stays. Perch's own former
+behavior is a commit, not an alternative.
 
 This is where the deletions are. A comment that merely echoes the line below it
 is nearly absent from this tree — a sweep looking for one finds almost nothing
@@ -151,6 +158,6 @@ one that has to work. `a_refresh_that_fails_across_a_threshold_crossing_never_sw
 needs nothing above it.
 
 **Comments, not documents.** An argument compressed to bullets stops being
-answerable by the next reader, which is what ADR 0043 exists to prevent. The
-ADRs keep their prose on purpose. Written down so no session "fixes" them to
-match this rule.
+answerable by the next reader, which is what ADR perch-says-what-it-did exists
+to prevent. The ADRs keep their prose on purpose. Written down so no session
+"fixes" them to match this rule.

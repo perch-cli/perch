@@ -6,8 +6,8 @@
 //! asserted here is the part that touches a machine: that a unit is written
 //! where the platform keeps one, that the service manager is actually driven,
 //! that a failure leaves nothing behind, and that the two commands which meet a
-//! running Service — a Purge and an Upgrade — do the thing ADR 0040 says they
-//! owe it.
+//! running Service — a Purge and an Upgrade — do the thing
+//! ADR the-machine-runs-the-watcher says they owe it.
 //!
 //! Three properties are what this command is for, and each has a test that fails
 //! if it stops holding: a Service belongs to one person and is refused to root,
@@ -129,8 +129,9 @@ fn run_service(host: &FakeHost, command: WatcherCommand) -> (perch::Result<i32>,
 /// service manager told about it, and a sentence saying what was installed.
 ///
 /// Not a sentence about starting at login. Every install that gets this far did
-/// that, so it was the ordinary case announcing that it was ordinary (ADR 0061)
-/// — and the two arms that stop short of it say what did not start.
+/// that, so it was the ordinary case announcing that it was ordinary
+/// (ADR perch-says-what-it-did) — and the two arms that stop short of it say
+/// what did not start.
 #[test]
 fn installing_writes_a_unit_and_starts_it_through_the_service_manager() {
     let host = linux();
@@ -163,8 +164,9 @@ fn installing_writes_a_unit_and_starts_it_through_the_service_manager() {
          starts a stopped unit and does nothing to a running one, which is the \
          state re-installing after an Upgrade is always in"
     );
-    // Asserted whole, because the claim is the sentence (ADR 0043): what it
-    // did, and which of this machine's binaries the unit was written against.
+    // Asserted whole, because the claim is the sentence
+    // (ADR perch-says-what-it-did): what it did, and which of this machine's
+    // binaries the unit was written against.
     assert!(
         printed.contains(&format!(
             "Installed the Service. It runs {} as a systemd user unit.",
@@ -233,12 +235,12 @@ fn a_carried_value_that_would_write_its_own_directive_is_refused_before_anything
 }
 
 /// **The same door, reached the other way.** An Upgrade rewrites the unit
-/// against the binary the Channel just moved (ADR 0039), and it does it from a
-/// `describe` that re-reads `PERCH_HOME` and `CLAUDE_CONFIG_DIR` out of the
-/// environment `perch upgrade` was run in. That path assembled the sequence by
-/// hand and dropped the guard above, so the value refused at install time went
-/// straight into a file systemd loads at every login — the same arbitrary code,
-/// persisted, one command over.
+/// against the binary the Channel just moved (ADR an-upgrade-asks-its-channel),
+/// and it does it from a `describe` that re-reads `PERCH_HOME` and
+/// `CLAUDE_CONFIG_DIR` out of the environment `perch upgrade` was run in. That
+/// path assembled the sequence by hand and dropped the guard above, so the
+/// value refused at install time went straight into a file systemd loads at
+/// every login — the same arbitrary code, persisted, one command over.
 #[test]
 fn an_upgrade_refuses_to_rewrite_the_unit_with_a_value_no_unit_can_hold() {
     let host = linux();
@@ -471,7 +473,8 @@ fn a_service_is_refused_to_root_rather_than_installed_for_the_wrong_person() {
 }
 
 /// Re-running is the documented repair for a Service whose binary moved, which
-/// an Upgrade does every time it routes through Homebrew or npm (ADR 0039).
+/// an Upgrade does every time it routes through Homebrew or npm
+/// (ADR an-upgrade-asks-its-channel).
 #[test]
 fn installing_twice_replaces_the_unit_rather_than_refusing() {
     let host = linux();
@@ -547,7 +550,8 @@ fn uninstalling_stops_the_service_and_takes_the_unit_back() {
         ran(&host)
     );
     // The whole of what it says, and nothing about what stops starting at
-    // login or about a terminal that was never affected (ADR 0061).
+    // login or about a terminal that was never affected
+    // (ADR perch-says-what-it-did).
     assert!(
         printed.contains("The Service is stopped and its unit is gone."),
         "{printed}"
@@ -721,10 +725,10 @@ fn status_says_where_the_installed_service_actually_writes_its_log() {
     );
 }
 
-/// Said rather than refused, for the reason ADR 0013 gives about a Margin at or
-/// above a Threshold: refusing would make the order two `perch config set`s are
-/// typed in matter. A Service with no grant holds harmlessly and takes over the
-/// moment one is given.
+/// Said rather than refused, for the reason ADR a-watcher-knob-is-arithmetic
+/// gives about a Margin at or above a Threshold: refusing would make the order
+/// two `perch config set`s are typed in matter. A Service with no grant holds
+/// harmlessly and takes over the moment one is given.
 #[test]
 fn installing_with_no_grant_anywhere_succeeds_and_says_the_service_will_hold() {
     let host = linux();
@@ -772,8 +776,8 @@ fn a_watcher_lock_that_will_not_be_taken_at_all_is_not_a_watcher_that_is_running
 }
 
 /// A grant said about the Ungrouped Accounts is not on its own enough for the
-/// Watcher to act on them: `interchangeable` is the declaration that has to come
-/// first, and without it every round holds (ADR 0017).
+/// Watcher to act on them: `interchangeable` is the declaration that has to
+/// come first, and without it every round holds (ADR a-group-is-a-declaration).
 ///
 /// Read from `watcher-may-act` alone, this line stayed silent on a machine where
 /// the Watcher can never act — telling somebody their Service was arranged when
@@ -804,7 +808,8 @@ fn a_grant_the_watcher_will_never_act_on_still_says_the_service_will_hold() {
 /// **The hazard a Purge exists to avoid, one level up.** A Watcher is the one
 /// process that writes Credentials without being asked, and a supervised one
 /// comes straight back — so it is stopped before anything is deleted, and the
-/// consent covers it (ADR 0024's shape, ADR 0040's rule).
+/// consent covers it (ADR a-removal-lands-first's shape,
+/// ADR the-machine-runs-the-watcher's rule).
 #[test]
 fn a_purge_stops_the_service_before_it_deletes_anything() {
     // Declining the Export and then typing the word, which is what a Purge
@@ -959,7 +964,8 @@ fn a_mac_gets_a_launchagent_in_its_own_place_bootstrapped_into_its_own_session()
 // ---- what an Upgrade owes a running Service -------------------------------
 
 /// A machine whose newest published Release is newer than this build, installed
-/// by Homebrew — the Channel `perch upgrade` hands the work to (ADR 0039).
+/// by Homebrew — the Channel `perch upgrade` hands the work to
+/// (ADR an-upgrade-asks-its-channel).
 fn upgradable() -> FakeHost {
     mac()
         .with_reply(
@@ -1388,11 +1394,11 @@ fn a_purge_refuses_under_a_watcher_run_from_a_terminal_with_no_service_installed
 /// On Windows the service-manager binary is spelled out, because a bare name is
 /// searched for in the current working directory first.
 ///
-/// `commands::upgrade::powershell` states the rule and ADR 0021 is the rule.
-/// `schtasks` is the higher-value target of the two it covers: its `/TR`
-/// argument is a command line Windows runs at every logon, so a `schtasks.exe`
-/// dropped in a downloads folder turns `perch watcher install` typed there into
-/// attacker-chosen persistence.
+/// `commands::upgrade::powershell` states the rule and
+/// ADR a-crate-must-not-cost-a-seam is the rule. `schtasks` is the higher-value
+/// target of the two it covers: its `/TR` argument is a command line Windows
+/// runs at every logon, so a `schtasks.exe` dropped in a downloads folder turns
+/// `perch watcher install` typed there into attacker-chosen persistence.
 #[test]
 fn windows_runs_the_schtasks_that_ships_with_windows_and_not_whichever_is_nearest() {
     let system32 = r"C:\Windows\System32\schtasks.exe";

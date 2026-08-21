@@ -1,5 +1,5 @@
 //! Surface: what the built binary accepts, what it prints, and what it exits
-//! with (ADR 0044).
+//! with (ADR the-binary-proves-its-surface).
 //!
 //! The one suite that runs `perch` as a process. Every other binary in `tests/`
 //! drives the command code in this process against `host::fake`, which is
@@ -144,9 +144,9 @@ impl Drop for Scratch {
 /// Every command the binary dispatches, as `--help` lists them.
 ///
 /// Fifteen names, because a command is placed by the noun it is about and the
-/// Account is the one left unsaid (ADR 0047). The ten that elide it, `perch`
-/// itself, and the four nouns that are written: `config`, `group`, `holdings`
-/// and `watcher`.
+/// Account is the one left unsaid (ADR a-command-names-its-noun). The ten that
+/// elide it, `perch` itself, and the four nouns that are written: `config`,
+/// `group`, `holdings` and `watcher`.
 const COMMANDS: [&str; 15] = [
     "add", "alias", "config", "disable", "enable", "group", "holdings", "relogin", "remove", "run",
     "list", "switch", "status", "upgrade", "watcher",
@@ -361,9 +361,10 @@ fn a_flag_that_could_be_either_is_refused_before_the_parser() {
 }
 
 /// The listing arm, whose surface is a positional Scope and two flags. A table
-/// for a person and a document for a script are the two renderings ADR 0011
-/// requires to both exist, and the argument is the breadth: a Scope that
-/// arrived where `--json` was read would answer a script about everything.
+/// for a person and a document for a script are the two renderings
+/// ADR perch-does-not-draw requires to both exist, and the argument is the
+/// breadth: a Scope that arrived where `--json` was read would answer a script
+/// about everything.
 ///
 /// `--refresh` is the one flag this suite cannot press — it is the only thing
 /// in Perch that touches the network — so what is claimed is that nothing else
@@ -402,8 +403,8 @@ fn the_listing_arm_takes_a_scope_and_renders_a_table_or_a_document() {
 }
 
 /// The status arm, which is about the Account you are on and cannot be widened
-/// to anything else (ADR 0053). A Scope typed here is a line the parser refuses
-/// rather than one that quietly lists a Group.
+/// to anything else (ADR the-listing-owns-the-set). A Scope typed here is a
+/// line the parser refuses rather than one that quietly lists a Group.
 #[test]
 fn the_status_arm_answers_about_one_account_and_takes_no_scope() {
     let machine = Scratch::holding_an_account("status");
@@ -571,7 +572,7 @@ fn disable_and_enable_reach_their_own_halves() {
     assert!(
         !row.contains("disabled"),
         "the state cell empties rather than naming a state with no name \
-         (ADR 0052):\n{}",
+         (ADR a-command-names-its-noun):\n{}",
         ran.out
     );
 }

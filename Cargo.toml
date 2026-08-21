@@ -13,20 +13,21 @@ description = "Run Claude Code as whichever Claude account you want, without log
 # their problem, and costs the project nothing but a second file.
 license = "MIT OR Apache-2.0"
 
-# crates.io is not one of Perch's channels (ADR 0030), but that is settled in
-# release-plz.toml rather than here. `publish = false` in this file does not
-# mean "do not publish this package" to release-plz — it means "this package is
-# not mine", and release-plz skips it silently: no version, no changelog, no
-# release pull request, no error. See the comment on `publish` there.
+# crates.io is not one of Perch's channels (ADR this-repo-assembles-a-release),
+# but that is settled in release-plz.toml rather than here. `publish = false` in
+# this file does not mean "do not publish this package" to release-plz — it
+# means "this package is not mine", and release-plz skips it silently: no
+# version, no changelog, no release pull request, no error. See the comment on
+# `publish` there.
 
 # Local `cargo clippy` and CI agree, rather than CI being the only place that
 # says no. `unsafe_op_in_unsafe_fn` because host/real.rs carries every platform
-# primitive ADR 0021 chose to link rather than shell out to — process liveness,
-# file times, terminal echo, signal handlers — and every one of those
-# operations should have to be written as
-# `unsafe` rather than inherited from the signature around it. The count is
-# deliberately not written down here: it moves, and a number in a comment that
-# moves is a comment that is wrong.
+# primitive ADR a-crate-must-not-cost-a-seam chose to link rather than shell out
+# to — process liveness, file times, terminal echo, signal handlers — and every
+# one of those operations should have to be written as `unsafe` rather than
+# inherited from the signature around it. The count is deliberately not written
+# down here: it moves, and a number in a comment that moves is a comment that is
+# wrong.
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 
@@ -56,14 +57,14 @@ opt-level = 3
 opt-level = 3
 
 [dependencies]
-# What `perch holdings export` writes (ADR 0014). Encryption sits on neither of
-# Perch's seams — it is not an effect the Host port carries, and it is not
-# shared with Claude Code — so a crate costs nothing here (ADR 0025). The
-# property that decided it is that an `age` file is read by the standard `age`
-# command: a backup meant to outlive the machine should not depend on Perch
-# still existing.
-# `armor` is `age`'s text encoding of the same file, which is what lets the
-# Export go through the Host port's ordinary private write.
+# What `perch holdings export` writes (ADR the-holdings-go-out-sealed).
+# Encryption sits on neither of Perch's seams — it is not an effect the Host
+# port carries, and it is not shared with Claude Code — so a crate costs nothing
+# here (ADR a-crate-must-not-cost-a-seam). The property that decided it is that
+# an `age` file is read by the standard `age` command: a backup meant to outlive
+# the machine should not depend on Perch still existing. `armor` is `age`'s text
+# encoding of the same file, which is what lets the Export go through the Host
+# port's ordinary private write.
 age = { version = "0.12.1", default-features = false, features = ["armor"] }
 chrono = { version = "0.4", features = ["serde"] }
 
@@ -74,9 +75,9 @@ chrono = { version = "0.4", features = ["serde"] }
 # entitled to elide a plain overwrite of memory nothing reads again — which is
 # the whole of what this crate is and why it cannot be hand-rolled.
 #
-# It sits on neither of Perch's seams (ADR 0025) and is already in the tree
-# through `age`, so it adds no crate to the build and nothing to audit that was
-# not being audited already.
+# It sits on neither of Perch's seams (ADR a-crate-must-not-cost-a-seam) and is
+# already in the tree through `age`, so it adds no crate to the build and
+# nothing to audit that was not being audited already.
 zeroize = "1.9"
 clap = { version = "4", features = ["derive"] }
 
@@ -86,26 +87,30 @@ sha2 = "0.11"
 thiserror = "2"
 
 # How wide a string is drawn, for the listing that lays itself out in columns.
-# A crate of its own now that ratatui is gone, and it survives ADR 0025's actual
-# test rather than the free-rider one: the width of a string is a pure function
-# and sits on no seam. A hand-rolled table of East Asian widths would be the
-# same data, kept by hand, going wrong quietly — and `perch list` has grown a
-# column since, so it needs the measuring more rather than less.
+# A crate of its own now that ratatui is gone, and it survives
+# ADR a-crate-must-not-cost-a-seam's actual test rather than the free-rider one:
+# the width of a string is a pure function and sits on no seam. A hand-rolled
+# table of East Asian widths would be the same data, kept by hand, going wrong
+# quietly — and `perch list` has grown a column since, so it needs the measuring
+# more rather than less.
 unicode-width = "0.2.2"
 
 # Both already in the build transitively — libc through sha2's cpufeatures,
 # windows-sys through clap's anstream — so declaring them adds no crate and buys
-# vetted declarations for the primitives std does not carry (ADR 0021).
+# vetted declarations for the primitives std does not carry
+# (ADR a-crate-must-not-cost-a-seam).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 # A directory junction is how Shared State reaches a Run's Profile on a Windows
-# without Developer Mode (ADR 0026), and it is a reparse point the standard
-# library will not write. The alternative was a hand-built REPARSE_DATA_BUFFER
-# through DeviceIoControl — precisely the class of `unsafe` ADR 0021 declined to
-# write — and this sits behind the Host port either way, which is where a crate
-# costs no seam (ADR 0025). Windows-only, and it carries no dependencies.
+# without Developer Mode (ADR everything-but-the-account), and it is a reparse
+# point the standard library will not write. The alternative was a hand-built
+# REPARSE_DATA_BUFFER through DeviceIoControl — precisely the class of `unsafe`
+# ADR a-crate-must-not-cost-a-seam declined to write — and this sits behind the
+# Host port either way, which is where a crate costs no seam
+# (ADR a-crate-must-not-cost-a-seam). Windows-only, and it carries no
+# dependencies.
 junction = { version = "2", default-features = false }
 
 windows-sys = { version = "0.61", features = [
@@ -120,12 +125,12 @@ windows-sys = { version = "0.61", features = [
 [features]
 # A test behind this one touches state the developer owns and did not offer —
 # their login keychain, their `~/.claude`, the clients they happen to have open
-# — so its outcome is not this repository's to determine (ADR 0050). A read of
-# their real state counts as much as a write: a suite that reports green on
-# Tuesday and skipped on Wednesday, on the same machine at the same commit,
-# according to whether a client was running, is the one thing a default-on suite
-# must never be. Off unless asked for; CI turns it on for the one step that
-# follows the install.
+# — so its outcome is not this repository's to determine
+# (ADR an-assumption-is-probed). A read of their real state counts as much as a
+# write: a suite that reports green on Tuesday and skipped on Wednesday, on the
+# same machine at the same commit, according to whether a client was running, is
+# the one thing a default-on suite must never be. Off unless asked for; CI turns
+# it on for the one step that follows the install.
 your-machine = []
 
 # `host::fake`, which exists so the real command code can be driven with no

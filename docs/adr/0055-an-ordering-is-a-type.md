@@ -14,7 +14,7 @@ sequence of bearer tokens:
 
 | | what it rules |
 |---|---|
-| (a) | the Landing resolves before anything is read (ADR 0048) |
+| (a) | the Landing resolves before anything is read (ADR a-switch-is-written-down-first) |
 | (b) | the Cooldown short-circuits before candidates are read |
 | (c) | liveness is asked before the candidate Refresh burst |
 | (d) | every way `refuse_if_live` can fail is answered, not just `ProfileLive` |
@@ -43,8 +43,9 @@ liveness ask, does not compile. (d) becomes `watch::refused_or_raised`, an
 exhaustive match over three named variants of `switch::NotIdle` — a fourth breaks
 the build until the round says whether it is a refusal or a raise.
 
-Four of the six stop being comments. The other two are behind `switch::switch_to`
-since the Switch got one door (ADR 0048, #200): the Check is recorded before the
+Four of the six stop being comments. The other two are behind
+`switch::switch_to` since the Switch got one door
+(ADR a-switch-is-written-down-first, #200): the Check is recorded before the
 Switch inside `record_the_switch`, and whether anything moved is a field *both*
 ways out carry, so the round asks one question of both rather than reading the
 answer off which way out it got.
@@ -80,15 +81,15 @@ per arrangement — reintroducing at the Round exactly the
 protocol-assembled-differently-by-two-callers that `switch_to` had just removed
 from the Switch.
 
-**A port.** `WatchPorts`, covering refresh / refuse-if-live / choose / perform, so
-the round could be unit-tested against a recording adapter. This was the shape
-the architecture review proposed, and the designer briefed to build it refused
-it: one real adapter of four one-line pass-throughs, one test-only recorder that
-re-records what `FakeHost::effects()` and `sent_to(..)` already record, and
-`cycle::choose` — a function that performs no IO — sitting behind a port. One
-adapter is a hypothetical seam. `&dyn Host` remains the only port Perch has, as
-ADR 0025 decided, and `host::fake` remains the only way behavior is driven, as
-ADR 0044 decided.
+**A port.** `WatchPorts`, covering refresh / refuse-if-live / choose / perform,
+so the round could be unit-tested against a recording adapter. This was the
+shape the architecture review proposed, and the designer briefed to build it
+refused it: one real adapter of four one-line pass-throughs, one test-only
+recorder that re-records what `FakeHost::effects()` and `sent_to(..)` already
+record, and `cycle::choose` — a function that performs no IO — sitting behind a
+port. One adapter is a hypothetical seam. `&dyn Host` remains the only port
+Perch has, as ADR a-crate-must-not-cost-a-seam decided, and `host::fake` remains
+the only way behavior is driven, as ADR the-binary-proves-its-surface decided.
 
 ## The glossary
 

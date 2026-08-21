@@ -1,5 +1,5 @@
 //! Copying the handful of `.claude.json` keys that belong to the person into
-//! the Profile a Run is about to launch (ADR 0003).
+//! the Profile a Run is about to launch (ADR everything-but-the-account).
 //!
 //! Everything else in a configuration directory crosses by link and never by
 //! copy ([`crate::reconcile`]). This one file cannot: it holds `oauthAccount`,
@@ -61,7 +61,7 @@ const PROJECTS: &str = "projects";
 ///
 /// `into` is the Profile being launched; `default_profile` is where the active
 /// Account's state actually lives, which is not that Account's Profile (ADR
-/// 0001). Everything else is read from the registry.
+/// claude-code-chooses-the-store). Everything else is read from the registry.
 ///
 /// Doing nothing is an ordinary outcome and never a refusal: no Profile to copy
 /// from, a client already running against this one, a file that is not the
@@ -79,11 +79,11 @@ pub fn carry(
     settled: Option<&crate::switch::Settled>,
 ) {
     // Where an Account's state lives depends on whether it is the active one,
-    // and during a Landing nothing is (ADR 0048): `is_active` answers with the
-    // Account being *left*, so `where_it_works` would look for its state in the
-    // Default Profile off a claim the registry has not made. Doing nothing is
-    // an ordinary outcome here and costs a dialog, which is the cheaper of the
-    // two answers.
+    // and during a Landing nothing is (ADR a-switch-is-written-down-first):
+    // `is_active` answers with the Account being *left*, so `where_it_works`
+    // would look for its state in the Default Profile off a claim the registry
+    // has not made. Doing nothing is an ordinary outcome here and costs a
+    // dialog, which is the cheaper of the two answers.
     if settled.is_none() {
         return;
     }
@@ -92,10 +92,10 @@ pub fn carry(
         return;
     };
 
-    // The precondition ADR 0003 puts on the write, and the reason this is the
-    // Run path's business alone: a client holds this file open and rewrites it
-    // wholesale on its way out, so a Profile with one running is a Profile
-    // Perch has nothing useful to say about.
+    // The precondition ADR everything-but-the-account puts on the write, and
+    // the reason this is the Run path's business alone: a client holds this
+    // file open and rewrites it wholesale on its way out, so a Profile with one
+    // running is a Profile Perch has nothing useful to say about.
     //
     // Discounting this process, because the Run has already claimed the Profile
     // by the time it Carries: the claim is what stops another `perch` deleting
@@ -219,18 +219,19 @@ fn project_entry(
 /// The identity file a Run copies from: the most recently used one holding
 /// state that may cross into this Profile.
 ///
-/// Which Accounts those are is ADR 0003's scoping, and it is about tool
-/// approvals: a Group is a declaration that its Accounts are interchangeable,
-/// and carrying a work Account's approvals into a personal Account's session is
-/// the one crossing worth preventing. An Account's own earlier state crosses to
-/// itself whatever Group it is in, because there is no crossing in it.
+/// Which Accounts those are is ADR everything-but-the-account's scoping, and it
+/// is about tool approvals: a Group is a declaration that its Accounts are
+/// interchangeable, and carrying a work Account's approvals into a personal
+/// Account's session is the one crossing worth preventing. An Account's own
+/// earlier state crosses to itself whatever Group it is in, because there is no
+/// crossing in it.
 ///
 /// Where an Account's state *is* depends on whether it is the active one: the
 /// active Account works in the Default Profile, and its Profile holds only what
-/// Perch stored there (ADR 0001). The Profile being launched is never a source
-/// — copying a file onto itself does nothing, and a source that is written by
-/// every Run would outrank the person's own directory from the first Run
-/// onwards.
+/// Perch stored there (ADR claude-code-chooses-the-store). The Profile being
+/// launched is never a source — copying a file onto itself does nothing, and a
+/// source that is written by every Run would outrank the person's own directory
+/// from the first Run onwards.
 fn most_recently_used(
     host: &dyn Host,
     registry: &Registry,
@@ -341,7 +342,8 @@ mod tests {
 
     /// The whole of the argument for naming what crosses instead of inverting
     /// it: this file holds figures read for one Account, and Perch is the thing
-    /// that would show them under another Account's name (ADR 0019).
+    /// that would show them under another Account's name
+    /// (ADR a-figure-names-its-account).
     #[test]
     fn nothing_keyed_to_an_account_is_in_the_set() {
         for key in [

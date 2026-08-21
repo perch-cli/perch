@@ -1,13 +1,15 @@
 # A Switch is written down before it moves anything, and the Landing is what it writes
 
-> **Carried out in #167.** Like ADR 0041, ADR 0042, ADR 0044, ADR 0045, ADR 0046
-> and ADR 0047, this is the artifact of a planning effort rather than of a
-> change, so it landed ahead of the work it describes instead of beside it.
-> `registry.active` is now one field with three states, `switch::perform` and
-> `switch::make_live` both write a Landing before the Credential moves,
-> `switch::resolve_a_landing` is the step every Switch path takes first, `perch
-> status` says a Switch was in flight, and the Watcher holds where the settling
-> refuses.
+> **Carried out in #167.** Like ADR using-it-is-the-proof,
+> ADR perch-does-not-draw, ADR the-binary-proves-its-surface,
+> ADR a-suite-is-named-and-gated, ADR a-watcher-knob-is-arithmetic and
+> ADR a-command-names-its-noun, this is the artifact of a planning effort rather
+> than of a change, so it landed ahead of the work it describes instead of
+> beside it. `registry.active` is now one field with three states,
+> `switch::perform` and `switch::make_live` both write a Landing before the
+> Credential moves, `switch::resolve_a_landing` is the step every Switch path
+> takes first, `perch status` says a Switch was in flight, and the Watcher holds
+> where the settling refuses.
 
 The question arrived as an accusation `CONTEXT.md` makes against itself. The
 **Landing** entry describes a window in which what is live and what Perch records
@@ -53,10 +55,10 @@ What survives all four: crash mid-Switch, then a Switch to a **third** Account.
 `.claude.json` still names the outgoing Account, the registry still names the
 outgoing Account, the two agree — and both are wrong. That evidence is
 indistinguishable from an ordinary Capture of a Rotation, which is the case
-ADR 0006 exists to serve, so no rule reading only that evidence can separate
-them. The Capture writes the *incoming* Account's Credential into the *outgoing*
-Account's Profile, over the copy the Switch's own first step had just correctly
-saved there.
+ADR a-switch-is-written-down-first exists to serve, so no rule reading only that
+evidence can separate them. The Capture writes the *incoming* Account's
+Credential into the *outgoing* Account's Profile, over the copy the Switch's own
+first step had just correctly saved there.
 
 **And it does not need a crash.** `switch.rs`'s own doc comment on `perform`
 describes the path: the registry hold goes stale in ninety seconds, a keychain
@@ -157,12 +159,12 @@ Account is the door somebody walks through while deleting things.
 
 ## Being seen
 
-**`perch status` says a Switch was in flight and not recorded**, as a line and as
-a `--json` field, and **exits 0**. Half of why this hazard has survived is that a
-machine mid-Landing is indistinguishable from a healthy one, so nobody looks. A
-non-zero exit was refused on ADR 0018's register — status reports what it found
-rather than judging it — and because a transient state should not fail somebody's
-script.
+**`perch status` says a Switch was in flight and not recorded**, as a line and
+as a `--json` field, and **exits 0**. Half of why this hazard has survived is
+that a machine mid-Landing is indistinguishable from a healthy one, so nobody
+looks. A non-zero exit was refused on ADR a-figure-carries-its-age's register —
+status reports what it found rather than judging it — and because a transient
+state should not fail somebody's script.
 
 **The Watcher holds rather than stops.** It is a Switch path, so it resolves; and
 where resolution refuses, nobody is there to answer. Its own entry already
@@ -213,24 +215,27 @@ bookkeeping, and the Landing entry is the one about the bookkeeping.
 
 ## Consequences
 
-**This supersedes nothing and amends nothing.** ADR 0006 is untouched: Capture
-before every Switch stands, the three steps stand, and its Consequences paragraph
-— a Credential rotated and lost before it can be Captured means a fresh login —
-stays true word for word. What changes is that Perch now refuses on the way into
-that state instead of causing it.
+**This supersedes nothing and amends nothing.**
+ADR a-switch-is-written-down-first is untouched: Capture before every Switch
+stands, the three steps stand, and its Consequences paragraph — a Credential
+rotated and lost before it can be Captured means a fresh login — stays true word
+for word. What changes is that Perch now refuses on the way into that state
+instead of causing it.
 
-That is the finding, and it is the same one ADR 0047 reached about the command
-surface: **this is not a decision being revisited, it is one that was never
-made.** ADR 0006 chose the three steps and said what an interruption costs.
-Nobody ever chose what Perch does on *finding* an interruption, which is why the
-answer lived in a glossary entry, as a confession.
+That is the finding, and it is the same one ADR a-command-names-its-noun reached
+about the command surface: **this is not a decision being revisited, it is one
+that was never made.** ADR a-switch-is-written-down-first chose the three steps
+and said what an interruption costs. Nobody ever chose what Perch does on
+*finding* an interruption, which is why the answer lived in a glossary entry, as
+a confession.
 
 The carry-out is not chained behind the sweep's other removals. It is a small
-deep change to `switch.rs` and `registry.rs`, where ADR 0047's rename is broad and
-shallow across `main.rs` and the commands; the two files that overlap, `watch.rs`
-and `commands/status.rs`, are cheaper to rebase a rename over than a behavior
-change. Sequencing a data-safety change behind three renames would be sequencing
-by convenience rather than by cost.
+deep change to `switch.rs` and `registry.rs`, where
+ADR a-command-names-its-noun's rename is broad and shallow across `main.rs` and
+the commands; the two files that overlap, `watch.rs` and `commands/status.rs`,
+are cheaper to rebase a rename over than a behavior change. Sequencing a
+data-safety change behind three renames would be sequencing by convenience
+rather than by cost.
 
 No exit code changes and no new one is added. The refusal is a `Conflict`, which
 is what the two refusals it joins already are.

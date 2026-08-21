@@ -1,4 +1,5 @@
-//! `perch holdings` — everything Perch holds on this machine (ADR 0047).
+//! `perch holdings` — everything Perch holds on this machine
+//! (ADR a-command-names-its-noun).
 //!
 //! Three commands that had no shared prefix because the noun they share had no
 //! name. An Export writes the Holdings to one file, an Import puts them back,
@@ -24,8 +25,8 @@ pub enum HoldingsCommand {
     ///
     /// The registry and every Credential, in the `age` format, so a dead
     /// machine or a new laptop does not cost a login for every subscription
-    /// (ADR 0014). There is no per-Account form: a selective export is a
-    /// partial restore.
+    /// (ADR the-holdings-go-out-sealed). There is no per-Account form: a
+    /// selective export is a partial restore.
     ///
     /// The passphrase is prompted and confirmed, and cannot be passed as an
     /// argument — an argument sits in the process table for anything on this
@@ -41,8 +42,9 @@ pub enum HoldingsCommand {
     ///
     /// The exact inverse of an export: the registry and every Credential, so a
     /// new machine arrives with the setup the old one had rather than a pile of
-    /// nameless logins (ADR 0014). Credentials land wherever this machine's
-    /// Claude Code keeps one, whatever store the file was written from.
+    /// nameless logins (ADR the-holdings-go-out-sealed). Credentials land
+    /// wherever this machine's Claude Code keeps one, whatever store the file
+    /// was written from.
     ///
     /// It refuses a Perch that already holds an Account and names `perch
     /// holdings purge` as the way to make room — merging two machines is a
@@ -56,9 +58,10 @@ pub enum HoldingsCommand {
 
     /// Give the machine back the state it had before Perch.
     ///
-    /// Every Profile, every Credential Perch holds and its own registry, gone in
-    /// one act — the exact inverse of an import, and what makes room for one
-    /// (ADR 0014). It takes no target: giving up one Account is `perch remove`.
+    /// Every Profile, every Credential Perch holds and its own registry, gone
+    /// in one act — the exact inverse of an import, and what makes room for one
+    /// (ADR the-holdings-go-out-sealed). It takes no target: giving up one
+    /// Account is `perch remove`.
     ///
     /// It offers to write an export first, lists the Accounts that will go by
     /// email address, and wants the word `purge` typed rather than a letter.

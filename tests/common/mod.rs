@@ -1,11 +1,12 @@
 //! Fixtures for the behavior tests: a machine with a Claude Code login on it.
 
-// Where a test lives is decided by what it names (ADR 0045). A `mod tests` in
-// `src` asserts a module's own vocabulary through the module's own API. A
-// binary in `tests/` asserts what a *command* does. The fake is not the
-// discriminator, and anybody who assumes it is draws the line in the wrong
-// place on their first try: `src/lock.rs` and `src/registry.rs` both drive
-// `FakeHost` from inside their own `mod tests`.
+// Where a test lives is decided by what it names
+// (ADR a-suite-is-named-and-gated). A `mod tests` in `src` asserts a module's
+// own vocabulary through the module's own API. A binary in `tests/` asserts
+// what a *command* does. The fake is not the discriminator, and anybody who
+// assumes it is draws the line in the wrong place on their first try:
+// `src/lock.rs` and `src/registry.rs` both drive `FakeHost` from inside their
+// own `mod tests`.
 
 // Each test binary gets its own copy of this module and uses the part of it
 // that it needs, so unused fixtures here are the normal case rather than rot.
@@ -117,7 +118,8 @@ pub fn logged_in_machine() -> FakeHost {
 }
 
 /// A machine that is not a Mac: Claude Code installed and logged in, keeping
-/// its Credential in the file that is the store there (ADR 0020).
+/// its Credential in the file that is the store there
+/// (ADR claude-code-chooses-the-store).
 pub fn logged_in_machine_off_macos() -> FakeHost {
     machine_with_claude_code()
         .with_platform(Platform::Other)
@@ -161,7 +163,7 @@ pub fn client_exiting(status: i32) -> impl Fn(&FakeHost, &Path) -> i32 {
 
 /// A `perch run` against an Account, as far as the rest of Perch can see one:
 /// the session marker that Run wrote into the Profile, naming the Perch that is
-/// waiting for the client (ADR 0027).
+/// waiting for the client (ADR a-run-is-one-shot).
 ///
 /// `began` is when that Run started. Now is a Run still going; an hour ago and a
 /// process that has since been replaced is the marker a killed Run left behind.
@@ -178,9 +180,10 @@ pub fn a_run_against(host: &FakeHost, email: &str, began: DateTime<Utc>) {
 /// Deliberately not [`probe::session_marker`], which is the one a *Run* writes:
 /// that carries `writtenBy` and no `cwd`, because inventing fields Claude Code
 /// has and Perch does not would be a file claiming to be something it is not.
-/// This is the other writer, and the difference is what ADR 0022 turns on — the
-/// probe reads `startedAt` and ignores the rest, whoever left it. A fixture that
-/// wrote Perch's marker for a client would stop testing that.
+/// This is the other writer, and the difference is what
+/// ADR a-profile-is-live-by-evidence turns on — the probe reads `startedAt` and
+/// ignores the rest, whoever left it. A fixture that wrote Perch's marker for a
+/// client would stop testing that.
 ///
 /// The path is `probe`'s, though. Where a marker lives — `sessions/<pid>.json`
 /// — is Claude Code's convention rather than this fixture's, and it is the one
@@ -241,7 +244,7 @@ pub fn run_status(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
 }
 
 /// `perch status --refresh`: the one command that fetches about the Account you
-/// are on (ADR 0015).
+/// are on (ADR a-figure-carries-its-age).
 pub fn run_status_refresh(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
     run_status_with(
         host,
@@ -319,7 +322,8 @@ pub fn run_list_with(host: &FakeHost, args: ListArgs) -> (perch::Result<()>, Str
 }
 
 /// A machine holding two Accounts, neither in a Group and neither named: the
-/// ordinary starting state once a second Account has been added (ADR 0017).
+/// ordinary starting state once a second Account has been added
+/// (ADR a-group-is-a-declaration).
 pub fn machine_with_two_accounts() -> FakeHost {
     let host =
         logged_in_machine().with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE));
@@ -374,7 +378,7 @@ pub fn run_add(host: &FakeHost, args: AddArgs) -> (perch::Result<()>, String) {
 }
 
 /// Where an Account's Profile keeps its things, derived the way every command
-/// derives it now that nothing records it (ADR 0020).
+/// derives it now that nothing records it (ADR claude-code-chooses-the-store).
 pub fn store_of(host: &FakeHost, email: &str) -> probe::Store {
     let dir = perch::registry::profile_dir_for(host, email).expect("home is known");
     probe::store_for_profile(host, &dir).expect("USER is set")
@@ -405,7 +409,8 @@ pub fn save_registry(host: &FakeHost, registry: &perch::registry::Registry) {
 }
 
 /// What a Perch killed mid-Switch leaves on the registry: a Landing naming the
-/// Account it was leaving and the one it was switching to (ADR 0048).
+/// Account it was leaving and the one it was switching to
+/// (ADR a-switch-is-written-down-first).
 ///
 /// The registry half only. What the *machine* holds — which Credential is live,
 /// and who `.claude.json` names — is the other half of the state, and it is the
@@ -541,9 +546,10 @@ pub fn watched() -> FakeHost {
 /// with the five-hour one as full as the trace says at that point.
 ///
 /// Both, because a reply leaving one out is one Perch refuses — it cannot tell
-/// that from the fullest window going missing, which is the ADR 0012 loss. The
-/// seven-day window sits at nought so the five-hour one is always the fullest
-/// and every figure the traces assert on is still the one they set.
+/// that from the fullest window going missing, which is the
+/// ADR headroom-is-the-worst-window loss. The seven-day window sits at nought
+/// so the five-hour one is always the fullest and every figure the traces
+/// assert on is still the one they set.
 pub fn usage(used_percent: f64) -> String {
     format!(
         r#"{{"five_hour": {{"utilization": {used_percent}, "resets_at": "2026-08-04T14:30:00Z"}},
@@ -570,9 +576,9 @@ pub fn answering(host: FakeHost, token: &str, email: &str, trace: &[f64]) -> Fak
 ///
 /// Found by the shape a round's line opens with — the stamp, the word it is
 /// read by, and then the figure it decided on. It used to be found by the word
-/// `threshold`, which ADR 0061 took off the round line altogether: left as it
-/// was, this would have found no decisions at all, and every assertion about
-/// one would have passed vacuously over an empty list.
+/// `threshold`, which ADR perch-says-what-it-did took off the round line
+/// altogether: left as it was, this would have found no decisions at all, and
+/// every assertion about one would have passed vacuously over an empty list.
 pub fn decisions(printed: &str) -> Vec<String> {
     printed
         .lines()
@@ -601,8 +607,8 @@ pub fn run_alias(host: &FakeHost, command: AliasCommand) -> (perch::Result<()>, 
 
 /// `perch alias <target> <name>`, taken the other way round: flipping the
 /// parameters to match would rewrite every call site in a dozen test files this
-/// change has no other business in, and the command line is what ADR 0054's
-/// rule is about.
+/// change has no other business in, and the command line is what
+/// ADR a-command-names-its-noun's rule is about.
 pub fn set_alias(host: &FakeHost, name: &str, target: &str) -> (perch::Result<()>, String) {
     run_alias(
         host,

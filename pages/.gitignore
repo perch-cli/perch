@@ -1,5 +1,5 @@
 # The site's own, so nothing at the root of the repository has to know that one
-# directory under it is a JavaScript project (ADR 0062).
+# directory under it is a JavaScript project (ADR one-thing-renders-the-site).
 node_modules/
 
 # What `astro build` writes, and what the Pages workflow uploads.

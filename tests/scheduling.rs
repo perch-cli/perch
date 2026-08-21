@@ -3,9 +3,9 @@
 //!
 //! The loop is a person watching; this is a machine watching, and the
 //! difference is entirely in how the answer is delivered. Scheduling is the
-//! operating system's job (ADR 0013), so what a Check owes cron is a decision
-//! line it can capture and an exit code it can branch on — nothing else, and
-//! nothing left running.
+//! operating system's job (ADR a-watcher-knob-is-arithmetic), so what a Check
+//! owes cron is a decision line it can capture and an exit code it can branch
+//! on — nothing else, and nothing left running.
 //!
 //! Two properties are what this mode is for, and each has tests here that fail
 //! if it stops holding: the policy is the loop's policy run once, and the
@@ -84,7 +84,7 @@ fn one_check_switches_and_reports_it_in_the_exit_code() {
     );
     assert!(
         !decision.contains("threshold") && !decision.contains("most room"),
-        "and nothing a scheduler could have read off the guide (ADR 0061): \
+        "and nothing a scheduler could have read off the guide (ADR perch-says-what-it-did): \
          {decision}"
     );
     assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
@@ -117,7 +117,7 @@ fn a_check_under_the_threshold_exits_fifteen_and_changes_nothing() {
     assert_eq!(
         decision, "2026-08-04T12:00:00Z  waiting   40% used, fullest 5-hour",
         "and the whole of it, because a round that did what it was asked to do \
-         has nothing to explain (ADR 0061)"
+         has nothing to explain (ADR perch-says-what-it-did)"
     );
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
     assert_eq!(
@@ -224,11 +224,11 @@ fn a_check_on_an_ungrouped_account_exits_eighteen_and_names_both_declarations() 
     );
 }
 
-/// **ADR 0051, in executable form.** A grant is said about the Scope it grants
-/// and nowhere else, so a `watcher-may-act true` said about a Group is a
-/// statement about that Group: it cannot authorize moving somebody off a work
-/// Account onto their personal subscription, because there is nowhere to write
-/// a grant that would.
+/// **ADR a-setting-names-its-scope, in executable form.** A grant is said about
+/// the Scope it grants and nowhere else, so a `watcher-may-act true` said about
+/// a Group is a statement about that Group: it cannot authorize moving somebody
+/// off a work Account onto their personal subscription, because there is
+/// nowhere to write a grant that would.
 ///
 /// This used to be an exception written into a uniform layer — a Global "yes"
 /// that reached every Scope except this one — and the exception was described in
@@ -260,7 +260,7 @@ fn a_grant_said_about_a_group_leaves_the_ungrouped_accounts_alone() {
         active(&host).as_deref(),
         Some(EMAIL),
         "and nothing moved underneath them, at 99% used and an empty Account \
-         beside it (ADR 0017)"
+         beside it (ADR a-group-is-a-declaration)"
     );
     assert!(host.sent_to(USAGE_URL).is_empty());
 }
@@ -413,9 +413,9 @@ fn the_cooldown_holds_between_one_check_and_the_next() {
 }
 
 /// What one check leaves for the next: when it Switched, which is what the
-/// cooldown is measured from and the whole of what is recorded (ADR 0046). Only
-/// a Switch that happened writes one, because a check that changed nothing has
-/// nothing to pace.
+/// cooldown is measured from and the whole of what is recorded
+/// (ADR a-watcher-knob-is-arithmetic). Only a Switch that happened writes one,
+/// because a check that changed nothing has nothing to pace.
 #[test]
 fn a_check_records_when_it_switched() {
     // Under the threshold, and then over it: two checks, of which only the
@@ -444,7 +444,8 @@ fn a_check_records_when_it_switched() {
 fn a_switch_the_machine_turned_away_exits_fifteen_and_says_so() {
     let host = checked(&[86.0], &[5.0]);
     // A `perch run` against the Account being left: the Capture would write
-    // into a Profile something else is holding (ADR 0027).
+    // into a Profile something else is holding
+    // (ADR a-profile-is-live-by-evidence).
     a_run_against(&host, EMAIL, host.now());
 
     let (result, printed) = run_watch_once(&host);
@@ -479,10 +480,10 @@ fn a_switch_the_machine_turned_away_exits_fifteen_and_says_so() {
 fn a_check_stopped_by_something_that_will_not_clear_itself_exits_on_it() {
     // The Capture writes the live Credential back into the outgoing Account's
     // Profile, and neither of that Profile's two stores will take it: the
-    // keychain hands back something other than what it was given — ADR 0008's
-    // truncating `security -i`, which is why every Credential is read back
-    // before it is trusted — and the file it falls back to cannot be written
-    // either.
+    // keychain hands back something other than what it was given —
+    // ADR claude-code-chooses-the-store's truncating `security -i`, which is
+    // why every Credential is read back before it is trusted — and the file it
+    // falls back to cannot be written either.
     let host = checked(&[86.0], &[5.0]);
     let plaintext = store_of(&host, EMAIL).credentials_file;
     let host = host
@@ -534,7 +535,8 @@ fn a_check_with_nobody_active_says_there_is_nothing_to_watch() {
 /// A check reads a figure and writes it down, and the write can fail on its
 /// own. What the round decides is still made on the figure it just read — that
 /// one is current whatever happened to the record — and the user is told, once,
-/// that the next command will show the older figure (ADR 0018).
+/// that the next command will show the older figure
+/// (ADR a-figure-carries-its-age).
 #[test]
 fn figures_that_were_read_but_could_not_be_kept_are_said_rather_than_swallowed() {
     let host = checked(&[95.0], &[10.0]).with_unwritable_file(REGISTRY_PATH, "read-only");
@@ -564,7 +566,8 @@ fn figures_that_were_read_but_could_not_be_kept_are_said_rather_than_swallowed()
 /// process, because every check is a fresh one. Without that record the next
 /// scheduled check saw no cooldown at all, and was free to move straight back:
 /// "a check that moved and let the next one move straight back", which is what
-/// ADR 0013 says the persisted record exists to prevent.
+/// ADR a-watcher-knob-is-arithmetic says the persisted record exists to
+/// prevent.
 #[test]
 fn a_check_that_switched_and_then_failed_still_paces_the_next_one() {
     let host = checked(&[86.0], &[5.0]);

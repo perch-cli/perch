@@ -61,7 +61,8 @@ fn a_declared_group_survives_a_restart() {
     // One line, and not the two rows saying what governs it. A Group is
     // declared at the compiled-in defaults every time, so those two rows are
     // the same two rows on every run — `perch group list` is where they are
-    // read (ADR 0061). What they hold is asserted below, off the registry.
+    // read (ADR perch-says-what-it-did). What they hold is asserted below, off
+    // the registry.
     assert_eq!(
         printed.trim_end(),
         "Declared the Group `work`.",
@@ -75,13 +76,13 @@ fn a_declared_group_survives_a_restart() {
         config,
         perch::registry::Settings::default(),
         "a fresh Group holds the compiled-in defaults, and nothing said about \
-         another Scope reaches it (ADR 0051)"
+         another Scope reaches it (ADR a-setting-names-its-scope)"
     );
     assert!(
         !registry_of(&host)
             .settings(&perch::registry::Scope::Group("work".to_string()))
             .watcher_may_act,
-        "unattended switching is off until the user says otherwise (ADR 0002)"
+        "unattended switching is off until the user says otherwise (ADR a-group-is-a-declaration)"
     );
 }
 
@@ -406,7 +407,7 @@ fn group_list_shows_every_group_with_its_accounts_and_its_configuration() {
 ///
 /// `watcher-may-act` is not the whole of whether the watcher acts there:
 /// `interchangeable` is a separate declaration that those Accounts are a set at
-/// all (ADR 0017). Read from the permission alone, the
+/// all (ADR a-group-is-a-declaration). Read from the permission alone, the
 /// summary announced "may switch unattended at 80%" about a Scope `perch
 /// watcher run` refuses outright — and it printed the same Cycling line
 /// whichever way the gate was set, so neither direction was falsifiable.
@@ -566,7 +567,8 @@ fn a_group_name_resembling_nothing_is_answered_with_the_groups_that_exist() {
 
 /// A Group whose watcher has been turned on reads as one that may act, with
 /// the whole policy rather than the threshold alone: a summary naming only when
-/// it acts would read as the whole of what it does (ADR 0013).
+/// it acts would read as the whole of what it does
+/// (ADR a-group-is-a-declaration).
 #[test]
 fn a_group_listing_says_when_its_watcher_may_switch_unattended() {
     let host = three_accounts_in_one_group();
@@ -642,9 +644,10 @@ fn a_rename_keeps_the_settings_the_group_holds() {
         "and the old name holds nothing: {:?}",
         registry.groups.keys().collect::<Vec<_>>()
     );
-    // Both names and the Accounts that came with them, asserted whole (ADR
-    // 0043) — and no row for the Setting above, which a rename never touches:
-    // reporting it would be Perch describing work it did not do (ADR 0061).
+    // Both names and the Accounts that came with them, asserted whole
+    // (ADR perch-says-what-it-did) — and no row for the Setting above, which a
+    // rename never touches: reporting it would be Perch describing work it did
+    // not do (ADR perch-says-what-it-did).
     assert_eq!(
         printed.trim_end(),
         "Renamed the Group `work` to `day-job`, which still holds 3 Accounts.",

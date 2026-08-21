@@ -6,11 +6,12 @@ type HastPlugin = NonNullable<SatteriProcessorOptions["hastPlugins"]>[number];
 /**
  * Rewrites the guide's relative markdown links into the paths the site serves.
  *
- * A guide page cross-references its neighbors as `switching.md#cycling`, because
- * the guide is read on GitHub as well as rendered here — one copy of the markdown
- * is what ADR 0035 promised and ADR 0062 carried forward, and GitHub resolves
- * that path against the directory the file is in. A browser cannot: the site
- * serves `/perch/switching/`, and nothing on it has an extension.
+ * A guide page cross-references its neighbors as `switching.md#cycling`,
+ * because the guide is read on GitHub as well as rendered here — one copy of
+ * the markdown is what ADR one-thing-renders-the-site promised and
+ * ADR one-thing-renders-the-site carried forward, and GitHub resolves that path
+ * against the directory the file is in. A browser cannot: the site serves
+ * `/perch/switching/`, and nothing on it has an extension.
  *
  * So the two spellings are reconciled here rather than written twice.
  * `tests/publication.rs` asserts the markdown side — that every one of these

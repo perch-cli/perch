@@ -2,8 +2,9 @@
 
 The **Reserve** — how many of a Scope's Accounts still have Headroom and how
 much the best of them has — was written for the Utilization tab and outlived it.
-ADR 0049 removed the tab and `perch list` took the tab's Headroom column;
-e5e6c6f deleted `src/reserve.rs` because nothing called it any more, and left
+ADR perch-does-not-draw removed the tab and `perch list` took the tab's Headroom
+column; e5e6c6f deleted `src/reserve.rs` because nothing called it any more, and
+left
 #197 open on whether the listing should take the saying up too.
 
 It should, and it attaches in one place: **where a heading has already named the
@@ -40,11 +41,11 @@ it always had was the reader's cursor.
 
 **The Ungrouped stay silent until `interchangeable` is declared.** Not a special
 case: `cycle::may_cycle_within` is the same gate the section's `ranked` already
-goes through, and ADR 0017 already says what it means. A Reserve is what a set of
-Accounts has *between them*, which is the claim nobody has made about the
-Ungrouped until they make it. Ranking them and saying what they have left are
-the two things every surface declines together, so they are declined off one
-answer rather than two.
+goes through, and ADR a-group-is-a-declaration already says what it means. A
+Reserve is what a set of Accounts has *between them*, which is the claim nobody
+has made about the Ungrouped until they make it. Ranking them and saying what
+they have left are the two things every surface declines together, so they are
+declined off one answer rather than two.
 
 ## `--json` carries it at every breadth, and that is not a disagreement
 
@@ -55,15 +56,15 @@ none.
 This is a divergence and it is deliberate. **The table's silence is a rendering
 constraint, not a domain one.** The same document already spells out a fact the
 table leaves implicit: `order` is an explicit key, and the table expresses it
-only by not sorting. ADR 0053 set the rule that put it there — a document says
-what its order is, or it does not have one — and ADR 0043's line is the same one
-from the other side: a machine reading a shape is not a person reading a
-sentence.
+only by not sorting. ADR the-listing-owns-the-set set the rule that put it there
+— a document says what its order is, or it does not have one — and
+ADR perch-says-what-it-did's line is the same one from the other side: a machine
+reading a shape is not a person reading a sentence.
 
-What ADR 0049 forbids is the two surfaces **disagreeing about a judgment**: a
-ranking on one that the other would not make. Neither surface here claims
-anything the other denies. One of them declines to say a true thing for want of
-somewhere to put it.
+What ADR the-listing-owns-the-set forbids is the two surfaces **disagreeing
+about a judgment**: a ranking on one that the other would not make. Neither
+surface here claims anything the other denies. One of them declines to say a
+true thing for want of somewhere to put it.
 
 Three shapes follow from the same reasoning:
 
@@ -125,9 +126,9 @@ asks for: it overturns `render_human`'s own reason, and the column of Accounts
 the eye runs down is what it would spend.
 
 **A Reserve on `perch status`.** Structurally the panel the Reserve came from,
-and refused: a Reserve is a fact about a set, and ADR 0053 removed
-`status --group` for being the listing wearing a flag. An `Across <scope>:` block
-there is that flag returning without its name.
+and refused: a Reserve is a fact about a set, and ADR the-listing-owns-the-set
+removed `status --group` for being the listing wearing a flag. An
+`Across <scope>:` block there is that flag returning without its name.
 
 **Leaving it unimplemented** — the `won't do` the issue offers. The per-Account
 **State** and **Headroom** columns do say enough for one person on one machine.
@@ -137,9 +138,9 @@ column is arithmetic the reader does rather than a sentence Perch says.
 
 ## Consequences
 
-**No new surface.** No argv, no flag, no exit code changes (ADR 0044), so nothing
-new in the binary-driving suite. `perch list` gains a footer line at a breadth it
-already had.
+**No new surface.** No argv, no flag, no exit code changes
+(ADR the-binary-proves-its-surface), so nothing new in the binary-driving suite.
+`perch list` gains a footer line at a breadth it already had.
 
 **The listing's footer is collected before it is written**, so the blank line
 that separates it from the table is decided by whether there is anything down
@@ -158,9 +159,9 @@ tests with it: four go with the per-window rows and one with the empty-Scope
 branch. Its own rules stay unit tests there; the attachment rules go to
 `tests/listing.rs`, where a sentence appearing under a table is already asserted.
 
-**ADR 0049 gains a reader rather than an amendment.** Its ban is on the two
-surfaces disagreeing about a judgment, and neither of these contradicts the
-other.
+**ADR the-listing-owns-the-set gains a reader rather than an amendment.** Its
+ban is on the two surfaces disagreeing about a judgment, and neither of these
+contradicts the other.
 
 **The switching page is untouched.** Its exit-15 message already points at
 `perch list <group> --refresh`; that pointer simply answers more than it did.

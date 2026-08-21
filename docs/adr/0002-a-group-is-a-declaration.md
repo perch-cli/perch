@@ -12,10 +12,11 @@ never your personal one — and a group is the declaration of which accounts are
 interchangeable. `perch switch` with no target chooses within the current
 account's group, and never leaves it.
 
-A group also carries configuration: whether the watcher (ADR 0013) may switch
-accounts within it unattended, at what utilization threshold, and which strategy
-it prefers. Unattended switching is off by default, so a group only ever changes
-underneath you because you said it could.
+A group also carries configuration: whether the watcher
+(ADR a-watcher-knob-is-arithmetic) may switch accounts within it unattended, at
+what utilization threshold, and which strategy it prefers. Unattended switching
+is off by default, so a group only ever changes underneath you because you said
+it could.
 
 ## Considered Options
 
@@ -36,11 +37,12 @@ budget on its own name, and `--group` reads better on a command line.
 
 ## Amended: Global carries the defaults and a Group Overrides them
 
-> **Superseded in full by [ADR 0051](0051-a-setting-is-said-about-the-scope-it-governs-and-the-case-for-overrides-never-defended-the-fallback.md).**
+> **Superseded in full by
+> [ADR a-setting-names-its-scope](0051-a-setting-is-said-about-the-scope-it-governs-and-the-case-for-overrides-never-defended-the-fallback.md).**
 > Every sentence below is about Global, Override, Inherit, the two layers or the
-> word-count idiom, and none of the five exists any more: a Setting is said about
-> the Scope it governs, each Scope holds its own full Settings, and the defaults
-> are compiled-in constants.
+> word-count idiom, and none of the five exists any more: a Setting is said
+> about the Scope it governs, each Scope holds its own full Settings, and the
+> defaults are compiled-in constants.
 >
 > **The body above is untouched, and better than untouched.** "A group also
 > carries configuration: whether the watcher may switch accounts within it

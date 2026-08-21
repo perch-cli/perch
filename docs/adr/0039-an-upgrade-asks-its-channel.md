@@ -1,8 +1,9 @@
 # An Upgrade asks its Channel
 
-Supersedes ADR 0032, which said Perch does not look for its own updates. It now
-does, in two places and on purpose, and the title of that ADR is no longer true.
-What survives of its argument is set out at the end, because most of it does.
+Supersedes ADR an-upgrade-asks-its-channel, which said Perch does not look for
+its own updates. It now does, in two places and on purpose, and the title of
+that ADR is no longer true. What survives of its argument is set out at the end,
+because most of it does.
 
 `perch upgrade` replaces this machine's Installation with a newer Release. It
 takes `--release` to name one, and without it takes the newest.
@@ -29,11 +30,11 @@ is echoed before it runs, and its exit status is Perch's. Only the installer
 Channel — the one where nothing else manages the binary — is replaced by Perch
 itself.
 
-That is the same line ADR 0033 drew and the glossary already carried: an
-Installation is what a Channel left, and taking one back belongs to the Channel
-that made it. Replacing one is the same kind of act as removing one, and it was
-never going to be true that Perch could remove an Installation only by asking
-the Channel but replace one behind its back.
+That is the same line ADR perch-takes-back-what-it-wrote drew and the glossary
+already carried: an Installation is what a Channel left, and taking one back
+belongs to the Channel that made it. Replacing one is the same kind of act as
+removing one, and it was never going to be true that Perch could remove an
+Installation only by asking the Channel but replace one behind its back.
 
 **npm on Windows is the exception that proves it is the right shape.** There the
 routed command cannot work at all: `npm update -g` would be replacing
@@ -56,10 +57,11 @@ Homebrew's would run `brew upgrade perch` against a formula that is not
 installed and report success having changed nothing.
 
 A `Cellar` segment is Homebrew, and the `brew` to run is derived from the prefix
-above it rather than found on `PATH`, for the reason ADR 0021 gives: a program
-Perch shells out to is named absolutely so nothing earlier on the path answers
-instead. A machine with two Homebrew prefixes has two `brew`s, and only the one
-that owns this Installation can replace it.
+above it rather than found on `PATH`, for the reason
+ADR a-crate-must-not-cost-a-seam gives: a program Perch shells out to is named
+absolutely so nothing earlier on the path answers instead. A machine with two
+Homebrew prefixes has two `brew`s, and only the one that owns this Installation
+can replace it.
 
 The installer's own directory is the installer, and that is asked for rather
 than assumed: both installers take `PERCH_INSTALL_DIR` above everything, and
@@ -101,15 +103,16 @@ It also happens to be why an upgrade does not ask about `PATH` again:
 a re-install is how Perch gets updated.
 
 **Windows needs one thing the installer did not have.** A running `perch.exe`
-cannot be replaced, and `install.ps1` had a branch saying so — "is perch running?
-Close it and try again" — which is exactly the state a self-upgrade is in.
-Windows does permit *renaming* a running executable, so the embedded script
+cannot be replaced, and `install.ps1` had a branch saying so — "is perch
+running? Close it and try again" — which is exactly the state a self-upgrade is
+in. Windows does permit *renaming* a running executable, so the embedded script
 renames it to `perch.exe.old`, moves the new one into place, and clears the
 stray — which fails while that binary is still the running one, so in practice
 the next Upgrade is what removes it. The residue sits beside the binary, on the
-Installation side of the line ADR 0033 drew, which is where a Channel's litter
-belongs. A failed move puts the working binary back, because an upgrade that
-did not happen is a better outcome than a machine with no Perch on it.
+Installation side of the line ADR perch-takes-back-what-it-wrote drew, which is
+where a Channel's litter belongs. A failed move puts the working binary back,
+because an upgrade that did not happen is a better outcome than a machine with
+no Perch on it.
 
 The alternative was a detached PowerShell that waits for Perch to exit and then
 performs the move. It was refused: it does the one dangerous step at the moment
@@ -140,7 +143,7 @@ enough leaves a working machine with a binary that will not read its own
 registry. The confirmation names that consequence rather than asking a bare
 "are you sure", which is a question nobody has ever answered with information.
 
-## What this gives up, which ADR 0032 was protecting
+## What this gives up, which ADR an-upgrade-asks-its-channel was protecting
 
 `perch --version` now makes a network request, and it did not before. That is
 the cost, and it is a real one: 0032 named `perch --version` as the thing that
@@ -148,9 +151,9 @@ simply says what is installed.
 
 What is *not* given up is the shape 0032 actually refused. There is no schedule,
 no cache, no age to reason about and no staleness to explain — the machinery it
-took ADR 0015 and ADR 0018 to get right for Utilization is not built a second
-time for this. The request happens when a human types the command, or not at
-all:
+took ADR a-figure-carries-its-age to get right for Utilization is not built a
+second time for this. The request happens when a human types the command, or not
+at all:
 
 - suppressed when stdout is not a terminal, so scripts, CI, the Homebrew
   formula's test block and the Dogfood phase that launches `perch --version` as
@@ -165,21 +168,22 @@ And **`perch status` stays silent on the network**, which was the specific harm
 reaching out. Nothing else in Perch mentions upgrades either. `perch upgrade
 --check` exists for asking on purpose.
 
-The check uses `curl` through the existing `Host::http`, and no HTTP client crate
-was taken for it. That was considered and deferred: `Host::http` is exactly the
-seam ADR 0025 says a crate may be taken behind, and a machine without
-`/usr/bin/curl` is a real failure this repository has already seen once. But the
-traffic that would justify a TLS stack in a credential tool is Anthropic's, not a
-version check, and the decision should be argued there. What was refused outright
-is *two* HTTP mechanisms, which is worse than either.
+The check uses `curl` through the existing `Host::http`, and no HTTP client
+crate was taken for it. That was considered and deferred: `Host::http` is
+exactly the seam ADR a-crate-must-not-cost-a-seam says a crate may be taken
+behind, and a machine without `/usr/bin/curl` is a real failure this repository
+has already seen once. But the traffic that would justify a TLS stack in a
+credential tool is Anthropic's, not a version check, and the decision should be
+argued there. What was refused outright is *two* HTTP mechanisms, which is worse
+than either.
 
 ## Honesty about why this exists
 
-ADR 0032 named its reopener precisely: "somebody stranded on an old version who
-installed through the shell installer. That is a real report, not a
-hypothetical." No such report arrived. The author asked for the command because
-Perch now has Releases and packages and it felt missing, which is exactly the
-reasoning 0032 was written to resist.
+ADR an-upgrade-asks-its-channel named its reopener precisely: "somebody stranded
+on an old version who installed through the shell installer. That is a real
+report, not a hypothetical." No such report arrived. The author asked for the
+command because Perch now has Releases and packages and it felt missing, which
+is exactly the reasoning 0032 was written to resist.
 
 It is recorded rather than dressed up. The bet being made is that routing to the
 Channel makes this a thin command rather than the machinery 0032 feared, and that

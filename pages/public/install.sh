@@ -128,9 +128,10 @@ say "checksum ok"
 #
 # And said either way. On most machines `gh` is absent, so the strongest check
 # available is the one that does not happen — and a check that is skipped in
-# silence reads exactly like a check that passed. ADR 0039: "A silently skipped
-# provenance check is the single thing a tool built around being careful with
-# Credentials should not do quietly."
+# silence reads exactly like a check that passed.
+# ADR an-upgrade-asks-its-channel: "A silently skipped provenance check is the
+# single thing a tool built around being careful with Credentials should not do
+# quietly."
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
     if gh attestation verify "$tmp/$archive" --repo "$REPO" >/dev/null 2>&1; then
         say "provenance ok — built by $REPO"
@@ -164,7 +165,7 @@ say "installed to $INSTALL_DIR/perch"
 # hand, and a line appended among their own lines could never be told back out
 # again at removal time — so the installer advises here and writes only on
 # Windows, where a PATH entry is a registry value that can be removed exactly
-# (ADR 0033).
+# (ADR perch-takes-back-what-it-wrote).
 
 # The shells that read ~/.profile at login. zsh reads ~/.zprofile and fish
 # reads neither, so the Debian guard can only be the answer for these.

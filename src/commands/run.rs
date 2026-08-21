@@ -1,5 +1,5 @@
 //! `perch run <target>` — a client against one Account's Profile, without a
-//! Switch (ADR 0010).
+//! Switch (ADR a-run-is-one-shot).
 //!
 //! One process is pointed at one Profile by setting `CLAUDE_CONFIG_DIR` for it
 //! and nothing else. The active Account, every other terminal, the editor
@@ -19,11 +19,12 @@
 //! launch: a client served a Profile it cannot see the person's memory,
 //! settings and plugins through is worse than one that did not start.
 //!
-//! It is also the one path that makes a Profile **Live** (ADR 0027). A Run
-//! writes the session marker that says so and takes it away when the Run ends,
-//! which is what stops another Perch Capturing, Renewing or writing
-//! `.claude.json` into a Profile somebody is working in. Reading out of one is
-//! untouched: a Switch onto the Account a Run is against still lands.
+//! It is also the one path that makes a Profile **Live**
+//! (ADR a-run-is-one-shot). A Run writes the session marker that says so and
+//! takes it away when the Run ends, which is what stops another Perch
+//! Capturing, Renewing or writing `.claude.json` into a Profile somebody is
+//! working in. Reading out of one is untouched: a Switch onto the Account a Run
+//! is against still lands.
 //!
 //! Everything Perch says about a Run goes to standard error, which every other
 //! remark about the machine already does. The client inherits this process's
@@ -94,14 +95,15 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     let default_profile = registry::the_default_profile(host)?;
 
     // Claimed before anything is linked rather than immediately before the
-    // launch (ADR 0027). Reconcile and Carry are both filesystem-bound over a
-    // whole Profile, and until the Marker exists nothing on the machine knows
-    // this Run is happening: a `perch remove` in another terminal asks whether
-    // the Profile is Live, is told no — twice, both times before this Marker
-    // was written — and then deletes the Credential and the directory while
-    // this command is still linking into it. What starts is a client pointed at
-    // an empty configuration directory, asking its user to log in, which is the
-    // state `refuse_a_quarantined_account` above exists to prevent.
+    // launch (ADR a-run-is-one-shot). Reconcile and Carry are both
+    // filesystem-bound over a whole Profile, and until the Marker exists
+    // nothing on the machine knows this Run is happening: a `perch remove` in
+    // another terminal asks whether the Profile is Live, is told no — twice,
+    // both times before this Marker was written — and then deletes the
+    // Credential and the directory while this command is still linking into it.
+    // What starts is a client pointed at an empty configuration directory,
+    // asking its user to log in, which is the state
+    // `refuse_a_quarantined_account` above exists to prevent.
     //
     // Nothing is lost by claiming early. The `Claim` takes its Marker back when
     // it drops, so a Run that fails between here and the launch leaves nothing
@@ -113,14 +115,14 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     reconcile::reconcile(host, &default_profile.config_dir, &profile)?;
 
     // The one file Reconcile cannot link, because it holds the Account as well
-    // as the person (ADR 0003). Handled key by key, and afterwards: Reconcile is
-    // what makes the Profile a directory at all.
-    // The one reader here that asks whether a Landing is in flight rather than
+    // as the person (ADR everything-but-the-account). Handled key by key, and
+    // afterwards: Reconcile is what makes the Profile a directory at all. The
+    // one reader here that asks whether a Landing is in flight rather than
     // settling one, and for the reason `perch watcher run`'s opening line asks
-    // (ADR 0055): a Run holds no registry lock by design, and a Switch left in
-    // flight is exactly the state where "who is active" has no answer —
-    // `Active::whose` hands back the Account being *left*, which is the last
-    // thing Perch established rather than anything it knows.
+    // (ADR an-ordering-is-a-type): a Run holds no registry lock by design, and
+    // a Switch left in flight is exactly the state where "who is active" has no
+    // answer — `Active::whose` hands back the Account being *left*, which is
+    // the last thing Perch established rather than anything it knows.
     let settled = switch::nothing_in_flight(&registry);
 
     carry::carry(
@@ -169,7 +171,7 @@ struct Launch {
     said: String,
 }
 
-/// Reads the words after `--` as a command line (ADR 0010).
+/// Reads the words after `--` as a command line (ADR a-run-is-one-shot).
 ///
 /// The first word decides, and decides totally: a word beginning with `-` is an
 /// argument, because nothing that begins with `-` can name a program the
@@ -203,8 +205,9 @@ fn what_to_launch(host: &dyn Host, command: &[String]) -> Result<Launch> {
     }
 }
 
-/// Refuses `perch run <target> <anything>`, where what was meant for the program
-/// was typed without the separator that says so (ADR 0010).
+/// Refuses `perch run <target> <anything>`, where what was meant for the
+/// program was typed without the separator that says so
+/// (ADR a-run-is-one-shot).
 ///
 /// Read off the command line before the parser sees it, because the parser is
 /// what the rule exists to protect against: clap will claim `--resume` for Perch

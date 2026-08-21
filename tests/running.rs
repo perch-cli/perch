@@ -1,5 +1,5 @@
 //! Behavior tests for `perch run <target>`: a client against one Account's
-//! Profile, and nothing else moved (ADR 0010).
+//! Profile, and nothing else moved (ADR a-run-is-one-shot).
 //!
 //! What every one of these is really asserting is the difference between a Run
 //! and a Switch. A Switch is about the whole machine; a Run is about one
@@ -407,8 +407,9 @@ fn a_run_says_which_account_stays_active_everywhere_else() {
 /// Perch established rather than anything it knows. Said off that answer, a Run
 /// promised that Account "stays the active Account everywhere else" while the
 /// other one's Credential may already be the live one. That is the same claim
-/// ADR 0055 had taken out of `perch watcher run`'s opening line, still being
-/// made by the command whose whole point is the second half of the sentence.
+/// ADR an-ordering-is-a-type had taken out of `perch watcher run`'s opening
+/// line, still being made by the command whose whole point is the second half
+/// of the sentence.
 #[test]
 fn a_run_claims_nothing_about_who_is_active_while_a_switch_is_in_flight() {
     let host = machine();
@@ -490,9 +491,9 @@ fn arguments_after_the_separator_reach_the_client_verbatim() {
 }
 
 /// A word that is not a flag names the program, which is what makes a Run a way
-/// of running anything under an Account rather than a way of running Claude Code
-/// (ADR 0010). The Profile is still what the program is pointed at: that is the
-/// point of running it here rather than in the shell.
+/// of running anything under an Account rather than a way of running Claude
+/// Code (ADR a-run-is-one-shot). The Profile is still what the program is
+/// pointed at: that is the point of running it here rather than in the shell.
 #[test]
 fn a_program_named_after_the_separator_is_what_runs() {
     let host = machine();
@@ -605,7 +606,8 @@ fn a_quarantined_account_is_refused_whatever_is_being_launched() {
     assert!(launched(&host).is_empty(), "{:?}", launched(&host));
 }
 
-// ---- a Run makes the Profile Live (ADR 0027) ---------------------------
+// ---- a Run makes the Profile Live (ADR a-run-is-one-shot)
+// ---------------------------
 
 /// The processes Perch would say are running against a Profile right now.
 fn live_against(host: &FakeHost, email: &str) -> Vec<u32> {
@@ -651,7 +653,8 @@ fn a_run_marks_its_profile_live_for_as_long_as_it_lasts() {
 /// opposite of the arm whose comment names this very case ("halfway through
 /// being written by a client that is starting up right now"). A `perch switch`
 /// landing in that window Captures the Credential the Run is about to hand a
-/// client, which is the mid-task logout ADR 0027's marker exists to prevent.
+/// client, which is the mid-task logout ADR a-run-is-one-shot's marker exists
+/// to prevent.
 ///
 /// Asserted as a rename, because that is what makes a write atomic: the reader
 /// sees the old name or the new one and never a prefix of either.
@@ -676,7 +679,7 @@ fn a_runs_marker_arrives_whole_rather_than_being_filled_in_place() {
 /// The consequence that matters: while somebody is working in a Profile, the
 /// Capture that a Switch away from that Account would perform is refused. That
 /// write would land under a client holding the same file, which is the mid-task
-/// logout ADR 0005 exists to prevent.
+/// logout ADR a-profile-is-live-by-evidence exists to prevent.
 #[test]
 fn a_capture_into_the_profile_a_run_is_against_is_refused() {
     let refused = Rc::new(RefCell::new(None));
@@ -731,7 +734,8 @@ fn switching_onto_the_account_a_run_is_against_succeeds() {
 
 /// A Run is killed often — closing the terminal is how a session usually ends —
 /// so the marker outliving the process it names is the ordinary case rather
-/// than the exception. It says nothing once that process is gone (ADR 0022).
+/// than the exception. It says nothing once that process is gone
+/// (ADR a-profile-is-live-by-evidence).
 #[test]
 fn a_run_that_was_killed_does_not_leave_a_profile_live_for_ever() {
     let host = machine();
@@ -766,9 +770,9 @@ fn a_killed_runs_marker_does_not_come_back_to_life_with_a_recycled_pid() {
 
 /// Liveness is a fact about one configuration directory, so the directory that
 /// records it is the one entry a Reconcile holds back that is neither the
-/// person's nor the Account's (ADR 0027). Shared, a Run against one Account
-/// would make every Profile on the machine Live at once, and its own marker
-/// would land in the Default Profile.
+/// person's nor the Account's (ADR everything-but-the-account). Shared, a Run
+/// against one Account would make every Profile on the machine Live at once,
+/// and its own marker would land in the Default Profile.
 #[test]
 fn a_run_answers_for_its_own_profile_and_for_nobody_elses() {
     let elsewhere = Rc::new(RefCell::new(Vec::new()));
@@ -911,7 +915,8 @@ fn machine_holding_the_two_that_share_a_profile() -> FakeHost {
 /// One directory means one Credential Store and one Credential, so the client
 /// this launches runs as whichever of the two is in it — while the line Perch
 /// prints a moment earlier names the other. `perch switch` refuses exactly this
-/// (ADR 0006); the Run reached the same directory by another route and did not.
+/// (ADR a-switch-is-written-down-first); the Run reached the same directory by
+/// another route and did not.
 #[test]
 fn a_run_against_a_profile_two_accounts_share_is_refused() {
     let host = machine_holding_the_two_that_share_a_profile().with_login(client_exiting(0));
@@ -976,12 +981,12 @@ fn a_run_marks_its_profile_live_before_it_touches_anything_in_it() {
 /// refused rather than written through.
 ///
 /// `create_dir_all` at a link to a directory succeeds and uses the target, so
-/// every write under it lands there. `reconcile::sweep` exists to take that link
-/// away — its comment names this exact hazard, "its own Run's marker would land
-/// in the Default Profile" — but a Run claims *before* it reconciles, and on
-/// purpose (ADR 0027): until the Marker exists nothing on the machine knows the
-/// Run is happening, so a `perch remove` in another terminal would be free to
-/// delete the Profile out from under it.
+/// every write under it lands there. `reconcile::sweep` exists to take that
+/// link away — its comment names this exact hazard, "its own Run's marker would
+/// land in the Default Profile" — but a Run claims *before* it reconciles, and
+/// on purpose (ADR a-run-is-one-shot): until the Marker exists nothing on the
+/// machine knows the Run is happening, so a `perch remove` in another terminal
+/// would be free to delete the Profile out from under it.
 ///
 /// Claimed through the link, the Marker makes the Default Profile report a live
 /// corroborated client, which refuses every Capture, Switch and Renewal on the

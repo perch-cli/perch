@@ -2,9 +2,10 @@
 //! that knows an address.
 //!
 //! None of this is a published contract, so it is held the way
-//! [`crate::probe`] holds Claude Code's internals (ADR 0007): one module carries
-//! every assumption, and a reply Perch cannot make sense of is reported as such
-//! rather than guessed at. What is assumed here is
+//! [`crate::probe`] holds Claude Code's internals
+//! (ADR an-assumption-is-probed): one module carries every assumption, and a
+//! reply Perch cannot make sense of is reported as such rather than guessed at.
+//! What is assumed here is
 //!
 //! - the usage endpoint answers with an object whose values are Quota Windows,
 //!   each carrying how full it is and when it resets;
@@ -25,7 +26,8 @@ use crate::host::{Host, HttpRequest, HttpResponse};
 use crate::registry::WindowUtilization;
 
 /// Where an Account's Quota Windows are read from. Roughly 28-30 requests per
-/// rolling hour per Account, and it does not refill early (ADR 0015).
+/// rolling hour per Account, and it does not refill early
+/// (ADR a-figure-carries-its-age).
 pub const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 
 /// Where Perch asks whose access token it is holding.
@@ -56,7 +58,7 @@ pub type QuotaWindows = Vec<WindowUtilization>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refused {
     /// The hourly budget for this Account is spent, and does not refill early
-    /// (ADR 0015).
+    /// (ADR a-figure-carries-its-age).
     Throttled,
     /// The Credential was not accepted.
     Rejected,
@@ -64,11 +66,11 @@ pub enum Refused {
     /// in — a body that will not parse, a document missing a field.
     ///
     /// Drift, in other words: Anthropic changed something and this build has
-    /// not caught up. Told apart from [`Refused::Failed`] because ADR 0019
-    /// carves out exactly this and nothing wider — "drift in a reply Perch
-    /// reads for reassurance is no reason to stop reading Utilization at all" —
-    /// and folding an HTTP failure in with it turned an outage into permission
-    /// to skip the ownership check.
+    /// not caught up. Told apart from [`Refused::Failed`] because
+    /// ADR a-figure-names-its-account carves out exactly this and nothing wider
+    /// — "drift in a reply Perch reads for reassurance is no reason to stop
+    /// reading Utilization at all" — and folding an HTTP failure in with it
+    /// turned an outage into permission to skip the ownership check.
     Unrecognized(String),
     /// The endpoint answered with a status Perch has no reading for — a 500, a
     /// 502, a 404 at a URL that used to work.
@@ -165,10 +167,11 @@ pub fn utilization(host: &dyn Host, access_token: &str) -> Result<QuotaWindows, 
 /// both back as `None` — which [`crate::observe::confirm`] reads as permission
 /// to cache.
 ///
-/// So the day Anthropic renamed `email_address`, the ADR 0019 guard would have
-/// become a no-op for every Account, for ever, with nothing printed anywhere.
-/// That is strictly worse than the outage this endpoint's other failure mode
-/// causes, because an outage ends and a rename does not.
+/// So the day Anthropic renamed `email_address`, the
+/// ADR a-figure-names-its-account guard would have become a no-op for every
+/// Account, for ever, with nothing printed anywhere. That is strictly worse
+/// than the outage this endpoint's other failure mode causes, because an outage
+/// ends and a rename does not.
 ///
 /// It stays a *carve-out* rather than a refusal — `confirm` still goes on to
 /// read Utilization, because drift in a reply is no evidence either way — but
@@ -402,12 +405,13 @@ fn windows_in(
         windows.push(window_from(name, used_percent, value, said));
     }
 
-    // The two every Account has, held to the same standard when they are missing
-    // as when they are unreadable. [`is_drift`] can only refuse a window that is
-    // *there* and has stopped answering, because it is asked once per key the
-    // reply carries — so a `"five_hour": null` was the loud failure and a
-    // `five_hour` the reply simply left out was the quiet one, which is the same
-    // ADR 0012 loss arriving by omission instead of by type.
+    // The two every Account has, held to the same standard when they are
+    // missing as when they are unreadable. [`is_drift`] can only refuse a
+    // window that is *there* and has stopped answering, because it is asked
+    // once per key the reply carries — so a `"five_hour": null` was the loud
+    // failure and a `five_hour` the reply simply left out was the quiet one,
+    // which is the same ADR headroom-is-the-worst-window loss arriving by
+    // omission instead of by type.
     //
     // Only where something was read. A reply carrying no window at all is not
     // this — it is an answer that says nothing about the Account rather than one
@@ -443,7 +447,8 @@ fn windows_in(
 /// dropped in silence "becomes one nothing would ever rank on" — held for
 /// exactly those two and for nothing else. A `one_hour` or `thirty_day` window
 /// that arrived flattened to a bare number would have been passed over without
-/// a word, and the ADR 0012 failure would be back under a new name.
+/// a word, and the ADR headroom-is-the-worst-window failure would be back under
+/// a new name.
 fn named_by_a_period(key: &str) -> bool {
     let mut parts = key.split('_');
     let counted = parts.next().is_some_and(|count| !count.is_empty());
@@ -476,7 +481,7 @@ fn how_full_it_says_it_is(value: &Value) -> Option<f64> {
 /// quoted as `"98"` — leaves the weekly window at 10% as the fullest Perch can
 /// see, so an Account reporting 90% Headroom is one whose five-hour window is
 /// 98% full, ranked top of its Group, switched onto and dead on arrival. That
-/// is precisely what ADR 0012 exists to refuse.
+/// is precisely what ADR headroom-is-the-worst-window exists to refuse.
 ///
 /// The name is what tells the two apart. A name that says a period is a window;
 /// one that does not is a field Perch is not entitled to an opinion about, and
@@ -493,9 +498,10 @@ fn how_full_it_says_it_is(value: &Value) -> Option<f64> {
 /// The two every Account has are held back from that generosity, because they
 /// are the ones always there to be read — so a `null` in their place is the
 /// field going missing rather than the Account not having it, and passing that
-/// over is the ADR 0012 failure above arriving as a `null` instead of as a `98`.
-/// Refusing the reply is the loud failure and dropping the window is the quiet
-/// one, and this is the one place in Perch that prefers the loud one.
+/// over is the ADR headroom-is-the-worst-window failure above arriving as a
+/// `null` instead of as a `98`. Refusing the reply is the loud failure and
+/// dropping the window is the quiet one, and this is the one place in Perch
+/// that prefers the loud one.
 fn is_drift(name: &str, value: &Value) -> bool {
     named_by_a_period(name) && !says_the_account_has_no_such_window(name, value)
 }
@@ -758,8 +764,9 @@ mod tests {
     /// whole picture. Here the five-hour window is 98% full and unreadable, so
     /// the weekly one at 10% becomes the fullest Perch can see — an Account
     /// reporting 90% headroom that a Cycle would land on and that dies
-    /// immediately. That is the ADR 0012 failure mode arriving through a type
-    /// change rather than through a name Perch had not been taught.
+    /// immediately. That is the ADR headroom-is-the-worst-window failure mode
+    /// arriving through a type change rather than through a name Perch had not
+    /// been taught.
     #[test]
     fn a_window_that_will_not_say_how_full_it_is_is_drift_rather_than_one_fewer_window() {
         let document: Value = serde_json::from_str(
@@ -779,9 +786,10 @@ mod tests {
     /// The same rule one level up. A window that stops being an object at all —
     /// the reply flattened to `"five_hour": 98`, or the field nulled out during
     /// an outage — is the identical loss with the identical consequence, and
-    /// passing over it silently was how the ADR 0012 failure got back in: the
-    /// weekly window at 10% becomes the fullest Perch can see, and the Account
-    /// whose five-hour window is 98% full ranks top of its Group.
+    /// passing over it silently was how the ADR headroom-is-the-worst-window
+    /// failure got back in: the weekly window at 10% becomes the fullest Perch
+    /// can see, and the Account whose five-hour window is 98% full ranks top of
+    /// its Group.
     ///
     /// Said of the two windows every Account has, which is what makes a `null`
     /// there drift rather than the absence it is under a per-model name — see
@@ -811,8 +819,9 @@ mod tests {
     /// and `seven` — so the whole argument this module makes about a window
     /// dropped in silence held for those two and for nothing else. A `one_hour`
     /// window flattened to a number would have been passed over without a word,
-    /// and the ADR 0012 failure would be back under a new name. It keys on the
-    /// unit now, which is what its own doc always claimed.
+    /// and the ADR headroom-is-the-worst-window failure would be back under a
+    /// new name. It keys on the unit now, which is what its own doc always
+    /// claimed.
     #[test]
     fn a_window_under_a_period_anthropic_has_not_used_yet_is_drift_when_it_stops_answering() {
         let document: Value = serde_json::from_str(
@@ -846,13 +855,13 @@ mod tests {
     /// loss as one that has stopped answering — and it used to be the quiet one.
     ///
     /// [`is_drift`] is asked once per key the reply *carries*, so it can only
-    /// ever catch a window that is there and unreadable. A `five_hour` the reply
-    /// simply omits was never asked about, and `utilization` refuses only a reply
-    /// naming no window at all — so a partial outage answering with the weekly
-    /// window alone left an Account whose five-hour window was 98% full reading
-    /// as 90% Headroom, ranked top of its Group and switched onto. That is
-    /// exactly the ADR 0012 failure [`is_drift`]'s doc refuses, arriving by
-    /// omission instead of by type.
+    /// ever catch a window that is there and unreadable. A `five_hour` the
+    /// reply simply omits was never asked about, and `utilization` refuses only
+    /// a reply naming no window at all — so a partial outage answering with the
+    /// weekly window alone left an Account whose five-hour window was 98% full
+    /// reading as 90% Headroom, ranked top of its Group and switched onto. That
+    /// is exactly the ADR headroom-is-the-worst-window failure [`is_drift`]'s
+    /// doc refuses, arriving by omission instead of by type.
     #[test]
     fn a_window_every_account_has_is_drift_when_the_reply_leaves_it_out() {
         for (left_out, document) in [

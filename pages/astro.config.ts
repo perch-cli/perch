@@ -9,7 +9,8 @@ const base = "/perch";
 
 // The whole of https://perch-cli.github.io/perch/ — the splash front page, the
 // guide, and the two installers `public/` carries to the root of the output
-// (ADR 0062). One project rather than two artifacts sharing an accent color.
+// (ADR one-thing-renders-the-site). One project rather than two artifacts
+// sharing an accent color.
 //
 // TypeScript rather than JavaScript for a reason this file is the best example
 // of: a mistyped key here builds cleanly and serves a site that is wrong — a

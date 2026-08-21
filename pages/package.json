@@ -1,7 +1,7 @@
 {
   "name": "perch-site",
   "private": true,
-  "description": "https://perch-cli.github.io/perch/ — the front page, the installers and the guide (ADR 0062)",
+  "description": "https://perch-cli.github.io/perch/ — the front page, the installers and the guide (ADR one-thing-renders-the-site)",
   "type": "module",
   "scripts": {
     "dev": "astro dev",

@@ -1,4 +1,5 @@
-//! `perch group` — declaring which Accounts are interchangeable (ADR 0002).
+//! `perch group` — declaring which Accounts are interchangeable
+//! (ADR a-group-is-a-declaration).
 //!
 //! A Group is the user's statement that Cycling may move them between these
 //! Accounts and no others: another work subscription, never their personal one.
@@ -31,7 +32,7 @@ use crate::target::{self, AccountTarget};
 pub enum GroupCommand {
     /// Declare a Group. It starts empty and at the compiled-in defaults —
     /// nothing said about another Scope reaches it, including a grant the
-    /// watcher already holds somewhere else (ADR 0051).
+    /// watcher already holds somewhere else (ADR a-setting-names-its-scope).
     Add {
         /// The name, which shares one namespace with Aliases.
         name: String,
@@ -77,7 +78,7 @@ pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Resul
         // What it declared, and not what governs it. A Group is declared at
         // the compiled-in defaults every time, so the two rows would be the
         // same two rows on every run — `perch group list` is where they are
-        // read (ADR 0061).
+        // read (ADR perch-says-what-it-did).
         GroupCommand::Add { name } => {
             registry.declare_group(&name)?;
             Ok(vec![format!("Declared the Group `{name}`.")])
@@ -89,7 +90,7 @@ pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Resul
         // The Accounts it still holds are said by `rename` itself, because a
         // rename could have lost them and did not. Its Settings are not: a
         // rename never touches one, so printing them is Perch reporting work
-        // it did not do (ADR 0061).
+        // it did not do (ADR perch-says-what-it-did).
         GroupCommand::Rename { from, to } => Ok(vec![rename(registry, &from, &to)?]),
         GroupCommand::Move { target, group } => {
             let account = target::resolve_account(registry, &target)?;
@@ -261,11 +262,11 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
         // three spellings of it had grown and one of them offered `on`/`off`,
         // which is not a value the Setting takes.
         write_line(out, "Cycling", &cycling_among_ungrouped(registry))?;
-        // The Accounts in no Group are a Scope (ADR 0017, amended), so what
-        // governs Cycling among them is a thing with an answer rather than a
-        // constant compiled into Perch. It is shown here for the same reason a
-        // Group's is: the rules Cycling will follow should be readable without
-        // opening the registry.
+        // The Accounts in no Group are a Scope (ADR a-group-is-a-declaration,
+        // amended), so what governs Cycling among them is a thing with an
+        // answer rather than a constant compiled into Perch. It is shown here
+        // for the same reason a Group's is: the rules Cycling will follow
+        // should be readable without opening the registry.
         describe_configuration(out, registry, &Scope::Ungrouped)?;
     }
 
@@ -276,22 +277,24 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
 ///
 /// No line naming which of them the Scope declared itself, because it declared
 /// all of them: a Scope holds its own full Settings and there is nothing above
-/// it for one to have come from (ADR 0051).
+/// it for one to have come from (ADR a-setting-names-its-scope).
 ///
 /// One function again rather than a `configuration_lines` beside it. That
 /// second half existed because `perch group add` and `perch group rename` went
-/// through [`crate::commands::only_the_registry`] (ADR 0057), which hands the
-/// change no writer, so what those two had to say had to come back as words —
-/// and neither says it any more (ADR 0061). What is left is one caller with a
-/// writer of its own.
+/// through [`crate::commands::only_the_registry`]
+/// (ADR one-door-to-the-registry), which hands the change no writer, so what
+/// those two had to say had to come back as words — and neither says it any
+/// more (ADR perch-says-what-it-did). What is left is one caller with a writer
+/// of its own.
 fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scope) -> Result<()> {
     let settings = registry.settings(scope);
     let strategy = labeled("Strategy", settings.strategy.as_str());
     // The whole policy rather than the threshold alone: a summary that named
     // only when the watcher acts would read as the whole of what it does, and
-    // the margin is what decides where it lands (ADR 0046). Two of the three
-    // are constants now, and they are still shown — what the watcher will do
-    // here should be readable without knowing which of the numbers is anyone's.
+    // the margin is what decides where it lands
+    // (ADR a-watcher-knob-is-arithmetic). Two of the three are constants now,
+    // and they are still shown — what the watcher will do here should be
+    // readable without knowing which of the numbers is anyone's.
     let policy = crate::watch::Policy::of(&settings);
     let acting = format!(
         "at {}%, onto {}% or better, at most every {}m",
@@ -301,12 +304,12 @@ fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scop
     );
     // Being allowed to act is not the whole of whether it does. Among the
     // Accounts in no Group, `interchangeable` is a separate declaration that
-    // they are a set at all (ADR 0017), and without it there is nowhere for the
-    // watcher to Switch to — `perch watcher run` refuses outright and names
-    // both. Read from `watcher-may-act` alone, this line claimed unattended
-    // switching that the watcher declines, and said the same thing whichever way
-    // the gate was set, so it was unfalsifiable in both directions.
-    // `config::scope_lines` already answers this correctly.
+    // they are a set at all (ADR a-group-is-a-declaration), and without it
+    // there is nowhere for the watcher to Switch to — `perch watcher run`
+    // refuses outright and names both. Read from `watcher-may-act` alone, this
+    // line claimed unattended switching that the watcher declines, and said the
+    // same thing whichever way the gate was set, so it was unfalsifiable in
+    // both directions. `config::scope_lines` already answers this correctly.
     let interchangeable = crate::cycle::may_cycle_within(registry, scope);
     let watcher = match (settings.watcher_may_act, interchangeable) {
         (true, true) => format!("may switch unattended {acting}"),

@@ -4,7 +4,7 @@
 //! observable outcomes: what was printed, what ended up in the keychain, and
 //! what went out to the network. A machine with no arranged replies has no
 //! network at all, so a command that fetches when it should not fails here
-//! rather than quietly passing (ADR 0015).
+//! rather than quietly passing (ADR a-figure-carries-its-age).
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -17,7 +17,7 @@ use chrono::{DateTime, TimeZone, Utc};
 // what a reader of this file is usually looking at. `impl port::Files for
 // FakeHost` says *this is the surface*; the bare `Filesystem` says *this is the
 // world*. Naming the state anything else would mint a second vocabulary for the
-// nine things ADR 0056 spent its effort naming once.
+// nine things ADR the-port-fits-the-machine spent its effort naming once.
 use super as port;
 use super::{
     Execution, HostError, HttpRequest, HttpResponse, Link, PRIVATE_DIR_MODE, PRIVATE_FILE_MODE,
@@ -26,9 +26,9 @@ use super::{
 // The methods, without the names: every `self.platform()`, `self.process_id()`
 // and `self.path_exists()` below is a trait method, and a trait has to be in
 // scope to be found even where its name is not wanted (`host::prelude`'s
-// reason, ADR 0056). Through `port` rather than `super`, because two of these
-// three names are also the state's and only one spelling of the port belongs in
-// this file.
+// reason, ADR the-port-fits-the-machine). Through `port` rather than `super`,
+// because two of these three names are also the state's and only one spelling
+// of the port belongs in this file.
 use crate::keychain::KeychainError;
 use port::{Environment as _, Files as _, Processes as _};
 use zeroize::Zeroizing;
@@ -91,9 +91,10 @@ pub enum Effect {
         config_dir: PathBuf,
         /// What was added to the launched program's environment. Kept whole
         /// rather than only as `config_dir`, because it is how an Upgrade tells
-        /// the embedded installer which Release to fetch (ADR 0039) — and a
-        /// tag that never reached the script is an upgrade to the wrong thing,
-        /// which nothing else here would notice.
+        /// the embedded installer which Release to fetch
+        /// (ADR an-upgrade-asks-its-channel) — and a tag that never reached the
+        /// script is an upgrade to the wrong thing, which nothing else here
+        /// would notice.
         env: Vec<(String, String)>,
     },
     /// A request that went out to the network.
@@ -101,7 +102,8 @@ pub enum Effect {
         url: String,
     },
     /// A question put to the person at the terminal. Recorded so a command that
-    /// must never ask one — bare `perch switch` (ADR 0011) — can be held to it.
+    /// must never ask one — bare `perch switch` (ADR perch-does-not-draw) — can
+    /// be held to it.
     Asked,
     /// A question whose answer the terminal never showed. Distinct from `Asked`
     /// so a test can say that a passphrase went in by the path that hides it
@@ -120,7 +122,7 @@ pub struct Sent {
     /// supposed to be abandoned quickly and was not is invisible in a test that
     /// only looks at where it went — and the whole point of the check on
     /// `perch --version` is that it costs nothing on a machine that cannot
-    /// answer (ADR 0039).
+    /// answer (ADR an-upgrade-asks-its-channel).
     pub within_millis: Option<u64>,
 }
 
@@ -139,7 +141,8 @@ impl Sent {
 }
 
 /// What an ordinary directory is created as — `mkdir` under the usual umask.
-/// A directory that will hold a Credential is not this (ADR 0020).
+/// A directory that will hold a Credential is not this
+/// (ADR claude-code-chooses-the-store).
 const ORDINARY_DIR_MODE: u32 = 0o755;
 
 /// Why the keychain refuses everything, when a test asks it to.
@@ -180,12 +183,13 @@ type Traces = BTreeMap<(String, Option<String>), VecDeque<HttpResponse>>;
 /// blocks reach a struct that is not their own — `port::Keys` and
 /// `port::Waiting` both take the [`Stall`], and `port::Processes` reads
 /// `environment.home` — and the helpers carry the rest of the crossings that
-/// were ten before they had anywhere to live. That is ADR 0056's thesis
-/// arriving in the state: the machine's surfaces are entangled, and a copy of
-/// the world is entangled in the same places. Methods on these structs would
-/// turn every one of those crossings into real coupling — passing a clock into
-/// the filesystem — which ADR 0056 already refused at the trait level
-/// (ADR 0059).
+/// were ten before they had anywhere to live. That is
+/// ADR the-port-fits-the-machine's thesis arriving in the state: the machine's
+/// surfaces are entangled, and a copy of the world is entangled in the same
+/// places. Methods on these structs would turn every one of those crossings
+/// into real coupling — passing a clock into the filesystem — which
+/// ADR the-port-fits-the-machine already refused at the trait level
+/// (ADR the-port-fits-the-machine).
 ///
 /// The `RefCell` stays on each field rather than moving out to wrap the struct.
 /// The fake is deliberately re-entered mid-call by a `somebody_else` closure,
@@ -210,7 +214,8 @@ pub struct FakeHost {
 struct Environment {
     home: PathBuf,
     /// The directory the command was typed in — the project a Run is about,
-    /// and the one entry of `projects` that crosses to a Profile (ADR 0003).
+    /// and the one entry of `projects` that crosses to a Profile
+    /// (ADR everything-but-the-account).
     current_dir: RefCell<PathBuf>,
     platform: RefCell<Platform>,
     vars: RefCell<BTreeMap<String, String>>,
@@ -230,7 +235,7 @@ struct Environment {
 /// runs both ways: `files`, `modes`, `dirs`, `modified`, `unwritable` and
 /// `undeletable` are all read from the `port::Links` block, and `links` is read
 /// from the `port::Files` one. That is the whole reason `port::Filesystem`
-/// exists as a supertrait of both (ADR 0056).
+/// exists as a supertrait of both (ADR the-port-fits-the-machine).
 struct Filesystem {
     files: RefCell<BTreeMap<PathBuf, String>>,
     /// The permissions of everything that has any, so a test can say that a
@@ -268,7 +273,8 @@ struct Filesystem {
     links: RefCell<BTreeMap<PathBuf, (Link, PathBuf)>>,
     /// Whether this Windows can make a symbolic link. Off is the ordinary
     /// machine: the privilege needs Developer Mode or elevation, which is the
-    /// whole reason a Run reaches for junctions and hard links (ADR 0026).
+    /// whole reason a Run reaches for junctions and hard links
+    /// (ADR everything-but-the-account).
     developer_mode: RefCell<bool>,
 }
 
@@ -343,10 +349,10 @@ struct Network {
 /// written at five sites: [`FakeHost::set_now`], and then `while_they_answer`,
 /// `keychain_set`, `sleep` and `wait` — and at all four of those the very next
 /// statement takes `somebody_else`. Time does not pass in this fake because a
-/// clock ticks; it passes because an effect took time, and while that effect was
-/// in flight somebody else touched the machine. That is why there is no `Clock`
-/// state struct: `impl port::Clock for FakeHost` reads `self.stall.now`
-/// (ADR 0059).
+/// clock ticks; it passes because an effect took time, and while that effect
+/// was in flight somebody else touched the machine. That is why there is no
+/// `Clock` state struct: `impl port::Clock for FakeHost` reads `self.stall.now`
+/// (ADR the-port-fits-the-machine).
 struct Stall {
     now: RefCell<DateTime<Utc>>,
     /// What the rest of the machine does the first time Perch waits, and then
@@ -383,16 +389,16 @@ impl Default for FakeHost {
 /// changes across two files and say less about each, not more.
 ///
 /// The same measurement is why the file did not follow the interface when the
-/// interface became nine traits (ADR 0056). There are nine `impl` blocks below,
-/// one per concern, and one file holding them — and the multiplier this comment
-/// measures is untouched by that, because it is per method rather than per
-/// trait.
+/// interface became nine traits (ADR the-port-fits-the-machine). There are nine
+/// `impl` blocks below, one per concern, and one file holding them — and the
+/// multiplier this comment measures is untouched by that, because it is per
+/// method rather than per trait.
 ///
 /// What was done about it instead is above: the fields these builders arrange
 /// are seven concern structs, a [`Stall`] and the recorder rather than forty
 /// flat ones, so a builder is grouped against the world it sets up and a reader
 /// of terminal code has five fields in scope rather than thirty-nine
-/// (ADR 0059). The multiplier is the
+/// (ADR the-port-fits-the-machine). The multiplier is the
 /// same — the 43rd method still costs what the 42nd did — because it was never
 /// the customer: three of the five fields added over the ten days before that
 /// work arrived with no new `Host` method at all. The fake grows from the
@@ -488,12 +494,12 @@ impl FakeHost {
     // are declared. The names are untouched — `with_file` still says
     // `with_file`, and all 695 call sites in `tests/` say what they always
     // said. What moved is which of them a reader has to hold in their head at
-    // once (ADR 0059).
+    // once (ADR the-port-fits-the-machine).
 
     // ---- environment: the machine it runs on ------------------------
 
     /// A machine that is not a Mac, where a Credential lives in a file rather
-    /// than in a keychain (ADR 0020).
+    /// than in a keychain (ADR claude-code-chooses-the-store).
     pub fn with_platform(self, platform: Platform) -> Self {
         *self.environment.platform.borrow_mut() = platform;
         self
@@ -507,7 +513,7 @@ impl FakeHost {
     }
 
     /// Where this Perch's binary sits, which is the whole of what says which
-    /// Channel installed it (ADR 0039).
+    /// Channel installed it (ADR an-upgrade-asks-its-channel).
     pub fn installed_at(self, path: impl AsRef<Path>) -> Self {
         *self.environment.current_exe.borrow_mut() = path.as_ref().to_path_buf();
         self
@@ -529,7 +535,7 @@ impl FakeHost {
     }
 
     /// A machine where Perch was run with `sudo`, which is the one thing `perch
-    /// watcher install` refuses outright (ADR 0040).
+    /// watcher install` refuses outright (ADR the-machine-runs-the-watcher).
     pub fn as_superuser(self) -> FakeHost {
         *self.environment.user_id.borrow_mut() = Some(0);
         self
@@ -790,7 +796,8 @@ impl FakeHost {
     }
 
     /// Every keychain operation now fails as locked or denied, rather than as
-    /// "not found" — the distinction ADR 0008 insists on.
+    /// "not found" — the distinction ADR claude-code-chooses-the-store insists
+    /// on.
     pub fn with_locked_keychain(self, detail: &str) -> Self {
         self.lock_keychain(detail);
         self
@@ -814,10 +821,11 @@ impl FakeHost {
     /// first `bytes` of what it was given.
     ///
     /// Exactly what `security -i` does when a command line overruns its 4096
-    /// byte stdin buffer: it truncates mid-argument and says nothing (ADR
-    /// 0008). Perch reads every Credential back before trusting it precisely
-    /// because of this, and without a store that can do it the read-back guard
-    /// could be deleted with every test still passing.
+    /// byte stdin buffer: it truncates mid-argument and says nothing
+    /// (ADR claude-code-chooses-the-store). Perch reads every Credential back
+    /// before trusting it precisely because of this, and without a store that
+    /// can do it the read-back guard could be deleted with every test still
+    /// passing.
     pub fn with_keychain_truncating_after(self, bytes: usize) -> Self {
         *self.keys.keychain_keeps.borrow_mut() = Some(bytes);
         self
@@ -883,7 +891,8 @@ impl FakeHost {
     }
 
     /// A process that is running and began at `at` — a recycled PID is one
-    /// wearing a marker that was written before the process began (ADR 0022).
+    /// wearing a marker that was written before the process began
+    /// (ADR a-profile-is-live-by-evidence).
     pub fn with_live_process_started_at(self, pid: u32, at: DateTime<Utc>) -> Self {
         self.processes
             .live_processes
@@ -911,7 +920,8 @@ impl FakeHost {
     }
 
     /// This Perch's pid recycled by a process that began at `at` — a marker
-    /// written before that instant names somebody else now (ADR 0022).
+    /// written before that instant names somebody else now
+    /// (ADR a-profile-is-live-by-evidence).
     pub fn with_this_process_replaced_at(self, at: DateTime<Utc>) -> Self {
         self.processes
             .live_processes
@@ -949,7 +959,7 @@ impl FakeHost {
     }
 
     /// The same, for the questions the terminal shows nothing back to — a
-    /// passphrase, prompted and confirmed (ADR 0014).
+    /// passphrase, prompted and confirmed (ADR the-holdings-go-out-sealed).
     pub fn with_secrets(self, secrets: &[&str]) -> Self {
         *self.terminal.secrets.borrow_mut() = secrets.iter().map(|line| line.to_string()).collect();
         self
@@ -1149,7 +1159,7 @@ impl FakeHost {
     /// `mkdir -p` leaves an existing directory's mode alone, and a fake that
     /// stamped every parent instead would report a Profile as private however
     /// it had been created — which is the one thing these modes are here to
-    /// tell apart (ADR 0020).
+    /// tell apart (ADR claude-code-chooses-the-store).
     /// A link counts as what it points at here too, which it did not.
     ///
     /// This consulted `fs.dirs` alone, so a `mkdir -p` at a path that is a link
@@ -1160,11 +1170,12 @@ impl FakeHost {
     /// fails, because `mkdir` answers `EEXIST` and the `is_dir` it falls back on
     /// follows the link and finds nothing.
     ///
-    /// What that hid is the state ADR 0027 is about. A Profile whose `sessions`
-    /// is a link into the Default Profile is exactly what `reconcile::HELD_BACK`
-    /// and `sweep` exist to repair, and `probe::claim` does `create_dir_all` on
-    /// that path — so a Marker written through the link, into another
-    /// directory, was a thing this fake could not model.
+    /// What that hid is the state ADR everything-but-the-account is about. A
+    /// Profile whose `sessions` is a link into the Default Profile is exactly
+    /// what `reconcile::HELD_BACK` and `sweep` exist to repair, and
+    /// `probe::claim` does `create_dir_all` on that path — so a Marker written
+    /// through the link, into another directory, was a thing this fake could
+    /// not model.
     fn make_dirs(&self, path: &Path, mode: u32) -> Result<(), HostError> {
         // Already a directory, by whatever route — including through a link, in
         // which case the target is what was asked for and nothing is made.
@@ -1214,7 +1225,8 @@ impl FakeHost {
     /// the hazard `reconcile::HELD_BACK` holds `sessions` back for is a Profile
     /// whose `sessions` is a link into another one, and reading a marker there
     /// is reading a file inside a linked directory. Without this the whole of
-    /// ADR 0027's reason for existing was a state no test could build.
+    /// ADR everything-but-the-account's reason for existing was a state no test
+    /// could build.
     ///
     /// Bounded on both counts: the walk down a chain of links gives up rather
     /// than hanging on two that point at each other, and the recursion up
@@ -1254,13 +1266,14 @@ impl FakeHost {
 
     /// The path a read lands on, or the refusal it meets on the way.
     ///
-    /// `RealHost` follows a symbolic link on every read it makes — `read_to_string`,
-    /// `metadata`, `read_dir` all do — and this fake followed one on none of them.
-    /// It was not even consistent with itself: `path_exists(link)` answered `true`
-    /// through [`resolved`](FakeHost::resolved) while `read_file(link)` answered
-    /// `NotFound`. So the machines a link makes could not be built here at all: a
-    /// `~/.claude.json` managed by stow or chezmoi, and the `sessions` linked into
-    /// another Profile that ADR 0027 names.
+    /// `RealHost` follows a symbolic link on every read it makes —
+    /// `read_to_string`, `metadata`, `read_dir` all do — and this fake followed
+    /// one on none of them. It was not even consistent with itself:
+    /// `path_exists(link)` answered `true` through
+    /// [`resolved`](FakeHost::resolved) while `read_file(link)` answered
+    /// `NotFound`. So the machines a link makes could not be built here at all:
+    /// a `~/.claude.json` managed by stow or chezmoi, and the `sessions` linked
+    /// into another Profile that ADR everything-but-the-account names.
     ///
     /// A path arranged as unreadable refuses whether it is the link or what the
     /// link points at, because on a real machine either one stops the read.
@@ -1300,9 +1313,9 @@ impl FakeHost {
 
     /// Lets whatever the test said happens while Perch waits happen, once.
     ///
-    /// Called from all four sites that move the clock, which is the whole of why
-    /// `now` and `somebody_else` are one [`Stall`] rather than a clock beside a
-    /// hook (ADR 0059).
+    /// Called from all four sites that move the clock, which is the whole of
+    /// why `now` and `somebody_else` are one [`Stall`] rather than a clock
+    /// beside a hook (ADR the-port-fits-the-machine).
     ///
     /// Taken out before it runs, so it can reach back into the fake without
     /// meeting a borrow the call it interrupts is still holding.
@@ -1330,9 +1343,9 @@ impl FakeHost {
     ///
     /// Without it the fake stored the file at the name it was given while
     /// `resolved` read *through* the link, so the two disagreed about one path
-    /// and the state ADR 0027 is about could not be built: a Profile whose
-    /// `sessions` is a link into another configuration directory, and a Marker
-    /// written under it landing there rather than here.
+    /// and the state ADR everything-but-the-account is about could not be
+    /// built: a Profile whose `sessions` is a link into another configuration
+    /// directory, and a Marker written under it landing there rather than here.
     fn lands_at(&self, path: &Path) -> PathBuf {
         let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
             return path.to_path_buf();
@@ -1562,8 +1575,9 @@ impl port::Files for FakeHost {
     /// state.
     ///
     /// The mode is still recorded, which is the other thing this call promises:
-    /// "created private" and "made private afterwards" are the distinction ADR
-    /// 0020 turns on, and `create_file_with_mode` underneath keeps it.
+    /// "created private" and "made private afterwards" are the distinction
+    /// ADR claude-code-chooses-the-store turns on, and `create_file_with_mode`
+    /// underneath keeps it.
     fn write_private_file(&self, path: &Path, contents: &str) -> Result<(), HostError> {
         self.record(Effect::WrotePrivateFile(path.to_path_buf()));
         if let Some(parent) = path.parent() {
@@ -1591,12 +1605,13 @@ impl port::Files for FakeHost {
             });
         };
         let path = path.as_path();
-        // Windows has no mode and relies on the profile ACL (ADR 0020), and the
-        // real Host answers `None` there. A fake that answered with a number
-        // would let a test drive `tighten_if_loose` — reading the mode, making
-        // the file private, remarking that others could read it — on a platform
-        // where none of that happens, which is a test asserting behavior the
-        // real Host cannot produce.
+        // Windows has no mode and relies on the profile ACL
+        // (ADR claude-code-chooses-the-store), and the real Host answers `None`
+        // there. A fake that answered with a number would let a test drive
+        // `tighten_if_loose` — reading the mode, making the file private,
+        // remarking that others could read it — on a platform where none of
+        // that happens, which is a test asserting behavior the real Host cannot
+        // produce.
         if self.platform() == Platform::Windows {
             return Ok(None);
         }
@@ -1894,7 +1909,7 @@ impl port::Files for FakeHost {
     /// found under the name that was asked about, which is what `read_dir` does
     /// with the path it was given. A `sessions` linked into another Profile
     /// therefore answers with that Profile's markers, which is the whole of the
-    /// hazard ADR 0027 names.
+    /// hazard ADR everything-but-the-account names.
     fn list_dir(&self, asked: &Path) -> Result<Vec<PathBuf>, HostError> {
         let resolved = self.resolved(asked);
         let Some(path) = resolved
@@ -1971,7 +1986,8 @@ impl port::Links for FakeHost {
     /// The refusals are the point of having this behind the port at all: a
     /// symbolic link on a Windows without Developer Mode, and a junction
     /// anywhere else, fail here exactly as they would there — so the fallbacks
-    /// ADR 0026 turns on are exercised from whatever machine the tests run on.
+    /// ADR everything-but-the-account turns on are exercised from whatever
+    /// machine the tests run on.
     fn link(&self, kind: Link, target: &Path, at: &Path) -> Result<(), HostError> {
         self.record(Effect::Linked {
             kind,

@@ -1,4 +1,5 @@
-//! Where a Credential ends up, and where it is looked for (ADR 0020).
+//! Where a Credential ends up, and where it is looked for
+//! (ADR claude-code-chooses-the-store).
 //!
 //! Perch keeps a Credential exactly where the installed Claude Code would, so
 //! these run the real commands on a machine that is a Mac and on one that is
@@ -298,8 +299,8 @@ fn a_credential_stored_in_the_second_choice_store_empties_the_first() {
 /// one this platform reads first keeps the copy it had — which then beats it on
 /// every later read, for ever. Reported as a failure rather than remarked,
 /// because the caller's next act is to believe the Capture happened, and a
-/// Capture that did not take effect is ADR 0006's silent poisoning by the back
-/// door.
+/// Capture that did not take effect is ADR a-switch-is-written-down-first's
+/// silent poisoning by the back door.
 #[test]
 fn a_superseded_copy_that_survives_in_the_store_read_first_is_a_failure() {
     let host = two_accounts_off_macos_with_a_keychain();
@@ -412,11 +413,12 @@ fn the_platform_decides_which_store_is_written_first() {
 /// written and believed.
 ///
 /// `security -i` truncates mid-argument when a command line overruns its 4096
-/// byte stdin buffer, and says nothing about it (ADR 0008). A truncated
-/// Credential is indistinguishable from a wrong one at the worst possible
-/// moment — some Switch later, with the good copy already replaced. So what a
-/// store says it kept is read back, and a store that kept something else is
-/// treated exactly like one that refused the write outright.
+/// byte stdin buffer, and says nothing about it
+/// (ADR claude-code-chooses-the-store). A truncated Credential is
+/// indistinguishable from a wrong one at the worst possible moment — some
+/// Switch later, with the good copy already replaced. So what a store says it
+/// kept is read back, and a store that kept something else is treated exactly
+/// like one that refused the write outright.
 #[test]
 fn a_store_that_kept_less_than_it_was_given_is_treated_as_one_that_refused() {
     let host = machine_with_two_accounts().with_keychain_truncating_after(40);

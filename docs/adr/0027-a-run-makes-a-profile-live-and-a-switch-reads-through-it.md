@@ -2,10 +2,10 @@
 
 A Profile with a Run against it is a Live Profile. Perch already knows how to
 recognize one — a session marker naming a process that is still the one that
-wrote it (ADR 0022) — and already refuses to write into one. What it did not do
-was produce that evidence for the sessions it launches itself, so a Run got the
-protection only when Claude Code happened to write a marker of its own, and a
-`perch run <target> -- npm test` got none at all.
+wrote it (ADR a-profile-is-live-by-evidence) — and already refuses to write into
+one. What it did not do was produce that evidence for the sessions it launches
+itself, so a Run got the protection only when Claude Code happened to write a
+marker of its own, and a `perch run <target> -- npm test` got none at all.
 
 ## A Run writes the marker, and names its own process
 
@@ -18,11 +18,11 @@ the marker has to exist before the process it protects starts working, or the
 window it leaves open is the first thing anybody does in a session.
 
 The marker corroborates itself by construction. Perch's process began strictly
-before Perch wrote the file, so the ADR 0022 check passes while the Run lives
-and fails the moment that pid belongs to anybody else. That is what makes a Run
-killed rather than exited safe: the marker outlives the process, and says
-nothing without it. Closing the terminal is how a session usually ends, so this
-is the ordinary path rather than the exception.
+before Perch wrote the file, so the ADR a-profile-is-live-by-evidence check
+passes while the Run lives and fails the moment that pid belongs to anybody
+else. That is what makes a Run killed rather than exited safe: the marker
+outlives the process, and says nothing without it. Closing the terminal is how a
+session usually ends, so this is the ordinary path rather than the exception.
 
 A Run that cannot write its marker is refused rather than launched unguarded.
 Everything else a Run cannot do is a remark — a key that did not Carry costs a
@@ -42,12 +42,13 @@ rewrites them on its way out.
 They are refused in the three different registers those paths already have, and
 deliberately not leveled to one. A Capture stops the Switch with exit code 16,
 because a Switch that cannot Capture must not proceed. A Renewal degrades to the
-cached figure and the command still exits 0, which is ADR 0018 — a refresh
-reports what it could not read rather than failing. A `.claude.json` key simply
-does not cross, silently, which is ADR 0003's amendment — nothing on the Carry
-path may refuse a Run, because a person who answers one onboarding question has
-lost less than one who was refused a client. Only the first of the three is a
-failed command, and saying otherwise would contradict two ADRs.
+cached figure and the command still exits 0, which is
+ADR a-figure-carries-its-age — a refresh reports what it could not read rather
+than failing. A `.claude.json` key simply does not cross, silently, which is
+ADR everything-but-the-account's amendment — nothing on the Carry path may
+refuse a Run, because a person who answers one onboarding question has lost less
+than one who was refused a client. Only the first of the three is a failed
+command, and saying otherwise would contradict two ADRs.
 
 A Renewal is refused for every directory the Account's Credential could be in
 use from, not only the one being written. A Rotation retires the refresh token
@@ -77,23 +78,24 @@ under. The login itself runs against a directory of its own, so it can never be
 what that check finds.
 
 **Allowed**: reading Utilization. An Account with a client running has a fresh
-access token by ADR 0005's own reasoning, so its figures are readable without
-renewing anything. The watcher is not blinded by a Run.
+access token by ADR a-profile-is-live-by-evidence's own reasoning, so its
+figures are readable without renewing anything. The watcher is not blinded by a
+Run.
 
 ## The sessions directory stops crossing
 
-This amends ADR 0026, which named `sessions` as an example of the Shared State
-that must follow a person into a Run. It cannot.
+This amends ADR everything-but-the-account, which named `sessions` as an example
+of the Shared State that must follow a person into a Run. It cannot.
 
 `sessions` is not the person's and not the Account's: it is the configuration
 directory's own answer to "is a client running *here*". Linked, one Profile's
 answer is every Profile's — a single `claude` in another terminal would make
 every Account on the machine Live and every Switch refuse, and a Run's own
 marker would land in the Default Profile rather than in the Profile it is about.
-So the denylist ADR 0026 wrote as two entries is three, and the third is a
-different kind of thing from the other two. It is now four: the refresh lock is
-held back on the same rule, an entry that answers a question about *this*
-directory meaning nothing in another one.
+So the denylist ADR everything-but-the-account wrote as two entries is three,
+and the third is a different kind of thing from the other two. It is now four:
+the refresh lock is held back on the same rule, an entry that answers a question
+about *this* directory meaning nothing in another one.
 
 Nothing is lost. `sessions` holds live-client markers; the transcripts and plans
 a person would miss are `projects`, `history.jsonl` and `plans`, and all of

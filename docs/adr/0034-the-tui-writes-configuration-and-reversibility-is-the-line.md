@@ -1,16 +1,16 @@
 # The TUI writes configuration, and reversibility is the line
 
-> **Superseded by ADR 0042.** The Config tab is removed — and `perch tui` with
-> it, since ADR 0049 took the whole view before the tab had to come out on its
-> own. The observation below is not what was found wrong: a Setting really is
-> not irreversible. Reversibility was simply the wrong axis. What the panel
-> costs is not the recoverability of what it writes
-> but the machinery that lets it write at all — the lock per edit, the refusal
-> and rollback, the debounce and its `Pending`, the one text mode — and every
-> link in that chain starts at *the panel writes*. One thing here is not
+> **Superseded by ADR perch-does-not-draw.** The Config tab is removed — and
+> `perch tui` with it, since ADR perch-does-not-draw took the whole view before
+> the tab had to come out on its own. The observation below is not what was
+> found wrong: a Setting really is not irreversible. Reversibility was simply
+> the wrong axis. What the panel costs is not the recoverability of what it
+> writes but the machinery that lets it write at all — the lock per edit, the
+> refusal and rollback, the debounce and its `Pending`, the one text mode — and
+> every link in that chain starts at *the panel writes*. One thing here is not
 > repealed: `perch config unset` stays, on its own merits rather than the
-> panel's, because a two-layer configuration needs a way back to Inherit
-> whoever is doing the clearing.
+> panel's, because a two-layer configuration needs a way back to Inherit whoever
+> is doing the clearing.
 
 `perch tui` acted on exactly two things, a Switch and a Run, and said why in its
 own words: `add`, `remove`, `purge` and `config` stayed out because a keystroke
@@ -32,10 +32,10 @@ Group: the Accounts survive it and become Ungrouped, but that Group's Overrides
 do not, and a value nobody can get back is exactly the loss this rule refuses.
 `perch group` still does it.
 
-ADR 0011 is untouched, because the TUI adds no capability. `perch config` sets
-every Setting the panel sets, and gains an `unset` so the panel cannot reach a
-state a script cannot — clearing an Override back to Inherit is a state, and one
-the panel offers on every row.
+ADR perch-does-not-draw is untouched, because the TUI adds no capability.
+`perch config` sets every Setting the panel sets, and gains an `unset` so the
+panel cannot reach a state a script cannot — clearing an Override back to
+Inherit is a state, and one the panel offers on every row.
 
 ## Two things the panel has to be honest about
 

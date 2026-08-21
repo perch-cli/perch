@@ -1,5 +1,5 @@
 //! `perch watcher install`, `uninstall` and `status` — having the machine run
-//! the Watcher for you (ADR 0040).
+//! the Watcher for you (ADR the-machine-runs-the-watcher).
 //!
 //! Three of the Watcher's five verbs, and the three that are about the Service:
 //! `install` writes the unit and starts it, `uninstall` stops it and takes the
@@ -9,13 +9,14 @@
 //!
 //! The Service keeps its name here because it keeps its glossary entry: it
 //! names an arrangement of the Watcher, and what lost its tree is the CLI noun
-//! rather than the concept (ADR 0047).
+//! rather than the concept (ADR a-command-names-its-noun).
 //!
 //! Perch does not background itself and has no `--detach`. What `install`
 //! leaves behind is a unit file the platform's own service manager owns, and
 //! `uninstall` removes it — reversibility being the line this codebase keeps
-//! drawing (ADR 0033, ADR 0034), and the only thing that makes writing to
-//! somebody's `~/Library/LaunchAgents` a reasonable thing to do.
+//! drawing (ADR perch-takes-back-what-it-wrote, ADR perch-does-not-draw), and
+//! the only thing that makes writing to somebody's `~/Library/LaunchAgents` a
+//! reasonable thing to do.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -31,8 +32,9 @@ use crate::{registry, upgrade};
 ///
 /// Idempotent, and that is a feature rather than a leniency: re-running it is
 /// the documented repair for a unit whose binary has moved, which `perch
-/// upgrade` does every time it routes through Homebrew or npm (ADR 0039). So a
-/// second install replaces rather than refusing, and says which it did.
+/// upgrade` does every time it routes through Homebrew or npm
+/// (ADR an-upgrade-asks-its-channel). So a second install replaces rather than
+/// refusing, and says which it did.
 pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     refuse_as_root(host)?;
 
@@ -99,7 +101,8 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
 
     // What it did and which binary it baked in, and nothing about starting at
     // login: an install that succeeded always did that, and the failure arms
-    // above are where a Service that is not running says so (ADR 0061).
+    // above are where a Service that is not running says so
+    // (ADR perch-says-what-it-did).
     //
     // The log stays, and the two are not the same kind of line. Where a
     // Service writes is derived from `PERCH_HOME` and differs by platform, so
@@ -126,11 +129,13 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
         ),
     )?;
 
-    // Said rather than refused, and the reason is the same one ADR 0013 gives
-    // for a Margin at or above a Threshold being in range: refusing would make
-    // the order two `perch config set`s are typed in matter. A Service with no
-    // grant holds harmlessly and takes over the moment one is given (ADR 0040),
-    // so the only thing missing is somebody knowing that.
+    // Said rather than refused, and the reason is the same one
+    // ADR a-watcher-knob-is-arithmetic gives for a Margin at or above a
+    // Threshold being in range: refusing would make the order two
+    // `perch config set`s are typed in matter. A Service with no grant holds
+    // harmlessly and takes over the moment one is given
+    // (ADR the-machine-runs-the-watcher), so the only thing missing is somebody
+    // knowing that.
     if let Some(missing) = nothing_may_act(host)? {
         say(out, &missing)?;
     }
@@ -158,7 +163,8 @@ pub fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
             // Nothing about what stops starting at login and nothing about
             // the terminal being unaffected: an uninstall that succeeded
             // always did the first, and the second is a worry Perch was
-            // pre-empting rather than a thing that happened (ADR 0061).
+            // pre-empting rather than a thing that happened
+            // (ADR perch-says-what-it-did).
             say(out, "The Service is stopped and its unit is gone.")?;
             Ok(EXIT_OK)
         }
@@ -184,9 +190,9 @@ pub fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
 /// branches on `--json` rather than on the code.
 ///
 /// It does not read the log. On Linux that would mean shelling out to
-/// `journalctl` (ADR 0021 disfavors it) to do worse than `journalctl -f`
-/// already does, and it would fork the implementation three ways for a feature
-/// every platform already ships.
+/// `journalctl` (ADR a-crate-must-not-cost-a-seam disfavors it) to do worse
+/// than `journalctl -f` already does, and it would fork the implementation
+/// three ways for a feature every platform already ships.
 pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
     let platform = host.platform();
     let at = service::unit_path(host)?;
@@ -207,7 +213,8 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
 
     // Read off the unit that is actually installed rather than off what one
     // would be written from now, because the whole point of the question is
-    // whether those two have come apart (ADR 0039 moves the binary).
+    // whether those two have come apart (ADR an-upgrade-asks-its-channel moves
+    // the binary).
     let recorded = installed
         .then(|| recorded_binary(host, at.as_deref()))
         .flatten();
@@ -261,7 +268,7 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
                 out,
                 &format!(
                     "It names {}, which is not there any more — an Upgrade \
-                     moves the binary (ADR 0039). `perch watcher install` \
+                     moves the binary (ADR an-upgrade-asks-its-channel). `perch watcher install` \
                      writes the unit again against the one that is.",
                     binary.display(),
                 ),
@@ -297,13 +304,13 @@ pub fn status(host: &dyn Host, json: bool, out: &mut dyn Write) -> Result<i32> {
 }
 
 /// Stops the Service and takes its unit back, before a Purge deletes anything
-/// (ADR 0040).
+/// (ADR the-machine-runs-the-watcher).
 ///
-/// This is ADR 0024's shape one level up. Removing the active Account lands
-/// somewhere before it deletes anything; giving the whole machine back stops the
-/// thing that writes to it before it starts. A Watcher racing a Purge is one
-/// process writing a captured Credential into a Profile directory another is
-/// deleting, and there is no partial success there worth having.
+/// This is ADR a-removal-lands-first's shape one level up. Removing the active
+/// Account lands somewhere before it deletes anything; giving the whole machine
+/// back stops the thing that writes to it before it starts. A Watcher racing a
+/// Purge is one process writing a captured Credential into a Profile directory
+/// another is deleting, and there is no partial success there worth having.
 ///
 /// **Refuses rather than continuing** where the Service will not stop. A Purge
 /// that carried on would leave a supervised loop coming straight back at a
@@ -440,7 +447,8 @@ fn write_and_start(host: &dyn Host, unit: &Unit, at: Option<&std::path::Path>) -
 }
 
 /// Writes the unit again against the binary that is there now, after an Upgrade
-/// has moved it (ADR 0039, ADR 0040).
+/// has moved it (ADR an-upgrade-asks-its-channel,
+/// ADR the-machine-runs-the-watcher).
 ///
 /// Answers what to say rather than saying it, and never fails: the Upgrade
 /// itself succeeded, the binary really is newer, and a Service that could not be
@@ -506,8 +514,8 @@ fn is_installed(host: &dyn Host, at: Option<&std::path::Path>) -> Result<bool> {
     }
 }
 
-/// The service-manager binary, spelled the way ADR 0021 asks on the platform
-/// that needs it.
+/// The service-manager binary, spelled the way ADR a-crate-must-not-cost-a-seam
+/// asks on the platform that needs it.
 ///
 /// `commands::upgrade::powershell` states the rule and the reason: "A bare name
 /// handed to Windows is searched for in the application directory and *the
@@ -550,12 +558,12 @@ fn is_running(host: &dyn Host) -> bool {
 /// Whether *a Watcher* is running, which is a different question from whether
 /// the Service is.
 ///
-/// Asked of the watcher lock rather than of the process table (ADR 0040). A lock
-/// is the thing a Watcher actually holds, it is held for exactly as long as one
-/// runs, and it is given back however the process ends — where scanning
-/// processes for something that looks like Perch is defeated by a renamed
-/// binary, races the thing it is asking about, and has no good answer on
-/// Windows.
+/// Asked of the watcher lock rather than of the process table
+/// (ADR the-machine-runs-the-watcher). A lock is the thing a Watcher actually
+/// holds, it is held for exactly as long as one runs, and it is given back
+/// however the process ends — where scanning processes for something that looks
+/// like Perch is defeated by a renamed binary, races the thing it is asking
+/// about, and has no good answer on Windows.
 ///
 /// Read by trying to take it and giving it straight back, which is the one way
 /// to ask that cannot be raced: `mkdir` either creates the directory or fails,
@@ -634,10 +642,11 @@ fn nothing_may_act(host: &dyn Host) -> Result<Option<String>> {
 
     // Both statements, because a grant alone is not enough for the Ungrouped
     // Accounts: `perch watcher run` asks `interchangeable` first and holds
-    // without it (ADR 0017). Read from `watcher-may-act` alone, this line stayed
-    // silent on a machine whose only grant is one the Watcher will never act on
-    // — the same claim `perch group list` was making until it took the gate on
-    // (`commands::group`), and `config::scope_lines` already answers correctly.
+    // without it (ADR a-group-is-a-declaration). Read from `watcher-may-act`
+    // alone, this line stayed silent on a machine whose only grant is one the
+    // Watcher will never act on — the same claim `perch group list` was making
+    // until it took the gate on (`commands::group`), and `config::scope_lines`
+    // already answers correctly.
     let any = registry.scopes().iter().any(|scope| {
         registry.settings(scope).watcher_may_act && cycle::may_cycle_within(&registry, scope)
     });
@@ -682,13 +691,14 @@ fn drive(host: &dyn Host, steps: Vec<Driven>) -> Result<()> {
 }
 
 /// Refuses to install a Service for somebody who is not the person it would
-/// watch (ADR 0040).
+/// watch (ADR the-machine-runs-the-watcher).
 ///
-/// Every Profile is under one person's home directory and the registry that says
-/// which Account is active is theirs. Installed under `sudo`, the Service would
-/// be a root process watching root's registry — which is empty — while the
-/// person who typed it went on wondering why nothing ever switched. On macOS it
-/// would additionally have no unlocked keychain to read (ADR 0008).
+/// Every Profile is under one person's home directory and the registry that
+/// says which Account is active is theirs. Installed under `sudo`, the Service
+/// would be a root process watching root's registry — which is empty — while
+/// the person who typed it went on wondering why nothing ever switched. On
+/// macOS it would additionally have no unlocked keychain to read
+/// (ADR claude-code-chooses-the-store).
 fn refuse_as_root(host: &dyn Host) -> Result<()> {
     if host.user_id() != Some(0) {
         return Ok(());

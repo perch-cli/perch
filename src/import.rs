@@ -1,13 +1,13 @@
 //! The exact inverse of an Export: one `age` file, put back on a machine (ADR
-//! 0014).
+//! the-holdings-go-out-sealed).
 //!
 //! Two halves, the same way [`crate::export`] has two. **Reading** an Export is
 //! arithmetic — given one, say whether this build understands it and what
 //! registry it restores to — and needs no machine to be tested against.
 //! **Placing** is the effect: every Credential into the Credential Store this
-//! machine's Claude Code would use, so an Export written on macOS lands in files
-//! on Linux and the other way round without either side knowing about the
-//! other's store (ADR 0020).
+//! machine's Claude Code would use, so an Export written on macOS lands in
+//! files on Linux and the other way round without either side knowing about the
+//! other's store (ADR claude-code-chooses-the-store).
 //!
 //! An Import refuses a machine that already holds an Account, and it does not
 //! merge. Merging is where every hard case lives — the same Account on both
@@ -102,7 +102,8 @@ pub fn restored(export: &Export, path: &std::path::Path) -> Result<Registry> {
 
     // Named one at a time rather than as a struct update, because who is active
     // is not a field anybody may set: an Import lands on nobody, which is a
-    // transition of its own (ADR 0048) and the one an arriving registry gets.
+    // transition of its own (ADR a-switch-is-written-down-first) and the one an
+    // arriving registry gets.
     let mut restored = export.registry.clone();
     restored.settle(None);
     restored.checks = BTreeMap::new();
@@ -172,8 +173,9 @@ impl Placed {
 /// Where that is is this machine's answer rather than the Export's: the file
 /// records a Credential against an email address and nothing about the store it
 /// came out of, so one written on macOS lands in a file on Linux and the other
-/// way round (ADR 0020). Each one goes through [`profile::store_credential`], so
-/// an Import gets the read-back guard every other write of a Credential gets.
+/// way round (ADR claude-code-chooses-the-store). Each one goes through
+/// [`profile::store_credential`], so an Import gets the read-back guard every
+/// other write of a Credential gets.
 ///
 /// An Account the Export holds no Credential for gets no Profile. That is how a
 /// Quarantined Account travels, reason and all, and the Account is still
@@ -185,9 +187,9 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
     // Every Credential in the file belongs to an Account the file lists, or
     // this is not the whole restore it claims to be. `gather` cannot write such
     // an Export, so this is about a file written by something else — and the
-    // failure it guards is the one ADR 0014 exists to prevent, arriving
-    // quietly: an Import that reports success having restored less than the
-    // file held.
+    // failure it guards is the one ADR the-holdings-go-out-sealed exists to
+    // prevent, arriving quietly: an Import that reports success having restored
+    // less than the file held.
     let unlisted: Vec<&str> = export
         .credentials
         .keys()
@@ -213,8 +215,8 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
     // `ONE@example.com` beside `one@example.com` both passed that guard — each
     // names a listed Account — and then only one was ever placed. The other was
     // discarded in silence under a report saying the file had been restored
-    // whole, which is the partial-restore-wearing-success's-clothes ADR 0014
-    // exists to prevent.
+    // whole, which is the partial-restore-wearing-success's-clothes
+    // ADR the-holdings-go-out-sealed exists to prevent.
     //
     // Both maps, because `identity_file_for` folds the same way: a `.claude.json`
     // dropped this way is a Profile that meets the onboarding dialog on every
@@ -290,13 +292,14 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
             // does not record and a Switch prefers it over anything Perch would
             // compose. Where it carries none, one is composed — a Profile
             // without this file Carries nothing, so every Run against it would
-            // meet the onboarding dialog afresh (ADR 0003).
-            // `Zeroizing`, because `Export::drop` goes to the trouble of
-            // wiping `identity_files` and this cloned a copy out from under it.
-            // A `.claude.json` is not only onboarding state: `login.rs` says
-            // why it is held like a Credential — "an MCP server entry routinely
-            // carries an API key in its `env` block" — so a plain `String` here
-            // outlived the guard and was dropped untouched.
+            // meet the onboarding dialog afresh
+            // (ADR everything-but-the-account). `Zeroizing`, because
+            // `Export::drop` goes to the trouble of wiping `identity_files` and
+            // this cloned a copy out from under it. A `.claude.json` is not
+            // only onboarding state: `login.rs` says why it is held like a
+            // Credential — "an MCP server entry routinely carries an API key in
+            // its `env` block" — so a plain `String` here outlived the guard
+            // and was dropped untouched.
             //
             // The composed fallback is not secret, and is wrapped anyway: one
             // type for one value is what stops the next reader having to work
@@ -627,8 +630,9 @@ mod tests {
     /// the whole restore it claims to be.
     ///
     /// `gather` cannot write one, so this is about a file written by something
-    /// else — and dropping it silently is the failure ADR 0014 exists to
-    /// prevent, arriving as a success message.
+    /// else — and dropping it silently is the failure
+    /// ADR the-holdings-go-out-sealed exists to prevent, arriving as a success
+    /// message.
     #[test]
     fn a_credential_for_an_account_the_export_does_not_list_is_refused() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
@@ -651,8 +655,9 @@ mod tests {
     /// The `unlisted` guard folds case, so both keys name a listed Account and
     /// both pass it. `credential_for` folds case too and answers with the
     /// *first* — so the second was never placed, never mentioned, and never
-    /// counted. ADR 0014 supports a hand-written Export (`age -a -p`), which is
-    /// where a capitalization that differs between two keys comes from.
+    /// counted. ADR the-holdings-go-out-sealed supports a hand-written Export
+    /// (`age -a -p`), which is where a capitalization that differs between two
+    /// keys comes from.
     #[test]
     fn an_export_holding_one_address_under_two_spellings_is_refused() {
         for (what, mut export) in [

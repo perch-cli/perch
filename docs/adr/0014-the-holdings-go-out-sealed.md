@@ -30,12 +30,13 @@ back. That is the correct trade for a file holding every credential at once.
 This record required a passphrase and named no primitive, and said nothing
 about what goes in the file or what happens on the way back in.
 
-**The format is age**, taken as a crate, in passphrase mode. ADR 0025's rule is
-that a crate is taken unless it would sit on the wrong side of a seam, and
-encryption sits on neither seam — it is not an effect the Host port carries,
-and it is not shared with Claude Code, so nothing here has to be bug-compatible
-with anything. Against that, the alternative was three crates and a header
-format Perch would version itself, for a bundle written perhaps twice a year.
+**The format is age**, taken as a crate, in passphrase mode.
+ADR a-crate-must-not-cost-a-seam's rule is that a crate is taken unless it would
+sit on the wrong side of a seam, and encryption sits on neither seam — it is not
+an effect the Host port carries, and it is not shared with Claude Code, so
+nothing here has to be bug-compatible with anything. Against that, the
+alternative was three crates and a header format Perch would version itself, for
+a bundle written perhaps twice a year.
 
 The property that decided it is that an age file can be decrypted by the
 standard `age` command. This file is meant to outlive the machine it was
@@ -79,13 +80,14 @@ about a third more bytes, on a file written perhaps twice a year.
 
 **The passphrase is typed at a terminal, and there is no flag.** Every other
 capability in Perch is reachable from a script, because it has to be complete
-over SSH and in CI (ADR 0011). This one is the exception, and it is the same
-rule an access token travels under (ADR 0021): a value passed as an argument
-sits in `argv` where any process on the machine can read it off the process
-table, and a value in a shell history outlives the command that used it. So
-`perch export` without a terminal is refused, and the refusal names the terminal
-rather than a way round it — an escape hatch here would be the whole of what the
-required passphrase was for.
+over SSH and in CI (ADR perch-does-not-draw). This one is the exception, and it
+is the same rule an access token travels under
+(ADR a-crate-must-not-cost-a-seam): a value passed as an argument sits in `argv`
+where any process on the machine can read it off the process table, and a value
+in a shell history outlives the command that used it. So `perch export` without
+a terminal is refused, and the refusal names the terminal rather than a way
+round it — an escape hatch here would be the whole of what the required
+passphrase was for.
 
 It is prompted twice and confirmed for the same reason it is required at all: a
 passphrase mistyped once is a file nobody discovers is unreadable until the
@@ -105,11 +107,11 @@ three things to whoever wrote the command. All three turned out to be decisions.
 
 **An import adopts nothing.** Every other command reads the registry through
 adoption, which takes the existing Claude Code login over the first time Perch
-runs (ADR 0009). Doing that here would make the machine hold one account on the
-way to refusing itself for holding one — the command would be unable to run on
-the machine it is written for. So import reads the registry directly, and the
-login that is on the machine is left exactly where it is. Whoever imported can
-switch onto it or ignore it; it is not Perch's to take.
+runs (ADR a-login-perch-does-not-need). Doing that here would make the machine
+hold one account on the way to refusing itself for holding one — the command
+would be unable to run on the machine it is written for. So import reads the
+registry directly, and the login that is on the machine is left exactly where it
+is. Whoever imported can switch onto it or ignore it; it is not Perch's to take.
 
 **Nothing is made active.** The account that was active where the export was
 taken is a fact about *that* machine's default profile, and an import writes
@@ -164,12 +166,12 @@ so running it again finds what it already deleted already gone and finishes — 
 a home left behind holding no registry, which is what a purge interrupted in its
 last step leaves, is taken by the next one rather than reported as nothing to do.
 
-**A live profile refuses a purge**, which is ADR 0005's rule at its extreme: a
-purge does not write into those directories, it deletes them. Asked of every
-account, because a purge is all or nothing and a refusal discovered half way
-through is the partial state the check exists to prevent. Doubt counts as a
-client, as it does for the carry: waiting costs a command run again, and not
-waiting costs whatever that client had open.
+**A live profile refuses a purge**, which is ADR a-profile-is-live-by-evidence's
+rule at its extreme: a purge does not write into those directories, it deletes
+them. Asked of every account, because a purge is all or nothing and a refusal
+discovered half way through is the partial state the check exists to prevent.
+Doubt counts as a client, as it does for the carry: waiting costs a command run
+again, and not waiting costs whatever that client had open.
 
 Asked twice — before the questions and again after them — for the same reason
 the registry hold is re-checked there, and over the same window: somebody may

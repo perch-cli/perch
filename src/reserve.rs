@@ -1,21 +1,22 @@
 //! What a Scope has left to draw on, said without inventing a number.
 //!
-//! One Account is measured by its most constrained Quota Window, and that figure
-//! is its Headroom (ADR 0012). A Scope has no equivalent single figure and never
-//! will: its Accounts sit on different plans, Perch only ever sees percentages,
-//! and a `pro` Account at 50% and a `max` Account at 50% do not have the same
-//! quota left. Summing or averaging them produces a number that looks
-//! quantitative, is not, and is exactly the kind of number people plan around.
+//! One Account is measured by its most constrained Quota Window, and that
+//! figure is its Headroom (ADR headroom-is-the-worst-window). A Scope has no
+//! equivalent single figure and never will: its Accounts sit on different
+//! plans, Perch only ever sees percentages, and a `pro` Account at 50% and a
+//! `max` Account at 50% do not have the same quota left. Summing or averaging
+//! them produces a number that looks quantitative, is not, and is exactly the
+//! kind of number people plan around.
 //!
 //! So the **Reserve** is how many of a Scope's Accounts still have Headroom and
 //! how much the best of them has — a count and one Account's own figure, every
 //! part of it something an Account actually reported rather than something Perch
 //! worked out.
 //!
-//! Said only where a heading has already named the Scope it is about, which is a
-//! narrowed `perch list` and nothing else on the human surface (ADR 0058). A
-//! `--json` section names its own Scope in a key, so every one of them carries
-//! it.
+//! Said only where a heading has already named the Scope it is about, which is
+//! a narrowed `perch list` and nothing else on the human surface
+//! (ADR the-listing-owns-the-set). A `--json` section names its own Scope in a
+//! key, so every one of them carries it.
 
 use chrono::{DateTime, Utc};
 use serde_json::json;
@@ -56,7 +57,8 @@ pub struct Reserve<'a> {
 }
 
 impl<'a> Reserve<'a> {
-    /// What one scope has left, read from the cache alone (ADR 0015).
+    /// What one scope has left, read from the cache alone
+    /// (ADR a-figure-carries-its-age).
     ///
     /// Every candidate is classified exactly once, into exactly one of the three
     /// answers [`HowMuchIsLeft`] has. That is what makes the counts add up to
@@ -146,11 +148,11 @@ impl<'a> Reserve<'a> {
             ),
         }];
 
-        // The count above is read from cache like every other figure, so it says
-        // how old the readings behind it are (ADR 0015). The oldest of them,
-        // because that is the weakest thing the count rests on — and on a line
-        // of its own, because the sentence above is already as long as a
-        // terminal is wide.
+        // The count above is read from cache like every other figure, so it
+        // says how old the readings behind it are
+        // (ADR a-figure-carries-its-age). The oldest of them, because that is
+        // the weakest thing the count rests on — and on a line of its own,
+        // because the sentence above is already as long as a terminal is wide.
         //
         // Gated on there being no best, this said the one thing it is for only
         // in the case where the count is nought. With a best, the only age on
@@ -187,8 +189,8 @@ impl<'a> Reserve<'a> {
     /// The same facts as a script reads them.
     ///
     /// Fields rather than the sentence [`lines`] renders, because the listing's
-    /// document is structured throughout and a prose sentence in a document is a
-    /// thing scripts end up regexing (ADR 0058).
+    /// document is structured throughout and a prose sentence in a document is
+    /// a thing scripts end up regexing (ADR the-listing-owns-the-set).
     ///
     /// Every count is over the Accounts a Cycle may choose, so `with_headroom`,
     /// `exhausted` and `never_observed` add up to `candidates`, and those plus
@@ -218,8 +220,9 @@ impl<'a> Reserve<'a> {
                 "observed_at": self.best_read_at().map(|at| at.to_rfc3339()),
             })),
             // The weakest reading the counts above rest on, which is what the
-            // sentence quotes for the same reason (ADR 0015). `null` where no
-            // candidate has ever been read.
+            // sentence quotes for the same reason
+            // (ADR a-figure-carries-its-age). `null` where no candidate has
+            // ever been read.
             "oldest_observed_at": self.oldest_reading().map(|at| at.to_rfc3339()),
         })
     }
@@ -403,9 +406,10 @@ mod tests {
         );
     }
 
-    /// The same facts, as the shape a script reads (ADR 0058) — with the counts
-    /// adding up to the Accounts beside them, which is what makes the document
-    /// checkable against its own `accounts` array.
+    /// The same facts, as the shape a script reads
+    /// (ADR the-listing-owns-the-set) — with the counts adding up to the
+    /// Accounts beside them, which is what makes the document checkable against
+    /// its own `accounts` array.
     #[test]
     fn the_document_says_the_same_counts_the_sentence_does() {
         let mut broken = account("broken@example.com", vec![window("5-hour", 0.0)]);

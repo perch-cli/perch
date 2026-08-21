@@ -36,4 +36,5 @@ still a Run of `npm`.
 This is the only path where profiles are used as live config directories rather
 than as storage. It is therefore the only path that has to Reconcile — linking
 memory, settings, and plugins into the profile before launch — and the only path
-that copies a project entry across profiles (ADR 0003). A Switch needs neither.
+that copies a project entry across profiles (ADR everything-but-the-account). A
+Switch needs neither.

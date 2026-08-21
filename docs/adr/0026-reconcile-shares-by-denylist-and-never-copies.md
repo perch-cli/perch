@@ -1,9 +1,9 @@
 # Reconcile shares by denylist, and never copies
 
 A Run launches a client against a Profile that is a live configuration
-directory rather than storage (ADR 0010), so every piece of Shared State has to
-be reachable from it. Two questions fall out: which entries cross, and by what
-mechanism.
+directory rather than storage (ADR a-run-is-one-shot), so every piece of Shared
+State has to be reachable from it. Two questions fall out: which entries cross,
+and by what mechanism.
 
 ## Which entries cross
 
@@ -11,11 +11,12 @@ Perch shares **everything in the Default Profile except `.credentials.json` and
 `.claude.json`**, which are the two Account-scoped things: the Credential
 itself, and the file holding `oauthAccount`.
 
-> **Amended by ADR 0027.** `sessions` is held back as well. It is neither the
-> person's nor the Account's but the configuration directory's own record of
-> which clients are running in it, and shared it would make one client's marker
-> the answer for every Profile at once. The example below stands as it was
-> written; the denylist is now three entries rather than two.
+> **Amended by ADR everything-but-the-account.** `sessions` is held back as
+> well. It is neither the person's nor the Account's but the configuration
+> directory's own record of which clients are running in it, and shared it would
+> make one client's marker the answer for every Profile at once. The example
+> below stands as it was written; the denylist is now three entries rather than
+> two.
 
 > **Amended again.** The refresh lock — `.oauth_refresh.lock` — is held back
 > too, and for the same reason as `sessions`: it answers a question about *this*
@@ -35,7 +36,7 @@ to follow them into a Run, which reads as Perch losing their work.
 The denylist fails the other way: a genuinely new Account-scoped file would be
 shared until somebody noticed. That is rarer — it needs Anthropic to invent
 one — and it is the kind of assumption Perch already probes rather than
-believes (ADR 0007).
+believes (ADR an-assumption-is-probed).
 
 ## By what mechanism
 
@@ -58,8 +59,8 @@ a list in Perch's source, so a Claude Code release that adds a directory needs
 no change here.
 
 `.claude.json` cannot be linked, because it holds identity that must stay
-per-Profile. It is therefore the one file handled key by key, which ADR 0003
-already began and its amendment continues.
+per-Profile. It is therefore the one file handled key by key, which
+ADR everything-but-the-account already began and its amendment continues.
 
 Refusing rather than copying makes the Run path the only one that can fail for
 a filesystem reason. That failure has to name the entry and the reason, because
