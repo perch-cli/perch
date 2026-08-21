@@ -119,6 +119,11 @@ actually moved. The number survives as a sort key so the directory reads as a
 table of contents; it is in no citation, because identity that shows up in a
 citation has not moved.
 
+There is no `docs/adr/README.md`. The prefixes put the section order in the
+listing, so a directory listing already reads as the table of contents an index
+would be — and an index is a second place every title has to be right, kept in
+step by hand, which is what one of those titles says not to do.
+
 One name rather than two. A short slug beside a long title is a second register,
 and the next session has to know which of them a reader wants — so the titles
 are short and the slug is the title. The 30-character cap is hard rather than a
@@ -137,12 +142,11 @@ exemption, in the other direction — it records what happened on a date, so a
 number there is not a citation and may name a document that is gone.
 
 Checked by `tests/citation.rs`: a slug resolving to exactly one file, a slug
-within cap and hyphenated, and nothing citing a number. Two exemptions stand
-until the area passes run — the guide, which loses its `ADR` mentions rather
-than gaining slugs, and `docs/research/adr-inventory.md`, a dated read of the 64
-documents that indexes them by the number. *A filename tail matches its H1*
-waits for the set to be final, because the documents that merge away keep the
-titles they have.
+within cap and hyphenated, a filename's tail matching its document's title, and
+nothing citing a number. The guide is checked the other way round — that it
+never says the word at all, since "the numbered ADRs" is not a citation and is
+the same defect. One exemption stands: `docs/research/adr-inventory.md`, a dated
+read of the 64 documents that indexes them by the number.
 
 **Present tense.** The same rule an ADR follows: state what stands, not the
 route to it. A rejected alternative is timeless and stays. Perch's own former

@@ -21,15 +21,12 @@ fn repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// Where a number is a record rather than a citation. `CHANGELOG.md` and the
-/// ADR inventory both say what was true on a date, so a number in either may
-/// name a document that is gone; the guide loses its `ADR` mentions outright
-/// rather than gaining slugs.
+/// Where a number is a record rather than a citation: `CHANGELOG.md` and the ADR
+/// inventory both say what was true on a date, so a number in either may name a
+/// document that is gone.
 fn exempt(path: &Path) -> bool {
     let relative = path.strip_prefix(repo()).unwrap_or(path);
-    relative == Path::new("CHANGELOG.md")
-        || relative == Path::new("docs/research/adr-inventory.md")
-        || relative.starts_with("pages/src/content/docs")
+    relative == Path::new("CHANGELOG.md") || relative == Path::new("docs/research/adr-inventory.md")
 }
 
 /// Directories holding no citation of this repository's: build output, and a
@@ -199,5 +196,67 @@ fn every_cited_slug_is_within_the_cap_and_hyphenated() {
         over.is_empty(),
         "a slug is at most {CAP} characters and never one word:\n{}",
         Vec::from_iter(over).join("\n")
+    );
+}
+
+/// A citation addresses an agent reading the tree, so the guide carries none —
+/// and it loses the word rather than gaining slugs, because a reader cannot
+/// follow one and did not ask for it. Asserted on the word rather than on the
+/// citation form: "the numbered ADRs" is not a citation and is the same defect.
+#[test]
+fn the_guide_never_says_adr() {
+    let directory = repo().join("pages/src/content/docs");
+    let mut said = Vec::new();
+    for entry in std::fs::read_dir(&directory).expect("the guide is a directory") {
+        let path = entry.expect("a readable entry").path();
+        let text = std::fs::read_to_string(&path).expect("a readable page");
+        for (number, line) in text.lines().enumerate() {
+            if line
+                .split(|c: char| !c.is_ascii_alphabetic())
+                .any(|word| word == "ADR")
+            {
+                said.push(format!("{}:{}", relative(&path), number + 1));
+            }
+        }
+    }
+
+    assert!(
+        said.is_empty(),
+        "the guide says what it does rather than citing a decision:\n{}",
+        said.join("\n")
+    );
+}
+
+/// The other half of a citation resolving: a slug globs to one file, and that
+/// file is the document whose title it is. Held back until the set was closed,
+/// because a document that merges away keeps the title it had.
+#[test]
+fn every_document_is_named_by_its_own_title() {
+    let mut wrong = Vec::new();
+    for entry in std::fs::read_dir(repo().join("docs/adr")).expect("docs/adr is a directory") {
+        let path = entry.expect("a readable entry").path();
+        let text = std::fs::read_to_string(&path).expect("a readable document");
+        let title = text.lines().next().unwrap_or("").trim_start_matches("# ");
+        let slug: String = title
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        let slug = slug
+            .split('-')
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("-");
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        let tail = stem.split_once('-').map_or("", |(_, tail)| tail);
+        if slug != tail {
+            wrong.push(format!("{}: titled {title:?}", relative(&path)));
+        }
+    }
+
+    assert!(
+        wrong.is_empty(),
+        "a filename's tail is its document's title, kebab-cased:\n{}",
+        wrong.join("\n")
     );
 }

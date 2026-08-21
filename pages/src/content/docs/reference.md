@@ -34,7 +34,7 @@ sidebar:
 | 0 | fine |
 | 1 | something else went wrong |
 | 2 | the command line was not understood |
-| 10 | refused: an assumption about the installed Claude Code failed (ADR 0007) |
+| 10 | refused: an assumption about the installed Claude Code failed |
 | 11 | the keychain is locked, denied, or unavailable |
 | 12 | there is no such thing — no login, no such Account, no such Group |
 | 13 | it collides with something that is already there — an Account added twice, a name already spoken for, a path an Export would have written over, an Import onto a Perch that already holds an Account |
@@ -42,9 +42,9 @@ sidebar:
 | 15 | there was nothing to do — you are already on that Account, a check found nothing to do now, or Perch is holding nothing on this machine to purge |
 | 16 | refused: a client is running against that Profile, so what is in it is not Perch's to write or to delete |
 | 17 | a Cycle found nowhere to land — every Account in the Group is exhausted, or none is a candidate |
-| 18 | a bare Cycle, or a watcher, on an Account nobody has declared interchangeable with anything (ADR 0017) |
-| 19 | that Account is Quarantined — its Credential no longer works, and `perch relogin` repairs it (ADR 0023) |
-| 20 | held: a lock somebody else has, or a `perch watcher check` with no current figure to decide on (ADR 0013). Nothing is wrong and nothing was changed — ask again shortly |
+| 18 | a bare Cycle, or a watcher, on an Account nobody has declared interchangeable with anything |
+| 19 | that Account is Quarantined — its Credential no longer works, and `perch relogin` repairs it |
+| 20 | held: a lock somebody else has, or a `perch watcher check` with no current figure to decide on. Nothing is wrong and nothing was changed — ask again shortly |
 
 `perch run` is the one command these do not describe once it has launched
 something: what the client exited with is what Perch exits with, so a script
@@ -74,34 +74,34 @@ Watcher holding the lock exits 20.
   alongside them.
 - `~/.config/perch/watch.log` — where a Service's decisions go on macOS and
   Windows, whose service managers keep no log of their own. On Linux there is no
-  such file: systemd captures standard output into the journal, so
-  `journalctl --user -u perch-watch -f` is the line.
+  such file: systemd captures standard output into the journal, so `journalctl
+  --user -u perch-watch -f` is the line.
 - The unit a Service is installed as, which is the one thing Perch writes
   *outside* `$PERCH_HOME` — `~/Library/LaunchAgents/cli.perch.watch.plist` on
   macOS, `~/.config/systemd/user/perch-watch.service` on Linux, and a Scheduled
   Task named `Perch\Watch` on Windows, which Windows keeps rather than Perch.
   `perch watcher uninstall` removes it, and so does `perch holdings purge`.
-- `~/.config/perch/profiles/<account>/` — one directory per Account. Its path is what
-  gives that Account a private Credential Store (ADR 0001).
-- `$PERCH_HOME` overrides `~/.config/perch`. Home is `$USERPROFILE` on Windows and
-  `$HOME` elsewhere; a machine that cannot say where home is gets a refusal,
+- `~/.config/perch/profiles/<account>/` — one directory per Account. Its path is
+  what gives that Account a private Credential Store.
+- `$PERCH_HOME` overrides `~/.config/perch`. Home is `$USERPROFILE` on Windows
+  and `$HOME` elsewhere; a machine that cannot say where home is gets a refusal,
   never a write into the filesystem root. `~/.config` is created if it is not
   there, and the same path is used on every platform, Windows included, rather
   than `%APPDATA%` — one rule to document and to support, and `$PERCH_HOME` for
   anybody who wants a different one.
-- `$PERCH_CLAUDE_BIN` overrides where `claude` is found. Without it, Perch
-  walks `PATH` itself — consulting `PATHEXT` on Windows, so the `claude.cmd`
-  an npm install leaves works from every shell.
+- `$PERCH_CLAUDE_BIN` overrides where `claude` is found. Without it, Perch walks
+  `PATH` itself — consulting `PATHEXT` on Windows, so the `claude.cmd` an npm
+  install leaves works from every shell.
 - `$PERCH_NO_UPGRADE_CHECK` stops `perch --version` asking whether a newer
-  Release exists. Checked before the request, so nothing goes out (ADR 0039).
-  That check is the only place Perch looks for its own updates; `perch status`
-  never touches the network.
+  Release exists. Checked before the request, so nothing goes out. That check is
+  the only place Perch looks for its own updates; `perch status` never touches
+  the network.
 
-A Credential lives wherever the installed Claude Code would put it (ADR 0020):
-the keychain on macOS, reached by driving `/usr/bin/security` (ADR 0008), and
-a `.credentials.json` inside the Profile everywhere else — created readable by
-its owner alone, and tightened if it is ever found looser. Perch drives `curl`
-by absolute path — `/usr/bin/curl`, or `%SystemRoot%\System32\curl.exe` on
-Windows — to reach Anthropic, with the URL, the headers and the body all
-handed over on standard input: an access token passed as an argument would sit
-in the process table for anything on the machine to read.
+A Credential lives wherever the installed Claude Code would put it: the keychain
+on macOS, reached by driving `/usr/bin/security`, and a `.credentials.json`
+inside the Profile everywhere else — created readable by its owner alone, and
+tightened if it is ever found looser. Perch drives `curl` by absolute path —
+`/usr/bin/curl`, or `%SystemRoot%\System32\curl.exe` on Windows — to reach
+Anthropic, with the URL, the headers and the body all handed over on standard
+input: an access token passed as an argument would sit in the process table for
+anything on the machine to read.

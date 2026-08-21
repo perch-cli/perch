@@ -5,13 +5,7 @@
 # refused a build script, which is where a `node_modules` in a repository that
 # publishes installers should start from.
 #
-# `minimumReleaseAge` is deliberately not set, so pnpm's own default holds: it
-# will not install a package published within the last twenty-four hours. That is
-# the same kind of guard as the checksums the installers verify and the commit
-# SHAs the workflows pin — a compromised release is usually found on its first
-# day — and it is why every dependency here is a caret range rather than an exact
-# pin. The range says what the site needs and the gate picks the newest version
-# inside it that it is willing to install, so "the latest" means the latest one
-# that has been in the world long enough for somebody else to have noticed.
+# `minimumReleaseAge` is deliberately not set, so pnpm's own default holds — a
+# guard the caret ranges here depend on (ADR one-thing-renders-the-site).
 allowBuilds:
   esbuild: true

@@ -8,7 +8,7 @@ sidebar:
 Three commands under one noun, and they are each other's inverse. Your Holdings
 are everything Perch holds on this machine: an export writes them to one
 encrypted file, an import puts them back, and a purge gives them up, leaving the
-machine as it was before Perch (ADR 0014).
+machine as it was before Perch.
 
 ## Backing up everything
 
@@ -16,8 +16,7 @@ machine as it was before Perch (ADR 0014).
 file: the whole registry — every Account, its Alias, its Group, whether Cycling
 may choose it, why it is Quarantined where it is, and what each Group carries —
 alongside every Credential. A dead machine, a mistaken `perch remove` or a new
-laptop then costs you a file rather than a login for every subscription
-(ADR 0014).
+laptop then costs you a file rather than a login for every subscription.
 
 ```
 $ perch holdings export ~/perch-backup.age
@@ -102,9 +101,9 @@ pair is what makes moving machines true. There is no `--force`, because a flag
 would be the merge wearing a shortcut's clothes.
 
 **Credentials land where this machine keeps one.** The file records a Credential
-against an email address and nothing about the store it came out of, so an export
-taken on a Mac restores into files on Linux and the other way round, without
-either side knowing about the other's store (ADR 0020).
+against an email address and nothing about the store it came out of, so an
+export taken on a Mac restores into files on Linux and the other way round,
+without either side knowing about the other's store.
 
 **Nothing is made active.** The Account that was active where the export was
 taken is a fact about that machine, and an import writes nothing into this one's
@@ -176,10 +175,10 @@ Credential in the Default Profile is Claude Code's own rather than a copy Perch
 holds, and a purge that logged you out of the tool you are using would be doing
 more than giving the machine back. A purge is refused while a client is running
 against one of the Profiles, for the same reason every other write into a Live
-Profile is (ADR 0005) — a purge deletes those directories, and what is in them
-belongs to whatever is holding them. That is checked before the questions and
-again after them, because a client started while you were typing was not running
-when the first check ran.
+Profile is — a purge deletes those directories, and what is in them belongs to
+whatever is holding them. That is checked before the questions and again after
+them, because a client started while you were typing was not running when the
+first check ran.
 
 The Credentials go first and the registry naming them goes last, which is what
 makes a purge that stopped part way finishable: a keychain item lives outside
