@@ -11,7 +11,7 @@
 
 use std::io::Write;
 
-use crate::commands::{ask_a_word, say, say_json};
+use crate::commands::{Presumed, said_yes, say, say_json};
 use crate::error::{PerchError, Result};
 use crate::host::{Host, Platform};
 use crate::upgrade::{self, Channel};
@@ -251,9 +251,9 @@ fn agree_to_going_back(
              back to {installed} is the repair."
         ),
     )?;
-    match ask_a_word(host, out, "Install the older Release? [y/N] ")?.as_deref() {
-        Some("y") | Some("yes") => Ok(()),
-        _ => Err(PerchError::NothingToDo(
+    match said_yes(host, out, "Install the older Release? [y/N] ", Presumed::No)? {
+        true => Ok(()),
+        false => Err(PerchError::NothingToDo(
             "Nothing was installed.".to_string(),
         )),
     }
