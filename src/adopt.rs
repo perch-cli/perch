@@ -1,12 +1,8 @@
 //! Adoption: the existing login becomes the first Profile
 //! (ADR a-login-perch-does-not-need).
 //!
-//! Anyone installing Perch is already logged into an Account. Perch copies that
-//! Credential into a Profile of its own and records the Account as active,
-//! rather than asking for a login it does not need. That leaves two copies of
-//! one Credential — which is exactly where every Switch leaves things
-//! (ADR a-switch-is-written-down-first), so adoption starts the system in its
-//! steady state rather than adding a case.
+//! On whichever command runs first, and once for the Holdings it begins — only a
+//! Purge undoes it, and the next command after one adopts again.
 
 use crate::error::{PerchError, Result};
 use crate::host::Host;
@@ -17,12 +13,9 @@ use crate::registry::{self, Account, Registry};
 
 /// Loads the registry, adopting the existing login the first time Perch runs.
 ///
-/// Anything worth telling the user about adoption is remarked on rather than
-/// written to the command's own output — see [`report`] for why.
-///
 /// For the commands that only *read* the registry, and for the two that spend a
 /// browser login before they change anything. A command that is going to write
-/// wants [`ensure_adopted_exclusively`] instead.
+/// wants [`ensure_adopted_exclusively`].
 pub fn ensure_adopted(host: &dyn Host) -> Result<Registry> {
     login::reap_abandoned(host);
     if let Some(registry) = registry::load(host)? {
@@ -38,11 +31,8 @@ pub fn ensure_adopted(host: &dyn Host) -> Result<Registry> {
 /// The registry, with every other Perch shut out of it until the returned hold
 /// is dropped.
 ///
-/// What a command that is going to change something asks for, and the reason
-/// the hold comes back rather than staying inside: the span that has to be
-/// exclusive is the whole load → change → save, not the save. A command holding
-/// a copy read before somebody else's `perch switch` writes that copy back
-/// afterwards and reverts them (see [`registry::lock`]).
+/// The hold comes back rather than staying inside because the span that has to
+/// be exclusive is the whole load → change → save (see [`registry::lock`]).
 pub fn ensure_adopted_exclusively(host: &dyn Host) -> Result<(crate::lock::Held<'_>, Registry)> {
     login::reap_abandoned(host);
     let mut held = registry::lock(host)?;
@@ -85,13 +75,9 @@ fn store_as_first_profile(
     let dir = registry::profile_dir_for(host, &findings.identity.email)?;
     let store = profile::create(host, &dir, findings.credential.as_str())?;
 
-    // Everything after the Credential is written is undone if it fails, for the
-    // reason `perch add` gives at its own version of this: a Profile that
-    // nothing records is worse than no Profile at all. It holds a copy of the
-    // live Credential — a keychain item outside Perch's home, on macOS — that
-    // no registry names, that `reap_abandoned` never walks because it only
-    // walks `pending/`, and that the user has no way to know about. A first run
-    // on a machine whose registry cannot be written is all it takes.
+    // Undone if it fails, because a Profile nothing records is worse than none:
+    // it holds a copy of the live Credential that no registry names and that
+    // `reap_abandoned` never walks, since that only walks `pending/`.
     let made = (|| {
         carry_the_identity_block(host, findings, &store)?;
 
@@ -119,19 +105,14 @@ fn store_as_first_profile(
 /// Keeps the `oauthAccount` block Claude Code wrote for the adopted Account in
 /// that Account's own Profile.
 ///
-/// A Profile holds an Account's Credential and how Claude Code describes it,
-/// which is what `perch add` gives every Profile it creates. Adoption is the
-/// only other way an Account arrives, and the file it would copy is right there
-/// — the login being adopted is the one that file describes. Without it, the
-/// Account everybody starts with is the one that comes back from a Switch
-/// described only by the four fields Perch itself records.
+/// Without it, the Account everybody starts with is the one a Switch describes
+/// by the four fields Perch records rather than in Claude Code's own terms.
 fn carry_the_identity_block(host: &dyn Host, findings: &Findings, store: &Store) -> Result<()> {
     let contents = match host.read_file(&findings.store.identity_file) {
         Ok(contents) => contents,
-        // The probe read an Identity out of this file moments ago, so this is a
-        // file that has gone away underneath us rather than one that was never
-        // there. Adoption still holds the Credential, which is the part that
-        // cannot be reconstructed.
+        // The probe read an Identity out of this file moments ago, so it has
+        // gone away underneath us. Adoption still holds the Credential, which
+        // is the part that cannot be reconstructed.
         Err(_) => return Ok(()),
     };
     let Some(block) = probe::oauth_account_block(&contents) else {
@@ -139,28 +120,18 @@ fn carry_the_identity_block(host: &dyn Host, findings: &Findings, store: &Store)
     };
 
     let kept = store.identity_file.clone();
-    // The write `login::carry_identity_file` uses, for the reason written
-    // there: a Profile's `.claude.json` is a file Perch is the first to create,
-    // and one Perch creates is created closed rather than at the process umask
-    // (ADR claude-code-chooses-the-store). Adoption is the other way a Profile
-    // comes to hold one.
+    // The write `login::carry_identity_file` uses, for the reason written there:
+    // a Profile's `.claude.json` is created closed rather than at the umask
+    // (ADR claude-code-chooses-the-store).
     crate::host::write_atomically(host, &kept, &probe::fresh_identity_file(block))
         .map_err(|err| PerchError::file_write(kept, err))
 }
 
-/// Says what was adopted, so the user can confirm Perch picked up the right
+/// Says what was adopted, so somebody can confirm Perch picked up the right
 /// Account before trusting it with anything.
 ///
-/// Said as a remark rather than written to `out`, because it is news about the
-/// machine and not the answer to the command somebody ran. Every caller reached
-/// adoption on the way to something else — `perch list`, `perch status`, a
-/// `perch switch` — and two of those render JSON on the very stream this would
-/// otherwise land on first. A document that begins with three lines of prose is
-/// not a document, and the first run is exactly where a script meets it.
-///
-/// That is the reasoning `Terminal::note` already carries for the stream it writes
-/// to: "a note never lands in the middle of the JSON a script is reading off
-/// stdout". Adoption was the one thing saying its piece on the other one.
+/// A remark rather than output: this is news about the machine, and two of the
+/// callers that reach adoption render JSON on the stream it would land on.
 fn report(host: &dyn Host, findings: &Findings) {
     let mut description = findings.identity.email.clone();
     let details: Vec<String> = [

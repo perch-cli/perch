@@ -1,15 +1,12 @@
-//! `perch add` — a second Account, without costing you the session you are in.
+//! `perch add` — a second Account, without costing the session you are in.
 //!
-//! Every Profile after the first is created by launching a login inside it
-//! (ADR a-login-perch-does-not-need). The active Account is never read, never
-//! written, and never logged out: the login happens in a config directory of
-//! its own, and the Credential it produces is moved into a Profile afterwards.
-//! Which Account it turned out to be is read back from the login rather than
-//! asked for.
+//! The login runs in a config directory of its own and the Credential it
+//! produces is moved into a Profile afterwards
+//! (ADR a-login-perch-does-not-need). Which Account it turned out to be is read
+//! back from the login rather than asked for.
 //!
 //! Nothing reaches the registry until the login has produced an Account Perch
-//! can name, so an abandoned login costs a directory that is then removed and
-//! nothing else.
+//! can name.
 
 use std::io::Write;
 
@@ -33,15 +30,12 @@ pub struct AddArgs {
 }
 
 pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
-    // Read rather than held. A login is a browser round trip the user drives,
-    // and holding the registry lock across it would block every other Perch on
-    // the machine for as long as somebody takes to find their password.
+    // Read rather than held: holding the registry lock across a browser round
+    // trip would block every other Perch for as long as the login takes.
     let registry = adopt::ensure_adopted(host)?;
 
     // Everything knowable before the login is checked before the login, so a
     // name Perch was always going to refuse never costs a browser round trip.
-    // Each name against the whole namespace, in the order the registry decides
-    // — shape before collision, which this command is the reason for.
     if let Some(alias) = &args.alias {
         registry.refuse_a_name_nothing_may_answer_to(NameKind::Alias, alias, None)?;
     }
@@ -52,8 +46,7 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
         registry::validate_name(NameKind::Group, group)?;
     }
     // And the pair against each other, which no check of one name can see: a
-    // command that sets both at once could otherwise plant the collision the
-    // shared namespace exists to prevent.
+    // command setting both at once could otherwise plant the collision.
     registry.refuse_taken_names(args.alias.as_deref(), args.group.as_deref())?;
     if args.group.is_none() && !args.no_group && !host.is_interactive() {
         return Err(PerchError::Invalid(
@@ -68,49 +61,32 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     let group = resolve_group(host, out, &registry, &args, &pending.identity)?;
     drop(registry);
 
-    // Everything from here is decided against the registry as it is *now*, with
-    // the other Perches shut out. The copy above was read before a login that
-    // may have taken minutes, and writing it back would revert whatever else
-    // ran in the meantime — a `perch switch` in another terminal, most
-    // damagingly, whose `active` the next Capture depends on
-    // (ADR a-switch-is-written-down-first).
+    // Decided against the registry as it is *now*: the copy above was read
+    // before a login that may have taken minutes, and writing it back would
+    // revert whatever ran meanwhile (ADR a-switch-is-written-down-first).
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
     refuse_an_account_perch_already_holds(host, &registry, &pending.identity)?;
     registry.refuse_taken_names(args.alias.as_deref(), group.as_deref())?;
 
     // Naming a Group on `add` declares it, so an Account is never in a Group
-    // that carries no configuration and that `perch group list` cannot show.
-    // The Account records the declared spelling, which is what puts it in the
-    // Group that already exists rather than beside it.
+    // `perch group list` cannot show. The declared spelling is what is recorded,
+    // which puts the Account in the Group that exists rather than beside it.
     let group = match &group {
         Some(name) => Some(registry.ensure_group(name)?),
         None => None,
     };
 
-    // The Store comes back with the Account, so nothing fallible sits between
-    // the Credential landing in the Profile and this being able to take it out
-    // again.
     let (account, placed) = settle_into_a_profile(host, pending, group.clone())?;
     let email = account.email().to_string();
 
-    // A Profile that nothing records is worse than no Profile at all: it holds
-    // a live refresh token, and nothing ever looks at it again. `reap_abandoned`
-    // walks the pending logins and never `profiles/`, so this one would sit
-    // there for good — the slow accumulation of working logins for Accounts the
-    // user believes they never added. The same all-or-nothing an Import makes.
-    //
-    // Every step from here to the save is inside it, not the save alone. The
-    // naming below is argued to be unreachable and the save is not the only
-    // thing that can fail; a discard reached by one of the two ways out and not
-    // the others is the shape this comment is about, written down and then only
-    // half applied.
+    // A Profile nothing records is worse than none: it holds a live refresh
+    // token that `reap_abandoned` never walks, since that only walks `pending/`.
+    // Every step from here to the save is inside the undo, not the save alone.
     let recorded = (|registry: &mut Registry| {
         registry.upsert(account);
         if let Some(alias) = &args.alias {
-            // Refused before the login and again here, against the registry as
-            // it is now. Nothing has changed under the lock this holds, so this
-            // cannot fail — and a name that reached this point unchecked would
-            // be one no command could ever free.
+            // Refused before the login and again here. Nothing has changed
+            // under the lock this holds, so it cannot fail.
             registry.name_account(alias, &email)?;
         }
         registry::save(host, &mut perch, registry)
@@ -135,15 +111,11 @@ pub fn run(host: &dyn Host, args: AddArgs, out: &mut dyn Write) -> Result<()> {
     )
 }
 
-/// Gives the Account a Profile of its own and returns the entry that records
-/// it, alongside the Store that Profile keeps its Credential in. A Profile that
-/// cannot be completed is discarded rather than left half-built for the next
-/// command to trip over.
+/// Gives the Account a Profile of its own and returns the entry that records it,
+/// alongside the Store that Profile keeps its Credential in.
 ///
-/// The Store is handed back rather than derived again by the caller, because
-/// deriving it is fallible and the caller needs it precisely in order to undo
-/// this — so asking for it a second time put one more thing that can fail
-/// between the Credential landing and anything being able to take it away.
+/// The Store is handed back rather than derived again, because deriving it is
+/// fallible and the caller needs it precisely in order to undo this.
 fn settle_into_a_profile(
     host: &dyn Host,
     pending: Produced,
@@ -152,9 +124,8 @@ fn settle_into_a_profile(
     let dir = registry::profile_dir_for(host, &pending.identity.email)?;
     let store = profile::create(host, &dir, pending.credential.as_str())?;
 
-    // The Identity travels with the Credential it describes: this directory is
-    // the Account's own configuration, and the file the login wrote for it is
-    // already exactly what belongs there.
+    // The Identity travels with the Credential it describes: the file the login
+    // wrote is already exactly what belongs in the Account's own directory.
     if let Err(err) = login::carry_identity_file(host, &pending.identity_json, &store) {
         profile::discard(host, &store);
         return Err(err);
@@ -173,22 +144,11 @@ fn settle_into_a_profile(
     ))
 }
 
-/// Refuses a login whose Credential would land in a Profile Perch already
-/// holds one in.
+/// Refuses a login whose Credential would land in a Profile Perch already holds
+/// one in.
 ///
-/// Two Profiles for one Account would fight over it — each holding a refresh
-/// token the other's next Renewal retires — so the way back to a working
-/// Account Perch already has is `perch relogin`, which repairs the Profile
-/// rather than building a second one.
-///
-/// The question is which *Profile* the login would land in, not which email it
-/// belongs to. A Profile is `profiles/<slugged email>`, and the slug lowercases
-/// and flattens every non-alphanumeric character, so `user+work@gmail.com`,
-/// `user.work@gmail.com` and `User-Work@gmail.com` all name one directory and
-/// one keychain namespace. Plus-addressing on a single inbox is exactly how
-/// somebody comes to hold several Anthropic Accounts, so this is a collision
-/// ordinary use produces — and storing over it would supersede the Credential
-/// already there and destroy a refresh token nothing can recover.
+/// The question is which *Profile*, not which address: two addresses that
+/// flatten to one slug are one Profile (ADR claude-code-chooses-the-store).
 fn refuse_an_account_perch_already_holds(
     host: &dyn Host,
     registry: &Registry,
@@ -202,13 +162,9 @@ fn refuse_an_account_perch_already_holds(
         return Ok(());
     };
 
-    // Over the whole of Unicode, because the collision that got us here was
-    // decided over the whole of Unicode: `same_profile` compares slugs, and
-    // `slug` lowercases before it does. Asked in ASCII, `café@example.com` and
-    // `CAFÉ@example.com` were one Profile and two Accounts — so the refusal
-    // withheld `perch relogin` and advised logging in "under an address that
-    // does not flatten to the same name", which no address satisfies. Same
-    // divergence, and same answer, as the one `target` already fixed for names.
+    // Over the whole of Unicode, because the collision that got here was:
+    // `same_profile` compares slugs and `slug` lowercases first, so an ASCII
+    // comparison would make one Profile look like two Accounts.
     let same_account = registry::same_name(existing.email(), &identity.email);
     let why = if same_account {
         "two Profiles for one Account would fight over it".to_string()
@@ -263,12 +219,7 @@ fn resolve_group(
     }
 
     // Only offered when it would be a usable Group name: an organization Perch
-    // would go on to refuse is no help as a default. An organization name is
-    // whatever Anthropic holds rather than something chosen to be typed, so its
-    // spaces become the separator the names people pick already use — `Overflow
-    // Ltd` is offered as `Overflow-Ltd` rather than not offered at all. Only
-    // the spaces: Group names are compared case-insensitively, so rewriting how
-    // somebody's organization spells itself would buy nothing.
+    // would go on to refuse is no help as a default.
     let offered = identity
         .organization_name
         .as_deref()
@@ -283,12 +234,8 @@ fn resolve_group(
     };
 
     // A name Perch cannot accept is asked about again rather than failing the
-    // command: the login has already happened by now, and losing the Account
-    // over a typo would be a poor trade. Every reason a name can be refused is
-    // asked here, not only whether it is a usable shape — a name that collides
-    // with an existing Alias is exactly as much a typo as a name with a space
-    // in it, and used to abort the command with the browser round trip already
-    // spent.
+    // command: the login has already happened, and losing the Account over a
+    // typo would be a poor trade. Every reason a name can be refused is asked.
     loop {
         let answer = match ask(host, out, &question)? {
             Some(answer) => answer.trim().to_string(),
@@ -317,15 +264,11 @@ fn resolve_group(
     }
 }
 
-/// What the login is for, and the one thing about it somebody mid-session
-/// needs to hear before a browser opens: their Account is not the one being
-/// logged out.
+/// What the login is for, and the one thing somebody mid-session needs to hear
+/// before a browser opens: their Account is not the one being logged out.
 ///
-/// Said here rather than again in the report. Every Add leaves the active
-/// Account exactly where it was, so a second sentence afterwards would be the
-/// ordinary case announcing that it was ordinary (ADR perch-says-what-it-did) —
-/// and this one is said at the moment it is load-bearing, which is before the
-/// browser rather than after it.
+/// Said here rather than again in the report, because this is the moment it is
+/// load-bearing (ADR perch-says-what-it-did).
 fn announcement(registry: &Registry) -> String {
     format!(
         "Logging in to a new Profile.{}",
@@ -360,16 +303,9 @@ fn report(
     }
     let group = group.unwrap_or(registry::NO_GROUP);
     say(out, &format!("Group:  {group}"))?;
-    // What the Scope this Account landed in still cannot do, where there is
-    // anything to say. An Add is what makes a Scope a set of two or more, which
-    // is when the two defaults gating a Cycle start to matter — said as a
-    // statement of what is now true, beside the line above it, and never as a
-    // question (ADR a-group-is-a-declaration, ADR perch-says-what-it-did).
-    //
-    // Said again on the Add after it, and the one after that, for as long as it
-    // stays true. This is not the prose ADR perch-says-what-it-did cut: that
-    // was a command explaining itself on a path that always runs, and this is a
-    // fact about a Scope that stops being said the moment somebody answers it.
+    // What the Scope this Account landed in still cannot do. An Add is what
+    // makes a Scope a set of two or more, which is when the two defaults gating
+    // a Cycle start to matter.
     match crate::config::what_the_scope_still_needs(registry, &registry.scope_of(added)) {
         Some(line) => say(out, &line),
         None => Ok(()),

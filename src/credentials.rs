@@ -1,20 +1,12 @@
 //! The Credential Store: the two places a Credential can be, and the composite
 //! that reads across them (ADR claude-code-chooses-the-store).
 //!
-//! Claude Code keeps a Credential in the operating system's keychain on macOS
-//! and in a file of JSON everywhere else, and reads from both. Perch stores one
-//! exactly where the installed Claude Code would, so it has both stores too,
-//! and the two halves are decided by different things:
-//!
-//! - the **platform** says which store is primary, because a Profile that was
-//!   created a moment ago holds no evidence about anything;
-//! - the **evidence** says which store is believed, because one that already
-//!   exists can be looked at — which is what stops a locked keychain reading as
-//!   "no login" on a machine whose Claude Code is working off its file.
+//! The platform says which store is primary, because a Profile created a moment
+//! ago holds no evidence about anything. The evidence says which store is
+//! believed, because one that already exists can be looked at.
 //!
 //! Nothing here decides *what* to write. The read-back guard and the removal of
-//! a superseded copy live in [`crate::profile`], with the rest of what it means
-//! to put a Credential somewhere.
+//! a superseded copy live in [`crate::profile`].
 
 use std::path::PathBuf;
 
@@ -28,9 +20,8 @@ use crate::probe::Store;
 /// One place a Credential can be kept.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CredentialStore {
-    /// The operating system's keychain, reached through `/usr/bin/security`
-    /// (ADR claude-code-chooses-the-store). The primary on macOS, and on every
-    /// other platform a store that simply never holds anything.
+    /// The operating system's keychain, reached through `/usr/bin/security`.
+    /// The primary on macOS, and elsewhere a store that never holds anything.
     Keychain { service: String, account: String },
     /// A file of JSON that nobody but its owner can read.
     Plaintext { path: PathBuf },
@@ -59,16 +50,14 @@ pub fn stores_for(host: &dyn Host, config: &Store) -> [CredentialStore; 2] {
 pub struct StoredCredential {
     pub kept_in: CredentialStore,
     /// `Zeroizing` for [`crate::probe::Credential`]'s reason, one step earlier:
-    /// this is Credential text as it came out of a store, before anything has
-    /// understood it, so it is the first buffer on the machine to hold a live
-    /// refresh token and the first worth wiping when it goes.
+    /// the first buffer on the machine to hold a live refresh token, and so the
+    /// first worth wiping when it goes.
     pub credential: Zeroizing<String>,
 }
 
 impl std::fmt::Debug for StoredCredential {
-    /// Names the store and the size, never the bytes. This is read Credential
-    /// text before anything has understood it, so it is the one shape that is
-    /// still a bare `String` — and a derived `Debug` would print it.
+    /// Names the store and the size, never the bytes: this is the one shape
+    /// still holding a bare `String`, and a derived `Debug` would print it.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             formatter,
@@ -79,14 +68,11 @@ impl std::fmt::Debug for StoredCredential {
     }
 }
 
-/// The Credential a config directory holds, from whichever of its two stores
-/// holds one.
+/// The Credential a config directory holds, from whichever store holds one.
 ///
-/// The primary is asked first and believed when it answers. Anything else —
-/// an item that is not there, a keychain that will not open — sends the
-/// question to the other store, and only if that holds nothing either is the
-/// primary's answer the one reported. A locked keychain is therefore a failure
-/// when it is the whole story and a detail when it is not.
+/// The primary is asked first and believed when it answers; anything else sends
+/// the question to the fallback, and only if that holds nothing either is the
+/// primary's answer reported.
 pub fn read(host: &dyn Host, config: &Store) -> Result<Option<StoredCredential>> {
     let [primary, fallback] = stores_for(host, config);
     match primary.read(host) {
@@ -103,12 +89,9 @@ pub fn read(host: &dyn Host, config: &Store) -> Result<Option<StoredCredential>>
             // machine with no keychain that is "nothing here", and on one with
             // a locked keychain it is the lock.
             Ok(None) => otherwise.map(|_| None),
-            // The fallback is there and would not say what it holds. That is
-            // not "no Credential": "no Credential" is terminal — it Quarantines
-            // an Account (ADR a-switch-is-written-down-first) — and a file that
-            // is temporarily unreadable must not be promoted to a permanent
-            // verdict. If the primary already failed, its failure is the one to
-            // report, since it is the store this machine is meant to be using.
+            // Not "no Credential", which is terminal — it Quarantines an
+            // Account (ADR a-switch-is-written-down-first). Where the primary
+            // also failed, its failure is the one to report.
             Err(fallback_failed) => match otherwise {
                 Ok(None) => Err(fallback_failed),
                 otherwise => otherwise.map(|_| None),
@@ -163,15 +146,9 @@ impl CredentialStore {
 
     /// Takes the Credential out of this store, and says whether there was one.
     ///
-    /// A store that held nothing is not a failure: this is how a copy that has
-    /// been superseded elsewhere is removed, and it is often already gone. But
-    /// it is not the same as one that gave a Credential up, and the caller is
-    /// sometimes about to tell the user which happened — `perch remove` says
-    /// the Credential Perch held is deleted, and the keychain item's account
-    /// name is `$USER`, which is not the same today as it was under `sudo -u`,
-    /// after a login rename, or in a launchd context. There, the delete is a
-    /// no-op that reads as success while the keychain goes on holding a working
-    /// Credential for an Account the tool just said it destroyed.
+    /// A store that held nothing is not a failure — this is how a superseded
+    /// copy is removed, and it is often already gone. It is not the same as one
+    /// that gave a Credential up, and a caller is sometimes about to say which.
     pub fn forget(&self, host: &dyn Host) -> Result<Forgotten> {
         match self {
             CredentialStore::Keychain { service, account } => {
@@ -208,36 +185,28 @@ pub enum Forgotten {
 /// Whether this machine has a keychain at all.
 ///
 /// Off macOS it has not, so a keychain that will not answer is a store holding
-/// nothing rather than a failure: a missing `/usr/bin/security` is not news on
-/// Linux, and reporting it would turn every logged-out machine into a broken
-/// one (ADR claude-code-chooses-the-store).
+/// nothing rather than a failure: reporting a missing `/usr/bin/security` would
+/// turn every logged-out Linux machine into a broken one.
 fn there_is_no_keychain_here(host: &dyn Host) -> bool {
     host.platform() != Platform::MacOs
 }
 
-/// Narrows a credential file anybody could read, and says so.
+/// Narrows a credential file anybody could read, and says so once.
 ///
-/// Not a refusal. Perch did not necessarily write this file — Claude Code did,
-/// or a backup restored it — and refusing would strand a machine whose Claude
-/// Code is working perfectly. A tightened file is a better outcome than an
-/// explained one, and [`Terminal::note`](crate::host::Host::note) says it once
-/// however many times the file is read.
+/// Not a refusal: Perch did not necessarily write this file, and refusing would
+/// strand a machine whose Claude Code is working perfectly.
 fn tighten_if_loose(host: &dyn Host, path: &std::path::Path) {
-    // A mode that cannot be read is not evidence of a loose file, and this is a
-    // remark made in passing on the way to reading a Credential: nothing here
-    // is worth failing the command the user actually asked for.
+    // A mode that cannot be read is not evidence of a loose file, and nothing
+    // here is worth failing the command the user actually asked for.
     let Ok(Some(mode)) = host.file_mode(path) else {
         return;
     };
     if host::is_private(mode) {
         return;
     }
-    // Said either way. The reasoning above — that a tightened file is a better
-    // outcome than an explained one — assumes the tightening works, and when it
-    // does not the user was getting neither: no error, no remark, and a
-    // world-readable refresh token read on every command from then on. That is
-    // the one outcome worse than an explanation, because nothing is ever going
-    // to mention it again.
+    // Said either way. A tightening that failed and said nothing would leave a
+    // world-readable refresh token read on every command from then on, with
+    // nothing ever to mention it again.
     match host.make_private(path) {
         Ok(()) => host.note(&format!(
             "{} held a Credential that others could read ({mode:04o}). \
@@ -390,10 +359,6 @@ mod tests {
         assert!(host.notes()[0].contains("0644"), "{:?}", host.notes());
     }
 
-    /// "Neither store holds one" is terminal — it Quarantines an Account — so a
-    /// store that is there and would not say what it holds must not answer as
-    /// one holding nothing. The wrong answer here turns a mode that can be
-    /// fixed in a second into a state only a browser login ends.
     #[test]
     fn a_store_that_will_not_say_what_it_holds_is_not_a_store_holding_nothing() {
         let host = FakeHost::new();

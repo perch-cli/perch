@@ -52,14 +52,9 @@ fn a_file_holding_a_credential_is_created_for_its_owner_alone() {
     );
 }
 
-/// The file beside it, which is not a Credential and is not nothing either.
-///
+/// The file beside it, which is not a Credential and is not nothing either:
 /// `.claude.json` holds MCP configuration, and an MCP server entry routinely
-/// carries an API key in its `env` block — which is the rule `switch` already
-/// writes the Default Profile's copy under. A Profile's own copy was created by
-/// a plain write, so it arrived at the process umask; and because the rule for a
-/// file that already exists is to carry its mode across, it then stayed there
-/// for the life of the Profile while a Carry wrote into it on every Run.
+/// carries an API key in its `env` block.
 #[test]
 fn the_identity_file_in_a_profile_is_created_for_its_owner_alone_too() {
     let host = logged_in_machine_off_macos();
@@ -97,14 +92,9 @@ fn a_credential_file_others_could_read_is_tightened_and_reported_rather_than_ref
     assert_eq!(tightened.len(), 1, "said once: {notes:?}");
 }
 
-/// The reasoning for tightening rather than refusing is that a tightened file
-/// is a better outcome than an explained one. When the tightening does not
-/// work, the user was getting neither: the remark sat inside the success arm,
-/// so a `chmod` that failed produced no error, no note, and a world-readable
-/// refresh token read on every command from then on.
-///
-/// A `.credentials.json` left owned by root by a `sudo claude`, or restored
-/// from a backup, is how a machine arrives here.
+/// A `.credentials.json` left owned by root by a `sudo claude`, or restored from
+/// a backup, is how a machine arrives here — and a `chmod` that cannot land is
+/// the case where tightening rather than refusing buys nothing.
 #[test]
 fn a_credential_file_that_cannot_be_tightened_is_still_said_out_loud() {
     let host = logged_in_machine_off_macos()
@@ -191,8 +181,8 @@ fn a_switch_off_macos_moves_the_credential_between_files() {
     );
 }
 
-/// The bug this ADR exists to fix: a Mac whose keychain will not open, and a
-/// Claude Code working perfectly off the file beside it.
+/// A Mac whose keychain will not open, and a Claude Code working perfectly off
+/// the file beside it.
 #[test]
 fn a_locked_keychain_does_not_hide_a_login_that_claude_code_is_using() {
     let host = machine_with_claude_code()
@@ -259,15 +249,10 @@ fn a_credential_written_to_the_primary_store_leaves_no_copy_in_the_other() {
 }
 
 /// The same rule the other way round, which matters more: the store that could
-/// not be written is the one a reader consults first, so a copy left in it
-/// would beat the Credential that was just stored.
+/// not be written is the one a reader consults first.
 ///
-/// Off macOS with a keychain, which is a machine that does not exist —
-/// `/usr/bin/security` is a Mac binary. This test is about the composite
-/// reader's rule and not about a platform, so it asks for the one arrangement
-/// that lets both stores be reachable at once and says so; the fake refuses a
-/// keychain off macOS by default, because a test that got one by accident would
-/// pass on a scenario the platform cannot produce.
+/// Off macOS with a keychain, which is a machine that does not exist — this is
+/// the one arrangement that lets both stores be reachable at once.
 #[test]
 fn a_credential_stored_in_the_second_choice_store_empties_the_first() {
     let host = two_accounts_off_macos_with_a_keychain();
@@ -295,18 +280,13 @@ fn a_credential_stored_in_the_second_choice_store_empties_the_first() {
 }
 
 /// The same removal, failing. A Profile directory that is read-only fails the
-/// write *and* the unlink, so the Credential goes to the other store and the
-/// one this platform reads first keeps the copy it had — which then beats it on
-/// every later read, for ever. Reported as a failure rather than remarked,
-/// because the caller's next act is to believe the Capture happened, and a
-/// Capture that did not take effect is ADR a-switch-is-written-down-first's
-/// silent poisoning by the back door.
+/// write *and* the unlink, so the store this platform reads first keeps the copy
+/// it had — which then beats the fresh one on every later read.
 #[test]
 fn a_superseded_copy_that_survives_in_the_store_read_first_is_a_failure() {
     let host = two_accounts_off_macos_with_a_keychain();
-    // Derived rather than spelled out, because the refusal is asserted against
-    // the path *as it renders* — and a Windows build joins with the other
-    // separator, so a fixture writing the path by hand names something the
+    // Derived rather than spelled out: a Windows build joins with the other
+    // separator, so a fixture writing the path by hand would name something the
     // message never says.
     let live = perch::probe::default_store(&host)
         .expect("home is known")
@@ -352,10 +332,8 @@ fn both_stores_being_unreachable_is_reported_as_the_primary_failing() {
     );
 }
 
-/// Two Accounts on a machine that is not a Mac.
-/// The same, on the machine that does not exist: not a Mac, and with a
-/// keychain that answers anyway. Only for the tests that are about the
-/// composite reader rather than about a platform.
+/// The machine that does not exist: not a Mac, and with a keychain that answers
+/// anyway. Only for the tests about the composite reader rather than a platform.
 fn two_accounts_off_macos_with_a_keychain() -> FakeHost {
     let host = logged_in_machine_off_macos()
         .with_keychain_off_macos()
@@ -410,14 +388,7 @@ fn the_platform_decides_which_store_is_written_first() {
 }
 
 /// The read-back guard, which is the whole reason a Credential is not simply
-/// written and believed.
-///
-/// `security -i` truncates mid-argument when a command line overruns its 4096
-/// byte stdin buffer, and says nothing about it
-/// (ADR claude-code-chooses-the-store). A truncated Credential is
-/// indistinguishable from a wrong one at the worst possible moment — some
-/// Switch later, with the good copy already replaced. So what a store says it
-/// kept is read back, and a store that kept something else is treated exactly
+/// written and believed: a store that kept something else is treated exactly
 /// like one that refused the write outright.
 #[test]
 fn a_store_that_kept_less_than_it_was_given_is_treated_as_one_that_refused() {
@@ -471,11 +442,8 @@ fn a_switch_neither_store_would_keep_intact_stops_at_the_write() {
         "and the Capture that ran before the write still stands"
     );
 
-    // The store the write was aimed at is the Default Profile's. Both halves of
-    // it took a value and read it back as something else, and a truncated
-    // Credential left where Claude Code looks is worse than none: it parses as
-    // nothing, so every retry fails a step earlier than this one did, and the
-    // only way back is deleting the item by hand.
+    // The store the write was aimed at is the Default Profile's, and both halves
+    // of it took a value and read it back as something else.
     assert_eq!(
         host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME),
         None,
@@ -495,12 +463,9 @@ fn a_switch_neither_store_would_keep_intact_stops_at_the_write() {
     );
 }
 
-/// A store that refuses the write outright is a different state, and its
-/// Credential is not this function's to throw away.
-///
-/// Nothing was written, so what it holds is what it held before — the last
-/// Credential that worked. Removing that would turn a failed Switch into a
-/// Quarantine, which is the one outcome worse than the failure being reported.
+/// A store that refuses the write outright is a different state: nothing was
+/// written, so it holds the last Credential that worked, and removing that would
+/// turn a failed Switch into a Quarantine.
 #[test]
 fn a_store_that_would_not_take_the_write_at_all_keeps_the_credential_it_had() {
     let host = machine_with_two_accounts()

@@ -282,11 +282,6 @@ fn adoption_makes_no_network_call() {
     assert!(host.http_calls().is_empty());
 }
 
-/// A Profile is named after the slugged email, and an address with no
-/// alphanumeric character in it slugs to nothing — which would put that
-/// Account's Profile *at* the directory holding every other Account's, one
-/// `perch remove` away from taking all of them. Refused where the address
-/// enters, so no path is ever derived from it.
 #[test]
 fn a_login_whose_address_names_no_directory_is_refused_rather_than_adopted() {
     let nameless = IDENTITY_FILE.replace(EMAIL, "@");
@@ -302,17 +297,10 @@ fn a_login_whose_address_names_no_directory_is_refused_rather_than_adopted() {
     );
 }
 
-/// Adoption is the other way an Account arrives, and it writes a Credential
-/// before it writes the registry that names it. A first run on a machine whose
-/// registry cannot be written — a disk with nothing left on it, a directory
-/// somebody made read-only — left a Profile holding a copy of the live
-/// Credential that no registry named, that the reaper never walks because it
-/// only walks `pending/`, and that the user has no way to learn about. On macOS
-/// that copy is a keychain item outside Perch's home entirely.
-///
-/// `perch add` has said for a while that a Profile nothing records is worse
-/// than no Profile at all. Adoption is the copy of that argument that was
-/// missed.
+/// A first run on a machine whose registry cannot be written — a full disk, a
+/// directory somebody made read-only. Adoption writes a Credential before it
+/// writes the registry that names it, and on macOS that copy is a keychain item
+/// outside Perch's home entirely.
 #[test]
 fn an_adoption_that_could_not_be_recorded_leaves_no_credential_behind() {
     let host = logged_in_machine().with_unwritable_file(REGISTRY_PATH, "no space left on device");
@@ -343,12 +331,9 @@ fn an_adoption_that_could_not_be_recorded_leaves_no_credential_behind() {
     );
 }
 
-/// An `oauthAccount` block that is there and names nobody. Different from a
-/// file with no block at all — that is a Claude Code nobody has logged into —
-/// and different again from one Perch cannot parse. The address is what every
-/// Profile path, keychain namespace, Alias target and Group membership is keyed
-/// on, so a block without one is refused where it enters rather than somewhere
-/// downstream that has already derived a path from nothing.
+/// An `oauthAccount` block that is there and names nobody: different from a file
+/// with no block at all, which is a Claude Code nobody has logged into, and
+/// different again from one Perch cannot parse.
 #[test]
 fn an_identity_block_that_names_no_address_is_refused_and_names_the_assumption() {
     let host = machine_with_claude_code()
