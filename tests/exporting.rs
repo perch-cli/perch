@@ -54,9 +54,6 @@ fn opened(host: &FakeHost, path: &str) -> export::Export {
     export::unseal(&sealed, PASSPHRASE).expect("it opens with the passphrase it was sealed with")
 }
 
-/// The whole of what the file promises: every Account, every Credential, and
-/// every name and rule the user gave them. Restoring the Credentials alone would
-/// leave a new machine holding working Accounts stripped of all of it.
 #[test]
 fn an_export_holds_every_account_every_credential_and_everything_said_about_them() {
     let host = a_machine_worth_backing_up();
@@ -95,10 +92,6 @@ fn an_export_holds_every_account_every_credential_and_everything_said_about_them
     }
 }
 
-/// A Quarantined Account is a broken login somebody still owns, and dropping it
-/// from the Export would restore a machine that has quietly forgotten it. The
-/// reason travels too: "this Account is broken" and "Anthropic would not renew
-/// its Credential" are different pieces of news.
 #[test]
 fn a_quarantined_account_is_exported_as_quarantined_with_its_reason() {
     let host = a_machine_worth_backing_up();
@@ -112,10 +105,6 @@ fn a_quarantined_account_is_exported_as_quarantined_with_its_reason() {
     );
 }
 
-/// The file is `age`'s own, in `age`'s text encoding, so it can be opened by the
-/// standard `age` command on a machine that has never heard of Perch. A backup
-/// readable only by the tool that wrote it is a worse backup than one whose
-/// format somebody else maintains.
 #[test]
 fn the_file_is_an_age_file_and_holds_nothing_readable_without_the_passphrase() {
     let host = a_machine_worth_backing_up();
@@ -140,10 +129,6 @@ fn the_file_is_an_age_file_and_holds_nothing_readable_without_the_passphrase() {
     );
 }
 
-/// Prompted and confirmed, and never through the path that echoes: a passphrase
-/// shown as it is typed is one in somebody's scrollback, and a mistyped one is a
-/// file nobody discovers is unreadable until the machine it would have restored
-/// is gone.
 #[test]
 fn the_passphrase_is_asked_for_twice_and_never_shown() {
     let host = a_machine_worth_backing_up();
@@ -181,8 +166,6 @@ fn a_confirmation_that_does_not_match_writes_nothing() {
     assert_eq!(host.file(AT), None, "nothing was written");
 }
 
-/// Required, not offered: an optional passphrase is one people skip, and the
-/// failure is silent until it isn't. Typing nothing is the same skip.
 #[test]
 fn an_empty_passphrase_is_refused_rather_than_accepted_as_none() {
     for typed in [&["", ""], &["   ", "   "]] {
@@ -196,8 +179,6 @@ fn an_empty_passphrase_is_refused_rather_than_accepted_as_none() {
     }
 }
 
-/// End of input is not a passphrase either — a pipe that closed must never read
-/// as somebody having chosen one.
 #[test]
 fn end_of_input_at_the_prompt_writes_nothing() {
     let host = a_machine_worth_backing_up().with_secrets(&[]);
@@ -229,9 +210,6 @@ fn without_a_terminal_the_export_is_refused_and_says_what_is_needed() {
     assert_eq!(host.file(AT), None, "nothing was written");
 }
 
-/// An Export reads what is stored. A Renewal may Rotate, and a backup that
-/// retired the refresh token of every Account on the way to recording it would
-/// break the machine it was taken from.
 #[test]
 fn nothing_is_renewed_or_rotated_by_an_export() {
     let host = a_machine_worth_backing_up();
@@ -254,9 +232,8 @@ fn nothing_is_renewed_or_rotated_by_an_export() {
     assert_eq!(before, after, "every store holds what it held");
 }
 
-/// The file grants full access to every Account somebody owns. It is created at
-/// the mode a Credential is, rather than tightened after the fact — a file
-/// `chmod`ed afterwards is a file that was briefly readable
+/// Created at the mode a Credential is rather than tightened afterwards — a file
+/// `chmod`ed after the fact was briefly readable
 /// (ADR claude-code-chooses-the-store).
 #[test]
 fn the_file_is_created_readable_by_its_owner_alone() {
@@ -273,14 +250,9 @@ fn the_file_is_created_readable_by_its_owner_alone() {
     );
 }
 
-/// Not the ciphertext, not a Credential, not the passphrase.
-///
-/// The reading taken of "nothing about the export is written to standard
-/// output": nothing the file *holds* goes there, and the passphrase never does
-/// either. What does go there is the prompts and one line naming what was
-/// written — because every other Perch command reports what it did, and a
-/// `perch holdings purge` offering to export first (#53) has to be able to say
-/// the export happened.
+/// The reading taken of "nothing about the Export is written to standard
+/// output": nothing the file *holds* goes there and neither does the passphrase.
+/// The prompts and one line naming what was written do.
 #[test]
 fn nothing_the_export_holds_reaches_standard_output() {
     let host = a_machine_worth_backing_up();
@@ -299,11 +271,9 @@ fn nothing_the_export_holds_reaches_standard_output() {
             "`{secret}` was printed: {printed}"
         );
     }
-    // One line, asserted whole (ADR perch-says-what-it-did): how many and
-    // where. What an Export carries is what an Export *is*, and keeping the
-    // passphrase away from the file is what the prompt says while somebody is
-    // still choosing one — so neither is said again after the write
-    // (ADR perch-says-what-it-did).
+    // One line, asserted whole (ADR perch-says-what-it-did): how many and where.
+    // What an Export carries is what an Export *is*, and the prompt says where
+    // the passphrase is kept, so neither is said again after the write.
     assert_eq!(
         printed.trim_end().lines().last(),
         Some(format!("Exported 3 Accounts to {AT}.").as_str()),
@@ -327,9 +297,6 @@ fn a_write_that_fails_says_so_without_saying_what_it_was_writing() {
     assert!(said.contains("No space left on device"), "{said}");
 }
 
-/// A locked keychain is not "this Account has no Credential". Recording it as
-/// one would write a file that restores to a machine of logins that do not work,
-/// and the user would find out on the day they needed it.
 #[test]
 fn a_store_that_will_not_say_what_it_holds_stops_the_export_rather_than_shrinking_it() {
     let host = a_machine_worth_backing_up();
@@ -342,8 +309,6 @@ fn a_store_that_will_not_say_what_it_holds_stops_the_export_rather_than_shrinkin
     assert_eq!(host.file(AT), None, "and nothing was written");
 }
 
-/// An Account whose stores hold nothing is still exported, because an Account
-/// Perch has forgotten is worse news than one that needs logging in again.
 #[test]
 fn an_account_with_no_credential_is_exported_without_one_and_said_so() {
     let host = a_machine_worth_backing_up();
@@ -378,10 +343,6 @@ fn an_account_something_is_running_against_is_exported_like_any_other() {
     );
 }
 
-/// The one argument is a path somebody typed, and what the command does with it
-/// is replace whatever is there. A mistyped one would otherwise make a backup
-/// command destroy the file it was pointed at — and an Export landing on an
-/// older Export is the older backup gone.
 #[test]
 fn an_export_is_never_written_over_anything() {
     let host = a_machine_worth_backing_up().with_file(AT, "something the user wrote");
@@ -402,10 +363,8 @@ fn an_export_is_never_written_over_anything() {
     );
 }
 
-/// The refusal above is checked before the prompts and again after them. The
-/// window in between is two questions long, and what closes it is a second
-/// `perch holdings export` aimed at the same path finishing while this one is
-/// still being typed at — the write itself replaces rather than fails.
+/// The refusal above is checked before the prompts and again after them, over a
+/// window two questions long — and the write itself replaces rather than fails.
 #[test]
 fn a_file_that_arrives_while_the_passphrase_is_typed_is_not_written_over_either() {
     let host = a_machine_worth_backing_up();
@@ -427,10 +386,6 @@ fn a_file_that_arrives_while_the_passphrase_is_typed_is_not_written_over_either(
     );
 }
 
-/// The private write would create the directory, and every one above it, at
-/// 0700. That is right for the directories Perch owns and presumptuous for a
-/// path somebody typed — where a missing directory is a typo more often than an
-/// instruction.
 #[test]
 fn a_path_whose_directory_is_not_there_is_refused_rather_than_having_one_made() {
     let host = a_machine_worth_backing_up();
@@ -453,9 +408,6 @@ fn a_path_whose_directory_is_not_there_is_refused_rather_than_having_one_made() 
     );
 }
 
-/// Nothing to back up is not a file with nothing in it: an empty Export restores
-/// to exactly the machine somebody already has, and looks like a backup while
-/// being one.
 #[test]
 fn a_machine_holding_no_accounts_is_told_so_rather_than_given_an_empty_file() {
     let host = typing_the_passphrase(machine_with_claude_code());
@@ -467,17 +419,9 @@ fn a_machine_holding_no_accounts_is_told_so_rather_than_given_an_empty_file() {
     assert_eq!(host.file(AT), None);
 }
 
-/// The passphrase is asked for twice, and the registry was read before either
-/// prompt. That is the same unbounded wait `perch holdings purge` and `perch
-/// remove` re-check their hold across, and `perch holdings export` was the one
-/// that did not: it re-asked whether the *path* was still free and never
-/// whether the registry was still its own.
-///
-/// An Account added by another `perch` while somebody was typing is an Account
-/// the copy being sealed does not hold — so the file would present itself as
-/// everything Perch holds while being a partial one. That is a selective Export,
-/// which is the failure the format exists to prevent, and it is found out at the
-/// restore rather than here.
+/// An Account added by another `perch` while somebody is typing is one the copy
+/// being sealed does not hold, so the file presents itself as everything Perch
+/// holds while being partial — and that is found out at the restore.
 #[test]
 fn an_export_whose_registry_went_stale_while_the_passphrase_was_typed_writes_nothing() {
     let host = typing_the_passphrase(a_machine_worth_backing_up())
@@ -504,9 +448,8 @@ fn an_export_whose_registry_went_stale_while_the_passphrase_was_typed_writes_not
     );
 }
 
-/// An Export of a machine Perch holds nothing on. There is a difference between
-/// a backup of nothing and a backup that failed, and writing an empty file
-/// would make the two indistinguishable on the day it is restored from.
+/// A backup of nothing and a backup that failed are indistinguishable once an
+/// empty file has been written, on the one day it is read.
 #[test]
 fn exporting_a_machine_with_no_accounts_refuses_rather_than_writing_an_empty_file() {
     // The state is reached the only way it can be: the last Account given up.
@@ -536,8 +479,7 @@ fn exporting_a_machine_with_no_accounts_refuses_rather_than_writing_an_empty_fil
 }
 
 /// A path with no directory in it names the current directory, which exists by
-/// definition. Refusing it as "no such directory" would turn the shortest form
-/// of the command into the one that never works.
+/// definition — and is the shortest form of the command.
 #[test]
 fn exporting_to_a_bare_filename_is_not_refused_for_want_of_a_directory() {
     let host = a_machine_worth_backing_up();
@@ -552,9 +494,6 @@ fn exporting_to_a_bare_filename_is_not_refused_for_want_of_a_directory() {
     );
 }
 
-/// More than one Account with no Credential anywhere. The sentence naming them
-/// has to agree in number, because this is the line that tells somebody their
-/// backup is less complete than they think.
 #[test]
 fn an_export_says_accounts_in_the_plural_when_several_have_no_credential() {
     let host = machine_with_three_accounts();
@@ -584,14 +523,9 @@ fn an_export_says_accounts_in_the_plural_when_several_have_no_credential() {
 /// copy is ahead of the one in that Account's own Profile.
 const ROTATED: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-rotated","refreshToken":"sk-ant-ort01-rotated","expiresAt":1790000000000,"subscriptionType":"pro"}}"#;
 
-/// The active Account's Credential lives in the Default Profile, and a Renewal
-/// Rotates it there — the copy in its own Profile only catches up when a Switch
-/// away Captures it (ADR a-switch-is-written-down-first). Read from the
-/// Profile, the one Account the user is actually working in travels as a
-/// refresh token Anthropic has already retired, and `perch watcher run` Renews
-/// that Account every few minutes. A restore would then bring back every
-/// Account but the one they used most, and they would find out on the day they
-/// needed it.
+/// A Renewal Rotates the live Credential and the copy in the Account's own
+/// Profile catches up only when a Switch away Captures it
+/// (ADR a-switch-is-written-down-first).
 #[test]
 fn the_active_accounts_credential_is_the_live_one_rather_than_the_copy_in_its_profile() {
     let host = machine_with_three_accounts();
@@ -618,11 +552,8 @@ fn the_active_accounts_credential_is_the_live_one_rather_than_the_copy_in_its_pr
     );
 }
 
-/// The live Credential is only the active Account's where the Default Profile
-/// says it is theirs. A login made outside Perch leaves `.claude.json` naming
-/// somebody Perch does not hold, and exporting those bytes under the active
-/// Account's address would restore a machine where one Account answers as
-/// another — the same evidence a Capture demands before it copies that
+/// A login made outside Perch leaves `.claude.json` naming somebody Perch does
+/// not hold, which is the evidence a Capture demands before it copies that
 /// Credential anywhere.
 #[test]
 fn a_live_credential_belonging_to_somebody_else_is_not_exported_as_the_active_accounts() {
@@ -644,17 +575,9 @@ fn a_live_credential_belonging_to_somebody_else_is_not_exported_as_the_active_ac
     );
 }
 
-/// An Export is the command you run on a machine you are giving up, and one of
-/// the things people give up on such a machine is Claude Code.
-///
-/// Nothing in an Export needs it. Every Credential is already in a store whose
-/// path Perch derives on its own, and the one place a version was asked for is
-/// reading the Default Profile's Identity — which is not evidence against the
-/// active Account when it is absent or unreadable, and is no more so when there
-/// is no Claude Code to ask. Propagated, it refused the whole command after the
-/// passphrase had been typed twice, and took `perch holdings purge` with it,
-/// because the Export that offers to save you first is one that stops the Purge
-/// when it fails.
+/// One of the things people give up on a machine they are decommissioning is
+/// Claude Code, and nothing in an Export needs it: the one place a version is
+/// asked for is an Identity that is not evidence against when it is absent.
 #[test]
 fn an_export_is_written_by_a_machine_that_no_longer_has_claude_code_on_it() {
     let host = machine_with_three_accounts();
@@ -677,18 +600,9 @@ fn an_export_is_written_by_a_machine_that_no_longer_has_claude_code_on_it() {
     );
 }
 
-/// A Switch that was written down and not yet recorded is a **Landing**, and a
-/// registry holding one answers "who is active" with the Account being *left*
-/// (ADR a-switch-is-written-down-first). The live Credential during one may be
-/// either Account's: a Switch killed between storing the arriving Credential
-/// and patching the Identity leaves the arriving Account's token live under the
-/// leaving Account's name.
-///
-/// Taken on that answer, an Export filed one Account's refresh token under the
-/// other's address and dropped the genuine copy of it — a file that restores two
-/// Accounts onto one token, which the first Renewal Rotates out from under one
-/// of them. So the Landing is settled before anything is read, which is what
-/// every other command that reads through the live Credential already does.
+/// A registry holding a **Landing** answers "who is active" with the Account
+/// being *left*, and the live Credential during one may be either's — so one
+/// refresh token would go into the file under two addresses.
 #[test]
 fn an_export_settles_a_landing_before_it_decides_whose_the_live_credential_is() {
     let host = machine_with_three_accounts();

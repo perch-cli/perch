@@ -1,17 +1,11 @@
 //! Everything Perch holds, as one `age` file (ADR the-holdings-go-out-sealed).
 //!
 //! Two halves, and they are separate on purpose. **Gathering** reads the
-//! registry and every Credential out of the stores they live in — an effect,
-//! and the only part of an Export that touches the machine. **Sealing** turns
-//! what was gathered into the bytes that go in the file, and is arithmetic:
-//! given an Export and a passphrase it is the same answer on every machine, so
-//! it is testable without one.
-//!
-//! An Export takes everything and has no target. Restoring the Credentials
-//! alone would leave a new machine holding working Accounts stripped of every
-//! name and rule the user gave them, and a per-Account form is a partial
-//! restore — the failure this file exists to prevent, wearing a feature's
-//! clothes.
+//! registry and every Credential out of the stores they live in, and is the
+//! only part of an Export that touches the machine. **Sealing** turns what was
+//! gathered into the bytes that go in the file, and is arithmetic: given an
+//! Export and a passphrase it is the same answer on every machine, so it is
+//! testable without one.
 
 use std::collections::BTreeMap;
 
@@ -26,58 +20,27 @@ use crate::registry::{self, Account, Registry};
 
 /// The version this build writes, and the only one there has ever been.
 ///
-/// A guard against the future rather than a migration story, as the registry's
-/// own is: an Export is meant to outlive the machine it was written on, so the
-/// build that reads one back has to be able to say it does not understand it.
-/// The registry travels inside carrying its own version, which answers the same
-/// question about its own shape; this one is about the envelope around it.
+/// The envelope's own. The registry travels inside carrying its own version,
+/// which answers the same question about its own shape.
 pub const CURRENT_VERSION: u32 = 1;
 
 /// The most scrypt work [`unseal`] will spend opening one file, as `log2(N)`.
 ///
-/// A fixed number rather than one this machine measures, which is the whole
-/// point of it. `age`'s own default ceiling is "about a second of work here,
-/// plus four doublings", and its default *work factor* is about a second of
-/// work on whatever wrote the file — so with both left alone, whether an Export
-/// opens is a question about the pair of machines it traveled between. An
-/// Export written on a desktop and carried to a laptop, or opened inside a
-/// container with less CPU than the one that wrote it, was refused on that
-/// alone. ADR the-holdings-go-out-sealed wants this file to outlive the machine
-/// that wrote it, and it cannot do that while what opens it depends on the
-/// machine that opens it.
-///
-/// 22 is where `age`'s own guidance tops out, and is comfortably above
-/// [`WORK_FACTOR`], since 2^22 scrypt rounds want four gigabytes to themselves.
+/// Fixed rather than measured here, so whether an Export opens is not a question
+/// about the pair of machines it traveled between. 22 is where `age`'s own
+/// guidance tops out, and 2^22 rounds want four gigabytes to themselves.
 const MAX_WORK_FACTOR: u8 = 22;
 
 /// The scrypt work [`seal`] spends writing one file, as `log2(N)`.
 ///
-/// Fixed for the half of the reason [`MAX_WORK_FACTOR`] is, and for a second
-/// one that is worse. `age` calibrates a work factor by timing 2^10 rounds on
-/// the machine doing the encrypting and doubling *only while that measurement
-/// is under a second* — so the number is not merely machine-dependent, it has
-/// no floor. On anything CPU-starved enough that 2^10 rounds already take a
-/// second — a cgroup-quota'd CI container, a loaded laptop, a Pi — the loop
-/// never runs and the file is sealed at 1024 rounds, which is a GPU-hours
-/// problem for a passphrase a person chose. Nothing in the file, the report or
-/// [`unseal`] would have said so: the ceiling is checked and there was no floor
-/// to check against.
-///
-/// So the strength of an Export is decided here, once, rather than by whatever
-/// the machine happened to be doing that afternoon — which is also what the
-/// module doc means by sealing being arithmetic.
-///
-/// 19 rather than `age`'s own "roughly 1 second on a modern machine" guess of
-/// 18, because this is a file meant to outlive the machine and the cost is paid
-/// once per Export and once per Import. Slow hardware pays seconds for it; that
-/// is the right way round, and the alternative is the hardware deciding how well
-/// the backup is encrypted.
+/// Fixed for [`MAX_WORK_FACTOR`]'s reason and for one worse: `age`'s own
+/// calibration has no floor, so a CPU-starved machine seals at 2^10 in silence.
+/// 19 is above `age`'s second-of-work guess of 18, and is paid twice per file.
 const WORK_FACTOR: u8 = 19;
 
 /// What Perch spends sealing has to stay under what it will spend opening, or
-/// every Export it writes is one it refuses to read. Asserted where the two
-/// numbers are, and at compile time, because there is no run in which it is
-/// worth discovering.
+/// every Export it writes is one it refuses to read. At compile time, because
+/// there is no run in which it is worth discovering.
 const _: () = assert!(WORK_FACTOR < MAX_WORK_FACTOR);
 
 /// An Export, unsealed: what one `age` file holds before it is encrypted and
@@ -86,53 +49,30 @@ const _: () = assert!(WORK_FACTOR < MAX_WORK_FACTOR);
 pub struct Export {
     pub version: u32,
     /// The whole registry — every Account, its Alias, its Group, whether
-    /// Cycling may choose it, why it is Quarantined where it is, and what each
-    /// Group carries. Written whole rather than field by field, so a setting
-    /// added to a Group is in the next Export without anybody remembering to put
-    /// it there.
+    /// Cycling may choose it, why it is Quarantined, and what each Group
+    /// carries. Written whole rather than field by field, so a Setting added to
+    /// a Group is in the next Export without anybody putting it there.
     pub registry: Registry,
     /// Every Credential Perch holds, by the address of the Account it belongs
-    /// to. An Account whose stores held nothing is absent from here and still
-    /// present in the registry above — which is exactly how a Quarantined
-    /// Account travels, reason and all.
-    ///
-    /// Required, unlike the two maps either side of it. An empty map is a
-    /// meaningful Export — every Account Quarantined, which is a thing `gather`
-    /// can honestly write — and a *missing* key is a document that never said
-    /// anything about Credentials at all. Defaulted, it unsealed happily,
-    /// `place` put nothing anywhere, and the Import reported every Account
-    /// "restored without one" and exited 0: the partial restore
-    /// ADR the-holdings-go-out-sealed exists to prevent, wearing a success's
-    /// clothes.
+    /// to. Absent for an Account whose stores held nothing, which is how a
+    /// Quarantined Account travels — and required, unlike the two maps either
+    /// side: an empty map is a meaningful Export, and a missing key is a
+    /// document that never said anything about Credentials at all.
     pub credentials: BTreeMap<String, String>,
-    /// Each Account's own `.claude.json`, by the address of the Account it
-    /// belongs to.
+    /// Each Account's own `.claude.json`, by the address it belongs to.
     ///
-    /// A Profile holds two things, not one. The Credential is what cannot be
-    /// reconstructed, and this is what cannot be reconstructed *faithfully*:
-    /// Claude Code writes an `oauthAccount` block carrying fields beyond the
-    /// four the registry records, and a Switch prefers that block verbatim over
-    /// one Perch composes. An Export without it restores every Account into the
-    /// degraded state [`crate::adopt`] goes out of its way to keep the first
-    /// one out of. It is also what a Run Carries from, so a Profile arriving
-    /// without one meets the onboarding dialog on every single Run
-    /// (ADR everything-but-the-account).
+    /// The half of a Profile that cannot be reconstructed *faithfully*: Claude
+    /// Code's `oauthAccount` block carries fields beyond the registry's four,
+    /// and a Run Carries from it (ADR everything-but-the-account).
     #[serde(default)]
     pub identity_files: BTreeMap<String, String>,
 }
 
-/// Wiped when it goes out of scope, for the reason its [`Debug`] is written by
-/// hand: this is the one shape in Perch carrying every Credential on the machine
-/// at once, and it lives for the whole of an Export or an Import rather than for
-/// a call.
-///
-/// Only the two maps that hold secrets. The registry beside them is addresses,
-/// Aliases, Groups and figures — the thing an Export is *for* somebody reading,
-/// and nothing a core dump makes worse.
-///
-/// Hand-written rather than derived, because `ZeroizeOnDrop` would want every
-/// field to be `Zeroize` and `Registry` is not one, nor should it become one to
-/// satisfy a derive.
+/// Wiped when it goes out of scope: this is the one shape in Perch carrying
+/// every Credential on the machine at once, and it lives for the whole of an
+/// Export or an Import rather than for a call. Only the two maps that hold
+/// secrets. Hand-written rather than derived, because `ZeroizeOnDrop` would want
+/// `Registry` to be `Zeroize`, which is not what it should become for a derive.
 impl Drop for Export {
     fn drop(&mut self) {
         for held in self.credentials.values_mut() {
@@ -145,17 +85,11 @@ impl Drop for Export {
 }
 
 impl std::fmt::Debug for Export {
-    /// Written by hand for the reason [`crate::probe::Credential`] and
-    /// [`crate::credentials::StoredCredential`] are: a derived one would print
-    /// every field, and this is the one shape in Perch carrying every Credential
-    /// on the machine at once. `Export` derives `PartialEq` too, so a regressed
-    /// `assert_eq!` in the round-trip test would have printed the lot — and a
-    /// formatting specifier is all that stands between any of these values and a
-    /// log.
-    ///
-    /// Counts and addresses, never secrets. Which Accounts an Export holds a
-    /// Credential for is exactly the question somebody debugging one has, and it
-    /// is answerable without rendering a single token.
+    /// Counts and addresses, never secrets: which Accounts an Export holds a
+    /// Credential for is the question somebody debugging one has, and it is
+    /// answerable without rendering a token. By hand for the reason
+    /// [`crate::probe::Credential`] is — a derived one prints every field, and a
+    /// formatting specifier is all that stands between these values and a log.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("Export")
@@ -170,15 +104,8 @@ impl std::fmt::Debug for Export {
 /// Reads everything Perch holds: the registry it was handed, and the Credential
 /// in each Account's Credential Store.
 ///
-/// Nothing is Renewed and nothing is Rotated. An Export reads what is stored —
-/// a Renewal may Rotate, and a file that retired the refresh token of every
-/// Account on the way to recording it would have broken the machine it was taken
-/// from.
-///
-/// A store that is there and will not say what it holds stops the whole Export.
-/// Reporting an Account with no Credential where the truth is a locked keychain
-/// would write a file that restores to a machine of logins that do not work,
-/// and the user would find out on the day they needed it.
+/// Nothing is Renewed and nothing is Rotated. A store that will not say what it
+/// holds stops the Export rather than being recorded as an Account with none.
 pub fn gather(host: &dyn Host, registry: &Registry) -> Result<Export> {
     let mut credentials = BTreeMap::new();
     let mut identity_files = BTreeMap::new();
@@ -187,9 +114,8 @@ pub fn gather(host: &dyn Host, registry: &Registry) -> Result<Export> {
             credentials.insert(account.email().to_string(), credential);
         }
         // Unlike the Credential, an identity file that will not be read does not
-        // stop the Export. It is not a secret and it is not irreplaceable — an
-        // Import composes one from the Identity the registry carries — so the
-        // whole file is worth more than the fidelity of one Profile's copy.
+        // stop the Export: an Import composes one from the Identity the registry
+        // carries, so the whole file is worth more than one Profile's fidelity.
         if let Some(contents) = read_the_identity_file(host, account) {
             identity_files.insert(account.email().to_string(), contents);
         }
@@ -206,29 +132,16 @@ pub fn gather(host: &dyn Host, registry: &Registry) -> Result<Export> {
 /// The Credential to write for one Account: the live one where that is what the
 /// Account's Credential *is*, and the copy in its own Profile otherwise.
 ///
-/// For the active Account the live Credential is in the Default Profile, and it
-/// is ahead of the copy in its own Profile — which only catches up when a
-/// Switch away Captures it (ADR a-switch-is-written-down-first). A Renewal
-/// Rotates the live copy and Anthropic retires the refresh token it replaced,
-/// so reading the Profile copy for the one Account the user is actually working
-/// in wrote the single token in the file most likely to be dead already.
-/// `perch watcher run` Renews that Account every few minutes, which makes it
-/// the ordinary case rather than the unlucky one, and the user would find out
-/// on the day they needed it.
-///
-/// The live copy is only taken on the evidence [`crate::switch::capture`]
-/// requires before it copies that same Credential anywhere: the Default
-/// Profile's Identity naming this Account, or naming nobody. A live Credential
-/// that belongs to somebody else is not this Account's to export.
+/// A Renewal Rotates the live copy and Anthropic retires what it replaced, so
+/// the active Account's Profile copy is the token likeliest to be dead already.
 fn read_the_credential(
     host: &dyn Host,
     registry: &Registry,
     account: &Account,
 ) -> Result<Option<String>> {
-    // The live store first, and its own Profile as the fallback rather than the
+    // The live store first, and its own Profile as a fallback rather than the
     // answer: `claude /logout` empties the live store and leaves the Account
-    // active, and an Export that read nothing there and stopped would drop a
-    // Credential Perch is still holding perfectly well.
+    // active, holding a Credential Perch has perfectly well.
     if let Some(live) = the_live_store(host, registry, account)?
         && let Some(credential) = read_from(host, &live, account)?
     {
@@ -237,26 +150,19 @@ fn read_the_credential(
     read_from(host, &account.store(host)?, account)
 }
 
-/// The Default Profile, when what is live in it is this Account's Credential.
+/// The Default Profile, where what is live in it is this Account's Credential.
+///
+/// On the evidence [`crate::switch::capture`] wants before it copies that same
+/// Credential anywhere (ADR a-switch-is-written-down-first): an Identity naming
+/// this Account, or naming nobody. Somebody else's is not this one's to export.
 fn the_live_store(
     host: &dyn Host,
     registry: &Registry,
     account: &Account,
 ) -> Result<Option<crate::probe::Store>> {
-    // A *settled* registry, rather than `is_active`, which answers a Landing
-    // with the Account being **left** (ADR a-switch-is-written-down-first). A
-    // Switch killed between storing the arriving Credential and patching the
-    // Identity leaves exactly that state, and `is_active` then said yes for the
-    // leaving Account while the live store held the arriving one's Credential —
-    // so the Export filed one Account's refresh token under the other's address
-    // and dropped the genuine copy of it. Restoring that gives two Accounts one
-    // token, and the first Renewal Rotates it and kills the other.
-    //
-    // Every command that acts on the live Credential settles a Landing before
-    // reading who is active, and `perch holdings export` now does too. This is
-    // the belt to that brace, and it is the one that covers `perch holdings
-    // purge` — which reads the registry directly, and must not become the
-    // command an unaccountable Landing can stop.
+    // A *settled* registry rather than `is_active`, which during a Landing
+    // answers with the Account being **left** while the live store may hold the
+    // arriving one's — one token under two addresses, and a Renewal kills one.
     if !matches!(
         registry.active(),
         registry::Active::Settled(active) if registry::same_name(active, account.email())
@@ -264,18 +170,9 @@ fn the_live_store(
         return Ok(None);
     }
     let live = registry::the_default_profile(host)?;
-    // An Identity that is absent, or one that will not be read, is not evidence
-    // against — exactly as it is not in a Capture. Only an Identity that names
-    // somebody else is.
-    //
-    // A Claude Code that will not say its version is the same thing one step
-    // earlier: without it there is no Identity to read, so there is nothing
-    // that names somebody else. Propagated instead, it refused the whole Export
-    // — after the passphrase had been typed twice — on a machine where Claude
-    // Code had been uninstalled or a global install had been wiped, which is
-    // exactly the machine somebody is decommissioning when they run this. And
-    // it takes `perch holdings purge` with it, because the Export it offers
-    // first is one that stops the Purge when it fails.
+    // An Identity that is absent, or that will not be read, is not evidence
+    // against — only one naming somebody else is. Nor is a Claude Code that will
+    // not say its version: an Export is what a decommissioned machine runs.
     let somebody_else = matches!(
         crate::probe::Installed::probed(host)
             .and_then(|installed| crate::probe::read_identity(host, &live, &installed)),
@@ -297,8 +194,8 @@ fn read_from(
         ))
     })?;
     // Copied out of its `Zeroizing` rather than carried in it: `Export` wipes
-    // both of its maps in its own `Drop` above, and the wrapper this came in
-    // wipes the buffer it is leaving behind.
+    // both of its maps in its own `Drop`, and the wrapper this came in wipes the
+    // buffer it leaves behind.
     Ok(held.map(|held| held.credential.to_string()))
 }
 
@@ -315,18 +212,9 @@ impl Export {
 
     /// The Credential this Export carries for one Account, if it carries one.
     ///
-    /// Keyed the way an address is compared everywhere else —
-    /// `registry::same_name` folds case — rather than by the `BTreeMap` lookup
-    /// the key type offers. An Export is a file a person may write themselves
-    /// with `age -a -p` (ADR the-holdings-go-out-sealed), and one keying a
-    /// credential `ONE@example.com` beside an account entry `one@example.com`
-    /// is one where the two halves of an Import disagreed: placement found the
-    /// Credential and put it down, and the report afterwards said the Account
-    /// had been "restored without one" and sent its owner to `perch relogin`
-    /// for an Account that was fine.
-    ///
-    /// Here rather than at either caller, because the disagreement was the two
-    /// of them asking the same question two ways.
+    /// Keyed by `registry::same_name`, which folds case, rather than by the
+    /// `BTreeMap` lookup the key type offers: an Export may be written by hand
+    /// with `age -a -p`, and placement and the report have to agree.
     pub fn credential_for(&self, email: &str) -> Option<&String> {
         by_name(&self.credentials, email)
     }
@@ -359,33 +247,13 @@ fn by_name<'a>(held: &'a BTreeMap<String, String>, email: &str) -> Option<&'a St
 
 /// The `age` file, as the text that goes in it.
 ///
-/// **`age`, taken as a crate** (ADR a-crate-must-not-cost-a-seam): encryption
-/// sits on neither of Perch's seams — it is not an effect the Host port
-/// carries, and it is not shared with Claude Code, so nothing here has to be
-/// bug-compatible with anything. What decided it is that the result can be
-/// decrypted by the standard `age` command: this file is meant to outlive the
-/// machine it was written on, and one readable only by the tool that wrote it
-/// is a worse backup than one whose format somebody else maintains.
-///
-/// **Armored**, which is `age`'s own text encoding of the same file and is read
-/// back by the same `age -d`. Two things fall out of it and both are wanted: the
-/// result is a `str`, so it goes through the Host port's private write like
-/// every other file Perch creates rather than needing a second, bytes-shaped way
-/// to write one; and an Export is something a person may want to paste into a
-/// password manager, which is a thing you can do with text.
+/// **Armored**, which is `age`'s own text encoding of the same file: the result
+/// is a `str`, so it goes through the Host port's private write like every other
+/// file Perch creates rather than through a second, bytes-shaped one.
 pub fn seal(export: &Export, passphrase: &str) -> Result<String> {
-    // Wiped before it is freed. This is every Credential on the machine in
-    // cleartext, and it is the one moment they are all in one buffer — freed
-    // heap outlives the process in a core dump, a swap file or a hibernation
-    // image, and a plain overwrite of memory nothing reads again is something a
-    // compiler may elide. `Zeroizing` takes the `Vec` rather than copying it, so
-    // what is wiped is the buffer `to_vec` produced.
-    // Serialized *into* a buffer this function owns rather than handed one
-    // `to_vec` grew for itself. `Vec` grows by allocating a bigger block,
-    // copying, and freeing the old one — so a document that doubles four times
-    // leaves four buffers in freed heap, each holding a prefix of every
-    // Credential on the machine, and `Zeroizing` wipes only the last of them.
-    // Which is the very thing the paragraph above says this is here to prevent.
+    // Serialized into a buffer this function owns and wipes. This is every
+    // Credential on the machine in cleartext, and freed heap outlives the
+    // process in a core dump, a swap file or a hibernation image.
     let mut plain = Wiping::with_room_for(export);
     serde_json::to_writer(&mut plain, export)
         .map_err(|err| PerchError::Other(format!("could not serialize the Export: {err}")))?;
@@ -396,11 +264,9 @@ pub fn seal(export: &Export, passphrase: &str) -> Result<String> {
 
 /// A buffer that wipes whatever it abandons on the way to being big enough.
 ///
-/// The one thing a plain `Zeroizing<Vec<u8>>` cannot promise: it wipes the
-/// buffer it is *holding* when it drops, and says nothing about the ones the
-/// `Vec` outgrew and freed along the way. Every one of those holds a prefix of
-/// the document, and this document is every Credential on the machine in
-/// cleartext.
+/// The one thing a plain `Zeroizing<Vec<u8>>` cannot promise: it wipes the buffer
+/// it is *holding* and says nothing about the ones the `Vec` outgrew and freed,
+/// each of which holds a prefix of every Credential on the machine.
 struct Wiping {
     held: Zeroizing<Vec<u8>>,
 }
@@ -445,48 +311,24 @@ impl std::io::Write for Wiping {
 /// The other direction: what an `age` file holds, given the passphrase it was
 /// sealed with.
 ///
-/// Here rather than with whatever comes to read one, because it is the only
-/// thing that can say what [`seal`] wrote: a file nothing can open is a file
-/// nothing can assert about, and "the whole registry and every Credential are in
-/// there" is the whole of what an Export promises.
-///
-/// A wrong passphrase is told apart from a file that is not an Export at all,
-/// because the two have different answers — one is worth typing again and the
-/// other is not. Two more answers are worth as much and are told apart for the
-/// same reason: an `age` file that was never a passphrase one, and one this
-/// machine will not spend the work to open.
+/// Four ways it can refuse, told apart because they ask for four different next
+/// moves — see [`would_not_open`].
 pub fn unseal(sealed: &str, passphrase: &str) -> Result<Export> {
     let mut identity = age::scrypt::Identity::new(secret(passphrase));
 
-    // The bound `age` picks on its own is measured on the machine doing the
-    // *decryption* — about a second of work here, plus four doublings. So an
-    // Export written on a fast desktop and opened on a slow laptop, or inside a
-    // CPU-limited container, was refused for no reason but the pair of machines
-    // it traveled between. That is the one property
-    // ADR the-holdings-go-out-sealed is about: this file is meant to outlive
-    // the machine that wrote it, so what will open it cannot be a function of
-    // the machine that opens it. 22 is where `age`'s own guidance tops out, and
-    // is above `WORK_FACTOR`, which is what `seal` spends — pinned there for
-    // the same reason, and for the floor `age`'s calibration does not have.
+    // Fixed rather than left to `age`, whose own bound is measured on the
+    // machine doing the *decryption*: left alone, whether an Export opens is a
+    // question about the pair of machines it traveled between.
     identity.set_max_work_factor(MAX_WORK_FACTOR);
 
-    // The same buffer coming the other way, and wiped for the same reason.
-    //
     // Only the buffer handed back, unlike `seal`, which owns the one it fills:
-    // whatever `age::decrypt` grew and freed on the way to producing this is
-    // inside that crate and not Perch's to wipe. Said rather than left implied,
-    // because the two directions look symmetrical and are not.
+    // whatever `age::decrypt` grew and freed on the way is inside that crate and
+    // not Perch's to wipe. The two directions look symmetrical and are not.
     let plain = Zeroizing::new(age::decrypt(&identity, sealed.as_bytes()).map_err(would_not_open)?);
 
-    // Both versions first, off a shape that is only the versions, and before
-    // the document is read as an Export. This is the order the guards need to
-    // be any use at all: a newer Perch is exactly the thing that writes a value
-    // this build has no variant for — a Strategy it added, a Quarantine reason —
-    // and reading the document first fails on that with serde's own words. The
-    // user is then told their *backup file is unreadable*, about a file that is
-    // perfectly well-formed, on the day the machine it would have restored is
-    // gone. `registry::load` gets this right and says so; this did not, so both
-    // version fields were dead in the only case they were written for.
+    // Both versions first, off a shape that is only the versions: a newer Perch
+    // writes values this build has no variant for, and serde's words about one
+    // say the backup is unreadable when it is perfectly well-formed.
     refuse_a_newer_perch(&plain)?;
 
     serde_json::from_slice(&plain).map_err(|err| PerchError::Malformed {
@@ -495,34 +337,27 @@ pub fn unseal(sealed: &str, passphrase: &str) -> Result<Export> {
     })
 }
 
-/// Why `age` would not open the file, said as something the reader can act on.
-///
-/// Four answers rather than two, because they ask for four different next
-/// moves: type it again, stop typing because no passphrase will ever open this
-/// one, find a machine with more to spend, and this is not an Export.
-///
-/// Apart from [`unseal`] so it can be asserted on directly. Two of these arrive
-/// only from files that cost seconds of scrypt to manufacture, and a refusal
-/// nothing can afford to test is a refusal that quietly stops being true.
+/// Why `age` would not open the file, as something the reader can act on: type
+/// it again, stop because no passphrase will open this one, find a machine with
+/// more to spend, or this was never an Export. Apart from [`unseal`] to be
+/// asserted on directly, two arriving only from files costing seconds of scrypt.
 fn would_not_open(err: age::DecryptError) -> PerchError {
     match err {
         // The only answer that genuinely means "that was the wrong passphrase".
         age::DecryptError::DecryptionFailed => PerchError::Invalid(
             "That is not the passphrase this file was written with.".to_string(),
         ),
-        // An `age` file, but one encrypted to a key rather than to a passphrase
-        // — `age -r ...` rather than `age -p`. Said as itself, because told as a
-        // wrong passphrase it invites somebody to retype forever one that was
-        // never involved.
+        // An `age` file encrypted to a key rather than to a passphrase — `age
+        // -r` rather than `age -p`. Told as a wrong passphrase, it invites
+        // somebody to retype forever one that was never involved.
         age::DecryptError::NoMatchingKeys => PerchError::Invalid(
             "This is an `age` file, but it was not written with a passphrase, so \
              no passphrase will open it. An Export always is."
                 .to_string(),
         ),
-        // The file is intact and the passphrase may well be right. Nothing here
+        // The file is intact and the passphrase may well be right: nothing here
         // is worth typing again, and everything here is worth trying on a
-        // machine with more to spend — which is the point of a format something
-        // other than Perch maintains.
+        // machine with more to spend.
         age::DecryptError::ExcessiveWork { required, .. } => PerchError::Invalid(format!(
             "This file was sealed with more work than Perch will spend opening \
              one (2^{required} scrypt rounds, against a ceiling of \
@@ -530,16 +365,9 @@ fn would_not_open(err: age::DecryptError) -> PerchError {
              passphrase is not in question — `age -d` opens it where this will \
              not."
         )),
-        // This *is* the Export, and it did not come through intact: a header
-        // whose MAC no longer checks out, or a payload that stops early. A
-        // backup copied off a filling disk, an interrupted transfer, a file
-        // half-pasted out of a password manager.
-        //
-        // Its own answer rather than the catch-all, which told somebody holding
-        // a damaged copy of the right file to go and look for a different one.
-        // That is the sentence that matters most on the one day this is read —
-        // the day the machine it was taken from is gone — and it was the answer
-        // that is definitely wrong.
+        // This *is* the Export and it did not come through intact: a header
+        // whose MAC fails, or a payload that stops early. Its own answer, or a
+        // damaged copy of the right file sends somebody looking for another.
         damaged @ (age::DecryptError::InvalidMac | age::DecryptError::Io(_)) => {
             PerchError::Invalid(format!(
                 "This is an `age` file and it did not come through intact \
@@ -554,10 +382,8 @@ fn would_not_open(err: age::DecryptError) -> PerchError {
 /// The two versions an Export carries, read on their own.
 ///
 /// A shape holding one number deserializes out of any JSON object that carries
-/// it, whatever else the object holds and whatever the rest of it means — which
-/// is the whole point. An absent version is "it does not say", which is not a
-/// claim about a newer Perch: the caller goes on to read the document properly
-/// and reports what it finds there.
+/// it, whatever else the object holds, which is the point. An absent version is
+/// "it does not say", and the caller reads the document properly next.
 fn refuse_a_newer_perch(plain: &[u8]) -> Result<()> {
     #[derive(Deserialize)]
     struct JustTheVersion {
@@ -613,12 +439,8 @@ fn secret(passphrase: &str) -> SecretString {
 
 #[cfg(test)]
 mod tests {
-    /// The buffer an Export is serialized into grows by hand, wiping what it
-    /// leaves behind — so a document bigger than the room reserved for it is
-    /// still one buffer at the end rather than a trail of them in freed heap.
-    ///
     /// Driven past the reserve deliberately: the ordinary Export never grows,
-    /// which is exactly why the growing path is the one nothing would otherwise
+    /// which is why the growing path is the one nothing would otherwise
     /// exercise.
     #[test]
     fn a_document_larger_than_the_buffer_reserved_for_it_is_still_written_whole() {
@@ -717,15 +539,11 @@ mod tests {
         }
     }
 
-    /// The whole of what an Export promises: what went in comes back out, and
-    /// what it traveled in is a file the standard `age` command reads.
-    ///
-    /// Two things say the second half. The armor header is what `age -d`
-    /// recognizes the text encoding by, and the recipient is scrypt — which is
-    /// what makes it a file `age` opens by *asking for a passphrase* rather than
-    /// one it wants a key file for. Verified against `age` 1.3.1 by hand, which
-    /// is as far as a test that must run on a machine with no `age` installed
-    /// can carry it.
+    /// Two things say the `age` half. The armor header is what `age -d`
+    /// recognizes the text encoding by, and the recipient being scrypt is what
+    /// makes it a file `age` opens by *asking for a passphrase*. Verified against
+    /// `age` 1.3.1 by hand, which is as far as a test on a machine with no `age`
+    /// installed can carry it.
     #[test]
     fn an_export_survives_being_sealed_and_opened_again() {
         let export = an_export();
@@ -750,15 +568,6 @@ mod tests {
         assert_eq!(unseal(&sealed, PASSPHRASE).expect("it opens"), export);
     }
 
-    /// What an Export is encrypted *with*, which nothing was asserting.
-    ///
-    /// Left to `age`, the work factor is measured on the machine doing the
-    /// sealing: 2^10 rounds timed once, then doubled only while that measurement
-    /// stays under a second. A machine slow enough that 2^10 already takes a
-    /// second seals at 2^10 — and since `unseal` checks only a ceiling, such a
-    /// file opens in silence. The strength of every backup Perch writes was a
-    /// property of whatever else the CPU was doing at the time.
-    ///
     /// Asserted through the ceiling, because that is the one place `age` will
     /// say a number out loud: opened against a maximum one below what `seal`
     /// spends, the refusal names the work the file actually required.
@@ -783,10 +592,9 @@ mod tests {
     }
 
     /// The one shape in Perch carrying every Credential on the machine at once,
-    /// and it derives `PartialEq` — so the `assert_eq!` above would have printed
-    /// the lot the day it regressed. `Credential` and `StoredCredential` both
-    /// write `Debug` by hand for exactly this reason: a formatting specifier is
-    /// all that stands between any of these values and a log.
+    /// and it derives `PartialEq` — so an `assert_eq!` that fails prints whatever
+    /// `Debug` renders. `Credential` and `StoredCredential` write theirs by hand
+    /// for the same reason.
     #[test]
     fn what_an_export_holds_is_never_rendered_by_debugging_it() {
         let rendered = format!("{:?}", an_export());
@@ -804,10 +612,8 @@ mod tests {
 
     /// A document that says nothing about Credentials is not an Export of a
     /// machine whose Accounts were all Quarantined — that one says so, with an
-    /// empty map. Read as the same thing, it unsealed happily, placed nothing,
-    /// and reported every Account restored without a Credential on the way to
-    /// exit 0: the partial restore the file exists to prevent, wearing a
-    /// success's clothes, on the day the machine it would have restored is gone.
+    /// empty map. Read as the same thing, it places nothing and reports every
+    /// Account restored without a Credential on the way to exit 0.
     #[test]
     fn a_document_that_says_nothing_about_credentials_is_not_an_export() {
         let mut document = serde_json::to_value(an_export()).expect("it serializes");
@@ -826,10 +632,9 @@ mod tests {
             "and it names what is missing: {refused}"
         );
 
-        // The neighboring shape that *is* meaningful, and still opens. Built by
-        // emptying rather than by `..an_export()`, because an `Export` wipes
-        // itself when it is dropped and a type with a `Drop` cannot have its
-        // fields moved out.
+        // The neighboring shape that *is* meaningful, and still opens. Emptied
+        // rather than built with `..an_export()`, because a type with a `Drop`
+        // cannot have its fields moved out.
         let mut none_kept = an_export();
         none_kept.credentials = BTreeMap::new();
         let sealed = seal(&none_kept, PASSPHRASE).expect("it seals");
@@ -839,10 +644,9 @@ mod tests {
         );
     }
 
-    /// A forgotten passphrase means the Export is gone, and re-login is the
-    /// only path back — the trade ADR the-holdings-go-out-sealed made
-    /// deliberately. What matters here is that it is *said* rather than
-    /// reported as a corrupt file.
+    /// A forgotten passphrase means the Export is gone and re-login is the only
+    /// path back. What matters here is that it is *said*, rather than reported
+    /// as a corrupt file.
     #[test]
     fn the_wrong_passphrase_opens_nothing_and_says_which_failure_it_is() {
         let sealed = seal(&an_export(), PASSPHRASE).expect("it seals");
@@ -854,14 +658,11 @@ mod tests {
         assert!(refused.to_string().contains("`age` file"), "{refused}");
     }
 
-    /// The Export somebody has, damaged. The whole of what an Export is for is
-    /// the day the machine it was taken from is gone, and on that day being
-    /// told to go and find a different file — because this one is "not an `age`
-    /// file" — is the one answer that is definitely wrong.
-    ///
-    /// Sealed and then cut, rather than asserted against the mapping: a payload
-    /// that stops early is the ordinary way an Export is damaged, and it costs
-    /// one scrypt to produce honestly.
+    /// Being told to go and find a different file — because this one is "not an
+    /// `age` file" — is the one answer that is definitely wrong here. Sealed and
+    /// then cut rather than asserted against the mapping: a payload that stops
+    /// early is the ordinary way an Export is damaged, and costs one scrypt to
+    /// produce honestly.
     #[test]
     fn an_export_that_did_not_come_through_intact_is_said_to_be_the_export() {
         let sealed = seal(&an_export(), PASSPHRASE).expect("it seals");
@@ -884,13 +685,9 @@ mod tests {
         );
     }
 
-    /// The two refusals that arrive at the worst possible moment — the day the
-    /// machine the Export would have restored is gone — and both of which used
-    /// to be reported as something they are not.
-    ///
     /// Asserted against the mapping rather than against a sealed file, because
-    /// manufacturing either one costs seconds of scrypt: an Export encrypted to
-    /// an X25519 recipient, and one sealed at a work factor above the ceiling.
+    /// manufacturing either costs seconds of scrypt: an Export encrypted to an
+    /// X25519 recipient, and one sealed above the ceiling.
     #[test]
     fn a_file_that_is_intact_is_never_reported_as_a_wrong_passphrase() {
         let no_passphrase = would_not_open(age::DecryptError::NoMatchingKeys);
@@ -944,9 +741,8 @@ mod tests {
         assert!(back.registry.group("work").is_some());
     }
 
-    /// An Export written by a build that understands more than this one is
-    /// refused rather than half-read. Nothing has ever written a version other
-    /// than the current one — this is about the future, not the past.
+    /// Nothing has ever written a version other than the current one: this is
+    /// about a machine holding two builds, not about the past.
     #[test]
     fn an_export_from_a_newer_perch_is_refused_rather_than_guessed_at() {
         let mut ahead = an_export();
@@ -957,16 +753,10 @@ mod tests {
         assert!(refused.to_string().contains("Upgrade Perch"), "{refused}");
     }
 
-    /// And refused as *that*, rather than as a corrupt file.
-    ///
-    /// The test above builds the newer Export out of this build's own shape and
-    /// bumps the integer, which is the one way the case never actually arrives.
-    /// A newer Perch is precisely the thing that writes a value this build has
-    /// no variant for — a Strategy it added, a Quarantine reason — so what turns
-    /// up is a document that is perfectly valid JSON and will not deserialize
-    /// here. Read as an `Export` first, that is reported as a malformed file:
-    /// the user is told their backup is corrupt, on the day the machine it
-    /// would have restored is gone.
+    /// The test above bumps an integer on this build's own shape, which is the
+    /// one way the case never arrives. A newer Perch writes a value this build
+    /// has no variant for — a Strategy it added, a Quarantine reason — so what
+    /// turns up is perfectly valid JSON that will not deserialize here.
     #[test]
     fn an_export_this_build_cannot_parse_is_still_refused_as_a_newer_perchs() {
         let ahead = format!(

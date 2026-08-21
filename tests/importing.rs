@@ -57,16 +57,9 @@ fn registry_on(host: &FakeHost) -> Option<Registry> {
     perch::registry::load(host).expect("whatever is there is readable")
 }
 
-/// The guard above asks whether every Credential in the file is listed, and it
-/// asks with `registry::same_name`, which folds case. Placement looked the same
-/// keys up in a `BTreeMap`, which does not.
-///
-/// So an Export spelling a credential key `SOMEONE@example.com` beside an
-/// account entry `someone@example.com` passed the check — the key *is* listed —
-/// and then missed at placement, leaving that Account with no Profile and no
-/// Credential while the Import reported success. That is exactly the partial
-/// restore the guard exists to prevent, arriving through the one comparison it
-/// did not share with the placement it guards.
+/// The unlisted-Credential guard folds case and a `BTreeMap` lookup does not, so
+/// a key spelled `SOMEONE@example.com` beside an account entry
+/// `someone@example.com` is listed by the one and missed by the other.
 #[test]
 fn a_credential_keyed_in_another_case_is_placed_rather_than_silently_dropped() {
     let mut export =
@@ -92,11 +85,9 @@ fn a_credential_keyed_in_another_case_is_placed_rather_than_silently_dropped() {
         "an Account the file holds a Credential for gets it, whichever way the \
          key was spelled"
     );
-    // The report asked the same question a third way, and got a third answer:
-    // `without_a_credential` was the one caller still doing a lookup by key, so
-    // an Account whose Credential had just been placed was announced as
-    // "restored without one" and its owner sent to `perch relogin` for an
-    // Account that was fine.
+    // The report asks the same question a third way, so a lookup by key here
+    // announces an Account whose Credential has just been placed as "restored
+    // without one" and sends its owner to `perch relogin` for nothing.
     assert!(
         !said.contains("held no Credential"),
         "and the report says so, rather than sending somebody to repair an \
@@ -104,19 +95,9 @@ fn a_credential_keyed_in_another_case_is_placed_rather_than_silently_dropped() {
     );
 }
 
-/// **The terminal going away after the Import lands does not un-import it.**
-///
 /// `report` is the last fallible thing an Import does, and everything before it
-/// has already succeeded: every Credential is placed and the registry is
-/// written. A closed pty, a `SIGHUP`, a `head` that stopped reading — any of
-/// them fails that `say`, and raised bare it read as an Import that had not
-/// happened. The obvious next move then meets
-/// `refuse_a_machine_that_is_not_empty`, whose advice is that `perch holdings
-/// purge` "gives the machine back and is what makes room" — on a machine that
-/// is already restored.
-///
-/// `commands::export` carries `landed` for this and `purge::still_standing`
-/// closes the same gap; an Import was the one of the three that never got it.
+/// has succeeded. Raised bare, the obvious next move meets
+/// `refuse_a_machine_that_is_not_empty`, which advises a Purge.
 #[test]
 fn a_terminal_that_goes_away_after_the_import_lands_says_it_landed() {
     /// Writes until the Import's own report starts, and then is not there.
@@ -157,16 +138,9 @@ fn a_terminal_that_goes_away_after_the_import_lands_says_it_landed() {
     assert!(credential_of(&host, EMAIL).is_some(), "Credentials and all");
 }
 
-/// The fourth command with an unbounded prompt under the registry lock, and
-/// the one that skipped the guard the other three take.
-///
-/// A passphrase is the one wait in Perch with no bound on it, so it is the one
-/// place a hold can go stale under a command that is behaving perfectly.
-/// Another `perch` may then have claimed the abandoned lock and put an Account
-/// down — and `import::place` writes every Credential the file holds before
-/// `registry::save` ever asks. Finding out at the save means finding out after
-/// the rollback has deleted the Profile and the keychain item that other Perch
-/// just created, under a line reading "Nothing was imported."
+/// A passphrase is the one wait in Perch with no bound on it, so it is where a
+/// hold goes stale under a command behaving perfectly — and finding out at the
+/// save is finding out after the rollback has deleted somebody else's Profile.
 #[test]
 fn an_import_whose_registry_went_stale_while_the_passphrase_was_typed_writes_nothing() {
     let host = a_new_machine_holding(&an_export_of_a_whole_machine())
@@ -196,8 +170,6 @@ fn an_import_whose_registry_went_stale_while_the_passphrase_was_typed_writes_not
     }
 }
 
-/// The whole of what the pair promises: a new machine arrives with the setup the
-/// old one had rather than a pile of nameless logins.
 #[test]
 fn an_import_restores_every_account_credential_alias_group_and_rule() {
     let host = a_new_machine_holding(&an_export_of_a_whole_machine());
@@ -236,8 +208,6 @@ fn an_import_restores_every_account_credential_alias_group_and_rule() {
     assert!(printed.contains("3 Accounts"), "{printed}");
 }
 
-/// A broken login somebody still owns travels with the reason it broke, so the
-/// machine it lands on says what happened rather than that Perch lost something.
 #[test]
 fn a_quarantined_account_imports_as_quarantined_with_its_reason() {
     let host = a_new_machine_holding(&an_export_of_a_whole_machine());
@@ -251,8 +221,7 @@ fn a_quarantined_account_imports_as_quarantined_with_its_reason() {
 }
 
 /// The file records a Credential against an email address and nothing about the
-/// store it came out of, so an Export taken on a Mac restores into files on
-/// Linux — and the machine it came from is none the wiser either way.
+/// store it came out of.
 #[test]
 fn a_credential_lands_in_the_store_this_machines_claude_code_would_use() {
     let sealed = an_export_of_a_whole_machine();
@@ -273,15 +242,9 @@ fn a_credential_lands_in_the_store_this_machines_claude_code_would_use() {
     );
 }
 
-/// Being active is a claim about which Credential is in this machine's Default
-/// Profile, and an Import puts none there. Whatever Claude Code was logged in as
-/// goes on running until the user Switches.
-///
-/// Asserted as the two data it is about, and no longer as a `perch switch` in
-/// the report: nothing arrives active on any Import, so pointing at the Switch
-/// was Perch pre-empting a disappointment on every run of the command
-/// (ADR perch-says-what-it-did). The guide is where an Import is described, and
-/// it says so.
+/// Asserted as the two data it is about rather than as a `perch switch` in the
+/// report: nothing arrives active on any Import, so pointing at the Switch is
+/// Perch pre-empting a disappointment on every run (ADR perch-says-what-it-did).
 #[test]
 fn nothing_is_made_active_by_an_import() {
     let sealed = an_export_of_a_whole_machine();
@@ -301,12 +264,9 @@ fn nothing_is_made_active_by_an_import() {
     );
 }
 
-/// The same rule, for the other claim a registry makes about right now.
-///
-/// `checks` is what a `perch watcher check` on the *other* machine did — when
-/// it Switched — and the cooldown is measured from it. Carried across, an
-/// Export taken this morning has the first check on the new machine reporting
-/// `cooling` on the strength of something that happened somewhere else.
+/// `checks` is what a `perch watcher check` on the *other* machine did, and the
+/// cooldown is measured from it — so carried across, an Export taken this
+/// morning has a new machine's first check reporting `cooling`.
 #[test]
 fn no_watcher_has_run_here_yet_however_recently_one_ran_where_the_export_was_taken() {
     // A machine whose scheduled check Switched a moment ago, exported.
@@ -336,10 +296,6 @@ fn no_watcher_has_run_here_yet_however_recently_one_ran_where_the_export_was_tak
     );
 }
 
-/// Every other command reads the registry through adoption, which takes the
-/// existing Claude Code login over the first time Perch runs. An Import that did
-/// that would make the machine non-empty on the way to refusing itself for being
-/// non-empty.
 #[test]
 fn an_import_onto_a_logged_in_machine_adopts_nothing() {
     let sealed = an_export_of_a_whole_machine();
@@ -362,10 +318,6 @@ fn an_import_onto_a_logged_in_machine_adopts_nothing() {
     assert_eq!(*registry.active(), Active::Nobody);
 }
 
-/// Merging is where every hard case lives — the same Account on both sides one
-/// Rotation apart, an Alias meaning different Accounts on two machines. That is
-/// a real feature and it is not this one, so the refusal names the command that
-/// makes room.
 #[test]
 fn a_machine_that_already_holds_an_account_is_refused_and_told_about_purge() {
     let sealed = an_export_of_a_whole_machine();
@@ -395,8 +347,6 @@ fn a_machine_that_already_holds_an_account_is_refused_and_told_about_purge() {
     );
 }
 
-/// A wrong passphrase means the file never opened, and a file that never opened
-/// cannot have restored anything.
 #[test]
 fn a_wrong_passphrase_fails_before_anything_is_written() {
     let sealed = an_export_of_a_whole_machine();
@@ -419,8 +369,6 @@ fn a_wrong_passphrase_fails_before_anything_is_written() {
     );
 }
 
-/// Typing nothing is the same skip an optional passphrase would have been, and
-/// end of input is a pipe that closed rather than somebody's answer.
 #[test]
 fn an_empty_passphrase_and_end_of_input_both_restore_nothing() {
     let sealed = an_export_of_a_whole_machine();
@@ -436,10 +384,8 @@ fn an_empty_passphrase_and_end_of_input_both_restore_nothing() {
     }
 }
 
-/// The same rule the Export was written under: a passphrase passed as an
-/// argument sits in the process table for anything on the machine to read, so
-/// there is no flag and the refusal names the terminal rather than a way round
-/// it.
+/// A passphrase passed as an argument sits in the process table for anything on
+/// the machine to read, so there is no flag to name instead of the terminal.
 #[test]
 fn without_a_terminal_the_import_is_refused_and_says_what_is_needed() {
     let sealed = an_export_of_a_whole_machine();
@@ -456,8 +402,6 @@ fn without_a_terminal_the_import_is_refused_and_says_what_is_needed() {
     assert_eq!(registry_on(&host), None);
 }
 
-/// A path that is a typo is answered by naming the path, rather than by advice
-/// about a machine the user was never asking about.
 #[test]
 fn a_path_that_holds_nothing_is_said_rather_than_guessed_at() {
     let host = machine_with_claude_code().with_secrets(&[PASSPHRASE]);
@@ -469,8 +413,6 @@ fn a_path_that_holds_nothing_is_said_rather_than_guessed_at() {
     assert!(refused.to_string().contains("typo.age"), "{refused}");
 }
 
-/// Something that is not an Export at all is told apart from a passphrase that
-/// is wrong, because one of the two is worth typing again and the other is not.
 #[test]
 fn a_file_that_is_not_an_export_is_refused_as_one_rather_than_as_a_bad_passphrase() {
     let host = machine_with_claude_code()
@@ -484,15 +426,9 @@ fn a_file_that_is_not_an_export_is_refused_as_one_rather_than_as_a_bad_passphras
     assert_eq!(registry_on(&host), None);
 }
 
-/// A binary `age` file is refused as the encoding it is, not as a byte stream
-/// that would not decode.
-///
-/// An Export is `age`'s *armored* form — its text encoding — which is what lets
-/// it go through the Host port's ordinary private write. So the read is a read
-/// of text, and plain `age -p` writes binary: the file failed UTF-8 decoding
-/// before `unseal` saw it, and came back as "stream did not contain valid
-/// UTF-8". The person who meets that is somebody who took their own backup with
-/// `age -p`, reading it on the day the machine it would have restored is gone.
+/// An Export is `age`'s *armored* form, so the read is a read of text and plain
+/// `age -p` writes binary — which fails UTF-8 decoding before `unseal` sees it.
+/// Whoever meets it took their own backup with `age -p`.
 #[test]
 fn a_binary_age_file_is_refused_as_one_that_has_to_be_armored() {
     let host = machine_with_claude_code()
@@ -518,9 +454,6 @@ fn a_binary_age_file_is_refused_as_one_that_has_to_be_armored() {
     assert_eq!(registry_on(&host), None);
 }
 
-/// An Import that fails part way leaves nothing behind: a machine holding some
-/// of an Export is the partial restore the file exists to prevent, wearing an
-/// accident's clothes.
 #[test]
 fn an_import_that_fails_part_way_takes_back_what_it_had_already_placed() {
     let sealed = an_export_of_a_whole_machine();
@@ -548,17 +481,9 @@ fn an_import_that_fails_part_way_takes_back_what_it_had_already_placed() {
     }
 }
 
-/// And it takes back what it *made*, which is not the same as what it wrote
-/// into.
-///
-/// An Import refuses a machine holding an Account, and that was read one step
-/// wider than it goes: it is the registry that has to be empty, and a Profile
-/// directory nothing names outlives every command that would have named it — a
-/// `perch add` that died at the browser step leaves one, and so does a Purge
-/// that could not empty a store. The rollback deleted it along with its own,
-/// and on macOS the keychain item outside it that only that directory's name
-/// could still reach went with it: a live refresh token for a login nobody was
-/// importing.
+/// It is the *registry* an Import needs empty, and a Profile directory nothing
+/// names outlives every command that would have named it — so on macOS deleting
+/// one takes the only name reaching a live Credential beside it.
 #[test]
 fn a_rollback_leaves_a_profile_that_was_already_on_the_machine_where_it_is() {
     let sealed = an_export_of_a_whole_machine();
@@ -567,9 +492,8 @@ fn a_rollback_leaves_a_profile_that_was_already_on_the_machine_where_it_is() {
         .with_file(AT, &sealed)
         .with_secrets(&[PASSPHRASE]);
     // A Profile from a `perch add` that never finished: a directory holding a
-    // Credential, and a registry that has never named it. The first of the
-    // three, so the Import has written into it by the time the second one
-    // fails.
+    // Credential and a registry that never named it. The first of the three, so
+    // the Import has written into it by the time the second one fails.
     let orphan = store_of(&host, EMAIL);
     let host = host.with_file(&orphan.credentials_file, CREDENTIAL);
     let made = store_of(&host, SECOND_EMAIL);
@@ -596,10 +520,8 @@ fn a_rollback_leaves_a_profile_that_was_already_on_the_machine_where_it_is() {
     );
 }
 
-/// The other end of the same promise, and the worse half of it: every Credential
-/// is already in a store by the time the registry is written, so a registry that
-/// will not go down would otherwise leave a machine full of Profiles no command
-/// could name.
+/// Every Credential is already in a store by the time the registry is written,
+/// so a registry that will not go down leaves Profiles no command could name.
 #[test]
 fn a_registry_that_cannot_be_written_takes_every_profile_back_out_with_it() {
     let sealed = an_export_of_a_whole_machine();
@@ -625,9 +547,6 @@ fn a_registry_that_cannot_be_written_takes_every_profile_back_out_with_it() {
     }
 }
 
-/// Both of Perch's formats are versioned, and both guards are about the future:
-/// the machine holding two builds, where the wrong answer is a file half-read
-/// rather than refused.
 #[test]
 fn an_export_or_a_registry_from_a_newer_perch_is_refused_rather_than_guessed_at() {
     let opened = perch::export::unseal(&an_export_of_a_whole_machine(), PASSPHRASE)
@@ -656,9 +575,6 @@ fn an_export_or_a_registry_from_a_newer_perch_is_refused_rather_than_guessed_at(
     }
 }
 
-/// An Account the Export carries no Credential for is still restored — one Perch
-/// has forgotten is worse news than one that needs logging in again — and the
-/// command says which, with the command that ends it.
 #[test]
 fn an_account_the_export_held_no_credential_for_is_restored_and_said_so() {
     let host = machine_with_three_accounts();
@@ -681,14 +597,9 @@ fn an_account_the_export_held_no_credential_for_is_restored_and_said_so() {
     );
 }
 
-/// The same with more than one, which nothing was asking.
-///
-/// The sentence agreed its noun with the whole list — "the Accounts were
-/// restored without one" — and then closed with `how_to_repair(bare[0])`, which
-/// says "`perch relogin a@example.com` logs *it* in again". So somebody who had
-/// just restored three credential-less Accounts was told to repair the first.
-/// The mirror of this in `perch holdings export` gets it right by naming none
-/// of them.
+/// A sentence agreeing its noun with the whole list and then closing with
+/// `how_to_repair(bare[0])` tells somebody who restored three credential-less
+/// Accounts to repair the first. The Export's mirror names none of them.
 #[test]
 fn an_import_that_restored_several_without_credentials_does_not_name_one_of_them() {
     let host = machine_with_three_accounts();
@@ -721,8 +632,6 @@ fn an_import_that_restored_several_without_credentials_does_not_name_one_of_them
     }
 }
 
-/// Not the passphrase, and not a Credential. The prompts and one line naming
-/// what was restored are what a command owes; nothing the file holds is.
 #[test]
 fn nothing_the_export_holds_reaches_standard_output() {
     let host = a_new_machine_holding(&an_export_of_a_whole_machine());
@@ -741,10 +650,9 @@ fn nothing_the_export_holds_reaches_standard_output() {
             "`{secret}` was printed: {printed}"
         );
     }
-    // One line, asserted whole (ADR perch-says-what-it-did): how many and from
-    // where. That nothing arrives active, and that an Import carries the whole
-    // registry, are true of every Import — so the guide is where they are
-    // established rather than here (ADR perch-says-what-it-did).
+    // One line, asserted whole: how many, and from where. That nothing arrives
+    // active and that an Import carries the whole registry are true of every
+    // Import, so the guide establishes them rather than this line.
     assert_eq!(
         printed.trim_end().lines().last(),
         Some(format!("Imported 3 Accounts from {AT}.").as_str()),
@@ -752,9 +660,8 @@ fn nothing_the_export_holds_reaches_standard_output() {
     );
 }
 
-/// The pair is the point: what a Purge gives back, an Import puts back. Asserted
-/// end to end, because each half is only as good as the other one being able to
-/// read what it wrote.
+/// Asserted end to end, because each half is only as good as the other being
+/// able to read what it wrote.
 #[test]
 fn what_an_export_wrote_is_what_an_import_reads_back() {
     let from = machine_with_three_accounts();
@@ -777,16 +684,9 @@ fn what_an_export_wrote_is_what_an_import_reads_back() {
     assert_eq!(registry_of(&onto), exported.1);
 }
 
-/// A Profile holds two things, and both of them travel.
-///
-/// The Credential is the one that cannot be reconstructed at all. The identity
-/// file is the one that cannot be reconstructed *faithfully*: the
-/// `oauthAccount` block Claude Code wrote carries fields beyond the four the
-/// registry records, and a Switch prefers it verbatim over anything Perch
-/// composes. Restoring without it puts every Account into the degraded state
-/// adoption goes out of its way to keep the first one out of — and leaves each
-/// Profile with nothing for a Run to Carry into, so the onboarding dialog comes
-/// back on every Run (ADR everything-but-the-account).
+/// The identity file is the half of a Profile that cannot be reconstructed
+/// *faithfully*: Claude Code's `oauthAccount` block carries fields beyond the
+/// registry's four, and a Run Carries from it (ADR everything-but-the-account).
 #[test]
 fn an_imported_profile_holds_the_identity_file_its_account_had() {
     let from = machine_with_two_accounts();
@@ -810,9 +710,8 @@ fn an_imported_profile_holds_the_identity_file_its_account_had() {
     }
 }
 
-/// An Export written before its Profile ever had one still restores a Profile a
-/// Run can Carry into: the Identity the registry records is enough to compose
-/// the block Claude Code would have written.
+/// The Identity the registry records is enough to compose the block Claude Code
+/// would have written.
 #[test]
 fn an_account_whose_export_carried_no_identity_file_still_gets_one() {
     let from = machine_with_two_accounts();
@@ -833,17 +732,10 @@ fn an_account_whose_export_carried_no_identity_file_still_gets_one() {
     assert!(held.contains(SECOND_EMAIL), "{held}");
 }
 
-/// A Profile something is running against is one nothing writes into, and an
-/// Import was the one writer that never asked.
-///
-/// An Import runs on a machine holding no *Accounts*, which is not the same as
-/// a machine holding no Profiles: a Purge that failed at its last step leaves
-/// `profiles/` populated with no registry above it, and
-/// `Touched::was_already_there` exists because of exactly that. Somebody who
-/// then opens a terminal against one of those directories and runs
-/// `perch holdings import` had that session's Credential replaced underneath it
-/// — the mid-task logout ADR a-profile-is-live-by-evidence refuses everywhere
-/// else.
+/// An Import runs on a machine holding no *Accounts*, which is not a machine
+/// holding no Profiles — so somebody with a terminal open against one of those
+/// directories meets the mid-task logout
+/// ADR a-profile-is-live-by-evidence refuses everywhere else.
 #[test]
 fn an_import_into_a_profile_a_client_is_holding_writes_nothing() {
     let sealed = an_export_of_a_whole_machine();
