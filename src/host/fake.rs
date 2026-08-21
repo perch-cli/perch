@@ -1619,6 +1619,10 @@ impl port::Files for FakeHost {
             Some(mode) => self.fs.modes.borrow_mut().insert(to.to_path_buf(), mode),
             None => self.fs.modes.borrow_mut().remove(to),
         };
+        // The age goes with the file. Left behind, it makes `modified_at` answer
+        // for a path `path_exists` already says is gone — and that answer is the
+        // one `lock::abandoned` reads as "the artifact is still there".
+        self.fs.modified.borrow_mut().remove(from);
         // And it replaces whatever was at the target, a link included, because
         // `rename(2)` does not follow the last component. That is the security
         // property `replace_via_tmp` exists to produce.

@@ -446,6 +446,26 @@ const CASES: &[Case] = &[
             );
         },
     },
+    Case {
+        named: "a rename leaves nothing to ask about at the source",
+        asserts: |host, root, adapter, _now| {
+            let from = root.join("moved-away");
+            let to = root.join("landed-here");
+            host.create_file_with_mode(&from, "what it holds", PRIVATE_FILE_MODE)
+                .expect("the file is written");
+            host.rename(&from, &to).expect("it moves");
+
+            // `lock::abandoned` reads `modified_at` for whether an artifact is
+            // still there, and takes `NotFound` as "it has gone". A source that
+            // keeps answering is a lock the fake would never call abandoned.
+            match host.modified_at(&from) {
+                Err(HostError::NotFound { .. }) => {}
+                other => panic!(
+                    "{adapter}: the source of a rename still reports an age: {other:?}"
+                ),
+            }
+        },
+    },
     // ---- asking about what is there --------------------------------------
     Case {
         named: "a directory is not a file",
