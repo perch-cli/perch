@@ -1,3 +1,5 @@
+Always load the `unslop` skill if it is present.
+
 ## The Holdings survive an upgrade
 
 The CLI surface moves freely: commands, flags, output prose, exit codes and the
