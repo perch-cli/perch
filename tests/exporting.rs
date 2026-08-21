@@ -1,4 +1,5 @@
-//! `perch holdings export` — the whole machine in one `age` file (ADR 0014).
+//! `perch holdings export` — the whole machine in one `age` file
+//! (ADR the-holdings-go-out-sealed).
 //!
 //! The command that makes a dead machine, a mistaken `perch remove` and a new
 //! laptop cost something less than a login for every subscription. Everything
@@ -255,7 +256,8 @@ fn nothing_is_renewed_or_rotated_by_an_export() {
 
 /// The file grants full access to every Account somebody owns. It is created at
 /// the mode a Credential is, rather than tightened after the fact — a file
-/// `chmod`ed afterwards is a file that was briefly readable (ADR 0020).
+/// `chmod`ed afterwards is a file that was briefly readable
+/// (ADR claude-code-chooses-the-store).
 #[test]
 fn the_file_is_created_readable_by_its_owner_alone() {
     let host = a_machine_worth_backing_up();
@@ -297,10 +299,11 @@ fn nothing_the_export_holds_reaches_standard_output() {
             "`{secret}` was printed: {printed}"
         );
     }
-    // One line, asserted whole (ADR 0043): how many and where. What an Export
-    // carries is what an Export *is*, and keeping the passphrase away from the
-    // file is what the prompt says while somebody is still choosing one — so
-    // neither is said again after the write (ADR 0061).
+    // One line, asserted whole (ADR perch-says-what-it-did): how many and
+    // where. What an Export carries is what an Export *is*, and keeping the
+    // passphrase away from the file is what the prompt says while somebody is
+    // still choosing one — so neither is said again after the write
+    // (ADR perch-says-what-it-did).
     assert_eq!(
         printed.trim_end().lines().last(),
         Some(format!("Exported 3 Accounts to {AT}.").as_str()),
@@ -583,11 +586,12 @@ const ROTATED: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-rotated",
 
 /// The active Account's Credential lives in the Default Profile, and a Renewal
 /// Rotates it there — the copy in its own Profile only catches up when a Switch
-/// away Captures it (ADR 0006). Read from the Profile, the one Account the user
-/// is actually working in travels as a refresh token Anthropic has already
-/// retired, and `perch watcher run` Renews that Account every few minutes. A
-/// restore would then bring back every Account but the one they used most, and
-/// they would find out on the day they needed it.
+/// away Captures it (ADR a-switch-is-written-down-first). Read from the
+/// Profile, the one Account the user is actually working in travels as a
+/// refresh token Anthropic has already retired, and `perch watcher run` Renews
+/// that Account every few minutes. A restore would then bring back every
+/// Account but the one they used most, and they would find out on the day they
+/// needed it.
 #[test]
 fn the_active_accounts_credential_is_the_live_one_rather_than_the_copy_in_its_profile() {
     let host = machine_with_three_accounts();
@@ -675,9 +679,10 @@ fn an_export_is_written_by_a_machine_that_no_longer_has_claude_code_on_it() {
 
 /// A Switch that was written down and not yet recorded is a **Landing**, and a
 /// registry holding one answers "who is active" with the Account being *left*
-/// (ADR 0048). The live Credential during one may be either Account's: a Switch
-/// killed between storing the arriving Credential and patching the Identity
-/// leaves the arriving Account's token live under the leaving Account's name.
+/// (ADR a-switch-is-written-down-first). The live Credential during one may be
+/// either Account's: a Switch killed between storing the arriving Credential
+/// and patching the Identity leaves the arriving Account's token live under the
+/// leaving Account's name.
 ///
 /// Taken on that answer, an Export filed one Account's refresh token under the
 /// other's address and dropped the genuine copy of it — a file that restores two

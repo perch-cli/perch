@@ -1,4 +1,5 @@
-//! Giving the machine back the state it had before Perch (ADR 0014).
+//! Giving the machine back the state it had before Perch
+//! (ADR the-holdings-go-out-sealed).
 //!
 //! The exact inverse of an Import, and the other half of what makes "I can move
 //! to a new machine" true: every Profile, every Credential Perch holds, and
@@ -46,10 +47,11 @@ pub struct Purged {
 /// Refuses while a client is running against a Profile a Purge would delete.
 ///
 /// The same rule every other write obeys, at its extreme: writing into a Live
-/// Profile is refused because something else is holding those files (ADR 0005),
-/// and a Purge does not write into one — it deletes it. Asked of every Account
-/// before anything is destroyed, because a Purge is all or nothing and a refusal
-/// discovered half way through is the partial state the command exists to avoid.
+/// Profile is refused because something else is holding those files
+/// (ADR a-profile-is-live-by-evidence), and a Purge does not write into one —
+/// it deletes it. Asked of every Account before anything is destroyed, because
+/// a Purge is all or nothing and a refusal discovered half way through is the
+/// partial state the command exists to avoid.
 ///
 /// Doubt counts as a client here. A marker that can be neither corroborated nor
 /// dismissed is a Profile that may be in use, and the cost of the two mistakes is

@@ -7,9 +7,9 @@ that come from a cache and an endpoint, but the thing that was designed is the
 wording.
 
 Across `tests/` that wording is asserted 933 times by `contains`. The question
-this ADR answers is whether it should be asserted by a baseline instead — `insta`
-or an equivalent, holding accepted output whole, so a clause that goes missing is
-caught rather than walked past.
+this ADR answers is whether it should be asserted by a baseline instead —
+`insta` or an equivalent, holding accepted output whole, so a clause that goes
+missing is caught rather than walked past.
 
 It should not. A baseline asserts that output has not changed since somebody
 accepted it, and the prose defects this repository has actually shipped were
@@ -62,9 +62,10 @@ Where the sentence genuinely is the claim, the suite already asserts it whole:
 And there is purpose-built machinery for doing it. `said()` in
 `tests/browsing.rs` reflows a frame into one run of words so a sentence can be
 asserted across whatever line breaks the terminal put in, and its doc comment
-says why in ADR 0015's terms. `assert_eq!(said(frame).matches("as of 4m ago").count(), 2)`
-claims that every figure carries its age — a stronger claim than any single
-substring, and one a baseline would only make by accident.
+says why in ADR a-figure-carries-its-age's terms.
+`assert_eq!(said(frame).matches("as of 4m ago").count(), 2)` claims that every
+figure carries its age — a stronger claim than any single substring, and one a
+baseline would only make by accident.
 
 So the proposed middle position — baselines for the load-bearing sentences,
 `contains` for the rest — is already this repository's shape, minus the

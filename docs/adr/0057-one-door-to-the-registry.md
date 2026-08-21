@@ -126,11 +126,11 @@ a near-miss; it is the proof that the boundary is somewhere real, and
 `only_the_registry` names it in prose for that reason.
 
 **Reversibility as the axis.** It is the obvious way to describe the cohort —
-every one of the eight is undoable — and it is wrong for the reason ADR 0042
-already found it wrong: "reversibility really was the wrong axis." What separates
-the eight is not that they can be undone but that they touch nothing outside the
-registry, which is a statement about reach rather than about consequence, and is
-the one a signature can hold.
+every one of the eight is undoable — and it is wrong for the reason
+ADR one-door-to-the-registry already found it wrong: "reversibility really was
+the wrong axis." What separates the eight is not that they can be undone but
+that they touch nothing outside the registry, which is a statement about reach
+rather than about consequence, and is the one a signature can hold.
 
 **A test that walks the command modules.** Nothing stops a future command taking
 the lock by hand and never finding the door. A test asserting otherwise would be
@@ -149,10 +149,10 @@ using it as a synonym for the whole. The rule was sayable in the domain's own
 vocabulary before it was written down, which is why `only_the_registry` is named
 in it rather than in a coinage.
 
-The three shapes stay out of `CONTEXT.md` for the reason **Round** and **witness**
-stayed out (ADR 0055): they are words about how this code is built, not about what
-Perch does, and the glossary is the domain's. They are defined here and at
-`only_the_registry`, and nowhere else.
+The three shapes stay out of `CONTEXT.md` for the reason **Round** and
+**witness** stayed out (ADR code-lives-where-it-reaches): they are words about
+how this code is built, not about what Perch does, and the glossary is the
+domain's. They are defined here and at `only_the_registry`, and nowhere else.
 
 ## Consequences
 
@@ -166,9 +166,10 @@ Perch does, and the glossary is the domain's. They are defined here and at
   shape 1's door and leave neither legible.
 - Behavior is unchanged. `enabling.rs`, `naming.rs`, `grouping.rs` and
   `configuring.rs` pass untouched, and that they were not edited is the check.
-- Nothing enforces that a *new* command finds the door. If a future one takes the
-  lock by hand and grows the fourth shape, this is the ADR that failed to prevent
-  it — and the fourth shape is then the thing to argue with, not the door.
+- Nothing enforces that a *new* command finds the door. If a future one takes
+  the lock by hand and grows the fourth shape, this is the ADR that failed to
+  prevent it — and the fourth shape is then the thing to argue with, not the
+  door.
 - The rejected ceremony is recorded at length because it is re-suggestible: three
   commands that print frightening sentences will look alike to the next review as
   they did to this one, and the table above is the answer to it.

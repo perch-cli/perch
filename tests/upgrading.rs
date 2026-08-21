@@ -1,9 +1,9 @@
 //! Behavior: what `perch upgrade` does about this machine's Installation.
 //!
 //! The whole of the command is deciding which Channel made the Installation and
-//! handing the work back to it (ADR 0039), so most of what is asserted here is
-//! *which program was run* — and, for the two Channels Perch does not run
-//! anything for, that nothing was.
+//! handing the work back to it (ADR an-upgrade-asks-its-channel), so most of
+//! what is asserted here is *which program was run* — and, for the two Channels
+//! Perch does not run anything for, that nothing was.
 //!
 //! Nothing here arranges a registry, and one test asserts that on purpose: an
 //! Installation is the counterpart to what Perch holds rather than part of it,
@@ -214,7 +214,8 @@ fn windows_machine() -> perch::host::FakeHost {
 /// A bare name is searched for in the current working directory before `PATH`,
 /// so `perch upgrade` typed in a downloads folder holding a `powershell.exe`
 /// would run that one — with `-ExecutionPolicy Bypass`, and handed a script
-/// whose whole job is to replace the Perch binary (ADR 0021).
+/// whose whole job is to replace the Perch binary
+/// (ADR a-crate-must-not-cost-a-seam).
 #[test]
 fn the_installer_is_run_by_the_powershell_windows_says_it_has() {
     let host =
@@ -349,12 +350,13 @@ fn a_binary_perch_did_not_place_is_refused_rather_than_written_over() {
 /// The same binary, asked a question rather than told to replace itself.
 ///
 /// A check writes nothing, so the refusal that protects a hand-placed binary
-/// has nothing to protect here — and it used to fire anyway, because the Channel
-/// was resolved before `--check` was consulted. What a script got back was
-/// "Perch will not write over a file it did not put there", a sentence about an
-/// act it had not asked for, and no `installed` or `newest` at all. A check is a
-/// question and answering it is success whichever way the answer went (ADR
-/// 0039); the Channel is the one thing that cannot be answered, so it is `null`.
+/// has nothing to protect here — and it used to fire anyway, because the
+/// Channel was resolved before `--check` was consulted. What a script got back
+/// was "Perch will not write over a file it did not put there", a sentence
+/// about an act it had not asked for, and no `installed` or `newest` at all. A
+/// check is a question and answering it is success whichever way the answer
+/// went (ADR an-upgrade-asks-its-channel); the Channel is the one thing that
+/// cannot be answered, so it is `null`.
 #[test]
 fn a_check_answers_on_a_binary_perch_did_not_place_rather_than_refusing() {
     let host = machine().installed_at("/usr/local/bin/perch");
@@ -861,9 +863,9 @@ fn an_upgrade_touches_nothing_perch_holds() {
 
 // ---- the line `perch --version` adds ------------------------------------
 
-/// The half of this that gives up what ADR 0032 was protecting: `perch
-/// --version` was silent on the network and no longer is. Everything below is
-/// the bounding of that.
+/// The half of this that gives up what ADR an-upgrade-asks-its-channel was
+/// protecting: `perch --version` was silent on the network and no longer is.
+/// Everything below is the bounding of that.
 #[test]
 fn a_newer_release_is_mentioned_under_the_version() {
     let host = machine();

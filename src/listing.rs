@@ -4,24 +4,24 @@
 //! A Listing is every Account Perch holds, shown in the Scopes they sit in and
 //! in the order each Scope's Strategy makes. It is one [`Section`] per Scope,
 //! and the Section is where the weight is: it carries whether its order is a
-//! ranking Perch would stand behind or Accounts merely held (ADR 0049), which
-//! is the one thing every renderer has to agree about. Asked once here, it
-//! travels with the Accounts rather than being worked out again by whoever is
-//! drawing them.
+//! ranking Perch would stand behind or Accounts merely held
+//! (ADR the-listing-owns-the-set), which is the one thing every renderer has to
+//! agree about. Asked once here, it travels with the Accounts rather than being
+//! worked out again by whoever is drawing them.
 //!
 //! What `perch list` *does* — which breadth was asked for, how a table is laid
 //! out, which sentences go under it — is [`crate::commands::list`]'s. What a
 //! Listing is *made of* is here, where `perch status` can reach it too:
 //! `status` answers about one Account and a listing about a set, but it is the
-//! same Account either way (ADR 0053), and [`document`] is the one shape both
-//! of them write it in.
+//! same Account either way (ADR the-listing-owns-the-set), and [`document`] is
+//! the one shape both of them write it in.
 //!
 //! Here rather than on [`crate::registry::Account`], which is where an
 //! Account's own document would otherwise go. That document carries the
 //! Account's Headroom and its Utilization, so it is written in terms of
 //! [`crate::cycle`] and [`crate::utilization`] — and each of those is written
 //! in terms of [`crate::registry`] already. This module is the first place all
-//! three can be reached at once (ADR 0060).
+//! three can be reached at once (ADR code-lives-where-it-reaches).
 
 use chrono::{DateTime, Utc};
 use serde_json::json;
@@ -37,18 +37,18 @@ use crate::utilization;
 ///
 /// Ranked where a Cycle could happen in the Scope, and in the order they were
 /// added where one could not. Being in no Group is the absence of a declaration
-/// that Accounts are interchangeable rather than a weaker form of one (ADR
-/// 0017), so until `interchangeable` says otherwise a bare `perch switch`
-/// refuses there instead of choosing. Ordering those Accounts by Headroom would
-/// show a ranking Perch would not make — the one thing a Listing exists not to
-/// do — so they are held in the order they were added, with the Headroom still
-/// beside each of them as the figure it is.
+/// that Accounts are interchangeable rather than a weaker form of one
+/// (ADR a-group-is-a-declaration), so until `interchangeable` says otherwise a
+/// bare `perch switch` refuses there instead of choosing. Ordering those
+/// Accounts by Headroom would show a ranking Perch would not make — the one
+/// thing a Listing exists not to do — so they are held in the order they were
+/// added, with the Headroom still beside each of them as the figure it is.
 ///
 /// Which of the two it is travels *with* the Accounts rather than being asked
 /// again by each renderer. A table shows the difference by not sorting; a
-/// document has to say it in a word (ADR 0053), and two answers to "was this
-/// ranked?" is how the two come to disagree about the distinction ADR 0049
-/// called its weightiest.
+/// document has to say it in a word (ADR the-listing-owns-the-set), and two
+/// answers to "was this ranked?" is how the two come to disagree about the
+/// distinction ADR the-listing-owns-the-set called its weightiest.
 ///
 /// Its fields are its own. Everything a renderer needs of a Section it gets by
 /// asking — [`Section::document`], [`Section::reserve`], [`flattened`] — because
@@ -75,8 +75,8 @@ impl<'a> Section<'a> {
     }
 
     /// What the order is, in the word the decision that drew the distinction
-    /// uses (ADR 0049) — so a script branches on the same term the guide
-    /// explains.
+    /// uses (ADR the-listing-owns-the-set) — so a script branches on the same
+    /// term the guide explains.
     fn order(&self) -> &'static str {
         match self.ranked {
             true => "ranked",
@@ -89,10 +89,10 @@ impl<'a> Section<'a> {
     ///
     /// The same gate the order goes through, and deliberately the same field: a
     /// Reserve is what these Accounts have *between them*, which is the claim
-    /// ADR 0017 says nobody has made about the Ungrouped until `interchangeable`
-    /// is declared. Ranking them and saying what they have left are the two
-    /// things every surface declines together, so they are declined here off one
-    /// answer rather than two.
+    /// ADR a-group-is-a-declaration says nobody has made about the Ungrouped
+    /// until `interchangeable` is declared. Ranking them and saying what they
+    /// have left are the two things every surface declines together, so they
+    /// are declined here off one answer rather than two.
     pub fn reserve<'r>(&self, registry: &'r Registry) -> Option<Reserve<'r>> {
         self.ranked.then(|| Reserve::of(registry, &self.scope))
     }
@@ -114,9 +114,9 @@ impl<'a> Section<'a> {
             // one should not have to learn a second spelling to read the other.
             "scope": scope_json(&self.scope),
             "order": self.order(),
-            // At every breadth, unlike the table (ADR 0058): the section has
-            // already named the Scope this is about, which is the whole of what
-            // the table lacks.
+            // At every breadth, unlike the table
+            // (ADR the-listing-owns-the-set): the section has already named the
+            // Scope this is about, which is the whole of what the table lacks.
             //
             // `null` for a Scope holding nobody, where the human listing says a
             // sentence of its own instead. Unambiguous against the other `null`
@@ -214,9 +214,10 @@ pub fn document(
         "alias": registry.alias_of(account.email()),
         "group": account.group,
         // Present on every Account, unlike the cell above it. A machine reading
-        // a shape is not a person reading a sentence (ADR 0043): a script that
-        // had to test for a key's presence to learn a bool would have been
-        // given a worse contract, not a truer one.
+        // a shape is not a person reading a sentence
+        // (ADR perch-says-what-it-did): a script that had to test for a key's
+        // presence to learn a bool would have been given a worse contract, not
+        // a truer one.
         "disabled": account.disabled,
         "quarantined": Quarantine::document(account.quarantine),
         "active": registry.is_active(account.email()),
@@ -235,7 +236,7 @@ pub fn document(
         // taken from. A section saying it is `ranked` and not carrying the
         // number it ranked on would be a claim with no way of checking it —
         // which is what the Headroom column exists to prevent on the surface a
-        // person reads (ADR 0049).
+        // person reads (ADR the-listing-owns-the-set).
         "headroom": cycle::headroom_document(account),
         "utilization": utilization::document(account, now),
     })
@@ -372,11 +373,12 @@ mod tests {
         );
     }
 
-    /// A Group is the declaration that its Accounts are interchangeable (ADR
-    /// 0002), so a Group's Section is always ranked. The Accounts in no Group
-    /// are ranked only once somebody says they may be (ADR 0017) — and the
-    /// Reserve goes through the same answer, because saying what a set has left
-    /// between them is the same claim as ranking them.
+    /// A Group is the declaration that its Accounts are interchangeable
+    /// (ADR a-group-is-a-declaration), so a Group's Section is always ranked.
+    /// The Accounts in no Group are ranked only once somebody says they may be
+    /// (ADR a-group-is-a-declaration) — and the Reserve goes through the same
+    /// answer, because saying what a set has left between them is the same
+    /// claim as ranking them.
     #[test]
     fn a_section_is_ranked_only_where_something_declared_its_accounts_a_set() {
         let mut registry = holdings();

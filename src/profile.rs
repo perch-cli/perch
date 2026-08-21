@@ -1,9 +1,10 @@
 //! Putting a Credential into a Profile of its own.
 //!
 //! Both ways an Account enters Perch end here: adoption copies the existing
-//! login in (ADR 0009), and `add` copies in the login it just created. Neither
-//! knows where a directory keeps its Credential — that is [`crate::probe`] and
-//! [`crate::credentials`] — and both get the same read-back guard for free.
+//! login in (ADR a-login-perch-does-not-need), and `add` copies in the login it
+//! just created. Neither knows where a directory keeps its Credential — that is
+//! [`crate::probe`] and [`crate::credentials`] — and both get the same
+//! read-back guard for free.
 
 use std::path::Path;
 
@@ -16,8 +17,9 @@ use crate::probe::{self, Store};
 ///
 /// Private from the moment it exists: off macOS the Credential is a file in
 /// here, and a directory others may enter is a directory whose contents others
-/// may open (ADR 0020). Created that way rather than tightened, because a
-/// Profile is Perch's to make and there is no window to leave.
+/// may open (ADR claude-code-chooses-the-store). Created that way rather than
+/// tightened, because a Profile is Perch's to make and there is no window to
+/// leave.
 ///
 /// One copy of it, because both paths that bring a Profile into being — a login
 /// stored here, and a Reconcile that needs somewhere to put a link — owe the
@@ -42,34 +44,35 @@ pub fn create(host: &dyn Host, dir: &Path, credential: &str) -> Result<Store> {
 /// before trusting it.
 ///
 /// Every write of a Credential goes through here, so no path can forget any of
-/// the three things a write owes (ADR 0020):
+/// the three things a write owes (ADR claude-code-chooses-the-store):
 ///
 /// - it goes to the platform's primary store, and to the other one only when
 ///   that fails, because a store Perch cannot write to is worse than a store it
 ///   would rather not use;
 /// - it is read back, because `security`'s stdin buffer truncates mid-argument
-///   without saying so (ADR 0008) and a truncated Credential is
-///   indistinguishable from a wrong one at the worst possible moment, some
-///   Switch later;
+///   without saying so (ADR claude-code-chooses-the-store) and a truncated
+///   Credential is indistinguishable from a wrong one at the worst possible
+///   moment, some Switch later;
 /// - the copy in the store that was *not* written is removed, or the composite
 ///   reader would hand a retired refresh token back to Claude Code the next
-///   time it consulted that one — ADR 0006's silent poisoning, arriving by the
-///   back door.
+///   time it consulted that one — ADR a-switch-is-written-down-first's silent
+///   poisoning, arriving by the back door.
 ///
-/// ADR 0020 states that last one of a write to the primary store, which is the
-/// case that happens. It is done in both directions because what the Credential
-/// Store *is* — one store holding a Profile's Credential at a time — has to
-/// hold after the rarer write too, and that direction is the more dangerous of
-/// the two: see [`supersede`].
+/// ADR claude-code-chooses-the-store states that last one of a write to the
+/// primary store, which is the case that happens. It is done in both directions
+/// because what the Credential Store *is* — one store holding a Profile's
+/// Credential at a time — has to hold after the rarer write too, and that
+/// direction is the more dangerous of the two: see [`supersede`].
 ///
 /// There is a fourth thing a write owes that this cannot check, and a caller
 /// must: **a Live Profile is not written into**. Something else is holding that
-/// Credential, and replacing it is the mid-task logout ADR 0005 exists to
-/// prevent. The question is [`crate::probe::live_clients`], and it has to be
-/// asked of the Profile being written *under whatever lock the write is taken
-/// under* — an answer from before a browser round trip or a lock wait is an
-/// answer about a machine that has since had minutes to move on
-/// ([`crate::switch::refuse_if_live_anywhere`] is the shape of asking it twice).
+/// Credential, and replacing it is the mid-task logout
+/// ADR a-profile-is-live-by-evidence exists to prevent. The question is
+/// [`crate::probe::live_clients`], and it has to be asked of the Profile being
+/// written *under whatever lock the write is taken under* — an answer from
+/// before a browser round trip or a lock wait is an answer about a machine that
+/// has since had minutes to move on ([`crate::switch::refuse_if_live_anywhere`]
+/// is the shape of asking it twice).
 ///
 /// It is not enforced here because this function cannot tell the callers apart:
 /// three of the eight paths write into a Profile something could be running
@@ -112,10 +115,11 @@ pub fn store_credential(host: &dyn Host, store: &Store, credential: &str) -> Res
             // Both refused, and either may be sitting on a value that is
             // neither the Credential asked for nor the one it replaced —
             // `security`'s stdin buffer truncates mid-argument without saying
-            // so (ADR 0008), which is the whole reason for the read-back. Left
-            // there it is worse than nothing: a reader hands Claude Code bytes
-            // it cannot parse, and every retry now fails a step earlier than
-            // this one, with no way back but deleting the item by hand.
+            // so (ADR claude-code-chooses-the-store), which is the whole reason
+            // for the read-back. Left there it is worse than nothing: a reader
+            // hands Claude Code bytes it cannot parse, and every retry now
+            // fails a step earlier than this one, with no way back but deleting
+            // the item by hand.
             //
             // Only a copy known to be bad is removed. A write that failed
             // outright left the store holding the Credential it had before,

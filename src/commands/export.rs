@@ -1,5 +1,5 @@
 //! `perch holdings export <path>` — the whole machine, in one `age` file (ADR
-//! 0014).
+//! the-holdings-go-out-sealed).
 //!
 //! The only command that turns the Credentials in a Credential Store into a
 //! file, and the only artifact that makes a dead machine, a mistaken `perch
@@ -15,7 +15,7 @@
 //! skip, and the failure is silent until it isn't. It is prompted, confirmed,
 //! and never taken as an argument — an argument sits in the process table for
 //! anything on the machine to read, which is the same rule an access token
-//! travels under (ADR 0021).
+//! travels under (ADR a-crate-must-not-cost-a-seam).
 //!
 //! Nothing is Renewed, nothing is Rotated, and no Live Profile is written: an
 //! Export reads what is stored, and refuses rather than writing a file that is
@@ -37,24 +37,24 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     // Before the passphrase, because all three are refusals somebody should
     // meet before typing one twice — and before the registry is even read,
     // because none of them depends on what it says and reading it is what
-    // adopts the login on a machine Perch has never run on (ADR 0009). The two
-    // about the path are asked again below, where the write is: what refuses
-    // this command early has to refuse `perch holdings purge` too, and the
-    // check that lives in only one of two callers is the check that stops being
-    // made.
+    // adopts the login on a machine Perch has never run on
+    // (ADR a-login-perch-does-not-need). The two about the path are asked again
+    // below, where the write is: what refuses this command early has to refuse
+    // `perch holdings purge` too, and the check that lives in only one of two
+    // callers is the check that stops being made.
     refuse_without_a_terminal(host, "perch holdings export")?;
     refuse_a_directory_that_is_not_there(host, path)?;
     refuse_an_occupied_path(host, path)?;
 
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
     // Before anything is read out of a Credential Store, for the reason every
-    // other command that reads through the live one settles first (ADR 0048):
-    // a registry holding a Landing answers "who is active" with the Account
-    // being *left*, and the live Credential during one may be either Account's.
-    // An Export that took the live copy on that answer wrote one Account's
-    // refresh token under the other's address — a file that restores two
-    // Accounts onto one token, which the first Renewal then Rotates out from
-    // under one of them.
+    // other command that reads through the live one settles first
+    // (ADR a-switch-is-written-down-first): a registry holding a Landing
+    // answers "who is active" with the Account being *left*, and the live
+    // Credential during one may be either Account's. An Export that took the
+    // live copy on that answer wrote one Account's refresh token under the
+    // other's address — a file that restores two Accounts onto one token, which
+    // the first Renewal then Rotates out from under one of them.
     crate::switch::resolve_a_landing(host, &mut perch, &mut registry)?;
 
     // Nothing to hand back to: this command's own failure says where the file
@@ -68,9 +68,9 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
 /// written.
 ///
 /// Shared with `perch holdings purge`, which offers to write one before it
-/// destroys anything (ADR 0014) and holds the registry lock across the offer —
-/// so it cannot go through [`run`], which would take that lock a second time
-/// and wait out its own hold.
+/// destroys anything (ADR the-holdings-go-out-sealed) and holds the registry
+/// lock across the offer — so it cannot go through [`run`], which would take
+/// that lock a second time and wait out its own hold.
 pub fn write_the_export(
     host: &dyn Host,
     perch: &mut crate::lock::Held<'_>,
@@ -205,9 +205,9 @@ fn agreed_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<S
 ///
 /// What an Export carries is what an Export is, and keeping the passphrase away
 /// from the file is what the prompt above says while somebody is choosing one
-/// — so neither is said again here, where every run would say it (ADR 0061).
-/// The Accounts that came without a Credential are the one thing this can
-/// report that another Export would not.
+/// — so neither is said again here, where every run would say it
+/// (ADR perch-says-what-it-did). The Accounts that came without a Credential
+/// are the one thing this can report that another Export would not.
 fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
     let accounts = export.accounts();
     say(

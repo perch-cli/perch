@@ -14,7 +14,7 @@ anything.
 
 ## Consequences
 
-The liveness check this requires is the same precondition ADR 0003 already
-placed on writing `projects[<cwd>]`. Both features depend on answering "is a
-client running for this profile?" correctly, which makes that check worth
-building carefully and exactly once.
+The liveness check this requires is the same precondition
+ADR everything-but-the-account already placed on writing `projects[<cwd>]`. Both
+features depend on answering "is a client running for this profile?" correctly,
+which makes that check worth building carefully and exactly once.

@@ -1,11 +1,12 @@
-//! Adoption: the existing login becomes the first Profile (ADR 0009).
+//! Adoption: the existing login becomes the first Profile
+//! (ADR a-login-perch-does-not-need).
 //!
 //! Anyone installing Perch is already logged into an Account. Perch copies that
 //! Credential into a Profile of its own and records the Account as active,
 //! rather than asking for a login it does not need. That leaves two copies of
-//! one Credential — which is exactly where every Switch leaves things (ADR
-//! 0006), so adoption starts the system in its steady state rather than adding
-//! a case.
+//! one Credential — which is exactly where every Switch leaves things
+//! (ADR a-switch-is-written-down-first), so adoption starts the system in its
+//! steady state rather than adding a case.
 
 use crate::error::{PerchError, Result};
 use crate::host::Host;
@@ -138,10 +139,11 @@ fn carry_the_identity_block(host: &dyn Host, findings: &Findings, store: &Store)
     };
 
     let kept = store.identity_file.clone();
-    // The write `login::carry_identity_file` uses, for the reason written there:
-    // a Profile's `.claude.json` is a file Perch is the first to create, and one
-    // Perch creates is created closed rather than at the process umask (ADR
-    // 0020). Adoption is the other way a Profile comes to hold one.
+    // The write `login::carry_identity_file` uses, for the reason written
+    // there: a Profile's `.claude.json` is a file Perch is the first to create,
+    // and one Perch creates is created closed rather than at the process umask
+    // (ADR claude-code-chooses-the-store). Adoption is the other way a Profile
+    // comes to hold one.
     crate::host::write_atomically(host, &kept, &probe::fresh_identity_file(block))
         .map_err(|err| PerchError::file_write(kept, err))
 }

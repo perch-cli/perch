@@ -1,28 +1,28 @@
 # A refusal is a promise
 
-> **Superseded in part by ADR 0049.** This file is three decisions and only two
-> of them were the picker's. The ratatui-over-crossterm choice is void, and so
-> is the second Amended section below — `tui::Screen`, the Refresh thread's own
-> Host, and `Host::print_remarks`, which was "the one thing about frames the
-> port does know" and is now nothing the port knows at all. `perch tui` is
-> removed entire, both crates leave the dependency set, and nothing in Perch
-> touches raw mode afterwards. **What stands is the color-eyre repeal and the
-> two-error-idiom rule**: expected failures are `PerchError` carrying an exit
-> code a script reads, unexpected ones are panics through the hook in
-> `report.rs`, and anything that starts as a panic and turns out to be an
-> outcome moves across. None of that was ever about drawing, and superseding
+> **Superseded in part by ADR perch-does-not-draw.** This file is three
+> decisions and only two of them were the picker's. The ratatui-over-crossterm
+> choice is void, and so is the second Amended section below — `tui::Screen`,
+> the Refresh thread's own Host, and `Host::print_remarks`, which was "the one
+> thing about frames the port does know" and is now nothing the port knows at
+> all. `perch tui` is removed entire, both crates leave the dependency set, and
+> nothing in Perch touches raw mode afterwards. **What stands is the color-eyre
+> repeal and the two-error-idiom rule**: expected failures are `PerchError`
+> carrying an exit code a script reads, unexpected ones are panics through the
+> hook in `report.rs`, and anything that starts as a panic and turns out to be
+> an outcome moves across. None of that was ever about drawing, and superseding
 > this file whole would have taken `report.rs`'s charter with it.
 
 Three crates are settled ahead of the code that uses them, so the choice is
 recorded rather than rediscovered.
 
-`perch tui` (ADR 0011) is built on **ratatui** over **crossterm**. Ratatui
-depends on crossterm itself, so naming crossterm directly keeps one version in
-the tree rather than two — Perch and `ratatui-crossterm` resolve to the same
-one, which matters because a terminal in raw mode is process-global state and
-two crossterm versions would each think they owned it. Both are in
-`Cargo.toml` from now, before `perch tui` exists, so the dependency set is
-settled while the surface is still small.
+`perch tui` (ADR perch-does-not-draw) is built on **ratatui** over
+**crossterm**. Ratatui depends on crossterm itself, so naming crossterm directly
+keeps one version in the tree rather than two — Perch and `ratatui-crossterm`
+resolve to the same one, which matters because a terminal in raw mode is
+process-global state and two crossterm versions would each think they owned it.
+Both are in `Cargo.toml` from now, before `perch tui` exists, so the dependency
+set is settled while the surface is still small.
 
 **color-eyre** is installed for its panic hook and nothing else. Perch's own
 failures are typed: `PerchError` carries the exit code a script reads — 10 for

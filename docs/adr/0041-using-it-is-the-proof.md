@@ -5,23 +5,25 @@
 > beside it — a departure from this repo's habit of shipping an ADR with its
 > implementation. The tree now matches it: the subsystem repealed below is gone.
 
-ADR 0037 built a suite that runs on real machines and proves only what each one
-holds. ADR 0038 changed what a Phase is, so a person could be asked to walk a
-login while Perch kept the judging to itself. Both are repealed here, and the
-subsystem they describe — `src/dogfood.rs`, `src/dogfood/phases.rs`,
-`src/bin/dogfood-setup.rs`, `tests/dogfood.rs`, the `dogfood` feature and the CI
-job that exercises it — is to be removed entire.
+ADR the-binary-proves-its-surface built a suite that runs on real machines and
+proves only what each one holds. ADR using-it-is-the-proof changed what a Phase
+is, so a person could be asked to walk a login while Perch kept the judging to
+itself. Both are repealed here, and the subsystem they describe —
+`src/dogfood.rs`, `src/dogfood/phases.rs`, `src/bin/dogfood-setup.rs`,
+`tests/dogfood.rs`, the `dogfood` feature and the CI job that exercises it — is
+to be removed entire.
 
-Nothing about the reasoning in either ADR turned out to be wrong. What changed is
-that the thing the suite was a model of became available.
+Nothing about the reasoning in either ADR turned out to be wrong. What changed
+is that the thing the suite was a model of became available.
 
 ## What Dogfood was for, and what arrived instead
 
-ADR 0037 named four things nothing proved: argv and the exit codes and every
-rendered line; `add` then `switch` then `run` then `status` in sequence over real
-bytes; a real token renewed by Anthropic; a real client launched against a
-Profile. The suite existed because a person using Perch was hypothetical, and the
-only way to get at those four was to write down what such a person would do.
+ADR the-binary-proves-its-surface named four things nothing proved: argv and the
+exit codes and every rendered line; `add` then `switch` then `run` then `status`
+in sequence over real bytes; a real token renewed by Anthropic; a real client
+launched against a Profile. The suite existed because a person using Perch was
+hypothetical, and the only way to get at those four was to write down what such
+a person would do.
 
 A person using Perch is no longer hypothetical. Taken one at a time against
 somebody actually living with the tool:
@@ -74,10 +76,10 @@ Three things make the loss affordable:
 
 It was always opportunistic. The phase returns `Halt::not_here` wherever
 `credential.usable_at(now)` — a Renewal only reaches Anthropic once the access
-token has actually run out, so the phase proved something only on a machine whose
-token had already gone stale. ADR 0038 accepted this and turned the Preflight's
-figure into a ceiling because of it. A suite run is one sample, taken when
-somebody had an evening free.
+token has actually run out, so the phase proved something only on a machine
+whose token had already gone stale. ADR using-it-is-the-proof accepted this and
+turned the Preflight's figure into a ceiling because of it. A suite run is one
+sample, taken when somebody had an evening free.
 
 Real use takes far more samples. Every stale token in a working week is a real
 Renewal against real Anthropic, and there are more of them in a month of use than
@@ -117,10 +119,11 @@ and should not be rediscovered.
 ## Marker is freed
 
 The glossary currently gives **Marker** to the receipt `dogfood-setup` writes.
-Meanwhile the concept that matters to the product — the session marker naming the
-process that wrote it, which ADR 0022 corroborates a Live Profile with, and which
-`probe.rs` calls `Marker` in code — has to go around the glossary in lowercase.
-The good noun is held by the throwaway and the load-bearing idea is unnamed.
+Meanwhile the concept that matters to the product — the session marker naming
+the process that wrote it, which ADR a-profile-is-live-by-evidence corroborates
+a Live Profile with, and which `probe.rs` calls `Marker` in code — has to go
+around the glossary in lowercase. The good noun is held by the throwaway and the
+load-bearing idea is unnamed.
 
 Removing the suite frees the word, and **Marker** becomes the session marker. This
 is a conceptual-surface gain independent of the line count, and it is the reason
@@ -134,9 +137,9 @@ The **Repair** entry loses its Phase-zero clause; Repair itself is untouched,
 because `perch relogin` was always the product feature and phase zero only ever
 borrowed it.
 
-`Host::is_interactive` stays. ADR 0038's reasoning about attendance was
-Dogfood-specific, but the primitive is used by `add`, `remove`, `purge`, `tui`
-and `upgrade`, and none of that changes.
+`Host::is_interactive` stays. ADR using-it-is-the-proof's reasoning about
+attendance was Dogfood-specific, but the primitive is used by `add`, `remove`,
+`purge`, `tui` and `upgrade`, and none of that changes.
 
 The repo is left with no test that drives `perch` as a process. That was already
 true in every way that counts — the suite was feature-gated, attended and never
@@ -144,8 +147,9 @@ run unattended — but it is now true without qualification, and it makes the
 argv-and-exit-codes question sharper rather than softer for whoever answers it
 next. This ADR deliberately does not answer it.
 
-**This decision is paid for by the commitment to actually use Perch.** That is the
-honest dependency. If nobody lives with the tool, the four gaps of ADR 0037 are
-not covered by real use *or* by a suite, and this ADR is a straight loss rather
-than a trade. The removal should not be read as a claim that the four gaps stopped
-mattering — only that a better instrument for three of them became available.
+**This decision is paid for by the commitment to actually use Perch.** That is
+the honest dependency. If nobody lives with the tool, the four gaps of
+ADR the-binary-proves-its-surface are not covered by real use *or* by a suite,
+and this ADR is a straight loss rather than a trade. The removal should not be
+read as a claim that the four gaps stopped mattering — only that a better
+instrument for three of them became available.

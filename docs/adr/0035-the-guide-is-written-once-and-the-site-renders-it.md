@@ -1,11 +1,12 @@
 # The guide is written once and the site renders it
 
-> **Superseded by ADR 0062.** mdBook is replaced by Astro and Starlight, and the
-> landing page is no longer hand-written — one project renders the front page and
-> the guide together. Two things below are void: the section headed "The landing
-> page is not part of the book", and mdBook as what renders the guide, along with
-> the pin and the stylesheet that answered for it. The guide moved to
-> `pages/src/content/docs/`, which was never the part that mattered.
+> **Superseded by ADR one-thing-renders-the-site.** mdBook is replaced by Astro
+> and Starlight, and the landing page is no longer hand-written — one project
+> renders the front page and the guide together. Two things below are void: the
+> section headed "The landing page is not part of the book", and mdBook as what
+> renders the guide, along with the pin and the stylesheet that answered for it.
+> The guide moved to `pages/src/content/docs/`, which was never the part that
+> mattered.
 >
 > The reasoning is not what was found wrong. The two costs named here are the
 > real ones and the theme was correctly identified as the second; 0062 only found
@@ -16,11 +17,11 @@
 > the root of the deployment, from URLs that do not move.
 
 The site existed because the installers needed a versionless URL to be served
-from (ADR 0028, ADR 0031). That is a real job and it went on doing it, but it
-meant the front page of a program somebody might want to read about was an
-install page: here are four ways to get it, and nothing at all about what it is
-for. The documentation was in the repository, where you had to already be
-looking.
+from (ADR this-repo-assembles-a-release). That is a real job and it went on
+doing it, but it meant the front page of a program somebody might want to read
+about was an install page: here are four ways to get it, and nothing at all
+about what it is for. The documentation was in the repository, where you had to
+already be looking.
 
 So the site renders the guide. What that decides is where the guide *lives*, and
 the answer is: exactly where it lived before. `docs/guide/` is markdown, read on
@@ -97,5 +98,6 @@ its getting-started. It links to the guide sources, and the site renders the sam
 files: nothing is written twice either way.
 
 Nothing here is served from a Release, and the site goes on deploying from
-`main`. That is ADR 0028's reasoning unchanged and now covers the guide too: a
-sentence that is wrong is fixed by a merge rather than by cutting a version.
+`main`. That is ADR this-repo-assembles-a-release's reasoning unchanged and now
+covers the guide too: a sentence that is wrong is fixed by a merge rather than
+by cutting a version.

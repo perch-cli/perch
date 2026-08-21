@@ -3,10 +3,10 @@
 //!
 //! Perch patches files it does not own — `.claude.json` holds project history,
 //! MCP configuration and settings beside the one block that belongs to an
-//! Account (ADR 0001). Parsing such a file and writing it back would reorder
-//! keys, reformat numbers and drop the shape its owner wrote, all invisibly. So
-//! the value is found as a span of text and spliced, and the rest of the file
-//! is never touched.
+//! Account (ADR everything-but-the-account). Parsing such a file and writing it
+//! back would reorder keys, reformat numbers and drop the shape its owner
+//! wrote, all invisibly. So the value is found as a span of text and spliced,
+//! and the rest of the file is never touched.
 //!
 //! Deliberately narrow: it finds the value of one top-level key. Anything
 //! deeper is this applied twice — the value of `projects` is itself a document

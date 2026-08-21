@@ -1,5 +1,5 @@
 //! What an Upgrade is: replacing this machine's Installation with a newer
-//! Release, through the Channel that made it (ADR 0039).
+//! Release, through the Channel that made it (ADR an-upgrade-asks-its-channel).
 //!
 //! The only place that knows a Channel can be told apart from another, that a
 //! tag and a version are different spellings of one thing, and where the newest
@@ -16,15 +16,16 @@ use crate::host::{Host, HttpRequest, Platform};
 pub const REPO: &str = "perch-cli/perch";
 
 /// Where the newest Release is asked for. The same endpoint both installers
-/// ask, which is the reason ADR 0031 refused to mark a Release as a prerelease:
-/// doing so would empty this.
+/// ask, which is the reason ADR this-repo-assembles-a-release refused to mark a
+/// Release as a prerelease: doing so would empty this.
 pub const LATEST_URL: &str = "https://api.github.com/repos/perch-cli/perch/releases/latest";
 
 /// How long the check on `perch --version` may take before it is abandoned.
 ///
 /// Short because nobody asked for it. `perch --version` was instant and silent
 /// on the network before this existed, and the line it now prints is worth a
-/// pause somebody would not notice — not a wait they would (ADR 0039).
+/// pause somebody would not notice — not a wait they would
+/// (ADR an-upgrade-asks-its-channel).
 pub const CHECK_WITHIN_MILLIS: u64 = 2_000;
 
 /// The variable that switches the check on `perch --version` off.
@@ -145,9 +146,10 @@ fn beneath(parts: &[&str]) -> PathBuf {
 /// path says.
 ///
 /// The path is the whole of the evidence. Every Channel installs the same bytes
-/// (ADR 0039), so there is nothing inside the binary to read and no marker file
-/// to trust — one placed beside the binary would be absent for Homebrew and npm
-/// both, making its absence mean two different things.
+/// (ADR an-upgrade-asks-its-channel), so there is nothing inside the binary to
+/// read and no marker file to trust — one placed beside the binary would be
+/// absent for Homebrew and npm both, making its absence mean two different
+/// things.
 pub fn channel_at(platform: Platform, installer_dir: &Path, exe: &Path) -> Option<Channel> {
     let parts = segments(platform, exe);
 
@@ -374,7 +376,8 @@ fn a_number(field: &str) -> Option<u64> {
 ///
 /// No cache and no interval: this happens because somebody typed a command, and
 /// the machinery for holding an answer and reasoning about its age is the thing
-/// ADR 0032 refused and ADR 0039 did not build.
+/// ADR an-upgrade-asks-its-channel refused and ADR an-upgrade-asks-its-channel
+/// did not build.
 pub fn newest(host: &dyn Host, within_millis: Option<u64>) -> Result<String> {
     // GitHub answers an unidentified caller with a 403, and `curl`'s default
     // agent is enough on its own — but a request that says which program made
@@ -423,7 +426,7 @@ pub fn newest(host: &dyn Host, within_millis: Option<u64>) -> Result<String> {
 /// swallows whatever went wrong. This is a line nobody requested printed
 /// underneath one they did, so a machine that is offline, has no `curl`, sits
 /// behind a proxy, or is being rate-limited loses the line and nothing else
-/// (ADR 0039).
+/// (ADR an-upgrade-asks-its-channel).
 pub fn notice(host: &dyn Host) -> Option<String> {
     if host.env_var(NO_CHECK).is_some() {
         return None;
@@ -463,10 +466,10 @@ pub fn version_report(host: &dyn Host) -> String {
 /// The command that hands the work back to Homebrew, as program and arguments.
 ///
 /// The `brew` beside the Cellar rather than the first one on `PATH`, for the
-/// reason ADR 0021 gives about every program Perch runs: a machine with two
-/// Homebrew prefixes has two `brew`s, and the one that owns this Installation is
-/// the one that can replace it. A Channel named by `--channel` carries no
-/// prefix, so that case falls back to the search.
+/// reason ADR a-crate-must-not-cost-a-seam gives about every program Perch
+/// runs: a machine with two Homebrew prefixes has two `brew`s, and the one that
+/// owns this Installation is the one that can replace it. A Channel named by
+/// `--channel` carries no prefix, so that case falls back to the search.
 pub fn homebrew_command(host: &dyn Host, prefix: &Path) -> Result<(PathBuf, Vec<String>)> {
     let brew = match prefix.as_os_str().is_empty() {
         true => crate::probe::on_path(host, "brew"),
@@ -516,9 +519,9 @@ pub fn npm_command(host: &dyn Host, version: Option<&str>) -> Result<(PathBuf, V
 ///
 /// `include_str!` at build time, because the alternative is downloading a shell
 /// script at run time and executing it, which is a sentence a program built
-/// around being careful with Credentials should not have to defend (ADR 0039).
-/// What the copy is pinned to costs nothing: the only thing passed into it is a
-/// tag.
+/// around being careful with Credentials should not have to defend
+/// (ADR an-upgrade-asks-its-channel). What the copy is pinned to costs nothing:
+/// the only thing passed into it is a tag.
 pub fn installer_for(platform: Platform) -> (&'static str, &'static str) {
     match platform {
         Platform::Windows => (

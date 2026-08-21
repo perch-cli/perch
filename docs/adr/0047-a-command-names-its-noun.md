@@ -1,11 +1,12 @@
 # A command names its noun
 
-> **Carried out in #164.** Like ADR 0041, ADR 0042, ADR 0044, ADR 0045 and ADR
-> 0046, this is the artifact of a planning effort rather than of a change, so it
-> landed ahead of the work it describes instead of beside it. The surface now
-> matches it: `perch --help` lists sixteen names, `holdings` and `watcher` are
-> the two new nouns, `--once` is `perch watcher check`, and `Holdings` is a
-> glossary entry.
+> **Carried out in #164.** Like ADR using-it-is-the-proof,
+> ADR perch-does-not-draw, ADR the-binary-proves-its-surface,
+> ADR a-suite-is-named-and-gated and ADR a-watcher-knob-is-arithmetic, this is
+> the artifact of a planning effort rather than of a change, so it landed ahead
+> of the work it describes instead of beside it. The surface now matches it:
+> `perch --help` lists sixteen names, `holdings` and `watcher` are the two new
+> nouns, `--once` is `perch watcher check`, and `Holdings` is a glossary entry.
 
 The question arrived as a choice of shapes: eighteen top-level commands in a flat
 verb list — should it stay flat, become noun-then-verb, or collapse to a small
@@ -100,10 +101,10 @@ decision that can be got wrong.
 
 ## Frequency, and the rule that fires nowhere
 
-Where frequency and taxonomy conflict, frequency wins. ADR 0011 is built on
-switching happening mid-task under mild frustration, with the shortest command
-doing the whole job, and a taxonomy that spent keystrokes there would be bought at
-the price of the product.
+Where frequency and taxonomy conflict, frequency wins. ADR perch-does-not-draw
+is built on switching happening mid-task under mild frustration, with the
+shortest command doing the whole job, and a taxonomy that spent keystrokes there
+would be bought at the price of the product.
 
 **On this surface they never conflict.** Every hot command is an Account command,
 and the Account is the elided noun, so the taxonomy already puts them where
@@ -197,10 +198,10 @@ have full entries and behave nothing alike. The one that works:
 > is a verb. Otherwise it is a flag.**
 
 `--once` changes both — a Check "says what it decided in its exit code" against
-ADR 0013's table, where the loop runs until you kill it. So it is a verb, and
-becomes one. `--refresh` changes neither; it is the same answer differently
-sourced, at a different cost. `--json`, `--yes`, `--group` and `--check` change
-neither. **No flag other than `--once` is affected.**
+ADR a-watcher-knob-is-arithmetic's table, where the loop runs until you kill it.
+So it is a verb, and becomes one. `--refresh` changes neither; it is the same
+answer differently sourced, at a different cost. `--json`, `--yes`, `--group`
+and `--check` change neither. **No flag other than `--once` is affected.**
 
 ## Admitting a command later
 
@@ -212,8 +213,9 @@ neither. **No flag other than `--once` is affected.**
    another's, it is its own command rather than a flag on the one it undoes. The
    flag-or-verb test does not reach the question.
 
-Clause 4 was added by ADR 0052, which amends this decision in that one clause
-and nothing else. Its decision, its table and its counts are untouched.
+Clause 4 was added by ADR a-command-names-its-noun, which amends this decision
+in that one clause and nothing else. Its decision, its table and its counts are
+untouched.
 
 Clause 2 is the one that will do the work. It makes growing the surface cost a
 glossary entry, which is the only price that reliably deters it — and it is
@@ -250,10 +252,11 @@ questions of *how many* commands there are. This decision settles where each one
 lives, which is what those questions were waiting on, and none of them is
 foreclosed by it.
 
-**ADR 0011 is re-affirmed without touching its text.** Its constraint — every
-capability the interactive view offers must exist non-interactively, because Perch
-has to be complete over SSH and in scripts — is untouched and still governing.
-Nothing here moves a capability into or out of the picker.
+**ADR perch-does-not-draw is re-affirmed without touching its text.** Its
+constraint — every capability the interactive view offers must exist
+non-interactively, because Perch has to be complete over SSH and in scripts — is
+untouched and still governing. Nothing here moves a capability into or out of
+the picker.
 
 ## The glossary
 
@@ -299,18 +302,20 @@ learns `perch group add` can predict where `perch holdings export` lives.
 
 **Ten older ADRs cite the moving paths** — 0013, 0014, 0015, 0021, 0025, 0034,
 0036, 0040, 0042 and 0044. **None is amended.** A citation going stale is not a
-decision decaying, and this repository supersedes records rather than editing them.
-ADR 0040 in particular is untouched and still governing: that the Watcher may be
-run for you by the machine's service manager is unaffected by which words invoke
-it.
+decision decaying, and this repository supersedes records rather than editing
+them. ADR the-machine-runs-the-watcher in particular is untouched and still
+governing: that the Watcher may be run for you by the machine's service manager
+is unaffected by which words invoke it.
 
-**This supersedes nothing.** It is the first record of a rule the surface has been
-following imperfectly since ADR 0011, and there is no prior decision to correct —
-which is itself the finding. The shape was never chosen; it accreted, and three
-commands happened to get a noun because their nouns happened to have names.
+**This supersedes nothing.** It is the first record of a rule the surface has
+been following imperfectly since ADR perch-does-not-draw, and there is no prior
+decision to correct — which is itself the finding. The shape was never chosen;
+it accreted, and three commands happened to get a noun because their nouns
+happened to have names.
 
 **Nothing about behavior changes.** No exit code moves, no flag other than
-`--once` is affected, `perch watcher check` reports on ADR 0013's table exactly as
-`perch watch --once` did, and no capability is added or removed. This is a decision
-about where twenty-eight capabilities are reached from, and about the one sentence
-that says why.
+`--once` is affected, `perch watcher check` reports on
+ADR a-watcher-knob-is-arithmetic's table exactly as `perch watch --once` did,
+and no capability is added or removed. This is a decision about where
+twenty-eight capabilities are reached from, and about the one sentence that says
+why.

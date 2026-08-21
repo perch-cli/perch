@@ -1,4 +1,5 @@
-//! `perch holdings import <path>` — a whole machine, put back (ADR 0014).
+//! `perch holdings import <path>` — a whole machine, put back
+//! (ADR the-holdings-go-out-sealed).
 //!
 //! The exact inverse of `perch holdings export`: the registry and every
 //! Credential, so a new laptop arrives with the setup the old one had rather
@@ -134,7 +135,7 @@ fn read_the_file(host: &dyn Host, path: &Path) -> Result<String> {
 /// by what the passphrase is protecting, because somebody choosing one has a
 /// decision to make and no way back from it; there is no decision here, and a
 /// preamble before every Import would be prose earning its place from the
-/// question rather than from the answer (ADR 0061).
+/// question rather than from the answer (ADR perch-says-what-it-did).
 fn the_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<String>> {
     ask_passphrase(host, out, "Passphrase: ")?.ok_or_else(|| {
         PerchError::Invalid(
@@ -149,9 +150,9 @@ fn the_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<Stri
 ///
 /// Nothing arrives active on any Import and an Import carries the whole
 /// registry on every one, so neither is said here: both are what the guide
-/// establishes once rather than what this repeats (ADR 0061). The Accounts the
-/// file held no Credential for are the one thing this can report that another
-/// Import would not.
+/// establishes once rather than what this repeats (ADR perch-says-what-it-did).
+/// The Accounts the file held no Credential for are the one thing this can
+/// report that another Import would not.
 fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
     let accounts = export.accounts();
     say(

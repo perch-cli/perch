@@ -12,8 +12,9 @@ not stretch goals, because each one exists to answer a question the switch
 itself creates.
 
 Rust, because the hot path is `perch status` — a command people put in a shell
-prompt or an editor status line, where it runs several times a minute (ADR
-0015) — and because distribution then needs no runtime on the target machine.
+prompt or an editor status line, where it runs several times a minute
+(ADR a-figure-carries-its-age) — and because distribution then needs no runtime
+on the target machine.
 
 ## Considered Options
 

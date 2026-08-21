@@ -58,9 +58,10 @@ holds, which is why the convention fit them in the first place.
 `Account`'s own fields, and `Account::document` becomes possible. Refused: the
 Headroom in the document is the figure a Section's order was made on, and
 `cycle::headroom_document` is where that figure is decided. A second spelling of
-it in `registry.rs` is the two-surfaces-disagreeing failure ADR 0049 exists to
-prevent, arriving in a document instead of on a screen — with the added
-unpleasantness that the copy would sit in the module the ranking is not made in.
+it in `registry.rs` is the two-surfaces-disagreeing failure
+ADR the-listing-owns-the-set exists to prevent, arriving in a document instead
+of on a screen — with the added unpleasantness that the copy would sit in the
+module the ranking is not made in.
 
 **Invert `cycle` and `utilization` onto `registry`.** Would let the document go
 on `Account`, at the cost of moving a ranking and a quota figure into the module
@@ -92,13 +93,13 @@ spell its own Scope as a listing's, for one call site. With the Section on the
 other side of the boundary, `listing::scope_json` names a Scope directly and
 `commands::list`'s own `Scope` adds the one arm a Cycle's Scope must never have.
 
-**`Listing` and `Section` are `CONTEXT.md` terms.** `Section` is the one carrying
-weight: it is where ranked-versus-held lives, ADR 0049 calls that distinction its
-weightiest, and `--json` puts `"order": "ranked" | "held"` in a contract scripts
-branch on.
+**`Listing` and `Section` are `CONTEXT.md` terms.** `Section` is the one
+carrying weight: it is where ranked-versus-held lives,
+ADR the-listing-owns-the-set calls that distinction its weightiest, and `--json`
+puts `"order": "ranked" | "held"` in a contract scripts branch on.
 
 **Nothing about the output changed.** No argv, no flag, no exit code, no key and
-no rendered line (ADR 0044), which is why the whole of `tests/listing.rs` and
-`tests/configuring.rs` passes untouched. What moved is where the code lives, and
-four unit tests came with it — three about a Section and the partition it rests
-on, one about the Scope that leads.
+no rendered line (ADR the-binary-proves-its-surface), which is why the whole of
+`tests/listing.rs` and `tests/configuring.rs` passes untouched. What moved is
+where the code lives, and four unit tests came with it — three about a Section
+and the partition it rests on, one about the Scope that leads.

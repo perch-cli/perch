@@ -4,8 +4,8 @@
 //! This is the command someone types mid-task when quota just ran out, so the
 //! tests are as much about what it refuses to do — prompt, leave the Group,
 //! land somewhere useless — as about which Account it lands on. Ranking reads
-//! the cache and nothing else (ADR 0015), so every fixture here seeds figures
-//! rather than arranging replies.
+//! the cache and nothing else (ADR a-figure-carries-its-age), so every fixture
+//! here seeds figures rather than arranging replies.
 
 mod common;
 
@@ -19,8 +19,8 @@ use perch::host::FakeHost;
 use perch::host::fake::Effect;
 use perch::host::prelude::*;
 
-/// Declares the ungrouped Accounts interchangeable (ADR 0017), the way a user
-/// declares it.
+/// Declares the ungrouped Accounts interchangeable
+/// (ADR a-group-is-a-declaration), the way a user declares it.
 fn ungrouped_declared_interchangeable(host: &FakeHost) {
     config_set(host, &["ungrouped", "interchangeable", "true"])
         .0
@@ -105,7 +105,7 @@ fn ranking_reads_each_accounts_worst_quota_window() {
         vec![window("5-hour", 4.0), window("7-day", 95.0)],
     );
     // Middling on both, and therefore the better landing place: being blocked
-    // by any window blocks you completely (ADR 0012).
+    // by any window blocks you completely (ADR headroom-is-the-worst-window).
     observed(
         &host,
         THIRD_EMAIL,
@@ -123,8 +123,8 @@ fn ranking_reads_each_accounts_worst_quota_window() {
     );
 }
 
-/// The specimen ADR 0061 is written around: three lines, each of them something
-/// that happened.
+/// The specimen ADR perch-says-what-it-did is written around: three lines, each
+/// of them something that happened.
 ///
 /// The headroom the ranking was made on used to be quoted here — 60%, and true
 /// of every one of this Account's windows — and the figures underneath are what
@@ -153,7 +153,7 @@ fn a_bare_switch_says_where_it_landed_and_what_it_bought_and_nothing_else() {
         said.len(),
         3,
         "a landing line and one line per Quota Window is the whole of it \
-         (ADR 0061): {printed}"
+         (ADR perch-says-what-it-did): {printed}"
     );
     assert_eq!(
         said[0],
@@ -171,7 +171,7 @@ fn a_bare_switch_says_where_it_landed_and_what_it_bought_and_nothing_else() {
     assert_eq!(
         printed.matches("as of 4m ago").count(),
         2,
-        "each carrying its own age (ADR 0015): {printed}"
+        "each carrying its own age (ADR a-figure-carries-its-age): {printed}"
     );
 }
 
@@ -265,9 +265,10 @@ fn every_account_exhausted_picks_nothing_and_names_the_one_that_frees_up_soonest
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
 }
 
-/// A cached figure outlives the window it describes (ADR 0015), so an exhausted
-/// reading whose reset has already gone by says nothing about when that Account
-/// comes back — the window came back, and the percentage beside it is stale.
+/// A cached figure outlives the window it describes
+/// (ADR a-figure-carries-its-age), so an exhausted reading whose reset has
+/// already gone by says nothing about when that Account comes back — the window
+/// came back, and the percentage beside it is stale.
 ///
 /// Read as a fact it sorted wrong twice: the soonest reset is the *earliest*, so
 /// among Accounts whose windows had all come back the stalest reading won, and
@@ -394,16 +395,17 @@ fn a_bare_switch_never_prompts() {
             .iter()
             .any(|effect| matches!(effect, Effect::Asked)),
         "the command exists for the moment the user wants no interaction \
-         (ADR 0011)"
+         (ADR perch-does-not-draw)"
     );
 }
 
 /// A Cycle ranks on the cache and says so by dating what it shows, rather than
-/// by pre-empting a disappointment that has not happened (ADR 0061).
+/// by pre-empting a disappointment that has not happened
+/// (ADR perch-says-what-it-did).
 ///
 /// The age is the whole of the promise Perch can make about a cached figure
-/// (ADR 0015), and it is made where the figure is rather than in a paragraph
-/// underneath it.
+/// (ADR a-figure-carries-its-age), and it is made where the figure is rather
+/// than in a paragraph underneath it.
 #[test]
 fn the_figures_a_choice_was_made_on_are_dated_and_never_read_from_the_network() {
     let host = three_accounts_in_one_group();
@@ -424,7 +426,7 @@ fn the_figures_a_choice_was_made_on_are_dated_and_never_read_from_the_network() 
     );
     assert!(
         host.http_calls().is_empty(),
-        "ranking reads the cache and never the network (ADR 0015)"
+        "ranking reads the cache and never the network (ADR a-figure-carries-its-age)"
     );
 }
 
@@ -510,7 +512,7 @@ fn the_setting_that_lets_ungrouped_accounts_cycle_is_off_until_it_is_turned_on()
     assert!(
         !registry_of(&host).ungrouped.interchangeable,
         "being ungrouped is the absence of a declaration that Accounts are \
-         interchangeable, not a weaker form of one (ADR 0017)"
+         interchangeable, not a weaker form of one (ADR a-group-is-a-declaration)"
     );
 }
 
@@ -581,7 +583,7 @@ fn naming_a_group_that_holds_no_accounts_switches_nowhere() {
 /// A Cycle is a Switch that chooses for you, so it inherits the rule about
 /// Live Profiles whole: the Account it lands on is only ever read from, and an
 /// Account you are already running in one terminal is exactly the one you would
-/// want active in the others (ADR 0027).
+/// want active in the others (ADR a-profile-is-live-by-evidence).
 #[test]
 fn a_cycle_lands_on_a_live_account_like_any_other() {
     let host = three_accounts_in_one_group();
@@ -669,8 +671,8 @@ fn credentials_written(host: &FakeHost) -> usize {
         .count()
 }
 
-/// ADR 0017, amended: the Accounts in no Group are a Scope, so Cycling among
-/// them reads a Strategy somebody can set.
+/// ADR a-group-is-a-declaration, amended: the Accounts in no Group are a Scope,
+/// so Cycling among them reads a Strategy somebody can set.
 ///
 /// Before this there was no key, no Group and no command that could change it —
 /// the code read `Strategy::default()` because there was nothing to ask. It is

@@ -11,9 +11,9 @@
 //! Today none does: every consumer of this port reaches across several
 //! concerns, because anything that touches the machine touches several of its
 //! surfaces at once. The port is 42 methods wide because the machine is, and
-//! ADR 0056 carries the table that says so, consumer by consumer. It is the
-//! answer to the next reading that counts the methods and proposes cutting them
-//! up to make somebody's signature smaller.
+//! ADR the-port-fits-the-machine carries the table that says so, consumer by
+//! consumer. It is the answer to the next reading that counts the methods and
+//! proposes cutting them up to make somebody's signature smaller.
 
 use std::path::{Path, PathBuf};
 
@@ -107,7 +107,7 @@ fn taken_over(bytes: Vec<u8>) -> String {
 /// of one has to travel the same way: an access token is a Credential, and a
 /// header passed on a command line sits in `argv` where any process on the
 /// machine can read it off the process table — the same reason a Credential
-/// never reaches `security`'s command line (ADR 0008).
+/// never reaches `security`'s command line (ADR claude-code-chooses-the-store).
 #[derive(Clone, PartialEq, Eq)]
 pub struct HttpRequest<'a> {
     pub url: &'a str,
@@ -121,7 +121,8 @@ pub struct HttpRequest<'a> {
     /// reason the headers are: the two callers want different answers. A
     /// Refresh is a figure somebody asked for and is worth waiting on; the
     /// upgrade check on `perch --version` is a line nobody asked for, and a
-    /// black-holed network must cost it nothing (ADR 0039).
+    /// black-holed network must cost it nothing
+    /// (ADR an-upgrade-asks-its-channel).
     pub within_millis: Option<u64>,
 }
 
@@ -193,8 +194,9 @@ impl std::fmt::Debug for HttpResponse {
 }
 
 /// The machine, to the resolution Perch cares about: macOS keeps secrets in a
-/// keychain and no other platform does (ADR 0020), and Windows finds programs
-/// through `PATHEXT` where everything else marks them executable.
+/// keychain and no other platform does (ADR claude-code-chooses-the-store), and
+/// Windows finds programs through `PATHEXT` where everything else marks them
+/// executable.
 ///
 /// An effect rather than a `cfg!`, so the behavior tests can drive every
 /// platform's Credential Store and program search whatever they are running
@@ -207,7 +209,7 @@ pub enum Platform {
 }
 
 /// How one path is made to stand for another, which is the whole of how Shared
-/// State reaches the Profile a Run launches (ADR 0026).
+/// State reaches the Profile a Run launches (ADR everything-but-the-account).
 ///
 /// Three kinds rather than one, because the platforms do not agree on which of
 /// them a person may make: only symbolic links need Developer Mode or elevation
@@ -256,7 +258,8 @@ pub enum Waited {
 }
 
 /// The permissions a file holding a Credential is created with, and the mode
-/// anything looser is tightened to: the owner, and nobody else (ADR 0020).
+/// anything looser is tightened to: the owner, and nobody else
+/// (ADR claude-code-chooses-the-store).
 pub const PRIVATE_FILE_MODE: u32 = 0o600;
 
 /// The same for the directory it sits in. A directory others may enter is a
@@ -359,7 +362,8 @@ pub enum HostError {
 /// age of an observation rather than wait for one.
 pub trait Clock {
     /// The current instant. Utilization is displayed as an observation with an
-    /// age (ADR 0015), so the clock is an effect like any other.
+    /// age (ADR a-figure-carries-its-age), so the clock is an effect like any
+    /// other.
     fn now(&self) -> DateTime<Utc>;
 }
 
@@ -374,7 +378,7 @@ pub trait Environment {
 
     /// The directory this command was typed in, which is the project a Run is
     /// about: Claude Code keys the trust it was given and the tools it was
-    /// allowed by exactly this path (ADR 0003).
+    /// allowed by exactly this path (ADR everything-but-the-account).
     fn current_dir(&self) -> Result<PathBuf, HostError>;
 
     /// What a variable is set to, or `None` for one that is unset, empty, or
@@ -388,7 +392,7 @@ pub trait Environment {
     fn env_var(&self, key: &str) -> Option<String>;
 
     /// Which platform this is, which is what decides where a Credential is
-    /// written (ADR 0020).
+    /// written (ADR claude-code-chooses-the-store).
     fn platform(&self) -> Platform;
 
     /// Where this Perch's own binary sits, with links followed.
@@ -396,7 +400,7 @@ pub trait Environment {
     /// The only evidence there is about which Channel installed this machine's
     /// Installation: every Channel points at the same Release and installs the
     /// same bytes, so nothing inside the binary can say where it came from and
-    /// the path it sits at has to (ADR 0039).
+    /// the path it sits at has to (ADR an-upgrade-asks-its-channel).
     ///
     /// Links followed because Homebrew's is the case that matters — what a
     /// person runs is `<prefix>/bin/perch`, which is a symlink into the Cellar,
@@ -406,13 +410,14 @@ pub trait Environment {
     /// Which user this process is running as, or `None` where the platform has
     /// no such number.
     ///
-    /// Two things need it, and both belong to `perch watcher` (ADR 0040). It is
-    /// what the root refusal is read off — every Profile Perch holds is under
-    /// one person's home directory, so a Service installed by root is one
-    /// watching a registry it does not own, and on macOS one with no unlocked
-    /// keychain to read (ADR 0008). And it names the domain a LaunchAgent is
-    /// bootstrapped into: `gui/<uid>` is the logged-in session, which is the
-    /// only place a Service belongs.
+    /// Two things need it, and both belong to `perch watcher`
+    /// (ADR the-machine-runs-the-watcher). It is what the root refusal is read
+    /// off — every Profile Perch holds is under one person's home directory, so
+    /// a Service installed by root is one watching a registry it does not own,
+    /// and on macOS one with no unlocked keychain to read
+    /// (ADR claude-code-chooses-the-store). And it names the domain a
+    /// LaunchAgent is bootstrapped into: `gui/<uid>` is the logged-in session,
+    /// which is the only place a Service belongs.
     ///
     /// `None` on Windows, where a logon task is registered against a named user
     /// and there is neither a uid to quote nor a root to refuse.
@@ -444,7 +449,7 @@ pub trait Files {
     ///
     /// A `chmod` after the fact leaves the secret on disk and readable for as
     /// long as the two calls take, which is the whole of what the mode is for
-    /// (ADR 0020).
+    /// (ADR claude-code-chooses-the-store).
     fn write_private_file(&self, path: &Path, contents: &str) -> Result<(), HostError>;
 
     /// Creates a directory, and any above it, that nobody but its owner may
@@ -505,10 +510,10 @@ pub trait Links {
     /// Makes `at` a link of `kind` standing for `target`.
     ///
     /// The one way Shared State reaches a Run's Profile, because it is the only
-    /// one that cannot diverge (ADR 0026). A kind the platform will not make is
-    /// an error rather than a quieter kind substituted for it: which link was
-    /// made decides what happens when the target is replaced, so the caller
-    /// chooses and hears about it.
+    /// one that cannot diverge (ADR everything-but-the-account). A kind the
+    /// platform will not make is an error rather than a quieter kind
+    /// substituted for it: which link was made decides what happens when the
+    /// target is replaced, so the caller chooses and hears about it.
     fn link(&self, kind: Link, target: &Path, at: &Path) -> Result<(), HostError>;
 
     /// What a path links to, or `None` when what is there is not a link.
@@ -538,14 +543,14 @@ pub trait Links {
 /// exactly what a scratch directory can drive — nineteen methods, against the
 /// clock, the keychain, the processes, the terminal and the network, which are
 /// either the machine's own state or the very things a fake exists to invent.
-/// That suite's table takes a `&dyn Filesystem` so its claim about its own reach
-/// is a signature rather than a paragraph, and a case there that reaches for
-/// [`Clock::now`] does not compile (ADR 0056).
+/// That suite's table takes a `&dyn Filesystem` so its claim about its own
+/// reach is a signature rather than a paragraph, and a case there that reaches
+/// for [`Clock::now`] does not compile (ADR the-port-fits-the-machine).
 pub trait Filesystem: Files + Links {}
 
 /// The Credential Store macOS keeps, as `/usr/bin/security` presents it — which
 /// is the binary Claude Code drives, and so the one Perch has to drive too
-/// (ADR 0008).
+/// (ADR claude-code-chooses-the-store).
 pub trait Keys {
     fn keychain_get(&self, service: &str, account: &str) -> Result<String, KeychainError>;
     fn keychain_set(&self, service: &str, account: &str, secret: &str)
@@ -579,10 +584,10 @@ pub trait Processes {
 
     /// This process, as the operating system names it.
     ///
-    /// What a Run marks its Profile Live with (ADR 0027): Perch waits for the
-    /// program it launched, so its own pid is alive for exactly as long as the
-    /// Run and no longer — and it is knowable *before* the launch, where the
-    /// child's is not.
+    /// What a Run marks its Profile Live with (ADR a-run-is-one-shot): Perch
+    /// waits for the program it launched, so its own pid is alive for exactly
+    /// as long as the Run and no longer — and it is knowable *before* the
+    /// launch, where the child's is not.
     fn process_id(&self) -> u32;
 
     /// Whether a process is still running. A Live Profile's Credential is
@@ -593,10 +598,11 @@ pub trait Processes {
     /// when there is no saying, because the process is gone or the operating
     /// system will not answer for it.
     ///
-    /// What corroborates a session marker (ADR 0022): a marker is evidence of
-    /// a client only when the process it names began no later than the marker
-    /// says the session did, because a recycled PID necessarily belongs to a
-    /// process that began after the marker was written.
+    /// What corroborates a session marker (ADR a-profile-is-live-by-evidence):
+    /// a marker is evidence of a client only when the process it names began no
+    /// later than the marker says the session did, because a recycled PID
+    /// necessarily belongs to a process that began after the marker was
+    /// written.
     fn process_started_at(&self, pid: u32) -> Option<DateTime<Utc>>;
 }
 
@@ -604,9 +610,10 @@ pub trait Processes {
 ///
 /// One trait rather than two, because [`Waited::Interrupted`] means nothing
 /// until [`Waiting::listen_for_interrupts`] has been called — so either the two
-/// sit together or the ordering between them is unsayable. `sleep` is filed here
-/// rather than among the processes it used to sit with: it is [`crate::lock`]'s
-/// contention wait and has nothing to do with a process (ADR 0056).
+/// sit together or the ordering between them is unsayable. `sleep` is filed
+/// here rather than among the processes it used to sit with: it is
+/// [`crate::lock`]'s contention wait and has nothing to do with a process
+/// (ADR the-port-fits-the-machine).
 pub trait Waiting {
     /// Waits. Contending for a lock is the only thing Perch waits on, and it is
     /// an effect like any other so that tests do not spend the time.
@@ -617,12 +624,13 @@ pub trait Waiting {
     ///
     /// `perch watcher run` calls this and nothing else does: every other
     /// command is over long before anybody could ask, and Ctrl-C during one of
-    /// them is a process killed where it stands (ADR 0013).
+    /// them is a process killed where it stands
+    /// (ADR a-watcher-knob-is-arithmetic).
     ///
     /// Both askings are the same request and are answered in the same place.
     /// Ctrl-C is the person's; `SIGTERM` is what systemd and launchd send to
     /// stop a Service, and a loop that did not claim it would be killed mid
-    /// Switch (ADR 0040).
+    /// Switch (ADR the-machine-runs-the-watcher).
     fn listen_for_interrupts(&self);
 
     /// Waits up to `millis`, and stops waiting the moment that has been asked
@@ -651,12 +659,12 @@ pub trait Terminal {
     /// One line of input that is never shown as it is typed, or `None` at end of
     /// input.
     ///
-    /// Its own effect rather than a flag on [`Terminal::read_line`], because the
-    /// caller who forgets the flag is the caller who writes somebody's export
-    /// passphrase into their scrollback — and because turning the terminal's
-    /// echo off and back on again is a platform primitive, which is what this
-    /// port is for. A platform with no way to hide what is typed refuses rather
-    /// than showing it (ADR 0014).
+    /// Its own effect rather than a flag on [`Terminal::read_line`], because
+    /// the caller who forgets the flag is the caller who writes somebody's
+    /// export passphrase into their scrollback — and because turning the
+    /// terminal's echo off and back on again is a platform primitive, which is
+    /// what this port is for. A platform with no way to hide what is typed
+    /// refuses rather than showing it (ADR the-holdings-go-out-sealed).
     ///
     /// `Zeroizing` in the signature rather than left to the caller, which is
     /// where it used to be: `commands::ask_secret` wrapped the answer and its
@@ -667,7 +675,8 @@ pub trait Terminal {
 
     /// Says something the user should know that is not the answer to what they
     /// asked: a Credential written to the store Perch would rather not have
-    /// used, a file found looser than it should be (ADR 0020).
+    /// used, a file found looser than it should be
+    /// (ADR claude-code-chooses-the-store).
     ///
     /// Said once. These are remarks about the state of the machine rather than
     /// about the command, and the same remark repeated for each of five
@@ -678,7 +687,8 @@ pub trait Terminal {
 /// The way out to Anthropic, and the only one.
 pub trait Network {
     /// Sends one request and reads the whole reply. The only way out to
-    /// Anthropic, and reached by nothing but `--refresh` (ADR 0015).
+    /// Anthropic, and reached by nothing but `--refresh`
+    /// (ADR a-figure-carries-its-age).
     fn http(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, HostError>;
 }
 
@@ -686,9 +696,10 @@ pub trait Network {
 ///
 /// The sum of the nine concerns above and nothing of its own. Commands and
 /// domain modules take a `&dyn Host`, which is the one port Perch has
-/// (ADR 0025) — the nine are names for its surfaces rather than nine ports, and
-/// a `&dyn Host` still reaches every one of them. ADR 0056 has the reasoning,
-/// including why no consumer of this port names fewer than three of the nine.
+/// (ADR a-crate-must-not-cost-a-seam) — the nine are names for its surfaces
+/// rather than nine ports, and a `&dyn Host` still reaches every one of them.
+/// ADR the-port-fits-the-machine has the reasoning, including why no consumer
+/// of this port names fewer than three of the nine.
 pub trait Host:
     Clock + Environment + Filesystem + Keys + Processes + Waiting + Terminal + Network
 {
@@ -705,11 +716,11 @@ pub trait Host:
 /// test in the tree and nothing else, since production builds a `RealHost` once
 /// and passes a `&dyn Host` from there on.
 ///
-/// A glob rather than nine imports per file, because the list a file would write
-/// out is not a fact about the file — a test that arranges a world and reads
-/// back what happened to it touches most of the machine by definition, and
-/// spelling out which nine-tenths would be noise a reader has to check against
-/// the body (ADR 0056).
+/// A glob rather than nine imports per file, because the list a file would
+/// write out is not a fact about the file — a test that arranges a world and
+/// reads back what happened to it touches most of the machine by definition,
+/// and spelling out which nine-tenths would be noise a reader has to check
+/// against the body (ADR the-port-fits-the-machine).
 pub mod prelude {
     pub use super::{
         Clock, Environment, Files, Filesystem, Host, Keys, Links, Network, Processes, Terminal,
@@ -724,7 +735,8 @@ pub mod prelude {
 /// write the directory can pre-plant something at — `CLAUDE_CONFIG_DIR` is
 /// taken verbatim and can name a shared location. The pid is what randomness
 /// buys here; a crate that generates a better one would want a real filesystem,
-/// and this sits behind the Host port where there is not always one (ADR 0025).
+/// and this sits behind the Host port where there is not always one
+/// (ADR a-crate-must-not-cost-a-seam).
 ///
 /// The pid comes through the port rather than from `std::process::id`, because
 /// the one thing this name has to be is *this process's*, and behind a fake
@@ -747,7 +759,7 @@ pub fn temp_beside(host: &dyn Host, path: &Path) -> PathBuf {
 /// MCP configuration, and an MCP server entry routinely carries an API key in
 /// its `env` block, so a file the user had narrowed must not come back at the
 /// process umask; and a file Perch is the first to create is created closed
-/// rather than open (ADR 0020).
+/// rather than open (ADR claude-code-chooses-the-store).
 fn mode_to_carry_across(host: &dyn Host, path: &Path) -> u32 {
     host.file_mode(path)
         .ok()

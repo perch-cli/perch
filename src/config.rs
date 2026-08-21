@@ -2,9 +2,10 @@
 //! it takes, and what having set it means.
 //!
 //! A Setting is one named rule governing how Perch chooses between Accounts,
-//! said about the Scope it governs and nowhere else (ADR 0051). [`Registry`]
-//! holds what a Scope has been set to and refuses a value it cannot mean;
-//! everything about how that value is *named*, *typed* and *explained* is here.
+//! said about the Scope it governs and nowhere else
+//! (ADR a-setting-names-its-scope). [`Registry`] holds what a Scope has been
+//! set to and refuses a value it cannot mean; everything about how that value
+//! is *named*, *typed* and *explained* is here.
 //!
 //! What `perch config` *does* — which words go where on a command line, which
 //! form somebody seems to have meant, how a line is printed so it reads back as
@@ -59,10 +60,11 @@ impl Setting {
     ///
     /// One Scope carries a key the others do not, and it is the Accounts in no
     /// Group: `interchangeable` is the declaration that they are a set worth
-    /// Cycling within, and a Group **is** that declaration (ADR 0002). Printing
-    /// it against a Group and then refusing to set it would break the invariant
-    /// the whole command rests on — every line `get` prints is the tail of the
-    /// `set` that would restore it — so the honest form is silence.
+    /// Cycling within, and a Group **is** that declaration
+    /// (ADR a-group-is-a-declaration). Printing it against a Group and then
+    /// refusing to set it would break the invariant the whole command rests on
+    /// — every line `get` prints is the tail of the `set` that would restore it
+    /// — so the honest form is silence.
     pub fn carried_by(self, scope: &Scope) -> bool {
         self != Setting::Interchangeable || *scope == Scope::Ungrouped
     }
@@ -184,7 +186,8 @@ impl Setting {
     /// the absence of a declaration that Accounts are interchangeable, not a
     /// weaker form of one" and "anything that changes underneath you only ever
     /// does so because you said it could" were both Perch defending a design to
-    /// somebody who had just typed the command that accepts it (ADR 0061).
+    /// somebody who had just typed the command that accepts it
+    /// (ADR perch-says-what-it-did).
     pub fn what_that_means(self, registry: &Registry, scope: &Scope) -> String {
         let settings = registry.settings(scope);
         let within = scope.within();
@@ -193,7 +196,7 @@ impl Setting {
                 "A bare `perch switch` from an Account in no Group now Cycles \
                  among the other ungrouped Accounts. That declares every \
                  ungrouped Account interchangeable at once, present and future \
-                 — including the next one `perch add` creates (ADR 0017)."
+                 — including the next one `perch add` creates (ADR a-group-is-a-declaration)."
                     .to_string()
             }
             Setting::Interchangeable => {
@@ -205,13 +208,13 @@ impl Setting {
             Setting::Strategy => match settings.strategy {
                 Strategy::MostHeadroom => format!(
                     "A Cycle {within} prefers the Account with the most \
-                     room left, measured by its worst Quota Window (ADR 0012)."
+                     room left, measured by its worst Quota Window (ADR headroom-is-the-worst-window)."
                 ),
                 Strategy::SoonestReset => format!(
                     "A Cycle {within} prefers the Account whose fullest \
                      Quota Window resets soonest, so perishable quota is spent \
                      rather than wasted. Headroom is still measured by the worst \
-                     window (ADR 0012), so an exhausted Account is still never \
+                     window (ADR headroom-is-the-worst-window), so an exhausted Account is still never \
                      chosen however soon it comes back."
                 ),
             },
@@ -240,15 +243,15 @@ impl Setting {
 /// matter: `watcher-may-act` is false on every Scope, and the Accounts in no
 /// Group need `interchangeable` as well, because being ungrouped is the absence
 /// of a declaration that they are interchangeable rather than a weaker form of
-/// one (ADR 0017). Both are correct, and neither used to be said anywhere near
-/// the command that makes them relevant — the Scope simply held two
-/// interchangeable-looking Accounts and quietly did nothing with them.
+/// one (ADR a-group-is-a-declaration). Both are correct, and neither used to be
+/// said anywhere near the command that makes them relevant — the Scope simply
+/// held two interchangeable-looking Accounts and quietly did nothing with them.
 ///
 /// **Said and never asked.** `watcher-may-act` is a consent gate, and a yes
 /// collected in the middle of adding an Account is not the yes Perch promises
 /// when it says nothing changes underneath you until you say it may. So this
 /// returns a statement of what is now true, which is [`crate::commands::add`]'s
-/// to print beside the rest of what it did (ADR 0061).
+/// to print beside the rest of what it did (ADR perch-says-what-it-did).
 ///
 /// Asked of a Scope rather than of a Group with the Ungrouped case bolted on:
 /// they are the same question, and the only difference is how many Settings
@@ -259,13 +262,13 @@ impl Setting {
 ///
 /// **It does not repeat [`ONLY_WHILE_IT_RUNS`], and that is deliberate.** Every
 /// sentence saying what `watcher-may-act` *does* carries that caveat, because a
-/// Scope that may be acted on is not a service that has been switched on (ADR
-/// 0013). This sentence says the opposite — that the Setting is off and nothing
-/// is happening — and the sentence about what turning it on means is
-/// [`Setting::what_that_means`], which is printed by the very `perch config
-/// set` named here. So the caveat arrives at the moment it becomes true rather
-/// than three clauses early, in a command whose report ADR 0061 keeps to what
-/// it did.
+/// Scope that may be acted on is not a service that has been switched on
+/// (ADR a-watcher-knob-is-arithmetic). This sentence says the opposite — that
+/// the Setting is off and nothing is happening — and the sentence about what
+/// turning it on means is [`Setting::what_that_means`], which is printed by the
+/// very `perch config set` named here. So the caveat arrives at the moment it
+/// becomes true rather than three clauses early, in a command whose report
+/// ADR perch-says-what-it-did keeps to what it did.
 ///
 /// **And it counts what the Scope holds rather than what a Cycle could choose.**
 /// [`Scope::accounts`] is the one idea of that set, and the narrower count would
@@ -322,7 +325,7 @@ pub fn vocabulary(scope: &Scope) -> Vec<&'static str> {
 }
 
 /// The second yes the Accounts in no Group need, said wherever permission for
-/// the watcher to act is (ADR 0017).
+/// the watcher to act is (ADR a-group-is-a-declaration).
 ///
 /// Two statements rather than one said twice: `interchangeable` declares those
 /// Accounts a set worth moving between, and `watcher-may-act` lets something
@@ -341,7 +344,7 @@ fn gated(registry: &Registry, scope: &Scope) -> String {
         Scope::Ungrouped => format!(
             " Those Accounts have also been declared interchangeable, which is \
              the other half of it: the watcher acts here only where `{}` is on \
-             too (ADR 0017).",
+             too (ADR a-group-is-a-declaration).",
             Setting::Interchangeable.as_str(),
         ),
         Scope::Group(_) => String::new(),
@@ -350,11 +353,12 @@ fn gated(registry: &Registry, scope: &Scope) -> String {
 
 /// Said of both of the watcher's fields, in one place, because two sentences
 /// about it would sooner or later say two different things: nothing here is a
-/// service that has been switched on (ADR 0013).
+/// service that has been switched on (ADR a-group-is-a-declaration).
 ///
-/// All three ways of running one are named, because a setting that only governed
-/// the loop would be a setting somebody with a Service, or somebody scheduling
-/// a Check, had no reason to read (ADR 0040).
+/// All three ways of running one are named, because a setting that only
+/// governed the loop would be a setting somebody with a Service, or somebody
+/// scheduling a Check, had no reason to read
+/// (ADR the-machine-runs-the-watcher).
 const ONLY_WHILE_IT_RUNS: &str = "Only while a Watcher is running — the loop in \
      the terminal you started it in, a Service `perch watcher install` set up, \
      or a `perch watcher check` your scheduler runs. Nothing here starts one.";
@@ -542,9 +546,9 @@ mod tests {
 
     /// Every message about a watcher setting that describes the watcher acting
     /// says what it is not — a Scope that may be acted on is not a service that
-    /// has been switched on (ADR 0013). Asserted over every key in every shape
-    /// its message branches on, because the branch that forgets is always the
-    /// one somebody added last.
+    /// has been switched on (ADR a-group-is-a-declaration). Asserted over every
+    /// key in every shape its message branches on, because the branch that
+    /// forgets is always the one somebody added last.
     #[test]
     fn every_message_about_the_watcher_acting_says_it_only_acts_while_the_loop_runs() {
         for granted in [false, true] {
@@ -566,9 +570,10 @@ mod tests {
         }
     }
 
-    /// ADR 0017: the Accounts in no Group need two independent yeses, and the
-    /// message that grants the watcher names the other one. A Group needs only
-    /// the grant, because being a Group is the declaration.
+    /// ADR a-group-is-a-declaration: the Accounts in no Group need two
+    /// independent yeses, and the message that grants the watcher names the
+    /// other one. A Group needs only the grant, because being a Group is the
+    /// declaration.
     #[test]
     fn granting_the_watcher_names_the_second_yes_the_ungrouped_accounts_need() {
         let mut registry = holding_a_group();
@@ -609,7 +614,7 @@ mod tests {
     /// A Scope that has grown to two Accounts is told what it still cannot do,
     /// and what it is told is the Settings it is actually missing — one for a
     /// Group, two for the Accounts in no Group, and the declaration named
-    /// before the grant (ADR 0017).
+    /// before the grant (ADR a-group-is-a-declaration).
     #[test]
     fn a_scope_of_two_is_told_the_yeses_it_is_still_missing() {
         let mut registry = holding_a_group();
@@ -629,7 +634,7 @@ mod tests {
         );
         assert!(
             !said.contains(Setting::Interchangeable.as_str()),
-            "a Group *is* that declaration (ADR 0002): {said}"
+            "a Group *is* that declaration (ADR a-group-is-a-declaration): {said}"
         );
 
         let said =

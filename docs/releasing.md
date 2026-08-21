@@ -101,7 +101,7 @@ are two different claims and only the second is what anybody installs.
 Do not try to remove `latest`. npm attaches it to a package's first version
 whatever `--tag` said and then refuses to delete it — the request comes back
 `400` after authenticating successfully, and no public package on the registry
-is without one. ADR 0031 covers what that cost.
+is without one. ADR this-repo-assembles-a-release covers what that cost.
 
 ### The Homebrew tap
 
@@ -135,7 +135,7 @@ does not, the version number does the work:
 | Channel | During 0.x | At 1.0 |
 | ------- | ---------- | ------ |
 | GitHub Releases | published normally — it genuinely is the latest release, and marking it a prerelease would empty the `releases/latest` endpoint the installers ask | unchanged |
-| npm | published normally, `latest` following the newest release — npm does not permit a package without a `latest` (ADR 0031) | unchanged |
+| npm | published normally, `latest` following the newest release — npm does not permit a package without a `latest` (ADR this-repo-assembles-a-release) | unchanged |
 | Homebrew | a tap, which nobody adds by accident | consider homebrew-core |
 
 Only one of the three is actually opt-in, which is worth being clear-eyed about:
@@ -153,19 +153,21 @@ judgment call. Worth revisiting at the same time: Apple notarization, which
 ## The site, and the installers on it
 
 <https://perch-cli.github.io/perch/> is built by `pages.yml` out of one source
-(ADR 0062): `pages/` is an Astro and Starlight project that renders the front page
-and the guide together, and `pages/public/` is copied to the root of the output
-verbatim. Nothing on the site is written twice — the guide the site serves is the
-markdown GitHub shows, in `pages/src/content/docs/`.
+(ADR one-thing-renders-the-site): `pages/` is an Astro and Starlight project
+that renders the front page and the guide together, and `pages/public/` is
+copied to the root of the output verbatim. Nothing on the site is written twice
+— the guide the site serves is the markdown GitHub shows, in
+`pages/src/content/docs/`.
 
 It publishes twice over, because the site's two halves keep different time
-(ADR 0063). **A release** rebuilds everything: the guide describes a Perch somebody
-can install, so between releases it does not move — a typo fixed in the guide is
-live at the next release and not before. `release.yml` does that by calling
-`pages.yml` as its last job, after the artifacts are uploaded; it cannot be an
-event, because a Release created with `GITHUB_TOKEN` starts no workflow. **A push
-to `main` that touches the installers** rebuilds too: they are pasted from a URL
-with no version in it, so a merge has to be able to fix one.
+(ADR one-thing-renders-the-site). **A release** rebuilds everything: the guide
+describes a Perch somebody can install, so between releases it does not move — a
+typo fixed in the guide is live at the next release and not before.
+`release.yml` does that by calling `pages.yml` as its last job, after the
+artifacts are uploaded; it cannot be an event, because a Release created with
+`GITHUB_TOKEN` starts no workflow. **A push to `main` that touches the
+installers** rebuilds too: they are pasted from a URL with no version in it, so
+a merge has to be able to fix one.
 
 Changing this workflow does not publish anything, deliberately — it cannot change
 either half of what goes out. Use **Run workflow** to apply a change to how the

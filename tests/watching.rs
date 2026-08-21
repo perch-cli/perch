@@ -11,7 +11,8 @@
 //! fails if it stops holding: only the Account you are on is Refreshed, every
 //! decision is printed including the ones where nothing happens, nothing is
 //! ever acted on but a figure that was just read, and no Switch lands on an
-//! Account nearly as full as the one being left (ADR 0046).
+//! Account nearly as full as the one being left
+//! (ADR a-watcher-knob-is-arithmetic).
 
 mod common;
 
@@ -67,13 +68,13 @@ fn when(decision: &str) -> DateTime<Utc> {
 /// `perch watcher install` succeeds on a machine Perch has never run on —
 /// nothing it writes reads a registry — so the Service starts at the next login
 /// and the first round asks adoption for one. On a machine with no Claude Code
-/// login there is nothing to adopt (ADR 0009), and that refusal used to end the
-/// loop: exit 12, systemd's start limit, a unit left `failed` for good. Logging
-/// into Claude Code afterwards never revived it.
+/// login there is nothing to adopt (ADR a-login-perch-does-not-need), and that
+/// refusal used to end the loop: exit 12, systemd's start limit, a unit left
+/// `failed` for good. Logging into Claude Code afterwards never revived it.
 ///
-/// Which is the crash loop ADR 0040 repealed the permission exits over,
-/// arriving one line above where they are caught. So it holds and says why,
-/// like every other way this machine can be un-arranged.
+/// Which is the crash loop ADR the-machine-runs-the-watcher repealed the
+/// permission exits over, arriving one line above where they are caught. So it
+/// holds and says why, like every other way this machine can be un-arranged.
 #[test]
 fn a_watcher_on_a_machine_with_no_login_holds_rather_than_exiting() {
     let host = machine_with_claude_code().with_interrupt_after(2);
@@ -94,7 +95,7 @@ fn a_watcher_on_a_machine_with_no_login_holds_rather_than_exiting() {
 
 /// The other half of the same repeal: a Check is one process reporting to a
 /// scheduler, so it still exits with the code the refusal earned rather than
-/// holding on it (ADR 0013).
+/// holding on it (ADR a-watcher-knob-is-arithmetic).
 #[test]
 fn a_check_on_a_machine_with_no_login_still_reports_the_refusal() {
     let host = machine_with_claude_code();
@@ -147,9 +148,9 @@ fn active(host: &FakeHost) -> Option<String> {
 /// `one_round` asks whether the outgoing Profile is Live before it spends a
 /// Refresh on the candidates, and the Switch asks again under the locks —
 /// because taking them can take seconds and a `claude` started in that gap is
-/// one the first answer never saw (ADR 0005). The second ask is the one that
-/// finds this, so the refusal comes back out of `perform` rather than from the
-/// check above it.
+/// one the first answer never saw (ADR a-profile-is-live-by-evidence). The
+/// second ask is the one that finds this, so the refusal comes back out of
+/// `perform` rather than from the check above it.
 ///
 /// Nothing moved, so it is news about the machine rather than a fault in it:
 /// the round says so, and the loop goes on watching. `perch switch` meeting the
@@ -217,11 +218,11 @@ fn every_round_prints_one_line_naming_the_figure_and_the_outcome() {
     );
 }
 
-/// **ADR 0061.** The claim this used to make was that every round quotes the
-/// threshold; the claim it makes now is stronger. The threshold is said once
-/// for the whole run, in the opening line, because it does not change within
-/// one — and a run of any length says it exactly as many times as a run of one
-/// round does.
+/// **ADR perch-says-what-it-did.** The claim this used to make was that every
+/// round quotes the threshold; the claim it makes now is stronger. The
+/// threshold is said once for the whole run, in the opening line, because it
+/// does not change within one — and a run of any length says it exactly as many
+/// times as a run of one round does.
 ///
 /// Three rounds here, and eight hours of them would be the same assertion: the
 /// count is of the run rather than of the rounds.
@@ -338,7 +339,7 @@ fn crossing_the_threshold_switches_and_the_line_says_what_it_switched_on() {
     assert!(
         !switched.contains("most room"),
         "and not why that Account won, which is Perch defending a ranking \
-         nobody questioned (ADR 0061): {switched}"
+         nobody questioned (ADR perch-says-what-it-did): {switched}"
     );
 
     assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
@@ -350,9 +351,9 @@ fn crossing_the_threshold_switches_and_the_line_says_what_it_switched_on() {
 }
 
 /// Everything the watcher does when it acts is a Switch, which means the
-/// outgoing Credential is Captured into its own Profile first (ADR 0006).
-/// Without that, a Rotation that happened while the Account was live is lost
-/// the moment the watcher moves off it.
+/// outgoing Credential is Captured into its own Profile first
+/// (ADR a-switch-is-written-down-first). Without that, a Rotation that happened
+/// while the Account was live is lost the moment the watcher moves off it.
 #[test]
 fn acting_captures_the_outgoing_credential_before_it_writes_the_incoming_one() {
     let host = watching(&[86.0], 5.0);
@@ -372,9 +373,9 @@ fn acting_captures_the_outgoing_credential_before_it_writes_the_incoming_one() {
 }
 
 /// A candidate's figures are read at the moment a decision is taken, not kept
-/// warm. They are idle then by definition, so ADR 0005 permits Renewing them —
-/// and reading them every round instead would spend every Account's allowance
-/// to keep numbers fresh that are looked at once.
+/// warm. They are idle then by definition, so ADR a-profile-is-live-by-evidence
+/// permits Renewing them — and reading them every round instead would spend
+/// every Account's allowance to keep numbers fresh that are looked at once.
 #[test]
 fn the_accounts_it_could_move_to_are_read_only_when_a_decision_needs_them() {
     let host = watching(&[40.0, 45.0, 86.0], 5.0);
@@ -600,7 +601,8 @@ fn a_reply_perch_cannot_read_is_a_failed_refresh_rather_than_a_reading_of_zero()
 
 /// Running while Claude Code is working is the normal case for this command,
 /// so the refusal that protects a running session has to hold under it: a
-/// Renewal may Rotate, and a Rotation logs that session out mid-task (ADR 0005).
+/// Renewal may Rotate, and a Rotation logs that session out mid-task
+/// (ADR a-profile-is-live-by-evidence).
 #[test]
 fn a_live_profiles_token_is_never_renewed_to_get_a_figure() {
     let host = answering(watched(), SPARE_TOKEN, SECOND_EMAIL, &[5.0])
@@ -648,10 +650,11 @@ fn nowhere_to_go_is_a_decision_and_the_loop_goes_on_watching() {
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
 }
 
-/// The margin (ADR 0046). At an 80% threshold nothing is moved to unless it is
-/// at 70% or better, so an Account that is only just emptier than the one you
-/// are on is passed over — moving there would buy a few minutes and cost a
-/// Capture, a Credential write, and the same decision again shortly.
+/// The margin (ADR a-watcher-knob-is-arithmetic). At an 80% threshold nothing
+/// is moved to unless it is at 70% or better, so an Account that is only just
+/// emptier than the one you are on is passed over — moving there would buy a
+/// few minutes and cost a Capture, a Credential write, and the same decision
+/// again shortly.
 #[test]
 fn a_candidate_only_just_emptier_than_the_threshold_is_never_switched_to() {
     let host = watching(&[86.0, 88.0], 74.0);
@@ -677,11 +680,12 @@ fn a_candidate_only_just_emptier_than_the_threshold_is_never_switched_to() {
     );
 }
 
-/// The whole of what the margin is for (ADR 0046). Usage climbs on the Account
-/// you are on and stands still on the one you are not, so without a margin the
-/// two walk upward together — a Switch every round, each one a Capture and a
-/// Credential write, and every landing on an Account with almost nothing left.
-/// The margin makes the round say there is nowhere better to go, which is true.
+/// The whole of what the margin is for (ADR a-watcher-knob-is-arithmetic).
+/// Usage climbs on the Account you are on and stands still on the one you are
+/// not, so without a margin the two walk upward together — a Switch every
+/// round, each one a Capture and a Credential write, and every landing on an
+/// Account with almost nothing left. The margin makes the round say there is
+/// nowhere better to go, which is true.
 #[test]
 fn a_destination_nearly_as_full_as_the_account_being_left_is_refused() {
     let host = watching_both(&[82.0, 79.0, 83.0, 81.0, 84.0, 80.0], &[78.0], 6);
@@ -716,8 +720,8 @@ fn filling_up_one_after_the_other() -> FakeHost {
     watching_both(&[40.0, 86.0, 20.0], &[5.0, 90.0], 8)
 }
 
-/// The cooldown (ADR 0013): a floor under how often the watcher acts, whatever
-/// the figures do in between.
+/// The cooldown (ADR a-watcher-knob-is-arithmetic): a floor under how often the
+/// watcher acts, whatever the figures do in between.
 #[test]
 fn two_switches_never_happen_closer_together_than_the_cooldown() {
     let host = filling_up_one_after_the_other();
@@ -753,13 +757,14 @@ fn two_switches_never_happen_closer_together_than_the_cooldown() {
         assert!(
             decision.contains("so nothing moves"),
             "and when it lifts, because a refusal keeps its whole sentence \
-             (ADR 0036, ADR 0061): {decision}"
+             (ADR a-refusal-is-a-promise, ADR perch-says-what-it-did): {decision}"
         );
     }
 }
 
 /// The cooldown is checked before anything is read, so a round that may not act
-/// spends no allowance finding out what it would have done (ADR 0046).
+/// spends no allowance finding out what it would have done
+/// (ADR a-watcher-knob-is-arithmetic).
 ///
 /// And once it has run out, the Account the watcher came off is a candidate like
 /// any other. Coming straight back is barred by the cooldown having to pass
@@ -804,7 +809,7 @@ fn the_account_just_left_is_returned_to_once_the_cooldown_has_run_out() {
 /// is written down nowhere, so stopping `perch watcher run` and starting it
 /// again is a person saying "go on then". A scheduled Check is the other
 /// case — the sequence of invocations is the watcher there, and what paces it
-/// has to outlive any one of them (ADR 0013).
+/// has to outlive any one of them (ADR a-watcher-knob-is-arithmetic).
 #[test]
 fn the_loop_carries_its_cooldown_in_memory_and_records_nothing() {
     let host = filling_up_one_after_the_other();
@@ -825,9 +830,9 @@ fn the_loop_carries_its_cooldown_in_memory_and_records_nothing() {
 }
 
 /// The margin holds for every Group, because there is no longer a Group that
-/// can be told otherwise (ADR 0046). A candidate at 79% under an 80% threshold
-/// was the arrangement a `watcher-margin-percent 0` used to buy, and the loop
-/// now refuses it whatever else has been set.
+/// can be told otherwise (ADR a-watcher-knob-is-arithmetic). A candidate at 79%
+/// under an 80% threshold was the arrangement a `watcher-margin-percent 0` used
+/// to buy, and the loop now refuses it whatever else has been set.
 ///
 /// That the three keys are refused is `configuring.rs`'s claim; this is what
 /// the loop does with the numbers nobody can move.
@@ -856,7 +861,8 @@ fn the_margin_refuses_a_barely_emptier_candidate_for_every_group() {
 fn a_switch_the_machine_turned_away_is_said_and_the_loop_carries_on() {
     let host = watching(&[86.0, 88.0], 5.0);
     // A `perch run` against the Account being left: the Capture would write
-    // into a Profile something else is holding (ADR 0027).
+    // into a Profile something else is holding
+    // (ADR a-profile-is-live-by-evidence).
     a_run_against(&host, EMAIL, host.now());
 
     let (result, printed) = run_watch(&host);
@@ -884,7 +890,7 @@ fn a_switch_the_machine_turned_away_is_said_and_the_loop_carries_on() {
         "and no candidate was read: a `perch run` held open in another terminal \
          keeps that Profile Live for as long as somebody is working in it, so \
          reading every candidate each round spends an allowance that does not \
-         refill early (ADR 0015) on a Switch that cannot happen — and throttles \
+         refill early (ADR a-figure-carries-its-age) on a Switch that cannot happen — and throttles \
          the `perch status --refresh` the user types, at the moment the watcher \
          matters most"
     );
@@ -1032,9 +1038,9 @@ fn the_decision_log_is_standard_output_and_no_file_is_written() {
 
     // Named rather than filtered by what a logfile might be called. Asked as
     // "nothing with `log` or `watch` in its name", a watcher writing
-    // `~/.config/perch/decisions.jsonl` or `history.txt` passed — and ADR
-    // 0013's property is about which files are written, not what they are
-    // called.
+    // `~/.config/perch/decisions.jsonl` or `history.txt` passed — and
+    // ADR a-watcher-knob-is-arithmetic's property is about which files are
+    // written, not what they are called.
     let written: Vec<_> = host
         .effects()
         .iter()
@@ -1073,11 +1079,12 @@ fn an_account_in_no_group_is_not_watched_however_freely_it_may_be_cycled() {
 
     let (result, printed) = run_watch(&host);
 
-    // The loop holds rather than stopping (ADR 0040): a supervisor respawns a
-    // deliberate exit until it gives up on the unit, and launchd cannot be told
-    // that some exits are fine. What the grant governs is untouched — a holding
-    // watcher reads nothing and moves nothing — and the moment somebody grants
-    // it, the Service that was already running takes over.
+    // The loop holds rather than stopping (ADR the-machine-runs-the-watcher): a
+    // supervisor respawns a deliberate exit until it gives up on the unit, and
+    // launchd cannot be told that some exits are fine. What the grant governs
+    // is untouched — a holding watcher reads nothing and moves nothing — and
+    // the moment somebody grants it, the Service that was already running takes
+    // over.
     result.expect("a machine that is not arranged for watching is held, not failed");
     assert!(
         printed.contains("held")
@@ -1092,7 +1099,8 @@ fn an_account_in_no_group_is_not_watched_however_freely_it_may_be_cycled() {
     );
 
     // A Check has no process left to hold with, and a scheduler has to be told.
-    // ADR 0013 promised it `14`, and ADR 0040 repealed only the loop's exits.
+    // ADR a-watcher-knob-is-arithmetic promised it `14`, and
+    // ADR the-machine-runs-the-watcher repealed only the loop's exits.
     let (once, _) = run_watch_once(&host);
     assert_eq!(
         once.expect_err("a Check still refuses").exit_code(),
@@ -1101,7 +1109,7 @@ fn an_account_in_no_group_is_not_watched_however_freely_it_may_be_cycled() {
 }
 
 /// The Watcher is a Switch path, so it settles a Landing — and where it cannot,
-/// it **holds rather than stops** (ADR 0048).
+/// it **holds rather than stops** (ADR a-switch-is-written-down-first).
 ///
 /// An unresolved Landing is a reason it may not act, indistinguishable in kind
 /// from being under Threshold or inside a Cooldown, and it gets the same
@@ -1131,7 +1139,7 @@ fn a_landing_the_watcher_cannot_settle_holds_the_loop_rather_than_stopping_it() 
     );
 
     // A scheduler has to be told, which is the one difference between the two
-    // arrangements (ADR 0040).
+    // arrangements (ADR the-machine-runs-the-watcher).
     let (once, _) = run_watch_once(&host);
     assert_eq!(
         once.expect_err("a Check exits on it").exit_code(),
@@ -1140,7 +1148,7 @@ fn a_landing_the_watcher_cannot_settle_holds_the_loop_rather_than_stopping_it() 
 }
 
 /// And the opening line names an Account only where one has been established
-/// (ADR 0055).
+/// (ADR an-ordering-is-a-type).
 ///
 /// A Landing in flight is a Switch nothing has recorded the outcome of, and
 /// `Active::whose` answers with the Account being *left* — the last thing Perch
@@ -1188,9 +1196,10 @@ fn a_landing_in_flight_leaves_the_opening_line_naming_nobody() {
     );
 }
 
-/// **ADR 0051 and ADR 0017 together.** The watcher acts on the Accounts in no
-/// Group only where both things have been said about *that* Scope: they are
-/// interchangeable at all, and something may act on them.
+/// **ADR a-setting-names-its-scope and ADR a-group-is-a-declaration together.**
+/// The watcher acts on the Accounts in no Group only where both things have
+/// been said about *that* Scope: they are interchangeable at all, and something
+/// may act on them.
 ///
 /// A grant said about a Group is a statement about that Group and reaches
 /// nothing else, so a person who has let the watcher into their work Group has
@@ -1210,7 +1219,7 @@ fn a_grant_said_about_a_group_leaves_ungrouped_accounts_alone() {
 
     let (result, printed) = run_watch(&host);
 
-    result.expect("held rather than failed (ADR 0040)");
+    result.expect("held rather than failed (ADR the-machine-runs-the-watcher)");
     assert!(
         printed.contains("interchangeable"),
         "the declaration that is still missing is named: {printed}"
@@ -1219,7 +1228,7 @@ fn a_grant_said_about_a_group_leaves_ungrouped_accounts_alone() {
         registry_of(&host).active().whose(),
         Some(EMAIL),
         "and nothing moved underneath them, at 99% used with an empty Account \
-         beside it (ADR 0017) — which is the whole of what the grant protects, \
+         beside it (ADR a-group-is-a-declaration) — which is the whole of what the grant protects, \
          and is exactly as true of a watcher that holds as of one that exits"
     );
     assert!(host.sent_to(USAGE_URL).is_empty());
@@ -1270,7 +1279,7 @@ fn a_group_that_has_not_said_the_watcher_may_act_is_not_watched() {
 
     let (result, printed) = run_watch(&host);
 
-    result.expect("held rather than failed (ADR 0040)");
+    result.expect("held rather than failed (ADR the-machine-runs-the-watcher)");
     assert!(printed.contains("watcher-may-act"), "{printed}");
     assert!(host.sent_to(USAGE_URL).is_empty(), "and nothing was read");
 
@@ -1285,7 +1294,8 @@ fn a_group_that_has_not_said_the_watcher_may_act_is_not_watched() {
 /// it can stop being given while the loop is sleeping: a `perch switch` typed
 /// in another terminal can leave an ungrouped Account active, and a watcher
 /// still watching it would be watching an Account nothing carries permission to
-/// act on. It holds on the message it would have held at the start (ADR 0040).
+/// act on. It holds on the message it would have held at the start
+/// (ADR the-machine-runs-the-watcher).
 #[test]
 fn a_switch_onto_an_ungrouped_account_holds_the_loop_that_was_already_running() {
     let host = watching(&[40.0, 45.0], 5.0).once_while_waiting(|host| {
@@ -1368,7 +1378,8 @@ fn the_run_fixture_marks_the_profile_of_the_account_it_names() {
 fn a_switch_that_changed_something_and_then_failed_stops_the_loop() {
     let host = watching(&[86.0, 40.0], 5.0);
     // The Credential is written and the Identity beside it cannot be, which is
-    // ADR 0006's crash between two writes arriving as a failed write.
+    // ADR a-switch-is-written-down-first's crash between two writes arriving as
+    // a failed write.
     let host = host.with_unwritable_file(IDENTITY_PATH, "read-only file system");
 
     let (result, printed) = run_watch(&host);
@@ -1395,7 +1406,7 @@ fn a_switch_that_changed_something_and_then_failed_stops_the_loop() {
         Some(SECOND_EMAIL),
         "which Account is active is a fact about which Credential is live, so \
          it is recorded as what happened rather than as what was asked for \
-         (ADR 0006)"
+         (ADR a-switch-is-written-down-first)"
     );
 }
 
@@ -1405,9 +1416,9 @@ fn a_switch_that_changed_something_and_then_failed_stops_the_loop() {
 /// That made a `perch status --refresh` in another terminal able to stop the
 /// watcher. It holds the exclusive lock across every Renewal and every read it
 /// makes, comfortably more than four seconds over a Group, and the machine then
-/// went unwatched until somebody noticed the process was gone. ADR 0013 stops
-/// the loop for a Switch that changed something and then failed; contention
-/// over a lock changed nothing at all.
+/// went unwatched until somebody noticed the process was gone.
+/// ADR a-watcher-knob-is-arithmetic stops the loop for a Switch that changed
+/// something and then failed; contention over a lock changed nothing at all.
 #[test]
 fn another_perch_holding_the_registry_holds_the_round_rather_than_ending_the_watcher() {
     let host = watching(&[40.0, 45.0], 5.0).once_while_waiting(|host| {
@@ -1573,7 +1584,8 @@ fn the_wait_a_ctrl_c_lands_in_costs_the_clock_nothing() {
     );
 }
 
-/// **One Watcher per person per machine** (ADR 0040), asked of the Check.
+/// **One Watcher per person per machine** (ADR the-machine-runs-the-watcher),
+/// asked of the Check.
 ///
 /// The loop keeps its Cooldown in memory and a Check reads the one in `checks`,
 /// and neither can see the other's — so a Check firing while a Service runs
@@ -1604,8 +1616,8 @@ fn a_check_that_finds_a_watcher_already_running_holds_rather_than_deciding() {
     );
 }
 
-/// The same contention, met by the loop — and answered differently, which is the
-/// whole of ADR 0040's reasoning about supervisors.
+/// The same contention, met by the loop — and answered differently, which is
+/// the whole of ADR the-machine-runs-the-watcher's reasoning about supervisors.
 ///
 /// A loop that exited here would be a Service that exits at every start until a
 /// lock left behind by a `kill -9` goes stale, and the supervisor would restart
@@ -1638,7 +1650,7 @@ fn a_loop_that_finds_the_watch_held_says_so_and_comes_back_rather_than_exiting()
 }
 
 /// **A Watcher renews the watch, on both sides of every round it takes** (ADR
-/// 0040).
+/// the-machine-runs-the-watcher).
 ///
 /// The watcher lock's staleness window is derived from "once a round" — it is
 /// the longest wait plus the round after it — so a loop that never renews goes
@@ -1744,7 +1756,8 @@ fn a_loop_whose_watch_was_taken_over_stops_rather_than_deciding_beside_it() {
 ///
 /// Run past the window with nothing touching `.watch.lock`, the next `perch
 /// watcher check` reads the artifact as abandoned and takes the watch out from
-/// under a live Watcher: the two-Watcher state ADR 0040 exists to prevent.
+/// under a live Watcher: the two-Watcher state ADR the-machine-runs-the-watcher
+/// exists to prevent.
 ///
 /// A Check was worse than the loop rather than better. It took the same lock
 /// and `renew` was never called on it anywhere in the process, so the whole of
@@ -1844,7 +1857,7 @@ fn a_claude_code_holding_its_own_lock_is_a_refusal_rather_than_an_unread_figure(
 fn a_check_held_settling_a_landing_says_so_on_standard_output() {
     let host = watching(&[86.0], 5.0);
     // A Switch that died between writing the Landing down and moving anything,
-    // so the next round has one to settle (ADR 0048).
+    // so the next round has one to settle (ADR a-switch-is-written-down-first).
     a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
     // And a Claude Code holding the lock that settling it needs.
     let holding_since = host.now();

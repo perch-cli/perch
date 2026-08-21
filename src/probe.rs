@@ -1,5 +1,5 @@
 //! What Perch believes about the installed Claude Code, and how confident it is
-//! (ADR 0007).
+//! (ADR an-assumption-is-probed).
 //!
 //! Every path, service-name derivation and struct shape Perch depends on is
 //! reverse-engineered and none of it is a public contract. They live here, in
@@ -36,8 +36,8 @@ pub mod assumption {
 ///
 /// Every refusal this module raises names the assumption that failed *and* the
 /// Claude Code it was reading, because an assumption about an unnamed version
-/// is a bug report nobody can act on (ADR 0007). That is the whole of what this
-/// is for: it is quoted, never compared.
+/// is a bug report nobody can act on (ADR an-assumption-is-probed). That is the
+/// whole of what this is for: it is quoted, never compared.
 ///
 /// A value rather than the `&str` it was, for two reasons. It is read by
 /// running `claude --version` — a `PATH` walk and a subprocess — and as six
@@ -119,8 +119,9 @@ pub struct Credential {
 /// How long before a Credential expires Perch stops relying on it.
 ///
 /// A token that expires while a request is in flight is a request wasted
-/// against a budget that does not refill early (ADR 0015), and the margin costs
-/// nothing: it moves a Rotation Perch was about to need anyway.
+/// against a budget that does not refill early (ADR a-figure-carries-its-age),
+/// and the margin costs nothing: it moves a Rotation Perch was about to need
+/// anyway.
 pub const EXPIRY_MARGIN_SECONDS: i64 = 60;
 
 impl Credential {
@@ -208,7 +209,7 @@ struct OauthAccount {
 
 /// Where the installed Claude Code keeps one Account's configuration: its
 /// Identity, and both of the Credential Stores it might hold a Credential in
-/// (ADR 0020).
+/// (ADR claude-code-chooses-the-store).
 ///
 /// Not itself a Credential Store, despite the name it has carried since before
 /// there were two of them: this is the config directory and everything derived
@@ -278,8 +279,8 @@ pub fn claude_bin(host: &dyn Host) -> Result<PathBuf> {
 /// and `npm.cmd` produces two programs that work in every shell and are
 /// invisible to a bare `Command::new`. The second of those is why this is a
 /// search for any name rather than for `claude`: `perch upgrade` hands the work
-/// back to `npm` on an npm Installation (ADR 0039), and finding it is the same
-/// problem this was already solving.
+/// back to `npm` on an npm Installation (ADR an-upgrade-asks-its-channel), and
+/// finding it is the same problem this was already solving.
 ///
 /// The name is taken as given — no extension is stripped and none is required,
 /// so a caller may pass `npm.cmd` and get exactly that.
@@ -376,7 +377,8 @@ pub fn claude_version(host: &dyn Host) -> Result<String> {
 ///
 /// Claude Code derives it as `Claude Code-credentials-<sha256(dir)[0:8]>`, or
 /// the bare name when `CLAUDE_CONFIG_DIR` is unset — which is what gives every
-/// Profile a private credential namespace for free (ADR 0001).
+/// Profile a private credential namespace for free
+/// (ADR claude-code-chooses-the-store).
 pub fn service_name_for(config_dir: &Path, is_default: bool) -> String {
     if is_default {
         DEFAULT_SERVICE.to_string()
@@ -477,14 +479,15 @@ pub const CREDENTIALS_FILE: &str = ".credentials.json";
 /// default one as `~/.claude.json`. That difference is Claude Code's, not
 /// Perch's: the 2.1.222 build joins its config directory to
 /// `.credentials.json` and nothing else, which is what gives each Profile a
-/// Credential of its own off macOS (ADR 0020).
+/// Credential of its own off macOS (ADR claude-code-chooses-the-store).
 ///
 /// This and [`service_name_for`] are the two halves of
 /// [`assumption::CREDENTIAL_LOCATION`], and the whole of what a Profile's
 /// privacy rests on. Neither is probed at runtime — a store that holds nothing
 /// is a logged-out Profile, not a broken belief — so what guards them is
 /// `tests/your_machine.rs`, which puts a Credential where this says one goes
-/// and asks the installed Claude Code to read it back (ADR 0007).
+/// and asks the installed Claude Code to read it back
+/// (ADR an-assumption-is-probed).
 pub fn credentials_file_for(config_dir: &Path) -> PathBuf {
     config_dir.join(CREDENTIALS_FILE)
 }
@@ -493,9 +496,9 @@ pub fn credentials_file_for(config_dir: &Path) -> PathBuf {
 /// config directory as `~/.claude.json`, and inside every other one.
 ///
 /// Named here because it is one of the two entries a Reconcile refuses to share
-/// (ADR 0026), and the name of a file Claude Code writes belongs in the module
-/// that knows about Claude Code rather than in the one that enumerates a
-/// directory.
+/// (ADR everything-but-the-account), and the name of a file Claude Code writes
+/// belongs in the module that knows about Claude Code rather than in the one
+/// that enumerates a directory.
 pub const IDENTITY_FILE: &str = ".claude.json";
 
 /// `~/.claude.json` for the default directory, `<dir>/.claude.json` otherwise.
@@ -521,14 +524,14 @@ const NO_LOGIN_NAME: &str = "(no keychain)";
 /// The login name a keychain item is stored under. `USERNAME` is Windows'
 /// spelling of `USER`; off macOS the name is carried in the Store but never
 /// looked up, since the keychain there is a store that holds nothing
-/// (ADR 0020).
+/// (ADR claude-code-chooses-the-store).
 ///
 /// So it is only *required* on macOS. Refused everywhere, an unset `USER` — a
-/// container, or the systemd timer that ADR 0013 says is where an unattended
-/// watcher belongs — made every Perch command on the machine fail over a value
-/// nothing on that machine would ever read, naming a keychain the platform does
-/// not have. Every `Store` is derived through here, so that was `perch status`,
-/// `perch list` and `perch watcher check` alike.
+/// container, or the systemd timer that ADR a-watcher-knob-is-arithmetic says
+/// is where an unattended watcher belongs — made every Perch command on the
+/// machine fail over a value nothing on that machine would ever read, naming a
+/// keychain the platform does not have. Every `Store` is derived through here,
+/// so that was `perch status`, `perch list` and `perch watcher check` alike.
 fn keychain_account_name(host: &dyn Host) -> Result<String> {
     if let Some(name) = host.env_var("USER").or_else(|| host.env_var("USERNAME")) {
         return Ok(name);
@@ -545,8 +548,8 @@ fn keychain_account_name(host: &dyn Host) -> Result<String> {
 }
 
 /// Reads and understands the Credential a config directory holds, from
-/// whichever of its two Credential Stores holds one (ADR 0020), or says why it
-/// cannot.
+/// whichever of its two Credential Stores holds one
+/// (ADR claude-code-chooses-the-store), or says why it cannot.
 pub fn read_credential(
     host: &dyn Host,
     store: &Store,
@@ -609,9 +612,9 @@ pub const CREDENTIAL_KEY: &str = "claudeAiOauth";
 /// The rest of the block is Claude Code's — the scopes it asked for, the
 /// subscription it recorded — and none of it is Perch's to decide. Unlike
 /// `.claude.json`, which is spliced as text because it holds a person's work
-/// (ADR 0001), a Credential is one small object that only ever holds an
-/// Account's tokens, so it is read and written as JSON rather than patched
-/// blind.
+/// (ADR claude-code-chooses-the-store), a Credential is one small object that
+/// only ever holds an Account's tokens, so it is read and written as JSON
+/// rather than patched blind.
 pub fn credential_after_rotation(
     current: &Credential,
     access_token: &str,
@@ -891,7 +894,8 @@ pub fn session_marker_at(config_dir: &Path, pid: u32) -> PathBuf {
 }
 
 /// The marker a Run writes to say a Profile is Live, in the shape Claude Code
-/// writes one and this module reads one back (ADR 0022).
+/// writes one and this module reads one back
+/// (ADR a-profile-is-live-by-evidence).
 ///
 /// Three fields and no more: the two that make it evidence — the process it
 /// names, and when the session began — and one that says who wrote it, so
@@ -917,12 +921,12 @@ pub fn session_marker(pid: u32, started_at: DateTime<Utc>) -> String {
 /// A config directory this process has made Live, for as long as this value is
 /// held.
 ///
-/// Perch writes session markers as well as reading them: a Run makes the Profile
-/// it launches Live (ADR 0027), and a login makes the directory it is driving
-/// Live so nothing reaps a login somebody is in the middle of. Both wrote the
-/// same three steps for themselves — the sessions directory, then the marker,
-/// atomically — and the second said so by pointing at a comment in the first's
-/// file.
+/// Perch writes session markers as well as reading them: a Run makes the
+/// Profile it launches Live (ADR a-run-is-one-shot), and a login makes the
+/// directory it is driving Live so nothing reaps a login somebody is in the
+/// middle of. Both wrote the same three steps for themselves — the sessions
+/// directory, then the marker, atomically — and the second said so by pointing
+/// at a comment in the first's file.
 ///
 /// A value rather than a function, and `Drop` rather than a call to make, for
 /// the reason [`crate::lock::Held`] is the same shape: what is being held is an
@@ -952,7 +956,7 @@ impl Drop for Claim<'_> {
 /// Perch's own pid, because Perch waits for what it started — the client a Run
 /// launched, or the login it is driving — so the marker holds for exactly as
 /// long as the operation and no longer, and it is knowable *before* the launch
-/// where the child's is not (ADR 0027).
+/// where the child's is not (ADR a-profile-is-live-by-evidence).
 ///
 /// Written atomically, so a reader sees the whole marker or no marker at all. A
 /// plain write truncates and then fills, and a reader catching it in between
@@ -980,8 +984,8 @@ pub fn claim<'a>(host: &'a dyn Host, config_dir: &Path) -> Result<Claim<'a>> {
     // state `reconcile::HELD_BACK` names in as many words ("its own Run's
     // marker would land in the Default Profile") and `reconcile::sweep` exists
     // to repair, and a Run reaches this before the sweep does: `commands::run`
-    // claims first on purpose (ADR 0027), because until the Marker exists
-    // nothing on the machine knows the Run is happening.
+    // claims first on purpose (ADR a-run-is-one-shot), because until the Marker
+    // exists nothing on the machine knows the Run is happening.
     //
     // Written through the link, the Marker makes the *Default Profile* report a
     // live corroborated client, which refuses every Capture, Switch and Renewal
@@ -1022,7 +1026,8 @@ pub fn claim<'a>(host: &'a dyn Host, config_dir: &Path) -> Result<Claim<'a>> {
 /// The marker Claude Code writes for a running session, to the extent Perch
 /// reads it. `startedAt` is when the session began, in milliseconds since the
 /// epoch — which means the same thing on every platform, and is why it is the
-/// field matched rather than the platform-encoded `procStart` (ADR 0022).
+/// field matched rather than the platform-encoded `procStart`
+/// (ADR a-profile-is-live-by-evidence).
 #[derive(Deserialize)]
 struct SessionMarker {
     #[serde(rename = "startedAt")]
@@ -1033,11 +1038,12 @@ struct SessionMarker {
 ///
 /// A marker file names its process in its own name, and Claude Code leaves them
 /// behind when it dies — so a marker is evidence of a client only when it is
-/// corroborated (ADR 0022): the process it names began no later than the marker
-/// says the session did. A recycled PID necessarily belongs to a process that
-/// began after the marker was written, so the check is exact rather than
-/// heuristic. A marker that cannot be read or understood is no evidence at all:
-/// a Profile is Live when something says so, not when nothing does.
+/// corroborated (ADR a-profile-is-live-by-evidence): the process it names began
+/// no later than the marker says the session did. A recycled PID necessarily
+/// belongs to a process that began after the marker was written, so the check
+/// is exact rather than heuristic. A marker that cannot be read or understood
+/// is no evidence at all: a Profile is Live when something says so, not when
+/// nothing does.
 ///
 /// One situation is neither belief nor dismissal — a running process whose
 /// start the operating system will not say. That marker can be neither
@@ -1066,13 +1072,14 @@ enum Unsure {
     /// A marker naming a running process that Perch could not read at all —
     /// root-owned after a `sudo claude`, most often.
     ///
-    /// Its own variant rather than the one above, because the two are told apart
-    /// by what the reader has to do about them: one is a file whose permissions
-    /// are wrong, and the other is an operating system that would not answer.
-    /// Folded together they shared the second's sentence, so somebody meeting a
-    /// marker they could `chmod` was told Perch could not find out when a
-    /// process started — the wrong diagnosis, in the one module whose whole job
-    /// is naming which belief failed (ADR 0007).
+    /// Its own variant rather than the one above, because the two are told
+    /// apart by what the reader has to do about them: one is a file whose
+    /// permissions are wrong, and the other is an operating system that would
+    /// not answer. Folded together they shared the second's sentence, so
+    /// somebody meeting a marker they could `chmod` was told Perch could not
+    /// find out when a process started — the wrong diagnosis, in the one module
+    /// whose whole job is naming which belief failed
+    /// (ADR an-assumption-is-probed).
     Unreadable(PathBuf),
     /// The sessions directory is there and would not be read. Told apart from
     /// an absent one, which is the ordinary "nothing is running" and the whole
@@ -1111,10 +1118,10 @@ impl Unsure {
 ///
 /// The question [`live_clients`] answers, for the caller that has no Claude
 /// Code version to name an assumption against and does not need one: the Carry
-/// writes into a Profile only when it is quiet (ADR 0003), and doubt is the
-/// same answer as a client for that purpose. Not writing costs a dialog;
-/// writing under a client that rewrites the file wholesale on its way out costs
-/// the file.
+/// writes into a Profile only when it is quiet
+/// (ADR everything-but-the-account), and doubt is the same answer as a client
+/// for that purpose. Not writing costs a dialog; writing under a client that
+/// rewrites the file wholesale on its way out costs the file.
 pub fn anything_running(host: &dyn Host, config_dir: &Path) -> bool {
     anything_running_but(host, config_dir, None)
 }
@@ -1123,10 +1130,10 @@ pub fn anything_running(host: &dyn Host, config_dir: &Path) -> bool {
 ///
 /// A Run claims its Profile before it reconciles and Carries, so that nothing
 /// else may delete the directory out from under a session that is starting
-/// (ADR 0027). That claim is a Marker, and a Marker is what makes a Profile
-/// Live, so the Carry that follows would find the Run's own claim and decline to
-/// write — leaving every Run meeting the onboarding dialog afresh, which is the
-/// one thing the Carry exists to prevent.
+/// (ADR a-run-is-one-shot). That claim is a Marker, and a Marker is what makes
+/// a Profile Live, so the Carry that follows would find the Run's own claim and
+/// decline to write — leaving every Run meeting the onboarding dialog afresh,
+/// which is the one thing the Carry exists to prevent.
 ///
 /// Discounting rather than skipping the question: any *other* client is still a
 /// client, and doubt still resolves towards Live.
@@ -1148,8 +1155,8 @@ fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32
         // one that means nothing is running. A directory that is there and will
         // not be read — root-owned after a `sudo claude`, say — is doubt, and
         // reading it as emptiness is how a Switch comes to write the Credential
-        // out from under a session (ADR 0005). Every other doubt in this
-        // function resolves towards Live; so does this one.
+        // out from under a session (ADR a-profile-is-live-by-evidence). Every
+        // other doubt in this function resolves towards Live; so does this one.
         Err(HostError::NotFound { .. }) => return Ok(Vec::new()),
         Err(why) => return Err(Unsure::Unlistable { dir, why }),
     };
@@ -1209,21 +1216,21 @@ fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32
 /// How far a process may appear to have begun *after* the session it is named
 /// by and still be taken as the one that wrote the Marker.
 ///
-/// ADR 0022 corroborates a Marker by comparing two clocks that are supposed to
-/// be one: when the session began, written down by the client, and when the
-/// process began, read back from the operating system. On macOS and Windows the
-/// second of those is fixed at process creation. On Linux it is *recomputed*
-/// every time it is read — `/proc/<pid>/stat` gives the start in ticks since
-/// boot, and the kernel derives `btime` in `/proc/stat` as realtime minus
-/// uptime, so it moves by exactly as much as anything that steps the wall
-/// clock.
+/// ADR a-profile-is-live-by-evidence corroborates a Marker by comparing two
+/// clocks that are supposed to be one: when the session began, written down by
+/// the client, and when the process began, read back from the operating system.
+/// On macOS and Windows the second of those is fixed at process creation. On
+/// Linux it is *recomputed* every time it is read — `/proc/<pid>/stat` gives
+/// the start in ticks since boot, and the kernel derives `btime` in
+/// `/proc/stat` as realtime minus uptime, so it moves by exactly as much as
+/// anything that steps the wall clock.
 ///
 /// So a `perch run` that claimed a Profile, followed by an NTP correction of a
 /// couple of seconds, made its own live process look like one that began after
 /// the session it had just recorded. The Marker was dismissed, the Profile
 /// stopped being Live, and the next Renewal Rotated the Credential the running
 /// client was holding — logging that session out mid-task, which is the whole
-/// of what ADR 0005 and ADR 0022 exist to prevent.
+/// of what ADR a-profile-is-live-by-evidence exists to prevent.
 ///
 /// The margin costs nothing in the direction the ordering is *for*. A pid the
 /// operating system has handed out again belongs to a process that started when
@@ -1269,7 +1276,7 @@ fn session_start_in(host: &dyn Host, marker: &Path) -> Marker {
 }
 
 /// The key of `.claude.json` that says who the Account is. The only key of that
-/// file Perch ever writes (ADR 0001).
+/// file Perch ever writes (ADR claude-code-chooses-the-store).
 pub const IDENTITY_KEY: &str = "oauthAccount";
 
 /// A file Claude Code would read, holding this Account and nothing else. What
@@ -1283,11 +1290,11 @@ pub fn fresh_identity_file(block: &str) -> String {
 /// byte of it exactly as it was.
 ///
 /// `.claude.json` also holds project history, MCP configuration and settings,
-/// none of which belong to the Account (ADR 0001). Leaving them in place is
-/// what makes them follow the person across a Switch for free — so this splices
-/// one value ([`crate::json`]) rather than parsing the file and writing it
-/// back, which would reorder keys and reformat values Perch has no business
-/// touching.
+/// none of which belong to the Account (ADR claude-code-chooses-the-store).
+/// Leaving them in place is what makes them follow the person across a Switch
+/// for free — so this splices one value ([`crate::json`]) rather than parsing
+/// the file and writing it back, which would reorder keys and reformat values
+/// Perch has no business touching.
 pub fn patch_oauth_account(
     contents: &str,
     block: &str,
@@ -1592,8 +1599,8 @@ mod tests {
     /// The name is only load-bearing where there is a keychain to store an item
     /// in. Off macOS every `Store` still has to be derivable without it, or a
     /// container with no `USER` cannot run a single Perch command — including
-    /// the `perch watcher check` a systemd timer fires, which is where ADR 0013
-    /// says an unattended watcher belongs.
+    /// the `perch watcher check` a systemd timer fires, which is where
+    /// ADR a-watcher-knob-is-arithmetic says an unattended watcher belongs.
     #[test]
     fn a_machine_with_no_keychain_needs_no_login_name() {
         for platform in [Platform::Other, Platform::Windows] {
@@ -1632,7 +1639,7 @@ mod tests {
     /// in any of them sends Credentials to a namespace nothing is read out of.
     /// It reads no machine to say so — which is why it lives here, on a fake,
     /// rather than in a suite named for the machine it does not touch (ADR
-    /// 0045, ADR 0050).
+    /// a-suite-is-named-and-gated).
     #[test]
     fn the_default_store_is_where_perch_believes_it_is() {
         let host = FakeHost::new();

@@ -1,4 +1,4 @@
-//! The `/usr/bin/security` wrapper (ADR 0008).
+//! The `/usr/bin/security` wrapper (ADR claude-code-chooses-the-store).
 //!
 //! macOS anchors a keychain item's access control to the binary that created
 //! it, so Perch drives the same binary Claude Code does rather than linking a
@@ -25,7 +25,8 @@
 use crate::host::{Execution, double_quoted};
 use zeroize::Zeroizing;
 
-/// The `security` binary. Never a build of Perch, never a crate — see ADR 0008.
+/// The `security` binary. Never a build of Perch, never a crate — see
+/// ADR a-crate-must-not-cost-a-seam.
 pub const SECURITY_BIN: &str = "/usr/bin/security";
 
 /// `security` exit code meaning "the item is not in the keychain".
@@ -126,9 +127,10 @@ fn inert(what: &str, value: &str) -> Result<(), KeychainError> {
 
 /// Which path a write of this size must take.
 ///
-/// ADR 0008 says writes *near* the limit fall back, not writes past it: the
-/// failure is silent corruption, and the exact byte at which `security` starts
-/// truncating is an observation about one build of it, not a promise.
+/// ADR claude-code-chooses-the-store says writes *near* the limit fall back,
+/// not writes past it: the failure is silent corruption, and the exact byte at
+/// which `security` starts truncating is an observation about one build of it,
+/// not a promise.
 pub fn write_path_for(command_line: &str) -> WritePath {
     if command_line.len() >= STDIN_BUFFER_LIMIT - STDIN_SAFETY_MARGIN {
         WritePath::Argv

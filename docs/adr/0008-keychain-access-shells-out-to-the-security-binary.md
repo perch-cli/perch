@@ -16,8 +16,8 @@ also what lets Perch read the item Claude Code wrote in the first place.
 
 Part of the case for Rust was avoiding interpreter startup, and the credential
 path spawns a subprocess anyway. The hot path is `perch status` reading cached
-utilization (ADR 0015), which touches no keychain at all and still benefits;
-the credential path will not be where Rust pays off.
+utilization (ADR a-figure-carries-its-age), which touches no keychain at all and
+still benefits; the credential path will not be where Rust pays off.
 
 Four constraints come with the `security` CLI. Writes hex-encode with `-X` and
 pipe through `-i` so secrets never reach `argv`. Its stdin buffer is 4096 bytes

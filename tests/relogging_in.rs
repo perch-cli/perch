@@ -69,8 +69,9 @@ fn a_repair_replaces_the_credential_and_clears_the_quarantine() {
     );
 }
 
-/// **What ADR 0061 leaves of the report.** What was repaired, and nothing about
-/// the Alias, the Group or a Cycling state that reads "may choose it".
+/// **What ADR perch-says-what-it-did leaves of the report.** What was repaired,
+/// and nothing about the Alias, the Group or a Cycling state that reads "may
+/// choose it".
 ///
 /// A repair leaves all three exactly as it found them, so a column of them was
 /// Perch reassuring somebody about work it did not do — and `perch list` is
@@ -82,9 +83,10 @@ fn a_repair_says_what_it_repaired_and_nothing_about_what_it_left_alone() {
     let (result, printed) = run_relogin(&host, "overflow");
 
     result.expect("the Account is repaired");
-    // The last line, asserted whole (ADR 0043) — which is a stronger claim than
-    // three greps for the labels that used to follow it, because it fails on
-    // anything appended rather than only on the wording that was cut.
+    // The last line, asserted whole (ADR perch-says-what-it-did) — which is a
+    // stronger claim than three greps for the labels that used to follow it,
+    // because it fails on anything appended rather than only on the wording
+    // that was cut.
     assert_eq!(
         printed.trim_end().lines().last(),
         Some(
@@ -257,7 +259,7 @@ fn a_login_under_an_accented_spelling_repairs_the_account_rather_than_being_a_st
             leaked(&IDENTITY_FILE.replace(EMAIL, shouted)),
         ));
     // The first command adopts the existing login, which is the Account this
-    // repairs (ADR 0009).
+    // repairs (ADR a-login-perch-does-not-need).
     run_list(&host, false).0.expect("the machine is adopted");
     quarantine(&host, accented);
 
@@ -389,9 +391,10 @@ fn a_terminal_that_goes_away_after_the_repair_still_makes_the_fresh_credential_l
     assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
 }
 
-/// A Landing nothing can account for is the one state ADR 0048 names this
-/// command as the way out of: *"`perch relogin {arriving}` finishes that Switch
-/// and `perch relogin {leaving}` abandons it"*. So it is the one failure the
+/// A Landing nothing can account for is the one state
+/// ADR a-switch-is-written-down-first names this command as the way out of:
+/// *"`perch relogin {arriving}` finishes that Switch and
+/// `perch relogin {leaving}` abandons it"*. So it is the one failure the
 /// command may not be stopped by — refusing here would be Perch turning away
 /// the remedy it had just told the user to run, and doing it after the browser
 /// round trip that remedy costs.
@@ -448,8 +451,9 @@ fn a_landing_nothing_accounts_for_is_repaired_rather_than_refused() {
 /// else's. Repairing on it would be deciding by not looking.
 #[test]
 fn a_store_that_will_not_answer_stops_the_repair_rather_than_being_stepped_past() {
-    // Off macOS, where a Profile keeps its Credential in a file (ADR 0020) —
-    // the only way to make the live store alone refuse to answer.
+    // Off macOS, where a Profile keeps its Credential in a file
+    // (ADR claude-code-chooses-the-store) — the only way to make the live store
+    // alone refuse to answer.
     let host = logged_in_machine_off_macos().with_login(login_producing(REPAIRED, IDENTITY_FILE));
     run_list(&host, false)
         .0
@@ -558,8 +562,9 @@ fn a_profile_a_client_is_running_against_is_refused_before_a_login_is_spent() {
 /// minutes old by the time it comes back — and what follows it writes a fresh
 /// Credential into the Account's own Profile. A `perch run` started while the
 /// person was logging in would be written under, so the repair stops instead
-/// (ADR 0027). The login itself runs against a directory of its own, which is
-/// what lets this be asked at all without the repair tripping over itself.
+/// (ADR a-run-is-one-shot). The login itself runs against a directory of its
+/// own, which is what lets this be asked at all without the repair tripping
+/// over itself.
 #[test]
 fn a_run_started_during_the_login_stops_the_repair_before_it_writes() {
     let host = broken_second_account();
@@ -595,12 +600,13 @@ fn a_run_started_during_the_login_stops_the_repair_before_it_writes() {
 
 /// And the Default Profile is asked about on that side of the login too.
 ///
-/// Repairing the Account you are on writes the fresh Credential into the Default
-/// Profile as well, so a `claude` started while the browser was open is holding
-/// the file the last step of the repair replaces (ADR 0005). The check before
-/// the login covers it; the check after has to cover the same pair, or the
-/// second ask is weaker than the first and the whole minutes-long window it
-/// exists for is the one it does not see.
+/// Repairing the Account you are on writes the fresh Credential into the
+/// Default Profile as well, so a `claude` started while the browser was open is
+/// holding the file the last step of the repair replaces
+/// (ADR a-profile-is-live-by-evidence). The check before the login covers it;
+/// the check after has to cover the same pair, or the second ask is weaker than
+/// the first and the whole minutes-long window it exists for is the one it does
+/// not see.
 #[test]
 fn a_client_started_during_the_login_stops_the_repair_of_the_account_you_are_on() {
     let host = machine_with_two_accounts();
@@ -644,9 +650,10 @@ fn a_client_started_during_the_login_stops_the_repair_of_the_account_you_are_on(
 /// saved, and then Claude Code's three locks are taken — a wait of up to four
 /// seconds against a client that is holding them. A `claude` started in that
 /// gap was one nothing had seen by the time its Credential was replaced, which
-/// is the mid-task logout ADR 0005 exists to prevent, arriving at the one write
-/// that does not Capture first. A `perch switch` closes exactly this window by
-/// asking again once the locks are held; the repair did not.
+/// is the mid-task logout ADR a-profile-is-live-by-evidence exists to prevent,
+/// arriving at the one write that does not Capture first. A `perch switch`
+/// closes exactly this window by asking again once the locks are held; the
+/// repair did not.
 #[test]
 fn a_client_that_starts_during_the_lock_wait_still_stops_the_repair() {
     let host = machine_with_two_accounts().with_login(login_producing(REPAIRED, IDENTITY_FILE));
@@ -854,12 +861,14 @@ fn a_repair_whose_identity_patch_failed_is_live_and_still_recorded_as_active() {
 /// The other side of it: the Credential never became live at all, so the broken
 /// one it replaced still is. Now `active` must stop naming that Account — the
 /// very next `perch switch`, which is at least as natural a thing to reach for
-/// as running the repair again, would Capture the broken copy over the fresh one
-/// and undo the whole browser round trip (ADR 0006).
+/// as running the repair again, would Capture the broken copy over the fresh
+/// one and undo the whole browser round trip
+/// (ADR a-switch-is-written-down-first).
 ///
-/// Off macOS, where the plaintext file is the store written first (ADR 0020), so
-/// making it unwritable is what stops the Credential reaching the live store at
-/// all rather than only stopping the Identity patch after it.
+/// Off macOS, where the plaintext file is the store written first
+/// (ADR claude-code-chooses-the-store), so making it unwritable is what stops
+/// the Credential reaching the live store at all rather than only stopping the
+/// Identity patch after it.
 #[test]
 fn a_repair_that_could_not_be_made_live_leaves_nothing_to_capture_into() {
     let host = logged_in_machine_off_macos()
@@ -988,8 +997,9 @@ fn machine_holding_the_two_that_share_a_profile() -> FakeHost {
 ///
 /// `settle_into_its_own_profile` writes the fresh Credential into the shared
 /// store, which supersedes the other Account's — and a retired refresh token is
-/// the one loss ADR 0006 calls unrecoverable. Worse, it would happen *after* the
-/// login, having already told the user this was the way back.
+/// the one loss ADR a-switch-is-written-down-first calls unrecoverable. Worse,
+/// it would happen *after* the login, having already told the user this was the
+/// way back.
 #[test]
 fn repairing_an_account_whose_profile_is_shared_is_refused_before_the_login() {
     let host = machine_holding_the_two_that_share_a_profile();

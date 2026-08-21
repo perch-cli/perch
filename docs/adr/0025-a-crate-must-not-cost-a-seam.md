@@ -25,64 +25,69 @@ two Perch processes writing the same file. The name now carries the process id.
 and the fake Host has none — the primitive belongs behind the port, and behind
 the port a pid is the whole of what randomness buys here.
 
-**Encryption**, from `age`, for what `perch export` writes (ADR 0014). It sits on
-neither seam: encryption is not an effect the Host port carries, and it is not
-shared with Claude Code, so nothing here has to be bug-compatible with anything.
-The property that decided it is that an `age` file is decrypted by the standard
-`age` command — an export is meant to outlive the machine it was written on, and
-a backup readable only by the tool that wrote it is a worse backup than one whose
-format somebody else maintains. Against that, the alternative was three crates
-and a header format Perch would version itself. It is the largest dependency
-Perch has by some way, and that is the price of the format rather than of the
-code.
+**Encryption**, from `age`, for what `perch export` writes
+(ADR the-holdings-go-out-sealed). It sits on neither seam: encryption is not an
+effect the Host port carries, and it is not shared with Claude Code, so nothing
+here has to be bug-compatible with anything. The property that decided it is
+that an `age` file is decrypted by the standard `age` command — an export is
+meant to outlive the machine it was written on, and a backup readable only by
+the tool that wrote it is a worse backup than one whose format somebody else
+maintains. Against that, the alternative was three crates and a header format
+Perch would version itself. It is the largest dependency Perch has by some way,
+and that is the price of the format rather than of the code.
 
 **Directory junctions**, from `junction`, on Windows only. A Reconcile shares a
 directory into a Run's Profile as a junction, because that is the one directory
-link a Windows without Developer Mode can make (ADR 0026) — and a junction is a
-reparse point the standard library will not write. The alternative was a
-hand-built `REPARSE_DATA_BUFFER` through `DeviceIoControl`, which is precisely
-the class of `unsafe` ADR 0021 declined to write when it took `windows-sys`
-rather than hand-rolling `GetProcessTimes`. The call sits inside `RealHost`, so
-it costs no seam: the fake makes and refuses the same three kinds of link on
-whatever machine the tests run on. Symbolic and hard links stay with the
-standard library, which carries both on every platform Perch runs on.
+link a Windows without Developer Mode can make (ADR everything-but-the-account)
+— and a junction is a reparse point the standard library will not write. The
+alternative was a hand-built `REPARSE_DATA_BUFFER` through `DeviceIoControl`,
+which is precisely the class of `unsafe` ADR a-crate-must-not-cost-a-seam
+declined to write when it took `windows-sys` rather than hand-rolling
+`GetProcessTimes`. The call sits inside `RealHost`, so it costs no seam: the
+fake makes and refuses the same three kinds of link on whatever machine the
+tests run on. Symbolic and hard links stay with the standard library, which
+carries both on every platform Perch runs on.
 
 ## Not taken, and why
 
-**`keyring`** — ADR 0008. macOS anchors a keychain item's ACL to the binary
-that created it, so a Perch that created its items would hand Claude Code items
-Claude Code cannot read. Perch has to drive the same `/usr/bin/security` Claude
-Code does; a keychain crate is the one thing that cannot be substituted here.
+**`keyring`** — ADR claude-code-chooses-the-store. macOS anchors a keychain
+item's ACL to the binary that created it, so a Perch that created its items
+would hand Claude Code items Claude Code cannot read. Perch has to drive the
+same `/usr/bin/security` Claude Code does; a keychain crate is the one thing
+that cannot be substituted here.
 
-**`sysinfo`** — ADR 0021. A process's start time is two fields on three
-platforms, and `libc` and `windows-sys` carry vetted declarations of exactly
-those. A process-table crate is a great deal of code, and generality, for a
-question with one answer.
+**`sysinfo`** — ADR a-crate-must-not-cost-a-seam. A process's start time is two
+fields on three platforms, and `libc` and `windows-sys` carry vetted
+declarations of exactly those. A process-table crate is a great deal of code,
+and generality, for a question with one answer.
 
 **`which`** — the program search is `PATHEXT`-aware because npm installs
-`claude.cmd` (ADR 0007), and it goes through the Host so a test can pin the
-Windows behavior from macOS. A crate that consults the real `PATH` cannot.
+`claude.cmd` (ADR an-assumption-is-probed), and it goes through the Host so a
+test can pin the Windows behavior from macOS. A crate that consults the real
+`PATH` cannot.
 
 **`dirs`** — the home directory is `USERPROFILE` on Windows and `HOME`
 elsewhere, and never `HOME` on Windows even when Git Bash sets it. That rule is
 three lines and is a Host method, so an unset-home refusal is testable.
 
 **`fd-lock` / `fs4`** — the locks Perch takes are Claude Code's, and Claude
-Code's are directories taken with `mkdir` (ADR 0001). A file-lock crate would
-take a lock of its own design, which is a lock against nobody.
+Code's are directories taken with `mkdir` (ADR claude-code-chooses-the-store). A
+file-lock crate would take a lock of its own design, which is a lock against
+nobody.
 
 **`reqwest` / `ureq`** — the request goes to `curl` on stdin so that no access
-token is ever an argument (ADR 0021), and shelling out means one TLS story on
-the machine rather than two. `std::io::IsTerminal` covers what a
-terminal-detection crate would.
+token is ever an argument (ADR a-crate-must-not-cost-a-seam), and shelling out
+means one TLS story on the machine rather than two. `std::io::IsTerminal` covers
+what a terminal-detection crate would.
 
 **`rpassword`** — reading the export passphrase without the terminal showing it
 is `ECHO` off, one line, `ECHO` back on: `tcgetattr`/`tcsetattr` on unix and
 `GetConsoleMode`/`SetConsoleMode` on Windows, both of which `libc` and
-`windows-sys` already declare. That is the same trade ADR 0021 made when it
-declined `sysinfo` for two fields, and it is a Host method either way — so a test
-can say the passphrase went in by the path that hides it rather than the one that
-echoes, from a machine with no terminal at all.
+`windows-sys` already declare. That is the same trade
+ADR a-crate-must-not-cost-a-seam made when it declined `sysinfo` for two fields,
+and it is a Host method either way — so a test can say the passphrase went in by
+the path that hides it rather than the one that echoes, from a machine with no
+terminal at all.
 
 **A JSON library, for the splicing** — `.claude.json` belongs to the person
 using Perch, not to Perch. Parsing and re-emitting it would reorder keys,
@@ -102,9 +107,9 @@ commit message.
 
 ## Reopened by `perch tui`, and settled the same way
 
-Crossterm is now in the tree (ADR 0016), which puts a second implementation of
-two things this document declined a crate for within reach. Both stay where
-they are.
+Crossterm is now in the tree (ADR a-crate-must-not-cost-a-seam), which puts a
+second implementation of two things this document declined a crate for within
+reach. Both stay where they are.
 
 **Reading the export passphrase** stays `Host::read_secret` over
 `tcgetattr`/`SetConsoleMode`, rather than crossterm's raw mode. Not because

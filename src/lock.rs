@@ -2,10 +2,10 @@
 //!
 //! Perch does not invent a scheme of its own: it takes the locks the process it
 //! is racing already takes, because a lock only excludes whoever agrees to
-//! honor it (ADR 0001). Under them, Claude Code's double-checked re-read of the
-//! credential store sees a swapped, non-expired Credential and abandons the
-//! refresh it was about to make — which is what makes swapping a live Credential
-//! safe at all.
+//! honor it (ADR claude-code-chooses-the-store). Under them, Claude Code's
+//! double-checked re-read of the credential store sees a swapped, non-expired
+//! Credential and abandons the refresh it was about to make — which is what
+//! makes swapping a live Credential safe at all.
 //!
 //! A lock artifact is a directory. `mkdir` either creates one or fails, with
 //! nothing in between, so the same call both asks and answers. Which
@@ -313,8 +313,9 @@ impl<'a, 'one, 'other> Holds<'a, 'one, 'other> {
     }
 
     /// The same, for the one step that has to *use* a hold rather than only be
-    /// protected by it: writing the registry down mid-Switch (ADR 0048), which
-    /// is a save and therefore takes the hold it is being renewed with.
+    /// protected by it: writing the registry down mid-Switch
+    /// (ADR a-switch-is-written-down-first), which is a save and therefore
+    /// takes the hold it is being renewed with.
     ///
     /// It is handed the second of the two, and that is not a coincidence to be
     /// generalized away: Claude Code's locks protect files Perch writes through
@@ -507,7 +508,7 @@ fn take(host: &dyn Host, lock: &LockSpec) -> Result<()> {
 ///
 /// [`crate::reconcile`] holds this back along with the lock it guards: it is an
 /// answer about one configuration directory, and one crossed into another is
-/// the hazard ADR 0026's denylist exists for.
+/// the hazard ADR everything-but-the-account's denylist exists for.
 fn takeover_claim(lock: &LockSpec) -> PathBuf {
     let mut claim = lock.dir.clone().into_os_string();
     claim.push(TAKEOVER_SUFFIX);
@@ -1350,11 +1351,11 @@ mod tests {
 /// Eight threads contending really do wait on each other, and that cost was
 /// once thought to earn a gate — but a gate asks for consent, and this works in
 /// a directory of its own in `temp_dir` and touches nothing the developer owns
-/// (ADR 0050). What settled it is what is underneath: this is
-/// the only execution of the exclusivity claim anywhere in the repository, and
-/// it had already gone unexecuted once, because naming `--test` targets in CI
-/// quietly suppressed the default set. A claim that has been silently skipped
-/// once does not go back behind a flag.
+/// (ADR a-suite-is-named-and-gated). What settled it is what is underneath:
+/// this is the only execution of the exclusivity claim anywhere in the
+/// repository, and it had already gone unexecuted once, because naming `--test`
+/// targets in CI quietly suppressed the default set. A claim that has been
+/// silently skipped once does not go back behind a flag.
 #[cfg(test)]
 mod exclusivity {
     use std::path::PathBuf;

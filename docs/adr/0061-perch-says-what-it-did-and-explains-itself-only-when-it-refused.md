@@ -84,9 +84,9 @@ worth making is that the Switch stayed inside the Group, and that claim is
 better made beside the Account it landed on than in a sentence of its own before
 anybody knows where they are going.
 
-The figures keep their age. ADR 0015 is untouched: a figure without `(as of 4m
-ago)` is a promise Perch cannot make, and shortening output is not license to
-start making it.
+The figures keep their age. ADR a-figure-carries-its-age is untouched: a figure
+without `(as of 4m ago)` is a promise Perch cannot make, and shortening output
+is not license to start making it.
 
 **The Watcher** writes to a scrollback or a cron mailbox, read long after the
 fact and often skimmed for the one line that mattered. Its five statuses split
@@ -100,11 +100,12 @@ exactly along the rule:
 
 `waiting` and `switched` are what the loop was asked to do, so they become data.
 `held`, `nowhere` and `cooling` are refusals, so they keep their prose. This is
-ADR 0036 preserved rather than disturbed: a hold promises nothing was changed,
-and a hold that did not say what was holding it would read as a Watcher that had
-given up. The threshold leaves the round line because the header declared it and
-it does not change within a run — and if it ever did change mid-run, that would
-deserve a line of its own rather than a repetition in every line.
+ADR a-refusal-is-a-promise preserved rather than disturbed: a hold promises
+nothing was changed, and a hold that did not say what was holding it would read
+as a Watcher that had given up. The threshold leaves the round line because the
+header declared it and it does not change within a run — and if it ever did
+change mid-run, that would deserve a line of its own rather than a repetition in
+every line.
 
 **Showing commands** are the case where the text is the deliverable, so the rule
 lands only on the prose appended beneath. The table stays whole. Underneath it,
@@ -112,17 +113,18 @@ each varying fact is said once — the Quarantine reason genuinely differs per
 Account — and each invariant fact is said once in total, so `how_to_repair` is
 printed for the Listing rather than for each Account in it.
 
-**The Capture line is cut, and this is the part worth arguing.** ADR 0006 makes
-the Capture happen before every Switch without exception, which is exactly what
-makes `Captured you@example.com's live Credential into its own Profile.`
-predictable — it is the ordinary case announcing that it was ordinary. The
-reassurance it carries is real, and it is the guide's to establish once rather
-than the command's to repeat forever. What is not cut is any of the five other
-outcomes: `NotTheirs`, `NothingLive`, `Unreadable`, `NoOutgoing` and
-`NothingToSave` (`src/commands/switch.rs:205`–`258`) all still speak, because
-each of them is a case where what happened is not what the guide describes. The
-rule one level down is the same as the rule above it: silence on the path that
-always runs, prose on the paths that do not.
+**The Capture line is cut, and this is the part worth arguing.**
+ADR a-switch-is-written-down-first makes the Capture happen before every Switch
+without exception, which is exactly what makes
+`Captured you@example.com's live Credential into its own Profile.` predictable —
+it is the ordinary case announcing that it was ordinary. The reassurance it
+carries is real, and it is the guide's to establish once rather than the
+command's to repeat forever. What is not cut is any of the five other outcomes:
+`NotTheirs`, `NothingLive`, `Unreadable`, `NoOutgoing` and `NothingToSave`
+(`src/commands/switch.rs:205`–`258`) all still speak, because each of them is a
+case where what happened is not what the guide describes. The rule one level
+down is the same as the rule above it: silence on the path that always runs,
+prose on the paths that do not.
 
 ## What was rejected, and why it matters
 
@@ -144,29 +146,31 @@ terminal — and this is not a formality, because `docs/guide/switching.md:88`
 currently explains staleness and ends "which is why every Cycle says so", which
 this decision makes false.
 
-**A line-count cap enforced by a test.** This is ADR 0043's instrument pointed
-at length instead of wording, and it fails the same way: it would bless whatever
-sits under the cap and say nothing about whether a sentence earned its place. It
-would also have passed the output above, which is seven lines. Prose stays
-defended by somebody reading it, which is the only thing that has ever caught
-one of these here.
+**A line-count cap enforced by a test.** This is ADR perch-says-what-it-did's
+instrument pointed at length instead of wording, and it fails the same way: it
+would bless whatever sits under the cap and say nothing about whether a sentence
+earned its place. It would also have passed the output above, which is seven
+lines. Prose stays defended by somebody reading it, which is the only thing that
+has ever caught one of these here.
 
 **A sweep of the test suite.** The six affected suites hold 279 of the
-repository's 1,241 `contains` calls, and ADR 0043 already refused to audit
-assertions wholesale: most of those 279 assert that a datum reached the page,
-which is what they should assert. Assertions are re-pointed as they break, each
-under 0043's rule — is this test about what Perch *says*, or about a datum? The
-ten `threshold 80%` assertions are the instructive ones. Under this decision the
-threshold appears once per run rather than once per round, so those tests should
-end up claiming *that*, which is a stronger claim than the one they make now.
+repository's 1,241 `contains` calls, and ADR perch-says-what-it-did already
+refused to audit assertions wholesale: most of those 279 assert that a datum
+reached the page, which is what they should assert. Assertions are re-pointed as
+they break, each under 0043's rule — is this test about what Perch *says*, or
+about a datum? The ten `threshold 80%` assertions are the instructive ones.
+Under this decision the threshold appears once per run rather than once per
+round, so those tests should end up claiming *that*, which is a stronger claim
+than the one they make now.
 
 **Nothing is superseded, and three ADRs look like collisions from a distance.**
-ADR 0043 says the sentence is the designed artifact and is about how a sentence
-is asserted, not how many there are; it also says wording is changed here
-deliberately and often, which is the permission this decision uses. ADR 0015 is
-why every figure carries its age, and every figure still does. ADR 0036 is why a
-hold says what is holding it, and this decision is what keeps those lines long
-while the ones around them shrink.
+ADR perch-says-what-it-did says the sentence is the designed artifact and is
+about how a sentence is asserted, not how many there are; it also says wording
+is changed here deliberately and often, which is the permission this decision
+uses. ADR a-figure-carries-its-age is why every figure carries its age, and
+every figure still does. ADR a-refusal-is-a-promise is why a hold says what is
+holding it, and this decision is what keeps those lines long while the ones
+around them shrink.
 
 ## The glossary
 
@@ -175,8 +179,8 @@ _Avoid_ list under **Listing** (`CONTEXT.md:380`), beside `table`, `view` and
 `report`. The domain has no object here to name. This is a rule about a
 register, and coining a noun for it would produce a word whose first use would
 be to describe a Listing — the exact collision that avoid-list exists to
-prevent. ADR 0043 declined a glossary entry on the same grounds and was right
-to.
+prevent. ADR perch-says-what-it-did declined a glossary entry on the same
+grounds and was right to.
 
 ## Consequences
 

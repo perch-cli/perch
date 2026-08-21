@@ -11,7 +11,8 @@
 //! the **active** Account is the case that needs care, because the live
 //! Credential belongs to the Account being given up: Perch names the Account it
 //! will leave active, lands on it first, and only then deletes anything. So the
-//! machine is never left running as an Account Perch has forgotten (ADR 0024).
+//! machine is never left running as an Account Perch has forgotten
+//! (ADR a-removal-lands-first).
 //!
 //! Where there is nowhere to land — the last Account, or nothing left that
 //! Cycling would ever choose — the removal is still allowed and still confirmed,
@@ -77,9 +78,10 @@ impl Consequence {
 pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()> {
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
-    // Removing the active Account lands somewhere first (ADR 0024), which
-    // reaches `make_live` — so this is a Switch path, and it resolves a Landing
-    // before anything reads which Account is active (ADR 0048). Before the
+    // Removing the active Account lands somewhere first
+    // (ADR a-removal-lands-first), which reaches `make_live` — so this is a
+    // Switch path, and it resolves a Landing before anything reads which
+    // Account is active (ADR a-switch-is-written-down-first). Before the
     // question rather than after it, because who is active is half of what the
     // user is being asked to agree to.
     switch::resolve_a_landing(host, &mut perch, &mut registry)?;
@@ -89,7 +91,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     let account = registry.held(&found.email)?.clone();
 
     // Before the question rather than after: an Account Perch may not touch is
-    // not one to ask about giving up (ADR 0005).
+    // not one to ask about giving up (ADR a-profile-is-live-by-evidence).
     let consequence = consequence_of(&registry, &account);
 
     // Once per command, which is [`Installed`]'s own rule: the answer cannot
@@ -215,10 +217,10 @@ fn consequence_of(registry: &Registry, account: &Account) -> Consequence {
 /// The Account that will be left active when the active one is given up.
 ///
 /// The Group comes first: Accounts in one Group are the ones the user has
-/// declared interchangeable (ADR 0002), so landing there is the only landing
-/// they have endorsed in advance. Failing that, any Account Perch holds will do
-/// — which is not a Cycle leaving its scope but a forced choice, made in front
-/// of the user and agreed to before it happens.
+/// declared interchangeable (ADR a-group-is-a-declaration), so landing there is
+/// the only landing they have endorsed in advance. Failing that, any Account
+/// Perch holds will do — which is not a Cycle leaving its scope but a forced
+/// choice, made in front of the user and agreed to before it happens.
 ///
 /// Never a Quarantined Account, whose Credential does not work, and never a
 /// disabled one: never being chosen for you is the whole of what disabled means,
@@ -230,12 +232,13 @@ fn consequence_of(registry: &Registry, account: &Account) -> Consequence {
 /// over cannot drift apart — a Remove choosing an Account no Cycle would is the
 /// same divergence arriving through a third door.
 ///
-/// It stays here rather than joining `cycle`, because it is not a Cycle. A Cycle
-/// stays inside the scope it started in (ADR 0002) and this deliberately leaves
-/// one when it has to; what makes that acceptable is that it is said out loud
-/// and agreed to first (ADR 0024), which is a property of the command rather
-/// than of the rule. Filing it under `cycle` would put a forced choice among the
-/// choices the user endorsed in advance.
+/// It stays here rather than joining `cycle`, because it is not a Cycle. A
+/// Cycle stays inside the scope it started in (ADR a-group-is-a-declaration)
+/// and this deliberately leaves one when it has to; what makes that acceptable
+/// is that it is said out loud and agreed to first (ADR a-removal-lands-first),
+/// which is a property of the command rather than of the rule. Filing it under
+/// `cycle` would put a forced choice among the choices the user endorsed in
+/// advance.
 fn successor<'a>(registry: &'a Registry, leaving: &Account) -> Option<&'a Account> {
     let candidates = || {
         registry.accounts.iter().filter(|held| {
@@ -333,10 +336,11 @@ fn what_it_would_leave(
 /// Makes the successor's Credential the live one before the Account being given
 /// up is destroyed, and records it as the active one the moment it becomes so.
 ///
-/// Not a Switch, which Captures the outgoing Credential first (ADR 0006). What
-/// is live here is the Credential of the Account being removed, and Capturing it
-/// would copy it into a Profile that is about to be deleted — work that can only
-/// fail, on the way to a directory that will not exist.
+/// Not a Switch, which Captures the outgoing Credential first
+/// (ADR a-switch-is-written-down-first). What is live here is the Credential of
+/// the Account being removed, and Capturing it would copy it into a Profile
+/// that is about to be deleted — work that can only fail, on the way to a
+/// directory that will not exist.
 ///
 /// The active pointer is written here rather than with the rest of the registry
 /// at the end, because everything between the two is destructive and any of it
@@ -344,9 +348,10 @@ fn what_it_would_leave(
 /// Profile, not a wish: a `remove` that stopped after the landing would
 /// otherwise leave `active` naming an Account whose Credential is no longer
 /// live, and the next Switch would Capture the successor's live Credential over
-/// that Account's own copy and destroy it (ADR 0006). Written whether the
-/// landing finished or not, for the same reason — a Credential that reached the
-/// Default Profile is live even if the Identity beside it was never patched.
+/// that Account's own copy and destroy it (ADR a-switch-is-written-down-first).
+/// Written whether the landing finished or not, for the same reason — a
+/// Credential that reached the Default Profile is live even if the Identity
+/// beside it was never patched.
 fn land_on(
     host: &dyn Host,
     perch: &mut Held<'_>,
@@ -396,7 +401,8 @@ fn land_on(
 
     // Which Account, and nothing about its Credential being the live one: a
     // Landing that succeeded always made it so, and the two arms above are
-    // where one that did not says which half is behind (ADR 0061).
+    // where one that did not says which half is behind
+    // (ADR perch-says-what-it-did).
     say(
         out,
         &format!(
@@ -515,9 +521,10 @@ fn report(
 ) -> Result<()> {
     // Silent on the ordinary outcome, which is every Remove that found a
     // Credential and deleted it: that is what a Remove *is*, so saying it is
-    // the ordinary case announcing that it was ordinary (ADR 0061). The two
-    // outcomes that are not what the guide describes still speak in full — one
-    // destroyed nothing, and one left a Credential where it was.
+    // the ordinary case announcing that it was ordinary
+    // (ADR perch-says-what-it-did). The two outcomes that are not what the
+    // guide describes still speak in full — one destroyed nothing, and one left
+    // a Credential where it was.
     let credential = match deleted {
         Deleted::Credential => String::new(),
         Deleted::NothingWasThere => format!(

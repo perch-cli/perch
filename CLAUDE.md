@@ -85,7 +85,7 @@ Worked examples and the reasoning behind each clause: `docs/agents/comments.md`.
 
 ## A citation names a slug
 
-A decision is cited as `ADR <slug>`: `(ADR the-tui-does-not-write)`. The slug is
+A decision is cited as `ADR <slug>`: `(ADR perch-does-not-draw)`. The slug is
 the document's H1 kebab-cased, and is the tail of its filename in `docs/adr/` —
 at most 30 characters, always hyphenated, never one word. The numeric prefix is a
 sort key: it appears in no citation, and the document is found by globbing

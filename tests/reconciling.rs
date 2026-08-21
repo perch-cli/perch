@@ -1,5 +1,5 @@
 //! Behavior tests for Reconcile: making Shared State reachable from the
-//! Profile a Run launches (ADR 0026).
+//! Profile a Run launches (ADR everything-but-the-account).
 //!
 //! Driven through the Host port, so the Windows half — junctions, and the
 //! symbolic link privilege a machine without Developer Mode does not have —
@@ -86,7 +86,7 @@ fn every_entry_of_the_default_profile_crosses_except_the_three_that_stay_behind(
 }
 
 /// The third entry that stays behind, and the one that is neither the person's
-/// nor the Account's but the directory's own (ADR 0027).
+/// nor the Account's but the directory's own (ADR everything-but-the-account).
 ///
 /// Shared, `sessions` would make one client's marker the answer for every
 /// Profile at once: a Run against one Account would make every other Account's
@@ -560,7 +560,8 @@ fn the_default_profile_is_never_reconciled_into_itself() {
 /// for good. What it means is not a tidiness question — a Profile whose
 /// Credential Store is a link into the Default Profile has no Credential of its
 /// own, so a Capture or a `perch relogin` writing into it writes into the live
-/// store; and a `sessions` link makes every Profile Live at once (ADR 0027).
+/// store; and a `sessions` link makes every Profile Live at once
+/// (ADR everything-but-the-account).
 #[test]
 fn a_link_at_a_held_back_name_is_taken_away_even_though_its_target_is_there() {
     let host = machine()

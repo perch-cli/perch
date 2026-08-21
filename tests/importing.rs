@@ -1,4 +1,5 @@
-//! `perch holdings import` — a whole machine, put back (ADR 0014).
+//! `perch holdings import` — a whole machine, put back
+//! (ADR the-holdings-go-out-sealed).
 //!
 //! The other half of the pair that makes "I can move to a new machine" true.
 //! Everything here is about the two ways it could quietly fail somebody: by
@@ -278,8 +279,9 @@ fn a_credential_lands_in_the_store_this_machines_claude_code_would_use() {
 ///
 /// Asserted as the two data it is about, and no longer as a `perch switch` in
 /// the report: nothing arrives active on any Import, so pointing at the Switch
-/// was Perch pre-empting a disappointment on every run of the command (ADR
-/// 0061). The guide is where an Import is described, and it says so.
+/// was Perch pre-empting a disappointment on every run of the command
+/// (ADR perch-says-what-it-did). The guide is where an Import is described, and
+/// it says so.
 #[test]
 fn nothing_is_made_active_by_an_import() {
     let sealed = an_export_of_a_whole_machine();
@@ -739,10 +741,10 @@ fn nothing_the_export_holds_reaches_standard_output() {
             "`{secret}` was printed: {printed}"
         );
     }
-    // One line, asserted whole (ADR 0043): how many and from where. That
-    // nothing arrives active, and that an Import carries the whole registry,
-    // are true of every Import — so the guide is where they are established
-    // rather than here (ADR 0061).
+    // One line, asserted whole (ADR perch-says-what-it-did): how many and from
+    // where. That nothing arrives active, and that an Import carries the whole
+    // registry, are true of every Import — so the guide is where they are
+    // established rather than here (ADR perch-says-what-it-did).
     assert_eq!(
         printed.trim_end().lines().last(),
         Some(format!("Imported 3 Accounts from {AT}.").as_str()),
@@ -778,13 +780,13 @@ fn what_an_export_wrote_is_what_an_import_reads_back() {
 /// A Profile holds two things, and both of them travel.
 ///
 /// The Credential is the one that cannot be reconstructed at all. The identity
-/// file is the one that cannot be reconstructed *faithfully*: the `oauthAccount`
-/// block Claude Code wrote carries fields beyond the four the registry records,
-/// and a Switch prefers it verbatim over anything Perch composes. Restoring
-/// without it puts every Account into the degraded state adoption goes out of
-/// its way to keep the first one out of — and leaves each Profile with nothing
-/// for a Run to Carry into, so the onboarding dialog comes back on every Run
-/// (ADR 0003).
+/// file is the one that cannot be reconstructed *faithfully*: the
+/// `oauthAccount` block Claude Code wrote carries fields beyond the four the
+/// registry records, and a Switch prefers it verbatim over anything Perch
+/// composes. Restoring without it puts every Account into the degraded state
+/// adoption goes out of its way to keep the first one out of — and leaves each
+/// Profile with nothing for a Run to Carry into, so the onboarding dialog comes
+/// back on every Run (ADR everything-but-the-account).
 #[test]
 fn an_imported_profile_holds_the_identity_file_its_account_had() {
     let from = machine_with_two_accounts();
@@ -836,11 +838,12 @@ fn an_account_whose_export_carried_no_identity_file_still_gets_one() {
 ///
 /// An Import runs on a machine holding no *Accounts*, which is not the same as
 /// a machine holding no Profiles: a Purge that failed at its last step leaves
-/// `profiles/` populated with no registry above it, and `Touched::was_already_there`
-/// exists because of exactly that. Somebody who then opens a terminal against
-/// one of those directories and runs `perch holdings import` had that session's
-/// Credential replaced underneath it — the mid-task logout ADR 0005 refuses
-/// everywhere else.
+/// `profiles/` populated with no registry above it, and
+/// `Touched::was_already_there` exists because of exactly that. Somebody who
+/// then opens a terminal against one of those directories and runs
+/// `perch holdings import` had that session's Credential replaced underneath it
+/// — the mid-task logout ADR a-profile-is-live-by-evidence refuses everywhere
+/// else.
 #[test]
 fn an_import_into_a_profile_a_client_is_holding_writes_nothing() {
     let sealed = an_export_of_a_whole_machine();

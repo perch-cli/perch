@@ -10,9 +10,10 @@ because every widening is paid three times, and that `anthropic.rs` would become
 testable against a five-line `Wire` stub.
 
 Two of the three do not survive being checked, and the one that does points
-somewhere smaller than the review thought. This is the same shape ADR 0045 found
-when it went to check whether `tests/` was too large: the arithmetic was wrong,
-and once fixed there was no size question left — only a shape one.
+somewhere smaller than the review thought. This is the same shape
+ADR a-suite-is-named-and-gated found when it went to check whether `tests/` was
+too large: the arithmetic was wrong, and once fixed there was no size question
+left — only a shape one.
 
 ## What the count actually shows
 
@@ -44,10 +45,10 @@ several of its surfaces at once.
 **The testability win was already banked.** `anthropic.rs` holds 20 tests and
 mentions `FakeHost` once: its translation of a reply into a figure needs no host
 at all, and the one path that calls `http` is covered by `tests/refreshing.rs` —
-713 lines driving real command code against the fake, which is the shape ADR 0044
-and ADR 0045 chose. A five-line stub would buy a second way to assert what is
-already asserted, at a surface `tests/conformance.rs:20` says it cannot
-adjudicate.
+713 lines driving real command code against the fake, which is the shape
+ADR the-binary-proves-its-surface and ADR a-suite-is-named-and-gated chose. A
+five-line stub would buy a second way to assert what is already asserted, at a
+surface `tests/conformance.rs:20` says it cannot adjudicate.
 
 ## What the language allows
 
@@ -94,8 +95,9 @@ way, both cases of a method filed where a reader trusting the divider would be
 misled:
 
 - **`user_id`** sat under *being asked to stop*. It is read for the root refusal
-  and for the `gui/<uid>` domain a LaunchAgent is bootstrapped into (ADR 0040).
-  It is who this process is, not whether anybody has asked it to stop.
+  and for the `gui/<uid>` domain a LaunchAgent is bootstrapped into
+  (ADR the-machine-runs-the-watcher). It is who this process is, not whether
+  anybody has asked it to stop.
 - **`sleep`** sat under *processes*. It is `lock.rs`'s contention wait and has
   nothing to do with a process. It joins `listen_for_interrupts` and `wait`,
   which is also the honest coupling: `Waited::Interrupted` means nothing until
@@ -181,9 +183,9 @@ short of tests.
 worth keeping: a stub at this port is admissible only where `conformance.rs` has
 already declared it cannot adjudicate *and* the trait is thin enough that the
 stub is the whole contract. `Network` passes both and still has no use for one.
-`Keys` fails the first — the keychain's sentences are the ones ADR 0008 says must
-match `/usr/bin/security`, and `your_machine.rs` exists to check them against the
-real thing.
+`Keys` fails the first — the keychain's sentences are the ones
+ADR claude-code-chooses-the-store says must match `/usr/bin/security`, and
+`your_machine.rs` exists to check them against the real thing.
 
 **Splitting the adapters into files.** `fake.rs:266` carries the measurement that
 settled this once: of the last twenty-five commits that added or removed a
@@ -208,12 +210,12 @@ this one.
 
 ## The glossary
 
-Nothing here reaches `CONTEXT.md`, for the reason ADR 0055 kept **Round** and
-**witness** out of it. `Clock`, `Files`, `Network` are names for the machine's
-surfaces — words about how Perch is built, not about what Perch does. The
-glossary is the domain's, and it holds **Account**, **Profile**, **Credential**,
-**Landing**. Teaching it nine words only `src/host/` uses is the drift the
-vocabulary exists to prevent.
+Nothing here reaches `CONTEXT.md`, for the reason
+ADR code-lives-where-it-reaches kept **Round** and **witness** out of it.
+`Clock`, `Files`, `Network` are names for the machine's surfaces — words about
+how Perch is built, not about what Perch does. The glossary is the domain's, and
+it holds **Account**, **Profile**, **Credential**, **Landing**. Teaching it nine
+words only `src/host/` uses is the drift the vocabulary exists to prevent.
 
 ## Consequences
 
@@ -226,22 +228,23 @@ vocabulary exists to prevent.
 - `conformance.rs`'s thirty-line claim about its own reach is now in its
   signature. If that suite ever does need the clock, widening `Filesystem` is
   not the answer — the answer is in its header.
-- ADR 0025 stands unamended, and so does ADR 0055's restatement of it: `&dyn
-  Host` remains the only port Perch has. This is nine names for one port's
-  surfaces, not nine ports. Nothing new is substitutable, no adapter was added,
-  and every effect still crosses the same seam.
-- The fake's cost is untouched, deliberately. #205 is where that is answered, and
-  it is worth noting that the nine concerns partition the fake's 40 fields 38
-  ways — so this ADR makes that work more mechanical without doing any of it.
+- ADR a-crate-must-not-cost-a-seam stands unamended, and so does
+  ADR code-lives-where-it-reaches's restatement of it: `&dyn Host` remains the
+  only port Perch has. This is nine names for one port's surfaces, not nine
+  ports. Nothing new is substitutable, no adapter was added, and every effect
+  still crosses the same seam.
+- The fake's cost is untouched, deliberately. #205 is where that is answered,
+  and it is worth noting that the nine concerns partition the fake's 40 fields
+  38 ways — so this ADR makes that work more mechanical without doing any of it.
 
-  > **Amended by ADR 0059.** They do not partition it 38 ways. Ten of the 40
-  > fields were read from outside their own concern, and `now` and
-  > `while_waiting` turned out to be one mechanism rather than two concerns'
-  > state. The finding above is strengthened rather than damaged: the fake's copy
-  > of the world is entangled in exactly the places this ADR found the machine's
-  > surfaces entangled, which is why `Filesystem` was minted here and why the
-  > fake's state holds all twelve filesystem fields as one struct. The work was
-  > less mechanical than this sentence promised, and it landed.
+  > **Amended by ADR the-port-fits-the-machine.** They do not partition it 38
+  > ways. Ten of the 40 fields were read from outside their own concern, and
+  > `now` and `while_waiting` turned out to be one mechanism rather than two
+  > concerns' state. The finding above is strengthened rather than damaged: the
+  > fake's copy of the world is entangled in exactly the places this ADR found
+  > the machine's surfaces entangled, which is why `Filesystem` was minted here
+  > and why the fake's state holds all twelve filesystem fields as one struct.
+  > The work was less mechanical than this sentence promised, and it landed.
 - `fake.rs:266`'s comment is amended to say the interface is nine traits while
   the file is deliberately one, so the next reader who finds the split obvious
   finds the measurement first.

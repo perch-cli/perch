@@ -1,5 +1,5 @@
 //! What makes a marker evidence, asserted against the real operating system
-//! (ADR 0022).
+//! (ADR a-profile-is-live-by-evidence).
 //!
 //! A Profile is Live because a process is still behind the marker that names
 //! it, and the whole of that rests on one primitive: the operating system
@@ -17,7 +17,7 @@
 //! Ungated, unlike `your_machine.rs`. Every process these read is one of their
 //! own — this test, and a child they spawn and reap — and the only marker they
 //! write goes into a directory of their own in `temp_dir`. Nothing here is the
-//! developer's to consent to (ADR 0050).
+//! developer's to consent to (ADR a-suite-is-named-and-gated).
 
 use perch::host::RealHost;
 use perch::host::prelude::*;
@@ -65,7 +65,8 @@ fn a_process_that_has_exited_has_no_start_to_read() {
     );
 }
 
-/// The marker a Run writes, held to the same standard as a client's (ADR 0027).
+/// The marker a Run writes, held to the same standard as a client's
+/// (ADR a-run-is-one-shot).
 ///
 /// A Run marks its Profile Live by naming its own process, and the whole of
 /// what makes that evidence is that the process began before the marker says

@@ -63,10 +63,11 @@ Perch writes that outlives its own binary and leaving no documented way back is
 the outcome least worth having.
 
 An uninstaller was the alternative to that last point and was not taken. Perch
-has no uninstaller for any other Channel, and ADR 0032 already refused to build
-machinery for a problem nobody has reported — the half of it that still stands,
-and the half ADR 0039 leaned on when it decided that replacing an Installation
-belongs to the Channel that made it for the same reason removing one does.
+has no uninstaller for any other Channel, and ADR an-upgrade-asks-its-channel
+already refused to build machinery for a problem nobody has reported — the half
+of it that still stands, and the half ADR an-upgrade-asks-its-channel leaned on
+when it decided that replacing an Installation belongs to the Channel that made
+it for the same reason removing one does.
 
 ## What would reopen it
 

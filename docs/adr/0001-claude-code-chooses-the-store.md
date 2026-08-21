@@ -14,8 +14,8 @@ every terminal, the VS Code extension, the desktop app — picks it up.
 
 Because each profile is a real config directory, Perch can also point a single
 client at one directly by setting `CLAUDE_CONFIG_DIR` for that process alone.
-That is the `run` path (ADR 0010), and it is what allows two accounts to work
-concurrently in different terminals.
+That is the `run` path (ADR a-run-is-one-shot), and it is what allows two
+accounts to work concurrently in different terminals.
 
 ## Consequences
 

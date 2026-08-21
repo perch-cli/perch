@@ -1,8 +1,8 @@
 # A Credential lives wherever Claude Code puts it
 
-ADR 0001 and ADR 0008 were written against a macOS-only Perch, and both assume
-a Credential is held in the operating system's keychain. That assumption is
-macOS's, not Claude Code's. On Windows — and, on present evidence, on Linux —
+ADR claude-code-chooses-the-store was written against a macOS-only Perch, and
+assumes a Credential is held in the operating system's keychain. That assumption
+is macOS's, not Claude Code's. On Windows — and, on present evidence, on Linux —
 Claude Code writes the Credential as plaintext JSON to
 `<config dir>/.credentials.json`, in the same `claudeAiOauth` shape. The 2.1.222
 Windows build contains the `find-generic-password` call gated behind the Darwin
@@ -11,10 +11,11 @@ non-Darwin store is named, in its own source, `plaintext`.
 
 Perch therefore stores a Credential exactly where the installed Claude Code
 would store it, and nowhere else. Off macOS the service-name derivation of
-ADR 0001 — `sha256(CLAUDE_CONFIG_DIR)[0:8]` — is simply irrelevant: the
-Credential lives inside the Profile directory, so a Profile's isolation comes
-from the directory itself rather than from a namespace derived out of it. The
-conclusion of ADR 0001 survives unchanged; only its mechanism is macOS's.
+ADR claude-code-chooses-the-store — `sha256(CLAUDE_CONFIG_DIR)[0:8]` — is simply
+irrelevant: the Credential lives inside the Profile directory, so a Profile's
+isolation comes from the directory itself rather than from a namespace derived
+out of it. The conclusion of ADR claude-code-chooses-the-store survives
+unchanged; only its mechanism is macOS's.
 
 The rejected alternative was to protect a parked Credential with the best each
 platform offers — the keychain, DPAPI, the Secret Service. It was rejected
@@ -30,18 +31,20 @@ Claude Code is not a single-store reader, so Perch is not either. Its store is a
 composite with a primary and a fallback, reporting `primary_and_fallback_failed`
 only when both refuse and deleting from both. That means a mac whose keychain is
 locked has a working Claude Code backed by a plaintext file — and a Perch that
-read only the keychain would report exit 11, or no login, about a machine that is
-logged in. So the platform chooses where Perch *writes*, because a Profile that
-`perch add` has just created holds no evidence to read; and evidence chooses what
-Perch *believes*, because an existing store can be looked at. This is ADR 0007's
-rule applied one level down: probed, not assumed.
+read only the keychain would report exit 11, or no login, about a machine that
+is logged in. So the platform chooses where Perch *writes*, because a Profile
+that `perch add` has just created holds no evidence to read; and evidence
+chooses what Perch *believes*, because an existing store can be looked at. This
+is ADR an-assumption-is-probed's rule applied one level down: probed, not
+assumed.
 
 A successful write to the primary store removes any copy in the fallback. One
-store holds a Profile's Credential at a time, and the reason is ADR 0006's: a
-Credential left in the fallback is several Rotations behind within minutes, so
-leaving it there arms the composite reader to hand a retired refresh token to
-Claude Code the next time the keychain locks — the silent poisoning that Capture
-exists to prevent, arriving by the back door.
+store holds a Profile's Credential at a time, and the reason is
+ADR a-switch-is-written-down-first's: a Credential left in the fallback is
+several Rotations behind within minutes, so leaving it there arms the composite
+reader to hand a retired refresh token to Claude Code the next time the keychain
+locks — the silent poisoning that Capture exists to prevent, arriving by the
+back door.
 
 ## Consequences
 
@@ -54,11 +57,11 @@ deliberately rather than discovered.
 
 Off macOS, Perch multiplies the number of plaintext secrets on disk. Claude Code
 alone keeps one Credential in one file; a person holding four Accounts through
-Perch has four, under `~/.config/perch/profiles/`. Perch does not lower the protection
-of any single Credential, but it does widen what a leaked backup of `$HOME`
-yields, and that is the strongest argument for the rejected alternative. The
-portable case — a Credential leaving the machine — is covered separately and
-differently by ADR 0014's required passphrase.
+Perch has four, under `~/.config/perch/profiles/`. Perch does not lower the
+protection of any single Credential, but it does widen what a leaked backup of
+`$HOME` yields, and that is the strongest argument for the rejected alternative.
+The portable case — a Credential leaving the machine — is covered separately and
+differently by ADR the-holdings-go-out-sealed's required passphrase.
 
 Files holding a Credential are created 0600 and their directories 0700, matching
 what Claude Code does at 39 sites in its own binary. The mode is set at creation
@@ -76,16 +79,16 @@ works. Windows has no mode and relies on the profile ACL; a `$PERCH_HOME` pointe
 at a shared or removable drive therefore gets that drive's permissions and Perch
 will not notice.
 
-Because a Credential Store is derived rather than recorded, `registry.json` stops
-carrying `keychain_service` and `keychain_account` — and, by the same argument,
-`dir`, which is `perch_home/profiles/slug(email)`. `Profile` collapses into
-values the registry already keys on. The fields are simply dropped: nobody is
-running Perch, so there is no registry an older one wrote to migrate and the
-format stays at version 1. The cost of deriving rather than recording is that
-a future change to Claude Code's derivation would send Perch looking in an empty
-namespace instead of at a remembered one; ADR 0007's answer to drift is to refuse
-loudly rather than to guess, and `short_hash` is pinned by test so the derivation
-cannot move by accident.
+Because a Credential Store is derived rather than recorded, `registry.json`
+stops carrying `keychain_service` and `keychain_account` — and, by the same
+argument, `dir`, which is `perch_home/profiles/slug(email)`. `Profile` collapses
+into values the registry already keys on. The fields are simply dropped: nobody
+is running Perch, so there is no registry an older one wrote to migrate and the
+format stays at version 1. The cost of deriving rather than recording is that a
+future change to Claude Code's derivation would send Perch looking in an empty
+namespace instead of at a remembered one; ADR an-assumption-is-probed's answer
+to drift is to refuse loudly rather than to guess, and `short_hash` is pinned by
+test so the derivation cannot move by accident.
 
 Linux was inference when this was written and is now observation: the 2.1.222
 Linux build was read the way the Windows one had been. Its store resolves to

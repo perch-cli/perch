@@ -1,7 +1,7 @@
 //! The beliefs that can only be checked against state the developer owns and
 //! did not offer: their login keychain, their `~/.claude`, the Claude Code they
-//! have installed, and whatever clients they happen to have open (ADR 0007,
-//! ADR 0050).
+//! have installed, and whatever clients they happen to have open
+//! (ADR an-assumption-is-probed, ADR a-suite-is-named-and-gated).
 //!
 //! That is the whole of why this suite is held back by the `your-machine`
 //! feature, and it is a question of consent rather than of damage. A read of
@@ -340,9 +340,10 @@ fn every_session_marker_claude_code_has_left_names_a_process() {
 /// the refusal that protects a running client stops firing — this is the test
 /// that should say so before a user does.
 ///
-/// Here rather than beside the rest of ADR 0022's corroboration, because what
-/// it reads is the developer's own `~/.claude/sessions`: whether it asserts or
-/// skips is decided by their afternoon rather than by this repository.
+/// Here rather than beside the rest of ADR a-profile-is-live-by-evidence's
+/// corroboration, because what it reads is the developer's own
+/// `~/.claude/sessions`: whether it asserts or skips is decided by their
+/// afternoon rather than by this repository.
 #[test]
 fn a_running_clients_marker_is_the_shape_perch_believes_in() {
     let host = RealHost::new();
@@ -395,10 +396,11 @@ fn a_running_clients_marker_is_the_shape_perch_believes_in() {
             "startedAt is epoch milliseconds, not {session_began}"
         );
 
-        // The belief the whole of ADR 0022 turns on, held against a real
-        // client: a genuine session's process began no later than the marker
-        // says the session did. If the two clocks drift apart, running clients
-        // read as recycled PIDs and every Live Profile protection stops firing.
+        // The belief the whole of ADR a-profile-is-live-by-evidence turns on,
+        // held against a real client: a genuine session's process began no
+        // later than the marker says the session did. If the two clocks drift
+        // apart, running clients read as recycled PIDs and every Live Profile
+        // protection stops firing.
         assert!(
             process_began.timestamp_millis() <= session_began,
             "{}: the process began at {} but the session claims {session_began} — \
@@ -423,10 +425,11 @@ fn a_running_clients_marker_is_the_shape_perch_believes_in() {
 
 /// [`probe::assumption::CREDENTIAL_LOCATION`], for the half of it that holds
 /// off macOS, and the only load-bearing belief there: the plaintext store sits
-/// inside the config directory Claude Code was given (ADR 0007, ADR 0020).
-/// Everything that makes a Profile a private place for a Credential rests on it
-/// — get it wrong and every Profile shares one file, which is every Account
-/// sharing one login.
+/// inside the config directory Claude Code was given
+/// (ADR an-assumption-is-probed, ADR claude-code-chooses-the-store). Everything
+/// that makes a Profile a private place for a Credential rests on it — get it
+/// wrong and every Profile shares one file, which is every Account sharing one
+/// login.
 ///
 /// Asserted the way it is relied on. Perch says where the store of a config
 /// directory is, a Credential is put exactly there, and the installed Claude

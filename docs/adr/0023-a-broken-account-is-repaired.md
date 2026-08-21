@@ -1,19 +1,20 @@
 # A broken Account is repaired
 
-ADR 0006 leaves an Account whose Credential cannot be recovered — a Rotation
-lost between two writes, a refresh token Anthropic has retired. Perch keeps that
-Account rather than dropping it: an Account that vanishes reads as data loss,
-while a broken one reads as something needing attention. The state is a
-Quarantine, and it carries the reason it was raised, because "broken" and
-"broken because Anthropic would not renew it" are different pieces of news.
+ADR a-switch-is-written-down-first leaves an Account whose Credential cannot be
+recovered — a Rotation lost between two writes, a refresh token Anthropic has
+retired. Perch keeps that Account rather than dropping it: an Account that
+vanishes reads as data loss, while a broken one reads as something needing
+attention. The state is a Quarantine, and it carries the reason it was raised,
+because "broken" and "broken because Anthropic would not renew it" are different
+pieces of news.
 
 Only a login produces a working Credential, so the repair is a login. It runs in
-a config directory of its own, exactly as `perch add` does (ADR 0009), and what
-it produces is moved **into the Profile the Account already has**. The Account
-keeps its Alias, its Group, whether Cycling may choose it, and its position in
-the listing. Removing and re-adding would produce something that resembles the
-Account and is not it, and would hand the user the job of putting back settings
-they never changed.
+a config directory of its own, exactly as `perch add` does
+(ADR a-login-perch-does-not-need), and what it produces is moved **into the
+Profile the Account already has**. The Account keeps its Alias, its Group,
+whether Cycling may choose it, and its position in the listing. Removing and
+re-adding would produce something that resembles the Account and is not it, and
+would hand the user the job of putting back settings they never changed.
 
 Only that Account is touched. The login cannot reach the active Account's
 Credential, so repairing one Account never costs the session being worked in —

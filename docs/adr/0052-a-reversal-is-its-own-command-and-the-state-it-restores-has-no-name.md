@@ -1,19 +1,24 @@
 # A reversal is its own command, and the state it restores has no name
 
-> **Carried out in #175.** Like ADR 0041 and ADR 0046 through 0051, this is the
+> **Carried out in #175.** Like ADR using-it-is-the-proof,
+> ADR a-watcher-knob-is-arithmetic, ADR a-command-names-its-noun,
+> ADR a-switch-is-written-down-first, ADR the-listing-owns-the-set,
+> ADR a-suite-is-named-and-gated and ADR a-setting-names-its-scope, this is the
 > artifact of a planning effort rather than of a change, so it landed ahead of
 > the work it describes instead of beside it. The tree now matches it:
 > `Account.enabled` is `disabled` and present-only, `enabled_by_default` is
 > gone, the State column empties for an Account in neither state, `--json`
-> carries `"disabled"`, ADR 0047 has its fourth clause, and **Disabled**'s
-> `_Avoid_` line names **reserved**. The command surface did not move.
+> carries `"disabled"`, ADR a-command-names-its-noun has its fourth clause, and
+> **Disabled**'s `_Avoid_` line names **reserved**. The command surface did not
+> move.
 
-ADR 0047 named this as one of the collapses it deliberately did not decide: two
-top-level verbs for one boolean. `perch disable <target>` takes an Account out of
-Cycling, `perch enable <target>` puts it back, and they share an implementation —
-one `EnableCommand` enum, one `run`, 99 lines in `src/commands/enable.rs`, 294 in
-`tests/enabling.rs`, and two dispatch arms at `main.rs:476` and `:481`. The guide
-has printed them on one row since before either was questioned.
+ADR a-command-names-its-noun named this as one of the collapses it deliberately
+did not decide: two top-level verbs for one boolean. `perch disable <target>`
+takes an Account out of Cycling, `perch enable <target>` puts it back, and they
+share an implementation — one `EnableCommand` enum, one `run`, 99 lines in
+`src/commands/enable.rs`, 294 in `tests/enabling.rs`, and two dispatch arms at
+`main.rs:476` and `:481`. The guide has printed them on one row since before
+either was questioned.
 
 **The pair stays.** What is decided here is why, and the "why" turns out to
 govern three things outside the command surface.
@@ -64,8 +69,8 @@ pins it.
 ## Why not one verb and a flag
 
 The rival shape was one name with the reversal on a flag — the shape `alias`
-already has, and the only instance of it left once ADR 0051 deletes `config
-unset`.
+already has, and the only instance of it left once ADR a-setting-names-its-scope
+deletes `config unset`.
 
 It was refused on the yardstick, and the arithmetic is against it more plainly
 than the count suggests. Two verbs cost **one** idea, not two: a person holds
@@ -87,7 +92,7 @@ both directions. A flag there marks nothing absent and carries only the polarity
 
 > **A flag may mark an argument's absence. It may not carry a verb's polarity.**
 
-## ADR 0047's flag-or-verb test is silent here, not satisfied
+## ADR a-command-names-its-noun's flag-or-verb test is silent here, not satisfied
 
 Read literally, that test condemns both verbs: neither changes the meaning of the
 exit code nor the lifetime of the command, so both are flags. The literal reading
@@ -110,15 +115,16 @@ by.
 
 ## The fourth clause
 
-ADR 0047's "Admitting a command later" gains one:
+ADR a-command-names-its-noun's "Admitting a command later" gains one:
 
 > **4. A reversal takes its own name.** Where a command's whole effect is to undo
 > another's, it is its own command rather than a flag on the one it undoes. The
 > flag-or-verb test does not reach the question.
 
-This amends ADR 0047 in that one clause and nothing else — the precedent is ADR
-0050 amending ADR 0007 in a single sentence. Its decision, its table and its
-counts are untouched.
+This amends ADR a-command-names-its-noun in that one clause and nothing else —
+the precedent is ADR a-suite-is-named-and-gated amending
+ADR an-assumption-is-probed in a single sentence. Its decision, its table and
+its counts are untouched.
 
 ## What follows outside the surface
 
@@ -159,10 +165,11 @@ nothing is reserving the Account.
 ### The JSON key
 
 `"enabled": true` becomes `"disabled": bool`, and stays present on every Account
-unconditionally. ADR 0043's distinction is the one that applies: a machine
-reading a shape is not a person reading a sentence, and a script that has to test
-for a key's presence to learn a bool has been given a worse contract, not a
-truer one. The key follows the field's name; only the human-facing cell empties.
+unconditionally. ADR perch-says-what-it-did's distinction is the one that
+applies: a machine reading a shape is not a person reading a sentence, and a
+script that has to test for a key's presence to learn a bool has been given a
+worse contract, not a truer one. The key follows the field's name; only the
+human-facing cell empties.
 
 ## The word Reserve
 
@@ -181,10 +188,10 @@ entry's own language instead: *keeping an Account out of Cycling*. No
 user-facing string changes, which is why this costs nothing to do here rather
 than later.
 
-ADR 0047 excluded *naming* from its scope and this does not reopen it — a command
-keeping a name it has is not a naming decision, and a glossary term being used
-for two things is a vocabulary collision, which is the one kind of naming every
-ticket on this sweep is obliged to look at.
+ADR a-command-names-its-noun excluded *naming* from its scope and this does not
+reopen it — a command keeping a name it has is not a naming decision, and a
+glossary term being used for two things is a vocabulary collision, which is the
+one kind of naming every ticket on this sweep is obliged to look at.
 
 ## The glossary
 
@@ -199,23 +206,27 @@ The only edit is one word on one `_Avoid_` line.
 ## Consequences
 
 **The command surface does not move.** Top-level names stay at fifteen and
-invocable forms at twenty-seven. This closed with ADR 0047's sixteen and
-twenty-eight, which were counted before ADR 0049 removed `perch tui` and took a
-name and a form with it; the arithmetic was never this decision's finding, and a
-wrong number left standing is read as a right one (ADR 0053). Both verbs keep
-their names, their placement, their exit codes and their output.
+invocable forms at twenty-seven. This closed with ADR a-command-names-its-noun's
+sixteen and twenty-eight, which were counted before ADR perch-does-not-draw
+removed `perch tui` and took a name and a form with it; the arithmetic was never
+this decision's finding, and a wrong number left standing is read as a right one
+(ADR the-listing-owns-the-set). Both verbs keep their names, their placement,
+their exit codes and their output.
 
-**This supersedes nothing and amends ADR 0047 in one clause.** ADR 0012
-("Cycling skips accounts that are exhausted, disabled, or quarantined") and ADR
-0024 ("never being chosen for you is the whole of what disabled means") use the
-word as a lowercase state and are untouched. ADR 0002's rejected alternative —
-"dropping groups entirely and using a per-account disable flag was seriously
-considered" — is the same trade seen from the other side and stays rejected; a
-Group declares a set interchangeable, a disable reserves one Account, and
-collapsing them would make reserving an Account require inventing a Group for it.
+**This supersedes nothing and amends ADR a-command-names-its-noun in one
+clause.** ADR headroom-is-the-worst-window ("Cycling skips accounts that are
+exhausted, disabled, or quarantined") and ADR a-removal-lands-first ("never
+being chosen for you is the whole of what disabled means") use the word as a
+lowercase state and are untouched. ADR a-group-is-a-declaration's rejected
+alternative — "dropping groups entirely and using a per-account disable flag was
+seriously considered" — is the same trade seen from the other side and stays
+rejected; a Group declares a set interchangeable, a disable reserves one
+Account, and collapsing them would make reserving an Account require inventing a
+Group for it.
 
 **What was actually bought.** Nothing on the surface, and one rule: that a
-capability's reversal is not a flag, with the boundary on ADR 0047's flag-or-verb
-test that makes the rule safe to apply. The three spellings that follow are not
-the point of the decision — they are what a model and a repository agreeing looks
-like once one of them has been declared right.
+capability's reversal is not a flag, with the boundary on
+ADR a-command-names-its-noun's flag-or-verb test that makes the rule safe to
+apply. The three spellings that follow are not the point of the decision — they
+are what a model and a repository agreeing looks like once one of them has been
+declared right.

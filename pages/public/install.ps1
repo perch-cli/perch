@@ -91,7 +91,8 @@ try {
     # succeeded, so a failure from here is saying something about the file.
     # Said either way, for the reason install.sh gives at the same place: a
     # check skipped in silence reads like a check that passed, and on most
-    # machines this is the one that is skipped (ADR 0039).
+    # machines this is the one that is skipped
+    # (ADR an-upgrade-asks-its-channel).
     $checked = $false
     $gh = Get-Command gh -ErrorAction SilentlyContinue
     if ($gh) {
@@ -122,9 +123,9 @@ try {
     # Windows holds a running executable open, so `perch.exe` cannot be
     # written over while it is running — which is exactly the state `perch
     # upgrade` runs this in, since the Perch being replaced is the one that
-    # started this script (ADR 0039). What Windows *does* allow is renaming a
-    # running executable, so the old one is moved aside and the new one takes
-    # its name.
+    # started this script (ADR an-upgrade-asks-its-channel). What Windows *does*
+    # allow is renaming a running executable, so the old one is moved aside and
+    # the new one takes its name.
     #
     # Cleared first because a rename onto an occupied name fails, and the
     # previous upgrade will have left one: the binary was still running when it
@@ -155,7 +156,8 @@ try {
     # Best effort: it is still running if this was an upgrade, in which case
     # this fails and the next upgrade clears it above. `perch.exe.old` sitting
     # beside the binary is the Installation's litter rather than something Perch
-    # holds, which is the side of the line ADR 0033 drew that it belongs on.
+    # holds, which is the side of the line ADR perch-takes-back-what-it-wrote
+    # drew that it belongs on.
     if ($movedAside) {
         Remove-Item -Force $superseded -ErrorAction SilentlyContinue
     }
@@ -168,14 +170,16 @@ finally {
 
 # A user PATH entry is a registry value, so the exact segment that was added
 # can be taken back out again later — which is what makes writing one here
-# defensible where appending to an rc file on Unix is not (ADR 0033).
+# defensible where appending to an rc file on Unix is not
+# (ADR perch-takes-back-what-it-wrote).
 #
 # Both the user and the machine PATH are consulted, and each is matched a
 # segment at a time rather than as a substring: a machine-wide entry is still
 # on the PATH, and an existing `C:\foo\binary` is not a `C:\foo\bin`. Getting
 # that right is what makes a re-install neither ask again nor add the directory
 # twice — and a re-install is exactly what `perch upgrade` performs on an
-# installer Installation, by running this script (ADR 0039).
+# installer Installation, by running this script
+# (ADR an-upgrade-asks-its-channel).
 function Test-OnPath($directory) {
     $wanted = $directory.TrimEnd('\')
     foreach ($scope in "User", "Machine") {

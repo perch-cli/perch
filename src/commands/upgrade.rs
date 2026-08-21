@@ -1,5 +1,5 @@
 //! `perch upgrade` — this machine's Installation, replaced with a newer Release
-//! (ADR 0039).
+//! (ADR an-upgrade-asks-its-channel).
 //!
 //! **It routes rather than overwrites.** Three of the four Channels manage the
 //! binary themselves, and writing over one of theirs is not a shortcut but a
@@ -44,7 +44,7 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
     // hand-unpacked Perch got "Perch will not write over a file it did not put
     // there" from `--check --json`, a sentence about an act it had not asked
     // for, and no `installed` or `newest` at all. Answering it is success
-    // whichever way the answer went (ADR 0039).
+    // whichever way the answer went (ADR an-upgrade-asks-its-channel).
     if args.check {
         // Only the *path's* answer is allowed to be missing. A word somebody
         // typed is a word, and `homebre` is a typo rather than a machine
@@ -131,9 +131,10 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
     }?;
 
     // The Channel has moved the binary, and neither `brew` nor `npm` has ever
-    // heard of a unit file (ADR 0039, ADR 0040). On Unix the Service is still
-    // running the *old* binary out of an inode nothing can see any more, and the
-    // path its unit names may not exist at all — so the unit is written again
+    // heard of a unit file (ADR an-upgrade-asks-its-channel,
+    // ADR the-machine-runs-the-watcher). On Unix the Service is still running
+    // the *old* binary out of an inode nothing can see any more, and the path
+    // its unit names may not exist at all — so the unit is written again
     // against the binary that is there now, and restarted onto it.
     //
     // Said rather than raised however it goes. The Upgrade itself succeeded: the
@@ -214,7 +215,7 @@ fn chosen_channel(host: &dyn Host, named: Option<&str>) -> Result<Channel> {
 ///
 /// Exits nought either way. A check is a question, and answering it is success
 /// whichever way the answer went — every other non-zero code Perch has is a
-/// refusal, and "there is news" is not one (ADR 0039).
+/// refusal, and "there is news" is not one (ADR an-upgrade-asks-its-channel).
 ///
 /// The Channel is optional here alone. An Upgrade cannot proceed without one,
 /// because it is about to write over a binary and has to know whose it is; a
@@ -364,10 +365,10 @@ fn hand_it_over(
 /// The one Channel Perch replaces itself for, done by the installer that made
 /// the Installation in the first place.
 ///
-/// The script is embedded rather than fetched (ADR 0039) and written where
-/// Perch keeps its own things, closed to everyone but its owner: it is a
-/// program about to be run, and one a second user on the machine could edit
-/// between the write and the run is a program somebody else chose.
+/// The script is embedded rather than fetched (ADR an-upgrade-asks-its-channel)
+/// and written where Perch keeps its own things, closed to everyone but its
+/// owner: it is a program about to be run, and one a second user on the machine
+/// could edit between the write and the run is a program somebody else chose.
 ///
 /// No execute bit, because it is never executed by name — `sh` and `powershell`
 /// are handed it as a file to read, which is also what keeps this working on a
@@ -426,14 +427,15 @@ fn run_the_installer(host: &dyn Host, at: &std::path::Path, tag: &str) -> Result
 /// Where Windows keeps PowerShell, from the environment rather than from
 /// `PATH`.
 ///
-/// ADR 0021's rule, and the one program Perch runs that was outside it: every
-/// other one goes by an absolute path — `curl`, `security`, `<prefix>/bin/brew`,
-/// the `npm` `probe::on_path` resolved — "because that path is a security
-/// property rather than a convenience". A bare name handed to Windows is
-/// searched for in the application directory and *the current working
-/// directory* before `PATH`, so `perch upgrade` typed in a downloads folder
-/// holding a `powershell.exe` ran that, with `-ExecutionPolicy Bypass`, and
-/// handed it a script whose whole job is to overwrite the Perch binary.
+/// ADR a-crate-must-not-cost-a-seam's rule, and the one program Perch runs that
+/// was outside it: every other one goes by an absolute path — `curl`,
+/// `security`, `<prefix>/bin/brew`, the `npm` `probe::on_path` resolved —
+/// "because that path is a security property rather than a convenience". A bare
+/// name handed to Windows is searched for in the application directory and *the
+/// current working directory* before `PATH`, so `perch upgrade` typed in a
+/// downloads folder holding a `powershell.exe` ran that, with
+/// `-ExecutionPolicy Bypass`, and handed it a script whose whole job is to
+/// overwrite the Perch binary.
 ///
 /// `%SystemRoot%` rather than `C:\\Windows`, and a refusal rather than a walk
 /// of `PATH` where it is unset, both for the reason `curl_bin` gives: Windows

@@ -136,10 +136,11 @@ fn the_account_you_were_using_stays_active_and_untouched() {
     assert!(result.is_ok(), "{:?}", result.err());
 
     assert_the_active_account_survived(&host);
-    // Asserted whole, because the claim *is* the sentence (ADR 0043) — and
-    // said once, before the browser opens, rather than again in the report
-    // afterwards: an Add leaves the active Account alone every time, so the
-    // second telling was the ordinary case announcing itself (ADR 0061).
+    // Asserted whole, because the claim *is* the sentence
+    // (ADR perch-says-what-it-did) — and said once, before the browser opens,
+    // rather than again in the report afterwards: an Add leaves the active
+    // Account alone every time, so the second telling was the ordinary case
+    // announcing itself (ADR perch-says-what-it-did).
     assert!(
         printed.contains(&format!(
             "Logging in to a new Profile. {EMAIL} stays active and its session \
@@ -565,7 +566,7 @@ fn adding_an_account_makes_no_network_call() {
 /// wholesale, `active` would silently revert to the Account that was active
 /// before the Switch — and the next Capture would copy the *live* Credential,
 /// which belongs to the Account switched to, over that Account's own good copy
-/// and destroy it (ADR 0006).
+/// and destroy it (ADR a-switch-is-written-down-first).
 #[test]
 fn an_add_does_not_revert_a_switch_that_ran_while_its_login_was_open() {
     let host = machine_with_two_accounts().with_login(|host, dir| {
@@ -858,8 +859,9 @@ fn a_login_whose_identity_file_cannot_be_read_is_refused_by_name() {
 /// Credential Claude Code had just written and leave the `perch add` driving it
 /// reporting that the login did not complete.
 ///
-/// The same evidence every other write asks for settles it (ADR 0022): a login
-/// somebody is in the middle of is a Live Profile, and nothing reaps one.
+/// The same evidence every other write asks for settles it
+/// (ADR a-profile-is-live-by-evidence): a login somebody is in the middle of is
+/// a Live Profile, and nothing reaps one.
 #[test]
 fn a_login_somebody_is_still_driving_is_never_reaped_however_old_it_is() {
     let host = logged_in_machine();
@@ -1012,11 +1014,11 @@ fn a_name_that_is_not_usable_is_refused_as_that_rather_than_as_a_collision() {
 /// had just written and left this `perch add` reporting that the login did not
 /// complete.
 ///
-/// Perch writes the marker itself now, before the browser opens — it is waiting on
-/// this login exactly as a Run waits on its client (ADR 0027). Depending on Claude
-/// Code to have written one was the wrong way round: a `claude` sitting on an OAuth
-/// prompt in a directory it has never had a session in is the least likely thing
-/// to have left a marker.
+/// Perch writes the marker itself now, before the browser opens — it is waiting
+/// on this login exactly as a Run waits on its client (ADR a-run-is-one-shot).
+/// Depending on Claude Code to have written one was the wrong way round: a
+/// `claude` sitting on an OAuth prompt in a directory it has never had a
+/// session in is the least likely thing to have left a marker.
 #[test]
 fn a_login_perch_is_driving_survives_a_command_run_in_another_terminal() {
     let host = logged_in_machine();
@@ -1053,10 +1055,10 @@ fn a_login_perch_is_driving_survives_a_command_run_in_another_terminal() {
 
 /// A Scope that has just grown to two Accounts holds a set nothing may Cycle
 /// between unasked, because `watcher-may-act` is false on every Scope until
-/// somebody says otherwise (ADR 0017). The Add says what is now true and names
-/// the Setting that would say yes — it does not ask, because a consent gate
-/// collected in the middle of adding an Account is not the yes the guide
-/// promises.
+/// somebody says otherwise (ADR a-group-is-a-declaration). The Add says what is
+/// now true and names the Setting that would say yes — it does not ask, because
+/// a consent gate collected in the middle of adding an Account is not the yes
+/// the guide promises.
 #[test]
 fn an_add_that_makes_a_group_a_set_says_what_that_group_still_cannot_do() {
     let host = ready_for_a_third_in("work");
@@ -1071,13 +1073,14 @@ fn an_add_that_makes_a_group_a_set_says_what_that_group_still_cannot_do() {
     assert!(
         !printed.contains("interchangeable"),
         "a Group *is* the declaration that its Accounts are interchangeable \
-         (ADR 0002), so there is no second yes to name:\n{printed}"
+         (ADR a-group-is-a-declaration), so there is no second yes to name:\n{printed}"
     );
 }
 
 /// The same question asked of the other Scope there is, which needs two yeses
 /// rather than one: being ungrouped is the absence of a declaration that those
-/// Accounts are interchangeable, not a weaker form of one (ADR 0017).
+/// Accounts are interchangeable, not a weaker form of one
+/// (ADR a-group-is-a-declaration).
 #[test]
 fn an_add_that_makes_the_ungrouped_scope_a_set_names_both_settings_it_needs() {
     let host = ready_to_add();
@@ -1152,7 +1155,8 @@ fn the_line_is_said_rather_than_asked_about() {
 /// And said again on the Add after that one, for as long as it stays true. A
 /// Scope that has not been answered has not stopped being unanswered because
 /// somebody added a third Account to it — this is a fact about the Scope rather
-/// than a command explaining itself on a path that always runs (ADR 0061).
+/// than a command explaining itself on a path that always runs
+/// (ADR perch-says-what-it-did).
 #[test]
 fn a_scope_that_stays_unanswered_is_told_again_on_the_add_after_that() {
     let host = ready_for_a_third_in("work");

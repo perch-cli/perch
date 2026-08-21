@@ -1,17 +1,17 @@
 //! `perch status` — who is active, and where their quota stands.
 //!
-//! Rendered from cache unless it is asked to fetch (ADR 0015). This is the
-//! command people put in a shell prompt, where it may run several times a
-//! minute; fetching by default would burn the hourly usage budget needed for
-//! switching decisions. Every figure is shown with its age, so a stale number
-//! is visibly stale rather than quietly wrong, and `--refresh` is how one stops
-//! being stale.
+//! Rendered from cache unless it is asked to fetch
+//! (ADR a-figure-carries-its-age). This is the command people put in a shell
+//! prompt, where it may run several times a minute; fetching by default would
+//! burn the hourly usage budget needed for switching decisions. Every figure is
+//! shown with its age, so a stale number is visibly stale rather than quietly
+//! wrong, and `--refresh` is how one stops being stale.
 //!
-//! One Account in detail, and that is the whole of it (ADR 0053). "Where would
-//! I land" is a question about a set, which is the listing
-//! [`crate::commands::list`] draws at whatever breadth it is asked for — so it
-//! is asked there, and this command answers about the Account you are on and
-//! cannot be anything else.
+//! One Account in detail, and that is the whole of it
+//! (ADR the-listing-owns-the-set). "Where would I land" is a question about a
+//! set, which is the listing [`crate::commands::list`] draws at whatever
+//! breadth it is asked for — so it is asked there, and this command answers
+//! about the Account you are on and cannot be anything else.
 
 use std::io::Write;
 
@@ -51,9 +51,10 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
     };
     // Perch on nobody *because* a Switch was in flight and never recorded is
     // not an absence to report — it is the answer to why the absence is there,
-    // and it exits 0 like every other way of saying one (ADR 0048). A Landing
-    // that left nobody behind is the one shape with no Account under it to
-    // describe, so what it gets is the line and the field alone.
+    // and it exits 0 like every other way of saying one
+    // (ADR a-switch-is-written-down-first). A Landing that left nobody behind
+    // is the one shape with no Account under it to describe, so what it gets is
+    // the line and the field alone.
     let active = match (
         active_email(&registry),
         registry.active().a_switch_in_flight(),
@@ -65,10 +66,10 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
         (Err(nobody), None) => return Err(nobody),
     };
 
-    // Every read spends from a budget that does not refill early (ADR 0015),
-    // and this command shows one Account, so it reads one Account. A refresh
-    // reads exactly what it is about to show, which is the rule `perch list`
-    // follows at its own breadths.
+    // Every read spends from a budget that does not refill early
+    // (ADR a-figure-carries-its-age), and this command shows one Account, so it
+    // reads one Account. A refresh reads exactly what it is about to show,
+    // which is the rule `perch list` follows at its own breadths.
     let report = match &mut perch {
         Some(perch) => observe::refresh(
             host,
@@ -144,8 +145,9 @@ fn render_human(
     // detail.
     //
     // Both halves on one line, and the repair named for the Account it can only
-    // be about: this command answers about exactly one Account (ADR 0053), so
-    // there is no second copy of the repair for it to be one copy too many of.
+    // be about: this command answers about exactly one Account
+    // (ADR the-listing-owns-the-set), so there is no second copy of the repair
+    // for it to be one copy too many of.
     if let Some(why) = account.quarantine {
         utilization::write_labeled(
             out,
@@ -176,9 +178,9 @@ fn render_human(
 /// shell prompt — and that earned its keep against a document which, under the
 /// flag that once widened this command to a Group, also answered about a set:
 /// the duplicate was insurance against reaching into the wrong shape. This
-/// document answers about exactly one Account and cannot be anything else (ADR
-/// 0053), so the insurance has nothing left to cover and `jq
-/// .active.utilization` is one word longer.
+/// document answers about exactly one Account and cannot be anything else
+/// (ADR the-listing-owns-the-set), so the insurance has nothing left to cover
+/// and `jq .active.utilization` is one word longer.
 fn render_json(
     host: &dyn Host,
     out: &mut dyn Write,

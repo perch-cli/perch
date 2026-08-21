@@ -1,10 +1,11 @@
 //! Behavior: what `perch status --refresh` fetches, what it keeps, and what
 //! it refuses to do to get a figure.
 //!
-//! This is the only command in v1 that spends network budget (ADR 0015), so the
-//! tests are as much about what does not go out as about what comes back: no
-//! read for an Account that is not being shown, no renewal of a Credential
-//! something else is holding (ADR 0005), and no figure recorded against an
+//! This is the only command in v1 that spends network budget
+//! (ADR a-figure-carries-its-age), so the tests are as much about what does not
+//! go out as about what comes back: no read for an Account that is not being
+//! shown, no renewal of a Credential something else is holding
+//! (ADR a-profile-is-live-by-evidence), and no figure recorded against an
 //! Account whose Credential it was not.
 
 mod common;
@@ -281,7 +282,7 @@ fn a_credential_a_client_is_holding_is_never_renewed() {
     result.expect("a Credential Perch may not touch is not a failed command");
     assert!(
         host.sent_to(TOKEN_URL).is_empty(),
-        "renewing a Credential a running client holds would log it out (ADR 0005)"
+        "renewing a Credential a running client holds would log it out (ADR a-profile-is-live-by-evidence)"
     );
     assert!(printed.contains("4242"), "{printed}");
     assert!(printed.contains("cached figure"), "{printed}");
@@ -303,9 +304,10 @@ fn a_credential_a_client_is_holding_is_never_renewed() {
     );
 }
 
-/// A Profile with a Run against it is Live by Perch's own marker (ADR 0027),
-/// and the rule that follows is the same one: the Credential in there belongs to
-/// the client holding it until that client exits.
+/// A Profile with a Run against it is Live by Perch's own marker
+/// (ADR a-run-is-one-shot), and the rule that follows is the same one: the
+/// Credential in there belongs to the client holding it until that client
+/// exits.
 #[test]
 fn a_credential_a_run_is_holding_is_never_renewed_either() {
     let host = two_accounts_in_a_group();
@@ -325,7 +327,7 @@ fn a_credential_a_run_is_holding_is_never_renewed_either() {
     result.expect("a Credential Perch may not touch is not a failed command");
     assert!(
         host.sent_to(TOKEN_URL).is_empty(),
-        "renewing under a Run would log that client out mid-task (ADR 0005)"
+        "renewing under a Run would log that client out mid-task (ADR a-profile-is-live-by-evidence)"
     );
     assert!(printed.contains(&THIS_PROCESS.to_string()), "{printed}");
     assert!(printed.contains("cached figure"), "{printed}");
@@ -338,7 +340,8 @@ fn a_credential_a_run_is_holding_is_never_renewed_either() {
 /// Profile, while the live copy sits in the Default Profile. A Rotation retires
 /// the refresh token for the Account rather than for a file, so renewing the
 /// live copy kills the one the Run is using just the same — and checking only
-/// the directory being written would miss it entirely (ADR 0027).
+/// the directory being written would miss it entirely
+/// (ADR a-profile-is-live-by-evidence).
 #[test]
 fn a_run_against_the_active_account_stops_its_live_credential_being_renewed() {
     let host = two_accounts_in_a_group();
@@ -359,9 +362,10 @@ fn a_run_against_the_active_account_stops_its_live_credential_being_renewed() {
     assert!(printed.contains("cached figure"), "{printed}");
 }
 
-/// And the half of ADR 0005 that is not a refusal: an Account with a client
-/// running has a fresh access token by that ADR's own reasoning, so its
-/// Utilization is readable without renewing anything. A Run is not a blindfold.
+/// And the half of ADR a-profile-is-live-by-evidence that is not a refusal: an
+/// Account with a client running has a fresh access token by that ADR's own
+/// reasoning, so its Utilization is readable without renewing anything. A Run
+/// is not a blindfold.
 #[test]
 fn utilization_for_a_live_account_is_read_without_a_renewal() {
     let host = two_accounts_in_a_group();
@@ -416,7 +420,8 @@ fn a_throttled_read_falls_back_to_the_cached_figure_and_still_succeeds() {
         .0
         .expect("the first read works");
 
-    // The allowance is spent, and does not refill early (ADR 0015).
+    // The allowance is spent, and does not refill early
+    // (ADR a-figure-carries-its-age).
     host.reply(USAGE_URL, Some(FRESH_TOKEN), 429, "");
     host.set_now(at(12, 3));
 
@@ -528,10 +533,11 @@ fn a_credential_that_will_not_say_when_it_expires_is_renewed_once_anthropic_refu
 }
 
 /// One rule at every breadth rather than a capability each command has of its
-/// own: a refresh reads the Accounts it is about to show and no others (ADR
-/// 0053). Every read spends from an allowance that does not refill early (ADR
-/// 0015), so a listing that narrowed what it showed without narrowing what it
-/// read would spend somebody's budget on Accounts they did not ask about.
+/// own: a refresh reads the Accounts it is about to show and no others
+/// (ADR the-listing-owns-the-set). Every read spends from an allowance that
+/// does not refill early (ADR a-figure-carries-its-age), so a listing that
+/// narrowed what it showed without narrowing what it read would spend
+/// somebody's budget on Accounts they did not ask about.
 #[test]
 fn a_refresh_reads_only_the_accounts_it_is_about_to_show() {
     let host = machine_with_two_accounts();
@@ -651,11 +657,11 @@ fn figures_are_not_recorded_against_an_account_the_credential_is_not_for() {
 /// An outage on the profile endpoint is not permission to skip the question it
 /// answers.
 ///
-/// ADR 0019 carves out one thing and one thing only: "drift in a reply Perch
-/// reads for reassurance is no reason to stop reading Utilization at all". A 503
-/// is not drift. It says nothing about who the live Credential belongs to, and
-/// `/api/oauth/usage` going on answering while `/api/oauth/profile` does not is
-/// exactly what an incident looks like.
+/// ADR a-figure-names-its-account carves out one thing and one thing only:
+/// "drift in a reply Perch reads for reassurance is no reason to stop reading
+/// Utilization at all". A 503 is not drift. It says nothing about who the live
+/// Credential belongs to, and `/api/oauth/usage` going on answering while
+/// `/api/oauth/profile` does not is exactly what an incident looks like.
 ///
 /// Folded in with drift, that switched the ownership check off for the duration:
 /// somebody who had logged in as a second Account directly would have had that
@@ -686,9 +692,10 @@ fn an_outage_on_the_profile_endpoint_records_nothing_rather_than_guessing() {
 }
 
 /// Drift, on the other hand, genuinely is no evidence either way — and is the
-/// case ADR 0019 wrote the carve-out for. A profile reply whose shape this build
-/// does not recognize must not stop a Utilization read: Anthropic changing a
-/// field name would otherwise take every figure in Perch with it.
+/// case ADR a-figure-names-its-account wrote the carve-out for. A profile reply
+/// whose shape this build does not recognize must not stop a Utilization read:
+/// Anthropic changing a field name would otherwise take every figure in Perch
+/// with it.
 #[test]
 fn a_profile_reply_this_build_does_not_recognize_still_lets_the_figures_be_read() {
     let host = machine_with_two_accounts();
@@ -715,10 +722,11 @@ fn a_profile_reply_this_build_does_not_recognize_still_lets_the_figures_be_read(
 /// that has switched itself off is worth one line. `email_in` folded "the reply
 /// named nobody" together with "the reply is not the shape Perch believes in"
 /// and answered `None` to both, which `confirm` read as permission to cache. So
-/// the day Anthropic renames `email_address`, the ADR 0019 check becomes a
-/// no-op for every Account, for ever, with nothing printed anywhere — which is
-/// strictly worse than the outage the test above is about, because an outage
-/// ends and a rename does not.
+/// the day Anthropic renames `email_address`, the
+/// ADR a-figure-names-its-account check becomes a no-op for every Account, for
+/// ever, with nothing printed anywhere — which is strictly worse than the
+/// outage the test above is about, because an outage ends and a rename does
+/// not.
 #[test]
 fn a_profile_reply_that_names_nobody_says_the_ownership_check_is_passing_everything() {
     let host = machine_with_two_accounts();
@@ -747,7 +755,8 @@ fn a_profile_reply_that_names_nobody_says_the_ownership_check_is_passing_everyth
 /// renewed the very Credential Perch was about to renew. So the Credential is
 /// read again once the lock is held, and a Rotation that has already happened
 /// is used rather than spent again — a second Renewal would hand back a token
-/// the other holder's Rotation has already invalidated (ADR 0006).
+/// the other holder's Rotation has already invalidated
+/// (ADR a-switch-is-written-down-first).
 #[test]
 fn a_credential_renewed_while_perch_waited_for_the_lock_is_not_renewed_again() {
     let host = machine_with_two_accounts();
@@ -890,9 +899,9 @@ fn a_token_renewed_on_the_way_in_is_not_renewed_again_when_anthropic_refuses_it(
 
 /// A Switch that was written down and not yet recorded is a **Landing**, and a
 /// registry holding one answers "who is active" with the Account being *left*
-/// (ADR 0048) — while the Default Profile may already hold the Credential of
-/// the one arriving. A Switch killed between storing the arriving Credential
-/// and patching the Identity leaves exactly that.
+/// (ADR a-switch-is-written-down-first) — while the Default Profile may already
+/// hold the Credential of the one arriving. A Switch killed between storing the
+/// arriving Credential and patching the Identity leaves exactly that.
 ///
 /// `perch status --refresh` and `perch list --refresh` do not settle a Landing
 /// before they read, so a Refresh taken on that answer asks Anthropic as one
@@ -957,9 +966,10 @@ fn a_refresh_mid_landing_reads_the_account_named_rather_than_whatever_is_live() 
 ///
 /// Every path that *acts* as an Account refuses that state before it moves
 /// anything: `perch add`, `perch holdings import`, `perch switch`, `perch run`,
-/// `perch relogin` and `perch remove` each ask. A Renewal did not, and it is the
-/// write ADR 0006 calls unrecoverable — Anthropic retires the old refresh token
-/// when it Rotates, so renewing here spends a token that is not this Account's.
+/// `perch relogin` and `perch remove` each ask. A Renewal did not, and it is
+/// the write ADR a-switch-is-written-down-first calls unrecoverable — Anthropic
+/// retires the old refresh token when it Rotates, so renewing here spends a
+/// token that is not this Account's.
 ///
 /// The state is only reachable by hand, because the doors that make an Account
 /// all refuse it. That is exactly why the guard belongs on the write rather
@@ -1013,9 +1023,10 @@ fn an_account_that_shares_a_profile_with_another_is_never_renewed() {
 /// Claude Code's config lock goes stale in ten seconds. Let run out, any client
 /// on the machine is entitled to clear the artifact and take the lock while
 /// Perch is writing the Rotated Credential under it — and Anthropic has already
-/// retired the old refresh token by then, which is the loss ADR 0006 calls
-/// unrecoverable. `switch::perform` wraps its own `store_credential` for exactly
-/// this reason; this path was the one that did not.
+/// retired the old refresh token by then, which is the loss
+/// ADR a-switch-is-written-down-first calls unrecoverable. `switch::perform`
+/// wraps its own `store_credential` for exactly this reason; this path was the
+/// one that did not.
 #[test]
 fn a_keychain_dialog_somebody_walked_away_from_does_not_cost_perch_the_locks_a_rotation_needs() {
     let host = machine_with_two_accounts().with_a_keychain_that_asks_first(20_000);

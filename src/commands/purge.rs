@@ -1,4 +1,5 @@
-//! `perch holdings purge` — giving the machine back (ADR 0014).
+//! `perch holdings purge` — giving the machine back
+//! (ADR the-holdings-go-out-sealed).
 //!
 //! Every Profile, every Credential Perch holds, and Perch's own registry, gone
 //! in one act. The exact inverse of an Import, and the command that makes moving
@@ -145,12 +146,12 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     // was always going to refuse.
     purge::refuse_while_anything_is_running(host, &registry).map_err(and_the_export)?;
 
-    // Before anything is deleted, and refusing rather than continuing if it will
-    // not stop (ADR 0040). A Watcher is the one process on this machine that
-    // writes Credentials without being asked, and a supervised one comes
-    // straight back — so "it will be gone in a moment" is not true of it. This
-    // is ADR 0024's rule at the scale of the whole machine: land somewhere
-    // before deleting anything.
+    // Before anything is deleted, and refusing rather than continuing if it
+    // will not stop (ADR the-machine-runs-the-watcher). A Watcher is the one
+    // process on this machine that writes Credentials without being asked, and
+    // a supervised one comes straight back — so "it will be gone in a moment"
+    // is not true of it. This is ADR a-removal-lands-first's rule at the scale
+    // of the whole machine: land somewhere before deleting anything.
     crate::commands::service::take_back_before_a_purge(host, out).map_err(and_the_export)?;
 
     let purged = purge::erase(host, &mut perch, &registry).map_err(and_the_export)?;
@@ -181,10 +182,11 @@ fn still_standing(error: PerchError, exported: Option<&std::path::Path>) -> Perc
 
 /// Refuses a Purge nobody is there to agree to.
 ///
-/// Every capability in Perch is reachable from a script (ADR 0011), so the
-/// refusal names the flag rather than the terminal: `--yes` is the whole of what
-/// a script needs, and a Purge that read end of input as agreement would be the
-/// one command where a closed pipe costs every Credential on the machine.
+/// Every capability in Perch is reachable from a script
+/// (ADR perch-does-not-draw), so the refusal names the flag rather than the
+/// terminal: `--yes` is the whole of what a script needs, and a Purge that read
+/// end of input as agreement would be the one command where a closed pipe costs
+/// every Credential on the machine.
 fn refuse_without_a_terminal_or_the_flag(host: &dyn Host, yes: bool) -> Result<()> {
     if yes || host.is_interactive() {
         return Ok(());
@@ -208,8 +210,9 @@ fn refuse_without_a_terminal_or_the_flag(host: &dyn Host, yes: bool) -> Result<(
 fn what_will_go(registry: &Registry, home: &Path, service: bool) -> String {
     // Said in the same breath as the Profiles rather than left for the report,
     // because it is the one thing a Purge takes that lives *outside* Perch's
-    // home (ADR 0040) — and consent to "everything under this directory" is not
-    // consent to a file in `~/Library/LaunchAgents`.
+    // home (ADR the-machine-runs-the-watcher) — and consent to "everything
+    // under this directory" is not consent to a file in
+    // `~/Library/LaunchAgents`.
     let and_the_service = match service {
         true => {
             "\nThe Service goes too, and goes first: nothing may be \
@@ -436,7 +439,8 @@ fn report(host: &dyn Host, out: &mut dyn Write, home: &Path, purged: &Purged) ->
     // thing said beyond the count. What Claude Code is still logged in as, and
     // that an Import puts an Export back, are both true of every Purge — the
     // first is said in the question this run was agreed to, which is where it
-    // is load-bearing, and neither is said again afterwards (ADR 0061).
+    // is load-bearing, and neither is said again afterwards
+    // (ADR perch-says-what-it-did).
     if purged.credentials < purged.accounts {
         say(
             out,

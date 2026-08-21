@@ -21,11 +21,12 @@ exactly the same measure.
 
 **A network flag is already within reach of a listing.** `perch status --group
 --refresh` reads every Account in the Group — `to_refresh` at `status.rs:121`
-says so, and `switching.md:103` advertises it in an exit-15 message. ADR 0015's
-allowance is roughly 28–30 reads an hour *per Account*, so breadth spends
-breadth-many independent budgets rather than exhausting one, and ADR 0018 already
-makes each Account's failure its neighbors' business. Reading every Account on a
-loop is what `perch watch` is for.
+says so, and `switching.md:103` advertises it in an exit-15 message.
+ADR a-figure-carries-its-age's allowance is roughly 28–30 reads an hour *per
+Account*, so breadth spends breadth-many independent budgets rather than
+exhausting one, and ADR a-figure-carries-its-age already makes each Account's
+failure its neighbors' business. Reading every Account on a loop is what
+`perch watch` is for.
 
 So the rule was never "keep the network away from listings". It is **a refresh
 reads the Accounts it is about to show and no others**, which already holds at
@@ -33,25 +34,26 @@ every breadth Perch has.
 
 ## `status --group` has no unique output, and after #169 it has no output at all
 
-It is `list::render` with `Scope::Group` — the call is at `status.rs:73`, and the
-scope is chosen four lines earlier, falling to `Scope::Ungrouped` from an Account
-in no Group (ADR 0017).
+It is `list::render` with `Scope::Group` — the call is at `status.rs:73`, and
+the scope is chosen four lines earlier, falling to `Scope::Ungrouped` from an
+Account in no Group (ADR a-group-is-a-declaration).
 
-ADR 0045 found this before this question was asked: `perch status` is asserted
-across three files, and **`listing.rs` holds both `list` and `--group`**. The
-harness has treated the listing as one behavior regardless of which command
-reaches it since before anybody wondered whether it was.
+ADR a-suite-is-named-and-gated found this before this question was asked:
+`perch status` is asserted across three files, and **`listing.rs` holds both
+`list` and `--group`**. The harness has treated the listing as one behavior
+regardless of which command reaches it since before anybody wondered whether it
+was.
 
-And ADR 0049 closes it. The ordering it moves out of the picker is
-`model.rs:1645`'s `ranked`, whose own doc comment describes what it does: each
-scope ranks its own Accounts, the Ungrouped are held rather than ranked, and
-**"the scope the active Account is in comes first, because it is where you are"**.
-Once #169 lands, the first section of `perch list` *is* `perch status --group`.
-The flag's only surviving job is bounding a refresh.
+And ADR the-listing-owns-the-set closes it. The ordering it moves out of the
+picker is `model.rs:1645`'s `ranked`, whose own doc comment describes what it
+does: each scope ranks its own Accounts, the Ungrouped are held rather than
+ranked, and **"the scope the active Account is in comes first, because it is
+where you are"**. Once #169 lands, the first section of `perch list` *is*
+`perch status --group`. The flag's only surviving job is bounding a refresh.
 
-ADR 0049 also already wrote the sentence. Its Consequences say **"`perch list` is
-the whole of looking"** — true of drawing, which is what it was about, and now
-true of listings too.
+ADR the-listing-owns-the-set also already wrote the sentence. Its Consequences
+say **"`perch list` is the whole of looking"** — true of drawing, which is what
+it was about, and now true of listings too.
 
 ## Two commands, and the distinctness is not breadth
 
@@ -87,37 +89,39 @@ The domain is Scopes rather than Groups, since an ungrouped Account narrows to
 the Ungrouped. Perch already addresses a Scope, and already reserved the word:
 `perch config` names one positionally — a Group by name or `ungrouped`
 (`configuration.md:71`) — `registry.rs:525` holds the constant, and
-`validate_name` refuses `ungrouped` as a Group name *and* as an Alias so that the
-Scope can answer to it. **Scope** is a glossary entry (`CONTEXT.md:340`) that
-ADR 0051 keeps.
+`validate_name` refuses `ungrouped` as a Group name *and* as an Alias so that
+the Scope can answer to it. **Scope** is a glossary entry (`CONTEXT.md:340`)
+that ADR a-setting-names-its-scope keeps.
 
 > **`perch list [<scope>]`** — a Group by name, or `ungrouped`. `--group` is
 > deleted rather than moved.
 
 A flag would be the only place in Perch a Scope is named by flag, against
-`perch config` and `perch switch [<group>]` both naming one positionally. ADR
-0052 supplies the rule from the other side: a flag may mark an argument's
-absence, and may not carry what an argument carries. A Scope name is an argument.
+`perch config` and `perch switch [<group>]` both naming one positionally.
+ADR a-command-names-its-noun supplies the rule from the other side: a flag may
+mark an argument's absence, and may not carry what an argument carries. A Scope
+name is an argument.
 
 `--refresh` follows the breadth, because it always has: `perch list --refresh`
 reads every Account it is about to show, `perch list <scope> --refresh` reads that
 Scope's. Two commands reach a refresh and that is not two capabilities — each
 refreshes what it shows, which is one rule applied to two shows.
 
-## The names stay, and ADR 0047's own defense is why
+## The names stay, and ADR a-command-names-its-noun's own defense is why
 
-ADR 0047 deferred naming deliberately: "ruling on their names before ruling on
-their number would decide in the wrong order." With the number settled at two,
-and with `tui` gone, `status` is the only noun among ten top-level Account
-commands.
+ADR a-command-names-its-noun deferred naming deliberately: "ruling on their
+names before ruling on their number would decide in the wrong order." With the
+number settled at two, and with `tui` gone, `status` is the only noun among ten
+top-level Account commands.
 
-It stays, and not by default. ADR 0047 defended `perch status` against `perch
-watcher status` as **"the rule working — same verb, different noun, and the
-elided noun is precisely what tells them apart."** That defense requires the word
-to be the same at both levels; renaming the Account's one orphans the Watcher's
-as a lone noun and spends the collision ADR 0047 built. `status` also happens to
-be the most conventional name any CLI has — `git`, `systemctl`, `docker` — and a
-convention every user already holds is conceptual surface bought for nothing.
+It stays, and not by default. ADR a-command-names-its-noun defended
+`perch status` against `perch watcher status` as **"the rule working — same
+verb, different noun, and the elided noun is precisely what tells them apart."**
+That defense requires the word to be the same at both levels; renaming the
+Account's one orphans the Watcher's as a lone noun and spends the collision
+ADR a-command-names-its-noun built. `status` also happens to be the most
+conventional name any CLI has — `git`, `systemctl`, `docker` — and a convention
+every user already holds is conceptual surface bought for nothing.
 
 The noun-among-verbs observation was worth making and the answer is that it is
 not a defect. `status` names the thing asked for, and it is asked for at two
@@ -138,25 +142,27 @@ insurance has nothing to cover and `jq .active.utilization` is one word longer.
 **The rule: a document says what its order is, or it does not have one.** After
 #169 the listing is scope-sectioned and ranked, so `accounts[0]` is the
 top-ranked Account of the Scope you are in — a load-bearing fact that a flat
-array states nowhere, and the held-versus-ranked distinction ADR 0049 called its
-weightiest piece is invisible in JSON entirely. A `--json` that shows the ranking
-without naming it as a ranking is the two-surfaces-disagreeing failure ADR 0049
-exists to prevent, arrived at through a different renderer.
+array states nowhere, and the held-versus-ranked distinction
+ADR the-listing-owns-the-set called its weightiest piece is invisible in JSON
+entirely. A `--json` that shows the ranking without naming it as a ranking is
+the two-surfaces-disagreeing failure ADR the-listing-owns-the-set exists to
+prevent, arrived at through a different renderer.
 
-This is ADR 0043's line where ADR 0052 last drew it — a machine reading a shape
-is not a person reading a sentence — with the corollary that when the *shape* is
-the claim, the shape has to make it. **The key names and the section shape are
+This is ADR perch-says-what-it-did's line where ADR a-command-names-its-noun
+last drew it — a machine reading a shape is not a person reading a sentence —
+with the corollary that when the *shape* is the claim, the shape has to make it.
+**The key names and the section shape are
 #169's to carry out under this rule**, not this decision's to invent.
 
 ## The glossary is a person's vocabulary
 
 **Nothing is added, and the reason is new.**
 
-The case for adding **Listing** was the ADR 0047 pattern exactly: the word does
-real work 49 times across `list.rs`, `cycle.rs` and `model.rs` and is a term
-nowhere, which is the diagnosis that named **Holdings**. And after ADR 0049 the
-listing does carry an idea — it is the surface that must not disagree with the
-Cycle's judgment.
+The case for adding **Listing** was the ADR a-command-names-its-noun pattern
+exactly: the word does real work 49 times across `list.rs`, `cycle.rs` and
+`model.rs` and is a term nowhere, which is the diagnosis that named
+**Holdings**. And after ADR the-listing-owns-the-set the listing does carry an
+idea — it is the surface that must not disagree with the Cycle's judgment.
 
 It is refused on a discriminator the sweep has not used before. **Holdings** is a
 word a *person* reaches for and had no term. "Listing" is a word the *codebase*
@@ -169,10 +175,10 @@ them names a rendering. Every entry is a thing, an act, a state or a measure.
 That is a property worth stating once rather than rediscovering — and the ideas
 the listing carries are already entered, under **Cycle** for the ranking,
 **Ungrouped** for held-rather-than-ranked, and **Headroom** for the column ADR
-0049 adds.
+the-listing-owns-the-set adds.
 
-This is the sixth ADR in this sweep to decline a `CONTEXT.md` entry and the first
-to decline one for this reason.
+This is the sixth ADR in this sweep to decline a `CONTEXT.md` entry and the
+first to decline one for this reason.
 
 ## Considered Options
 
@@ -199,25 +205,28 @@ Account, and a flag naming a Scope would be the only one in Perch.
 leaves one command and arrives at another as an argument; no name is added,
 removed or renamed, and no form appears.
 
-**This corrects one sentence of ADR 0052's body.** It closes with "sixteen names,
-twenty-eight forms" — ADR 0047's figures from before ADR 0049 removed `perch
-tui`, which took a name and a form with it. The correct count then and now is
-fifteen and twenty-seven. ADR 0052's decision is untouched; the arithmetic was
-never its finding, and a wrong number left standing is read as a right one.
+**This corrects one sentence of ADR a-command-names-its-noun's body.** It closes
+with "sixteen names, twenty-eight forms" — ADR a-command-names-its-noun's
+figures from before ADR perch-does-not-draw removed `perch tui`, which took a
+name and a form with it. The correct count then and now is fifteen and
+twenty-seven. ADR a-command-names-its-noun's decision is untouched; the
+arithmetic was never its finding, and a wrong number left standing is read as a
+right one.
 
-**This supersedes nothing, and ADR 0047 is answered rather than amended.** Its
-"What this does not decide" section posed both halves of this question — the
-count and the naming — and deferred them on purpose. A decision that supplies an
-answer a prior decision asked for is not correcting it.
+**This supersedes nothing, and ADR a-command-names-its-noun is answered rather
+than amended.** Its "What this does not decide" section posed both halves of
+this question — the count and the naming — and deferred them on purpose. A
+decision that supplies an answer a prior decision asked for is not correcting
+it.
 
-**ADR 0015 and ADR 0018 are untouched.** Both cite `perch status --refresh` and
-ADR 0015 lists the surfaces that show Utilization as "`status`, `list`, `tui`".
-Those citations go stale and the decisions do not decay — ADR 0047's rule, which
-this is the third occasion to apply.
+**ADR a-figure-carries-its-age is untouched.** It cites `perch status --refresh`
+and lists the surfaces that show Utilization as "`status`, `list`, `tui`". Those
+citations go stale and the decisions do not decay —
+ADR a-command-names-its-noun's rule, which this is the third occasion to apply.
 
-**ADR 0049 gains a reader rather than an amendment.** "`perch list` is the whole
-of looking" was written about drawing; it is now also true of listings, and the
-sentence needed no help to say so.
+**ADR the-listing-owns-the-set gains a reader rather than an amendment.**
+"`perch list` is the whole of looking" was written about drawing; it is now also
+true of listings, and the sentence needed no help to say so.
 
 **`docs/guide/status.md` is restructured rather than edited.** It opens "Two
 commands answer it" and then splits by breadth; it now splits by question — the
@@ -228,8 +237,9 @@ against whichever is being shown. `reference.md`'s two rows change to
 
 **`CONTEXT.md` is unchanged.**
 
-**`tests/status.rs` still becomes `reporting.rs`** (ADR 0045, tracked at #158),
-and that rename is unaffected: ADR 0045 chose the name so that "a rename of
+**`tests/status.rs` still becomes `reporting.rs`**
+(ADR a-suite-is-named-and-gated, tracked at #158), and that rename is
+unaffected: ADR a-suite-is-named-and-gated chose the name so that "a rename of
 `perch status` does not invalidate `reporting.rs`", and here `perch status` is
 not even renamed. `listing.rs` keeps `list` and inherits the narrowing;
 `refreshing.rs` keeps `--refresh` at both breadths.

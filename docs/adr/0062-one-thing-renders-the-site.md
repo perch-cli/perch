@@ -1,11 +1,12 @@
 # One thing renders the site
 
-ADR 0035 got the diagnosis right and the treatment wrong. It named two costs of
-rendering the guide with mdBook and paid them both openly, and the second one was
-"a theme that looks like every other Rust project's docs". The answer it wrote
-for that cost was `docs/theme/perch.css`: sixty-five lines carrying the landing
-page's type and its one accent color, small on purpose, leaving the navigation
-and the search alone because those were the reason mdBook was there.
+ADR one-thing-renders-the-site got the diagnosis right and the treatment wrong.
+It named two costs of rendering the guide with mdBook and paid them both openly,
+and the second one was "a theme that looks like every other Rust project's
+docs". The answer it wrote for that cost was `docs/theme/perch.css`: sixty-five
+lines carrying the landing page's type and its one accent color, small on
+purpose, leaving the navigation and the search alone because those were the
+reason mdBook was there.
 
 The answer failed, and it failed for a reason worth writing down rather than
 retrying. The problem was never that one of the site's two artifacts was plain.
@@ -14,24 +15,24 @@ It was that there were two.
 ## What the seam cost
 
 The landing page was hand-written HTML with its own inline `<style>` block. The
-guide was mdBook plus a stylesheet correcting mdBook. They shared an accent color
-and nothing else — not the type scale, not the navigation, not the header, not
-the search. Moving from one to the other was leaving one site and arriving at
-another, and no quantity of CSS on the second closes that, because mdBook does
-not want to be the front page. ADR 0035 says so itself, and carved the landing
-page out for exactly that reason. The carve-out is the defect. It was written
-down as a concession to one.
+guide was mdBook plus a stylesheet correcting mdBook. They shared an accent
+color and nothing else — not the type scale, not the navigation, not the header,
+not the search. Moving from one to the other was leaving one site and arriving
+at another, and no quantity of CSS on the second closes that, because mdBook
+does not want to be the front page. ADR one-thing-renders-the-site says so
+itself, and carved the landing page out for exactly that reason. The carve-out
+is the defect. It was written down as a concession to one.
 
 Four things were also plainly broken, and they are recorded because each was
 found by looking rather than assumed:
 
 The chapter list shipped in an `<iframe src="toc.html">` rather than in the page
-that needed it. There was no per-page table of contents, so five of the ten guide
-pages opened with a hand-typed list of their own headings — nineteen links, kept
-in step by hand, standing in for navigation a renderer should generate. The
-previous and next links sat at the end of the document. And the theme picker
-offered a reader Rust, Coal, Navy and Ayu, which is the cost of ADR 0035's second
-paragraph stated as a menu.
+that needed it. There was no per-page table of contents, so five of the ten
+guide pages opened with a hand-typed list of their own headings — nineteen
+links, kept in step by hand, standing in for navigation a renderer should
+generate. The previous and next links sat at the end of the document. And the
+theme picker offered a reader Rust, Coal, Navy and Ayu, which is the cost of
+ADR one-thing-renders-the-site's second paragraph stated as a menu.
 
 The nineteen hand-written links are the sharpest of the four. A renderer that
 makes the author write navigation by hand is not one whose navigation was the
@@ -45,18 +46,20 @@ sidebar is in the page. Each page gets a table of contents on the right, so the
 nineteen hand-written links are deleted — the headings stay, which is what every
 cross-page anchor was pointing at.
 
-What is carried forward from ADR 0035 entire, and is the reason this change is
-small: **the guide is written once and the site renders it.** Also unchanged: the
-site deploys from `main`, because everything here is still fixed by a merge, and
-the installers are still served from the root of the deployment.
+What is carried forward from ADR one-thing-renders-the-site entire, and is the
+reason this change is small: **the guide is written once and the site renders
+it.** Also unchanged: the site deploys from `main`, because everything here is
+still fixed by a merge, and the installers are still served from the root of the
+deployment.
 
-> **Amended by ADR 0063.** The clause about deploying from `main` is void, and
-> carrying it forward from ADR 0035 without reopening it was the mistake: it was
-> true of the installers and had stopped being true of the guide, which was
-> describing a Perch nobody could install. The guide is published by a release
-> now, the installers still by a merge, and one run assembles both. Everything
-> else here stands, the installers at the root of the deployment included — that
-> is the half of the sentence that was right.
+> **Amended by ADR one-thing-renders-the-site.** The clause about deploying from
+> `main` is void, and carrying it forward from ADR one-thing-renders-the-site
+> without reopening it was the mistake: it was true of the installers and had
+> stopped being true of the guide, which was describing a Perch nobody could
+> install. The guide is published by a release now, the installers still by a
+> merge, and one run assembles both. Everything else here stands, the installers
+> at the root of the deployment included — that is the half of the sentence that
+> was right.
 
 ## Where the guide lives
 
@@ -81,28 +84,29 @@ page's `h1`, so the `# Heading` came out of all ten files. On GitHub a guide pag
 now opens with a small frontmatter table and goes straight into prose.
 
 That is a real loss and is recorded rather than glossed over. It is accepted on
-the ground ADR 0035 actually stood on: what that document promised was one copy
-of the content, not the absence of metadata, and a title rendered as a table cell
-is still a title in the file. What would have broken the promise is `.mdx`, which
-would have made ten documents into ten sources. The guide is `.md`. Exactly one
-file is `.mdx` — the splash page, which is the one place a component earns
-anything.
+the ground ADR one-thing-renders-the-site actually stood on: what that document
+promised was one copy of the content, not the absence of metadata, and a title
+rendered as a table cell is still a title in the file. What would have broken
+the promise is `.mdx`, which would have made ten documents into ten sources. The
+guide is `.md`. Exactly one file is `.mdx` — the splash page, which is the one
+place a component earns anything.
 
 ## Three lists became one
 
-ADR 0035's closing section was an apology. The pages were written once; the
-*list* of them was written three times, in `SUMMARY.md`, in the table in
-`docs/guide/README.md`, and in the README — three audiences, none derivable from
-the others, kept in step by `tests/publication.rs` because keeping them in step
-by hand is what that document said not to do.
+ADR one-thing-renders-the-site's closing section was an apology. The pages were
+written once; the *list* of them was written three times, in `SUMMARY.md`, in
+the table in `docs/guide/README.md`, and in the README — three audiences, none
+derivable from the others, kept in step by `tests/publication.rs` because
+keeping them in step by hand is what that document said not to do.
 
-Two of the three are gone. `SUMMARY.md` is an autogenerated sidebar, which cannot
-omit a page. `docs/guide/README.md`'s table of nine destinations is the splash
-page's card grid, so the guide's index and the site's front page are the same
-artifact instead of two that agree. What remains is the README's command table,
-and it remains for ADR 0035's reason unchanged: `npm/build.mjs` copies the README
-into the package, so it is npm's landing page too, and an offline clone would
-lose its getting-started if that table became links to a website.
+Two of the three are gone. `SUMMARY.md` is an autogenerated sidebar, which
+cannot omit a page. `docs/guide/README.md`'s table of nine destinations is the
+splash page's card grid, so the guide's index and the site's front page are the
+same artifact instead of two that agree. What remains is the README's command
+table, and it remains for ADR one-thing-renders-the-site's reason unchanged:
+`npm/build.mjs` copies the README into the package, so it is npm's landing page
+too, and an offline clone would lose its getting-started if that table became
+links to a website.
 
 The assertions followed. `the_summary_lists_only_pages_that_exist` is deleted,
 because the thing it guarded no longer exists. The other seven live, retargeted:
@@ -166,13 +170,13 @@ older version is never the safer one; it is only the older one.
 
 `packaging/pages/` is gone and `pages/public/` took the installers, which Astro
 copies to the root of the output verbatim. `install.sh` and `install.ps1` are
-served from the URLs that are already in terminal histories, in the README and in
-the install guide, and `the_installers_stay_at_the_root_of_the_site` still says
-so on every pull request. That constraint is older than either renderer, is the
-reason the site exists at all (ADR 0028, ADR 0031), and is not what this document
-reopened. `install-test.sh` went back to `packaging/`, which is where a script
-that runs the installer against a fabricated release belongs — it is no part of
-what anybody downloads.
+served from the URLs that are already in terminal histories, in the README and
+in the install guide, and `the_installers_stay_at_the_root_of_the_site` still
+says so on every pull request. That constraint is older than either renderer, is
+the reason the site exists at all (ADR this-repo-assembles-a-release), and is
+not what this document reopened. `install-test.sh` went back to `packaging/`,
+which is where a script that runs the installer against a fabricated release
+belongs — it is no part of what anybody downloads.
 
 `/guide/` is gone from the URLs. Guide pages are `/perch/accounts/` rather than
 `/perch/guide/accounts.html`. The prefix existed because the book was a guest on

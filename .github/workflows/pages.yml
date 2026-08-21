@@ -1,17 +1,18 @@
 name: Pages
 
 # Builds and serves https://perch-cli.github.io/perch/ — the front page, the
-# guide, and the installers (ADR 0062, ADR 0063).
+# guide, and the installers (ADR one-thing-renders-the-site).
 #
 # `pages/` is an Astro and Starlight project that renders the splash page and the
 # guide together, and `pages/public/` is copied to the root of the output verbatim.
 #
-# Two things are published here and they do not answer to the same clock, which is
-# the whole shape of this file (ADR 0063). The guide describes a Perch somebody can
-# install, so it comes from the newest release and moves when `release.yml` calls
-# this workflow. The installers are pasted into terminals from a URL with no
-# version in it, so they come from `main` and move when a merge fixes one — an
-# installer that had to wait for a release would stay broken until then.
+# Two things are published here and they do not answer to the same clock, which
+# is the whole shape of this file (ADR one-thing-renders-the-site). The guide
+# describes a Perch somebody can install, so it comes from the newest release
+# and moves when `release.yml` calls this workflow. The installers are pasted
+# into terminals from a URL with no version in it, so they come from `main` and
+# move when a merge fixes one — an installer that had to wait for a release
+# would stay broken until then.
 #
 # So a run checks out the release, then puts `main`'s `pages/public/` back on top,
 # and what it deploys is the release's site carrying the current installers. Every
@@ -29,7 +30,7 @@ on:
   #
   # Being called rather than triggered also puts this after the Release's
   # artifacts are uploaded, so the guide never describes a Perch that cannot yet
-  # be downloaded — which is the whole claim of ADR 0063.
+  # be downloaded — which is the whole claim of ADR one-thing-renders-the-site.
   workflow_call:
   # The installers, and nothing else. This file is deliberately not among the
   # paths: what a run publishes is the release's site carrying `main`'s two

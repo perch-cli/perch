@@ -1,11 +1,13 @@
 //! What a Service *is*: where its unit goes, what the unit says, and which
-//! commands drive the machine's own service manager (ADR 0040).
+//! commands drive the machine's own service manager
+//! (ADR the-machine-runs-the-watcher).
 //!
 //! A Service is the Watcher, run for you by the machine's service manager,
 //! started when you log in. Perch never backgrounds itself — it writes a unit
 //! and hands the job over, which is the same "scheduling is the operating
-//! system's job" ADR 0013 settled, with the one thing added that ADR 0013
-//! refused: a unit file Perch will write and take back.
+//! system's job" ADR a-watcher-knob-is-arithmetic settled, with the one thing
+//! added that ADR a-watcher-knob-is-arithmetic refused: a unit file Perch will
+//! write and take back.
 //!
 //! Nothing here reaches the filesystem or spawns anything. What a Service *does*
 //! is [`crate::commands::service`]'s; what one *says* is here, where three
@@ -21,18 +23,20 @@
 //!
 //! All three are **per-user and start at login**, never at boot. Every Profile
 //! Perch holds is under one person's home directory, and on macOS there is no
-//! unlocked keychain before somebody logs in (ADR 0008) — so a system-wide
-//! arrangement would be a Watcher with nothing it could read.
+//! unlocked keychain before somebody logs in
+//! (ADR claude-code-chooses-the-store) — so a system-wide arrangement would be
+//! a Watcher with nothing it could read.
 //!
 //! [`Platform::Other`] is read as Linux throughout, which is a claim worth
 //! making out loud rather than leaving to a `_` arm. Perch builds for five
-//! Targets and two of them are `-unknown-linux-musl` (ADR 0029), so the set of
-//! machines that are neither macOS nor Windows and are running a Perch is
-//! exactly the set running Linux. The rest of the codebase already reads it that
-//! way — `commands::a_store_that_held_nothing` decides a Credential Store on
+//! Targets and two of them are `-unknown-linux-musl`
+//! (ADR a-linux-build-is-static), so the set of machines that are neither macOS
+//! nor Windows and are running a Perch is exactly the set running Linux. The
+//! rest of the codebase already reads it that way —
+//! `commands::a_store_that_held_nothing` decides a Credential Store on
 //! macOS-or-not — and this module says `systemd` where that one says a file. A
-//! sixth Target on a platform with a different service manager is the thing that
-//! would make this wrong, and it would make [`Platform`] wrong first.
+//! sixth Target on a platform with a different service manager is the thing
+//! that would make this wrong, and it would make [`Platform`] wrong first.
 
 use std::path::{Path, PathBuf};
 
@@ -69,21 +73,23 @@ pub const STOP_GRACE_SECONDS: u32 = 30;
 /// How long a supervisor leaves it before starting the Watcher again, in
 /// seconds.
 ///
-/// It should almost never be used: the Watcher holds rather than exiting (ADR
-/// 0040), so the ordinary reasons a loop used to stop no longer stop it. What is
-/// left is a genuine failure — a Switch that moved and then failed — and coming
-/// straight back at a machine that is part way through one would be the
-/// supervisor deciding what to do next about something nobody has looked at.
+/// It should almost never be used: the Watcher holds rather than exiting
+/// (ADR the-machine-runs-the-watcher), so the ordinary reasons a loop used to
+/// stop no longer stop it. What is left is a genuine failure — a Switch that
+/// moved and then failed — and coming straight back at a machine that is part
+/// way through one would be the supervisor deciding what to do next about
+/// something nobody has looked at.
 pub const RESTART_SECONDS: u32 = 30;
 
 /// How many failed starts inside [`GIVE_UP_AFTER_SECONDS`] before systemd stops
 /// trying and leaves the unit failed.
 ///
-/// A Watcher holds rather than exiting on everything it can hold on (ADR 0040),
-/// so a Service that will not *start* is a machine somebody has to look at: a
-/// registry that will not parse, a Claude Code that cannot be probed, a home
-/// directory that has gone. Restarting into that for ever is a loop nobody ever
-/// sees, because the only place it is visible is a log nobody is reading.
+/// A Watcher holds rather than exiting on everything it can hold on
+/// (ADR the-machine-runs-the-watcher), so a Service that will not *start* is a
+/// machine somebody has to look at: a registry that will not parse, a Claude
+/// Code that cannot be probed, a home directory that has gone. Restarting into
+/// that for ever is a loop nobody ever sees, because the only place it is
+/// visible is a log nobody is reading.
 ///
 /// systemd's own defaults would never trip here — five starts inside ten
 /// seconds, against a `RestartSec` of thirty — so the window is set from the
@@ -115,10 +121,10 @@ const _: () = assert!(
 /// The environment a unit carries over from the shell that installed it.
 ///
 /// Both are read from the process environment and are typically set in a shell
-/// profile that no service manager will ever source (ADR 0040). A Service
-/// silently watching `~/.config/perch` while its owner works out of
-/// `PERCH_HOME=~/work/perch` would be reporting, correctly and uselessly, that
-/// there is nothing to do.
+/// profile that no service manager will ever source
+/// (ADR the-machine-runs-the-watcher). A Service silently watching
+/// `~/.config/perch` while its owner works out of `PERCH_HOME=~/work/perch`
+/// would be reporting, correctly and uselessly, that there is nothing to do.
 ///
 /// Named rather than "everything that is set", which is the same bargain
 /// [`crate::carry`] makes about `.claude.json`: a unit that captured the whole
@@ -129,11 +135,12 @@ pub const CARRIED: [&str; 2] = ["PERCH_HOME", "CLAUDE_CONFIG_DIR"];
 /// Where the decision log goes on a platform whose service manager will not
 /// keep one.
 ///
-/// Inside Perch's home, which is what makes it Perch's to remove: a Purge sweeps
-/// it with everything else Perch holds (ADR 0040). On Linux there is no such
-/// file — systemd captures standard output into the journal, which rotates it,
-/// retains it and answers `journalctl --user -u perch-watch -f` without Perch
-/// knowing the word journal.
+/// Inside Perch's home, which is what makes it Perch's to remove: a Purge
+/// sweeps it with everything else Perch holds
+/// (ADR the-machine-runs-the-watcher). On Linux there is no such file — systemd
+/// captures standard output into the journal, which rotates it, retains it and
+/// answers `journalctl --user -u perch-watch -f` without Perch knowing the word
+/// journal.
 pub fn log_path(host: &dyn Host) -> Result<Option<PathBuf>> {
     match host.platform() {
         Platform::Other => Ok(None),
@@ -170,7 +177,8 @@ pub fn unit_path(host: &dyn Host) -> Result<Option<PathBuf>> {
 ///
 /// A unit names an absolute path and is read months later by a service manager
 /// that will not search a `PATH`. Two Channels make that path a question rather
-/// than a lookup (ADR 0039, ADR 0040):
+/// than a lookup (ADR an-upgrade-asks-its-channel,
+/// ADR the-machine-runs-the-watcher):
 ///
 /// **Homebrew**: `current_exe` resolves symlinks, so the running binary is
 /// `…/Cellar/perch/0.2.0/bin/perch` — **version-stamped**, and gone the next
@@ -212,10 +220,10 @@ pub struct Unit {
     ///
     /// Read off the machine rather than left as `%USERNAME%` for `schtasks` to
     /// expand, because nothing expands it: `%VAR%` is `cmd.exe`'s notation, and
-    /// these arguments go to `CreateProcess` with no shell between (ADR 0021).
-    /// `schtasks` received the ten characters and refused the account name, so
-    /// `perch watcher install` rolled back and Windows never got a Service at
-    /// all.
+    /// these arguments go to `CreateProcess` with no shell between
+    /// (ADR a-crate-must-not-cost-a-seam). `schtasks` received the ten
+    /// characters and refused the account name, so `perch watcher install`
+    /// rolled back and Windows never got a Service at all.
     pub user_name: Option<String>,
 }
 
@@ -234,11 +242,12 @@ impl Unit {
 
     /// A LaunchAgent, which launchd reads as a property list.
     ///
-    /// `KeepAlive` rather than `RunAtLoad` alone, because the point of a Service
-    /// is that it is still there tomorrow: `RunAtLoad` starts it once, and
-    /// `KeepAlive` is what starts it again. The Watcher holds rather than
-    /// exiting on everything that is not a genuine failure (ADR 0040), so this
-    /// is not the respawn-forever loop it would have been against ADR 0013's
+    /// `KeepAlive` rather than `RunAtLoad` alone, because the point of a
+    /// Service is that it is still there tomorrow: `RunAtLoad` starts it once,
+    /// and `KeepAlive` is what starts it again. The Watcher holds rather than
+    /// exiting on everything that is not a genuine failure
+    /// (ADR the-machine-runs-the-watcher), so this is not the respawn-forever
+    /// loop it would have been against ADR a-watcher-knob-is-arithmetic's
     /// watcher.
     fn plist(&self) -> String {
         let environment = match self.environment.is_empty() {
@@ -353,12 +362,13 @@ impl Unit {
     /// A `systemd --user` unit.
     ///
     /// `Type=simple` because the Watcher is the process: it does not fork, does
-    /// not write a pid file, and does not background itself — which is the whole
-    /// of ADR 0040's arrangement, said in one word.
+    /// not write a pid file, and does not background itself — which is the
+    /// whole of ADR the-machine-runs-the-watcher's arrangement, said in one
+    /// word.
     ///
     /// Standard output is left alone, so systemd captures it into the journal.
-    /// That is the one platform where ADR 0013's "the decision log goes to
-    /// standard output" needs nothing added to it at all.
+    /// That is the one platform where ADR a-watcher-knob-is-arithmetic's "the
+    /// decision log goes to standard output" needs nothing added to it at all.
     fn systemd_unit(&self) -> String {
         let environment = self
             .environment
@@ -487,14 +497,15 @@ pub fn starting(platform: Platform, unit: &Unit, at: Option<&Path>) -> Vec<Drive
         //
         // And `restart` after it, because `enable --now` starts a unit that is
         // *stopped* and does nothing to one that is already running. Re-running
-        // the install is the documented repair after an Upgrade (ADR 0039), and
-        // there the unit is always already running — so `perch watcher install`
-        // said "Replaced the Service, and it now runs /usr/local/bin/perch"
-        // while the old process image went on running until the next logout.
-        // `binary_for_the_unit` deliberately keeps the path stable for Homebrew
-        // and npm, so `status`' "it names X, which is not there any more" could
-        // never catch it either. May fail: a unit that was not running is
-        // started by `enable --now` above and has nothing left for this to do.
+        // the install is the documented repair after an Upgrade
+        // (ADR an-upgrade-asks-its-channel), and there the unit is always
+        // already running — so `perch watcher install` said "Replaced the
+        // Service, and it now runs /usr/local/bin/perch" while the old process
+        // image went on running until the next logout. `binary_for_the_unit`
+        // deliberately keeps the path stable for Homebrew and npm, so `status`'
+        // "it names X, which is not there any more" could never catch it
+        // either. May fail: a unit that was not running is started by
+        // `enable --now` above and has nothing left for this to do.
         Platform::Other => vec![
             Driven::must("systemctl", &["--user", "daemon-reload"]),
             Driven::must("systemctl", &["--user", "enable", "--now", UNIT_NAME]),
@@ -1026,7 +1037,8 @@ mod tests {
     }
 
     /// Linux writes no log path at all: standard output goes to the journal,
-    /// which is the one platform where ADR 0013's decision needs nothing added.
+    /// which is the one platform where ADR a-watcher-knob-is-arithmetic's
+    /// decision needs nothing added.
     #[test]
     fn linux_keeps_no_logfile_because_the_journal_already_does() {
         assert!(
@@ -1097,8 +1109,8 @@ mod tests {
     /// claiming: the plist carries it as a second `<string>`, systemd as the
     /// tail of `ExecStart`, and Windows inside a `cmd /c`. Three spellings of
     /// one fact is how two of them come to name a verb the binary stopped
-    /// answering to (ADR 0047), which is a Service that installs cleanly and
-    /// then fails at every login.
+    /// answering to (ADR a-command-names-its-noun), which is a Service that
+    /// installs cleanly and then fails at every login.
     #[test]
     fn every_unit_format_runs_the_watcher_loop_by_the_name_the_binary_answers_to() {
         let unit = a_unit();

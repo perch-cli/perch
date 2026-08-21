@@ -1,12 +1,13 @@
 # A gate asks for consent, and drift was never what it caught
 
-> **Carried out in #171.** Like ADR 0041, ADR 0042, ADR 0044 and ADR 0045, this
-> is the artifact of a planning effort rather than of a change, so it landed
-> ahead of the work it describes instead of beside it. The tree now matches it:
-> the feature is `your-machine`, the two surviving binaries are
-> `tests/your_machine.rs` and `tests/corroboration.rs` — the words this file
-> left to the carry-out — and `conformance.rs` runs thirty-two cases against
-> both adapters where it ran twenty-seven.
+> **Carried out in #171.** Like ADR using-it-is-the-proof,
+> ADR perch-does-not-draw, ADR the-binary-proves-its-surface and
+> ADR a-suite-is-named-and-gated, this is the artifact of a planning effort
+> rather than of a change, so it landed ahead of the work it describes instead
+> of beside it. The tree now matches it: the feature is `your-machine`, the two
+> surviving binaries are `tests/your_machine.rs` and `tests/corroboration.rs` —
+> the words this file left to the carry-out — and `conformance.rs` runs
+> thirty-two cases against both adapters where it ran twenty-seven.
 
 The question arrived as a shape question: four suites, 895 lines, held back by
 the `contract` feature because they need a real Claude Code and a real keychain
@@ -49,8 +50,8 @@ rest are held back by association with the file they were written in.
 Two of them are not contract tests under any reading.
 `the_default_store_is_where_perch_believes_it_is` does **no I/O at all** — it
 reads `HOME` and `USER` and asserts that `probe::default_store` derives
-`~/.claude` and the bare service name. Under ADR 0045's discriminator, *what the
-test names*, it names the probe.
+`~/.claude` and the bare service name. Under ADR a-suite-is-named-and-gated's
+discriminator, *what the test names*, it names the probe.
 
 And `taking_a_lock_is_a_directory_only_one_caller_can_make` works in `temp_dir`
 and asserts a property of **every** filesystem — its own comment says *"the whole
@@ -77,7 +78,8 @@ and three that each carry one claim conformance does not have:
 - a write **after** the link is made is visible through it;
 - **`a_directory_link_shows_what_the_directory_gains_afterwards`** — entirely
   new, the only case that picks a junction on Windows the way Reconcile itself
-  does, and *"the part an allowlist would have got wrong"* (ADR 0026);
+  does, and *"the part an allowlist would have got wrong"*
+  (ADR everything-but-the-account);
 - a hard link **stops** sharing when the file behind it is replaced by the
   write-beside-then-rename-over an editor does.
 
@@ -93,18 +95,18 @@ already asserted on two.
 
 `src/host/fake.rs:179` records that a hard link is held in the link table
 **and** in `files`, *"because that is what a hard link is: another name for the
-same bytes — the whole reason a Run reaches for junctions and hard links (ADR
-0026)"*. The fake was built to model exactly the properties `contract_links.rs`
-checks, and `contract_links.rs` drives only `RealHost`, so **nothing asserts the
-fake models them correctly**.
+same bytes — the whole reason a Run reaches for junctions and hard links
+(ADR everything-but-the-account)"*. The fake was built to model exactly the
+properties `contract_links.rs` checks, and `contract_links.rs` drives only
+`RealHost`, so **nothing asserts the fake models them correctly**.
 
 That is the half that can actually be wrong. The platform is not going to stop
 sharing bytes across a hard link; the hand-maintained fake might stop modeling
 it, and `conformance.rs`'s own header is a list of five times the two silently
 drifted apart. Moving these cases into conformance's table does not relocate a
-claim, it strengthens one — from *"the platform behaves as ADR 0026 assumes"* to
-*"…and the fake agrees"*, which is what every behavior test leaning on
-Reconcile actually depends on.
+claim, it strengthens one — from *"the platform behaves as
+ADR everything-but-the-account assumes"* to *"…and the fake agrees"*, which is
+what every behavior test leaning on Reconcile actually depends on.
 
 The cost is named rather than hidden: two of the carried-over properties are
 ones the fake can only agree about by construction rather than by observation.
@@ -188,8 +190,8 @@ here, unchanged, rather than left unexamined.
 upstream drift rather than as a fault in the pull request"*.
 
 **The protection is `probe.rs`** — one module that refuses the dangerous
-operation and says which assumption failed (ADR 0007). That is the only part of
-this a user could ever feel.
+operation and says which assumption failed (ADR an-assumption-is-probed). That
+is the only part of this a user could ever feel.
 
 Nothing new is named for drift, and that is the finding rather than an omission.
 Naming a feature after a purpose it does not serve is exactly the confusion this
@@ -212,24 +214,25 @@ correctness, and letting it choose a gate would be the figure choosing the test
 shape. Most of these lines become visible as a consequence of the re-gating; the
 consequence is not priced.
 
-**The names.** The two surviving binaries are correspondences, so ADR 0045's
-rule already fixes their shape — a noun — and the carry-out chooses the words,
-on #145's precedent of excluding naming from the decision. Not #158: that pass
-renames `adoption.rs`, `status.rs` and `publishing.rs` and edits
-`tests/common/mod.rs` and `CONTEXT.md`, none of which this touches, so the two
-are independent rather than sequenced.
+**The names.** The two surviving binaries are correspondences, so
+ADR a-suite-is-named-and-gated's rule already fixes their shape — a noun — and
+the carry-out chooses the words, on #145's precedent of excluding naming from
+the decision. Not #158: that pass renames `adoption.rs`, `status.rs` and
+`publishing.rs` and edits `tests/common/mod.rs` and `CONTEXT.md`, none of which
+this touches, so the two are independent rather than sequenced.
 
-**ADR 0007's decision**, which is untouched. Probing rather than assuming, and
-refusing at runtime, is exactly as sound after this as before.
+**ADR an-assumption-is-probed's decision**, which is untouched. Probing rather
+than assuming, and refusing at runtime, is exactly as sound after this as
+before.
 
 ## Consequences
 
-`ADR 0007` gains **one amendment and no supersession**. Its closing sentence —
-*"Contract tests assert the same shapes against the installed bundle in CI, to
-find drift before users do"* — names an artifact that will not exist by that
-name, so it is rewritten to name the scheduled run, which is the thing that
-actually does it. A first correction header on a file that has none; #144's
-objection was to a third.
+`ADR an-assumption-is-probed` gains **one amendment and no supersession**. Its
+closing sentence — *"Contract tests assert the same shapes against the installed
+bundle in CI, to find drift before users do"* — names an artifact that will not
+exist by that name, so it is rewritten to name the scheduled run, which is the
+thing that actually does it. A first correction header on a file that has
+none; #144's objection was to a third.
 
 The CI step loses its `--lib`, which existed only to reach the two unit tests
 that now run by default, and its `--test` list shrinks to the one gated binary.
@@ -243,12 +246,13 @@ the glossary is for that kind and no other. The 497 lines of `CONTEXT.md`
 contain no entry for *contract*, *drift*, *probe*, *conformance* or *assumption*
 today, and that was correct.
 
-This ADR supersedes nothing. ADR 0043 governs what an assertion claims, ADR 0044
-the level it is made at, ADR 0045 where a test lives and what its file is
-called, and this one **whether a test may run without being asked**. Four axes,
-no overlap.
+This ADR supersedes nothing. ADR perch-says-what-it-did governs what an
+assertion claims, ADR the-binary-proves-its-surface the level it is made at,
+ADR a-suite-is-named-and-gated where a test lives and what its file is called,
+and this one **whether a test may run without being asked**. Four axes, no
+overlap.
 
-ADR 0045 placed the four `contract_*` suites as Correspondence and explicitly
-left the gate to this ticket. The placement survives: the two survivors are
-correspondences still, and the cases that move into `conformance.rs` move within
-the same kind.
+ADR a-suite-is-named-and-gated placed the four `contract_*` suites as
+Correspondence and explicitly left the gate to this ticket. The placement
+survives: the two survivors are correspondences still, and the cases that move
+into `conformance.rs` move within the same kind.

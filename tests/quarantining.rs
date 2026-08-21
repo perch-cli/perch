@@ -1,12 +1,12 @@
 //! Behavior: what Perch does with an Account whose Credential has stopped
 //! working for good.
 //!
-//! ADR 0006 makes this the terminal state of the capture design rather than a
-//! feature: a Rotation lost between two writes leaves an Account that no amount
-//! of retrying will fix. The whole of the design is that such an Account is
-//! *kept* — listed, named, and clearly broken, with the reason it broke — because
-//! an Account that vanishes reads as data loss while a broken one reads as
-//! something needing attention.
+//! ADR a-switch-is-written-down-first makes this the terminal state of the
+//! capture design rather than a feature: a Rotation lost between two writes
+//! leaves an Account that no amount of retrying will fix. The whole of the
+//! design is that such an Account is *kept* — listed, named, and clearly
+//! broken, with the reason it broke — because an Account that vanishes reads as
+//! data loss while a broken one reads as something needing attention.
 //!
 //! So these tests are about three things: that the terminal failures are told
 //! apart from the ones worth retrying, that the reason survives to every surface
@@ -76,7 +76,9 @@ fn a_credential_anthropic_will_not_renew_quarantines_its_account() {
 
     let (result, printed) = run_status_refresh(&host, false);
 
-    result.expect("a refresh degrades the display rather than failing it (ADR 0018)");
+    result.expect(
+        "a refresh degrades the display rather than failing it (ADR a-figure-carries-its-age)",
+    );
     assert_eq!(
         quarantine_of(&host, EMAIL),
         Some(Quarantine::RenewalRejected),
@@ -104,9 +106,9 @@ fn a_credential_anthropic_will_not_renew_quarantines_its_account() {
 #[test]
 fn a_rotation_that_could_not_be_stored_quarantines_rather_than_reading_as_a_failed_write() {
     // The Credential is in the file store, which is about to become unwritable,
-    // and the keychain will not take it either. Both halves of ADR 0006's
-    // dangerous moment: Anthropic has retired the old refresh token and Perch
-    // cannot keep the new one.
+    // and the keychain will not take it either. Both halves of
+    // ADR a-switch-is-written-down-first's dangerous moment: Anthropic has
+    // retired the old refresh token and Perch cannot keep the new one.
     let host = machine_with_two_accounts()
         .with_unwritable_file(CREDENTIALS_PATH, "no space left on device")
         .with_reply(TOKEN_URL, 200, RENEWED);
@@ -145,7 +147,9 @@ fn a_renewal_that_rotated_nothing_is_a_failed_reading_rather_than_a_quarantine()
 
     let (result, printed) = run_status_refresh(&host, false);
 
-    result.expect("a refresh degrades the display rather than failing it (ADR 0018)");
+    result.expect(
+        "a refresh degrades the display rather than failing it (ADR a-figure-carries-its-age)",
+    );
     assert_eq!(
         quarantine_of(&host, EMAIL),
         None,
@@ -296,7 +300,7 @@ fn a_quarantined_account_is_not_asked_again() {
     assert!(
         host.http_calls().is_empty(),
         "an Account Perch has written off does not spend an allowance that does \
-         not refill early (ADR 0015) to be written off again: {:?}",
+         not refill early (ADR a-figure-carries-its-age) to be written off again: {:?}",
         host.http_calls()
     );
     assert_eq!(
@@ -425,8 +429,9 @@ fn an_account_quarantined_by_a_refresh_leaves_the_cycling_pool_from_that_moment(
 /// `claude` and logs in directly leaves Perch's record of who is active behind,
 /// and when *their* login later dies a refresh reads their dead Credential —
 /// and would condemn the Account Perch believes is active, whose own Profile
-/// still holds a perfectly good copy. ADR 0019 says a figure is recorded only
-/// against the Account it was read for, and a Quarantine is a recording too.
+/// still holds a perfectly good copy. ADR a-figure-names-its-account says a
+/// figure is recorded only against the Account it was read for, and a
+/// Quarantine is a recording too.
 #[test]
 fn a_credential_that_may_be_somebody_elses_quarantines_nobody() {
     let host = about_to_renew(SPENT).with_reply(TOKEN_URL, 401, RETIRED);
@@ -471,7 +476,8 @@ fn a_credential_that_may_be_somebody_elses_quarantines_nobody() {
 ///
 /// `holding` reads *both* halves out of their own Profiles during a Landing —
 /// nothing is settled, so neither is the active one — so the `its_own_profile`
-/// arm of the ADR 0019 guard let the terminal verdict straight through.
+/// arm of the ADR a-figure-names-its-account guard let the terminal verdict
+/// straight through.
 #[test]
 fn a_switch_in_flight_is_not_evidence_that_the_account_arriving_is_broken() {
     let host = machine_with_two_accounts();
@@ -486,7 +492,9 @@ fn a_switch_in_flight_is_not_evidence_that_the_account_arriving_is_broken() {
 
     let (result, printed) = run_list_refresh(&host, false);
 
-    result.expect("a refresh degrades the display rather than failing it (ADR 0018)");
+    result.expect(
+        "a refresh degrades the display rather than failing it (ADR a-figure-carries-its-age)",
+    );
     assert_eq!(
         quarantine_of(&host, SECOND_EMAIL),
         None,

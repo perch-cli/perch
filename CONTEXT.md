@@ -31,11 +31,12 @@ _Avoid_: nickname, label, tag
 The Claude Code login already on the machine becoming the first Account Perch
 holds, on whichever command is run first — bar an Import and a Purge, which
 would each be making an Account on the way to giving one up. Not a step somebody
-takes: Perch asks for no login it does not need (ADR 0009), so the Account
-arrives without ever being added. What separates it from adding one is that
-nothing was logged into: the Credential was already there, and Adoption copies
-it into a Profile of its own. Happens once for the Holdings it begins — only a
-Purge undoes it, and the next command after one adopts again.
+takes: Perch asks for no login it does not need
+(ADR a-login-perch-does-not-need), so the Account arrives without ever being
+added. What separates it from adding one is that nothing was logged into: the
+Credential was already there, and Adoption copies it into a Profile of its own.
+Happens once for the Holdings it begins — only a Purge undoes it, and the next
+command after one adopts again.
 _Avoid_: init, setup, onboarding, import, first run
 
 **Remove**:
@@ -245,8 +246,9 @@ has said out loud it is in. A Perch that finds one knows the live Credential is
 one of two Accounts' — the one being left, or the one being switched to — which
 is what it can settle a Landing from. Never read for its outcome before it is
 recorded: the next Switch Captures into whichever Profile the registry names
-(ADR 0006). Only whether it *moved* is answerable earlier, because a Switch that
-happened paces the Watcher whether or not it finished.
+(ADR a-switch-is-written-down-first). Only whether it *moved* is answerable
+earlier, because a Switch that happened paces the Watcher whether or not it
+finished.
 _Avoid_: result, outcome, attempt
 
 **Cycle**:
@@ -344,9 +346,9 @@ it makes Profiles Live too — a Run does, for as long as it lasts, and so does 
 login, so that nothing reaps an Account somebody is midway through logging in.
 Evidence rather than a claim — a pid alone would not be, since the operating
 system hands pids out again, so a Marker holds only while the process it names
-began no later than the session it records (ADR 0022). One a client left behind
-when it died therefore names nothing, and nobody has to remove it for that to be
-true.
+began no later than the session it records (ADR a-profile-is-live-by-evidence).
+One a client left behind when it died therefore names nothing, and nobody has to
+remove it for that to be true.
 _Avoid_: lock, pid file, session file, heartbeat, sentinel
 
 ## Configuration
@@ -428,8 +430,9 @@ _Avoid_: asset, file, package, download
 One route by which somebody installs Perch — Homebrew, npm, an installer
 script, or the Release page itself. Each has its own idea of what "the default"
 means, and only some of them can be asked to withhold it: Homebrew's is a Tap
-nobody adds by accident, npm's cannot be withheld at all (ADR 0031). A Channel
-distributes a Release; it never builds one.
+nobody adds by accident, npm's cannot be withheld at all
+(ADR this-repo-assembles-a-release). A Channel distributes a Release; it never
+builds one.
 _Avoid_: registry, source, distribution, repo
 
 **Tap**:
@@ -444,7 +447,8 @@ _Avoid_: formula, bottle, brew repo
 What a Channel left on this machine: the binary, and on Windows the PATH entry
 that makes it runnable. The counterpart to what Perch *holds* — an Installation
 outlives a Purge, and taking one back belongs to the Channel that made it
-rather than to any Perch command (ADR 0033), as does replacing one (ADR 0039).
+rather than to any Perch command (ADR perch-takes-back-what-it-wrote), as does
+replacing one (ADR an-upgrade-asks-its-channel).
 _Avoid_: install, setup, deployment, footprint
 
 **Upgrade**:
@@ -461,10 +465,11 @@ _Avoid_: update, self-update, bump, install
 **Behavior**:
 What a command does, and the largest of the three kinds of suite in `tests/` —
 the other two assert a correspondence between artifacts that have to agree, and
-the binary's surface (ADR 0045). Named for the Behavior rather than for the
-command: `perch status` is asserted across three files because three Behaviors
-share its verb, and `carrying`, `storing`, `reconciling` and `naming` are
-mechanics no single command owns. What separates one from a `mod tests` in `src`
-is what the test names — a command, or a module's own vocabulary through its own
-API — and never whether it reaches for a fake, which both sides do.
+the binary's surface (ADR a-suite-is-named-and-gated). Named for the Behavior
+rather than for the command: `perch status` is asserted across three files
+because three Behaviors share its verb, and `carrying`, `storing`, `reconciling`
+and `naming` are mechanics no single command owns. What separates one from a
+`mod tests` in `src` is what the test names — a command, or a module's own
+vocabulary through its own API — and never whether it reaches for a fake, which
+both sides do.
 _Avoid_: functional test, end-to-end test, feature test, acceptance test

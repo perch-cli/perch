@@ -305,7 +305,7 @@ jobs:
       # allow a published package to have no `latest` — the registry refuses to
       # delete it — so the alternative was never "npm install perch-cli fails",
       # it was "npm install perch-cli quietly installs whichever version latest
-      # was stuck on". ADR 0031.
+      # was stuck on". ADR this-repo-assembles-a-release.
       #
       # Every path here is written `./…`, and that is load-bearing rather than
       # tidy. npm reads a bare `npm-dist/perch-cli` as GitHub shorthand for the
@@ -415,10 +415,10 @@ jobs:
           git push "https://x-access-token:${TAP_TOKEN}@github.com/perch-cli/homebrew-perch.git" HEAD:main
 
   # The site, once the Release exists and everything it holds can be downloaded.
-  # The guide describes a Perch somebody can install (ADR 0063), so a release is
-  # what publishes it — and this is the release doing that, rather than an event
-  # this workflow cannot raise: a Release created with GITHUB_TOKEN starts no
-  # workflow of its own.
+  # The guide describes a Perch somebody can install
+  # (ADR one-thing-renders-the-site), so a release is what publishes it — and
+  # this is the release doing that, rather than an event this workflow cannot
+  # raise: a Release created with GITHUB_TOKEN starts no workflow of its own.
   #
   # `pages.yml` deploys the guide from the newest release that carries a site and
   # the installers from main, so it does not need to be told which tag this is. It

@@ -21,14 +21,15 @@ use crate::probe::{Identity, LockSpec};
 /// than silently misread; one from the past is not read at all, because nobody
 /// is running Perch yet and there is nothing to migrate.
 ///
-/// Moved to `2` when every Scope came to hold its own Settings (ADR 0051):
-/// `groups` stopped being a map of Overrides, `ungrouped` absorbed the record
-/// that was `global`, and `cycle_ungrouped` became `interchangeable`. The guard
-/// that refuses a newer registry is only worth having if the number moves when
-/// the shape does.
+/// Moved to `2` when every Scope came to hold its own Settings
+/// (ADR a-setting-names-its-scope): `groups` stopped being a map of Overrides,
+/// `ungrouped` absorbed the record that was `global`, and `cycle_ungrouped`
+/// became `interchangeable`. The guard that refuses a newer registry is only
+/// worth having if the number moves when the shape does.
 pub const CURRENT_VERSION: u32 = 2;
 
-/// One Quota Window's Utilization, as observed at a point in time (ADR 0015).
+/// One Quota Window's Utilization, as observed at a point in time
+/// (ADR a-figure-carries-its-age).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WindowUtilization {
@@ -42,7 +43,7 @@ pub struct WindowUtilization {
 }
 
 /// Cached Utilization for one Account. What every surface renders, and what
-/// only a `--refresh` ever goes and fetches (ADR 0015).
+/// only a `--refresh` ever goes and fetches (ADR a-figure-carries-its-age).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CachedUtilization {
@@ -66,8 +67,9 @@ pub enum Quarantine {
     /// to a login that has been ended elsewhere.
     RenewalRejected,
     /// Anthropic Rotated the refresh token and the new one could not be stored,
-    /// so the old one is retired and the new one is gone: ADR 0006's crash
-    /// between two writes, arriving as a failed write instead of a crash.
+    /// so the old one is retired and the new one is gone:
+    /// ADR a-switch-is-written-down-first's crash between two writes, arriving
+    /// as a failed write instead of a crash.
     RotationLost,
     /// The Credential carries no refresh token, so the access token that ran out
     /// was the last thing it could offer.
@@ -112,9 +114,10 @@ impl Quarantine {
     /// surfaces spelling this out separately would eventually offer two
     /// different repairs for one state.
     ///
-    /// For a surface showing several at once, [`shown_of`](Quarantine::shown_of)
-    /// is the varying half of this and [`how_to_repair_them`] the invariant one
-    /// (ADR 0061) — still the same two sentences, and still from here.
+    /// For a surface showing several at once,
+    /// [`shown_of`](Quarantine::shown_of) is the varying half of this and
+    /// [`how_to_repair_them`] the invariant one (ADR perch-says-what-it-did) —
+    /// still the same two sentences, and still from here.
     ///
     /// `detail` is whatever the failure underneath said, where there was one
     /// worth keeping — a keychain that would not take the Rotated Credential,
@@ -136,9 +139,9 @@ impl Quarantine {
     ///
     /// For a surface that has already said the state — a Listing whose State
     /// column says `quarantined` on every row it is about — and that says the
-    /// repair once beneath all of them rather than once per Account (ADR 0061).
-    /// What is left is exactly the part that differs between two broken
-    /// Accounts.
+    /// repair once beneath all of them rather than once per Account
+    /// (ADR perch-says-what-it-did). What is left is exactly the part that
+    /// differs between two broken Accounts.
     ///
     /// No `detail`, which [`said_of`](Quarantine::said_of) takes: a Listing
     /// renders what the registry recorded, and the registry records a
@@ -206,7 +209,7 @@ pub fn how_to_repair(target: &str) -> String {
 }
 
 /// The same repair, for however many Accounts are in that state — said once,
-/// because it is the same repair (ADR 0061).
+/// because it is the same repair (ADR perch-says-what-it-did).
 ///
 /// Named where there is exactly one to name, and about the state where there is
 /// more than one: [`how_to_repair`] says "logs *it* in again", which over a set
@@ -241,7 +244,7 @@ pub struct Account {
     /// the registry is something a person may open, and an Account nobody has
     /// done anything to reads more clearly for saying nothing. The positive
     /// state has no name to write down — it is the absence of this one
-    /// (ADR 0052).
+    /// (ADR a-command-names-its-noun).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub disabled: bool,
     /// Why this Account's Credential can no longer be used, when it cannot.
@@ -260,9 +263,9 @@ pub struct Account {
 /// How Cycling orders the Accounts in a Group.
 ///
 /// Both readings measure headroom the same way — the worst Quota Window an
-/// Account has (ADR 0012) — and differ only in what they do with it. The
-/// measurement is fixed and the Strategy is a separate axis on top of it, so
-/// neither reading is a way round an exhausted Account.
+/// Account has (ADR headroom-is-the-worst-window) — and differ only in what
+/// they do with it. The measurement is fixed and the Strategy is a separate
+/// axis on top of it, so neither reading is a way round an exhausted Account.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Strategy {
@@ -313,7 +316,8 @@ pub fn a_percentage() -> String {
     format!("a whole number between 0 and {MAX_PERCENTAGE}")
 }
 
-/// Every Setting there is, all of them set: what one Scope holds (ADR 0051).
+/// Every Setting there is, all of them set: what one Scope holds
+/// (ADR a-setting-names-its-scope).
 ///
 /// A Scope — each Group, and the Accounts in no Group taken together — holds
 /// its own full set. There is nothing above it for a value to fall back to, so
@@ -322,21 +326,23 @@ pub fn a_percentage() -> String {
 ///
 /// Two of these are the watcher's, and only one of the two is a pace: how full
 /// is too full, which is the single question in the loop that a person's
-/// appetite for risk answers rather than arithmetic (ADR 0046). The numbers the
-/// loop paces itself by are not among them — the interval it Refreshes at, the
-/// cooldown between two Switches and the margin under where one may land are
-/// all derived rather than preferred, and live in [`crate::watch`].
+/// appetite for risk answers rather than arithmetic
+/// (ADR a-watcher-knob-is-arithmetic). The numbers the loop paces itself by are
+/// not among them — the interval it Refreshes at, the cooldown between two
+/// Switches and the margin under where one may land are all derived rather than
+/// preferred, and live in [`crate::watch`].
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
     pub strategy: Strategy,
     /// Whether the watcher may Switch within this Scope unattended. Off unless
     /// the user says otherwise: nothing changes underneath someone because they
-    /// did not say it could (ADR 0002).
+    /// did not say it could (ADR a-group-is-a-declaration).
     ///
-    /// Said about the Scope it grants and nowhere else (ADR 0051). A grant that
-    /// reached a Scope by falling through from somewhere wider would authorize
-    /// Groups nobody had said anything about — including ones not yet declared.
+    /// Said about the Scope it grants and nowhere else
+    /// (ADR a-setting-names-its-scope). A grant that reached a Scope by falling
+    /// through from somewhere wider would authorize Groups nobody had said
+    /// anything about — including ones not yet declared.
     pub watcher_may_act: bool,
     /// The Utilization the watcher would act at, as a percentage.
     pub watcher_threshold_percent: u8,
@@ -391,16 +397,16 @@ fn out_of_range(
 ///
 /// The only levels at which a Setting means anything. One type for both ideas,
 /// because they are one idea: a Cycle never leaves the Scope it started in
-/// (ADR 0002), and a Setting is said about exactly the Scope it governs
-/// (ADR 0051). They were two types while a Config had a layer above every
-/// Scope, on the grounds that sharing one would put "every Account there is"
-/// within reach of the ranking. There is no such value to be handed any more,
-/// so that is a mistake nobody can make.
+/// (ADR a-group-is-a-declaration), and a Setting is said about exactly the
+/// Scope it governs (ADR a-setting-names-its-scope). They were two types while
+/// a Config had a layer above every Scope, on the grounds that sharing one
+/// would put "every Account there is" within reach of the ranking. There is no
+/// such value to be handed any more, so that is a mistake nobody can make.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Scope {
-    /// The Accounts in no Group, taken as one Scope (ADR 0017, amended). Not a
-    /// Group and never one: a Group is a declaration somebody made, and this is
-    /// the absence of one.
+    /// The Accounts in no Group, taken as one Scope
+    /// (ADR a-group-is-a-declaration, amended). Not a Group and never one: a
+    /// Group is a declaration somebody made, and this is the absence of one.
     Ungrouped,
     /// One Group, named as it was declared.
     Group(String),
@@ -499,13 +505,13 @@ pub fn means_ungrouped(name: &str) -> bool {
 /// The word people reach for when they mean every Scope at once.
 ///
 /// There is no such Scope: every Setting is said about the one Scope it governs
-/// and there is nothing above them (ADR 0051). So unlike [`UNGROUPED`] this
-/// word addresses nothing, and a Group may not take it — `perch config set
-/// global watcher-may-act true` is somebody saying *everywhere*, and a Group
-/// answering to the name would take that quietly and leave every other Scope as
-/// it was. Kept reserved so the refusal is where they find out Perch has no
-/// everywhere-layer, which is a better place to learn it than from a Setting
-/// that appeared to take.
+/// and there is nothing above them (ADR a-setting-names-its-scope). So unlike
+/// [`UNGROUPED`] this word addresses nothing, and a Group may not take it —
+/// `perch config set global watcher-may-act true` is somebody saying
+/// *everywhere*, and a Group answering to the name would take that quietly and
+/// leave every other Scope as it was. Kept reserved so the refusal is where
+/// they find out Perch has no everywhere-layer, which is a better place to
+/// learn it than from a Setting that appeared to take.
 pub const GLOBAL: &str = "global";
 
 /// Whether a name is the one people mean every Scope at once by.
@@ -514,7 +520,7 @@ pub fn means_global(name: &str) -> bool {
 }
 
 /// The Switch a scheduled Check made within a Group, kept so the next one can
-/// be paced by it (ADR 0013).
+/// be paced by it (ADR a-watcher-knob-is-arithmetic).
 ///
 /// The one thing about the watcher that is written down, and only because
 /// `perch watcher check` is a fresh process every time: the cooldown is
@@ -525,14 +531,16 @@ pub fn means_global(name: &str) -> bool {
 ///
 /// Per Group rather than per machine: a cooldown paces the Switches made within
 /// a Group, and a Switch within `work` has nothing to say about how soon
-/// `personal` may move. A constant still has to be paced somewhere (ADR 0046).
+/// `personal` may move. A constant still has to be paced somewhere
+/// (ADR a-watcher-knob-is-arithmetic).
 ///
 /// A stamp and nothing else. Which Account was Switched off was recorded here
-/// too, for the no-return that read it — and when that went (ADR 0046) the field
-/// was left behind, written every Check and read by nothing. It is not kept
-/// against the day ADR 0046's guard fires and a no-return comes back: breaking
-/// the registry's format is free (`CLAUDE.md`), so the day something needs to
-/// know which Account was left is the day to record it again.
+/// too, for the no-return that read it — and when that went
+/// (ADR a-watcher-knob-is-arithmetic) the field was left behind, written every
+/// Check and read by nothing. It is not kept against the day
+/// ADR a-watcher-knob-is-arithmetic's guard fires and a no-return comes back:
+/// breaking the registry's format is free (`CLAUDE.md`), so the day something
+/// needs to know which Account was left is the day to record it again.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Checked {
@@ -545,8 +553,8 @@ pub struct Checked {
 ///
 /// The one Scope whose record is not a bare [`Settings`], because it is the one
 /// Scope that has to say it is a Scope at all. A Group carries no such line: a
-/// Group **is** that declaration (ADR 0002), and printing one against it would
-/// be a line `perch config set` could not take back.
+/// Group **is** that declaration (ADR a-group-is-a-declaration), and printing
+/// one against it would be a line `perch config set` could not take back.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct UngroupedConfig {
@@ -558,7 +566,7 @@ pub struct UngroupedConfig {
     /// is the absence of a declaration that Accounts are interchangeable, not a
     /// weaker form of one. Cycling freely here would move someone from their
     /// work subscription onto their personal one without their ever having said
-    /// the two were substitutable (ADR 0017).
+    /// the two were substitutable (ADR a-group-is-a-declaration).
     pub interchangeable: bool,
     /// The Settings this Scope holds, like every other Scope.
     pub settings: Settings,
@@ -684,12 +692,13 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
     // The third word that already means something, and the one that means
     // something Perch does not have. `perch config set global watcher-may-act
     // true` is somebody saying *everywhere* — and there is no everywhere, since
-    // every Setting is said about the one Scope it governs (ADR 0051). Left to
-    // fall through it would be answered with "Declare it with `perch group add
-    // global`", and a Group by that name would then take every later `perch
-    // config set global …` quietly, leaving every other Scope as it was.
-    // Refused here so the offer can never be made, and so the refusal is where
-    // somebody learns there is no such layer.
+    // every Setting is said about the one Scope it governs
+    // (ADR a-setting-names-its-scope). Left to fall through it would be
+    // answered with "Declare it with `perch group add global`", and a Group by
+    // that name would then take every later `perch config set global …`
+    // quietly, leaving every other Scope as it was. Refused here so the offer
+    // can never be made, and so the refusal is where somebody learns there is
+    // no such layer.
     if means_global(name) {
         return Err(PerchError::Invalid(format!(
             "`{name}` is how people say every Scope at once, so it cannot also \
@@ -723,7 +732,7 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
 }
 
 /// Which Account is active — and, while a Switch is under way, that Perch
-/// cannot yet say (ADR 0048).
+/// cannot yet say (ADR a-switch-is-written-down-first).
 ///
 /// One field with three states rather than two fields, so a registry naming
 /// both a settled active Account and a different in-flight one cannot be
@@ -797,16 +806,17 @@ impl Active {
     ///
     /// Said at all because half of why this hazard survived is that a machine
     /// mid-Landing is indistinguishable from a healthy one, so nobody looks
-    /// (ADR 0048). It never changes an exit code: Perch reports what it found
-    /// rather than judging it (ADR 0018), and a state the next Switch resolves
-    /// by itself should not fail somebody's shell prompt.
+    /// (ADR a-switch-is-written-down-first). It never changes an exit code:
+    /// Perch reports what it found rather than judging it
+    /// (ADR a-figure-carries-its-age), and a state the next Switch resolves by
+    /// itself should not fail somebody's shell prompt.
     ///
     /// Here rather than in the command, beside [`document`], because two
     /// commands say it and both have to say the same thing — `perch status`
     /// about the Account you are on, and `perch list` about the set it sits in,
-    /// at whatever breadth that was asked for (ADR 0053). What it qualifies is
-    /// whichever line says which Account is active, and there is one of those
-    /// in each.
+    /// at whatever breadth that was asked for (ADR the-listing-owns-the-set).
+    /// What it qualifies is whichever line says which Account is active, and
+    /// there is one of those in each.
     ///
     /// [`document`]: Active::document
     pub fn a_switch_in_flight(&self) -> Option<String> {
@@ -831,9 +841,10 @@ impl Active {
     /// than folded into it, and the same shape in every document that carries
     /// one. The two answer different questions — *which Account* against
     /// *whether Perch can say* — and a script that only ever wanted the first
-    /// should not have to learn what a Landing is to go on getting it (ADR
-    /// 0048). Absent reads as false wherever a script asks whether it is set,
-    /// which is how [`Quarantine::document`] beside it is read.
+    /// should not have to learn what a Landing is to go on getting it
+    /// (ADR a-switch-is-written-down-first). Absent reads as false wherever a
+    /// script asks whether it is set, which is how [`Quarantine::document`]
+    /// beside it is read.
     pub fn document(&self) -> serde_json::Value {
         match self {
             Active::Landing { leaving, arriving } => {
@@ -868,12 +879,13 @@ pub struct Registry {
     ///
     /// Private, and the only field here that is. Every other field is a thing
     /// somebody declared; this one is a thing Perch *did*, and the three states
-    /// it moves between are the whole of ADR 0048. A `= Active::Settled(…)`
-    /// anywhere is a Switch recorded without having been written down first,
-    /// which is precisely the write [`crate::switch::switch_to`] exists to be
-    /// the one door for. So it is reached through [`Registry::begin_landing`],
-    /// [`Registry::settle`] and [`Registry::abandon_landing`], each of which
-    /// names a transition, and read through [`Registry::active`].
+    /// it moves between are the whole of ADR a-switch-is-written-down-first. A
+    /// `= Active::Settled(…)` anywhere is a Switch recorded without having been
+    /// written down first, which is precisely the write
+    /// [`crate::switch::switch_to`] exists to be the one door for. So it is
+    /// reached through [`Registry::begin_landing`], [`Registry::settle`] and
+    /// [`Registry::abandon_landing`], each of which names a transition, and
+    /// read through [`Registry::active`].
     #[serde(default, skip_serializing_if = "Active::is_nobody")]
     active: Active,
     #[serde(default)]
@@ -888,9 +900,10 @@ pub struct Registry {
     /// has said anything about yet.
     #[serde(default)]
     pub groups: BTreeMap<String, Settings>,
-    /// What the Accounts in no Group hold, taken as one Scope (ADR 0017,
-    /// amended). Not a Group and never one; it is here rather than under a
-    /// reserved key in `groups` so that nothing can walk it as one.
+    /// What the Accounts in no Group hold, taken as one Scope
+    /// (ADR a-group-is-a-declaration, amended). Not a Group and never one; it
+    /// is here rather than under a reserved key in `groups` so that nothing can
+    /// walk it as one.
     #[serde(default)]
     pub ungrouped: UngroupedConfig,
     /// What the last scheduled Check did in each Group. Written by `perch
@@ -923,7 +936,8 @@ impl Account {
     ///
     /// Derived from the email address the registry already keys on rather than
     /// recorded beside it: two statements of one fact can disagree, and this is
-    /// the fact every Credential Store is derived from in turn (ADR 0020).
+    /// the fact every Credential Store is derived from in turn
+    /// (ADR claude-code-chooses-the-store).
     pub fn profile_dir(&self, host: &dyn Host) -> Result<PathBuf> {
         profile_dir_for(host, self.email())
     }
@@ -961,7 +975,7 @@ impl Registry {
     }
 
     /// Which Account is active, or the Switch that was in flight when this was
-    /// last written (ADR 0048).
+    /// last written (ADR a-switch-is-written-down-first).
     ///
     /// Reading is nobody's to get wrong, so it is open to everybody. Writing is
     /// three named transitions and nothing else.
@@ -970,7 +984,8 @@ impl Registry {
     }
 
     /// Writes down that a Switch is about to move the live Credential, naming
-    /// both Accounts it could then belong to (ADR 0048).
+    /// both Accounts it could then belong to
+    /// (ADR a-switch-is-written-down-first).
     ///
     /// Hands back what it replaced, because the Landing has to reach disk
     /// before it means anything: a save that fails leaves a caller holding a
@@ -1008,8 +1023,9 @@ impl Registry {
     /// "settled" true of what it leaves behind: handed the enum it would accept
     /// [`Active::Landing`], and a Landing written by anything but
     /// [`Registry::begin_landing`] is a Switch recorded without having been
-    /// written down first — the one state ADR 0048 exists to keep impossible,
-    /// walking back in through the door built to stop it.
+    /// written down first — the one state ADR a-switch-is-written-down-first
+    /// exists to keep impossible, walking back in through the door built to
+    /// stop it.
     pub fn settle(&mut self, on: Option<String>) {
         self.active = Active::settled_on(on);
     }
@@ -1070,7 +1086,7 @@ impl Registry {
         every
     }
 
-    /// The Settings a Scope holds (ADR 0051).
+    /// The Settings a Scope holds (ADR a-setting-names-its-scope).
     ///
     /// A lookup rather than a cascade: there is nothing above a Scope, so this
     /// walks no chain — there is no chain. A Group Perch does not hold is not a
@@ -1098,10 +1114,11 @@ impl Registry {
     /// The Scope an Account's Settings come from: its Group, or the Ungrouped
     /// Accounts.
     ///
-    /// One place, because the rule is ADR 0017's and there is nothing to it but
-    /// this match — which is exactly the kind of thing that gets written out
-    /// again at a call site and then goes on being written out. `permitted` had
-    /// its own copy while this had no caller at all.
+    /// One place, because the rule is ADR a-group-is-a-declaration's and there
+    /// is nothing to it but this match — which is exactly the kind of thing
+    /// that gets written out again at a call site and then goes on being
+    /// written out. `permitted` had its own copy while this had no caller at
+    /// all.
     pub fn scope_of(&self, account: &Account) -> Scope {
         match &account.group {
             Some(name) => Scope::Group(name.clone()),
@@ -1123,7 +1140,7 @@ impl Registry {
     }
 
     /// The Accounts that are in no Group — the ordinary starting state, not an
-    /// error (ADR 0017).
+    /// error (ADR a-group-is-a-declaration).
     pub fn ungrouped_accounts(&self) -> Vec<&Account> {
         self.accounts
             .iter()
@@ -1150,7 +1167,7 @@ impl Registry {
         // somebody says otherwise about this Group. Nothing said elsewhere
         // reaches it — including a `watcher-may-act true` said about another
         // Scope, which is the whole point of a grant being said about the Scope
-        // it grants (ADR 0051).
+        // it grants (ADR a-setting-names-its-scope).
         self.groups.insert(name.to_string(), Settings::default());
         Ok(())
     }
@@ -1608,8 +1625,9 @@ pub fn profiles_dir(host: &dyn Host) -> Result<PathBuf> {
 /// Switch taking `CLAUDE_CONFIG_DIR` at its word inside a Run wrote a third
 /// Account's Credential into the running Account's Profile, superseded the copy
 /// it had, and left the registry naming an Account the machine was not on — the
-/// disagreement between Credential and Identity that ADR 0006 exists to keep
-/// impossible, arriving by way of the environment.
+/// disagreement between Credential and Identity that
+/// ADR a-switch-is-written-down-first exists to keep impossible, arriving by
+/// way of the environment.
 ///
 /// Asked of the whole of [`perch_home`] rather than of `profiles`, because a
 /// Profile is not the only directory Perch points that variable at: a login
@@ -1755,7 +1773,7 @@ pub fn lock_spec(host: &dyn Host) -> Result<LockSpec> {
 /// bounded back-off — plus the round that follows it. Anything shorter would
 /// have a Watcher backed off against a failing endpoint declared dead by the
 /// next `perch watcher run` to come along, and two Watchers is the state this
-/// lock exists to prevent (ADR 0040).
+/// lock exists to prevent (ADR the-machine-runs-the-watcher).
 ///
 /// It is deliberately long, and what pays for it is that nothing waits on it. A
 /// Watcher that finds the lock held **holds and comes back** rather than
@@ -1769,7 +1787,8 @@ const WATCHER_STALE_MILLIS: i64 =
 /// Comfortably inside a round, so the renewal a round makes always touches.
 const WATCHER_UPDATE_MILLIS: i64 = 60_000;
 
-/// The lock that makes a Watcher the only one on this machine (ADR 0040).
+/// The lock that makes a Watcher the only one on this machine
+/// (ADR the-machine-runs-the-watcher).
 ///
 /// Two loops for one person watch the same active Account and each keeps its
 /// Cooldown in memory, where neither can see the other's — so the pacing the
@@ -1785,7 +1804,8 @@ pub fn watcher_lock_spec(host: &dyn Host) -> Result<LockSpec> {
         name: "the Perch watcher lock",
         // The Watcher rather than one of its three arrangements: whoever holds
         // this is a loop, a Check or a Service, and which of them it is neither
-        // changes what to do about it nor is knowable from here (ADR 0047).
+        // changes what to do about it nor is knowable from here
+        // (ADR a-command-names-its-noun).
         held_by: "another Watcher",
         dir: perch_home(host)?.join(".watch.lock"),
         stale_millis: WATCHER_STALE_MILLIS,
@@ -1805,7 +1825,8 @@ pub fn watcher_lock_spec(host: &dyn Host) -> Result<LockSpec> {
 /// write, because it is the *read* that goes stale: a `perch add` that saved
 /// its copy after a `perch switch` had landed would put `active` back to
 /// whatever it was before the Switch, and the next Capture would then write the
-/// live Credential into the wrong Account's Profile (ADR 0006).
+/// live Credential into the wrong Account's Profile
+/// (ADR a-switch-is-written-down-first).
 ///
 /// Never held across a browser login. That is minutes of somebody else's time,
 /// and the commands that spend it take this afterwards, against a registry read
@@ -2287,8 +2308,9 @@ fn refuse_a_name_nothing_would_have_accepted(
 /// declared too, `load` sees to that" — and which nothing was enforcing. An
 /// Account claiming an undeclared Group falls out of `perch list` entirely,
 /// because the listing walks the declared Groups and then the Accounts in none
-/// of them (ADR 0049), so it becomes an Account nothing shows; and `perch
-/// switch <that group>` refuses while `perch list` shows the Group.
+/// of them (ADR the-listing-owns-the-set), so it becomes an Account nothing
+/// shows; and `perch switch <that group>` refuses while `perch list` shows the
+/// Group.
 ///
 /// Declared rather than refused, because the Group's settings are what is
 /// missing and the defaults are what a freshly declared Group carries anyway.
@@ -2345,12 +2367,12 @@ fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
 pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -> Result<()> {
     perch.renew();
     if !perch.still_held() {
-        // A general failure rather than `Busy`, and deliberately (ADR 0036).
-        // `Busy` promises that nothing was changed, and `perch watcher run`
-        // branches on that promise by going round again — but this save is
-        // reached after a Switch has already moved a Credential as often as
-        // before anything has been written, and from here there is no telling
-        // which.
+        // A general failure rather than `Busy`, and deliberately
+        // (ADR a-refusal-is-a-promise). `Busy` promises that nothing was
+        // changed, and `perch watcher run` branches on that promise by going
+        // round again — but this save is reached after a Switch has already
+        // moved a Credential as often as before anything has been written, and
+        // from here there is no telling which.
         return Err(PerchError::Other(
             "Another `perch` took the registry lock over while this command was \
              working, and has changed the registry since this one read it. \
@@ -2414,16 +2436,16 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) ->
 /// everything else: every Account's email address, organization, plan, Alias,
 /// Group and Quarantine reason, and the Utilization history behind them. That
 /// is a full picture of somebody's Anthropic relationships, and the Profile
-/// directories it sits beside are already 0700 (ADR 0020) — this file was the
-/// gap. A `~/.config/perch` that already exists keeps the mode it has, as `mkdir -p`
+/// directories it sits beside are already 0700
+/// (ADR claude-code-chooses-the-store) — this file was the gap. A
+/// `~/.config/perch` that already exists keeps the mode it has, as `mkdir -p`
 /// does everywhere else in Perch, but the file is replaced on every save and so
-/// comes back narrow from the first one.
-/// The directory above it is not made here. `write_private_file` is documented
-/// as creating a file "and any directory above it" with that mode, and both
-/// Hosts do exactly that — so the call this used to make first was the same call
-/// against the same path with the same mode. That is the duplicate
-/// [`lock`] records having already been removed once; this was the copy that
-/// survived it.
+/// comes back narrow from the first one. The directory above it is not made
+/// here. `write_private_file` is documented as creating a file "and any
+/// directory above it" with that mode, and both Hosts do exactly that — so the
+/// call this used to make first was the same call against the same path with
+/// the same mode. That is the duplicate [`lock`] records having already been
+/// removed once; this was the copy that survived it.
 fn write(host: &dyn Host, path: &Path, contents: &str) -> Result<()> {
     host.write_private_file(path, contents)
         .map_err(|err| PerchError::file_write(path, err))
@@ -2662,7 +2684,8 @@ mod tests {
     }
 
     /// Both ends of a Landing, because both are pointers into the Accounts and
-    /// resolving one reads the Credential of the other (ADR 0048).
+    /// resolving one reads the Credential of the other
+    /// (ADR a-switch-is-written-down-first).
     ///
     /// The end that dangles is named, rather than the pair reported as one
     /// broken `active`: a hand-edited registry is what this rule is written
@@ -3291,9 +3314,9 @@ mod tests {
         assert!(!back.account("someone@example.com").unwrap().quarantined());
     }
 
-    /// The positive state has no name (ADR 0052), so the file says nothing
-    /// about an Account nobody has taken out of Cycling — the same shape, and
-    /// the same reason, as the Quarantine above it.
+    /// The positive state has no name (ADR a-command-names-its-noun), so the
+    /// file says nothing about an Account nobody has taken out of Cycling — the
+    /// same shape, and the same reason, as the Quarantine above it.
     #[test]
     fn an_account_nobody_has_disabled_records_no_disable_at_all() {
         let mut registry = Registry::default();
@@ -3328,9 +3351,10 @@ mod tests {
         );
     }
 
-    /// `enabled` was the same bool spelled the other way round, and ADR 0052
-    /// renamed it rather than teaching this build to read both. A registry
-    /// carrying it is refused, which is what `deny_unknown_fields` is for.
+    /// `enabled` was the same bool spelled the other way round, and
+    /// ADR a-command-names-its-noun renamed it rather than teaching this build
+    /// to read both. A registry carrying it is refused, which is what
+    /// `deny_unknown_fields` is for.
     #[test]
     fn a_registry_that_still_says_enabled_is_refused_rather_than_read() {
         let held: std::result::Result<Registry, _> = serde_json::from_str(
@@ -3388,12 +3412,12 @@ mod tests {
         assert!(
             !says_nothing_about_it.ungrouped.interchangeable,
             "a registry that says nothing about it reads as off, not as a \
-             declaration nobody made (ADR 0017)"
+             declaration nobody made (ADR a-group-is-a-declaration)"
         );
     }
 
     /// A freshly declared Group holds the compiled-in defaults, and nothing
-    /// said about another Scope reaches it (ADR 0051).
+    /// said about another Scope reaches it (ADR a-setting-names-its-scope).
     #[test]
     fn a_new_group_holds_the_defaults_and_leaves_the_watcher_alone() {
         let mut registry = Registry::default();
@@ -3419,7 +3443,7 @@ mod tests {
 
     /// The grant that has to be said about the Scope it grants: a Group
     /// declared after somebody let the watcher into another one is a Group
-    /// nobody has said anything about (ADR 0051).
+    /// nobody has said anything about (ADR a-setting-names-its-scope).
     #[test]
     fn a_group_declared_later_is_not_reached_by_a_grant_made_earlier() {
         let mut registry = Registry::default();
@@ -3441,10 +3465,10 @@ mod tests {
         );
     }
 
-    /// The one number the watcher's policy still carries (ADR 0046). Asserted as
-    /// the number rather than as the constant, because a default is a promise
-    /// made in the docs and a test that reads the constant back cannot notice it
-    /// change.
+    /// The one number the watcher's policy still carries
+    /// (ADR a-watcher-knob-is-arithmetic). Asserted as the number rather than
+    /// as the constant, because a default is a promise made in the docs and a
+    /// test that reads the constant back cannot notice it change.
     #[test]
     fn the_watchers_policy_has_the_default_it_is_documented_with() {
         assert_eq!(Settings::default().watcher_threshold_percent, 80);
@@ -3759,8 +3783,8 @@ mod tests {
 
     /// An Account claiming a Group nothing declared falls out of `perch list`
     /// entirely — the listing walks the declared Groups and then the Accounts
-    /// in none of them (ADR 0049) — which makes it an Account nothing shows,
-    /// while `perch switch <that group>` refuses.
+    /// in none of them (ADR the-listing-owns-the-set) — which makes it an
+    /// Account nothing shows, while `perch switch <that group>` refuses.
     #[test]
     fn a_group_an_account_claims_is_declared_by_the_time_anything_reads_it() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");

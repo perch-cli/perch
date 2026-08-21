@@ -1,12 +1,13 @@
 # Perch does not look for its own updates
 
-> **Superseded by ADR 0039.** Perch now carries `perch upgrade`, and
-> `perch --version` says when a newer Release exists. Most of the argument below
-> survived — there is still no schedule, no cache and no age, and `perch status`
-> is still silent on the network — but the title is no longer true, and the
-> reopener this ADR asked for is not what happened. ADR 0039 says which parts it
-> kept and what it gave up. Left here as written, because what it refused is the
-> thing that has to go on being refused.
+> **Superseded by ADR an-upgrade-asks-its-channel.** Perch now carries
+> `perch upgrade`, and `perch --version` says when a newer Release exists. Most
+> of the argument below survived — there is still no schedule, no cache and no
+> age, and `perch status` is still silent on the network — but the title is no
+> longer true, and the reopener this ADR asked for is not what happened.
+> ADR an-upgrade-asks-its-channel says which parts it kept and what it gave up.
+> Left here as written, because what it refused is the thing that has to go on
+> being refused.
 
 Most distributed CLIs tell you when a newer version exists. Perch does not, and
 will not add it without a reason that has actually happened.
@@ -21,8 +22,8 @@ version check is entirely about them.
 A version check is a periodic outbound request, a cache to hold the answer, an
 age to reason about, and a failure mode when the request does not come back.
 Perch already carries exactly that shape for Utilization — served from cache,
-with the age shown, degrading rather than failing (ADR 0015, ADR 0018) — and it
-took two ADRs to get right for a figure the program is actually about.
+with the age shown, degrading rather than failing (ADR a-figure-carries-its-age)
+— and it took two ADRs to get right for a figure the program is actually about.
 
 A second one would be the same machinery for something the program is not about,
 in a tool whose value proposition is that it is careful with credentials.
@@ -32,7 +33,7 @@ and bounded, and it buys a notification.
 There is a smaller point that decides it against the convenient version. The
 obvious implementation asks GitHub on some interval and caches the answer, which
 means `perch status` — cheap enough for a shell prompt, and deliberately silent
-on the network (ADR 0015) — stops being either.
+on the network (ADR a-figure-carries-its-age) — stops being either.
 
 ## What would reopen it
 

@@ -255,7 +255,7 @@ fn disabling_a_quarantined_account_promises_no_switch_that_would_not_work() {
     // The one thing either half of this pair says beyond what it changed, and
     // the reason it is exempt: an Account nothing will switch to is a refusal
     // wearing an outcome's clothes, so it keeps its explanation and its remedy
-    // (ADR 0061).
+    // (ADR perch-says-what-it-did).
     assert!(
         printed.contains("It is Quarantined, though")
             && printed.contains("so nothing switches to it, Cycling or you."),
@@ -268,8 +268,8 @@ fn disabling_a_quarantined_account_promises_no_switch_that_would_not_work() {
     );
 }
 
-/// **What ADR 0061 leaves of these two.** A healthy Account is told what
-/// changed and nothing else.
+/// **What ADR perch-says-what-it-did leaves of these two.** A healthy Account
+/// is told what changed and nothing else.
 ///
 /// What Cycling does with a disabled Account, and that a disabled one stays
 /// listed and named and can still be switched to by name, are true after every

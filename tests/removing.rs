@@ -66,10 +66,11 @@ fn removing_an_account_forgets_it_and_deletes_the_credential_perch_held() {
         "a removed Account stops appearing in the listing:\n{listed}"
     );
 
-    // And the report is one line, asserted whole (ADR 0043). Every Remove that
-    // finds a Credential deletes it and leaves nothing listing or Cycling to
-    // the Account — the ordinary case announcing that it was ordinary (ADR
-    // 0061). What that sentence promised is asserted above, off the machine.
+    // And the report is one line, asserted whole (ADR perch-says-what-it-did).
+    // Every Remove that finds a Credential deletes it and leaves nothing
+    // listing or Cycling to the Account — the ordinary case announcing that it
+    // was ordinary (ADR perch-says-what-it-did). What that sentence promised is
+    // asserted above, off the machine.
     assert_eq!(
         printed.trim_end().lines().last(),
         Some(format!("Removed {SECOND_EMAIL}.").as_str()),
@@ -179,7 +180,8 @@ fn removing_the_active_account_names_what_will_be_active_and_asks_first() {
 /// destroyed yet. A failure in there must leave the record agreeing with the
 /// machine — because `active` is what the next Switch Captures *into*, and one
 /// naming the Account whose Credential is no longer live would copy the
-/// successor's over that Account's own good copy and destroy it (ADR 0006).
+/// successor's over that Account's own good copy and destroy it
+/// (ADR a-switch-is-written-down-first).
 #[test]
 fn a_removal_that_fails_after_landing_still_records_who_is_live() {
     let host = machine_with_two_accounts()
@@ -366,7 +368,7 @@ fn without_a_terminal_the_active_account_goes_only_when_asked_for_outright() {
         },
     );
 
-    result.expect("every capability is available non-interactively (ADR 0011)");
+    result.expect("every capability is available non-interactively (ADR perch-does-not-draw)");
     assert!(!holds(&host, EMAIL), "{printed}");
     assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
 }
@@ -388,7 +390,7 @@ fn removal_is_refused_while_the_accounts_profile_is_live() {
 fn removing_the_active_account_is_refused_while_a_client_is_running_against_the_default_profile() {
     // The Account's own Profile is quiet; it is the Default Profile that a
     // client is holding, and that is where the Account Perch lands on has to be
-    // written (ADR 0005).
+    // written (ADR a-profile-is-live-by-evidence).
     let host = client_running_against(machine_with_two_accounts(), DEFAULT_PROFILE, 5150)
         .with_answers(&["y"]);
 
@@ -586,10 +588,12 @@ fn a_removal_that_found_no_credential_does_not_claim_to_have_deleted_one() {
 
     result.expect("the Account is still forgotten");
     assert!(!holds(&host, SECOND_EMAIL), "{printed}");
-    // Asserted whole, because the claim is the sentence (ADR 0043). A Remove
-    // that deletes a Credential says nothing about it — that is what every
-    // Remove does (ADR 0061) — so this is one of the two outcomes that speaks
-    // at all, and what it must not do is claim a deletion that never happened.
+    // Asserted whole, because the claim is the sentence
+    // (ADR perch-says-what-it-did). A Remove that deletes a Credential says
+    // nothing about it — that is what every Remove does
+    // (ADR perch-says-what-it-did) — so this is one of the two outcomes that
+    // speaks at all, and what it must not do is claim a deletion that never
+    // happened.
     assert!(
         printed.contains(&format!(
             "Removed {SECOND_EMAIL}. Neither of its Credential Stores held \
@@ -605,9 +609,10 @@ fn a_removal_that_found_no_credential_does_not_claim_to_have_deleted_one() {
 /// The same sentence off macOS, where every word of it used to be false.
 ///
 /// There is no keychain there and nothing is filed under `$USER` — a Credential
-/// lives in a file inside the Profile (ADR 0020). Told the macOS story anyway,
-/// somebody is sent looking in a keychain their machine does not have, by the
-/// one sentence that exists to say where a Credential might still be.
+/// lives in a file inside the Profile (ADR claude-code-chooses-the-store). Told
+/// the macOS story anyway, somebody is sent looking in a keychain their machine
+/// does not have, by the one sentence that exists to say where a Credential
+/// might still be.
 #[test]
 fn a_removal_off_macos_explains_the_store_that_machine_actually_has() {
     let host = logged_in_machine_off_macos().with_answers(&["y"]);
@@ -767,11 +772,12 @@ fn a_client_that_starts_while_the_question_is_answered_stops_the_removal() {
 /// The lock somebody else is holding is the one failure a Remove reports that
 /// resolves on its own, and the exit code is the only place that says so.
 ///
-/// Removing the active Account lands on its successor first (ADR 0024), and
-/// landing takes Claude Code's locks. A `claude` holding one of them stops the
-/// removal before anything is deleted — which is a "try again in a moment",
-/// not a fault. It is reported with a note about what the machine is holding,
-/// and the note must not cost the code the scheduler branches on.
+/// Removing the active Account lands on its successor first
+/// (ADR a-removal-lands-first), and landing takes Claude Code's locks. A
+/// `claude` holding one of them stops the removal before anything is deleted —
+/// which is a "try again in a moment", not a fault. It is reported with a note
+/// about what the machine is holding, and the note must not cost the code the
+/// scheduler branches on.
 #[test]
 fn a_lock_somebody_is_holding_stops_a_removal_as_held_rather_than_as_a_fault() {
     let host = machine_with_two_accounts();
@@ -838,11 +844,11 @@ fn a_removal_that_deleted_the_credential_but_could_not_be_recorded_says_so() {
 
 /// Removing the active Account lands on a successor before deleting anything,
 /// and that landing does not begin until Perch has written down that it is
-/// about to (ADR 0048). So a registry that will not take a write removes
-/// nothing and moves nothing: the state a later Switch would Capture over — a
-/// Credential live for an Account Perch does not call active — never comes into
-/// being at all, where before it was reached by a failure this command could
-/// only narrate.
+/// about to (ADR a-switch-is-written-down-first). So a registry that will not
+/// take a write removes nothing and moves nothing: the state a later Switch
+/// would Capture over — a Credential live for an Account Perch does not call
+/// active — never comes into being at all, where before it was reached by a
+/// failure this command could only narrate.
 #[test]
 fn a_landing_perch_cannot_write_down_removes_nothing_and_moves_nothing() {
     let host = machine_with_two_accounts().with_unwritable_file(REGISTRY_PATH, "read-only");

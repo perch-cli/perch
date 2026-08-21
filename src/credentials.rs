@@ -1,5 +1,5 @@
 //! The Credential Store: the two places a Credential can be, and the composite
-//! that reads across them (ADR 0020).
+//! that reads across them (ADR claude-code-chooses-the-store).
 //!
 //! Claude Code keeps a Credential in the operating system's keychain on macOS
 //! and in a file of JSON everywhere else, and reads from both. Perch stores one
@@ -29,8 +29,8 @@ use crate::probe::Store;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CredentialStore {
     /// The operating system's keychain, reached through `/usr/bin/security`
-    /// (ADR 0008). The primary on macOS, and on every other platform a store
-    /// that simply never holds anything.
+    /// (ADR claude-code-chooses-the-store). The primary on macOS, and on every
+    /// other platform a store that simply never holds anything.
     Keychain { service: String, account: String },
     /// A file of JSON that nobody but its owner can read.
     Plaintext { path: PathBuf },
@@ -105,10 +105,10 @@ pub fn read(host: &dyn Host, config: &Store) -> Result<Option<StoredCredential>>
             Ok(None) => otherwise.map(|_| None),
             // The fallback is there and would not say what it holds. That is
             // not "no Credential": "no Credential" is terminal — it Quarantines
-            // an Account (ADR 0006) — and a file that is temporarily unreadable
-            // must not be promoted to a permanent verdict. If the primary
-            // already failed, its failure is the one to report, since it is the
-            // store this machine is meant to be using.
+            // an Account (ADR a-switch-is-written-down-first) — and a file that
+            // is temporarily unreadable must not be promoted to a permanent
+            // verdict. If the primary already failed, its failure is the one to
+            // report, since it is the store this machine is meant to be using.
             Err(fallback_failed) => match otherwise {
                 Ok(None) => Err(fallback_failed),
                 otherwise => otherwise.map(|_| None),
@@ -210,7 +210,7 @@ pub enum Forgotten {
 /// Off macOS it has not, so a keychain that will not answer is a store holding
 /// nothing rather than a failure: a missing `/usr/bin/security` is not news on
 /// Linux, and reporting it would turn every logged-out machine into a broken
-/// one (ADR 0020).
+/// one (ADR claude-code-chooses-the-store).
 fn there_is_no_keychain_here(host: &dyn Host) -> bool {
     host.platform() != Platform::MacOs
 }

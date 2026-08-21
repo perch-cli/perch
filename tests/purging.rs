@@ -1,4 +1,5 @@
-//! `perch holdings purge` — giving the machine back (ADR 0014).
+//! `perch holdings purge` — giving the machine back
+//! (ADR the-holdings-go-out-sealed).
 //!
 //! The one command that destroys everything at once, so almost all of this is
 //! about what it will not destroy quietly: not without the word typed out, not
@@ -88,11 +89,11 @@ fn a_purge_takes_every_profile_every_credential_and_the_registry() {
         !host.path_exists(Path::new(PERCH_HOME)),
         "and the directory Perch kept it all in is not there either"
     );
-    // One line, asserted whole (ADR 0043): how many, and the directory they
-    // were kept in. That every Profile and every Credential went with them is
-    // what a Purge *is* — it was said in the question this was agreed to, and
-    // saying it again afterwards is the ordinary case announcing itself (ADR
-    // 0061).
+    // One line, asserted whole (ADR perch-says-what-it-did): how many, and the
+    // directory they were kept in. That every Profile and every Credential went
+    // with them is what a Purge *is* — it was said in the question this was
+    // agreed to, and saying it again afterwards is the ordinary case announcing
+    // itself (ADR perch-says-what-it-did).
     assert!(
         printed.trim_end().ends_with(&format!(
             "Purged 3 Accounts, and {} is gone.",
@@ -124,8 +125,8 @@ fn the_login_claude_code_is_running_on_is_left_exactly_where_it_is() {
     );
     // Said where it is load-bearing — in the question this Purge was agreed
     // to — rather than again in the report, which is every Purge saying what
-    // every Purge does (ADR 0061). Asserted whole, because the claim is the
-    // sentence (ADR 0043).
+    // every Purge does (ADR perch-says-what-it-did). Asserted whole, because
+    // the claim is the sentence (ADR perch-says-what-it-did).
     assert!(
         printed.contains(
             "Claude Code goes on running as whatever it is logged in as — the \
@@ -137,8 +138,8 @@ fn the_login_claude_code_is_running_on_is_left_exactly_where_it_is() {
 }
 
 /// Off macOS that login is a file inside the Default Profile rather than a
-/// keychain item (ADR 0020), and the Purge that empties every Profile Perch made
-/// leaves that directory standing.
+/// keychain item (ADR claude-code-chooses-the-store), and the Purge that
+/// empties every Profile Perch made leaves that directory standing.
 #[test]
 fn the_credential_the_default_profile_keeps_in_a_file_is_left_alone_too() {
     let host = logged_in_machine_off_macos().with_answers(&["n", "purge"]);
@@ -512,9 +513,9 @@ fn what_a_purge_gives_back_an_import_puts_back() {
     }
 }
 
-/// Every capability is reachable from a script (ADR 0011), so the flag answers
-/// ahead of time — and answers both questions, because an Export is a path
-/// somebody names and a passphrase somebody types.
+/// Every capability is reachable from a script (ADR perch-does-not-draw), so
+/// the flag answers ahead of time — and answers both questions, because an
+/// Export is a path somebody names and a passphrase somebody types.
 #[test]
 fn the_flag_purges_without_asking_anything() {
     let host = machine_with_three_accounts().without_terminal();
@@ -558,7 +559,7 @@ fn without_a_terminal_and_without_the_flag_a_purge_is_refused_and_names_it() {
 
 /// A Purge deletes the Profiles a client would be holding files in, so it is
 /// refused while one is — the same rule every other write into a Live Profile
-/// obeys (ADR 0005), at its extreme.
+/// obeys (ADR a-profile-is-live-by-evidence), at its extreme.
 #[test]
 fn a_client_running_against_a_profile_stops_the_purge() {
     let host = a_machine_to_give_back();
@@ -854,10 +855,10 @@ fn a_purge_that_found_no_credential_does_not_claim_to_have_deleted_one() {
 /// The same sentence off macOS, where every word of it used to be false.
 ///
 /// There is no keychain and nothing is filed under `$USER`: a Credential lives
-/// in a file inside the Profile (ADR 0020), so the Profile going is the
-/// Credential going. Told the macOS story anyway, somebody is sent looking in a
-/// keychain their machine does not have, by the one sentence that exists to say
-/// where a Credential might still be.
+/// in a file inside the Profile (ADR claude-code-chooses-the-store), so the
+/// Profile going is the Credential going. Told the macOS story anyway, somebody
+/// is sent looking in a keychain their machine does not have, by the one
+/// sentence that exists to say where a Credential might still be.
 #[test]
 fn a_purge_off_macos_explains_the_store_that_machine_actually_has() {
     let host = logged_in_machine_off_macos().with_answers(&["n", "purge"]);
