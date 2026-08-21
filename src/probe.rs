@@ -1998,7 +1998,10 @@ mod tests {
 
             let said = refused.to_string();
             assert!(said.contains("is not JSON Perch understands"), "{said}");
-            assert!(!said.contains(TOKEN), "the refusal carries the token: {said}");
+            assert!(
+                !said.contains(TOKEN),
+                "the refusal carries the token: {said}"
+            );
         }
     }
 

@@ -1333,7 +1333,10 @@ pub fn same_profile(one: &str, other: &str) -> bool {
 /// Three commands ask it — a Switch, a Renewal and a Remove — and each spelled
 /// its own scan, two of them comparing addresses by bytes where the third folded
 /// case. Beside [`same_profile`], for the reason that already lives there.
-pub fn sharing_a_profile_with<'a>(registry: &'a Registry, account: &Account) -> Option<&'a Account> {
+pub fn sharing_a_profile_with<'a>(
+    registry: &'a Registry,
+    account: &Account,
+) -> Option<&'a Account> {
     registry.accounts.iter().find(|held| {
         !same_name(held.email(), account.email()) && same_profile(held.email(), account.email())
     })
@@ -3007,7 +3010,10 @@ mod tests {
 
         let registry = load(&host).expect("it reads").expect("it is there");
 
-        assert!(registry.checked("work").is_some(), "the Check is still there");
+        assert!(
+            registry.checked("work").is_some(),
+            "the Check is still there"
+        );
     }
 
     /// The other half: normalizing first must not make the rule toothless.

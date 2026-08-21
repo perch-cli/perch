@@ -466,7 +466,8 @@ const CASES: &[Case] = &[
             let at = root.join("the-other-name");
             host.create_file_with_mode(&target, "what it holds", PRIVATE_FILE_MODE)
                 .expect("a file to point at");
-            host.link(Link::Hard, &target, &at).expect("the second name");
+            host.link(Link::Hard, &target, &at)
+                .expect("the second name");
 
             // `remove_link`'s whole contract is that it takes away Perch's own
             // share and never the person's file. A hard link says nothing about
@@ -494,9 +495,9 @@ const CASES: &[Case] = &[
             // keeps answering is a lock the fake would never call abandoned.
             match host.modified_at(&from) {
                 Err(HostError::NotFound { .. }) => {}
-                other => panic!(
-                    "{adapter}: the source of a rename still reports an age: {other:?}"
-                ),
+                other => {
+                    panic!("{adapter}: the source of a rename still reports an age: {other:?}")
+                }
             }
         },
     },

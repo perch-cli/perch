@@ -296,7 +296,11 @@ fn sources_quoting_urls() -> Vec<String> {
         "pages/public/install.sh".to_string(),
         "pages/public/install.ps1".to_string(),
     ];
-    quoting.extend(guide_pages().iter().map(|page| format!("pages/src/content/docs/{page}")));
+    quoting.extend(
+        guide_pages()
+            .iter()
+            .map(|page| format!("pages/src/content/docs/{page}")),
+    );
     quoting
 }
 

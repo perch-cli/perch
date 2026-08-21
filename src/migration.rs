@@ -512,7 +512,10 @@ mod tests {
                 "checks.work",
                 r#"{"version":1,"accounts":[],"checks":{"work":"2026-01-01T00:00:00Z"}}"#,
             ),
-            ("an entry in `accounts`", r#"{"version":1,"accounts":["a"]}"#),
+            (
+                "an entry in `accounts`",
+                r#"{"version":1,"accounts":["a"]}"#,
+            ),
         ] {
             let refused = forward(document).expect_err("the case this is about: {document}");
             let said = refused.to_string();
