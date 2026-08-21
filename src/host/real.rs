@@ -52,7 +52,11 @@ fn curl_at(usually: &Path, path: &std::ffi::OsStr) -> Result<PathBuf, HostError>
         return Ok(usually.to_path_buf());
     }
 
+    // Absolute directories only. An empty `PATH` element — `""`, or the one a
+    // trailing `:` leaves — means the working directory, so a bare `curl` beside
+    // whatever Perch was run in would be handed the `Authorization` header.
     std::env::split_paths(path)
+        .filter(|dir| dir.is_absolute())
         .map(|dir| dir.join("curl"))
         .find(|candidate| candidate.is_file())
         .ok_or_else(|| {
@@ -1682,6 +1686,31 @@ mod tests {
             super::curl_at(&usually, bin.as_os_str()).expect("it is there"),
             usually
         );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An empty element is how `PATH` spells the working directory, and a
+    /// relative candidate is one `Command::new` resolves the same way.
+    #[cfg(not(windows))]
+    #[test]
+    fn the_walk_passes_over_an_element_naming_the_working_directory() {
+        let root = std::env::temp_dir().join(format!("perch-curl-cwd-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("a scratch directory");
+        let usually = root.join("usr-bin-curl");
+        std::fs::write(root.join("curl"), "#!/bin/sh\n").expect("a curl to be passed over");
+
+        // What a trailing separator leaves, with the directory holding a `curl`
+        // as the process Perch would be run from.
+        let previous = std::env::current_dir().expect("a working directory");
+        std::env::set_current_dir(&root).expect("somewhere to stand");
+        let refused = super::curl_at(&usually, std::ffi::OsStr::new(":"));
+        std::env::set_current_dir(previous).expect("back where we were");
+
+        let said = refused
+            .expect_err("a curl in the working directory is not one to hand a token to")
+            .to_string();
+        assert!(said.contains("PATH"), "{said}");
 
         let _ = std::fs::remove_dir_all(&root);
     }
