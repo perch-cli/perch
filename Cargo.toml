@@ -13,20 +13,14 @@ description = "Run Claude Code as whichever Claude account you want, without log
 # their problem, and costs the project nothing but a second file.
 license = "MIT OR Apache-2.0"
 
-# crates.io is not one of Perch's channels (ADR this-repo-assembles-a-release),
-# but that is settled in release-plz.toml rather than here. `publish = false` in
-# this file does not mean "do not publish this package" to release-plz — it
-# means "this package is not mine", and release-plz skips it silently: no
-# version, no changelog, no release pull request, no error. See the comment on
-# `publish` there.
+# No `publish = false` here: release-plz reads it as "this package is not mine"
+# and skips the package silently. crates.io is not one of Perch's Channels
+# (ADR this-repo-assembles-a-release), and release-plz.toml is where that is set.
 
 # Local `cargo clippy` and CI agree, rather than CI being the only place that
-# says no. `unsafe_op_in_unsafe_fn` because host/real.rs carries every platform
-# primitive Perch links rather than shells out to — process liveness, file times,
-# terminal echo, signal handlers — and every one of those should have to be
-# written as `unsafe` rather than inherited from the signature around it. The
-# count is deliberately not written down: it moves, and a number in a comment
-# that moves is a comment that is wrong.
+# says no. `unsafe_op_in_unsafe_fn` because host/real.rs carries the platform
+# primitives Perch links rather than shells out to, and each one should have to
+# be written as `unsafe` rather than inherited from the signature around it.
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 
@@ -41,10 +35,9 @@ lto = "thin"
 codegen-units = 1
 
 # scrypt is deliberately expensive, and `export.rs` pins how expensive. An
-# unoptimized build of it is that cost times twenty — which is paid by nothing a
-# user runs, and by every test that seals or opens an Export, several times each.
-# Optimizing the three crates that do the arithmetic takes the suite back from
-# minutes to seconds without touching the work factor, which is the number that
+# unoptimized build of it is that cost times twenty, paid by nothing a user runs
+# and by every test that seals or opens an Export. Optimizing the three crates
+# that do the arithmetic leaves the work factor alone, which is the number that
 # is supposed to decide this.
 [profile.dev.package.scrypt]
 opt-level = 3
@@ -59,26 +52,19 @@ opt-level = 3
 # port, or fidelity to what Claude Code actually does
 # (ADR a-crate-must-not-cost-a-seam). Every entry below says which side it is on.
 [dependencies]
-# What `perch holdings export` writes (ADR the-holdings-go-out-sealed).
-# Encryption sits on neither seam — it is not an effect the Host port carries,
-# and it is not shared with Claude Code. The property that decided it is that an
-# `age` file is read by the standard `age` command: a backup meant to outlive the
-# machine should not depend on Perch still existing. `armor` is `age`'s text
-# encoding of the same file, which is what lets the Export go through the Host
-# port's ordinary private write.
+# What `perch holdings export` writes (ADR the-holdings-go-out-sealed), and it
+# sits on neither seam. An `age` file is read by the standard `age` command, so
+# a backup meant to outlive the machine does not depend on Perch still existing.
+# `armor` is the same file text-encoded, which is what lets the Export go
+# through the Host port's ordinary private write.
 age = { version = "0.12.1", default-features = false, features = ["armor"] }
 chrono = { version = "0.4", features = ["serde"] }
 
-# Wipes a buffer before it is freed, for the two that hold every Credential on
-# the machine at once: the passphrase an Export is sealed with, and the
-# serialized bundle either side of the encryption. Freed heap outlives the
-# process in a core dump, a swap file or a hibernation image, and a compiler is
-# entitled to elide a plain overwrite of memory nothing reads again — which is
-# the whole of what this crate is and why it cannot be hand-rolled.
-#
-# It sits on neither seam and is already in the tree through `age`, so it adds
-# no crate to the build and nothing to audit that was not being audited
-# already.
+# Wipes a buffer before it is freed: the passphrase an Export is sealed with,
+# and the serialized bundle either side of the encryption. Freed heap outlives
+# the process in a core dump or a hibernation image, and a compiler may elide a
+# plain overwrite of memory nothing reads again. On neither seam, and already in
+# the tree through `age`, so it adds no crate and nothing new to audit.
 zeroize = "1.9"
 clap = { version = "4", features = ["derive"] }
 
@@ -88,10 +74,9 @@ sha2 = "0.11"
 thiserror = "2"
 
 # How wide a string is drawn, for the listing that lays itself out in columns.
-# A crate of its own now that ratatui is gone, and it survives the actual test
-# rather than the free-rider one: the width of a string is a pure function and
-# sits on no seam. A hand-rolled table of East Asian widths would be the same
-# data, kept by hand, going wrong quietly.
+# It survives the actual test rather than the free-rider one: the width of a
+# string is a pure function and sits on no seam. A hand-rolled table of East
+# Asian widths would be the same data, kept by hand, going wrong quietly.
 unicode-width = "0.2.2"
 
 # Both already in the build transitively — libc through sha2's cpufeatures,
@@ -102,11 +87,10 @@ libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 # A directory junction is how Shared State reaches a Run's Profile on a Windows
-# without Developer Mode (ADR everything-but-the-account), and it is a reparse
-# point the standard library will not write. The alternative is a hand-built
+# without Developer Mode (ADR everything-but-the-account), and a reparse point
+# the standard library will not write. The alternative is a hand-built
 # REPARSE_DATA_BUFFER through DeviceIoControl, and the call sits inside RealHost
-# either way, so it costs no seam. Windows-only, and it carries no
-# dependencies.
+# either way, so it costs no seam. Windows-only, and it depends on nothing.
 junction = { version = "2", default-features = false }
 
 windows-sys = { version = "0.61", features = [
@@ -119,26 +103,16 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [features]
-# A test behind this one touches state the developer owns and did not offer —
-# their login keychain, their `~/.claude`, the clients they happen to have open
-# — so its outcome is not this repository's to determine
-# (ADR an-assumption-is-probed). A read of their real state counts as much as a
-# write: a suite that reports green on Tuesday and skipped on Wednesday, on the
-# same machine at the same commit, according to whether a client was running, is
-# the one thing a default-on suite must never be. Off unless asked for; CI turns
-# it on for the one step that follows the install.
+# The gate for the suite that touches state the developer owns and did not
+# offer (ADR a-suite-is-named-and-gated). Off unless asked for; CI turns it on
+# for the one step that follows the install.
 your-machine = []
 
-# `host::fake`, which exists so the real command code can be driven with no
-# machine.
-# Behavior tests are integration tests, so they link the library as any other
-# crate would and `#[cfg(test)]` cannot reach them; without a feature the fake
-# went into the binary somebody downloads, along with every planted keychain
-# item and injected failure it carries.
-#
-# Turned on by the dev-dependency below, which is this package on itself: the
-# documented way to say "the tests need more of the library than the binary
-# does". `cargo test` gets it without being asked, `cargo build` does not.
+# `host::fake`, so the real command code can be driven with no machine. Behavior
+# tests are integration tests, so they link the library as any other crate would
+# and `#[cfg(test)]` cannot reach them; without this feature the fake ships in
+# the binary somebody downloads. Turned on by the dev-dependency below, which is
+# this package on itself: `cargo test` gets it, `cargo build` does not.
 fakes = []
 
 [dev-dependencies]

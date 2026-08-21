@@ -199,16 +199,21 @@ fn every_cited_slug_is_within_the_cap_and_hyphenated() {
     );
 }
 
-/// A citation addresses an agent reading the tree, so the guide carries none —
-/// and it loses the word rather than gaining slugs, because a reader cannot
-/// follow one and did not ask for it. Asserted on the word rather than on the
-/// citation form: "the numbered ADRs" is not a citation and is the same defect.
+/// A citation addresses a reader with the tree in front of them. Three places
+/// face one who has not: the guide, and the two files GitHub and the npm
+/// registry put in front of somebody deciding whether to install. Each loses
+/// the word rather than gaining slugs, and the word is what is asserted —
+/// "the numbered ADRs" is not a citation and is the same defect.
 #[test]
-fn the_guide_never_says_adr() {
-    let directory = repo().join("pages/src/content/docs");
+fn nothing_facing_a_reader_without_the_tree_says_adr() {
+    let guide = repo().join("pages/src/content/docs");
+    let mut faced = vec![repo().join("README.md"), repo().join("SECURITY.md")];
+    for entry in std::fs::read_dir(&guide).expect("the guide is a directory") {
+        faced.push(entry.expect("a readable entry").path());
+    }
+
     let mut said = Vec::new();
-    for entry in std::fs::read_dir(&directory).expect("the guide is a directory") {
-        let path = entry.expect("a readable entry").path();
+    for path in faced {
         let text = std::fs::read_to_string(&path).expect("a readable page");
         for (number, line) in text.lines().enumerate() {
             if line
@@ -222,7 +227,8 @@ fn the_guide_never_says_adr() {
 
     assert!(
         said.is_empty(),
-        "the guide says what it does rather than citing a decision:\n{}",
+        "a page a reader arrives at says what it does rather than citing a \
+         decision they have no tree to glob:\n{}",
         said.join("\n")
     );
 }

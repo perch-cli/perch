@@ -1,44 +1,23 @@
 # Perch writes American English, and this is what holds it to that. CLAUDE.md
 # carries the reasoning; this file is the rule.
 #
-# `locale = "en-us"` is the whole of it, and it costs no allowlist for any of the
-# vocabulary Perch was forced into from outside — serde's derives, HTTP's
-# `Authorization` header, Anthropic's `organization_uuid` and `utilization` —
-# because en-us already wants exactly those forms.
+# `locale = "en-us"` is the whole of it. The vocabulary Perch was forced into
+# from outside — serde's derives, HTTP's `Authorization`, Anthropic's
+# `organization_uuid` and `utilization` — costs no allowlist, because en-us
+# already wants those forms.
 #
-# This file is the one thing the gate cannot see: `typos` skips any file its own
-# config could live in, which is also why Cargo.toml is exempt. CI pipes both
-# back in rather than leaving two tracked files unchecked.
+# The gate cannot see this file: `typos` skips any file its own config could
+# live in, which is also why Cargo.toml is exempt. CI pipes both back in.
 
 [files]
-# `.github/` is where the workflow that runs this check lives, and it was
-# spelling three words the British way while checking everything else. A gate
-# that exempts its own directory is a gate with a hole in it.
+# `.github/` is where the workflow that runs this check lives, and a gate that
+# exempts its own directory is a gate with a hole in it.
 ignore-hidden = false
-# But hidden means hidden, and `.git` is hidden. It has to be named here rather
-# than left to `ignore-vcs`, which excludes what git *ignores* and not git's own
-# directory. What is in there is not Perch's prose and some of it can never
-# pass: `hooks/*.sample` ships from git in British English, and `COMMIT_EDITMSG`
-# and `logs/HEAD` hold commit messages, which are exempt for the same reason
-# CHANGELOG.md is, below.
-#
-# Worth knowing if this ever looks over-careful: a checkout has a `.git`
-# directory and a worktree has a `.git` *file*, so leaving this out fails on the
-# first and passes on the second.
-#
-# And CHANGELOG.md, which is the reason those commit messages are exempt and was
-# named as such here while being checked anyway. Nobody writes this file:
-# release-plz assembles it out of the commit subjects back to the previous tag,
-# and those commits are already in history. Two of them — #155 and #157, both
-# merged before this rule existed — spell behavior the British way, so the
-# standing release pull request came up red on a file none of its reviewers
-# wrote and no commit in it could fix, and would have again on every release
-# reaching back past the rule. Respelling the entry is no answer either: the
-# next push to main regenerates it from the same subjects.
-#
-# The gate holds the prose Perch can still change. A commit subject is prose it
-# cannot — the place to catch one is the pull request title it is squashed from,
-# while somebody can still edit it.
+# Two paths hold prose Perch can no longer change: `.git`, whose hooks ship from
+# git in British English and whose logs hold commit subjects, and CHANGELOG.md,
+# which release-plz assembles out of those same subjects on every push. Named
+# rather than left to `ignore-vcs`, which excludes what git *ignores* and not
+# git's own directory — a file in a worktree, a directory in a checkout.
 extend-exclude = [".git/", "CHANGELOG.md"]
 
 [default]

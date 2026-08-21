@@ -23,7 +23,8 @@ used to do.
 
 ### Rephrases
 
-`src/watch.rs`, `REFRESH_INTERVAL_MILLIS`. Eleven lines to four.
+`src/watch.rs`, `REFRESH_INTERVAL_MILLIS`. Thirteen lines to five, which is what
+the tree holds.
 
 Before:
 
@@ -48,17 +49,21 @@ After:
 ```rust
 /// How long the watcher waits between Refreshing the Account it is on.
 ///
-/// 150s is 24 reads an hour. The endpoint allows 28-30 per Account
-/// (ADR a-figure-carries-its-age), so a concurrent `perch status --refresh`
-/// still fits. Refreshes one Account: at 24/hour each, a Group of two is
-/// already at the limit.
+/// Twenty-four reads an hour, inside the 28-30 Anthropic's usage endpoint allows per
+/// Account (ADR a-figure-carries-its-age), leaving room for the `perch status
+/// --refresh` somebody types while the loop is running.
 ```
 
 What went, and why each was filling rather than fact: *"the same arithmetic read
 the other way"* narrates the reasoning instead of stating it. *"Said here,
 because this is the number it is the reason for"* justifies the comment's own
-placement. *"somebody types"* and *"the user's own question refused"* dramatize a
-constraint the numbers already carry. Every figure survives.
+placement. *"rather than spending the whole allowance on the loop and having the
+user's own question refused"* dramatizes a constraint the numbers already carry.
+
+The Group-of-two arithmetic went with the second paragraph rather than being
+compressed into the first, because `a-watcher-knob-is-arithmetic` is where a
+knob's arithmetic is argued and the constant only has to say what it is. That is
+the cap doing its work: five lines is one fact, and the second fact had a home.
 
 ADR a-watcher-knob-is-arithmetic goes because the module header already cites it
 — one citation per file. ADR a-figure-carries-its-age stays because this
@@ -96,21 +101,49 @@ The thin edge is the gloss against the banned kind. A gloss translates into
 Perch's vocabulary; a restatement reads the syntax back. `EXIT_OK: i32 = 0` earns
 one, because `0` is a convention and not a meaning.
 
-**Strict register.** Decided against the tree rather than from it. The tree's
-most admired comments are the ones most in breach — `src/watch.rs`'s 26-line
-header is the register being cut. So the tree supplied *which facts* a comment
-carries; it did not supply how to say them.
+**Strict register.** Decided against the tree rather than from it. The comments
+that read best were the ones most in breach, and the module headers that argued
+their design at length are the register being cut. So the tree supplied *which
+facts* a comment carries; it did not supply how to say them.
 
 **Caps, and what over the cap means.** A numeric cap is checkable and survives
 ten sessions; a disposition does not. The cap's real work is not squeezing prose
 — it is routing argument to `docs/adr/` and leaving the code holding facts.
 Reflowing a long comment to fit is the one response the rule forbids.
 
+The three tiers are roles rather than markers, because most of the tree is not
+Rust. A `.toml`, `.yml`, `.sh` or `.css` file has one marker and the same three
+jobs for it, and reading the caps as binding only where `///` exists exempts the
+largest comment blocks in the repository. Which block is the header is the one
+judgment that reading needs, and it is settled by moving the block to the top of
+the file rather than by widening the rule.
+
+A block costs its first line carrying text to its last, inclusive. A blank
+separator between two paragraphs counts, because two facts in one block is the
+commonest way over the cap and one of them belongs elsewhere. A `/*` or `*/`
+alone on a line does not, because that is what the syntax spends rather than
+what the author spends.
+
+Over the cap has three answers rather than two. Usually an ADR, and sometimes a
+ticket where the argument is load-bearing and the closed set has no home for it.
+The third is a comment that had simply never been edited, and it compresses with
+every fact intact: the rule that only `invalid_grant` in a refusal body may be
+read as a retired refresh token ran to 23 lines over two blocks, has no home —
+`a-broken-account-is-repaired` says how a Quarantine is repaired, never how it
+is raised — and fits in two capped blocks with RFC 6749 §5.2 still in it. That
+third answer looks like a false positive in a report and is not.
+
+A `///` clap renders into `--help` is exempt from the cap and from nothing else.
+That text is what a person reads at a terminal, and cutting a `--help` paragraph
+to satisfy a comment cap breaks the surface to fix the tree. The same fact bars a
+citation there outright, which is the one predicate under which *over the cap*
+and *reaches a person* agree about a block.
+
 **One citation per file.** The caps make a citation the cheapest thing a comment
-can carry, so unbounded they would trade prose for slugs. `src/watch.rs` cites
-ADR a-watcher-knob-is-arithmetic eleven times today and `src/commands/watch.rs`
-cites ADR the-machine-runs-the-watcher eighteen; a decision appearing eleven
-times in one file marks nothing.
+can carry, so unbounded they would trade prose for slugs: a decision appearing
+eleven times in one file marks nothing. The count is over comment lines only —
+an assertion message is read on a failure rather than in the tree, so repeating
+a citation across four asserts costs nothing and helps.
 
 **Slugs, not numbers.** Identity on the number made a renumber a tree-wide
 rewrite — 1,500 sites across 158 files, every one of them moving even where the
@@ -142,19 +175,32 @@ Never a path, so never clickable — that is the cost, paid because the slug is
 the identity and a path names the number instead. Markdown gets no dialect of
 its own for the same reason: one form, six file types.
 
-**Who a citation is for.** An agent reading the tree. So the guide never says
-`ADR`, and neither does anything Perch says to a person: a user reading a refusal
-cannot follow the citation and did not ask for it. `CHANGELOG.md` is the other
-exemption, in the other direction — it records what happened on a date, so a
-number there is not a citation and may name a document that is gone.
+**Who a citation is for.** A reader with the tree in front of them. That is the
+line, rather than agent-against-person: `README.md` ships into the npm package
+and `SECURITY.md` is read on github.com by somebody reporting a vulnerability,
+and neither reader can glob `docs/adr/`. The guide is the same case, and so is
+everything Perch says at a terminal — including a `///` clap renders, which is
+`--help` output wearing a doc comment. `CHANGELOG.md` is the exemption in the
+other direction: it records what happened on a date, so a number there is not a
+citation and may name a document that is gone.
 
 Checked by `tests/citation.rs`: a slug resolving to exactly one file, a slug
 within cap and hyphenated, a filename's tail matching its document's title,
 every band contiguous from its base, and nothing citing a number. Which band a
 document belongs to is a judgment; that a band has no gap in it is not. The
-guide is checked the other way round — that it never says the word at all, since
-"the numbered ADRs" is not a citation and is the same defect. One exemption stands: `docs/research/adr-inventory.md`, a dated
+three pages a reader arrives at are checked the other way round — that they
+never say the word at all, since "the numbered ADRs" is not a citation and is
+the same defect. One exemption stands: `docs/research/adr-inventory.md`, a dated
 read of the 64 documents that indexes them by the number.
+
+And by `tests/comment.rs`: every block within the cap of its tier, no decision
+cited twice in one file, and nothing clap prints citing one at all. Those are
+the two clauses of the standard a text comparison reaches. The other two — which
+of the four things a comment says, and whether it says it in the present tense —
+need a reader. Passing the check is not passing the standard, and it is worth
+saying because a green check reads like one. What the check is for is the other
+direction: in most of the eleven passes that rewrote this tree it found blocks
+and duplicate citations that a reading judging every block by eye had passed.
 
 **Present tense.** The same rule an ADR follows: state what stands, not the
 route to it. A rejected alternative is timeless and stays. Perch's own former
