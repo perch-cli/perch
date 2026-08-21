@@ -310,6 +310,15 @@ fn perform(
         return failed(error);
     }
 
+    // The outgoing Account too, because the Capture writes into *its* store: a
+    // Profile two Accounts share holds one Credential, so filing the live one
+    // there takes the other Account's away with nothing left to tell them apart.
+    if let Some(outgoing) = outgoing
+        && let Err(error) = refuse_a_shared_profile(outgoing, registry)
+    {
+        return failed(error);
+    }
+
     let store = match registry::the_default_profile(host) {
         Ok(ground) => ground,
         Err(error) => return failed(error),

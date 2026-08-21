@@ -2023,6 +2023,56 @@ fn a_keychain_dialog_somebody_walked_away_from_does_not_cost_perch_its_registry_
     );
 }
 
+/// The other side of the same rule. The Capture writes into the *outgoing*
+/// Account's store, so a Profile it shares is one whose other Account's
+/// Credential the Capture takes away — with nothing left to tell the two apart.
+#[test]
+fn a_switch_off_an_account_that_shares_a_profile_is_refused_before_the_capture() {
+    let host = logged_in_machine();
+    run_list(&host, false)
+        .0
+        .expect("the first command adopts the login there already is");
+    let mut registry = registry_of(&host);
+    for email in ["some-one@example.com", "some.one@example.com"] {
+        registry.upsert(perch::registry::Account {
+            identity: probe::Identity {
+                email: email.to_string(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            disabled: false,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        });
+    }
+    // The one being switched *off*, so the Capture is what would write.
+    registry.settle(Some("some-one@example.com".to_string()));
+    common::save_registry(&host, &registry);
+
+    let shared = store_of(&host, "some-one@example.com");
+    host.set_keychain_item(
+        &shared.keychain_service,
+        &shared.keychain_account,
+        SECOND_CREDENTIAL,
+    );
+    host.forget_effects();
+
+    let (result, printed) = run_switch(&host, EMAIL);
+
+    let error = result.expect_err("the Capture would destroy the other Account's Credential");
+    assert_eq!(error.exit_code(), EXIT_CONFLICT, "{error}");
+    assert!(error.to_string().contains("share one Profile"), "{error}");
+    assert_eq!(
+        host.keychain_item(&shared.keychain_service, &shared.keychain_account)
+            .as_deref(),
+        Some(SECOND_CREDENTIAL),
+        "the shared store still holds what it held: {printed}"
+    );
+}
+
 #[test]
 fn a_switch_onto_an_account_that_shares_a_profile_is_refused() {
     let host = logged_in_machine();
