@@ -1,4 +1,11 @@
 //! The Host implementation that actually touches the machine.
+//!
+//! Two rules run through the whole file. A mode is set through a *handle* and
+//! never through a name: `chmod(2)` on a path follows a link, so anything that
+//! can write the directory can redirect it — and `CLAUDE_CONFIG_DIR` is taken
+//! verbatim and can name a shared location. And every secret travels on stdin
+//! rather than in `argv`, because the process table is readable by anything
+//! running as the same user.
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -19,41 +26,26 @@ use crate::keychain::{
 };
 
 /// The `curl` binary. Perch shells out for the same reason it shells out to
-/// `security` (ADR a-crate-must-not-cost-a-seam): the machine already has one,
-/// and a linked HTTP client would be a second TLS story to keep current.
-///
-/// Always by absolute path, because the path is a security property rather
-/// than a convenience: `Command::new("curl")` would let anything earlier on
-/// `PATH` receive an `Authorization: Bearer` header.
+/// `security` (ADR a-crate-must-not-cost-a-seam), and always by absolute path,
+/// because the path is a security property rather than a convenience:
+/// `Command::new("curl")` would let anything earlier on `PATH` receive an
+/// `Authorization: Bearer` header.
 #[cfg(not(windows))]
 fn curl_bin() -> Result<PathBuf, HostError> {
     const USUALLY: &str = "/usr/bin/curl";
 
-    // The absolute path first and almost always, for the reason the paragraph
-    // above gives: nothing earlier on `PATH` gets handed a request carrying an
-    // `Authorization: Bearer` header.
-    //
-    // It was the whole of this function, and on a machine that does not
-    // populate `/usr/bin` — NixOS, and anything else built the same way — that
-    // made every Refresh and every Renewal fail with "could not run
-    // /usr/bin/curl". Perch ships a static Linux binary and an npm package, so
-    // those machines are in the audience whether or not the path is.
-    //
-    // The walk is reached only when the absolute path is *absent*, so no
-    // machine that has `curl` where it is expected is any weaker for it — and
-    // where it is absent there is no safer answer available, only the choice
-    // between a `PATH` walk and not working. The Windows arm has always taken
-    // `%SystemRoot%` from the environment, which anything that can set `PATH`
-    // can set too, so this is the rule that side already lives by.
+    // The walk is reached only where the absolute path is absent — a machine
+    // that does not populate `/usr/bin` — and there the only other answer is
+    // not working.
     curl_at(
         Path::new(USUALLY),
         &std::env::var_os("PATH").unwrap_or_default(),
     )
 }
 
-/// The choice itself, given the two places to look. Split from the caller above
-/// so a test can drive all three answers: this machine has `curl` where it is
-/// expected, so the branch that matters is the one it can never reach.
+/// The choice itself, given the two places to look. Split from the caller so a
+/// test can drive all three answers: a machine with `curl` where it is expected
+/// can never reach the branch that matters.
 #[cfg(not(windows))]
 fn curl_at(usually: &Path, path: &std::ffi::OsStr) -> Result<PathBuf, HostError> {
     if usually.is_file() {
@@ -86,26 +78,11 @@ fn curl_bin() -> Result<PathBuf, HostError> {
     Ok(PathBuf::from(root).join("System32").join("curl.exe"))
 }
 
-/// The options that are the same for every request, and none of which is a
-/// secret. Everything that is one goes in on stdin instead.
-///
-/// The two timeouts are what make a hung endpoint a *refusal* rather than a
-/// hang. Perch has no thread it can abandon a request from: `perch watcher run`
-/// waits out every read in its round. A connection that is open and silent
-/// would otherwise stop it indefinitely — which is worse than the network
-/// being down, because ADR a-figure-carries-its-age has an answer for that one
-/// and no answer for a loop that never comes back to be told.
-///
-/// Generous rather than tight: what is on the other side is a request Perch
-/// would rather complete than retry, and both numbers are far longer than a
-/// reply that is coming ever takes.
-///
-/// `-q` is first because it is only obeyed there, and it is here for the reason
-/// [`curl_bin`] names an absolute path: without it `curl` reads `~/.curlrc`
-/// before anything else, and that file can set `proxy` and `insecure` — which
-/// is a machine-local way of receiving an `Authorization: Bearer` header,
-/// arriving through a different door than `PATH`. It can also set `output`,
-/// which diverts the body to a file and leaves Perch parsing nothing.
+/// The options that are the same for every request, none of which is a secret.
+/// `-q` is first because it is only obeyed there: without it `curl` reads
+/// `~/.curlrc`, which can set `proxy` and `insecure` — a machine-local way of
+/// receiving an `Authorization: Bearer` header — and `output`, which diverts the
+/// body to a file.
 const CURL_ARGS: [&str; 7] = [
     "-q",
     "--silent",
@@ -116,28 +93,19 @@ const CURL_ARGS: [&str; 7] = [
     "-",
 ];
 
-/// How long a request gets when it does not say: long enough for a Refresh
-/// somebody is waiting on, over a connection that may be slow.
-///
-/// In the configuration rather than in [`CURL_ARGS`], where both of these used
-/// to be, so that a request carrying its own bound has one place to put it —
-/// and so that every part of a request still travels the same way (see
-/// [`HttpRequest`]).
+/// How long a request gets when it does not say. The two timeouts are what make
+/// a hung endpoint a *refusal*: `perch watcher run` waits out every read in its
+/// round, so a connection that is open and silent would stop it indefinitely.
+/// In the configuration rather than in [`CURL_ARGS`], so that a request
+/// carrying its own bound has one place to put it.
 const CONNECT_TIMEOUT_SECONDS: u64 = 10;
 const MAX_TIME_SECONDS: u64 = 30;
 
-/// The other bound a reply needs, beside how long it may take.
-///
-/// The two timeouts make a *silent* endpoint a refusal; neither makes a
-/// talkative one. A reply that keeps arriving is bounded only by `max-time`,
-/// and until then the whole of it is buffered by `Command::output` and copied
-/// again into `HttpResponse::body` — once per Account per round, on a
-/// `perch watcher run` that is meant to sit there for weeks.
-///
-/// Only Anthropic and `api.github.com` are ever addressed, so this is
-/// defense in depth rather than a live exposure. Generous for the same reason
-/// the timeouts are: the largest thing Perch reads is a Utilization document,
-/// which is a few kilobytes, and this is four orders of magnitude above it.
+/// The other bound a reply needs. The timeouts make a *silent* endpoint a
+/// refusal and neither makes a talkative one: a reply that keeps arriving is
+/// buffered whole by `Command::output` and copied again into
+/// `HttpResponse::body`. Four orders of magnitude above the largest thing Perch
+/// reads, so this is defense in depth rather than a live exposure.
 const MAX_REPLY_BYTES: u64 = 8 * 1024 * 1024;
 
 /// The request as a `curl` configuration file, which is what goes in on stdin.
@@ -148,33 +116,18 @@ const MAX_REPLY_BYTES: u64 = 8 * 1024 * 1024;
 fn curl_config(request: &HttpRequest<'_>) -> Result<String, HostError> {
     let quoted = super::double_quoted;
 
-    // `double_quoted` makes a value a token and says so: it does not make one
-    // inert, because a configuration file is read a line at a time and there is
-    // no escape for a newline to be quoted into. `security` has refused these
-    // where they enter since ADR claude-code-chooses-the-store; the `curl` half
-    // of the same invariant was never written, and an access token is a value
-    // Perch reads out of a JSON file it does not own — where `\n` is a legal
-    // escape. A token carrying one would end the `header` line and begin
-    // whatever the rest of it spelled, and `output =` writes a file while
-    // `url =` fetches one.
+    // A configuration file is read a line at a time and has no escape a newline
+    // could be quoted into, so a token carrying one would end the `header` line
+    // and begin whatever the rest of it spelled.
     super::inert("the URL", request.url)?;
     for (name, value) in request.headers {
         super::inert(&format!("the {name} header"), value)?;
     }
     if let Some(body) = request.body {
         super::inert("the request body", body)?;
-        // And `curl`'s own escape, which quoting does not disarm: the
-        // configuration parser strips the quotes and *then* the option parser
-        // reads a leading `@` in `data-binary` as "the rest of this is a
-        // filename". `curl` would post the contents of that file instead of the
-        // body, or fail naming a path — either way sending something Perch did
-        // not compose to an endpoint it authenticates to.
-        //
-        // Not reachable today: every body Perch posts is a JSON object and
-        // starts with `{`. Here because `inert`'s own reasoning applies exactly
-        // — "Perch does not author most of what goes through here" — and it
-        // produced a guard against newlines alone. Only the body, because `@`
-        // means nothing to `url` or to `header`.
+        // `curl`'s own escape, which quoting does not disarm: a leading `@` in
+        // `data-binary` is read as a filename. Only the body, because `@` means
+        // nothing to `url` or to `header`.
         if body.starts_with('@') {
             return Err(HostError::Other(
                 "the request body begins with `@`, which curl reads as a \
@@ -185,8 +138,7 @@ fn curl_config(request: &HttpRequest<'_>) -> Result<String, HostError> {
     }
 
     // Whole seconds, because that is the only unit `curl` takes here, and at
-    // least one: a bound that rounded down to zero would mean *no* bound, which
-    // is the opposite of what a caller asking for a short one wants.
+    // least one: a bound that rounded down to zero would mean *no* bound.
     let (connect, whole) = match request.within_millis {
         Some(millis) => {
             let seconds = millis.div_ceil(1000).max(1);
@@ -204,8 +156,7 @@ fn curl_config(request: &HttpRequest<'_>) -> Result<String, HostError> {
             quoted(&format!("{name}: {value}"))
         ));
     }
-    // Giving `curl` data is what makes the request a POST; there is no verb to
-    // set separately.
+    // Giving `curl` data is what makes the request a POST; there is no verb.
     if let Some(body) = request.body {
         config.push_str(&format!("data-binary = {}\n", quoted(body)));
     }
@@ -213,18 +164,13 @@ fn curl_config(request: &HttpRequest<'_>) -> Result<String, HostError> {
 }
 
 /// Runs a program, optionally with something on its stdin, and reads the whole
-/// of what it said.
-///
-/// The one place Perch spawns anything. Stdin is where every secret travels —
-/// `curl`'s configuration and `security`'s command lines both — so the choice
-/// between a pipe and `/dev/null` is the same choice in both cases and is made
-/// once.
+/// of what it said. The one place Perch spawns anything: stdin is where every
+/// secret travels, so the choice between a pipe and `/dev/null` is one choice
+/// made once.
 fn run(program: &Path, args: &[&str], stdin: Option<&str>) -> std::io::Result<Execution> {
-    // Named here rather than by each caller. `Command::spawn`'s error carries
-    // no path, so a machine without `/usr/bin/curl` failed `perch status
-    // --refresh` with "No such file or directory (os error 2)" and nothing at
-    // all about what was missing or where Perch looked. The kind is kept, so
-    // anything matching on `NotFound` still does.
+    // `Command::spawn`'s error carries no path, so the name is added here
+    // rather than by each caller. The kind is kept, so anything matching on
+    // `NotFound` still does.
     let mut child = Command::new(program)
         .args(args)
         .stdin(if stdin.is_some() {
@@ -247,17 +193,9 @@ fn run(program: &Path, args: &[&str], stdin: Option<&str>) -> std::io::Result<Ex
         let mut pipe = child.stdin.take().expect("stdin was piped");
         let written = pipe.write_all(input.as_bytes());
         drop(pipe);
-        // Reaped even when the write failed, and reported in the child's own
-        // words where it has any.
-        //
-        // `Child::drop` neither kills nor waits, so returning straight out of
-        // here left a zombie for the life of the process — and `perch watcher
-        // run` is a loop that spawns `curl` every round for as long as somebody
-        // leaves it running. The likeliest failure is an `EPIPE` from a child
-        // that has already exited, which is precisely the case where its stderr
-        // says what went wrong and "Broken pipe (os error 32)" does not: the
-        // same information loss the naming above was written to fix for a spawn
-        // that failed.
+        // Reaped even when the write failed, because `Child::drop` neither
+        // kills nor waits. Reported in the child's own words: the likeliest
+        // failure is an `EPIPE` from one that has already exited.
         if let Err(err) = written {
             let said = child
                 .wait_with_output()
@@ -275,17 +213,11 @@ fn run(program: &Path, args: &[&str], stdin: Option<&str>) -> std::io::Result<Ex
     Ok(Execution::from(child.wait_with_output()?))
 }
 
-/// How a process that has finished ended, as the one number a caller can pass
-/// on as its own exit code.
-///
-/// A code where the process exited with one. Where it did not it was killed by
-/// a signal, and the shell's own convention is the honest answer: 128 plus the
-/// signal, which is what `$?` reports for that same death and therefore what
-/// anything wrapping `perch run` is already written to read
-/// (ADR a-run-is-one-shot). The `-1` [`Execution`] uses is for the captured
-/// executions Perch only ever asks `succeeded()` of; a status that *becomes*
-/// Perch's exit code has to say more than "not zero", and -1 leaves the shell
-/// reporting 255 for a Ctrl-C.
+/// How a process that has finished ended, as the one number a caller can pass on
+/// as its own exit code. A death by signal is 128 plus the signal, which is what
+/// `$?` reports for that same death and so what anything wrapping `perch run`
+/// already reads (ADR a-run-is-one-shot). The `-1` [`Execution`] uses is for the
+/// executions Perch only ever asks `succeeded()` of.
 #[cfg(unix)]
 fn ended_as(status: std::process::ExitStatus) -> i32 {
     use std::os::unix::process::ExitStatusExt;
@@ -306,11 +238,10 @@ fn curl(config: &str) -> Result<Execution, HostError> {
     Ok(run(&curl_bin()?, &CURL_ARGS, Some(config))?)
 }
 
-/// Runs `security` and turns anything short of success into the distinction
-/// that matters: not found, or locked and denied.
-///
-/// `security -i` reports a failed sub-command on stderr while still exiting 0,
-/// so a clean exit is not on its own evidence that the item was written.
+/// Runs `security` and turns anything short of success into the distinction that
+/// matters: not found, or locked and denied. `security -i` reports a failed
+/// sub-command on stderr while still exiting 0, so a clean exit is not on its
+/// own evidence that the item was written.
 fn security(
     args: &[&str],
     stdin: Option<&str>,
@@ -322,10 +253,9 @@ fn security(
             detail: format!("could not run {SECURITY_BIN}: {err}"),
         })?;
 
-    // The stderr check belongs to `-i` and nothing else. That is the mode where
-    // a failed sub-command is reported on stderr while the process still exits
-    // 0; every other invocation says so with its exit code, and reading their
-    // stderr for a complaint would turn a warning into a failure.
+    // The stderr check belongs to `-i` and nothing else: every other invocation
+    // says so with its exit code, and reading their stderr for a complaint
+    // would turn a warning into a failure.
     let complained = args == ["-i"] && said_something_went_wrong(&execution.stderr);
     if execution.succeeded() && !complained {
         Ok(execution)
@@ -334,19 +264,10 @@ fn security(
     }
 }
 
-/// Whether `security` wrote a diagnostic of its own.
-///
-/// Matched on the `security:` prefix it writes those with, rather than on the
-/// word "error". Its failure lines routinely carry no such word —
-///
-/// ```text
-/// security: -25299: The specified item already exists in the keychain.
-/// security: SecKeychainItemCreateFromContent (<NULL>): The user name or passphrase you entered is not correct.
-/// ```
-///
-/// — so a substring search for "error" misses exactly the failures the check
-/// exists to catch, which is the silent-write case
-/// ADR claude-code-chooses-the-store is about.
+/// Whether `security` wrote a diagnostic of its own, matched on the `security:`
+/// prefix rather than on the word "error" — its failure lines routinely carry no
+/// such word, as in `security: -25299: The specified item already exists in the
+/// keychain.`
 fn said_something_went_wrong(stderr: &str) -> bool {
     stderr
         .lines()
@@ -390,18 +311,9 @@ impl Environment for RealHost {
     }
 
     fn env_var(&self, key: &str) -> Option<String> {
-        // Read as bytes and converted here, rather than `std::env::var`, so a
-        // value that is present and not text is told apart from one that is not
-        // there. `var().ok()` folds them together, and the two mean opposite
-        // things to every caller: `CLAUDE_CONFIG_DIR` read as unset sends a
-        // Credential to `~/.claude` instead of to the directory somebody
-        // pointed at, and `PERCH_HOME` read as unset puts Perch's own state
-        // somewhere they did not ask for.
-        //
-        // Still `None`, because there is nothing usable to hand back — a path
-        // Perch cannot spell cannot be joined or compared — but said out loud,
-        // because being ignored silently is what makes it a mystery rather than
-        // a mistake.
+        // Bytes rather than `std::env::var`, so a value that is present and not
+        // text is told apart from one that is not there — still `None`, because
+        // a path Perch cannot spell cannot be joined, but said out loud.
         let held = std::env::var_os(key)?;
         if held.is_empty() {
             return None;
@@ -428,24 +340,21 @@ impl Environment for RealHost {
         }
     }
 
-    /// Canonicalized, because the path is read as evidence of a Channel and
-    /// the Homebrew case arrives as a symlink: `std::env::current_exe` on macOS
-    /// hands back the path the process was launched with, which for a
-    /// Homebrew install is `<prefix>/bin/perch` and says nothing about a
-    /// Cellar. A path that will not canonicalize is handed back as it came —
-    /// less informative, and better than refusing to run.
+    /// Canonicalized, because `std::env::current_exe` on macOS hands back the
+    /// path the process was launched with — for Homebrew `<prefix>/bin/perch`,
+    /// which says nothing about a Cellar. A path that will not canonicalize is
+    /// handed back as it came, which is less informative and better than
+    /// refusing to run.
     fn current_exe(&self) -> Result<PathBuf, HostError> {
         let launched = std::env::current_exe()?;
         Ok(std::fs::canonicalize(&launched).unwrap_or(launched))
     }
 
-    /// Linked rather than shelled out to (ADR a-crate-must-not-cost-a-seam):
-    /// the whole of it is one `geteuid`, and `id -u` would be a process spawned
-    /// to answer a question the C library already holds.
-    ///
+    /// Linked rather than shelled out to: the whole of it is one `geteuid`, and
+    /// `id -u` would be a process spawned for a question the C library holds.
     /// The *effective* uid rather than the real one, because that is the
-    /// identity the filesystem will judge every write by, and the one launchd
-    /// files a session under.
+    /// identity the filesystem judges every write by, and the one launchd files
+    /// a session under.
     #[cfg(unix)]
     fn user_id(&self) -> Option<u32> {
         // SAFETY: `geteuid` takes nothing, cannot fail, and touches no memory.
@@ -453,7 +362,7 @@ impl Environment for RealHost {
     }
 
     /// Windows has no uid: a logon task names the user it runs as, and there is
-    /// nothing here to quote or to refuse (ADR the-machine-runs-the-watcher).
+    /// nothing here to quote or to refuse.
     #[cfg(not(unix))]
     fn user_id(&self) -> Option<u32> {
         None
@@ -461,14 +370,10 @@ impl Environment for RealHost {
 }
 
 /// A syscall's "no such file" as [`HostError::NotFound`], naming the path it was
-/// asked about; anything else as itself.
-///
-/// Written once because it was written nine times. Every `Files` and `Links`
-/// method that reads something has the same three arms — the value, the missing
-/// file, the rest — and nine copies of a classification is how a tenth call
-/// comes to disagree with the nine about what "not there" is. The distinction
-/// matters to callers: `HostError::NotFound` is the one `credentials` reads as
-/// "this store holds nothing" rather than as a machine that is broken.
+/// asked about; anything else as itself. One copy, because every read here has
+/// the same three arms and nine copies of a classification is how a tenth call
+/// comes to disagree about what "not there" is: `credentials` reads
+/// `NotFound` as "this store holds nothing" rather than as a broken machine.
 fn or_not_found<T>(result: std::io::Result<T>, path: &Path) -> Result<T, HostError> {
     match result {
         Ok(value) => Ok(value),
@@ -480,12 +385,9 @@ fn or_not_found<T>(result: std::io::Result<T>, path: &Path) -> Result<T, HostErr
 }
 
 /// The same, for the answer a lock turns on: something is already at this name.
-///
-/// `HostError::AlreadyExists` is load-bearing at this port — `mod.rs` calls it
-/// "the whole of what makes a lock a lock" — and `make_link` was letting `?`
-/// flatten `EEXIST` into `HostError::Io`, while `FakeHost::link` answered the
-/// variant. Nothing branches on it there today, so this is the gap being closed
-/// before a caller is written against the fake and is wrong on the machine.
+/// `HostError::AlreadyExists` is what makes a lock a lock, so a `?` that
+/// flattened `EEXIST` into `HostError::Io` here would answer differently from
+/// the fake, which reports the variant.
 fn or_already_exists<T>(result: std::io::Result<T>, path: &Path) -> Result<T, HostError> {
     match result {
         Ok(value) => Ok(value),
@@ -499,10 +401,9 @@ fn or_already_exists<T>(result: std::io::Result<T>, path: &Path) -> Result<T, Ho
 }
 
 /// The same three arms where a missing file is not a failure at all: `None`.
-///
 /// What every removal here wants, since a path that is already gone is the state
 /// the caller asked for — and what the two `remove_link`s want one step earlier,
-/// where the question is whether there is anything to inspect before removing.
+/// to decide whether there is anything to inspect.
 fn if_it_is_there<T>(result: std::io::Result<T>) -> Result<Option<T>, HostError> {
     match result {
         Ok(value) => Ok(Some(value)),
@@ -529,15 +430,10 @@ impl Files for RealHost {
     }
 
     /// Written beside and moved into place, so the file that ends up at `path`
-    /// is one that was created 0600 rather than one that was tightened
-    /// afterwards — even where something looser was already there
-    /// (ADR claude-code-chooses-the-store).
-    ///
-    /// The choreography itself is [`super::replace_via_tmp`], shared with the
-    /// non-secret writes: two copies of it would let the failure cleanup drift
-    /// apart between the path that handles Credentials and the path that does
-    /// not, which is the wrong pair to let drift. All this adds is the parent
-    /// directory, which has to be private before the file lands in it.
+    /// was created 0600 rather than tightened afterwards — even where something
+    /// looser was already there. All this adds to
+    /// [`super::replace_via_tmp`] is the parent directory, which has to be
+    /// private before the file lands in it.
     fn write_private_file(&self, path: &Path, contents: &str) -> Result<(), HostError> {
         if let Some(parent) = path.parent() {
             create_private_dir_all(parent)?;
@@ -583,14 +479,9 @@ impl Files for RealHost {
                     path: path.to_path_buf(),
                 })
             }
-            // A parent that is not there is `ENOENT`, and it is the other
-            // variant this port names. Flattened into `Io` it read as "the
-            // filesystem refused", which `lock::take` reports rather than
-            // waits out — the right outcome for the wrong stated reason, and
-            // the fake answered `NotFound` for it.
-            //
-            // Named for the *parent*, because the path itself is the one thing
-            // that is certainly absent here and saying so would be no news.
+            // A parent that is not there is `ENOENT`, which is the other
+            // variant this port names — and named for the *parent*, because the
+            // path itself is certainly absent and saying so would be no news.
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(HostError::NotFound {
                 path: path.parent().unwrap_or(path).to_path_buf(),
             }),
@@ -612,8 +503,8 @@ impl Files for RealHost {
 
     fn rename(&self, from: &Path, to: &Path) -> Result<(), HostError> {
         rename_replacing(from, to)?;
-        // The bytes are already durable by the time anything is renamed over
-        // another file here; this is what makes the new name durable too.
+        // The bytes are durable by the time anything is renamed over another
+        // file here; this is what makes the new name durable too.
         sync_directory_of(to);
         Ok(())
     }
@@ -640,7 +531,7 @@ impl Links for RealHost {
     }
 
     /// `symlink_metadata` rather than `read_link` alone, so the three answers
-    /// stay three: a link, something that is not a link, and nothing there.
+    /// stay three — a link, something that is not a link, and nothing there.
     /// `read_link` collapses the last two into one error.
     fn link_target(&self, path: &Path) -> Result<Option<PathBuf>, HostError> {
         let metadata = or_not_found(std::fs::symlink_metadata(path), path)?;
@@ -663,14 +554,9 @@ impl Keys for RealHost {
             service,
             account,
         )?;
-        // Taken out of the `Execution` and wiped there, rather than read from
-        // it and left behind. `security -w` answers with the Credential itself
-        // on stdout, so this buffer is the first thing on the machine to hold a
-        // live refresh token — and an `Execution` is an ordinary struct that
-        // would drop it back to the allocator untouched. The `String` this
-        // returns lands in a `Zeroizing` one frame up
-        // (`CredentialStore::read`); what could not be reached from there is
-        // the buffer the child's output arrived in.
+        // Taken out of the `Execution` and wiped there: `security -w` answers
+        // with the Credential on stdout, and an `Execution` would drop that
+        // buffer back to the allocator untouched.
         let mut stdout = std::mem::take(&mut execution.stdout);
         let decoded = decode_password_output(&stdout);
         stdout.zeroize();
@@ -687,15 +573,9 @@ impl Keys for RealHost {
         match keychain::write_path_for(&command_line) {
             WritePath::Stdin => security(&["-i"], Some(&command_line), service, account)?,
             WritePath::Argv => {
-                // The one time a Credential reaches `argv`, and therefore the
-                // process table. Hex is an encoding, not a protection: anything
-                // that can read `argv` recovers the bytes with `xxd -r -p`. It
-                // is done anyway because the alternative is `security`
-                // truncating the write mid-argument without saying so, which
-                // stores a corrupt Credential nothing notices until some Switch
-                // later (ADR claude-code-chooses-the-store) — but it is said
-                // out loud, because an invariant with a silent exception is not
-                // an invariant.
+                // The one time a Credential reaches `argv`, and so the process
+                // table. Said out loud, because an invariant with a silent
+                // exception is not one.
                 self.note(
                     "A Credential was too large for `security`'s stdin buffer, so it was \
                      given to it as a command-line argument instead. While that ran, any \
@@ -750,31 +630,15 @@ impl Processes for RealHost {
         for (key, value) in env {
             command.env(key, value);
         }
-        // The terminal belongs to the child for as long as it runs, and so do
-        // the keys that interrupt it.
-        //
-        // Ctrl-C is delivered to every process in the foreground group, and
-        // this process is in it. Claude Code handles it — Ctrl-C there clears
-        // the input line rather than exiting — while Perch took the default
-        // disposition and died. The shell's job is `perch`, so the prompt came
-        // back while `claude` was still reading the same tty, two programs
-        // typed at once; and `Claim::drop` never ran, so the session Marker was
-        // left behind for `clients_in` to find and corroborate against a pid
-        // that had gone.
-        //
-        // What an exec wrapper does about that is ignore the signals for the
-        // duration and let the child be the one that acts on them. The child
-        // must not *inherit* the ignoring, which is the trap: a disposition of
-        // `SIG_IGN` survives `exec`, so a `claude` started this way would never
-        // see Ctrl-C at all. So it is put back to the default between the fork
-        // and the exec.
+        // Ctrl-C reaches every process in the foreground group, and belongs to
+        // the child while it runs. The child must not *inherit* the ignoring:
+        // `SIG_IGN` survives `exec`, so it would never see Ctrl-C at all.
         #[cfg(unix)]
         let guarding = {
             use std::os::unix::process::CommandExt;
 
             // SAFETY: `signal` is async-signal-safe and is the whole of what
-            // this closure calls, which is the rule for anything between fork
-            // and exec.
+            // this closure calls, which is the rule between fork and exec.
             unsafe {
                 command.pre_exec(|| {
                     libc::signal(libc::SIGINT, libc::SIG_DFL);
@@ -784,7 +648,7 @@ impl Processes for RealHost {
             }
 
             // SAFETY: replacing this process's own dispositions with `SIG_IGN`,
-            // and keeping what was there to put back below.
+            // keeping what was there to put back below.
             let guarding = [libc::SIGINT, libc::SIGQUIT];
             (
                 guarding,
@@ -793,22 +657,13 @@ impl Processes for RealHost {
         };
 
         // Named here for the reason `run` names it: `Command::status`'s error
-        // carries no path, so a `claude` that had been uninstalled between
-        // Perch finding it and launching it failed a login with "could not
-        // launch a login: No such file or directory (os error 2)" — nothing
-        // about what was missing or where Perch looked. `commands::run` adds
-        // the name back for its own launch; the login path had no equivalent.
-        // The kind is kept, so anything matching on `NotFound` still does.
+        // carries no path either, and a `claude` uninstalled between being
+        // found and being launched is a real state.
         let ran = command.status();
 
-        // However the launch ended, including the one that never started. A
-        // process left ignoring Ctrl-C is the same class of mistake as a
-        // terminal left with its echo off, and `read_without_echo` says why it
-        // restores unconditionally.
-        //
-        // `SIG_ERR` is not a disposition — it is what `signal` answers when it
-        // could not install one — so handing it back would install an invalid
-        // handler over whatever was really there.
+        // However the launch ended, including the one that never started.
+        // `SIG_ERR` is not a disposition but what `signal` answers when it could
+        // not install one, so handing it back installs an invalid handler.
         #[cfg(unix)]
         // SAFETY: restoring exactly the dispositions `signal` reported above.
         unsafe {
@@ -848,15 +703,11 @@ impl Waiting for RealHost {
         listen_for_interrupts();
     }
 
-    /// In slices, checking between them, because the platforms do not agree on
-    /// what a signal does to a sleeping thread and none of them can be relied
-    /// on to cut one short: `nanosleep` reports how much was left and the
-    /// standard library goes back round for the rest. A watcher that noticed
-    /// Ctrl-C only when its poll interval happened to end would take two and a
-    /// half minutes to die.
-    ///
-    /// The slice is what the person waits for after pressing Ctrl-C, and the
-    /// only cost of a shorter one is a wakeup that does nothing.
+    /// In slices, checking between them, because no platform can be relied on to
+    /// cut a sleeping thread short — `nanosleep` reports how much was left and
+    /// the standard library goes back round for the rest. The slice is what the
+    /// person waits for after pressing Ctrl-C, and the only cost of a shorter
+    /// one is a wakeup that does nothing.
     fn wait(&self, millis: u64) -> Waited {
         const SLICE_MILLIS: u64 = 100;
 
@@ -869,8 +720,8 @@ impl Waiting for RealHost {
             std::thread::sleep(std::time::Duration::from_millis(slice));
             left -= slice;
         }
-        // Asked once more at the end, so a Ctrl-C arriving inside the last
-        // slice ends this wait rather than being carried into the next one.
+        // Asked once more at the end, so a Ctrl-C inside the last slice ends
+        // this wait rather than being carried into the next one.
         match interrupted() {
             true => Waited::Interrupted,
             false => Waited::Fully,
@@ -881,7 +732,7 @@ impl Waiting for RealHost {
 impl Terminal for RealHost {
     fn is_interactive(&self) -> bool {
         use std::io::IsTerminal;
-        // Both ends matter: a question needs somewhere to be shown as well as
+        // Both ends: a question needs somewhere to be shown as well as
         // somewhere to be answered from.
         std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
     }
@@ -922,20 +773,11 @@ impl Filesystem for RealHost {}
 
 impl Host for RealHost {}
 
-/// The body and the status code out of what `curl` wrote, which is the body
-/// followed by `--write-out '\n%{http_code}'`.
-///
-/// Apart from the caller so it can be asserted on. Nothing else can reach it —
-/// `FakeHost::http` answers with a `HttpResponse` already built — so the one
-/// piece of parsing on the path every Renewal and every Utilization read goes
-/// through had no test at all.
-///
-/// A status code that will not parse is said rather than swallowed. It was
-/// `unwrap_or(0)`, which turned "curl printed something Perch does not
-/// understand" into an HTTP status of zero: `anthropic::understand` has no arm
-/// for it, so the user was told their Credential was refused with `HTTP 0` —
-/// a number no server ever sends, about a request that may never have been
-/// made.
+/// The body and the status code out of what `curl` wrote. Apart from the caller
+/// so it can be asserted on, since `FakeHost::http` answers with a
+/// `HttpResponse` already built. A status code that will not parse is said
+/// rather than read as zero, which is a status no server sends about a request
+/// that may never have been made.
 fn split_reply(stdout: &str) -> Result<HttpResponse, HostError> {
     let (body, code) = stdout
         .rsplit_once('\n')
@@ -952,46 +794,24 @@ fn split_reply(stdout: &str) -> Result<HttpResponse, HostError> {
     })
 }
 
-/// One line from standard input, or `None` at end of it.
-///
-/// Through the same reader the secret prompt uses, which is not a tidiness
-/// question. This was `stdin().lock()`, an 8 KiB `BufReader` owned by the
-/// process, while [`read_secret`](RealHost::read_secret) reads the descriptor
-/// directly — and `perch holdings purge` asks a word, then a path, then an
-/// Export passphrase. Two readers on one descriptor is the buffered one
-/// swallowing bytes the unbuffered one then never sees: on a terminal it
-/// usually stops at the line, and "usually" is not a property to hand the
-/// passphrase prompt.
-///
-/// The `Zeroizing` the shared reader hands back costs nothing here and is
-/// dropped by the copy out. Wiping a line that was never secret is not wrong;
-/// two ways of reading one descriptor is.
+/// One line from standard input, or `None` at end of it. Through the same reader
+/// the secret prompt uses, because one descriptor has one reader: a buffered
+/// reader beside an unbuffered one swallows bytes the unbuffered one never sees,
+/// and `perch holdings purge` asks a word, then a path, then a passphrase.
 fn read_a_line() -> Result<Option<String>, HostError> {
     Ok(a_line_from(one_byte_of_standard_input)?.map(|line| line.to_string()))
 }
 
-/// One line from wherever the bytes come from, into a buffer that is wiped when
-/// it is dropped and never leaves a copy behind.
-///
-/// Both prompts come through here — the plain one and the secret one — so that
-/// one descriptor has one reader. What the wiping is *for* is the secret one.
-///
-/// `read_a_line` used to be a `BufRead::read_line` into a `String`, and
-/// `ask_secret`'s own comment claimed that was enough — "the buffer that gets wiped is the one the terminal was read into,
-/// not a second copy of it beside the first". It is two copies. `read_line`
-/// grows a `String` by reallocating, so a passphrase longer than the last
-/// capacity leaves fragments of itself in freed heap; and the `trim_end_matches`
-/// after it allocates a fresh `String` and drops the original untouched.
-///
-/// So the bytes are collected into one buffer that is reserved up front, grown
-/// only by hand — wiping what it abandons — and trimmed in place before it
-/// becomes the `String` the caller keeps. Every buffer the passphrase ever sits
-/// in is wiped.
+/// One line from wherever the bytes come from, into one buffer reserved up
+/// front, grown only by hand — wiping what it abandons — and trimmed in place.
+/// `read_line` into a `String` is two copies: it grows by reallocating, and a
+/// trim after it allocates afresh, so a long passphrase leaves fragments of
+/// itself in freed heap.
 fn a_line_from(
     mut next: impl FnMut() -> Result<Option<u8>, HostError>,
 ) -> Result<Option<Zeroizing<String>>, HostError> {
-    // Longer than any passphrase anybody types, so the growth below is a
-    // guard against being wrong rather than the ordinary path.
+    // Longer than any passphrase anybody types, so the growth below guards
+    // against being wrong rather than being the ordinary path.
     const ROOM: usize = 512;
 
     let mut bytes = Zeroizing::new(Vec::with_capacity(ROOM));
@@ -1003,8 +823,8 @@ fn a_line_from(
         }
         if bytes.len() == bytes.capacity() {
             // `Vec` would copy into the new allocation and free the old one
-            // untouched, which is the whole failure this function is about. So
-            // the move is made here and the buffer left behind is wiped.
+            // untouched, so the move is made here and the buffer left behind is
+            // wiped.
             let mut grown = Vec::with_capacity(bytes.capacity() * 2);
             grown.extend_from_slice(&bytes);
             let mut abandoned = std::mem::replace(&mut *bytes, grown);
@@ -1016,8 +836,8 @@ fn a_line_from(
         return Ok(None);
     }
 
-    // In place, so the trimmed bytes are gone rather than left behind a shorter
-    // copy of themselves.
+    // In place, so the trimmed bytes are gone rather than left behind a
+    // shorter copy of themselves.
     while bytes.last() == Some(&b'\r') {
         bytes.pop();
     }
@@ -1029,21 +849,18 @@ fn a_line_from(
     Ok(Some(secret))
 }
 
-/// One byte of standard input, straight off the descriptor.
-///
-/// Not through `stdin().lock()`, whose 8 KiB `BufReader` belongs to the process:
-/// read that way, the passphrase stays in a buffer nothing wipes for the rest of
-/// the run, however carefully the copy handed back is looked after.
+/// One byte of standard input, straight off the descriptor rather than through
+/// `stdin().lock()`, whose 8 KiB `BufReader` belongs to the process: read that
+/// way, the passphrase stays in a buffer nothing wipes for the rest of the run.
 #[cfg(unix)]
 fn one_byte_of_standard_input() -> Result<Option<u8>, HostError> {
     one_byte_of(libc::STDIN_FILENO)
 }
 
-/// The read itself, off whichever descriptor. Split from the caller above for
-/// the reason `a_secret_line_from` is split from *its* caller: standard input
-/// is not something a test may take over — the behavior suite links this
-/// library, and a `dup2` onto fd 0 would be one test reaching into every other
-/// test's process — while a pipe is.
+/// The read itself, off whichever descriptor. Split from the caller so a test
+/// can drive it: standard input is not something a test may take over, since the
+/// behavior suite links this library and a `dup2` onto fd 0 would reach into
+/// every other test in the process.
 #[cfg(unix)]
 fn one_byte_of(fd: libc::c_int) -> Result<Option<u8>, HostError> {
     let mut byte = 0u8;
@@ -1058,12 +875,8 @@ fn one_byte_of(fd: libc::c_int) -> Result<Option<u8>, HostError> {
 }
 
 /// The same on Windows, which has no descriptor to read and so goes through the
-/// buffered handle.
-///
-/// The copy this leaves in that buffer is a gap the unix arm does not have, and
-/// it is `std`'s rather than Perch's: `stdin()` is buffered and there is no
-/// unbuffered handle to ask for. What is fixed here either way is the
-/// reallocation and the second copy above, which are the ones this code owned.
+/// buffered handle. The copy that leaves in `std`'s own buffer is a gap the unix
+/// arm does not have, and there is no unbuffered handle to ask for.
 #[cfg(windows)]
 fn one_byte_of_standard_input() -> Result<Option<u8>, HostError> {
     use std::io::Read;
@@ -1076,33 +889,17 @@ fn one_byte_of_standard_input() -> Result<Option<u8>, HostError> {
 }
 
 /// Whether the terminal was echoing before Perch turned it off, and so whether
-/// an interrupted read owes it an `ECHO` back on.
-///
-/// A static because the only thing that can act between turning echo off and
-/// turning it back on is a signal handler, and a handler reaches nothing else.
-/// A terminal somebody had already put in `stty -echo` is left as they left it,
-/// which is why this is the answer rather than an assumption.
+/// an interrupted read owes it an `ECHO` back on. A static, because the only
+/// thing that can act between the two `tcsetattr` calls is a signal handler and
+/// a handler reaches nothing else. Asked rather than assumed, so a terminal
+/// already in `stty -echo` is left as somebody left it.
 static WAS_ECHOING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// The same, with the terminal not showing what is typed.
-///
-/// The whole of it is `ECHO` off, one line, `ECHO` back on — a platform
-/// primitive linked rather than taken as a crate, which is what
-/// ADR a-crate-must-not-cost-a-seam decided for the last two of these. The mode
-/// is restored whatever the read did, because a terminal left with its echo off
-/// outlives the process that turned it off and every shell after it types
-/// blind.
-///
-/// "Whatever the read did" has to include Ctrl-C, which is not something the
-/// read does. Only `perch watcher run` takes SIGINT over
-/// ([`listen_for_interrupts`]), so at the one prompt where echo is off the
-/// signal otherwise arrives at the default disposition and kills the process in
-/// the window between the two `tcsetattr` calls — and backing out of a
-/// passphrase prompt is a thing people do, not an accident. So the window is
-/// held with a handler that repairs the terminal and then hands the signal
-/// straight back: `tcgetattr`, `tcsetattr`, `signal` and `raise` are all
-/// async-signal-safe, and re-raising rather than exiting means a parent still
-/// sees a process that died of SIGINT.
+/// The same, with the terminal not showing what is typed: `ECHO` off, one line,
+/// `ECHO` back on. Restored however the read ended, Ctrl-C included — a terminal
+/// left with its echo off outlives the process that turned it off, so the window
+/// is held with a handler that repairs the terminal and re-raises, which is four
+/// async-signal-safe calls and a parent that still sees a death by SIGINT.
 #[cfg(unix)]
 fn read_without_echo() -> Result<Option<Zeroizing<String>>, HostError> {
     use std::os::fd::AsRawFd;
@@ -1112,9 +909,8 @@ fn read_without_echo() -> Result<Option<Zeroizing<String>>, HostError> {
     unsafe extern "C" fn show_again_and_stop(signal: libc::c_int) {
         if WAS_ECHOING.load(Relaxed) {
             // SAFETY: a `termios` owned by this frame and this process's own
-            // standard input, and both calls are async-signal-safe. `TCSANOW`
-            // rather than `TCSAFLUSH`: there is no longer a read for pending
-            // input to confuse, and flushing is work this frame need not do.
+            // standard input; both calls are async-signal-safe. `TCSANOW`,
+            // because there is no read left for pending input to confuse.
             unsafe {
                 let mut mode: libc::termios = std::mem::zeroed();
                 if libc::tcgetattr(libc::STDIN_FILENO, &mut mode) == 0 {
@@ -1141,18 +937,9 @@ fn read_without_echo() -> Result<Option<Zeroizing<String>>, HostError> {
     }
 
     WAS_ECHOING.store(showing.c_lflag & libc::ECHO != 0, Relaxed);
-    // Installed before the echo goes off rather than after, so there is no
-    // instant where it is off and nothing would put it back. A signal arriving
-    // early finds a terminal that is already echoing and leaves it that way.
-    //
-    // Both signals the same terminal delivers at this prompt with a default
-    // disposition that kills. SIGINT is the one somebody means; SIGQUIT is one
-    // key over, arrives the same way, and left exactly the blind shell this
-    // function exists to prevent — the guard was written for "backing out of a
-    // passphrase prompt is a thing people do", and Ctrl-\ is that too.
-    // SAFETY: the handler stores to an atomic and calls four async-signal-safe
-    // functions. `signal` hands back the disposition being replaced, which is
-    // put back below.
+    // Installed before the echo goes off, so there is no instant where it is off
+    // and nothing would put it back. Both signals, because Ctrl-\ kills too.
+    // SAFETY: four async-signal-safe calls and a store to an atomic.
     let guarding = [libc::SIGINT, libc::SIGQUIT];
     let previously = guarding.map(|signal| unsafe {
         libc::signal(
@@ -1163,11 +950,9 @@ fn read_without_echo() -> Result<Option<Zeroizing<String>>, HostError> {
 
     let mut hiding = showing;
     hiding.c_lflag &= !libc::ECHO;
-    // `TCSAFLUSH` rather than `TCSANOW`: anything typed ahead of the question was
-    // typed while the terminal was still echoing, and would be read as part of
-    // the passphrase after having been shown on the way in.
-    // SAFETY: both arguments are as above, and `hiding` is the mode just read
-    // back with one flag cleared.
+    // `TCSAFLUSH`, because anything typed ahead of the question was typed while
+    // the terminal was still echoing.
+    // SAFETY: `hiding` is the mode just read back with one flag cleared.
     let hidden = unsafe { libc::tcsetattr(terminal, libc::TCSAFLUSH, &hiding) } == 0;
 
     let typed = if hidden {
@@ -1176,15 +961,9 @@ fn read_without_echo() -> Result<Option<Zeroizing<String>>, HostError> {
         Err(HostError::Io(std::io::Error::last_os_error()))
     };
 
-    // SAFETY: as above, restoring exactly the mode `tcgetattr` reported and the
-    // dispositions `signal` reported. Both happen however the read ended, which
-    // is the whole of what this function promises.
-    //
-    // `SIG_ERR` is not a disposition and is what `signal` answers when it could
-    // not install one. Handed straight back it installs an invalid handler over
-    // whatever was really there, so an install that failed was turned into a
-    // second, worse failure — the one case where this is reached is the one
-    // where the original disposition is still in place and wants leaving alone.
+    // SAFETY: restoring what `tcgetattr` and `signal` reported, however the
+    // read ended. `SIG_ERR` is what `signal` answers when it could not install
+    // one, so that arm leaves the original disposition alone.
     unsafe {
         libc::tcsetattr(terminal, libc::TCSAFLUSH, &showing);
         for (signal, was) in guarding.into_iter().zip(previously) {
@@ -1196,14 +975,11 @@ fn read_without_echo() -> Result<Option<Zeroizing<String>>, HostError> {
     typed
 }
 
-/// The same on Windows, where the console has one mode word and `ENABLE_ECHO_INPUT`
-/// is the bit in it.
-///
-/// Ctrl-C is guarded for the reason the unix half is, and in the shape
-/// [`listen_for_interrupts`] already uses over there: a console handler, claimed
-/// for the length of the read and given back afterwards. It answers `FALSE`, so
-/// the default handler still ends the process — all this one does is put the
-/// echo back before it does.
+/// The same on Windows, where the console has one mode word and
+/// `ENABLE_ECHO_INPUT` is the bit in it. Ctrl-C is guarded by a console handler
+/// claimed for the length of the read; it answers `FALSE`, so the default
+/// handler still ends the process and all this one does is put the echo back
+/// first.
 #[cfg(windows)]
 fn read_without_echo() -> Result<Option<Zeroizing<String>>, HostError> {
     use std::sync::atomic::Ordering::Relaxed;
@@ -1286,16 +1062,10 @@ fn rename_replacing(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 /// The same on Windows, where a rename fails while anything holds a handle on
-/// the target — routinely Windows Defender, transiently. The target here can
-/// be `.claude.json`, the file the design goes out of its way not to lose, so
-/// the failure is retried briefly and then reported exactly as it would have
-/// been on the first try.
-///
-/// Both codes, because Windows reports the one phenomenon as either:
-/// `ERROR_SHARING_VIOLATION` from some paths through the kernel, and
-/// `ERROR_ACCESS_DENIED` from `MoveFileEx` replacing an open file — the code
-/// CI actually observed. A genuine permission failure spends the half second
-/// and then fails as it always did.
+/// the target — routinely Windows Defender, transiently — so it is retried
+/// briefly and then reported as it would have been on the first try. Both
+/// codes, because Windows reports the one phenomenon as either
+/// `ERROR_SHARING_VIOLATION` or `ERROR_ACCESS_DENIED`.
 #[cfg(windows)]
 fn rename_replacing(from: &Path, to: &Path) -> std::io::Result<()> {
     use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION};
@@ -1321,12 +1091,9 @@ fn rename_replacing(from: &Path, to: &Path) -> std::io::Result<()> {
     outcome
 }
 
-/// Creates a directory, and every directory above it, that nobody but its
-/// owner may enter.
-///
-/// The mode is given to `mkdir` rather than applied afterwards, so a directory
-/// that will hold a Credential is never briefly open
-/// (ADR claude-code-chooses-the-store).
+/// Creates a directory, and every directory above it, that nobody but its owner
+/// may enter. The mode is given to `mkdir` rather than applied afterwards, so a
+/// directory that will hold a Credential is never briefly open.
 #[cfg(unix)]
 fn create_private_dir_all(path: &Path) -> Result<(), HostError> {
     use std::os::unix::fs::DirBuilderExt;
@@ -1344,59 +1111,27 @@ fn create_private_dir_all(path: &Path) -> Result<(), HostError> {
     Ok(())
 }
 
-/// Creates a file with its mode, never writing *into* one that is already
-/// there: anything at the name is unlinked first and the file is created afresh
-/// with `O_EXCL`.
-///
-/// Which is the security property, and it is not the one the first line of this
-/// comment used to claim — it said the call refuses an existing file, and it has
-/// never refused one; `tests/conformance.rs` asserts that creating over one
-/// takes the new mode. Opening an existing file would leave it at whatever mode
-/// it already had, which for a Credential store is the whole question, and a
-/// reader auditing this path was being told the opposite of what it does.
-///
-/// Synced before it is closed. A rename is atomic against other *processes*,
-/// not against a crash: the rename can reach the disk while the data blocks
-/// have not, leaving a file that is present, named, and empty. What this writes
-/// is a Credential Anthropic has already Rotated to, or a `.claude.json` full
-/// of somebody's project history — neither of which can be written again.
+/// Creates a file with its mode, never writing *into* one already there:
+/// anything at the name is unlinked first and the file created afresh with
+/// `O_EXCL`, so it cannot be left at whatever mode it had. Synced before it is
+/// closed, because a rename is atomic against other *processes* and not against
+/// a crash — it can land while the data blocks have not.
 #[cfg(unix)]
 fn create_file_with_mode(path: &Path, contents: &str, mode: u32) -> Result<(), HostError> {
     use std::io::Write;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
-    // Anything already here is what a write that died left behind, and holding
-    // on to it would mean writing into a file of unknown mode.
+    // Anything already here is what a write that died left behind, and keeping
+    // it would mean writing into a file of unknown mode.
     let _ = std::fs::remove_file(path);
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(mode)
         .open(path)?;
-    // `open`'s mode is what the file is created *at most* as: the kernel takes
-    // the process umask out of it, so `.mode(0o644)` under `umask 077` is a
-    // file at 0600 and the port's promise of "exactly this mode" is not kept.
-    // The direction is always narrowing, so nothing was ever exposed by it —
-    // what it broke is `write_atomically`, which reads the target's mode and
-    // writes the replacement with it: a `.claude.json` the person keeps at 0644
-    // came back at 0600 after a Switch run from a shell with a tight umask, and
-    // the conformance case asserting the mode passed or failed depending on the
-    // shell that launched the suite.
-    //
-    // Set here rather than asked for at `open`, because there is nowhere else
-    // to ask. Safe at this point and nowhere later: the file is `O_EXCL` and
-    // still empty, so the instant this widens is an instant there is nothing in
-    // it to read — which is the whole of what "at creation" was protecting.
-    //
-    // Through the handle rather than through the path. `std::fs::set_permissions`
-    // is `chmod(2)` on a name and follows a link, which throws away the whole of
-    // what `create_new` just established: between the open and the chmod,
-    // anything that can write the directory can unlink this file and leave a
-    // link at the same name, and the mode lands on whatever that link points
-    // at. The directory is attacker-writable in the case this file already
-    // defends against — `CLAUDE_CONFIG_DIR` is taken verbatim and can name a
-    // shared location — and `File::set_permissions` is `fchmod(2)`, which
-    // cannot be redirected.
+    // `open`'s mode is what the file is created *at most* as, since the kernel
+    // takes the umask out of it. Safe here and nowhere later: the file is
+    // `O_EXCL` and still empty, so an instant of widening reveals nothing.
     file.set_permissions(std::fs::Permissions::from_mode(mode))?;
     file.write_all(contents.as_bytes())?;
     file.sync_all()?;
@@ -1429,14 +1164,10 @@ fn make_link(kind: Link, target: &Path, at: &Path) -> Result<(), HostError> {
     }
 }
 
-/// The same on Windows, where the kinds actually differ.
-///
-/// A symbolic link needs Developer Mode or elevation and fails without either,
-/// which is the failure the other two kinds exist to be tried after. Junctions
-/// are a reparse point the standard library does not write, so that one is the
-/// `junction` crate's: hand-writing a `REPARSE_DATA_BUFFER` is exactly the
-/// class of `unsafe` ADR a-crate-must-not-cost-a-seam declined to write, and it
-/// sits behind this port either way (ADR a-crate-must-not-cost-a-seam).
+/// The same on Windows, where the kinds actually differ. A symbolic link needs
+/// Developer Mode or elevation and fails without either, which is the failure
+/// the other two kinds exist to be tried after. A junction is a reparse point
+/// the standard library does not write, so that one is the `junction` crate's.
 #[cfg(windows)]
 fn make_link(kind: Link, target: &Path, at: &Path) -> Result<(), HostError> {
     match kind {
@@ -1452,20 +1183,11 @@ fn make_link(kind: Link, target: &Path, at: &Path) -> Result<(), HostError> {
     }
 }
 
-/// Removes a link and nothing else. A link that has already gone is not a
-/// failure, as with every other removal here.
-///
-/// "And nothing else" is checked rather than assumed. This was `remove_file` on
-/// a bare path, which deletes whatever is there — so the one call whose whole
-/// contract is that it only ever takes away Perch's own share would have taken
-/// away the person's file at the same name. Its only caller asks `link_target`
-/// first, but that is a separate syscall from this one and the fake could not
-/// have caught its loss: `FakeHost::remove_link` leaves a plain file alone.
-///
-/// A symbolic link and no other kind, because that is all there is to remove
-/// here: `reconcile::make` offers a hard link on Windows alone, and Windows has
-/// its own arm below. A hard link is a name for the file and cannot be told
-/// from one, so a check like this would be wrong there and is right here.
+/// Removes a link and nothing else, checked rather than assumed: a bare
+/// `remove_file` would take away the person's file at the same name, and the
+/// caller's `link_target` is a separate syscall. A symbolic link and no other
+/// kind, because `reconcile::make` offers a hard link on Windows alone and a
+/// hard link is a name for the file that cannot be told from one.
 #[cfg(not(windows))]
 fn remove_link(path: &Path) -> Result<(), HostError> {
     let Some(metadata) = if_it_is_there(std::fs::symlink_metadata(path))? else {
@@ -1481,23 +1203,10 @@ fn remove_link(path: &Path) -> Result<(), HostError> {
 }
 
 /// The same on Windows, where which call removes a link depends on whether it
-/// names a directory.
-///
-/// Read off the attributes rather than off `FileType`, which reports a junction
-/// as a symlink and not as a directory — true, and not what the call to make
-/// turns on.
-///
-/// The same refusal as the unix arm, and it was missing here: the attributes
-/// were read only to choose between the two removals, so whatever sat at the
-/// name went — a plain file of the person's, or an empty directory of theirs.
-/// `FakeHost::remove_link` refuses regardless of platform, so the test that
-/// proves the guard passed on Windows by asking the adapter that has it.
-///
-/// A reparse point rather than a symlink, because that is the one thing both
-/// kinds Windows makes have in common: `reconcile::make` offers a junction here
-/// as well as a symbolic link, and a junction is not a symlink to anything that
-/// asks. A hard link is left out for the reason the unix arm gives — it is a
-/// name for the file and cannot be told from one.
+/// names a directory. Read off the attributes rather than off `FileType`, which
+/// reports a junction as a symlink and not as a directory — and the refusal
+/// turns on a reparse point rather than a symlink, which is the one thing both
+/// kinds Windows makes have in common.
 #[cfg(windows)]
 fn remove_link(path: &Path) -> Result<(), HostError> {
     use std::os::windows::fs::MetadataExt;
@@ -1525,13 +1234,10 @@ fn remove_link(path: &Path) -> Result<(), HostError> {
     if_it_is_there(removed).map(|_| ())
 }
 
-/// Whether the person at the terminal has asked a loop to stop.
-///
-/// A `static` rather than something the Host owns, because the handler that
-/// sets it is the operating system's to call and it is handed no context to
-/// find a Host through. Everything a signal handler may touch has to be
-/// async-signal-safe, and a single atomic flag is the whole of what this one
-/// touches.
+/// Whether the person at the terminal has asked a loop to stop. A `static`
+/// rather than something the Host owns, because the handler that sets it is the
+/// operating system's to call and is handed no context to find a Host through —
+/// and a single atomic flag is the whole of what a signal handler may touch.
 static INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn interrupted() -> bool {
@@ -1539,45 +1245,17 @@ fn interrupted() -> bool {
 }
 
 /// Takes Ctrl-C — and the signal a service manager stops a process with — over
-/// from the default handler, which would kill the process where it stands.
-///
-/// Perch links the platform's own primitive rather than taking a crate for it
-/// (ADR a-crate-must-not-cost-a-seam): the whole of the unix half is two
-/// `signal` calls, and the whole of the Windows half is one
-/// `SetConsoleCtrlHandler`.
-///
-/// **`SIGTERM` as well as `SIGINT`, and this is what a Service rests on**
-/// (ADR the-machine-runs-the-watcher). `SIGINT` is what a person types;
-/// `SIGTERM` is what systemd and launchd send to stop a unit, and its default
-/// action is immediate death. Unhandled, a `systemctl --user stop` arriving
-/// mid-Switch would kill Perch between the incoming Credential reaching the
-/// Default Profile and the Identity being patched — a Landing nobody wrote
-/// down, which is the one state ADR a-switch-is-written-down-first's ordering
-/// exists to make impossible. Both mean the same thing to the loop, so both set
-/// the same flag and are answered at the same place: the wait.
-///
-/// The handler stands down after one signal, so a **second** of either kills the
-/// process the way it always did. The first asks the loop to finish what it is
-/// doing, and there is no bound on how long that takes — a round waiting on a
-/// keychain prompt or on a network that has gone away could sit there — so
-/// neither the person watching nor the service manager is left with a program
-/// that has taken the only way of stopping it and given nothing back. That
-/// second signal is what a service manager sends at the end of its stop grace,
-/// which `install` pins to thirty seconds on every platform.
-///
-/// Idempotent, and safe to call more than once: installing the same handler
-/// twice installs the same handler.
+/// from the default handler. **`SIGTERM` as well as `SIGINT`, and this is what a
+/// Service rests on** (ADR the-machine-runs-the-watcher): unhandled, a
+/// `systemctl --user stop` mid-Switch leaves a Landing nobody wrote down. It
+/// stands down after one signal, so a **second** of either kills the process.
 #[cfg(unix)]
 fn listen_for_interrupts() {
     unsafe extern "C" fn stop(signal: libc::c_int) {
         INTERRUPTED.store(true, std::sync::atomic::Ordering::Relaxed);
-        // SAFETY: `signal` is async-signal-safe, and this hands the signal back
-        // to the default handler rather than installing anything of Perch's.
-        //
-        // Only the signal that arrived is stood down, which is deliberate: a
-        // first Ctrl-C followed by a `systemctl stop` should still be able to
-        // kill a loop that is wedged finishing its Switch, and standing both
-        // down together would leave one of them re-arming the other's default.
+        // Only the signal that arrived is stood down, so a first Ctrl-C followed
+        // by a `systemctl stop` still kills a wedged loop.
+        // SAFETY: `signal` is async-signal-safe and installs the default.
         unsafe { libc::signal(signal, libc::SIG_DFL) };
     }
 
@@ -1590,15 +1268,11 @@ fn listen_for_interrupts() {
     }
 }
 
-/// The same on Windows, where Ctrl-C is a console event delivered on a thread
-/// of its own rather than a signal.
-///
+/// The same on Windows, where Ctrl-C is a console event on a thread of its own.
 /// Only the two events that mean "stop this program" are claimed, and only the
-/// first of them: the second is answered `FALSE` and left to the default
-/// handler, which ends the process — the same standing-down the unix half does,
-/// for the same reason. A console being closed or a user logging out is never
-/// claimed at all, because those are not requests to finish what you were
-/// doing, and Windows kills a handler that claims them seconds later anyway.
+/// first of them. A console being closed or a user logging out is never claimed
+/// at all: those are not requests to finish what you were doing, and Windows
+/// kills a handler that claims them seconds later anyway.
 #[cfg(windows)]
 fn listen_for_interrupts() {
     use windows_sys::Win32::Foundation::{FALSE, TRUE};
@@ -1617,10 +1291,9 @@ fn listen_for_interrupts() {
         }
     }
 
-    // SAFETY: the handler stores to an atomic and reads its argument, and the
-    // routine stays valid for the life of the process. A registration that
-    // fails leaves the default handler in place, which ends the process on
-    // Ctrl-C — the behavior of every other Perch command.
+    // SAFETY: the handler stores to an atomic and reads its argument, and stays
+    // valid for the life of the process. A registration that fails leaves the
+    // default handler in place, which is every other command's behavior.
     unsafe {
         SetConsoleCtrlHandler(Some(stop), TRUE);
     }
@@ -1634,13 +1307,11 @@ fn listen_for_interrupts() {
 #[cfg(not(any(unix, windows)))]
 fn listen_for_interrupts() {}
 
-/// Makes the *name* durable, once the bytes behind it are.
-///
-/// `sync_all` on the file promises its contents survive; the directory entry
-/// the rename created is a separate write, and on a crash a file can be there
-/// with its old name or with neither. Best-effort: a directory that will not
-/// open for reading — Windows, most of all — is not a reason to fail a write
-/// that has already landed.
+/// Makes the *name* durable, once the bytes behind it are. `sync_all` on the
+/// file promises its contents survive; the directory entry a rename created is a
+/// separate write, and on a crash a file can be there with its old name or with
+/// neither. Best-effort: a directory that will not open for reading is not a
+/// reason to fail a write that has already landed.
 fn sync_directory_of(path: &Path) {
     if let Some(parent) = path.parent()
         && let Ok(dir) = std::fs::File::open(parent)
@@ -1662,25 +1333,11 @@ fn mode_of(_metadata: &std::fs::Metadata) -> Option<u32> {
     None
 }
 
-/// The one `chmod` Perch performs, done through a handle rather than through a
-/// name.
-///
-/// `std::fs::set_permissions` is `chmod(2)` on a path and follows a link, which
-/// is the hazard [`create_file_with_mode`] is already written against and the
-/// one call left making it. The file this narrows is a Credential store Perch
-/// did not necessarily create — Claude Code did, or a backup restored it — and
-/// it sits under `CLAUDE_CONFIG_DIR`, which is taken verbatim and can name a
-/// location somebody else can write. A link planted at that name sent the mode
-/// to whatever it pointed at, and the two path-based calls either side of it
-/// (`file_mode`, then this) were a window as well as a redirection.
-///
-/// `O_NOFOLLOW` on the open is what closes it: a symlink at the last component
-/// fails with `ELOOP` rather than being followed, so the answer becomes the
-/// remark `tighten_if_loose` already makes about a file it could not narrow.
-/// `fchmod(2)` on the handle cannot be redirected afterwards.
-///
-/// Read-only, because a mode is not the contents: opening for writing would
-/// truncate the Credential this is protecting.
+/// The one `chmod` Perch performs. `O_NOFOLLOW` is what makes it a handle rather
+/// than a name: a symlink at the last component fails with `ELOOP`, so the answer
+/// becomes the remark `tighten_if_loose` already makes about a file it could not
+/// narrow. Read-only, because opening for writing would truncate the Credential
+/// this is protecting.
 #[cfg(unix)]
 fn set_private_mode(path: &Path) -> Result<(), HostError> {
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -1698,17 +1355,15 @@ fn set_private_mode(_path: &Path) -> Result<(), HostError> {
 }
 
 /// When a process began, in the terms `/proc` speaks: field 22 of
-/// `/proc/<pid>/stat` is the start in clock ticks since boot, and boot itself
-/// is `btime` in `/proc/stat`, in seconds since the epoch.
-///
-/// Both figures round down, so the answer can only run early — the safe
-/// direction, since an answer that ran late could make a genuine client look
-/// like a recycled PID.
+/// `/proc/<pid>/stat` is the start in clock ticks since boot, and boot itself is
+/// `btime` in `/proc/stat`. Both figures round down, so the answer can only run
+/// early — the safe direction, since one that ran late would make a genuine
+/// client look like a recycled PID.
 #[cfg(target_os = "linux")]
 fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    // The command name sits in parentheses and may hold anything, spaces and
-    // parentheses included; the numbered fields resume after the last ')'.
+    // The command name sits in parentheses and may hold anything; the numbered
+    // fields resume after the last ')'.
     let after_command = stat.rsplit_once(')')?.1;
     let ticks_after_boot: i64 = after_command.split_whitespace().nth(19)?.parse().ok()?;
 
@@ -1722,7 +1377,7 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
 
     // SAFETY: `sysconf` reads a value the C library holds and takes no pointer.
     // A name it does not know answers -1, which the check below treats as no
-    // answer rather than as a rate.
+    // answer.
     let ticks_per_second = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
     if ticks_per_second <= 0 {
         return None;
@@ -1730,14 +1385,11 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
     DateTime::from_timestamp_millis(boot * 1_000 + ticks_after_boot * 1_000 / ticks_per_second)
 }
 
-/// When a process began, as libproc reports it: the `proc_bsdinfo` for one
-/// pid, whose `pbi_start_tvsec`/`pbi_start_tvusec` are the start as a
-/// microsecond-resolution timestamp.
-///
-/// `proc_pidinfo` rather than `sysctl KERN_PROC_PID`, because the libc crate
-/// carries a vetted declaration of the former for Apple and none of the
-/// latter's `kinfo_proc` — and hand-writing that struct is precisely the
-/// `unsafe` ADR a-crate-must-not-cost-a-seam exists to avoid.
+/// When a process began, as libproc reports it: the `proc_bsdinfo` for one pid,
+/// whose `pbi_start_tvsec`/`pbi_start_tvusec` are the start to the microsecond.
+/// `proc_pidinfo` rather than `sysctl KERN_PROC_PID`, because `libc` carries a
+/// vetted declaration of the former for Apple and none of the latter's
+/// `kinfo_proc`.
 #[cfg(target_os = "macos")]
 fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
     // SAFETY: `proc_bsdinfo` is plain old data, so an all-zero value is a valid
@@ -1746,10 +1398,8 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
     let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
 
     // SAFETY: the buffer is the `info` above and `size` is that same type's
-    // size, so the kernel cannot write past it. That the two agree is exactly
-    // what the vetted `libc` declaration buys — a hand-written `kinfo_proc`
-    // getting the size wrong is the class of mistake
-    // ADR a-crate-must-not-cost-a-seam declined to risk.
+    // size, so the kernel cannot write past it. That the two agree is what the
+    // vetted declaration buys.
     let written = unsafe {
         libc::proc_pidinfo(
             pid as libc::c_int,
@@ -1766,12 +1416,9 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
     }
 
     let seconds = i64::try_from(info.pbi_start_tvsec).ok()?;
-    // `checked_mul`, because this is the one arithmetic here on a number the
-    // kernel chooses: a `tv_usec` above 4,294,967 overflows `u32` and is a
+    // `checked_mul`, because a `tv_usec` above 4,294,967 overflows `u32`: a
     // panic in a debug build and a wrapped nanosecond count in a release one.
-    // A real `tv_usec` is under a million, so nothing is expected to reach it —
-    // which is exactly the kind of expectation worth spelling as an answer
-    // rather than as a multiplication.
+    // A real one is under a million, which is an expectation and not a promise.
     let nanoseconds = u32::try_from(info.pbi_start_tvusec)
         .ok()?
         .checked_mul(1_000)?;
@@ -1779,14 +1426,10 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
 }
 
 /// When a process began, as `GetProcessTimes` reports it: a creation `FILETIME`
-/// counting 100-nanosecond ticks from 1601.
-///
-/// Only for a process that is still running. A Windows process object outlives
-/// its exit for as long as anything holds a handle, and `GetProcessTimes`
-/// answers for it the whole while — but an exited process is a gone one here,
-/// as it is on unix once reaped, because a start time exists to corroborate a
-/// session marker (ADR a-profile-is-live-by-evidence) and a process that has
-/// exited corroborates nothing.
+/// counting 100-nanosecond ticks from 1601. Only for a process that is still
+/// running — a Windows process object outlives its exit while anything holds a
+/// handle, and a start time exists to corroborate a session marker
+/// (ADR a-profile-is-live-by-evidence), which an exited process cannot.
 #[cfg(windows)]
 fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
     use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, STILL_ACTIVE};
@@ -1797,15 +1440,9 @@ fn process_started_at(pid: u32) -> Option<DateTime<Utc>> {
     /// The epoch, in milliseconds after the point `FILETIME` counts from.
     const EPOCH_MILLIS_AFTER_1601: i64 = 11_644_473_600_000;
 
-    // `STILL_ACTIVE` is 259, so a process that exits with code 259 reads as
-    // running. That is the safe direction here and deliberately so: "running"
-    // means Perch leaves the Profile alone, and a marker corroborated by a
-    // process that has in fact exited costs a refusal the user can clear by
-    // deleting the file.
-    //
-    // SAFETY: every call takes either a handle this block opened or a value
-    // owned by this frame, and the handle is closed on every path out —
-    // including the two early returns below.
+    // `STILL_ACTIVE` is 259, so a process that exits with 259 reads as running.
+    // The safe direction: "running" means Perch leaves the Profile alone.
+    // SAFETY: a handle this block opened, closed on every path out.
     unsafe {
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if process.is_null() {
@@ -1865,21 +1502,11 @@ fn home_from(variable: &str, value: Option<std::ffi::OsString>) -> Result<PathBu
         })
 }
 
-/// Whether a process exists. Signal 0 performs the permission and existence
-/// checks without delivering anything.
-///
-/// The identifier is narrowed rather than cast, because `kill` reads the values
-/// a cast can produce as something else entirely: `0` is the caller's own
-/// process group and `-1` is every process it may signal, and both answer "yes"
-/// to a signal that is never delivered. A marker file is named after a number
-/// somebody else wrote (`probe::clients_in` parses any `u32`), so `4294967295`
-/// and `0` are both reachable, and both would otherwise report a live client
-/// that is not there — which refuses every Switch against that Profile forever.
-///
-/// `EPERM` is alive. It means the process exists and belongs to another user,
-/// which is the same reasoning the Windows half already writes down for a
-/// handle it may not open: a Profile that looks Live is one Perch leaves alone,
-/// and that is the safe direction. Only `ESRCH` is dead.
+/// Whether a process exists. Signal 0 performs the checks without delivering
+/// anything, and the identifier is narrowed rather than cast: `0` and `-1` are a
+/// process *group* to `kill`, and both are reachable since `probe::clients_in`
+/// parses a pid out of any filename. `EPERM` is alive and only `ESRCH` is dead,
+/// because a Profile that looks Live is one Perch leaves alone.
 #[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
     let Ok(pid) = i32::try_from(pid) else {
@@ -1888,11 +1515,9 @@ fn process_alive(pid: u32) -> bool {
     if pid <= 0 {
         return false;
     }
-    // SAFETY: `kill` takes no pointer and touches no memory Perch owns. Signal
-    // `0` sends nothing at all — it is the "does this pid exist, and may I
-    // signal it" query — and the two guards above are what make the argument a
-    // pid rather than one of the values `kill` reads as a *group*: `0` is the
-    // caller's own process group and `-1` is every process it may signal.
+    // SAFETY: `kill` takes no pointer and touches no memory Perch owns, signal
+    // `0` delivers nothing, and the guards above make the argument a pid rather
+    // than a group.
     if unsafe { libc::kill(pid, 0) } == 0 {
         return true;
     }
@@ -1931,11 +1556,8 @@ fn process_alive(pid: u32) -> bool {
 #[cfg(unix)]
 fn touch_now(path: &Path) -> Result<(), HostError> {
     // `OsStrExt::as_bytes` rather than `as_encoded_bytes`: this is the call
-    // whose result is documented to be the bytes the operating system will
-    // receive, which is exactly what a `CString` for `utimes` has to hold. The
-    // encoding behind `as_encoded_bytes` is deliberately unspecified, and it
-    // happening to be the same thing on unix today is not the promise this
-    // needs.
+    // documented to give the bytes the operating system will receive, which is
+    // what a `CString` for `utimes` has to hold.
     use std::os::unix::ffi::OsStrExt;
     let raw = std::ffi::CString::new(path.as_os_str().as_bytes())
         .map_err(|err| HostError::Other(format!("{} is not a path: {err}", path.display())))?;
@@ -1944,10 +1566,8 @@ fn touch_now(path: &Path) -> Result<(), HostError> {
         Ok(())
     } else {
         // Through `or_not_found`, because a path that is not there is the one
-        // failure this port names rather than lumping in with the rest — and
-        // `FakeHost::touch` resolves first and answers `NotFound`, so this was
-        // the two adapters disagreeing about the variant a lock reads as "the
-        // artifact has gone".
+        // failure this port names — and it is the variant a lock reads as "the
+        // artifact has gone", which both adapters have to answer alike.
         or_not_found(Err(std::io::Error::last_os_error()), path)
     }
 }
@@ -1998,18 +1618,9 @@ fn touch_now(path: &Path) -> Result<(), HostError> {
 
 #[cfg(test)]
 mod tests {
-    /// Ctrl-C during a Run belongs to the client, and Perch survives it to put
-    /// its Marker back.
-    ///
-    /// A terminal delivers SIGINT to every process in the foreground group, so
-    /// this process gets one too. Left at the default disposition it died while
-    /// the client was still holding the tty — the shell's prompt returning
-    /// underneath a program still reading it — and `Claim::drop` never ran, so
-    /// the session Marker outlived the Run.
-    ///
     /// Sent to this process directly rather than to a group, which is what a
-    /// test may do: what is being asserted is the disposition, and a signal
-    /// raised here arrives at the same handler a terminal's would.
+    /// test may do: what is asserted is the disposition, and a signal raised
+    /// here arrives at the same handler a terminal's would.
     #[cfg(unix)]
     #[test]
     fn an_interrupt_during_a_launch_belongs_to_the_client_and_perch_lives_through_it() {
@@ -2023,11 +1634,9 @@ mod tests {
             "a SIGINT arriving while the child runs is the child's: {ran:?}"
         );
 
-        // And put back afterwards, or every later Ctrl-C in this process would
-        // be swallowed too. Asked by installing the default and reading back
-        // what was there.
-        // SAFETY: reading the current disposition by replacing it and putting
-        // the answer straight back.
+        // Put back afterwards, or every later Ctrl-C in this process would be
+        // swallowed too.
+        // SAFETY: reading the disposition by replacing it and putting it back.
         let restored = unsafe {
             let was = libc::signal(libc::SIGINT, libc::SIG_DFL);
             libc::signal(libc::SIGINT, was);
@@ -2040,9 +1649,6 @@ mod tests {
         );
     }
 
-    /// `curl` is found where it almost always is, and the walk exists for the
-    /// machines that do not put it there.
-    ///
     /// All three answers, driven off a scratch directory rather than off this
     /// machine — which has `curl` at `/usr/bin`, and so can never reach the two
     /// branches that matter.
@@ -2080,12 +1686,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The read a passphrase arrives through, driven off a pipe rather than off
-    /// standard input — which the suite may not take over, because every other
-    /// test in the process is using it.
-    ///
-    /// All three answers, because they are three different things to the caller:
-    /// a byte, the end of input, and a descriptor that will not be read.
+    /// Driven off a pipe rather than off standard input, which the suite may not
+    /// take over: every other test in the process is using it. All three answers,
+    /// because a byte, the end of input and a descriptor that will not be read
+    /// are three different things to the caller.
     #[cfg(unix)]
     #[test]
     fn a_byte_the_end_of_input_and_a_refusal_are_three_answers() {
@@ -2135,12 +1739,6 @@ mod tests {
     }
 
     /// The buffer arithmetic a passphrase goes through, driven byte by byte.
-    ///
-    /// What is being asserted is not only the answer: it is that the answer is
-    /// reached without leaving a copy behind. `read_line` into a `String` and a
-    /// `trim_end_matches(...).to_string()` after it produce the same text and
-    /// two un-wiped buffers, which is what `ask_secret` used to claim it did
-    /// not do.
     fn typed(input: &str) -> Option<String> {
         let mut bytes = input.bytes().collect::<std::collections::VecDeque<u8>>();
         super::a_line_from(|| Ok(bytes.pop_front()))
@@ -2202,11 +1800,8 @@ mod tests {
         // An empty body still carries a status, which is what a 204 looks like.
         assert_eq!(split_reply("\n204").expect("a bodyless reply").status, 204);
 
-        // And what curl did not write is said as itself. `unwrap_or(0)` turned
-        // this into an HTTP status of zero, which `anthropic::understand` has no
-        // arm for — so somebody was told their Credential was refused with
-        // `HTTP 0`, a number no server sends, about a request that may never
-        // have been made.
+        // And what curl did not write is said as itself rather than read as a
+        // status of zero, which `anthropic::understand` has no arm for.
         let refused = split_reply("something went wrong\nnot a number")
             .expect_err("that is not a status code");
         assert!(
@@ -2306,18 +1901,10 @@ mod tests {
     }
 
     /// On a real filesystem, because this is the primitive the lock protocol
-    /// leans on: a lock artifact is a **directory**, and its modification time
-    /// is what says whether the holder is alive or died holding it. The
-    /// platform split in `touch_now` (backup semantics on Windows) exists for
-    /// exactly this case.
-    ///
-    /// It has to outwait a coarse filesystem timestamp, and there is no faking
-    /// that — but a second of wall clock is a price rather than a claim, and
-    /// this touches nothing outside a directory of its own in `temp_dir`, so
-    /// there is nothing here to hold back (ADR a-suite-is-named-and-gated).
-    /// Ungated with `lock::exclusivity`, which is the other one that was
-    /// waiting on a clock: the two together are a second or two on a six-second
-    /// suite, and Cargo parallelizes within the binary.
+    /// leans on: a lock artifact is a directory whose modification time says
+    /// whether its holder is alive. It outwaits a coarse filesystem timestamp,
+    /// which is a second of wall clock and a price rather than a claim — and it
+    /// touches nothing outside `temp_dir` (ADR a-suite-is-named-and-gated).
     #[test]
     fn touch_moves_a_directorys_modification_time_forward() {
         let host = RealHost::new();
@@ -2360,13 +1947,10 @@ mod tests {
         );
     }
 
-    /// The temp path a replacement is written at sits beside the target and
-    /// carries this process's id, so it is guessable rather than secret.
-    /// `CLAUDE_CONFIG_DIR` is taken verbatim and can name a directory somebody
-    /// else may write to, so a symlink planted there would have Perch write the
-    /// Identity through it to a file of the attacker's choosing. What stops it
-    /// is not the name: the file is unlinked and created afresh with `O_EXCL`,
-    /// which is the shape the Credential writer always used.
+    /// The temp path is guessable rather than secret, and
+    /// `CLAUDE_CONFIG_DIR` can name a directory somebody else may write to. What
+    /// stops a symlink planted there is not the name: the file is unlinked and
+    /// created afresh with `O_EXCL`.
     #[cfg(unix)]
     #[test]
     fn a_replacement_is_never_written_through_something_left_at_the_temp_path() {
@@ -2420,13 +2004,10 @@ mod tests {
         assert_eq!(config.lines().count(), 5, "one option per line: {config}");
     }
 
-    /// A request that says how long it may take gets that, and one that does
-    /// not gets the ordinary bound.
-    ///
-    /// Both in the configuration rather than in `CURL_ARGS`, which is where
-    /// they were: the upgrade check on `perch --version` is a line nobody asked
-    /// for, and thirty seconds of a black-holed network is a great deal to
-    /// spend on one (ADR an-upgrade-asks-its-channel).
+    /// A request that says how long it may take gets that, and one that does not
+    /// gets the ordinary bound. The upgrade check on `perch --version` is a line
+    /// nobody asked for, and thirty seconds of a black-holed network is a great
+    /// deal to spend on one (ADR an-upgrade-asks-its-channel).
     #[test]
     fn a_request_may_carry_its_own_bound_and_otherwise_gets_the_ordinary_one() {
         let ordinary = curl_config(&HttpRequest::get("https://example.test/usage", &[])).unwrap();
