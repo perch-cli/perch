@@ -1803,8 +1803,15 @@ impl port::Links for FakeHost {
         if let Some(detail) = self.fs.undeletable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
-        // A hard link is a name for the file, so removing it removes that name
-        // — and only that name.
+        // A hard link is another name for the file and says nothing about
+        // itself, so neither real adapter can recognize one: unix asks
+        // `is_symlink` and Windows asks for a reparse point, and both refuse.
+        if matches!(self.fs.links.borrow().get(path), Some((Link::Hard, _))) {
+            return Err(HostError::Other(format!(
+                "{} is not a link, so it is not Perch's to remove",
+                path.display()
+            )));
+        }
         if self.fs.links.borrow_mut().remove(path).is_some() {
             self.fs.files.borrow_mut().remove(path);
             self.fs.modes.borrow_mut().remove(path);

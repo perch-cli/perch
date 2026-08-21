@@ -78,7 +78,17 @@ fn can_link(host: &dyn Filesystem, kind: Link, root: &Path, adapter: &str) -> bo
         .expect("a file to point at");
     match host.link(kind, &target, &at) {
         Ok(()) => {
-            let _ = host.remove_link(&at);
+            // By kind, because `remove_link` refuses a hard link on every
+            // adapter — a swallowed `remove_link` here is how that disagreement
+            // stayed invisible while the suite performed it on both.
+            match kind {
+                Link::Hard => {
+                    let _ = host.remove_file(&at);
+                }
+                _ => {
+                    let _ = host.remove_link(&at);
+                }
+            }
             let _ = host.remove_file(&target);
             true
         }
@@ -443,6 +453,30 @@ const CASES: &[Case] = &[
                 !matches!(failed, HostError::NotFound { .. }),
                 "{adapter}: a rename propagates what the filesystem said rather \
                  than naming it: {failed:?}"
+            );
+        },
+    },
+    Case {
+        named: "removing a link refuses a hard link, which is not one it can recognize",
+        asserts: |host, root, adapter, _now| {
+            if !can_link(host, Link::Hard, root, adapter) {
+                return;
+            }
+            let target = root.join("the-file-itself");
+            let at = root.join("the-other-name");
+            host.create_file_with_mode(&target, "what it holds", PRIVATE_FILE_MODE)
+                .expect("a file to point at");
+            host.link(Link::Hard, &target, &at).expect("the second name");
+
+            // `remove_link`'s whole contract is that it takes away Perch's own
+            // share and never the person's file. A hard link says nothing about
+            // itself, so neither adapter can tell one from a file of theirs.
+            let failed = host
+                .remove_link(&at)
+                .expect_err("a hard link is not Perch's to remove");
+            assert!(
+                failed.to_string().contains("not a link"),
+                "{adapter}: {failed:?}"
             );
         },
     },
