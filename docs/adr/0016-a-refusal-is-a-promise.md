@@ -1,106 +1,140 @@
 # A refusal is a promise
 
-> **Superseded in part by ADR perch-does-not-draw.** This file is three
-> decisions and only two of them were the picker's. The ratatui-over-crossterm
-> choice is void, and so is the second Amended section below — `tui::Screen`,
-> the Refresh thread's own Host, and `Host::print_remarks`, which was "the one
-> thing about frames the port does know" and is now nothing the port knows at
-> all. `perch tui` is removed entire, both crates leave the dependency set, and
-> nothing in Perch touches raw mode afterwards. **What stands is the color-eyre
-> repeal and the two-error-idiom rule**: expected failures are `PerchError`
-> carrying an exit code a script reads, unexpected ones are panics through the
-> hook in `report.rs`, and anything that starts as a panic and turns out to be
-> an outcome moves across. None of that was ever about drawing, and superseding
-> this file whole would have taken `report.rs`'s charter with it.
+**Perch carries two error idioms on purpose. An expected failure is a `PerchError`
+carrying the exit code a script reads. An unexpected one is a panic, through the hook in
+`report.rs`. Anything that starts as a panic and turns out to be an outcome a user can act
+on moves across.**
 
-Three crates are settled ahead of the code that uses them, so the choice is
-recorded rather than rediscovered.
+Exit codes are part of the interface: a shell prompt or a script needs to tell "this
+account is gone" from "the keychain is locked" from "Perch does not recognize this Claude
+Code" without parsing prose. `PerchError` carries one per variant and the compiler checks
+that every variant has one. Routing those through a type-erased report would trade that
+check for a downcast, and a colored backtrace is the wrong thing to print at a command
+people put in a shell prompt.
 
-`perch tui` (ADR perch-does-not-draw) is built on **ratatui** over
-**crossterm**. Ratatui depends on crossterm itself, so naming crossterm directly
-keeps one version in the tree rather than two — Perch and `ratatui-crossterm`
-resolve to the same one, which matters because a terminal in raw mode is
-process-global state and two crossterm versions would each think they owned it.
-Both are in `Cargo.toml` from now, before `perch tui` exists, so the dependency
-set is settled while the surface is still small.
+A panic is a different animal: it is a bug rather than an outcome, and a bug deserves a
+report worth pasting. What that report needs is the version, the platform, where to send
+it, and how to get a backtrace when the first run did not carry one. The runtime's own hook
+already prints the payload, the location and the backtrace, so Perch's sits on top of it
+and adds those four things in a dozen lines. A span-formatted backtrace from a dedicated
+crate is genuinely nicer to read, and it is not nicer than not shipping four crates for it.
 
-**color-eyre** is installed for its panic hook and nothing else. Perch's own
-failures are typed: `PerchError` carries the exit code a script reads — 10 for
-a probe refusal, 11 for a locked keychain, 12 for a target that is not there —
-and the compiler checks that every variant has one. Routing those through a
-type-erased `Report` would trade that check for a downcast, and a colored
-backtrace is the wrong thing to print at a command people put in a shell
-prompt. A panic is a different animal: it is a bug rather than an outcome, and
-a bug deserves a report worth pasting.
+`RUST_BACKTRACE=0` is how the runtime is told *not* to print one, so the variable's mere
+presence is not the question: read as "already asked for", it withholds the suggestion from
+exactly the person who has no backtrace to send.
+
+The same sentence about what a bug is and where to send it is shared with
+`registry::save`'s refusal to write a registry no later command could read — not a panic,
+but a bug all the same, and one the person in front of it can do nothing about.
+
+## Held is a promise about the machine
+
+`PerchError::Busy` carries `EXIT_HELD`, and the guide states what that means to whoever
+reads it: *a lock somebody else has… Nothing is wrong and nothing was changed — ask again
+shortly.*
+
+That is not decoration. The Watcher's loop branches on it. Every other failure ends the
+loop; a `Busy` is counted against the back-off, said out loud with when the Watcher will
+try again, and gone round again. The loop keeps running because the code told it the
+machine is exactly as it was.
+
+So **`Busy` is a promise about the machine rather than a description of the failure**, and
+the two come apart in one place: a hold lost *after* something has been written. Another
+`perch` waited the artifact out and took it over while this one was working, so this one
+holds a registry behind the one on disk, and `registry::save` refuses — correctly, because
+writing it back would revert whatever the other command did. Read as a lock problem that is
+the most retryable failure there is. Read as a promise it is false, because by then the
+Credential has moved.
+
+### The one that matters
+
+Recording which Account is active happens after a Switch has landed. Its failure is the
+case: the incoming Credential is in the Default Profile, Claude Code's own file names the
+incoming Account, and Perch's record still names the outgoing one. Nothing about that is
+untouched, and nothing about it is fixed by waiting. A watcher that carried on watching
+would be deciding what to do next about a machine nobody has looked at yet, and a `Busy`
+is what would make it carry on.
+
+Being exact about the cost matters, because the tempting argument overstates it. A
+continued loop would **not** destroy a Credential: a Capture reads the Identity beside the
+live Credential before it files anything, and a Credential whose Identity names somebody
+other than the Account the registry calls outgoing is declined rather than written into the
+wrong Profile — a guard put there for this exact state
+(ADR a-switch-is-written-down-first). What a continued loop costs is smaller and still not
+acceptable: every round after it reads and ranks the wrong Account, because the registry
+names one Account and the machine is acting as another, and it does so unattended and
+indefinitely.
+
+### What follows
+
+> **A refusal earns `Busy` when nothing has been written yet, and only then.**
+
+Losing a contended lock qualifies: nothing has started. `commands::still_ours` qualifies by
+construction — it is asked before the first irreversible thing, which is its whole reason
+for existing (ADR one-door-to-the-registry). A save that finds the hold lost qualifies
+where the save *is* the change, and does not where a Credential moved first.
+
+Where it does not qualify, the general failure code is the right answer and the loop
+stopping is the right behavior. A person has to look.
+
+`perch watcher check` inherits this. A scheduler reading `EXIT_HELD` comes back in five
+minutes and expects the machine to have moved on; reading a general failure it mails
+somebody. Those are the two things a Check can say, and a Switch that half happened is the
+second.
+
+## Three sentences about a lost hold stay three
+
+Losing a contended lock, a question that waited too long, and a refusal to revert another
+command each say something different about what was and was not done, and the exit code
+each earns depends on that rather than on all three being about a lock. Routing them through
+one variant removes three hand-written sentences and, with them, the distinction the loop is
+branching on. It has been proposed once on exactly that reasoning, which is why it is
+written down here.
+
+## What a failure carries besides its code
+
+**A note is added to what failed rather than said instead of it, and never changes the exit
+code the failure earned.** A step that fails part way through a sequence has to say what
+happened *and* what the machine is holding now, and those are two different pieces of
+knowledge: the failure belongs to whatever failed, and what it left belongs to whatever was
+running the sequence. The variants that carry structure rather than a sentence already exit
+as a general failure, so folding one of them loses the shape and nothing a caller could act
+on.
+
+Where a note matters most is `Busy`: a lock somebody else is holding is the one failure that
+resolves on its own, and a `remove` or a `relogin` noting what it left behind must not cost
+the scheduler reading the code the fact that retrying works.
+
+**A Quarantine's reason travels beside its sentence rather than only inside it.** The command
+that discovers a Quarantine is the one that has to record it, and a reason inferred back out
+of the message is a reason that goes wrong the day a second kind of Quarantine is raised
+nearby.
+
+**A file Perch could not make sense of does not say which kind of nonsense it was.** Every
+way serde declines a perfectly well-formed document — an unknown variant, a missing field, a
+number out of range — reads as a syntax error if the sentence claims one, and sends somebody
+looking past the half of it that says what is actually wrong.
+
+**A document written by a newer Perch is refused in one sentence, naming what it was, how far
+ahead it is, and that upgrading is the way through.** The two formats Perch versions owe the
+reader the same three things, so it is said once for both. A registry migrates forward and an
+Export is refused, and which of the two a format gets turns on what the refusal costs
+(ADR the-holdings-outlive-a-perch); this is the wording the refusal uses. The version question
+is asked on its own, ahead of parsing, because a newer Perch is exactly what writes a value
+this build has no variant for — and parsed first, that fails in serde's words about a document
+that is perfectly well-formed, with nothing in the sentence saying the build in front of the
+reader is simply too old.
 
 ## Consequences
 
-Perch carries two error idioms on purpose. Expected failures are `PerchError`
-and exit codes; unexpected ones are panics with a color-eyre report. Anything
-that starts as a panic and turns out to be an outcome a user can act on should
-move across, not stay.
+Every variant has an exit code, no two codes mean the same thing, and the arms that map them
+are spelled out rather than caught by a wildcard: a variant added later would otherwise be
+folded into a general failure silently, and nothing would notice. A few extra arms are the
+price of the compiler asking.
 
-## Amended: a declaration waits for the code that uses it
+`report.rs` holds the panic hook and nothing else. The exit codes are `error.rs`'s, the
+sentences are each command's, and the rule connecting them is here.
 
-Two changes, one reason.
-
-Ratatui and crossterm were declared from the start, before anything imported
-them, so that the dependency set was settled while the surface was small. That
-was the wrong half of the decision to act on early.
-
-The *choice* is what is worth settling ahead of time, and this document is
-where it is settled — including the reason crossterm is named directly rather
-than left to ratatui, which is the part that would have been rediscovered. The
-*declaration* buys nothing until there is code behind it: together they were
-the largest subtree in the dependency graph, compiled on every build and
-audited on every advisory, for no call site. They come back with `perch tui`,
-at the versions named above.
-
-Color-eyre is the same shape of cost with the code already written. Its whole
-use is a panic hook — `report.rs` installs that and explicitly discards the
-error hook — and it brings eyre, backtrace, owo-colors and indenter along for
-it. What a bug report actually needs is the version, the platform, where to
-send it, and how to get a backtrace; the runtime's own hook already prints the
-payload, the location and the backtrace when one is asked for. So Perch's hook
-now sits on top of the runtime's and adds those four things in a dozen lines,
-and says how to re-run with `RUST_BACKTRACE=1` — which color-eyre's prettier
-report never did.
-
-What is given up is the span-formatted backtrace, which is genuinely nicer to
-read. It is not nicer than not shipping four crates for it, and the choice is
-recorded here so it is a decision rather than a drift.
-
-## Amended: the declaration is back, and the terminal is a seam of its own
-
-`perch tui` exists, so the code the declaration was waiting for is here.
-Ratatui 0.30 and crossterm 0.29 are in `Cargo.toml` — crossterm at the version
-`ratatui-crossterm` resolves to, which is the whole point of naming it, and
-ratatui with its default features off: the calendar and the rest are widgets
-Perch does not draw, and a binary somebody downloads pays for them.
-
-The part that was not settled ahead of time is where the terminal sits. It is
-an effect outside the process, which is the Host port's whole subject, and it
-is deliberately not a Host method. A `Host` that knew about frames would be one
-every non-TUI test carried and every fake had to answer for, and what is on the
-far side of the call is not a primitive like `mkdir` — it is ratatui's `Frame`.
-So `perch tui` owns its terminal through a seam of its own, `tui::Screen`, with
-two methods: draw this model, and wait this long for a keystroke. The fake
-draws into a buffer and hands back a scripted keystroke, so the real frame loop
-is driven with no terminal at all — the same bargain the Host port makes, made
-locally.
-
-A Refresh is the other thing the frame loop must not do itself, and it goes to
-a thread with a `RealHost` of its own. That Host keeps its remarks rather than
-printing them: `Host::note` goes to stderr, which is exactly where the frames
-are, so a note about the machine would land in the middle of one. The loop
-shows them where it shows everything else a Refresh could not do.
-
-The rule is the Host's rather than that thread's. The Switch the picker performs
-runs against the *process's* Host, so a remark it provoked — a Credential
-written to a store Perch would rather not have used — was printed onto the
-alternate screen and thrown away with it. `Host::print_remarks` is the one thing
-about frames the port does know, and it knows it only as "keep these for now":
-`perch tui` turns printing off for exactly as long as it holds the screen, reads
-what was kept, and shows it in the frame beside what the command said. A fake
-never printed a remark in the first place, which is why nothing here was
-testable until the real Host could be told to behave the same way.
+The Watcher's loop is what makes this a contract rather than a convention. Anything that
+changes which refusals earn `EXIT_HELD` changes what the loop does unattended, which is why
+the boundary is stated as a rule rather than left to each call site.

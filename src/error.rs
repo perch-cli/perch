@@ -122,18 +122,15 @@ pub enum PerchError {
     NoCandidate(String),
 
     /// A bare Cycle from an Account whose interchangeability nobody has
-    /// declared. Names both ways to declare it (ADR a-group-is-a-declaration).
+    /// declared. Names both ways to declare it.
     #[error("{0}")]
     NotInterchangeable(String),
 
-    /// Something was asked of an Account that is Quarantined. Says what it was
-    /// Quarantined for and how to repair it, because those are the two things
-    /// that turn a dead end into a next step.
-    ///
-    /// The reason travels beside the message rather than only inside it: the
-    /// command that discovers a Quarantine is the one that has to record it,
-    /// and a reason it had to infer from the failure would be a reason that
-    /// goes wrong the day a second kind of Quarantine is raised nearby.
+    /// Something was asked of an Account that is Quarantined. The reason
+    /// travels beside the sentence rather than only inside it, because the
+    /// command that discovers a Quarantine has to record it and a reason
+    /// inferred back out of prose goes wrong the day a second kind is raised
+    /// nearby (ADR a-refusal-is-a-promise).
     #[error("{said}")]
     Quarantined {
         why: crate::registry::Quarantine,
@@ -154,19 +151,11 @@ pub enum PerchError {
         source: std::io::Error,
     },
 
-    /// A file Perch could not make sense of. Says which file and what stopped
-    /// it, and deliberately does not say *which kind* of nonsense it was.
-    ///
-    /// It used to say "is not valid JSON", which is the misdiagnosis
-    /// `registry::load`'s version guard was added to prevent — and the guard
-    /// only closes it for a document claiming a version this build does not
-    /// know. Every other way serde declines a perfectly well-formed document
-    /// still arrives here: `unknown variant \`round-robin\``, `missing field
-    /// \`version\``, `number out of range`. Each sent somebody looking for a
-    /// syntax error that is not there, past the half of the sentence that says
-    /// what is actually wrong. `import` reaches it for something that is not a
-    /// parse at all — a Credential belonging to no Account — where the claim
-    /// was simply untrue.
+    /// A file Perch could not make sense of: which file, and what stopped it —
+    /// deliberately not *which kind* of nonsense. Every way serde declines a
+    /// well-formed document arrives here, as does an `import` of a Credential
+    /// belonging to no Account, and naming a syntax error sends the reader past
+    /// the half of the sentence that says what is wrong.
     #[error("Perch could not read {path}: {detail}")]
     Malformed { path: String, detail: String },
 
@@ -175,17 +164,10 @@ pub enum PerchError {
 }
 
 /// The refusal a build raises rather than half-reading something a newer Perch
-/// wrote.
-///
-/// Both of Perch's own formats are versioned, and the version is a guard against
-/// the future rather than a migration story: nobody is running Perch yet, so
-/// there is no past format to read. What there is, and what this exists for, is
-/// the machine holding two builds — a registry written by the newer one, an
-/// Export restored by the older — where the wrong answer is a file half-read
-/// rather than refused.
-///
-/// Said once because the two formats owe the reader the same three things: what
-/// it was, how far ahead it is, and that upgrading is the way through.
+/// wrote. Said once because both formats owe the reader the same three things:
+/// what it was, how far ahead it is, and that upgrading is the way through. A
+/// registry merely *older* migrates forward instead, and which of the two a
+/// format gets turns on what a refusal costs (ADR the-holdings-outlive-a-perch).
 pub fn written_by_a_newer_perch(what: &str, of: &str, version: u32, understood: u32) -> PerchError {
     PerchError::Other(format!(
         "{what} was written by a newer Perch ({of} version {version}, this build \
@@ -193,20 +175,11 @@ pub fn written_by_a_newer_perch(what: &str, of: &str, version: u32, understood: 
     ))
 }
 
-/// What version a document Perch wrote claims to be, read on its own and ahead
-/// of reading the document properly.
-///
-/// The other half of [`written_by_a_newer_perch`], and here beside it because
-/// the two are only ever used together: every format Perch versions is asked
-/// this first, and the answer decides whether the parse is even attempted. A
+/// What version a document claims to be, asked ahead of the parse — because a
 /// newer Perch is exactly what writes a value this build has no variant for, so
-/// parsing first fails with serde's words — `unknown variant \`round-robin\`` —
-/// about a document that is perfectly well-formed, with nothing in the sentence
-/// saying the build in front of the reader is simply too old.
-///
-/// Nothing rather than an error for a document that will not parse at all: this
-/// is the version question only, and what a caller does about nonsense is its
-/// own to say, in its own words, about its own file.
+/// parsing first fails in serde's words about a document that is well-formed.
+/// Nothing rather than an error where it will not parse at all: what to make of
+/// nonsense is the caller's to say, about its own file.
 pub fn claimed_version(contents: &str) -> Option<u32> {
     #[derive(serde::Deserialize)]
     struct Versioned {
@@ -219,11 +192,9 @@ pub fn claimed_version(contents: &str) -> Option<u32> {
 impl PerchError {
     /// A file that could not be read, from whatever said so.
     ///
-    /// Every caller of this used to spell out the same
-    /// `std::io::Error::other(err.to_string())` laundering, because what fails
-    /// is a [`HostError`](crate::host::HostError) and what the variant carries
-    /// is an `io::Error`. Said once, so the six places that report a file
-    /// failure report it the same way.
+    /// What fails is a [`HostError`](crate::host::HostError) and what the
+    /// variant carries is an `io::Error`, so the laundering between them is
+    /// said once rather than at each of the six places that report one.
     pub fn file_read(path: impl Into<PathBuf>, why: impl std::fmt::Display) -> PerchError {
         PerchError::FileRead {
             path: path.into(),
@@ -241,18 +212,13 @@ impl PerchError {
 
     /// The same failure, with a line about what it left behind.
     ///
-    /// A step that fails part way through a sequence has to say what happened
-    /// *and* what the machine is holding now, and those are two different
-    /// pieces of knowledge: the failure belongs to whatever failed, and what it
-    /// left belongs to whatever was running the sequence. The kind is kept, so
-    /// the exit code a script branches on is still the one the failure earned.
+    /// The failure belongs to whatever failed and what it left belongs to
+    /// whatever was running the sequence, so both are said. The kind is kept,
+    /// so the exit code a script branches on is the one the failure earned.
     pub fn with_note(mut self, note: &str) -> PerchError {
-        // Every variant that carries its own sentence keeps its kind, so the
-        // exit code a script branches on survives the note — including
-        // [`PerchError::Busy`], where it matters most: a lock somebody else is
-        // holding is the one failure that resolves on its own, and a Remove or
-        // a Relogin noting what it left behind must not cost the scheduler
-        // reading the code the fact that retrying works.
+        // Where keeping the kind matters most is `Busy`: it is the one failure
+        // that resolves on its own, and a note about what was left behind must
+        // not cost a scheduler the fact that retrying works.
         match self.message_mut() {
             Some(message) => {
                 message.push_str(&format!("\n\n{note}"));
@@ -265,14 +231,10 @@ impl PerchError {
         }
     }
 
-    /// The one sentence a variant carries, for the things that add to it rather
-    /// than replace it.
-    ///
-    /// `None` is a variant built out of fields instead — a path and a reason,
-    /// say — which has no single sentence to append to. Written once because
-    /// thirteen arms spelling out `Variant(m) => Variant(format!("{m}…"))` is
-    /// thirteen chances for one of them to be spelled differently, and the
-    /// difference would be an exit code silently changing under a note.
+    /// The one sentence a variant carries, or `None` for one built out of
+    /// fields instead. Written once because thirteen arms rebuilding their own
+    /// variant is thirteen chances for one of them to be spelled differently,
+    /// and the difference would be an exit code changing under a note.
     fn message_mut(&mut self) -> Option<&mut String> {
         match self {
             PerchError::ProbeRefused { detail, .. } => Some(detail),
@@ -290,9 +252,7 @@ impl PerchError {
             | PerchError::Other(message) => Some(message),
             // Spelled out rather than caught by a `_`, and the same at
             // `exit_code`: a variant added later would otherwise be folded into
-            // `Other` by a note and exit as a general failure, silently, and
-            // `one_of_each` would not be extended to notice. Three arms is the
-            // price of the compiler asking.
+            // `Other` and exit as a general failure, silently.
             PerchError::FileRead { .. }
             | PerchError::FileWrite { .. }
             | PerchError::Malformed { .. } => None,
@@ -328,12 +288,8 @@ impl From<KeychainError> for PerchError {
                 "No credential stored for {account} under {service}"
             )),
             // Spelled out rather than caught by a `_`, for the reason
-            // `message_mut` and `exit_code` give about the enum above: a
-            // variant added later would otherwise be folded into "unavailable"
-            // silently, and "the keychain could not be consulted at all" is
-            // deliberately distinct from every other thing that can go wrong
-            // with one (ADR claude-code-chooses-the-store). One arm is the
-            // price of the compiler asking.
+            // `message_mut` gives: a variant added later would be folded into
+            // "unavailable" silently.
             KeychainError::Unavailable { detail } => PerchError::KeychainUnavailable(detail),
         }
     }
@@ -347,9 +303,8 @@ mod tests {
     use crate::registry::Quarantine;
 
     /// One of every variant, so the tables below are about the whole enum
-    /// rather than about whichever variants somebody remembered. A variant
-    /// added without a line here is one the note and the exit code say nothing
-    /// about, and nothing else would notice.
+    /// rather than whichever variants somebody remembered. A variant added
+    /// without a line here is one nothing checks.
     fn one_of_each() -> Vec<(&'static str, PerchError)> {
         vec![
             (
@@ -426,9 +381,6 @@ mod tests {
         ]
     }
 
-    /// The property the whole of `with_note` rests on: a sequence that failed
-    /// part way through can say what the machine is holding now without costing
-    /// the script wrapping it the code it branches on.
     #[test]
     fn a_note_never_changes_the_exit_code_the_failure_earned() {
         for (name, error) in one_of_each() {
@@ -442,10 +394,9 @@ mod tests {
         }
     }
 
-    /// A note is added to what failed rather than said instead of it. Where it
-    /// lands differs by variant — [`PerchError::ProbeRefused`] renders its
-    /// detail mid-sentence, so the note goes inside that rather than after the
-    /// version — but nothing else about the message moves either way.
+    /// Where the note lands differs by variant — [`PerchError::ProbeRefused`]
+    /// renders its detail mid-sentence — so what is asserted is that nothing
+    /// else about the message moved.
     #[test]
     fn a_note_is_said_alongside_what_failed_rather_than_instead_of_it() {
         for (name, error) in one_of_each() {
@@ -464,9 +415,6 @@ mod tests {
         }
     }
 
-    /// The variants that carry a message keep their shape, so a second note
-    /// lands beside the first rather than folding the whole thing into
-    /// [`PerchError::Other`] on the way.
     #[test]
     fn a_second_note_lands_beside_the_first_rather_than_swallowing_it() {
         let noted = PerchError::NotFound("no such Account".to_string())
@@ -482,8 +430,6 @@ mod tests {
         );
     }
 
-    /// A Quarantine travels beside the message rather than only inside it, so
-    /// the command that has to record why still can after a note is added.
     #[test]
     fn a_noted_quarantine_still_carries_the_reason_it_was_raised_for() {
         let noted = PerchError::Quarantined {
@@ -501,9 +447,8 @@ mod tests {
         }
     }
 
-    /// The variants that carry structure rather than a message exit as a
-    /// general failure already, so folding them loses nothing a caller could
-    /// act on — but what they said about the file has to survive the fold.
+    /// These fold into [`PerchError::Other`], which is the one case where what
+    /// was said about the file has to survive a change of variant.
     #[test]
     fn a_note_on_a_structured_failure_keeps_what_it_said_about_the_file() {
         let noted = PerchError::file_write("/tmp/registry.json", "read-only")
@@ -545,8 +490,6 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    /// No two codes mean the same thing, because telling one failure from
-    /// another is the whole reason they are numbered rather than prose.
     #[test]
     fn the_codes_that_mean_different_things_are_different_numbers() {
         let mut codes = vec![
@@ -571,10 +514,8 @@ mod tests {
         assert_eq!(codes.len(), count, "two failures share an exit code");
     }
 
-    /// A keychain with no such item and a keychain that will not answer are
-    /// different problems with different repairs, and this conversion is where
-    /// that distinction is either kept or lost
-    /// (ADR claude-code-chooses-the-store).
+    /// Different problems with different repairs, and this conversion is where
+    /// the distinction is either kept or lost.
     #[test]
     fn a_missing_item_is_not_found_and_anything_else_is_the_keychain_being_unavailable() {
         let missing: PerchError = KeychainError::NotFound {

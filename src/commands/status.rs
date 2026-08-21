@@ -1,17 +1,13 @@
 //! `perch status` — who is active, and where their quota stands.
 //!
-//! Rendered from cache unless it is asked to fetch
-//! (ADR a-figure-carries-its-age). This is the command people put in a shell
-//! prompt, where it may run several times a minute; fetching by default would
-//! burn the hourly usage budget needed for switching decisions. Every figure is
-//! shown with its age, so a stale number is visibly stale rather than quietly
-//! wrong, and `--refresh` is how one stops being stale.
-//!
 //! One Account in detail, and that is the whole of it
-//! (ADR the-listing-owns-the-set). "Where would I land" is a question about a
-//! set, which is the listing [`crate::commands::list`] draws at whatever
-//! breadth it is asked for — so it is asked there, and this command answers
-//! about the Account you are on and cannot be anything else.
+//! (ADR the-listing-owns-the-set): "where would I land" is a question about a
+//! set, which [`crate::commands::list`] answers at whatever breadth.
+//!
+//! Rendered from cache unless asked to fetch (ADR a-figure-carries-its-age).
+//! This is the command people put in a shell prompt, where it may run several
+//! times a minute, and fetching by default would burn the budget switching
+//! decisions need.
 
 use std::io::Write;
 
@@ -37,11 +33,8 @@ pub struct StatusArgs {
 
 pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()> {
     // Exclusively only when there is something to write, which is `--refresh`
-    // and nothing else. This is the command advertised for shell prompts: two
-    // of them rendering at once is the ordinary case, not a race, and taking
-    // the registry lock to read would have one of them wait out the other and
-    // then fail — a prompt showing an error because a second prompt drew at the
-    // same moment.
+    // and nothing else: two shell prompts rendering at once is the ordinary
+    // case, and a read that took the write lock would fail on one of them.
     let (mut perch, mut registry) = match args.refresh {
         true => {
             let (perch, registry) = adopt::ensure_adopted_exclusively(host)?;
@@ -49,12 +42,9 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
         }
         false => (None, adopt::ensure_adopted(host)?),
     };
-    // Perch on nobody *because* a Switch was in flight and never recorded is
-    // not an absence to report — it is the answer to why the absence is there,
-    // and it exits 0 like every other way of saying one
-    // (ADR a-switch-is-written-down-first). A Landing that left nobody behind
-    // is the one shape with no Account under it to describe, so what it gets is
-    // the line and the field alone.
+    // Perch on nobody *because* a Switch was in flight is the answer to why the
+    // absence is there rather than an absence to report, so it exits 0
+    // (ADR a-switch-is-written-down-first).
     let active = match (
         active_email(&registry),
         registry.active().a_switch_in_flight(),
@@ -66,10 +56,8 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
         (Err(nobody), None) => return Err(nobody),
     };
 
-    // Every read spends from a budget that does not refill early
-    // (ADR a-figure-carries-its-age), and this command shows one Account, so it
-    // reads one Account. A refresh reads exactly what it is about to show,
-    // which is the rule `perch list` follows at its own breadths.
+    // This command shows one Account, so it reads one Account: a refresh reads
+    // exactly what it is about to show, at whatever breadth.
     let report = match &mut perch {
         Some(perch) => observe::refresh(
             host,
@@ -92,11 +80,9 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
 
 /// The Account being reported on, or why there is not one.
 ///
-/// The remedy depends on what Perch holds. With nothing held there is nobody to
-/// switch to and a login is the way in; with Accounts held, a login is not the
-/// answer at all — Perch has Credentials and has simply been left on nobody,
-/// which is what `perch switch` is for and what `perch remove` itself
-/// recommends when it leaves the machine in this state.
+/// The remedy depends on what Perch holds: with nothing held a login is the way
+/// in, and with Accounts held it is not the answer at all — Perch has been left
+/// on nobody, which is what `perch switch` is for.
 fn active_email(registry: &Registry) -> Result<String> {
     if let Some(account) = registry.active_account() {
         return Ok(account.email().to_string());
@@ -124,11 +110,9 @@ fn render_human(
 ) -> Result<()> {
     report.write_notes_beside_the_accounts(out)?;
 
-    // Above the Account line, because it is what qualifies it: with a Switch in
-    // flight, the Account named below is the one Perch was on rather than the
-    // one it can establish is live. A note rather than a labeled row, as the
-    // Refresh's own notes above it are — the column is for facts about the
-    // Account, and this is a fact about whether Perch can name one.
+    // Above the Account line, because it qualifies it. A note rather than a
+    // labeled row: the column is for facts about the Account, and this is one
+    // about whether Perch can name one.
     if let Some(said) = registry.active().a_switch_in_flight() {
         crate::commands::say(out, &said)?;
     }
@@ -141,13 +125,8 @@ fn render_human(
         utilization::write_labeled(out, "Plan", plan)?;
     }
     // Above the figures, because a Quarantined Account's figures describe quota
-    // it cannot currently spend: the state is the news, and the numbers are the
-    // detail.
-    //
-    // Both halves on one line, and the repair named for the Account it can only
-    // be about: this command answers about exactly one Account
-    // (ADR the-listing-owns-the-set), so there is no second copy of the repair
-    // for it to be one copy too many of.
+    // it cannot spend: the state is the news and the numbers are the detail.
+    // Both halves on one line, since one Account means one copy of the repair.
     if let Some(why) = account.quarantine {
         utilization::write_labeled(
             out,
@@ -163,24 +142,11 @@ fn render_human(
     utilization::write_figures(out, account, now)
 }
 
-/// What a script reads about the Account you are on.
-///
-/// `active` is the Account object every Listing uses ([`listing::document`])
-/// rather than a shape of its own: the two used to carry key sets that did not
-/// overlap, so a script asking which Group the active Account is in had to run a
-/// second command, and one written against `perch list --json` could not be
-/// pointed at this. The Account is the same Account; only the question the
-/// document answers differs, and `active` against `sections` is what says which
-/// was asked.
-///
-/// The Utilization is under `active` and nowhere else. It sat at the top level
-/// too — `perch status --json | jq .utilization` being the line in somebody's
-/// shell prompt — and that earned its keep against a document which, under the
-/// flag that once widened this command to a Group, also answered about a set:
-/// the duplicate was insurance against reaching into the wrong shape. This
-/// document answers about exactly one Account and cannot be anything else
-/// (ADR the-listing-owns-the-set), so the insurance has nothing left to cover
-/// and `jq .active.utilization` is one word longer.
+/// What a script reads about the Account you are on. `active` is the Account
+/// object every Listing uses ([`listing::document`]) rather than a shape of its
+/// own, and `active` against `sections` is what says which question was asked.
+/// The Utilization sits under it and nowhere else: a copy at the top level would
+/// insure against a shape this document cannot have.
 fn render_json(
     host: &dyn Host,
     out: &mut dyn Write,
@@ -199,13 +165,9 @@ fn render_json(
 }
 
 /// The whole of the report where a Landing left nobody behind: the Switch that
-/// was in flight, and no Account section, because there is no Account
-/// established to put in one.
-///
-/// The `--json` document keeps every key the ordinary one has, with the ones it
-/// cannot answer left empty. A script reaching for `.active` on this machine is
-/// asking about an Account Perch cannot name, and `null` is that answer — where
-/// a document missing the key is a script's `jq` failing for what reads like a
+/// was in flight, and no Account section to put under it. The document keeps
+/// every key the ordinary one has, with what it cannot answer left `null` —
+/// where a missing key is a script's `jq` failing for what reads like a
 /// different reason.
 fn the_switch_alone(
     out: &mut dyn Write,
@@ -223,9 +185,8 @@ fn the_switch_alone(
             "active": serde_json::Value::Null,
             "landing": registry.active().document(),
             // Whether one was asked for, not whether one happened: a Landing
-            // that left nobody behind has no Account to read, and a hard-coded
-            // default said "nobody asked" to a caller who had passed
-            // `--refresh`.
+            // that left nobody behind has no Account to read, and a caller who
+            // passed `--refresh` is not one who asked for nothing.
             "refresh": match refresh {
                 true => Report::asked_for().document(),
                 false => Report::default().document(),

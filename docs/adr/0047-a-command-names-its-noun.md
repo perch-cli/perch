@@ -1,207 +1,244 @@
 # A command names its noun
 
-> **Carried out in #164.** Like ADR using-it-is-the-proof,
-> ADR perch-does-not-draw, ADR the-binary-proves-its-surface,
-> ADR a-suite-is-named-and-gated and ADR a-watcher-knob-is-arithmetic, this is
-> the artifact of a planning effort rather than of a change, so it landed ahead
-> of the work it describes instead of beside it. The surface now matches it:
-> `perch --help` lists sixteen names, `holdings` and `watcher` are the two new
-> nouns, `--once` is `perch watcher check`, and `Holdings` is a glossary entry.
+**A command is placed by the noun it is about. The Account is elided, because the
+Account is the subject of the product. Every other noun is written, at depth
+two.**
 
-The question arrived as a choice of shapes: eighteen top-level commands in a flat
-verb list — should it stay flat, become noun-then-verb, or collapse to a small
-core of verbs with the rest as flags?
-
-Both halves of that premise are wrong, and correcting them is most of the answer.
-
-There are **nineteen** commands, not eighteen; `watch` is missing from the list.
-And the surface is **not a flat verb list**. Three of the nineteen are already
-noun-then-verb trees:
+`CONTEXT.md` opens "Perch runs Claude Code as whichever Claude account you want",
+so an Account command that named its noun would be naming it in every command.
+That elision is the rule rather than an accident of it: the surface is
+noun-then-verb throughout, with one noun so pervasive it goes unwritten.
 
 | | |
 | --- | --- |
-| Flat verbs (16) | `add` `alias` `disable` `enable` `export` `import` `list` `purge` `relogin` `remove` `run` `status` `switch` `tui` `upgrade` `watch` |
-| Noun trees (3) | `config` set/unset/get · `group` add/remove/rename/move/list · `service` install/uninstall/status |
+| Top level, Account elided (10) | `add` `alias` `disable` `enable` `list` `relogin` `remove` `run` `status` `switch` |
+| Top level, Perch itself (1) | `upgrade` |
+| `config` (2) | `set` `get` |
+| `group` (5) | `add` `remove` `rename` `move` `list` |
+| `watcher` (5) | `run` `check` `install` `uninstall` `status` |
+| `holdings` (3) | `export` `import` `purge` |
 
-Nineteen top-level names, **twenty-seven invocable forms**. So the real question
-is not *flat or nested* — the surface is both. It is: **why did those three get a
-noun, and the other sixteen not?**
+**Fifteen names, twenty-six invocable forms.** The count is not the finding, and
+it is written down because a wrong number left standing is read as a right one.
 
-## The rule was already there
+Depth is capped at two, hard. `perch account group move` is what a noun-first
+rule generates if nothing stops it, and depth three is where a CLI stops being
+navigable. The cap forces a decision each time instead of letting the tree grow a
+level.
 
-Look at what `config`, `group` and `service` have in common. They are **the three
-things that are not an Account**.
+## The rival is the smaller surface, and it is refused
 
-Every flat verb but four acts on an Account: `add` `alias` `disable` `enable`
-`list` `relogin` `remove` `run` `status` `switch` `tui`. The noun is elided
-because the Account is the subject of the entire product — `CONTEXT.md` opens
-"Perch runs Claude Code as whichever Claude account you want". Saying it would be
-saying it in every command.
+The obvious alternative makes the top level *what you type while working* and puts
+administration under its noun, the Account's included:
 
-That is a principled elision rather than an accident, and it means the surface has
-been noun-then-verb all along, with one noun so pervasive it went unwritten. Only
-**four** commands break it. `export`, `import` and `purge` act on the whole of
-what Perch holds rather than on one Account. `watch` is a bare verb for the same
-noun `service` names.
-
-The guide has known this for longer than `main.rs` has. Its reference table has
-**eighteen rows for nineteen commands**, because it already pairs `disable`/`enable`
-and `export`/`import` as families and splits `switch` across two. The documentation
-thinks in families; only the dispatch thinks in a list.
-
-## The rule
-
-> **A command is placed by the noun it is about. The Account is elided, because
-> the Account is the subject of the product. Every other noun is written, at
-> depth two.**
-
-Depth is capped at two, hard. `perch account group move` is exactly what a
-noun-first rule generates if nothing stops it, and depth three is where a CLI
-stops being navigable. The cap costs nothing today and forces a real decision each
-time instead of letting the tree grow a level — the kind of forward-looking guard
-`CLAUDE.md` keeps.
-
-## Why not the smaller surface
-
-The obvious rival was to make the top level *what you type while working* and put
-administration under its noun, including the Account's:
-
-> `status` `switch` `run` `list` `tui` · `account` `config` `group` `watcher`
+> `status` `switch` `run` `list` · `account` `config` `group` `watcher`
 > `holdings`
 
-Ten top-level names against this decision's sixteen. It was refused, and the
-yardstick is why.
-
-This rule is **one** idea, and its line takes no judgment: does an Account name
-what the command is about, yes or no. The rival is **two** ideas, and the second
-one has to be adjudicated per command — and adjudicated badly. `perch relogin` is
-the way back from a Quarantine, which is a thing that bites you mid-task. `perch
-disable` is what you type the moment you notice an Account misbehaving. Both are
-"working" by any honest reading, and both would have been filed under
+Nine top-level names against fifteen. This rule is **one** idea whose line takes
+no judgment — does an Account name what the command is about, yes or no. The rival
+is **two** ideas, and the second has to be adjudicated per command, badly.
+`perch relogin` is the way back from a Quarantine, which bites mid-task.
+`perch disable` is what you type the moment you notice an Account misbehaving.
+Both are "working" by any honest reading, and both would have been filed under
 administration to keep the count down.
 
 Under *conceptual surface first*, one sharp idea beats two ideas of which one
 needs arguing about. Six saved names are not six ideas — they are six lookups.
 
-## Why one capability gets one name
+## One capability, one name, one place
 
-Aliasing was refused: no `perch switch` standing for `perch account switch`, the
-shape `docker` reached with `ps` beside `container ls`.
+There is no aliasing: no `perch switch` standing for `perch account switch`, the
+shape `docker` reached with `ps` beside `container ls`. It doubles the names *and*
+adds the idea that two spellings are one thing, which is itself an idea a person
+has to carry — and once both spellings exist neither is ever retired, so every
+document has to pick one.
 
-It is the most expensive thing available under this yardstick. It doubles the
-names *and* adds the idea that two spellings are one thing, which is itself an
-idea a person has to carry. Docker is the cautionary tale rather than the model —
-the short forms were never retired, so both live forever and every document has to
-pick one.
+What aliasing normally buys is a way to move a name without breaking the people
+typing the old one. Perch does not need buying off: the CLI surface is the side
+that moves freely, renamed or cut with a `[**breaking**]` entry in
+`CHANGELOG.md`, while the Holdings are what a changelog entry cannot give back
+(ADR the-holdings-outlive-a-perch). A command's placement is therefore a decision
+that can be got wrong and then corrected in the open, which is what makes this
+rule load-bearing rather than decorative.
 
-Aliasing normally buys backwards compatibility. `CLAUDE.md` says there is nothing
-to be compatible with. So: **one name, one place** — which is what makes the rule
-load-bearing rather than decorative, since every command's placement is now a
-decision that can be got wrong.
+## Frequency, and the tiebreak that fires nowhere
 
-## Frequency, and the rule that fires nowhere
-
-Where frequency and taxonomy conflict, frequency wins. ADR perch-does-not-draw
-is built on switching happening mid-task under mild frustration, with the
-shortest command doing the whole job, and a taxonomy that spent keystrokes there
-would be bought at the price of the product.
+Where frequency and taxonomy conflict, frequency wins: switching happens mid-task
+under mild frustration, and a taxonomy that spent keystrokes there would be bought
+at the price of the product.
 
 **On this surface they never conflict.** Every hot command is an Account command,
 and the Account is the elided noun, so the taxonomy already puts them where
-frequency wants them. The tiebreak is recorded because it is true and because it
-is what would decide the case if a hot non-Account command ever appeared — not
-because it does any work today. Saying so plainly is better than leaving a future
-reader to infer a rule from an outcome it did not cause.
+frequency wants them. The tiebreak is recorded because it is what would decide the
+case if a hot non-Account command ever appeared, and saying so plainly is better
+than leaving a future reader to infer a rule from an outcome it did not cause.
 
-## The four that move
+## The three nouns that are written
 
 ### Holdings
 
-`export`, `import` and `purge` have no shared prefix because **the noun they share
-has no name**. `CONTEXT.md` defines Export as "*Everything Perch holds*, written
-to one file", Purge as "Giving the machine back *every piece of state Perch
-holds*", and Import as the inverse of a Purge. The same phrase does the work three
-times and is never a term. `registry` appears in the prose, lowercase and
-ungoverned, standing in for it.
+`export`, `import` and `purge` share a noun that had no name. `CONTEXT.md` defines
+Export as "*Everything Perch holds*, written to one file", Purge as "Giving the
+machine back *every piece of state Perch holds*", and Import as the inverse of a
+Purge — the same phrase doing the work three times and never a term. The family
+was not missing a prefix; it was missing a noun, and the prefix is what a noun
+gives it for free.
 
-So the family is not missing a prefix. It is missing a noun, and the prefix is
-what a noun would have given it for free.
+**The noun is Holdings**, and `CONTEXT.md` chose it rather than this document: it
+is the word the glossary reaches for every time it needs the concept, including in
+the Installation entry — "the counterpart to what Perch **holds**". An
+Installation is what a Channel *left*; Holdings are what Perch *holds*; a Purge
+takes the second without touching the first.
 
-**The noun is Holdings**, and the document chose it rather than this decision: it
-is the word `CONTEXT.md` reaches for every time it needs the concept, including in
-the Installation entry — "the counterpart to what Perch **holds**". That contrast
-is the entry's whole point and now lands cleanly: an Installation is what a Channel
-*left*, Holdings are what Perch *holds*, and a Purge takes the second without
-touching the first.
+`Registry` understates the thing by exactly the part that matters, since an Export
+writes the registry "alongside every Credential". `State` is the kind of word the
+glossary's *Avoid* lines exist to catch. `Backup` is refused by `CONTEXT.md`
+itself, which rules that "a backup is what one is *for*; the thing itself is an
+Export".
 
-`Registry` was considered and refused: Export writes "the whole registry
-**alongside every Credential**", so Credentials are not in it and the word
-understates the thing by exactly the part that matters. `State` was refused as the
-kind of word the glossary's *Avoid* lines exist to catch. `Backup` was refused by
-`CONTEXT.md` itself, which already rules that "a backup is what one is *for*; the
-thing itself is an Export".
-
-The cost is honest and worth stating: this trades three top-level names for one
-new glossary term, on three commands typed once each in a machine's life. It is
-worth it only because the diagnosis above is right — an exception here would be the
-rule conceding on the very case that exposed it.
+The cost is three top-level names traded for one glossary term, on three commands
+typed once each in a machine's life. It is worth it because the diagnosis is
+right, and an exception here would be the rule conceding on the very case that
+exposed it.
 
 ### The Watcher
 
 `CONTEXT.md` already says these are one thing: the Watcher is "**Three
 arrangements and one behavior**: a loop you can see and kill, a Service the
-machine runs for you, or a sequence of Checks something else schedules. One of them
-at a time."
+machine runs for you, or a sequence of Checks something else schedules. One of
+them at a time." So one noun carries all three — `watcher run`, `watcher check`,
+and `watcher install`/`uninstall`/`status`.
 
-The surface splits that one noun three ways — a bare verb, a flag on it, and an
-unrelated tree. This is the sharpest instance of the diagnosis anywhere on the
-surface: the domain model is more coherent than the dispatch, and has been all
-along.
+**Service keeps its glossary entry and has no tree of its own.** It names an
+*arrangement* of the Watcher, which is why `install` and `uninstall` are the right
+verbs for it and why it was never a rival noun. A tree per arrangement would have
+been three trees for one behavior.
 
-| Now | Then |
-| --- | --- |
-| `perch watch` | `perch watcher run` |
-| `perch watch --once` | `perch watcher check` |
-| `perch service install\|uninstall\|status` | `perch watcher install\|uninstall\|status` |
+Two apparent collisions are not. `perch status` is an Account's and
+`perch watcher status` is the Watcher's; `perch run` launches a client and
+`perch watcher run` starts the loop. Same verb, different noun, and the elided
+noun is precisely what tells them apart.
 
-**Service keeps its glossary entry and loses its tree.** It names an *arrangement*
-of the Watcher, which is why `install` and `uninstall` are the right verbs for it
-and why it was never a rival noun. A tree per arrangement would have been three
-trees for one behavior.
-
-Two apparent collisions are not. `perch status` is an Account's and `perch watcher
-status` is the Watcher's; `perch run` launches a client and `perch watcher run`
-starts the loop. That is the rule working rather than failing — same verb,
-different noun, and the elided noun is precisely what tells them apart. A surface
-where the same verb means the same act against different subjects is the surface
-this rule is for.
-
-### `upgrade` stays where it is
+### `upgrade` stays at the top level
 
 Its noun is the Installation, which is not an Account, so the rule appears to
-demand `perch installation upgrade`.
-
-It does not, and no exception is needed. **The noun is Perch, and you have already
-typed it.** `perch upgrade` reads as the whole sentence: perch, upgrade yourself.
-`CONTEXT.md`'s Upgrade entry anticipates this — it opens by distinguishing the act
-from the command, "Names the act rather than the command". `perch self upgrade`
-was refused for importing a concept from `rustup` that Perch has nowhere else.
+demand `perch installation upgrade`. It does not, and no exception is needed:
+**the noun is Perch, and you have already typed it.** `perch upgrade` reads as the
+whole sentence. `CONTEXT.md`'s Upgrade entry anticipates it by opening "Names the
+act rather than the command". `perch self upgrade` imports a concept from `rustup`
+that Perch has nowhere else.
 
 ## Flag or verb
-
-Needed, because promoting `--once` to `check` spends it.
-
-The discriminator cannot be *the glossary names it*: **Refresh** and **Check** both
-have full entries and behave nothing alike. The one that works:
 
 > **If it changes the meaning of the exit code or the lifetime of the command, it
 > is a verb. Otherwise it is a flag.**
 
-`--once` changes both — a Check "says what it decided in its exit code" against
-ADR a-watcher-knob-is-arithmetic's table, where the loop runs until you kill it.
-So it is a verb, and becomes one. `--refresh` changes neither; it is the same
-answer differently sourced, at a different cost. `--json`, `--yes`, `--group`
-and `--check` change neither. **No flag other than `--once` is affected.**
+The discriminator cannot be *the glossary names it*: **Refresh** and **Check** both
+have full entries and behave nothing alike. `perch watcher check` is a verb
+because a Check "says what it decided in its exit code"
+(ADR a-watcher-knob-is-arithmetic) against a loop that runs until you kill it —
+both halves move. `--refresh` changes neither; it is the same answer differently
+sourced, at a different cost. Neither do `--json`, `--yes` or `--check`.
+
+**The test adjudicates a capability within a command's scope, and never how many
+commands one capability is reached by.** Read past that boundary it condemns
+`perch group add` and `perch group remove` — neither changes an exit code's
+register or a command's lifetime, so both would be flags, and nobody has ever
+proposed `perch group add <name> --undo`. A flag needs a verb to hang on, so
+applying the test to a pair with no host means first choosing which of the two
+becomes the host, which is the question rather than an input to it.
+
+## A reversal takes its own name
+
+`perch disable <target>` takes an Account out of Cycling and `perch enable
+<target>` puts it back. They share an implementation — one `EnableCommand`, one
+`run` — and they are two commands anyway.
+
+Two verbs cost **one** idea, not two: a person holds *Disabled*, and knowing
+`perch disable` tells them `perch enable` without a lookup.
+`perch disable <target> --undo` inverts that, discoverable only by reading the
+help, which is a lookup the pair does not charge. The maintenance surface is
+shared either way, so a flag would not shrink it.
+
+> **A flag may mark an argument's absence. It may not carry a verb's polarity.**
+
+`perch alias <name> --unset` is not a counter-example, and the difference is the
+argument list: its two forms take *different* arguments, and `--unset` is what
+makes the Target's absence deliberate rather than a missing operand — which is
+also the safety property, since a bare `perch alias work` would otherwise silently
+free a name. `disable` and `enable` take the same argument in both directions, so
+a flag there marks nothing absent and carries only the polarity.
+
+**The positive state has no name.** An Account that has never been disabled is not
+*enabled*; it simply is not disabled. `CONTEXT.md` has **Disabled** and no
+**Enabled**, because the positive is the absence of the negative. A glossary names
+states and a command surface names acts, and **undoing is an act you perform** —
+it stays an act whether or not the state it restores has a name. So `perch enable`
+on a fresh Account says it was already so and exits 0; neither verb ever reaches
+`EXIT_NOTHING_TO_DO`, because a script that runs twice has not done anything
+wrong.
+
+Three spellings follow. `Account.disabled` is present-only in the registry, the
+shape `quarantine` has and for the reason `quarantine` gives — a healthy Account
+reads more clearly for saying nothing about its health. The listing's State cell
+empties to the placeholder the Alias column already uses, so `disabled`,
+`quarantined` and `disabled, quarantined` are the only things it says. And
+`"disabled"` is present on every Account in `--json` unconditionally, because a
+machine reading a shape is not a person reading a sentence
+(ADR perch-says-what-it-did) and a script made to test for a key's presence to
+learn a bool has a worse contract rather than a truer one.
+
+## A command is named for what it does in every case
+
+> **A command takes the glossary's word for its act only where the command and the
+> act are the same size. Where the command is wider, it is named for what it does
+> in every case rather than for the case that matters most.**
+
+Every command whose act the glossary names takes the glossary's word: `remove` →
+Remove, `purge` → Purge, `export` → Export, `import` → Import, `switch` → Switch,
+`run` → Run, `upgrade` → Upgrade, `group rename` → Rename, `watcher check` →
+Check. The ones that take no glossary word — `add`, `list`, `status`,
+`disable`/`enable` — are exactly the ones where the glossary names no act.
+
+`relogin` is the single case where a word for the act exists and the command
+declines it, and the reason is that **the command is wider than the act**.
+**Repair** is "Logging a *Quarantined* Account in again in place", while the
+command is allowed on a healthy Account and behaves identically there, because a
+Credential somebody suspects is going wrong should not have to break first before
+it can be replaced (ADR a-broken-account-is-repaired). So `perch repair work` on a
+healthy Account is a false sentence, and the only ways to make it true are
+widening **Repair** — the vocabulary in `CONTEXT.md` is fixed — or narrowing the
+command to Quarantined Accounts alone, which deletes a capability to make a name
+fit.
+
+The `re-` is load-bearing in its own right: `perch add` is also a login, so
+`perch login` would collide with it conceptually while `relogin` says precisely
+what distinguishes them — again, and in place.
+
+**`alias` survives as a name** for two reasons that hold independently. `status`
+is a noun-shaped name on this surface already, so noun-shaped is not
+disqualifying; and `alias` is a verb in English and the oldest idiom in
+command-line naming, so a person meets it already knowing what it does.
+`perch rename` is refused by the vocabulary: **Rename** is reserved for Groups,
+and the two are different acts — a Group's name is its identity and carries its
+Overrides, its Accounts and its Cooldown, while an Alias is optional and
+detachable.
+
+## The thing acted on comes first
+
+> **The thing a command acts on is its first argument. What it is being given
+> comes after.**
+
+`group rename <from> <to>`, `group move <target> <group>`, `perch list [<scope>]`
+and every single-argument command take the subject first and the new value second.
+`perch alias <target> <name>` is written the same way, and `--unset` takes the
+Target rather than the name — which is a strict superset, since a Target resolves
+an Alias before an email (`CONTEXT.md`, **Target**), so somebody who knows only
+the address can free a name too.
+
+The shell idiom does not argue for the inversion. `alias ll='ls -l'` is one
+`name=value` token rather than two positional arguments, so it supplies the word
+and is silent on the order.
 
 ## Admitting a command later
 
@@ -212,15 +249,14 @@ and `--check` change neither. **No flag other than `--once` is affected.**
 4. **A reversal takes its own name.** Where a command's whole effect is to undo
    another's, it is its own command rather than a flag on the one it undoes. The
    flag-or-verb test does not reach the question.
-
-Clause 4 was added by ADR a-command-names-its-noun, which amends this decision
-in that one clause and nothing else. Its decision, its table and its counts are
-untouched.
+5. **A command is named for what it does in every case.** Where `CONTEXT.md` names
+   the act and the command does no more than that act, the command takes that
+   word. Where the command is wider, it is named for the whole of what it does.
 
 Clause 2 is the one that will do the work. It makes growing the surface cost a
 glossary entry, which is the only price that reliably deters it — and it is
-exactly what would have caught `export`, `import` and `purge`, which invented an
-unnamed noun and then had nowhere to live.
+exactly what would have caught `export`, `import` and `purge`, which shared an
+unnamed noun and so had nowhere to live.
 
 ## The borderline cases, named
 
@@ -231,91 +267,32 @@ between Groups changes two Groups and nothing about the Account.
 
 **`config` names an aggregate while `set` acts on a member.** `CONTEXT.md` defines
 a Config as "Every Setting in force, taken together", so a Setting is always *in* a
-Config and naming the aggregate names the member's home. `perch setting set` was
+Config and naming the aggregate names the member's home. `perch setting set` is
 refused because its sibling `perch setting get` would print what is definitionally
 a Config. A tree's verbs may act on the tree or on its members; depth two forbids
-the nesting that would separate them, and that is the cap earning its keep.
+the nesting that would separate them.
 
 ## What this does not decide
 
-**Naming.** This rule governs *where* a capability lives and says nothing about
-what it is called. Two things are therefore untouched: `tui` is a jargon acronym
-where every other top-level name is a word, and `status` and `list` are two names
-over one dataset. Both exclusions are principled. The picker's own survival is
-still open, so naming it now is work with a live chance of not surviving; and
-`status` against `list` is a question of whether they are *one command*, so ruling
-on their names before ruling on their number would decide in the wrong order.
+**Naming**, beyond the two rules above. This governs *where* a capability lives
+and what it may be called; it does not rename anything that already fits.
 
-**The collapses.** `disable`/`enable` as two verbs for one boolean, `status`
-against `list`, and whether the backup family is three commands or fewer. All are
-questions of *how many* commands there are. This decision settles where each one
-lives, which is what those questions were waiting on, and none of them is
-foreclosed by it.
-
-**ADR perch-does-not-draw is re-affirmed without touching its text.** Its
-constraint — every capability the interactive view offers must exist
-non-interactively, because Perch has to be complete over SSH and in scripts — is
-untouched and still governing. Nothing here moves a capability into or out of
-the picker.
-
-## The glossary
-
-**Holdings** is added: everything Perch holds on this machine — every Profile,
-every Credential Perch holds, the registry naming them and what each Group carries.
-The counterpart to an Installation, which is what a Channel left. What an Export
-writes, an Import puts back and a Purge gives up, and the reason none of the three
-takes a Target.
-
-**Export**, **Import** and **Purge** keep their entries and tighten by the new
-word: three definitions currently spell out "everything Perch holds" because they
-had to, and can now say Holdings.
-
-**Check** loses one citation. Its entry names the flag — "One round of the Watcher
-taken on its own — `perch watch --once`" — and that becomes `perch watcher check`.
-It is the only path `CONTEXT.md` cites that this decision moves; `perch status
---refresh`, `perch relogin` and `perch upgrade` are all unaffected.
-
-**Watcher** and **Service** are untouched. The Watcher entry's "three arrangements
-and one behavior" is what this decision implements rather than something it
-changes, and Service cites no path.
+**The glossary gains nothing here.** Every act these names perform is either
+already an entry or deliberately not one, and a glossary that named every act a
+command performs would be a second copy of the surface.
 
 ## Consequences
 
-**Top-level names go from nineteen to sixteen. Invocable forms go from
-twenty-seven to twenty-eight.**
+Fifteen names and twenty-six forms, and a reader who learns `perch group add` can
+predict where `perch holdings export` lives. What is bought is not a smaller
+surface — nineteen looked-up names cost one idea if a rule places them and
+nineteen facts if nothing does.
 
-The second number is the honest one, and it goes the wrong way: promoting `--once`
-to a verb adds a form. **This shape does not shrink the surface, and must not be
-sold as though it does.** The count was never the defect — nineteen looked-up names
-cost one idea if a rule places them and nineteen facts if nothing does. What is
-bought is that a person now holds one rule and a lookup, and that a reader who
-learns `perch group add` can predict where `perch holdings export` lives.
+`perch watcher check` reports on ADR a-watcher-knob-is-arithmetic's table, and
+exits with what it decided rather than with "it worked". `perch run` and
+`perch upgrade` also exit with something other than Perch's own code, for reasons
+their own commands hold.
 
-| | |
-| --- | --- |
-| Top level, Account elided (11) | `add` `alias` `disable` `enable` `list` `relogin` `remove` `run` `status` `switch` `tui` |
-| Top level, Perch itself (1) | `upgrade` |
-| `config` (3) | `set` `unset` `get` |
-| `group` (5) | `add` `remove` `rename` `move` `list` |
-| `watcher` (5) | `run` `check` `install` `uninstall` `status` |
-| `holdings` (3) | `export` `import` `purge` |
-
-**Ten older ADRs cite the moving paths** — 0013, 0014, 0015, 0021, 0025, 0034,
-0036, 0040, 0042 and 0044. **None is amended.** A citation going stale is not a
-decision decaying, and this repository supersedes records rather than editing
-them. ADR the-machine-runs-the-watcher in particular is untouched and still
-governing: that the Watcher may be run for you by the machine's service manager
-is unaffected by which words invoke it.
-
-**This supersedes nothing.** It is the first record of a rule the surface has
-been following imperfectly since ADR perch-does-not-draw, and there is no prior
-decision to correct — which is itself the finding. The shape was never chosen;
-it accreted, and three commands happened to get a noun because their nouns
-happened to have names.
-
-**Nothing about behavior changes.** No exit code moves, no flag other than
-`--once` is affected, `perch watcher check` reports on
-ADR a-watcher-knob-is-arithmetic's table exactly as `perch watch --once` did,
-and no capability is added or removed. This is a decision about where
-twenty-eight capabilities are reached from, and about the one sentence that says
-why.
+A command that reaches nothing but the registry goes through the one door
+(ADR one-door-to-the-registry), which is a statement about reach rather than about
+placement and does not follow from anything here.

@@ -1,14 +1,10 @@
-//! Behavior: what `perch list` answers when the question is "what do I have",
-//! and what it shows when it is narrowed to a Scope — a Group by name, or the
-//! Accounts in no Group (ADR the-listing-owns-the-set). Both render from cache,
-//! and neither touches the network without `--refresh`
+//! Behavior: what `perch list` answers to "what do I have", at every breadth,
+//! and what it answers about which Account is *best*
+//! (ADR the-listing-owns-the-set) — the rows in the order a Cycle ranks them,
+//! with the Headroom that order was made on beside them, held rather than
+//! ranked where nothing has declared the Accounts interchangeable
+//! (ADR a-group-is-a-declaration). Rendered from cache unless `--refresh`
 //! (ADR a-figure-carries-its-age).
-//!
-//! And what it answers about which Account is *best*, which is the other half
-//! of the listing (ADR the-listing-owns-the-set): the rows come out in the
-//! order a Cycle ranks them, with the Headroom that order was made on beside
-//! them, except where nothing has declared the Accounts interchangeable — there
-//! they are held rather than ranked (ADR a-group-is-a-declaration).
 
 mod common;
 
@@ -55,8 +51,8 @@ fn observed(observed_at: DateTime<Utc>, windows: &[(&str, f64)]) -> CachedUtiliz
     }
 }
 
-/// Three Accounts, deliberately unalike: the active one in a Group with a
-/// second that is Quarantined, and a third that is in no Group and disabled.
+/// Three Accounts, deliberately unalike: the active one in a Group with a second
+/// that is Quarantined, and a third in no Group and disabled.
 fn machine_holding_three_accounts() -> FakeHost {
     let mut registry = Registry::default();
 
@@ -92,12 +88,10 @@ fn machine_holding(registry: &Registry) -> FakeHost {
     host
 }
 
-/// The Accounts as the listing puts them, top row first.
-///
-/// Rows only. Every row starts with the marker column — `* ` on the active
-/// Account and two spaces on the rest — and the sentences under the table start
-/// at the margin, which matters because a Quarantine is written out down there
-/// with the address in it and would otherwise be counted as a row.
+/// The Accounts as the listing puts them, top row first. Rows only: they start
+/// with the marker column where the sentences under the table start at the
+/// margin, and a Quarantine written out down there carries an address that would
+/// otherwise count as a row.
 fn accounts_in_order(printed: &str) -> Vec<&str> {
     printed
         .lines()
@@ -125,9 +119,8 @@ fn a_group_of(group: Option<&str>, active: &str, accounts: &[(&str, f64)]) -> Re
     registry
 }
 
-/// The whole point of showing the ranking: the top row is where a bare
-/// `perch switch` would land, so the listing and the Switch cannot come to
-/// disagree about which Account is better (ADR the-listing-owns-the-set).
+/// The top row is where a bare `perch switch` would land, so the listing and the
+/// Switch cannot come to disagree about which Account is better.
 #[test]
 fn the_rows_come_out_in_the_order_a_cycle_ranks_them() {
     let host = machine_holding(&a_group_of(
@@ -146,13 +139,9 @@ fn the_rows_come_out_in_the_order_a_cycle_ranks_them() {
     );
 }
 
-/// The figure the order was made on, said so the order can be checked against
-/// it rather than taken on trust.
-///
 /// Distinct from the Utilization beside it, which is every Quota Window: the
 /// Headroom is what is left in the *worst* of them
-/// (ADR headroom-is-the-worst-window), and that is the one number a Cycle sorts
-/// on.
+/// (ADR headroom-is-the-worst-window), and the one number a Cycle sorts on.
 #[test]
 fn the_headroom_the_order_was_made_on_is_a_column_of_its_own() {
     let host = machine_holding_three_accounts();
@@ -188,11 +177,8 @@ fn the_headroom_the_order_was_made_on_is_a_column_of_its_own() {
     );
 }
 
-/// Being in no Group is the absence of a declaration that Accounts are
-/// interchangeable rather than a weaker form of one
-/// (ADR a-group-is-a-declaration), so a bare `perch switch` refuses there.
-/// Ordering them by Headroom would show a ranking Perch would not make, which
-/// is the one thing this listing exists not to do.
+/// A bare `perch switch` refuses there, so ordering them by Headroom would show
+/// a ranking Perch would not make — the one thing this listing exists not to do.
 #[test]
 fn ungrouped_accounts_are_held_rather_than_ranked() {
     let host = machine_holding(&a_group_of(
@@ -216,8 +202,6 @@ fn ungrouped_accounts_are_held_rather_than_ranked() {
     );
 }
 
-/// The other half of it: once somebody has said those Accounts are
-/// interchangeable, a Cycle does choose between them, so the listing ranks them.
 #[test]
 fn ungrouped_accounts_are_ranked_once_cycling_may_move_between_them() {
     let mut registry = a_group_of(None, EMAIL, &[(EMAIL, 90.0), (SECOND_EMAIL, 10.0)]);
@@ -234,16 +218,10 @@ fn ungrouped_accounts_are_ranked_once_cycling_may_move_between_them() {
     );
 }
 
-/// A document says what its order is, or it does not have one
-/// (ADR the-listing-owns-the-set).
-///
-/// `accounts[0]` of the first section is the Account a bare `perch switch`
-/// would land on, and a flat array states that nowhere — a script reading it
-/// would be relying on a ranking the document never claimed to be making. The
-/// held-versus-ranked distinction is the half with teeth: a `--json` showing a
-/// ranking of Accounts Perch would refuse to choose between is the
-/// two-surfaces-disagreeing failure ADR the-listing-owns-the-set exists to
-/// prevent, reached through a different renderer.
+/// A document says what its order is, or it does not have one. The
+/// held-versus-ranked half is the one with teeth: a `--json` showing a ranking of
+/// Accounts Perch would refuse to choose between is the two-surfaces-disagreeing
+/// failure reached through a different renderer.
 #[test]
 fn the_json_says_which_of_its_sections_is_ranked_and_which_is_held() {
     let mut registry = a_group_of(Some("work"), EMAIL, &[(EMAIL, 90.0), (SECOND_EMAIL, 10.0)]);
@@ -281,9 +259,8 @@ fn the_json_says_which_of_its_sections_is_ranked_and_which_is_held() {
     );
 }
 
-/// The figure the ranking was made on travels with it, so a section saying it
-/// is `ranked` carries the number that ranked it — and the three answers stay
-/// three, rather than an absent figure arriving as nought.
+/// A section saying it is `ranked` carries the number that ranked it, and the
+/// three answers stay three rather than an absent figure arriving as nought.
 #[test]
 fn the_json_carries_the_headroom_the_ranking_was_made_on() {
     let host = machine_holding_three_accounts();
@@ -315,10 +292,8 @@ fn the_json_carries_the_headroom_the_ranking_was_made_on() {
     );
 }
 
-/// A Cycle never leaves the scope it started in (ADR a-group-is-a-declaration),
-/// so a listing spanning several is those rankings one after another — and the
-/// one you are standing in leads, because it is where a bare `perch switch`
-/// would look.
+/// A Cycle never leaves the scope it started in, so a listing spanning several is
+/// those rankings one after another — and the one you are standing in leads.
 #[test]
 fn the_scope_the_active_account_is_in_comes_first() {
     let mut registry = Registry::default();
@@ -373,10 +348,8 @@ fn list_shows_every_account_with_its_alias_group_and_state() {
     );
 }
 
-/// The positive state has no name (ADR a-command-names-its-noun), so the column
-/// says nothing about the Account nobody has done anything to — the placeholder
-/// the Alias column already uses for having nothing to say. `disabled`,
-/// `quarantined` and `disabled, quarantined` are the only things it prints.
+/// The positive state has no name (ADR a-command-names-its-noun), so the cell
+/// empties to the placeholder the Alias column already uses.
 #[test]
 fn the_state_column_is_empty_for_an_account_in_neither_state() {
     let host = machine_holding_three_accounts();
@@ -399,7 +372,7 @@ fn the_state_column_is_empty_for_an_account_in_neither_state() {
 }
 
 /// One Account's State cell, found by where the header puts the column rather
-/// than by counting words — the Alias cell holds the same placeholder, so a
+/// than by counting words: the Alias cell holds the same placeholder, so a
 /// positional read would pass on the wrong one.
 fn state_cell<'a>(printed: &'a str, email: &str) -> &'a str {
     let header = printed
@@ -437,13 +410,9 @@ fn list_says_which_account_is_active() {
     );
 }
 
-/// A listing with nothing to say under it ends at the table, and does not space
-/// for the sentences it has not got.
-///
-/// The blank line above the footer is the footer's own — a bare listing on a
-/// machine with no active Account, nothing Quarantined and no Switch in flight
-/// has no legend to explain, no Reserve to say (ADR the-listing-owns-the-set)
-/// and no reason to print, so there is nothing for the line to separate.
+/// The blank line above the footer is the footer's own, so the fixture is the
+/// machine with nothing to put down there: no active Account, nothing
+/// Quarantined, no Switch in flight.
 #[test]
 fn a_listing_with_nothing_under_the_table_ends_at_the_table() {
     let mut registry = a_group_of(None, EMAIL, &[(EMAIL, 42.0), (SECOND_EMAIL, 10.0)]);
@@ -510,14 +479,12 @@ fn list_without_refresh_never_touches_the_network() {
     assert!(printed.contains("11h ago"), "{printed}");
     assert!(
         host.http_calls().is_empty(),
-        "cheapness is a property of not passing `--refresh` (ADR the-listing-owns-the-set)"
+        "cheapness is a property of not passing `--refresh`"
     );
 }
 
-/// The rule `perch status` states for itself, which the listing follows at every
-/// breadth: two of these drawing at once is the ordinary case rather than a
-/// race, and a read that took the write lock would wait out whatever holds it
-/// and then fail.
+/// Two of these drawing at once is the ordinary case rather than a race, and a
+/// read that took the write lock would fail on one of them.
 #[test]
 fn list_reads_alongside_another_perch_rather_than_waiting_on_it() {
     let host = machine_holding_three_accounts();
@@ -533,8 +500,6 @@ fn list_reads_alongside_another_perch_rather_than_waiting_on_it() {
     drop(held);
 }
 
-/// The other half of the same rule: `--refresh` writes what it fetched, so it
-/// takes the lock exclusively, at whatever breadth it was asked for.
 #[test]
 fn a_listing_that_refreshes_waits_for_the_other_perch_because_it_writes() {
     let host = machine_holding_three_accounts();
@@ -584,7 +549,7 @@ fn list_json_carries_an_observation_time_on_every_figure() {
         active["disabled"], false,
         "the key follows the field's name and stays present on every Account: \
          a script testing for a key's presence to learn a bool has a worse \
-         contract, not a truer one (ADR a-command-names-its-noun)"
+         contract, not a truer one"
     );
     assert!(
         active["quarantined"].is_null(),
@@ -635,7 +600,7 @@ fn list_json_carries_an_observation_time_on_every_figure() {
 }
 
 /// A Scope narrows the listing to the Accounts you could Cycle between, which
-/// is where you would land before you switch (ADR the-listing-owns-the-set).
+/// is where you would land before you switch.
 #[test]
 fn list_in_a_group_shows_every_account_in_it() {
     let host = machine_holding_three_accounts();
@@ -677,7 +642,7 @@ fn list_narrows_to_the_scope_named_rather_than_to_the_active_accounts_own() {
     );
 }
 
-/// Being in no Group is not a Group (ADR a-group-is-a-declaration), so it is
+/// Being in no Group is not a Group, so it is
 /// addressed by the one word reserved for it rather than by a Group name.
 #[test]
 fn list_ungrouped_shows_every_account_in_no_group() {
@@ -709,7 +674,7 @@ fn list_ungrouped_shows_every_account_in_no_group() {
     );
     assert!(
         printed.contains("only moves between these when you say it may"),
-        "being ungrouped is not a Group, and Cycling says so (ADR a-group-is-a-declaration):\n{printed}"
+        "being ungrouped is not a Group, and Cycling says so:\n{printed}"
     );
     assert!(
         printed.contains("`interchangeable` is false"),
@@ -719,13 +684,8 @@ fn list_ungrouped_shows_every_account_in_no_group() {
     );
 }
 
-/// The other half of it, which nothing was asking: the same clause on a machine
-/// where the declaration *has* been made.
-///
-/// `perch group list` and the TUI both say which way the Setting is set;
-/// `perch list` printed the rule alone, so somebody who had run
-/// `perch config set ungrouped interchangeable true` was still told Cycling moves between
-/// these "when you say it may".
+/// The same clause on a machine where the declaration *has* been made, because
+/// the rule alone reads as "you have yet to say it" to somebody who has.
 #[test]
 fn the_ungrouped_cycling_clause_says_so_once_cycling_has_been_allowed() {
     let mut registry = Registry::default();
@@ -745,12 +705,9 @@ fn the_ungrouped_cycling_clause_says_so_once_cycling_has_been_allowed() {
     );
 }
 
-/// What the Scope has left to draw on, said under the table a heading has
-/// already named the Scope of (ADR the-listing-owns-the-set).
-///
 /// A count over the Accounts a Cycle may choose, the best one's own figure, and
-/// the age of the reading that figure came from — never one pooled figure, since
-/// Accounts sit on different plans and Perch only ever sees percentages.
+/// that figure's age — never one pooled figure, since Accounts sit on different
+/// plans and Perch only ever sees percentages.
 #[test]
 fn a_narrowed_listing_says_what_the_scope_has_left() {
     let host = machine_holding_three_accounts();
@@ -824,11 +781,9 @@ fn a_scope_with_nothing_left_says_what_is_in_the_way_rather_than_a_figure() {
     );
 }
 
-/// A bare `perch list` is one table across every Scope at once, with the Group
-/// as a column and no heading to name which Scope a sentence would be about
-/// (ADR the-listing-owns-the-set). A Reserve line there would have to name its
-/// own Scope, which is a heading smuggled into a sentence already as wide as a
-/// terminal.
+/// A bare listing is one table across every Scope with no heading, so a Reserve
+/// line there would have to name its own Scope — a heading smuggled into a
+/// sentence already as wide as a terminal.
 #[test]
 fn a_bare_listing_says_no_reserve() {
     for host in [
@@ -846,11 +801,8 @@ fn a_bare_listing_says_no_reserve() {
     }
 }
 
-/// Being in no Group is the absence of a declaration that those Accounts are
-/// interchangeable (ADR a-group-is-a-declaration), and what they have left
-/// *between them* is exactly the claim nobody has made. So the listing declines
-/// it in the same breath it declines ranking them, and says it once the
-/// declaration is made.
+/// What a set has left *between them* is the same claim as ranking it, so the
+/// listing declines both in one breath and says both once declared.
 #[test]
 fn the_ungrouped_say_no_reserve_until_they_are_declared_interchangeable() {
     let mut registry = a_group_of(None, EMAIL, &[(EMAIL, 90.0), (SECOND_EMAIL, 10.0)]);
@@ -876,12 +828,9 @@ fn the_ungrouped_say_no_reserve_until_they_are_declared_interchangeable() {
     );
 }
 
-/// The slot under the table reads top to bottom in the order each sentence
-/// qualifies the one above it: the legend, what a Switch in flight did to it
-/// (ADR a-switch-is-written-down-first), what the Scope has left, whether
-/// Cycling may move within it, and last what is broken — with the repair
-/// closing that block, since it is about every Account in it
-/// (ADR perch-says-what-it-did).
+/// Top to bottom in the order each sentence qualifies the one above it: the
+/// legend, a Switch in flight (ADR a-switch-is-written-down-first), what the
+/// Scope has left, whether Cycling may move within it, and what is broken.
 #[test]
 fn the_reserve_sits_between_the_legend_and_the_quarantine_reasons() {
     let host = machine_holding_three_accounts();
@@ -910,13 +859,9 @@ fn the_reserve_sits_between_the_legend_and_the_quarantine_reasons() {
     );
 }
 
-/// The Quarantine reason varies between Accounts and the repair does not, so
-/// the reason is said once per Account and the repair once for the Listing
+/// The reason varies between Accounts and the repair does not, so the reason is
+/// said once per Account and the repair once for the Listing
 /// (ADR perch-says-what-it-did).
-///
-/// Three broken Accounts used to mean three copies of the identical
-/// `perch relogin` sentence, under a table that had already said `quarantined`
-/// three times in its State column.
 #[test]
 fn the_repair_is_said_once_however_many_accounts_are_quarantined() {
     let mut registry = a_group_of(
@@ -962,9 +907,8 @@ fn the_repair_is_said_once_however_many_accounts_are_quarantined() {
     }
 }
 
-/// And where there is exactly one to name, it is named — a person with one
-/// broken Account learns both why it broke and the command that repairs it,
-/// with nothing left to substitute.
+/// And with exactly one to name it is named, rather than a substitution standing
+/// where a single address would fit.
 #[test]
 fn one_quarantined_account_is_told_the_repair_for_itself() {
     let host = machine_holding_three_accounts();
@@ -985,9 +929,8 @@ fn one_quarantined_account_is_told_the_repair_for_itself() {
     );
 }
 
-/// And the `Cycling …` clause follows it directly, qualifying it: the count is
-/// over the Accounts a Cycle may move between, and that clause is the sentence
-/// saying whether it may.
+/// The count above is over the Accounts a Cycle may move between, and this clause
+/// is the sentence saying whether it may.
 #[test]
 fn the_cycling_clause_follows_the_reserve_it_qualifies() {
     let mut registry = a_group_of(None, EMAIL, &[(EMAIL, 90.0)]);
@@ -1007,8 +950,6 @@ fn the_cycling_clause_follows_the_reserve_it_qualifies() {
     );
 }
 
-/// A Scope holding nobody says so in the one sentence that fits it, rather than
-/// counting to nought about Accounts it has not got.
 #[test]
 fn a_narrowed_scope_holding_no_accounts_says_only_that() {
     let mut registry = Registry::default();
@@ -1030,13 +971,9 @@ fn a_narrowed_scope_holding_no_accounts_says_only_that() {
     );
 }
 
-/// The document says it at every breadth, unlike the table
-/// (ADR the-listing-owns-the-set): each section names its own Scope in a key,
-/// which is the whole of what the table lacks.
-///
-/// As fields rather than the rendered sentence — the listing's document is
-/// structured throughout, and a prose sentence in a document is a thing scripts
-/// end up regexing.
+/// At every breadth, unlike the table: each section names its own Scope in a key.
+/// As fields rather than the rendered sentence, because a prose sentence in a
+/// document is a thing scripts end up regexing.
 #[test]
 fn every_section_of_the_json_carries_the_scopes_reserve() {
     let host = machine_holding_three_accounts();
@@ -1077,9 +1014,8 @@ fn every_section_of_the_json_carries_the_scopes_reserve() {
     );
 }
 
-/// `null` for a Scope holding nobody too, which is not ambiguous against the
-/// other `null` because `accounts` sits beside it and tells "nobody is here"
-/// from "nobody declared these a set".
+/// Not ambiguous against the other `null`, because `accounts` sits beside it and
+/// tells "nobody is here" from "nobody declared these a set".
 #[test]
 fn a_section_holding_no_accounts_carries_no_reserve() {
     let mut registry = Registry::default();
@@ -1146,9 +1082,9 @@ fn list_ungrouped_json_says_it_narrowed_to_no_group() {
     assert!(document["scope"]["name"].is_null());
 }
 
-/// A Scope nothing declared is a mistyped name, and the answer is what *was*
-/// declared — the same answer `perch group move` gives, because it is the same
-/// mistake. An empty table would read as a Group that exists and holds nothing.
+/// A Scope nothing declared is a mistyped name, answered with what *was* — the
+/// same answer `perch group move` gives. An empty table would read as a Group
+/// that exists and holds nothing.
 #[test]
 fn a_scope_nothing_declared_is_refused_rather_than_listed_as_empty() {
     let host = machine_holding_three_accounts();
@@ -1163,11 +1099,9 @@ fn a_scope_nothing_declared_is_refused_rather_than_listed_as_empty() {
     assert!(printed.is_empty(), "and nothing was listed: {printed}");
 }
 
-/// `global` is how people say every Scope at once, and it is refused as a Group
-/// name so that a Group can never take that word (`validate_name`). Answered as
-/// an ordinary mistyped Group it would be met with "Declare it with `perch group
-/// add global`" — an offer the registry would then refuse. Here the answer is
-/// the happy one: every Scope at once is what a bare `perch list` already shows.
+/// Answered as an ordinary mistyped Group, `global` would be met with "Declare it
+/// with `perch group add global`" — an offer `validate_name` then refuses. Here
+/// the answer is the happy one.
 #[test]
 fn global_is_answered_with_the_listing_it_means_rather_than_offered_as_a_group() {
     let host = machine_holding_three_accounts();
@@ -1187,9 +1121,8 @@ fn global_is_answered_with_the_listing_it_means_rather_than_offered_as_a_group()
     );
 }
 
-/// An Alias names one Account and a Scope is a set, so the two are not
-/// interchangeable here even though they share a namespace: the Account you want
-/// a row for is `perch status`'s question, or a row of the listing it is in.
+/// An Alias names one Account and a Scope is a set, so sharing a namespace does
+/// not make them interchangeable here.
 #[test]
 fn an_alias_is_not_a_scope() {
     let host = machine_holding_three_accounts();
@@ -1203,10 +1136,9 @@ fn an_alias_is_not_a_scope() {
     );
 }
 
-/// `perch list` is the surface that keeps working when Perch holds no active
-/// Account — precisely the state `perch status` refuses in and sends somebody to
-/// `perch switch` to leave. A narrowing that read the active Account to know
-/// what it meant would have brought that coupling back.
+/// This is the surface that keeps working where `perch status` refuses, so a
+/// narrowing that read the active Account to know what it meant would couple the
+/// two back together.
 #[test]
 fn list_narrows_on_a_machine_with_no_active_account() {
     let host = machine_holding_three_accounts();
@@ -1257,9 +1189,8 @@ fn list_on_a_machine_perch_has_never_run_on_adopts_first() {
     assert!(printed.contains(EMAIL), "{printed}");
 }
 
-/// The first run is where a script meets adoption, and adoption used to say its
-/// piece on the stream the document is written to. A `--json` that begins with
-/// three lines of prose is not a document, and `jq` is what finds out.
+/// The first run is where a script meets adoption, which has its own piece to
+/// say: a `--json` that begins with three lines of prose is not a document.
 #[test]
 fn the_json_of_a_first_run_is_a_document_and_nothing_else() {
     for json_of in [
@@ -1283,13 +1214,9 @@ fn the_json_of_a_first_run_is_a_document_and_nothing_else() {
     }
 }
 
-/// Every Account's Quota Windows go into one `Utilization` column, so the
-/// percentages line up down it however unalike the Accounts are.
-///
-/// The width of the window-name column was measured per Account, and an
-/// Opus-eligible Account carries `7-day-opus` where a `pro` Account does not — so
-/// the same `5-hour` percentage sat five columns further right on one Account
-/// than on the one above it, in the one place the eye is running down a column.
+/// The fixture is an Opus-eligible Account above a `pro` one, because only the
+/// first carries `7-day-opus` — so a width measured per Account puts the same
+/// `5-hour` percentage in a different place on each.
 #[test]
 fn the_utilization_figures_line_up_down_the_column_across_unalike_accounts() {
     let mut registry = Registry::default();
@@ -1329,13 +1256,9 @@ fn the_utilization_figures_line_up_down_the_column_across_unalike_accounts() {
     );
 }
 
-/// A machine holding nothing is diagnosed the same way whichever Scope was
-/// named.
-///
-/// `perch list` on an empty machine says "No Accounts yet"; `perch list
-/// ungrouped` said "Every Account is in a Group", which is a true-sounding
-/// sentence about a machine with no Account to be in one. Narrowing a listing
-/// should change what it shows, not what Perch says is the matter.
+/// Narrowing a listing changes what it shows rather than what Perch says is the
+/// matter: "Every Account is in a Group" is a true-sounding sentence about a
+/// machine with no Account to be in one.
 #[test]
 fn narrowing_a_listing_on_an_empty_machine_does_not_change_the_diagnosis() {
     let host = machine_holding(&Registry::default());

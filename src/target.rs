@@ -4,15 +4,10 @@
 //! `group move` — resolves it here, so a name means the same thing whichever
 //! command it is typed at. The order is Alias, then Account email, then Group.
 //!
-//! The order can never actually break a tie: an Alias and a Group name cannot
-//! collide because the registry refuses the second one, and neither may look
-//! like an email address. It is fixed here anyway, because a resolution rule
-//! that depends on no collisions existing is one that stops being true the day
-//! a migration lets one through.
-//!
-//! A Target that matches nothing is the one case worth spending words on: what
-//! was typed is repeated back with whatever it nearly matched, because a
-//! mistyped name is far more common than an imagined one.
+//! That order can never break a tie: an Alias and a Group name cannot collide
+//! because the registry refuses the second, and neither may look like an email
+//! address. It is fixed anyway, because a resolution rule that depends on no
+//! collisions existing stops being true the day a migration lets one through.
 
 use crate::error::{PerchError, Result};
 use crate::registry::{self, Registry};
@@ -29,10 +24,9 @@ pub enum Target {
 }
 
 impl Target {
-    /// How the Target matched, said the way the user would hear it and ready
-    /// to print on its own line. Commands say this when they act, so "Perch
+    /// How the Target matched, ready to print on its own line — so "Perch
     /// understood me" is something the user reads rather than infers from the
-    /// outcome.
+    /// outcome. Hands back the *held* spelling rather than what was typed.
     pub fn matched(&self) -> String {
         match self {
             Target::Alias { name, email } => format!("`{name}` is an Alias for {email}."),
@@ -49,9 +43,9 @@ impl Target {
     }
 }
 
-/// A Target that named exactly one Account. Carrying the Account and how it
-/// was reached together is what keeps every caller from having to ask a
-/// [`Target`] for an email address it might not have.
+/// A Target that named exactly one Account. Carrying the Account and how it was
+/// reached together is what keeps every caller from asking a [`Target`] for an
+/// email address it might not have.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountTarget {
     pub email: String,
@@ -67,9 +61,9 @@ pub fn resolve(registry: &Registry, target: &str) -> Result<Target> {
     }
 }
 
-/// The same order, for the commands whose Target has to be exactly one
-/// Account. A Group is resolved rather than ignored, so naming one gets an
-/// answer about the Group instead of a claim that it does not exist.
+/// The same order, for the commands whose Target has to be exactly one Account.
+/// A Group is resolved rather than ignored, so naming one gets an answer about
+/// the Group instead of a claim that it does not exist.
 pub fn resolve_account(registry: &Registry, target: &str) -> Result<AccountTarget> {
     let found = match matched(registry, target) {
         Some(found) => found,
@@ -89,16 +83,9 @@ pub fn resolve_account(registry: &Registry, target: &str) -> Result<AccountTarge
 }
 
 /// Matched however it was capitalized, because that is the rule the names were
-/// made under.
-///
-/// The registry refuses an Alias or a Group that differs from a held name only
-/// in case — "nobody remembers which way they capitalized a Group months ago",
-/// as it puts it — so there is never more than one candidate to find. An exact
-/// lookup here made every command that *resolves* a Target stricter than every
-/// command that *sets* one: `perch group add Work` then `perch switch work`
-/// said nothing was called `work`, while `perch config set work …` and `perch
-/// group remove work` both accepted it. Emails diverged the same way, against
-/// a `switch::already_landed` that compares them case-insensitively.
+/// made under: the registry refuses an Alias or a Group differing from a held
+/// name only in case, so there is never more than one candidate to find. An
+/// exact lookup here would make resolving a Target stricter than setting one.
 fn matched(registry: &Registry, target: &str) -> Option<Target> {
     if let Some((name, email)) = registry.declared_alias(target) {
         return Some(Target::Alias {
@@ -106,14 +93,9 @@ fn matched(registry: &Registry, target: &str) -> Option<Target> {
             email: email.to_string(),
         });
     }
-    // The same comparison Aliases and Group names get, and the same one a
-    // Profile is derived under: `registry::slug` lowercases the whole of
-    // Unicode, so `CAFÉ@example.com` and `café@example.com` already share one
-    // Profile and `perch add` already refuses the second as a collision. Asked
-    // in ASCII here, this was the one place that disagreed — a held
-    // `café@example.com` could not be reached by typing it with a capital É,
-    // and the refusal said Perch holds nothing by that name about an Account it
-    // holds and would not let you have two of.
+    // The comparison a Profile is derived under, over the whole of Unicode:
+    // `CAFÉ@example.com` and `café@example.com` share one Profile and `perch
+    // add` refuses the second, so asking in ASCII here would disagree.
     if let Some(account) = registry
         .accounts
         .iter()
@@ -159,9 +141,9 @@ fn nothing_called(target: &str, candidates: Vec<String>) -> PerchError {
     PerchError::NotFound(format!("Nothing Perch holds is called `{target}`. {help}"))
 }
 
-/// What the user probably meant, if anything they hold is close enough to be
-/// worth guessing at. Shared with the commands that take a name of one
-/// particular kind, so a typo reads the same wherever it is made.
+/// What the user probably meant, where anything they hold is close enough to be
+/// worth guessing at. Shared with the commands that take a name of one kind, so
+/// a typo reads the same wherever it is made.
 pub fn suggestion(candidates: &[String], typed: &str) -> Option<String> {
     let near = near_matches(candidates, typed);
     (!near.is_empty()).then(|| {
@@ -203,17 +185,9 @@ fn near_matches(candidates: &[String], target: &str) -> Vec<String> {
                 .then_some(((!started, distance), candidate))
         })
         .collect();
-    // In its own bucket, ahead of everything, because the sort is what the rule
-    // above needed and did not have. Ranked on the raw distance, `over` put
-    // `over1`, `over2` and `over3` — one edit each — ahead of
-    // `overflow@example.com` at sixteen, and the list is cut at three: the one
-    // candidate the rule was written for was the one it dropped.
-    //
-    // Plainly, because `((bool, usize), &String)` already orders that way and
-    // the hand-written comparator was the same thing spelled out — `left.1` is
-    // the candidate, not a second score, so a `then_with` there reads as a
-    // tie-break on distance when it is one on the name. Sorting the tuple keeps
-    // the alphabetical tie-break and says where it comes from.
+    // A started name sorts in its own bucket first, because on raw distance a
+    // long address loses to any three-letter near-miss and the list is cut at
+    // three. Plainly, because the tuple already orders that way.
     scored.sort();
     scored
         .into_iter()
@@ -222,8 +196,8 @@ fn near_matches(candidates: &[String], target: &str) -> Vec<String> {
         .collect()
 }
 
-/// Levenshtein distance, one row of the matrix at a time. The strings compared
-/// here are names somebody typed, so the quadratic cost is on nothing.
+/// Levenshtein distance, one row of the matrix at a time. The strings are names
+/// somebody typed, so the quadratic cost is on nothing.
 fn edit_distance(left: &str, right: &str) -> usize {
     let right: Vec<char> = right.chars().collect();
     let mut previous: Vec<usize> = (0..=right.len()).collect();
@@ -277,11 +251,9 @@ mod tests {
         );
     }
 
-    /// "However long it is" was a claim the filter made and the sort took back.
-    /// Ranked on the raw edit distance, a name the Target starts sinks in
-    /// proportion to how much of it is left to type, and the list is cut at
-    /// three — so `over` offered `over1`, `over2` and `over3`, one edit each,
-    /// and dropped the `overflow@example.com` the rule exists for at sixteen.
+    /// The fixture is three one-edit names against one sixteen edits away: on
+    /// raw distance they crowd out the long name the start rule exists for,
+    /// because the list is cut at three.
     #[test]
     fn a_name_the_target_starts_outranks_a_shorter_name_it_does_not() {
         let names = vec![

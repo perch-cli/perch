@@ -1,43 +1,13 @@
-//! `perch list` — the one place that answers "what do I have", and the only
-//! place that shows what a Cycle would make of it.
+//! `perch list` — the one place that answers "what do I have", at every breadth,
+//! and the only place that shows what a Cycle would make of it
+//! (ADR the-listing-owns-the-set).
 //!
-//! Every Account with the things that decide whether it is any use to you — the
-//! name you reach it by, the Group that says what it is interchangeable with,
-//! whether it is a Cycle candidate at all, how much Headroom it has left and
-//! how full each of its Quota Windows is. Like every surface that shows
-//! Utilization it renders from cache unless it is asked to fetch
-//! (ADR a-figure-carries-its-age).
-//!
-//! The rows come out in the order a Cycle ranks them
-//! (ADR headroom-is-the-worst-window), always and not behind a flag: the
-//! ranking `perch switch` makes should be visible rather than hidden, so the
-//! two surfaces cannot come to disagree about which Account is better
-//! (ADR the-listing-owns-the-set). Where nothing has declared a set of Accounts
-//! interchangeable they are shown held rather than ranked
-//! (ADR a-group-is-a-declaration) — a ranking of Accounts Perch would refuse to
-//! choose between is a claim nothing backs.
-//!
-//! This is the listing at every breadth (ADR the-listing-owns-the-set). A Scope
-//! narrows it — a Group by name, or `ungrouped` — because showing a set of
-//! Accounts is one job whether the set is everything or the Group you would
-//! Cycle within, and "where would I land before I switch" is that job asked of
-//! one Scope.
-//!
-//! Narrowed, it also says what that Scope has left to draw on — its Reserve
-//! (ADR the-listing-owns-the-set). Only narrowed: the table spans every Scope
-//! at once with the Group as a column, so there is no heading for a sentence
-//! about one of them to sit under. A `--json` section names its own Scope in a
-//! key, so every section carries the Reserve at every breadth.
-//!
-//! `--refresh` follows the breadth: it reads the Accounts about to be shown and
-//! no others, which is one rule rather than a capability each breadth has of
-//! its own.
-//!
-//! What a Listing *is* — which Scopes it covers, in what order, and whether a
-//! Scope's order is a ranking — is [`crate::listing`]'s. What this command does
-//! is choose the breadth and draw it: the word somebody typed, the table, and
-//! the sentences under it. The [`Scope`] here is the breadth alone, which is why
-//! it has an arm a Cycle's Scope must never have.
+//! Rows in the order a Cycle ranks them, with the Headroom that order was made
+//! on beside them, held rather than ranked where nothing has declared the
+//! Accounts interchangeable. Rendered from cache unless asked to fetch
+//! (ADR a-figure-carries-its-age); `--refresh` reads the Accounts about to be
+//! shown and no others. What a Listing *is* is [`crate::listing`]'s; this picks
+//! the breadth and draws it, so its [`Scope`] has an arm a Cycle's must not.
 
 use std::io::Write;
 
@@ -56,12 +26,11 @@ use crate::utilization;
 
 #[derive(Debug, Default, Clone)]
 pub struct ListArgs {
-    /// Which Accounts to show: a Group by name, or `ungrouped` for the Accounts
-    /// in no Group. `None` is every Account Perch holds.
+    /// Which Accounts to show: a Group by name, or `ungrouped`. `None` is every
+    /// Account Perch holds.
     ///
-    /// The word as it was typed rather than a resolved [`Scope`], because a
-    /// name nothing was declared under is answered with what *was* declared,
-    /// and a parser that had already thrown the word away could not.
+    /// The word as typed rather than a resolved [`Scope`], because a name
+    /// nothing was declared under is answered with what *was* declared.
     pub scope: Option<String>,
     /// Read current Utilization before showing it, rather than showing what was
     /// last observed.
@@ -69,17 +38,11 @@ pub struct ListArgs {
     pub json: bool,
 }
 
-/// Which Accounts a listing covers.
-///
-/// Being in no Group is not a Group (ADR a-group-is-a-declaration), so it is a
-/// scope of its own rather than a Group with a reserved name: the two are shown
-/// differently because Cycling treats them differently.
-///
-/// Deliberately not [`crate::registry::Scope`], which is the same idea for a
-/// Cycle and has no `Everything`. Showing every Account is ordinary; Cycling
-/// across every Account is the thing ADR a-group-is-a-declaration exists to
-/// prevent, and the difference is worth keeping in the types rather than in a
-/// check.
+/// Which Accounts a listing covers. Deliberately not
+/// [`crate::registry::Scope`], which is the same idea for a Cycle and has no
+/// `Everything`: showing every Account is ordinary, and Cycling across every
+/// Account is what ADR a-group-is-a-declaration exists to prevent — a
+/// difference kept in the types rather than in a check.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Scope {
     /// Every Account Perch holds.
@@ -93,11 +56,8 @@ enum Scope {
 impl Scope {
     /// The Accounts a listing covers, which is also the set `--refresh` reads.
     ///
-    /// Membership alone, and asked of the registry directly. What order they
-    /// come out in is [`Scope::ranked`], which answers a question a Refresh
-    /// does not have — it spends its budget on the Accounts about to be shown
-    /// (ADR a-figure-carries-its-age) and has no opinion about which of them is
-    /// best.
+    /// Membership alone. What order they come out in is [`Scope::sections`],
+    /// which answers a question a Refresh does not have.
     fn accounts<'a>(&self, registry: &'a Registry) -> Vec<&'a Account> {
         match self {
             Scope::Everything => registry.accounts.iter().collect(),
@@ -106,15 +66,9 @@ impl Scope {
         }
     }
 
-    /// The same Accounts, as the emails a Refresh is asked for.
-    ///
-    /// Here rather than at the caller because it is the same set [`accounts`]
-    /// is: a refresh reads exactly what is about to be shown
-    /// (ADR the-listing-owns-the-set), and a second walk of the registry to
-    /// work out what that is would be a second answer to a question this type
-    /// already answers.
-    ///
-    /// [`accounts`]: Scope::accounts
+    /// The same Accounts, as the emails a Refresh is asked for. Here rather
+    /// than at the caller because a second walk of the registry would be a
+    /// second answer to a question this type already answers.
     fn emails(&self, registry: &Registry) -> Vec<String> {
         self.accounts(registry)
             .iter()
@@ -122,17 +76,11 @@ impl Scope {
             .collect()
     }
 
-    /// The same Accounts, in the order the listing shows them, and in the
-    /// sections that order was made within.
-    ///
-    /// The same Accounts is the load-bearing half. A Cycle never leaves the
-    /// scope it started in (ADR a-group-is-a-declaration), so there is no one
-    /// ranking over every Account Perch holds: each Group ranks its own by its
-    /// own Strategy, and the Accounts in no Group rank among themselves when
-    /// anything has said they may. The whole listing is those rankings one
-    /// after another — which is why the Group is a column rather than a sort
-    /// key nobody can see, and which is only a listing of everything because an
-    /// Account is in exactly one of those scopes (see [`scopes`]).
+    /// The same Accounts, in the order the listing shows them and in the
+    /// sections that order was made within. A Cycle never leaves the scope it
+    /// started in, so there is no single ranking over everything Perch holds:
+    /// the listing is each Scope's own ranking one after another, which is why
+    /// the Group is a column rather than a sort key nobody can see.
     fn sections<'a>(&self, registry: &'a Registry, now: DateTime<Utc>) -> Vec<Section<'a>> {
         let of = |scope| Section::of(registry, scope, now);
         match self {
@@ -152,13 +100,10 @@ impl Scope {
         }
     }
 
-    /// The breadth as a script reads it.
-    ///
-    /// Only the arm a Cycle's Scope has no answer for is spelled here. The other
-    /// two are [`listing::scope_json`]'s, which is also what a Section names
-    /// itself with — a listing narrowed to a Group would otherwise be at liberty
-    /// to describe that Group one way at the top of the document and another in
-    /// the section below it.
+    /// The breadth as a script reads it. Only the arm a Cycle's Scope has no
+    /// answer for is spelled here; the other two are [`listing::scope_json`]'s,
+    /// which is also what a Section names itself with — otherwise a narrowed
+    /// listing could describe one Group two ways in one document.
     fn json(&self) -> serde_json::Value {
         match self {
             Scope::Everything => json!({"kind": "all", "name": serde_json::Value::Null}),
@@ -168,22 +113,18 @@ impl Scope {
     }
 }
 
-/// One Group, said as the line above the Accounts in it.
-///
-/// Taken from [`registry::Scope::described`] rather than spelled again, because
-/// that is what names the same Group in the middle of a sentence: a Group that
-/// read one way over a listing and another in the sentence explaining a Cycle
-/// would read as two Groups.
+/// One Group, said as the line above the Accounts in it. From
+/// [`registry::Scope::described`] rather than spelled again, because a Group
+/// that read one way over a listing and another in the sentence explaining a
+/// Cycle would read as two Groups.
 fn group_heading(name: &str) -> String {
     registry::Scope::Group(name.to_string()).described()
 }
 
 pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
     // Exclusively only when there is something to write, which is `--refresh`
-    // and nothing else — the rule `perch status` states for itself and the
-    // reason it gives holds here too: a read that took the write lock would
-    // wait out whatever holds it and then fail, and two listings drawn at the
-    // same moment are the ordinary case rather than a race.
+    // and nothing else: two listings drawn at the same moment are the ordinary
+    // case, and a read that took the write lock would fail on one of them.
     let (mut perch, mut registry) = match args.refresh {
         true => {
             let (perch, registry) = adopt::ensure_adopted_exclusively(host)?;
@@ -197,10 +138,8 @@ pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
         None => Scope::Everything,
     };
 
-    // Exactly the Accounts about to be shown. Every read spends from a budget
-    // that does not refill early (ADR a-figure-carries-its-age), so narrowing
-    // the listing narrows the reads with it and nothing is spent on an Account
-    // nobody asked about.
+    // Exactly the Accounts about to be shown, so narrowing the listing narrows
+    // the reads with it and nothing is spent on an Account nobody asked about.
     let report = match &mut perch {
         Some(perch) => {
             let asking_about = scope.emails(&registry);
@@ -221,24 +160,18 @@ pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
     render(host, out, &registry, scope, now, args.json, &report)
 }
 
-/// The Scope a name addresses, which is a Group by name or the Accounts in no
-/// Group.
+/// The Scope a name addresses: a Group by name, or the Accounts in no Group.
 ///
-/// An Alias or an email address is not one of them and is not accepted as one.
-/// A Target names one Account and this narrows to a set — a listing of one row
-/// is what `perch status` answers better — so a name that is somebody's Alias
-/// is answered as the Group it is not, the same way `perch config` answers it.
+/// An Alias or an email address is neither, and is answered as the Group it is
+/// not — the same way `perch config` answers one. A Target names one Account,
+/// and a listing of one row is what `perch status` answers better.
 fn narrowed(registry: &Registry, name: &str) -> Result<Scope> {
     if registry::means_ungrouped(name) {
         return Ok(Scope::Ungrouped);
     }
-    // The one word that has to be answered here rather than left to fall
-    // through, and for the reason `validate_name` refuses it as a name: fallen
-    // through it is answered with "Declare it with `perch group add global`",
-    // which is an offer the registry refuses to honor. `perch config` answers
-    // it with there being no Scope every other one falls back to; a listing has
-    // the happier answer, because every Scope at once is precisely what it
-    // shows when it is asked for no Scope at all.
+    // Answered here rather than left to fall through, because fallen through it
+    // offers "Declare it with `perch group add global`" — which `validate_name`
+    // then refuses. A listing has the happier answer.
     if registry::means_global(name) {
         return Err(PerchError::NotFound(format!(
             "There is no Scope called `{name}` — it is how people say every \
@@ -272,16 +205,11 @@ fn render(
     }
 }
 
-/// The fixed columns, in the order they are printed. The headers are the same
-/// array the rows are measured against, so a renamed column cannot drift from
-/// the width it was measured at.
-///
+/// The fixed columns, in the order they are printed — the same array the rows
+/// are measured against, so a renamed column cannot drift from its width.
 /// **Headroom** is the figure the order was made on: an Account's *worst* Quota
-/// Window (ADR headroom-is-the-worst-window), which is a different question
-/// from the Utilization printed beside it. Utilization is every window, one
-/// line each; Headroom is the one of them that decides whether a Cycle would
-/// come here, said as the single number the ranking sorted on. Without it the
-/// order is a claim the table gives no way of checking.
+/// Window (ADR headroom-is-the-worst-window), where the Utilization beside it is
+/// every window. Without it the order is a claim nothing here can check.
 const HEADERS: [&str; 5] = ["Account", "Alias", "Group", "State", "Headroom"];
 
 /// How many there are, for the arrays measured against them.
@@ -314,11 +242,9 @@ fn columns(registry: &Registry, account: &Account) -> [String; COLUMNS] {
 }
 
 /// Each column as wide as the widest thing in it, [`HEADERS`] included,
-/// measured in the cells a terminal draws them in — see [`cells`].
-///
-/// The headers are not a parameter, because there is one set of them and a
-/// column measured against anything else is a column padded to a width its own
-/// heading does not fit in.
+/// measured in the cells a terminal draws them in. The headers are not a
+/// parameter: a column measured against anything else is one padded to a width
+/// its own heading does not fit in.
 fn widths<'a>(rows: impl IntoIterator<Item = &'a [String; COLUMNS]> + Clone) -> [usize; COLUMNS] {
     std::array::from_fn(|column| {
         rows.clone()
@@ -363,17 +289,11 @@ fn rows(registry: &Registry, accounts: &[&Account], now: DateTime<Utc>) -> Vec<R
         .collect()
 }
 
-/// Whether the Account has been taken out of Cycling, and whether its Credential
-/// still works. Each is said whenever it is true, and an Account both things
-/// are true of says both — they are separate facts with separate fixes:
-/// enabling a Quarantined Account would not repair it, and a Quarantined
-/// Account that is listed like any other is never mistaken for one that
-/// vanished.
-///
-/// Neither being true is not a third thing to say. The positive state has no
-/// name (ADR a-command-names-its-noun), so the cell empties to the placeholder
-/// the Alias column already uses for having nothing to say, and `disabled`,
-/// `quarantined` and `disabled, quarantined` are the only things it prints.
+/// Whether the Account has been taken out of Cycling, and whether its
+/// Credential still works — both said where both are true, because they are
+/// separate facts with separate fixes. Neither being true is not a third thing
+/// to say: the positive state has no name (ADR a-command-names-its-noun), so
+/// the cell empties to the placeholder the Alias column already uses.
 fn state_of(account: &Account) -> String {
     let said: Vec<&str> = [
         account.disabled.then_some("disabled"),
@@ -390,20 +310,10 @@ fn state_of(account: &Account) -> String {
 }
 
 /// What each Quarantined Account is Quarantined for, under the table rather
-/// than in it, and the one command that repairs any of them.
-///
-/// A reason is a sentence and a column is not, and the reason is the half of
-/// the state that says what to do about it — so it is written out in full for
-/// every broken Account. The repair is not that half: it is the same command
-/// whatever broke and however many Accounts it broke, so it closes the block
-/// once rather than ending each line in it (ADR perch-says-what-it-did). The
-/// table above has already said `quarantined` on every row this is about, which
-/// is why each of these lines is a name and a reason and does not say the state
-/// again.
-///
-/// Nothing is said at all when nothing is broken, which is the ordinary case,
-/// and the name is the block's rather than the reasons' in it — the last line
-/// of it is a repair, which is not a why.
+/// than in it, and the one command that repairs any of them. The reason varies
+/// per Account and is written out for each; the repair does not, so it closes
+/// the block once rather than ending every line in it
+/// (ADR perch-says-what-it-did). Nothing at all where nothing is broken.
 fn what_is_broken(registry: &Registry, accounts: &[&Account]) -> Vec<String> {
     let mut said = Vec::new();
     let mut broken = Vec::new();
@@ -431,10 +341,9 @@ fn render_human(
         say(out, &heading)?;
     }
 
-    // One table rather than one per section. What a section is shows in the
-    // Group column and in the order, and a table that broke for a heading every
-    // few rows would put a blank line between Accounts the eye is running down
-    // a column of.
+    // One table rather than one per section: a table that broke for a heading
+    // every few rows would put a blank line between Accounts the eye is running
+    // down a column of.
     let accounts = &listing::flattened(sections);
     let rows = rows(registry, accounts, now);
     if rows.is_empty() {
@@ -467,20 +376,16 @@ fn render_human(
         }
     }
 
-    // The sentences under the table, in the order they qualify one another: the
-    // legend, what a Switch in flight has done to it, what this Scope has left,
-    // what Cycling will do with it, and what is broken. Collected rather than
-    // written one at a time so the blank line that separates them from the table
-    // is decided by whether there is anything down here at all, rather than by a
-    // condition each new sentence has to remember to join.
+    // In the order they qualify one another. Collected rather than written one
+    // at a time, so the blank line above them is decided by whether there is
+    // anything here at all rather than by a condition each one must join.
     let mut footer = Vec::new();
     if rows.iter().any(|row| row.active) {
         footer.push("* is the active Account.".to_string());
     }
-    // Said whether or not the `*` is in this listing: with a Switch in flight
-    // the marker is on the Account Perch was on rather than one it can
-    // establish is live, and a listing narrowed to a Group that Switch was
-    // leaving may carry no marker at all (ADR a-switch-is-written-down-first).
+    // Said whether or not the `*` is in this listing: a listing narrowed to the
+    // Group a Switch in flight was leaving may carry no marker at all
+    // (ADR a-switch-is-written-down-first).
     footer.extend(registry.active().a_switch_in_flight());
     footer.extend(reserve_lines(registry, scope, sections, now));
     if matches!(scope, Scope::Ungrouped) {
@@ -502,15 +407,10 @@ fn render_human(
 }
 
 /// What the Scope has left to draw on, said where a heading has already named
-/// which Scope that is (ADR the-listing-owns-the-set).
-///
-/// Off [`Scope::heading`] rather than off the breadth, because the heading is
-/// the condition rather than a proxy for it. A bare `perch list` has none: it is
-/// one table across every Scope at once — the reason is in [`render_human`] — so
-/// a Reserve line there would have to name its own Scope, which is a heading
-/// smuggled into a sentence already as wide as a terminal. Anything that gave
-/// the bare listing headings would be giving these sentences somewhere to sit by
-/// the same stroke.
+/// which Scope that is. Off [`Scope::heading`] rather than off the breadth,
+/// because the heading is the condition rather than a proxy for it: anything
+/// giving the bare listing headings would give these sentences somewhere to sit
+/// by the same stroke.
 fn reserve_lines(
     registry: &Registry,
     scope: &Scope,
@@ -553,10 +453,8 @@ fn write_row(
 /// A listing with nothing in it, said as the state it is rather than as an
 /// empty table.
 fn nothing_here(registry: &Registry, scope: &Scope) -> String {
-    // A machine holding nothing is diagnosed the same way whichever Scope was
-    // named. "Every Account is in a Group" is a true-sounding sentence about a
-    // machine with no Account to be in one, and narrowing a listing should not
-    // change what Perch says is the matter.
+    // Diagnosed the same way whichever Scope was named: narrowing a listing
+    // changes what it shows rather than what Perch says is the matter.
     if registry.accounts.is_empty() {
         return "No Accounts yet. `perch add` logs into one in a Profile of its own.".to_string();
     }
@@ -569,22 +467,11 @@ fn nothing_here(registry: &Registry, scope: &Scope) -> String {
     }
 }
 
-/// A document says what its order is, or it does not have one
-/// (ADR the-listing-owns-the-set).
-///
-/// So the Accounts arrive in `sections` rather than in one `accounts` array.
-/// The order is load-bearing — `accounts[0]` of the first section is the
-/// Account a bare `perch switch` would land on — and a flat array states that
-/// nowhere: a script reading it would be relying on a ranking the document
-/// never claimed to be making. Worse, the held-versus-ranked distinction
-/// ADR the-listing-owns-the-set called its weightiest piece would be invisible,
-/// and a `--json` showing a ranking of Accounts Perch would refuse to choose
-/// between is the two-surfaces-disagreeing failure reached through a different
-/// renderer.
-///
-/// One `accounts` array beside the sections was the other option and is the
-/// same mistake twice: a shape that makes no claim, kept for scripts, next to
-/// the shape that makes it.
+/// A document says what its order is, or it does not have one — so the Accounts
+/// arrive in `sections` rather than in one flat array a script could read a
+/// ranking off unclaimed. One `accounts` array beside the sections is the same
+/// mistake twice: a shape that makes no claim, kept for scripts, next to the
+/// shape that makes it.
 fn render_json(
     host: &dyn Host,
     out: &mut dyn Write,
@@ -607,11 +494,9 @@ fn render_json(
         // two documents answer two questions, and a script that reaches for the
         // wrong one should not find a plausible value there.
         "active_account": registry.active().whose(),
-        // What qualifies the key above, under the same name and the same shape
-        // it has in `status --json` (ADR a-switch-is-written-down-first). Here
-        // as well as there because which Account you are standing on is not a
-        // fact that stops being worth qualifying because the question widened
-        // from it to the set it sits in.
+        // What qualifies the key above, in the same shape `status --json` gives
+        // it: which Account you are standing on does not stop being worth
+        // qualifying because the question widened to the set it sits in.
         "landing": registry.active().document(),
         "sections": sectioned,
         "refresh": report.document(),
@@ -645,12 +530,6 @@ mod tests {
         }
     }
 
-    /// Every state the cell has a word for, and the one it has none for.
-    ///
-    /// The positive state has no name (ADR a-command-names-its-noun), so
-    /// nothing is printed where nothing has been done — and the two facts that
-    /// do have names are still said separately, because they have separate
-    /// fixes.
     #[test]
     fn the_state_cell_says_only_what_has_been_done_to_the_account() {
         let broken = Some(Quarantine::RenewalRejected);
@@ -680,12 +559,9 @@ mod tests {
         assert_eq!(widths[1], 8);
     }
 
-    /// And not in characters either, which is the same mistake one step later.
-    ///
-    /// A CJK name is drawn two columns per character. Measured by character it
-    /// takes half the room it needs, and because one set of widths lays out
-    /// every row, the columns after it step out of line for the whole table —
-    /// on every row, not just the one with the name in it.
+    /// A CJK name is drawn two columns per character, and one set of widths
+    /// lays out every row — so measuring by character steps the columns after
+    /// it out of line on every row rather than only its own.
     #[test]
     fn a_column_is_measured_in_the_cells_a_terminal_draws_it_in() {
         let in_group = |name: &str| -> [[String; COLUMNS]; 1] {
