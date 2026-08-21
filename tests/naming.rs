@@ -317,10 +317,9 @@ fn a_name_that_differs_only_in_case_is_the_same_name() {
 }
 
 #[test]
-fn an_alias_command_on_a_registry_from_before_aliases_finds_nothing() {
-    // Holding the Account it names: a registry from before Aliases still had
-    // the Account it was active on, and one that named an Account it did not
-    // hold is a state `validate` refuses rather than a machine anybody had.
+fn an_alias_command_on_a_registry_with_no_aliases_finds_nothing() {
+    // Holding the Account it names: a registry naming one it does not hold is a
+    // state `validate` refuses rather than a machine anybody has.
     let host = logged_in_machine().with_file(
         REGISTRY_PATH,
         r#"{"version":2,"active":{"settled":"someone@example.com"},"accounts":[{"identity":{"email":"someone@example.com"}}]}"#,
@@ -339,10 +338,8 @@ fn an_alias_command_on_a_registry_from_before_aliases_finds_nothing() {
     );
 }
 
-/// The registry refuses an Alias or a Group that differs from a held name only
-/// in case, precisely so that nobody has to remember how they capitalized one
-/// months ago. Resolving a Target has to honor the same rule, or `perch group
-/// add Work` produces a Group that `perch group remove work` will drop and
+/// Resolving a Target honors the rule the registry enforces, or `perch group add
+/// Work` produces a Group that `perch group remove work` drops and
 /// `perch switch work` says does not exist.
 #[test]
 fn a_name_is_reached_however_it_is_capitalized() {
@@ -374,12 +371,9 @@ fn a_name_is_reached_however_it_is_capitalized() {
          `already_landed` has always compared by"
     );
 
-    // And over the whole of Unicode, not the ASCII half. `registry::slug`
+    // And over the whole of Unicode, not the ASCII half: `registry::slug`
     // lowercases everything, so `CAFÉ@` and `café@` already share one Profile
-    // and `perch add` already refuses the second as a collision — resolving in
-    // ASCII made this the one place that disagreed, and the refusal said Perch
-    // holds nothing by that name about an Account it holds and will not let you
-    // have two of.
+    // and `perch add` already refuses the second as a collision.
     let mut registry = registry;
     let accented = "café@example.com";
     let mut account = registry.account(EMAIL).expect("the Account").clone();
@@ -409,11 +403,6 @@ fn a_switch_accepts_the_spelling_every_other_command_accepts() {
     assert!(printed.contains(SECOND_EMAIL), "{printed}");
 }
 
-/// `validate_name` accepts the whole of Unicode, so the rule that two names
-/// differing only in case are one name has to hold over the whole of Unicode
-/// too. Comparing only ASCII would make `work` and `Work` one Group while
-/// making `café` and `CAFÉ` two — the exact ambiguity the rule exists to
-/// prevent, kept for the users whose language has accents in it.
 #[test]
 fn a_name_is_one_name_however_it_is_capitalized_in_any_language() {
     let host = machine_with_two_accounts();
@@ -460,11 +449,9 @@ fn unsetting_by_email_frees_the_alias_the_account_answers_to() {
     assert_eq!(registry_of(&host).alias_of(SECOND_EMAIL), None);
 }
 
-/// Both arms take a Target, so both get the Group refusal the shared
-/// resolution path gives — the same answer `perch alias <group> <name>` has
-/// always had, where freeing a name used to be told there was no Alias by that
-/// name. An Alias is one Account's, and saying which kind did match is what
-/// tells somebody they named the wrong thing rather than misspelled it.
+/// Both arms take a Target, so both get the Group refusal the shared resolution
+/// path gives. Saying which kind did match is what tells somebody they named the
+/// wrong thing rather than misspelled it.
 #[test]
 fn unsetting_a_group_is_refused_as_a_group_the_way_naming_one_is() {
     let host = machine_with_a_named_second_account();
@@ -508,15 +495,9 @@ fn unsetting_an_account_that_answers_to_no_alias_is_refused() {
     );
 }
 
-/// Aliases and Group names share one namespace and a name reaches one Account.
-/// Handing a name that already names somebody else to a second Account would
-/// leave `perch switch <name>` meaning whichever the registry happened to
-/// resolve first — so it is refused, and the refusal names the command that
-/// frees the name rather than leaving somebody to guess at it.
-///
-/// The sentence it prints survived the argument flip untouched: the held name
-/// now sits where the Target goes rather than where the name did, and reaches
-/// the same Account either way, because a Target resolves an Alias first.
+/// The held name sits where the Target goes and reaches the same Account either
+/// way, because a Target resolves an Alias first — so the refusal can name the
+/// command that frees the name.
 #[test]
 fn a_name_that_already_reaches_another_account_is_refused_and_says_how_to_free_it() {
     let host = machine_with_two_accounts();

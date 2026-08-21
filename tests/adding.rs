@@ -136,11 +136,8 @@ fn the_account_you_were_using_stays_active_and_untouched() {
     assert!(result.is_ok(), "{:?}", result.err());
 
     assert_the_active_account_survived(&host);
-    // Asserted whole, because the claim *is* the sentence
-    // (ADR perch-says-what-it-did) — and said once, before the browser opens,
-    // rather than again in the report afterwards: an Add leaves the active
-    // Account alone every time, so the second telling was the ordinary case
-    // announcing itself (ADR perch-says-what-it-did).
+    // Asserted whole, because the claim *is* the sentence — and said once,
+    // before the browser opens, rather than again in the report afterwards.
     assert!(
         printed.contains(&format!(
             "Logging in to a new Profile. {EMAIL} stays active and its session \
@@ -189,10 +186,8 @@ fn with_no_group_the_organization_is_offered_and_accepted_by_confirming() {
     let (result, printed) = run_add(&host, AddArgs::default());
     assert!(result.is_ok(), "{:?}", result.err());
 
-    // An organization name is whatever Anthropic holds rather than something
-    // chosen to be typed, and `Overflow Ltd` is not a name a Group can carry —
-    // settings are read back a word at a time. So its spaces become the
-    // separator the names people pick already use, and the offer survives.
+    // `Overflow Ltd` is not a name a Group can carry — settings are read back a
+    // word at a time — so its spaces become the separator, and the offer stands.
     assert!(
         printed.contains("Overflow-Ltd"),
         "the organization should be offered as the default:\n{printed}"
@@ -513,13 +508,8 @@ fn a_profile_that_cannot_be_completed_is_not_left_half_built() {
 }
 
 /// The same one step later: the Profile is complete and the registry will not
-/// take it.
-///
-/// A Profile nothing records is worse than no Profile at all — it holds a live
-/// refresh token, and `reap_abandoned` walks the pending logins and never
-/// `profiles/`, so nothing would ever look at it or delete it. That is the slow
-/// accumulation of working logins for Accounts the user believes they never
-/// added, reached by the one door that was still open.
+/// take it. A Profile nothing records holds a live refresh token that
+/// `reap_abandoned` never walks, since that only walks `pending/`.
 #[test]
 fn a_profile_the_registry_would_not_record_is_taken_back_out_again() {
     let host = logged_in_machine();
@@ -559,14 +549,9 @@ fn adding_an_account_makes_no_network_call() {
     assert!(host.http_calls().is_empty());
 }
 
-/// The interleaving Perch's registry lock exists for.
-///
-/// `perch add` reads the registry, then spends minutes in a browser. Another
-/// terminal switches while it waits. If the add then wrote its own copy back
-/// wholesale, `active` would silently revert to the Account that was active
-/// before the Switch — and the next Capture would copy the *live* Credential,
-/// which belongs to the Account switched to, over that Account's own good copy
-/// and destroy it (ADR a-switch-is-written-down-first).
+/// The interleaving Perch's registry lock exists for: `perch add` reads the
+/// registry, spends minutes in a browser, and another terminal Switches while it
+/// waits (ADR a-switch-is-written-down-first).
 #[test]
 fn an_add_does_not_revert_a_switch_that_ran_while_its_login_was_open() {
     let host = machine_with_two_accounts().with_login(|host, dir| {
@@ -597,12 +582,9 @@ fn an_add_does_not_revert_a_switch_that_ran_while_its_login_was_open() {
     );
 }
 
-/// A Profile is `profiles/<slugged email>`, and the slug flattens every
-/// non-alphanumeric character — so plus-addressing on one inbox, which is
-/// exactly how somebody comes to hold several Anthropic Accounts, produces two
-/// emails that name one directory and one keychain namespace. Storing over it
-/// would supersede the Credential already there: a refresh token nothing can
-/// recover, gone without a word.
+/// Plus-addressing on one inbox, which is exactly how somebody comes to hold
+/// several Anthropic Accounts, produces two addresses that slug to one Profile
+/// (ADR claude-code-chooses-the-store).
 #[test]
 fn a_login_whose_profile_is_already_held_is_refused_even_under_another_address() {
     const DOTTED: &str = "team.lead@example.com";
@@ -679,12 +661,8 @@ fn a_login_under_a_differently_capitalized_address_is_the_account_perch_holds() 
 }
 
 /// And the same for an address whose capitalization is only a capitalization
-/// outside ASCII. The collision is found by `same_profile`, which compares
-/// slugs and lowercases over the whole of Unicode; whether it is *one Account*
-/// was asked in ASCII, so these were one Profile and two Accounts. The refusal
-/// then withheld `perch relogin` and advised logging in "under an address that
-/// does not flatten to the same name" — which no address satisfies, because the
-/// two are the same address.
+/// outside ASCII: `same_profile` lowercases over the whole of Unicode, so asking
+/// whether it is *one Account* in ASCII would make these two.
 #[test]
 fn a_login_under_an_accented_spelling_is_the_account_perch_holds_too() {
     let accented = "café@example.com";
@@ -713,12 +691,9 @@ fn a_login_under_an_accented_spelling_is_the_account_perch_holds_too() {
     assert_eq!(registry_of(&host).accounts.len(), 1);
 }
 
-/// Ctrl-C during a login kills Perch without unwinding, and "quit Claude Code
-/// when the login is done" is the documented flow — so a login being abandoned
-/// is expected rather than exceptional. What it leaves behind is a complete,
-/// working Credential in a directory named after the moment it started, which
-/// nothing ever looked for again: a slow accumulation of live refresh tokens
-/// for Accounts the user believes they never added.
+/// Ctrl-C during a login kills Perch without unwinding, so what is left behind
+/// is a complete, working Credential in a directory named after the moment the
+/// login started (ADR a-login-perch-does-not-need).
 #[test]
 fn what_an_abandoned_login_left_behind_is_reaped_by_the_next_command() {
     let host = logged_in_machine();
@@ -760,11 +735,8 @@ fn what_an_abandoned_login_left_behind_is_reaped_by_the_next_command() {
     assert!(!host.path_exists(&abandoned), "and so is its directory");
 }
 
-/// The Group prompt re-asks rather than failing, because "losing the Account
-/// over a typo would be a poor trade" — and a name that is already an Alias is
-/// exactly as much a typo as a name with a space in it. It used to pass the
-/// shape check, leave the loop, and abort the command with the browser round
-/// trip already spent and discarded.
+/// A name that is already an Alias is exactly as much a typo as a name with a
+/// space in it, and the prompt re-asks rather than failing either way.
 #[test]
 fn a_group_name_that_is_already_an_alias_is_asked_about_again() {
     let host = ready_to_add().with_answers(&["overflow", "work"]);
@@ -789,9 +761,8 @@ fn a_group_name_that_is_already_an_alias_is_asked_about_again() {
 }
 
 /// A login that exits cleanly having written nothing is somebody who closed the
-/// browser tab rather than one whose Claude Code failed. Both end with no
-/// Account, but only one of them has an exit status worth repeating back — a
-/// status of zero says nothing, so the refusal must not pretend it does.
+/// browser tab rather than one whose Claude Code failed. A status of zero says
+/// nothing, so the refusal must not pretend it does.
 #[test]
 fn a_login_that_finished_without_logging_anybody_in_says_just_that() {
     let host = logged_in_machine().with_login(|_host, _dir| 0);
@@ -853,15 +824,8 @@ fn a_login_whose_identity_file_cannot_be_read_is_refused_by_name() {
 }
 
 /// Age is evidence and not proof, and the reaper runs at the start of every
-/// command. Thirty minutes is not generous for a login that wants a password
-/// manager, a second factor and a browser that opened on the wrong profile —
-/// so a `perch status` typed in another terminal was free to delete the
-/// Credential Claude Code had just written and leave the `perch add` driving it
-/// reporting that the login did not complete.
-///
-/// The same evidence every other write asks for settles it
-/// (ADR a-profile-is-live-by-evidence): a login somebody is in the middle of is
-/// a Live Profile, and nothing reaps one.
+/// command: a login somebody is in the middle of is a Live Profile, and nothing
+/// reaps one (ADR a-profile-is-live-by-evidence).
 #[test]
 fn a_login_somebody_is_still_driving_is_never_reaped_however_old_it_is() {
     let host = logged_in_machine();
@@ -896,17 +860,9 @@ fn a_login_somebody_is_still_driving_is_never_reaped_however_old_it_is() {
     );
 }
 
-/// A Credential Store's name is derived from the directory it belongs to, and
-/// on macOS the item itself lives outside that directory — so the directory is
-/// the only thing that can still name the item. Removing it while a store is
-/// still holding a Credential leaves a live refresh token nothing can ever find
-/// again: not a reap, not a Purge, not the user, for an Account they believe
-/// was never added.
-///
-/// So the order is the one `purge` already keeps, and a store that refuses
-/// stops the removal rather than being shrugged off. What is left is a Profile
-/// nothing names, which is untidy and recoverable — the side of that trade to
-/// be on.
+/// On macOS the keychain item lives outside the directory its name is derived
+/// from, so a store that refuses stops the removal rather than being shrugged
+/// off. What is left is a Profile nothing names: untidy, and recoverable.
 #[test]
 fn a_store_that_will_not_give_a_credential_up_keeps_the_directory_that_names_it() {
     let host = logged_in_machine();
@@ -954,10 +910,9 @@ fn a_store_that_will_not_give_a_credential_up_keeps_the_directory_that_names_it(
     assert!(!host.path_exists(&abandoned));
 }
 
-/// The reaper walks a directory of logins named after when each one started. A
-/// name it cannot read a moment out of is left alone rather than guessed at:
-/// being wrong in that direction costs a stale directory, and being wrong in
-/// the other costs somebody the login they are in the middle of.
+/// A directory name the reaper cannot read a moment out of is left alone rather
+/// than guessed at: being wrong that way costs a stale directory, and being
+/// wrong the other way costs somebody the login they are in the middle of.
 #[test]
 fn a_pending_login_directory_with_an_unreadable_name_is_never_reaped() {
     let host = logged_in_machine();
@@ -977,14 +932,8 @@ fn a_pending_login_directory_with_an_unreadable_name_is_never_reaped() {
     );
 }
 
-/// What is wrong with a name is said before what it clashes with.
-///
-/// `refuse_taken_names` opens by asking whether the Alias and the Group are the
-/// same name, so running it first answered `--alias '' --group ''` with "`` cannot
-/// be both an Alias and a Group name" — a Conflict, about two names neither of
-/// which was usable to begin with. `--alias ''` on its own was correctly refused
-/// as Invalid, so the same mistake had two answers depending on how much of it
-/// you made.
+/// What is wrong with a name is said before what it clashes with, so the same
+/// mistake does not get two answers depending on how much of it was made.
 #[test]
 fn a_name_that_is_not_usable_is_refused_as_that_rather_than_as_a_collision() {
     let host = ready_to_add();
@@ -1003,22 +952,9 @@ fn a_name_that_is_not_usable_is_refused_as_that_rather_than_as_a_collision() {
     assert!(refusal.to_string().contains("cannot be empty"), "{refusal}");
 }
 
-/// The protection above has to exist without anybody arranging it.
-///
-/// `reap_abandoned` asks whether anything is running against the pending
-/// directory, and the answer is a session marker — which only `perch run` ever
-/// wrote. So nothing marked a login Perch was driving, and the comment
-/// promising that "a login somebody is in the middle of is a Live Profile"
-/// described something that was not happening: a `perch watcher check` from
-/// cron, or any command in another terminal, deleted the Credential the login
-/// had just written and left this `perch add` reporting that the login did not
-/// complete.
-///
-/// Perch writes the marker itself now, before the browser opens — it is waiting
-/// on this login exactly as a Run waits on its client (ADR a-run-is-one-shot).
-/// Depending on Claude Code to have written one was the wrong way round: a
-/// `claude` sitting on an OAuth prompt in a directory it has never had a
-/// session in is the least likely thing to have left a marker.
+/// The protection above has to exist without anybody arranging it: Perch writes
+/// the session marker itself, before the browser opens, because it is waiting on
+/// this login exactly as a Run waits on its client (ADR a-run-is-one-shot).
 #[test]
 fn a_login_perch_is_driving_survives_a_command_run_in_another_terminal() {
     let host = logged_in_machine();
@@ -1054,11 +990,8 @@ fn a_login_perch_is_driving_survives_a_command_run_in_another_terminal() {
 }
 
 /// A Scope that has just grown to two Accounts holds a set nothing may Cycle
-/// between unasked, because `watcher-may-act` is false on every Scope until
-/// somebody says otherwise (ADR a-group-is-a-declaration). The Add says what is
-/// now true and names the Setting that would say yes — it does not ask, because
-/// a consent gate collected in the middle of adding an Account is not the yes
-/// the guide promises.
+/// between unasked (ADR a-group-is-a-declaration). The Add says what is now true
+/// and names the Setting that would say yes; it does not ask.
 #[test]
 fn an_add_that_makes_a_group_a_set_says_what_that_group_still_cannot_do() {
     let host = ready_for_a_third_in("work");
@@ -1079,8 +1012,7 @@ fn an_add_that_makes_a_group_a_set_says_what_that_group_still_cannot_do() {
 
 /// The same question asked of the other Scope there is, which needs two yeses
 /// rather than one: being ungrouped is the absence of a declaration that those
-/// Accounts are interchangeable, not a weaker form of one
-/// (ADR a-group-is-a-declaration).
+/// Accounts are interchangeable, not a weaker form of one.
 #[test]
 fn an_add_that_makes_the_ungrouped_scope_a_set_names_both_settings_it_needs() {
     let host = ready_to_add();
@@ -1152,10 +1084,8 @@ fn the_line_is_said_rather_than_asked_about() {
     );
 }
 
-/// And said again on the Add after that one, for as long as it stays true. A
-/// Scope that has not been answered has not stopped being unanswered because
-/// somebody added a third Account to it — this is a fact about the Scope rather
-/// than a command explaining itself on a path that always runs
+/// And said again on the Add after that one, for as long as it stays true: a
+/// fact about the Scope rather than a command explaining itself
 /// (ADR perch-says-what-it-did).
 #[test]
 fn a_scope_that_stays_unanswered_is_told_again_on_the_add_after_that() {

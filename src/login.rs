@@ -1,17 +1,10 @@
-//! Running a login where it can cost nothing.
+//! Running a login where it can cost nothing
+//! (ADR a-login-perch-does-not-need).
 //!
-//! Both commands that need Anthropic to authenticate somebody — `perch add` and
-//! `perch relogin` — run the login in a config directory of its own and take
-//! what it left behind (ADR a-login-perch-does-not-need). The active Account is
-//! never read, never written and never logged out by either of them: gaining an
-//! Account and repairing one both leave the session you are working in exactly
-//! where it was.
-//!
-//! What is *done* with the result is the caller's, and the two callers differ on
-//! the one question that matters — `add` refuses an Account Perch already holds,
-//! and `relogin` refuses every Account but that one. So this module ends where
-//! the login ends: it says who logged in, and nothing about whether that was who
-//! was wanted.
+//! `perch add` and `perch relogin` both run a login in a config directory of its
+//! own and take what it left behind. This module ends where the login ends: it
+//! says who logged in, and nothing about whether that was who was wanted — the
+//! two callers differ on exactly that.
 
 use std::io::Write;
 
@@ -33,16 +26,12 @@ pub struct Produced {
 
 /// Launches a login and returns what it produced.
 ///
-/// `purpose` is the line said before the browser opens: why Perch is asking for
-/// a login and what it is leaving alone. The directory the login runs in is
-/// removed whether it worked or not, so an abandoned login costs a directory
-/// that is then gone and nothing else.
+/// `purpose` is the line said before the browser opens: why Perch is asking, and
+/// which Account it is leaving alone. The directory the login runs in is removed
+/// whether it worked or not.
 pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Produced> {
     // Everything that can fail without leaving anything behind happens first,
-    // so the directory is made only once nothing before it can refuse. All
-    // three are derivations rather than effects: which Claude Code is
-    // installed, where to find it, and what a Profile at that path would be
-    // called.
+    // so the directory is made only once nothing before it can refuse.
     let installed = Installed::probed(host)?;
     let claude = probe::claude_bin(host)?;
     let dir = registry::pending_login_dir(host, host.now())?;
@@ -53,30 +42,14 @@ pub fn perform(host: &dyn Host, out: &mut dyn Write, purpose: &str) -> Result<Pr
     host.create_private_dir_all(&dir)
         .map_err(|err| PerchError::Other(format!("could not create {}: {err}", dir.display())))?;
 
-    // And Perch says so itself, before the browser opens. `reap_abandoned`
-    // protects a login somebody is in the middle of by asking whether anything
-    // is running against the directory — which reads a session marker, and the
-    // only thing that writes one is `perch run`. Nothing wrote one here, so the
-    // protection its comment describes did not exist: a `perch watcher check`
-    // from cron, firing while somebody hunted for their second factor, deleted
-    // the Credential the login had just written and left the `perch add`
-    // driving it reporting that the login did not complete.
-    //
-    // Perch's own pid, because Perch is waiting on this login exactly as a Run
-    // waits on its client — so ADR a-run-is-one-shot's argument that a Run may
-    // corroborate its own Profile holds here word for word. A `claude` sitting
-    // on an OAuth prompt in a directory it has never had a session in is the
-    // least likely thing to have written a marker of its own, which is why
-    // depending on it was the wrong way round. `profile::discard` takes it with
-    // the directory.
+    // Perch's own pid: Perch waits on this login as a Run waits on its client,
+    // and a `claude` on an OAuth prompt has no session of its own to mark
+    // (ADR a-run-is-one-shot). `profile::discard` takes it with the directory.
     let _live = probe::claim(host, &dir).ok();
 
-    // From here every way out has to take the directory back out again, which
-    // is what the doc above promises and what `?` in the middle of this would
-    // quietly stop doing. A pending login nobody reaps is only a directory —
-    // no Credential has been written yet — but `reap_abandoned` exists because
-    // they accumulate, and one left by a failure is one it will not tidy for
-    // thirty minutes.
+    // Every way out from here takes the directory back out again, which a `?`
+    // in the middle would quietly stop doing: one left by a failure is one
+    // `reap_abandoned` will not tidy for thirty minutes.
     let produced = run_the_login(host, out, purpose, &claude, &dir, &store, &installed);
     profile::discard(host, &store);
     produced
@@ -92,12 +65,9 @@ fn run_the_login(
     store: &probe::Store,
     installed: &Installed,
 ) -> Result<Produced> {
-    // Both said on every login, and both kept. Neither narrates a step Perch
-    // took: `purpose` is what the browser about to open is for and which
-    // Account it will not disturb, and the line below is an instruction the
-    // person has to follow before the command can finish.
-    // ADR perch-says-what-it-did cuts the ordinary case announcing that it was
-    // ordinary; a thing somebody has to *do* is not that.
+    // Neither narrates a step Perch took: one is what the browser about to open
+    // is for, the other an instruction somebody has to follow before the command
+    // can finish (ADR perch-says-what-it-did).
     say(out, purpose)?;
     say(
         out,
@@ -157,55 +127,22 @@ fn what_the_login_left(
 /// into. The Identity travels with the Credential it describes.
 ///
 /// Through the same write `switch` patches the Default Profile's copy with,
-/// which is where the rule about this file's mode is written down:
-/// `.claude.json` holds MCP configuration, an MCP server entry routinely
-/// carries an API key in its `env` block, and a file Perch is the first to
-/// create is created closed rather than open
-/// (ADR claude-code-chooses-the-store). A plain `write_file` creates at the
-/// process umask, so every Profile `perch add`, `perch relogin` and an Import
-/// made held that file at 0644 — and because the rule for a file that already
-/// exists is to *carry its mode across*, it stayed 0644 for the life of the
-/// Profile while a Carry wrote the person's `projects` entry into it on every
-/// Run. On unix the 0700 Profile directory contained the damage; on Windows
-/// nothing narrows either the directory or the file.
+/// which is what creates the file closed rather than at the process umask.
 pub fn carry_identity_file(host: &dyn Host, contents: &str, store: &probe::Store) -> Result<()> {
     crate::host::write_atomically(host, &store.identity_file, contents)
         .map_err(|err| PerchError::file_write(store.identity_file.clone(), err))
 }
 
 /// How long a pending login is left alone before it is taken to have been
-/// abandoned.
-///
-/// Generous, because the thing on the other side of it is a person finding
-/// their password: a login somebody is still driving in another terminal must
-/// never be reaped out from under them. A login nobody came back from costs
-/// only the time until the next command, and there is no hurry.
+/// abandoned. Generous, because what is on the other side of it is a person
+/// finding their password.
 const ABANDONED_AFTER_MINUTES: i64 = 30;
 
 /// Deletes what abandoned logins left behind.
 ///
-/// A login writes a complete, working Credential into the directory it runs in
-/// — the keychain on macOS, a file everywhere else — and [`perform`] clears
-/// that directory on the way out. But Ctrl-C delivers SIGINT to the whole
-/// foreground group, and "quit Claude Code when the login is done" is the
-/// documented flow, so a login being abandoned is expected rather than
-/// exceptional: Perch dies without unwinding and the Credential stays.
-///
-/// Nothing ever looked for those again. Each one is named after the moment it
-/// started, so every abandonment left a new one, and the keychain items are
-/// invisible — a slow accumulation of live refresh tokens for Accounts the user
-/// believes they never added. This runs at the start of every command, which is
-/// the earliest anything can notice.
-///
 /// Two things have to be true before one is reaped: it is older than any login
-/// somebody could plausibly still be in, and nothing is running against it. The
-/// second is what the first cannot promise — a login somebody is still driving
-/// in another terminal must never be reaped out from under them, and age alone
-/// says nothing about that.
-///
-/// Silent and best-effort throughout. It is tidying up on the way to what the
-/// user actually asked for, and a directory that will not go is not a reason to
-/// fail that.
+/// somebody could plausibly still be in, and nothing is running against it.
+/// Silent and best-effort — this is tidying on the way to what was asked for.
 pub fn reap_abandoned(host: &dyn Host) {
     let Ok(pending) = registry::pending_logins_dir(host) else {
         return;
@@ -226,18 +163,9 @@ pub fn reap_abandoned(host: &dyn Host) {
         if started_at > too_old {
             continue;
         }
-        // Age is evidence and not proof. Thirty minutes is not generous for a
-        // login that wants a password manager, a second factor and a browser
-        // that opened on the wrong profile — and this runs at the start of
-        // every command, so any `perch status` typed in another terminal was
-        // free to delete the Credential Claude Code had just written and leave
-        // the `perch add` driving it reporting that the login did not complete.
-        //
-        // So the same evidence every other write asks for
-        // (ADR a-profile-is-live-by-evidence): a session marker naming a
-        // process that is still the one that wrote it. A login somebody is in
-        // the middle of is a Live Profile, and nothing reaps one however old it
-        // is.
+        // Age is evidence and not proof, so the same evidence every other write
+        // asks for (ADR a-profile-is-live-by-evidence): a login somebody is in
+        // the middle of is a Live Profile, and nothing reaps one however old.
         if probe::anything_running(host, &dir) {
             continue;
         }
@@ -293,13 +221,8 @@ mod tests {
             )
     }
 
-    /// The directory a login runs in comes back out however `perform` ends.
-    ///
-    /// The doc above says so — "removed whether it worked or not" — and it was
-    /// true of the login itself and not of the steps around it: several `?` sat
-    /// between making the directory and discarding it, so a failure at any of
-    /// them left a pending login behind that `reap_abandoned` would not tidy
-    /// for thirty minutes. A closed pipe is the one that needs no arranging.
+    /// A closed pipe is the failure that needs no arranging: it lands between
+    /// making the directory and discarding it.
     #[test]
     fn a_login_that_could_not_be_announced_takes_its_directory_back_out() {
         let host = a_machine_with_claude_code();

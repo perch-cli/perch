@@ -1,17 +1,13 @@
 //! `perch alias` — naming an Account so no command needs an email address.
 //!
-//! An Alias shares one namespace with Group names, so a name is refused here
-//! if a Group already has it, and refused there if an Account already answers
-//! to it. Because the collision cannot exist, the single Target every command
-//! takes always has exactly one meaning.
+//! An Alias shares one namespace with Group names, so the single Target every
+//! command takes always has exactly one meaning. An Account answers to one Alias
+//! at a time: naming one that already has a name replaces it, and says which
+//! name it gave up.
 //!
-//! An Account answers to one Alias at a time: naming an Account that already
-//! has a name replaces it, and says which name it gave up.
-//!
-//! Both forms are told the Account first and the name second, because the thing
-//! a command acts on is its first argument (ADR a-command-names-its-noun). So
-//! `--unset` frees whatever Alias the Account it names answers to, which is the
-//! same act reached by the Alias itself or by the email address behind it.
+//! Both forms are told the Account first and the name second
+//! (ADR a-command-names-its-noun), so `--unset` frees whatever Alias the Account
+//! it names answers to.
 
 use std::io::Write;
 
@@ -50,9 +46,8 @@ pub fn run(host: &dyn Host, command: AliasCommand, out: &mut dyn Write) -> Resul
     })
 }
 
-/// Names an Account, refusing anything that would leave two things answering
-/// to one name. Returns what to tell the user, which includes the name the
-/// Account gave up when it had one.
+/// Names an Account, refusing anything that would leave two things answering to
+/// one name. Says which name the Account gave up, where it had one.
 fn set(registry: &mut Registry, name: &str, account: &AccountTarget) -> Result<String> {
     let previous = registry.name_account(name, &account.email)?;
 

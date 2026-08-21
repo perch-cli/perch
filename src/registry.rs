@@ -1,10 +1,9 @@
 //! Perch's own state: the Accounts it holds, the Profile each one lives in,
 //! and which Account is active.
 //!
-//! Versioned, so that a registry written by a build that understands more than
-//! this one is refused rather than silently misread. The version is a guard
-//! against the future and not a migration story: nobody is running Perch yet,
-//! so there is no past format to read.
+//! Versioned, and the version moves when the shape does
+//! (ADR the-holdings-outlive-a-perch): a registry claiming more than this build
+//! understands is refused rather than silently misread.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -17,15 +16,10 @@ use crate::host::{Host, HostError};
 use crate::lock;
 use crate::probe::{Identity, LockSpec};
 
-/// The version this build writes. A registry from the future is refused rather
-/// than silently misread; one from the past is not read at all, because nobody
-/// is running Perch yet and there is nothing to migrate.
+/// The version this build writes.
 ///
-/// Moved to `2` when every Scope came to hold its own Settings
-/// (ADR a-setting-names-its-scope): `groups` stopped being a map of Overrides,
-/// `ungrouped` absorbed the record that was `global`, and `cycle_ungrouped`
-/// became `interchangeable`. The guard that refuses a newer registry is only
-/// worth having if the number moves when the shape does.
+/// A registry claiming a higher one is refused rather than silently misread, and
+/// the guard is only worth having if this moves whenever the shape does.
 pub const CURRENT_VERSION: u32 = 2;
 
 /// One Quota Window's Utilization, as observed at a point in time
@@ -43,7 +37,7 @@ pub struct WindowUtilization {
 }
 
 /// Cached Utilization for one Account. What every surface renders, and what
-/// only a `--refresh` ever goes and fetches (ADR a-figure-carries-its-age).
+/// only a `--refresh` ever goes and fetches.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CachedUtilization {
@@ -52,14 +46,10 @@ pub struct CachedUtilization {
 }
 
 /// Why an Account's Credential can no longer be used and cannot be recovered
-/// from anything Perch holds.
+/// from anything Perch holds (ADR a-broken-account-is-repaired).
 ///
-/// Recorded rather than merely counted, because "this Account is broken" and
-/// "this Account is broken because Anthropic retired its refresh token" are
-/// different pieces of news: the first leaves the user guessing whether Perch
-/// lost something, and the second says what happened and implies the repair.
-/// Every one of these is terminal — none of them can be undone by trying again,
-/// which is exactly what makes it a Quarantine rather than a failed command.
+/// Recorded rather than merely counted: every one of these is terminal, and
+/// which one it is implies the repair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Quarantine {
@@ -67,9 +57,7 @@ pub enum Quarantine {
     /// to a login that has been ended elsewhere.
     RenewalRejected,
     /// Anthropic Rotated the refresh token and the new one could not be stored,
-    /// so the old one is retired and the new one is gone:
-    /// ADR a-switch-is-written-down-first's crash between two writes, arriving
-    /// as a failed write instead of a crash.
+    /// so the old one is retired and the new one is gone.
     RotationLost,
     /// The Credential carries no refresh token, so the access token that ran out
     /// was the last thing it could offer.
@@ -106,22 +94,11 @@ impl Quarantine {
         }
     }
 
-    /// The whole of what is said about a Quarantined Account where nothing
-    /// around it says any of it: which Account, what happened to it, and the one
-    /// command that ends it.
+    /// The whole of what is said about a Quarantined Account where nothing around
+    /// it says any of it: which Account, what happened, and how to end it.
     ///
-    /// Said in one place because every surface owes the same three things. Two
-    /// surfaces spelling this out separately would eventually offer two
-    /// different repairs for one state.
-    ///
-    /// For a surface showing several at once,
-    /// [`shown_of`](Quarantine::shown_of) is the varying half of this and
-    /// [`how_to_repair_them`] the invariant one (ADR perch-says-what-it-did) —
-    /// still the same two sentences, and still from here.
-    ///
-    /// `detail` is whatever the failure underneath said, where there was one
-    /// worth keeping — a keychain that would not take the Rotated Credential,
-    /// say. The reason is what happened; the detail is how.
+    /// `detail` is whatever the failure underneath said. The reason is what
+    /// happened; the detail is how.
     pub fn said_of(&self, named: &str, target: &str, detail: Option<&str>) -> String {
         let how = match detail {
             Some(detail) => format!(" ({detail})"),
@@ -137,28 +114,17 @@ impl Quarantine {
     /// What is true of this Account and no other: which one it is and what
     /// happened to it, without the repair.
     ///
-    /// For a surface that has already said the state — a Listing whose State
-    /// column says `quarantined` on every row it is about — and that says the
-    /// repair once beneath all of them rather than once per Account
-    /// (ADR perch-says-what-it-did). What is left is exactly the part that
-    /// differs between two broken Accounts.
-    ///
-    /// No `detail`, which [`said_of`](Quarantine::said_of) takes: a Listing
-    /// renders what the registry recorded, and the registry records a
-    /// `Quarantine` rather than the failure that produced one. The detail exists
-    /// only in the moment a Refresh finds it, which is not this moment.
+    /// For a surface that has already said the state and says the repair once
+    /// beneath all of them (ADR perch-says-what-it-did).
     pub fn shown_of(&self, named: &str) -> String {
         format!("{named}: {}.", self.because())
     }
 
-    /// The refusal a command raises rather than acting on a Quarantined
-    /// Account, as opposed to [`said_of`](Quarantine::said_of), which is how one
-    /// is *shown*.
+    /// The refusal a command raises rather than acting on a Quarantined Account,
+    /// as opposed to [`said_of`](Quarantine::said_of), which is how one is
+    /// *shown*.
     ///
-    /// `consequence` is the caller's, and it is the only part that differs:
-    /// what a Switch would have cost is not what a Run would have. Everything
-    /// around it is shared, so the third command to refuse a Quarantine cannot
-    /// come to offer a different repair from the first two.
+    /// `consequence` is the caller's, and is the only part that differs.
     pub fn refusal(self, named: &str, target: &str, consequence: &str) -> PerchError {
         PerchError::Quarantined {
             why: self,
@@ -170,25 +136,11 @@ impl Quarantine {
         }
     }
 
-    /// The same as a script reads it. Absent reads as false and present reads
-    /// as true wherever a script asks whether it is set, so the fact a script
-    /// already branches on branches the same way — and now carries why.
+    /// The same as a script reads it. Absent reads as false wherever a script
+    /// asks whether it is set, so one already branching on the fact carries why.
     ///
-    /// `said` rather than `detail`, because `detail` already means something
-    /// else here and it is not this: [`said_of`](Quarantine::said_of) takes one,
-    /// and its doc defines it as "whatever the failure underneath said — a
-    /// keychain that would not take the Rotated Credential, say. The reason is
-    /// what happened; the detail is how." What this key carries is the *reason*
-    /// rendered as prose — one fixed sentence per `reason`, and therefore a
-    /// restatement of the key beside it rather than a second fact. A script
-    /// reading `detail` for the "how" got the "what" again, in longer words,
-    /// and nothing told it so.
-    ///
-    /// The underlying detail is not here to be carried: the registry records a
-    /// `Quarantine` and not the failure that produced it, so the machine
-    /// surface has one fact where the human sentence has two. Naming the key
-    /// for what it holds is what keeps that visible instead of hiding it behind
-    /// a word that promises the other one.
+    /// `said` rather than `detail`: the registry records a `Quarantine` and not
+    /// the failure behind one, so there is no "how" here to carry.
     pub fn document(quarantine: Option<Quarantine>) -> serde_json::Value {
         match quarantine {
             Some(why) => {
@@ -209,13 +161,10 @@ pub fn how_to_repair(target: &str) -> String {
 }
 
 /// The same repair, for however many Accounts are in that state — said once,
-/// because it is the same repair (ADR perch-says-what-it-did).
+/// because it is the same repair.
 ///
-/// Named where there is exactly one to name, and about the state where there is
-/// more than one: [`how_to_repair`] says "logs *it* in again", which over a set
-/// names one Account and tells somebody holding three broken ones to repair the
-/// first. Nothing where nothing is broken, so a surface can ask without first
-/// asking whether to.
+/// Named where there is exactly one to name: "logs *it* in again" over a set
+/// tells somebody holding three broken Accounts to repair the first.
 pub fn how_to_repair_them(targets: &[impl AsRef<str>]) -> Option<String> {
     match targets {
         [] => None,
@@ -240,18 +189,14 @@ pub struct Account {
     pub plan: Option<String>,
     /// Whether the Account has been taken out of Cycling.
     ///
-    /// Said only when it is true, for the reason the Quarantine below gives:
-    /// the registry is something a person may open, and an Account nobody has
-    /// done anything to reads more clearly for saying nothing. The positive
-    /// state has no name to write down — it is the absence of this one
-    /// (ADR a-command-names-its-noun).
+    /// Said only when true: the positive state has no name to write down — it is
+    /// the absence of this one (ADR a-command-names-its-noun).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub disabled: bool,
     /// Why this Account's Credential can no longer be used, when it cannot.
     ///
-    /// Absent is the ordinary case, and is left out of the file entirely rather
-    /// than written as a null: the registry is something a person may open, and
-    /// a healthy Account reads more clearly for saying nothing about its health.
+    /// Left out of the file entirely rather than written as a null: the registry
+    /// is something a person may open.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quarantine: Option<Quarantine>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -263,9 +208,8 @@ pub struct Account {
 /// How Cycling orders the Accounts in a Group.
 ///
 /// Both readings measure headroom the same way — the worst Quota Window an
-/// Account has (ADR headroom-is-the-worst-window) — and differ only in what
-/// they do with it. The measurement is fixed and the Strategy is a separate
-/// axis on top of it, so neither reading is a way round an exhausted Account.
+/// Account has (ADR headroom-is-the-worst-window) — so neither is a way round an
+/// exhausted Account.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Strategy {
@@ -296,22 +240,14 @@ pub const DEFAULT_WATCHER_THRESHOLD_PERCENT: u8 = 80;
 
 /// The most a Setting said as a share of something can be.
 ///
-/// `100` was written out in the sentence below and twice in the range check —
-/// so what `perch config set` accepts and what a hand-edited registry is
-/// refused for were two statements of one number.
-///
-/// Not the bound on a Utilization figure, which `validate` checks separately
-/// and `anthropic::understand` clamps to. That one is what a *reading* may be;
-/// this is what a Setting may be *set to*, which is a decision — a Perch that
-/// declined to let the watcher act above ninety would move this and must not
-/// move that. They are the same number today and two facts always.
+/// Not the bound on a Utilization figure, which `validate` checks separately:
+/// that is what a *reading* may be and this is what a Setting may be *set to*.
+/// The same number today, and two facts always.
 pub const MAX_PERCENTAGE: u8 = 100;
 
-/// What a percentage accepts, said once so that the refusal a mistyped `perch
-/// config set` gets and the one a hand-edited registry gets are the same words.
-///
-/// Built from the bound rather than written out beside it, so the sentence and
-/// the number it describes cannot come to disagree.
+/// What a percentage accepts, said once so a mistyped `perch config set` and a
+/// hand-edited registry are refused in the same words. Built from the bound, so
+/// the sentence and the number cannot disagree.
 pub fn a_percentage() -> String {
     format!("a whole number between 0 and {MAX_PERCENTAGE}")
 }
@@ -319,30 +255,16 @@ pub fn a_percentage() -> String {
 /// Every Setting there is, all of them set: what one Scope holds
 /// (ADR a-setting-names-its-scope).
 ///
-/// A Scope — each Group, and the Accounts in no Group taken together — holds
-/// its own full set. There is nothing above it for a value to fall back to, so
-/// a Setting nobody has said anything about is the compiled-in default rather
-/// than somebody else's value.
-///
-/// Two of these are the watcher's, and only one of the two is a pace: how full
-/// is too full, which is the single question in the loop that a person's
-/// appetite for risk answers rather than arithmetic
-/// (ADR a-watcher-knob-is-arithmetic). The numbers the loop paces itself by are
-/// not among them — the interval it Refreshes at, the cooldown between two
-/// Switches and the margin under where one may land are all derived rather than
-/// preferred, and live in [`crate::watch`].
+/// There is nothing above a Scope for a value to fall back to, so a Setting
+/// nobody has said anything about is the compiled-in default.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
     pub strategy: Strategy,
     /// Whether the watcher may Switch within this Scope unattended. Off unless
-    /// the user says otherwise: nothing changes underneath someone because they
-    /// did not say it could (ADR a-group-is-a-declaration).
-    ///
-    /// Said about the Scope it grants and nowhere else
-    /// (ADR a-setting-names-its-scope). A grant that reached a Scope by falling
-    /// through from somewhere wider would authorize Groups nobody had said
-    /// anything about — including ones not yet declared.
+    /// the user says otherwise: nothing changes underneath somebody because they
+    /// did not say it could (ADR a-group-is-a-declaration). Said about the Scope
+    /// it grants and nowhere else.
     pub watcher_may_act: bool,
     /// The Utilization the watcher would act at, as a percentage.
     pub watcher_threshold_percent: u8,
@@ -359,13 +281,11 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// Refuses configuration that cannot mean what it says. Serde already
-    /// refuses a strategy Perch does not implement, and a `true`/`false` that
-    /// is neither; what is left is the range the one number has to be in.
+    /// Refuses configuration that cannot mean what it says. Serde refuses a
+    /// strategy Perch does not implement; what is left is the range.
     ///
-    /// The refusal names the numbers that would have been accepted, because
-    /// the script that mistyped one is the reader, and being told only that it
-    /// was wrong leaves it to guess twice.
+    /// The refusal names the numbers that would have been accepted, because the
+    /// script that mistyped one is the reader.
     pub fn validate(&self, scope: &Scope) -> Result<()> {
         if self.watcher_threshold_percent > MAX_PERCENTAGE {
             return Err(out_of_range(
@@ -395,18 +315,12 @@ fn out_of_range(
 /// The set of Accounts a Setting governs, and the set a Cycle may look within:
 /// one Group, or the Accounts in no Group taken together.
 ///
-/// The only levels at which a Setting means anything. One type for both ideas,
-/// because they are one idea: a Cycle never leaves the Scope it started in
-/// (ADR a-group-is-a-declaration), and a Setting is said about exactly the
-/// Scope it governs (ADR a-setting-names-its-scope). They were two types while
-/// a Config had a layer above every Scope, on the grounds that sharing one
-/// would put "every Account there is" within reach of the ranking. There is no
-/// such value to be handed any more, so that is a mistake nobody can make.
+/// One type for both, because they are one idea: a Cycle never leaves the Scope
+/// it started in, and a Setting is said about exactly the Scope it governs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Scope {
-    /// The Accounts in no Group, taken as one Scope
-    /// (ADR a-group-is-a-declaration, amended). Not a Group and never one: a
-    /// Group is a declaration somebody made, and this is the absence of one.
+    /// The Accounts in no Group, taken as one Scope. Not a Group and never one:
+    /// a Group is a declaration somebody made, and this is the absence of one.
     Ungrouped,
     /// One Group, named as it was declared.
     Group(String),
@@ -414,8 +328,7 @@ pub enum Scope {
 
 impl Scope {
     /// The word that addresses this Scope on a command line, and the word it is
-    /// recorded under wherever something is kept per Scope — what the last
-    /// scheduled Check did, for one.
+    /// recorded under wherever something is kept per Scope.
     ///
     /// A Group cannot be called `ungrouped` ([`validate_name`]), so the two can
     /// never collide.
@@ -428,10 +341,9 @@ impl Scope {
 
     /// The Accounts this Scope holds.
     ///
-    /// The same set whoever is asking: what a Cycle may land on, and what a
-    /// Scope has left to draw on ([`crate::reserve`]) is measured over. A second
-    /// idea of which Accounts those are is how the figure on screen comes to
-    /// describe a different set from the one that gets chosen.
+    /// The same set whoever is asking. A second idea of which Accounts those are
+    /// is how the figure on screen comes to describe a different set from the
+    /// one that gets chosen.
     pub fn accounts<'a>(&self, registry: &'a Registry) -> Vec<&'a Account> {
         match self {
             Scope::Ungrouped => registry.ungrouped_accounts(),
@@ -439,10 +351,9 @@ impl Scope {
         }
     }
 
-    /// The Scope as an adverbial phrase: "a Cycle {} prefers…", "Nothing {} is
-    /// worth Switching to". Said once here rather than per surface, because
-    /// three spellings of "among the Accounts in no Group" is how two of them
-    /// come to name the same set differently.
+    /// The Scope as an adverbial phrase: "a Cycle {} prefers…". Said once here,
+    /// because three spellings of "among the Accounts in no Group" is how two of
+    /// them come to name the same set differently.
     pub fn within(&self) -> String {
         match self {
             Scope::Ungrouped => "among the Accounts in no Group".to_string(),
@@ -458,19 +369,11 @@ impl Scope {
         }
     }
 
-    /// The Scope in the middle of a sentence *about the Scope itself*: "a
-    /// Setting {} carries", "`strategy` on {} is now …".
+    /// The Scope in the middle of a sentence *about the Scope itself*: "a Setting
+    /// {} carries", "`strategy` on {} is now …".
     ///
-    /// [`Scope::described`] with the capital taken off, which is the whole
-    /// difference and the whole point: that one is documented as a subject and
-    /// reads as "The Ungrouped Scope", which is right standing at the front of
-    /// a sentence and wrong everywhere else. `perch config` said "`strategy` on
-    /// The Ungrouped Scope is now soonest-reset" and "`foo` is not a Setting The
-    /// Ungrouped Scope carries."
-    ///
-    /// A Group is unaffected either way — "Group `work`" is a name, and a name
-    /// is spelled the same wherever it appears — which is exactly why this went
-    /// unnoticed: every sentence reads correctly until somebody has no Group.
+    /// [`Scope::described`] with the capital taken off: that one reads as a
+    /// subject and this one does not. A Group is unaffected, being a name.
     pub fn mentioned(&self) -> String {
         match self {
             Scope::Ungrouped => "the Ungrouped Scope".to_string(),
@@ -481,8 +384,7 @@ impl Scope {
     /// The Scope as the middle of a sentence about the Accounts in it: "every
     /// Account in {}".
     ///
-    /// Not [`Scope::described`], which is a subject and reads as "The Ungrouped
-    /// Scope" — true standing alone and ungrammatical the moment "in" is said
+    /// Not [`Scope::described`], which is ungrammatical the moment "in" is said
     /// before it.
     pub fn place(&self) -> String {
         match self {
@@ -504,14 +406,9 @@ pub fn means_ungrouped(name: &str) -> bool {
 
 /// The word people reach for when they mean every Scope at once.
 ///
-/// There is no such Scope: every Setting is said about the one Scope it governs
-/// and there is nothing above them (ADR a-setting-names-its-scope). So unlike
-/// [`UNGROUPED`] this word addresses nothing, and a Group may not take it —
-/// `perch config set global watcher-may-act true` is somebody saying
-/// *everywhere*, and a Group answering to the name would take that quietly and
-/// leave every other Scope as it was. Kept reserved so the refusal is where
-/// they find out Perch has no everywhere-layer, which is a better place to
-/// learn it than from a Setting that appeared to take.
+/// There is no such Scope, so this word addresses nothing and a Group may not
+/// take it: `perch config set global …` would then take quietly and leave every
+/// other Scope as it was. Reserved, so the refusal is where that is learned.
 pub const GLOBAL: &str = "global";
 
 /// Whether a name is the one people mean every Scope at once by.
@@ -519,28 +416,11 @@ pub fn means_global(name: &str) -> bool {
     same_name(name, GLOBAL)
 }
 
-/// The Switch a scheduled Check made within a Group, kept so the next one can
-/// be paced by it (ADR a-watcher-knob-is-arithmetic).
-///
-/// The one thing about the watcher that is written down, and only because
-/// `perch watcher check` is a fresh process every time: the cooldown is
-/// measured from the last Switch, and a check that could not remember one would
-/// be a check with no policy but the threshold. The loop carries the same fact
-/// in memory and records nothing, because a loop is one process and a person
-/// watching it — two of them would otherwise pace each other's decisions.
-///
-/// Per Group rather than per machine: a cooldown paces the Switches made within
-/// a Group, and a Switch within `work` has nothing to say about how soon
-/// `personal` may move. A constant still has to be paced somewhere
-/// (ADR a-watcher-knob-is-arithmetic).
-///
-/// A stamp and nothing else. Which Account was Switched off was recorded here
-/// too, for the no-return that read it — and when that went
-/// (ADR a-watcher-knob-is-arithmetic) the field was left behind, written every
-/// Check and read by nothing. It is not kept against the day
-/// ADR a-watcher-knob-is-arithmetic's guard fires and a no-return comes back:
-/// breaking the registry's format is free (`CLAUDE.md`), so the day something
-/// needs to know which Account was left is the day to record it again.
+/// The Switch a scheduled Check made within a Group, so the next can be paced by
+/// it (ADR a-watcher-knob-is-arithmetic). Written down only because
+/// `perch watcher check` is a fresh process each time; the loop keeps the same
+/// fact in memory. Per Group: a Switch within `work` says nothing about how soon
+/// `personal` may move.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Checked {
@@ -552,21 +432,15 @@ pub struct Checked {
 /// interchangeable at all, and the Settings governing how they are Cycled.
 ///
 /// The one Scope whose record is not a bare [`Settings`], because it is the one
-/// Scope that has to say it is a Scope at all. A Group carries no such line: a
-/// Group **is** that declaration (ADR a-group-is-a-declaration), and printing
-/// one against it would be a line `perch config set` could not take back.
+/// that has to say it is a Scope at all. A Group **is** that declaration.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct UngroupedConfig {
     /// Whether the Accounts in no Group have been declared interchangeable —
-    /// what a bare `perch switch` and the watcher both need before either may
-    /// move between them.
+    /// what a bare `perch switch` and the watcher both need first.
     ///
-    /// Off unless the user says otherwise, and deliberately so: being ungrouped
-    /// is the absence of a declaration that Accounts are interchangeable, not a
-    /// weaker form of one. Cycling freely here would move someone from their
-    /// work subscription onto their personal one without their ever having said
-    /// the two were substitutable (ADR a-group-is-a-declaration).
+    /// Off unless the user says otherwise: being ungrouped is the absence of a
+    /// declaration, not a weaker form of one.
     pub interchangeable: bool,
     /// The Settings this Scope holds, like every other Scope.
     pub settings: Settings,
@@ -613,24 +487,18 @@ impl NameKind {
 
 /// Whether two names the user chose are the same name.
 ///
-/// Case-insensitively, because nobody remembers which way they capitalized a
-/// Group months ago — and over the whole of Unicode, because
-/// [`validate_name`] accepts the whole of Unicode. Comparing only ASCII would
-/// make `café` and `CAFÉ` two different Groups while making `work` and `Work`
-/// one, which is the ambiguity the rule exists to prevent, kept for exactly
-/// the users whose language has accents in it.
+/// Case-insensitively, because nobody remembers how they capitalized a Group
+/// months ago — and over the whole of Unicode, because ASCII alone would fold
+/// `work` and `Work` but not `café` and `CAFÉ`.
 pub fn same_name(one: &str, other: &str) -> bool {
     one.to_lowercase() == other.to_lowercase()
 }
 
-/// A Group name offered as a default, made from something that was never
-/// chosen to be one — an organization name, which is whatever Anthropic holds
-/// and commonly has spaces in it.
+/// A Group name offered as a default, made from something that was never chosen
+/// to be one — an organization name, which commonly has spaces in it.
 ///
-/// Only the spaces are touched, and only into the separator the names people
-/// pick already use. Anything else wrong with it — an `@`, or `none` — leaves
-/// no offer at all, because a suggestion is a convenience and inventing a name
-/// around a refusal is not.
+/// Only the spaces are touched, and only into the separator chosen names already
+/// use. Anything else wrong with it leaves no offer at all.
 pub fn offerable_name(from: &str) -> Option<String> {
     let joined = from.split_whitespace().collect::<Vec<_>>().join("-");
     validate_name(NameKind::Group, &joined).ok()?;
@@ -639,10 +507,9 @@ pub fn offerable_name(from: &str) -> Option<String> {
 
 /// Refuses a name that could not be told from something else.
 ///
-/// Aliases and Group names share one namespace and are both valid Targets for
-/// `switch` and `run`, so a name has to be distinguishable from the other
-/// things a Target can be: an email address, and the word that means no Group
-/// at all.
+/// Aliases and Group names share one namespace and are both valid Targets, so a
+/// name has to be distinguishable from the other things a Target can be: an
+/// email address, and the words that already address something.
 pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
     if name.trim().is_empty() {
         return Err(PerchError::Invalid(format!(
@@ -651,11 +518,8 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
         )));
     }
     // Any whitespace, not only at the ends. `perch config get` prints each
-    // setting as the tail of the `perch config set` that would restore it —
-    // `<group> <key> <value>`, read back by counting words — so a Group with a
-    // space in its name prints a line that cannot be typed back in. A name that
-    // breaks the round trip the output promises is worth refusing at the one
-    // moment somebody can still choose another.
+    // setting as the `perch config set` that would restore it, read back by
+    // counting words, so a name with a space in it breaks that round trip.
     if name.chars().any(char::is_whitespace) {
         return Err(PerchError::Invalid(format!(
             "`{name}` has a space in it. {} are read back a word at a time — \
@@ -665,11 +529,8 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
             kind.names()
         )));
     }
-    // Both of the words that already address something are refused for either
-    // half of the namespace, and both say which half they were asked about.
-    // They were the two refusals in this function that did not: an Alias called
-    // `ungrouped` was turned down with "so it cannot also name a Group", which
-    // is a rule about something the user was not doing.
+    // Both words that already address something are refused for either half of
+    // the namespace, and both say which half they were asked about.
     if means_no_group(name) {
         return Err(PerchError::Invalid(format!(
             "`{name}` means no Group at all on `perch group move`, so it cannot \
@@ -677,11 +538,9 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
             kind.article()
         )));
     }
-    // The other word that already addresses something. `perch config` reads
-    // which Scope is meant off the words that were typed, so a Group called
-    // `ungrouped` would be a Group no `perch config set` could reach — the
-    // Ungrouped Scope would answer to the name first. An Alias called
-    // `ungrouped` is the same collision from the other side.
+    // The other word that already addresses something. A Group called
+    // `ungrouped` would be one no `perch config set` could reach, since the
+    // Ungrouped Scope answers to the name first; an Alias is the same collision.
     if means_ungrouped(name) {
         return Err(PerchError::Invalid(format!(
             "`{name}` addresses the Accounts in no Group on `perch config`, so \
@@ -690,15 +549,8 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
         )));
     }
     // The third word that already means something, and the one that means
-    // something Perch does not have. `perch config set global watcher-may-act
-    // true` is somebody saying *everywhere* — and there is no everywhere, since
-    // every Setting is said about the one Scope it governs
-    // (ADR a-setting-names-its-scope). Left to fall through it would be
-    // answered with "Declare it with `perch group add global`", and a Group by
-    // that name would then take every later `perch config set global …`
-    // quietly, leaving every other Scope as it was. Refused here so the offer
-    // can never be made, and so the refusal is where somebody learns there is
-    // no such layer.
+    // something Perch does not have. A Group by that name would take every
+    // later `perch config set global …` quietly, so it is refused here.
     if means_global(name) {
         return Err(PerchError::Invalid(format!(
             "`{name}` is how people say every Scope at once, so it cannot also \
@@ -713,13 +565,9 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
             kind.names()
         )));
     }
-    // Nothing that begins with `-` can name a program, and `perch run` is where
+    // Nothing beginning with `-` can name a program, and `perch run` is where
     // that matters: its `command` is `last = true`, so the `--` that rescues
-    // such a Target everywhere else is already spoken for. `perch run -dev` is
-    // read as flags and `perch run -- -dev` leaves no Target at all, so a name
-    // like this is one the registry holds, `perch list` shows, `perch switch`
-    // honors — and `perch run` can never be told. Refused at the one moment
-    // somebody can still pick another.
+    // such a Target everywhere else is already spoken for.
     if name.starts_with('-') {
         return Err(PerchError::Invalid(format!(
             "`{name}` begins with `-`, and {} are typed where a flag could go. \
@@ -731,20 +579,11 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Which Account is active — and, while a Switch is under way, that Perch
-/// cannot yet say (ADR a-switch-is-written-down-first).
+/// Which Account is active — and, while a Switch is under way, that Perch cannot
+/// yet say (ADR a-switch-is-written-down-first).
 ///
-/// One field with three states rather than two fields, so a registry naming
-/// both a settled active Account and a different in-flight one cannot be
-/// written at all. The registry already carries one dangling-pointer check for
-/// what this names; a second field would need a second, held by nothing but
-/// care.
-///
-/// `deny_unknown_fields` for the reason [`load`] gives for every other type
-/// here, and this was the one that did not carry it. A `leavign` in a Landing
-/// deserialized as `leaving: None` and said nothing — so the Landing claimed
-/// Perch had been on nobody, and the next Switch's Capture had no Profile to
-/// file the outgoing Credential into.
+/// One field with three states rather than two, so a registry naming both a
+/// settled active Account and a different in-flight one cannot be written.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Active {
@@ -758,9 +597,8 @@ pub enum Active {
     Settled(String),
     /// A **Landing**: a Switch that has been written down and not yet recorded.
     ///
-    /// Written after the Capture and before the Credential moves, so a Perch
-    /// that finds one knows the live Credential is one of these two Accounts'
-    /// — or a Rotation of one of them — rather than knowing nothing at all.
+    /// Written after the Capture and before the Credential moves, so a Perch that
+    /// finds one knows the live Credential belongs to one of these two Accounts.
     /// Every Switch path settles one before it acts.
     Landing {
         /// The Account being left. `None` where Perch was on nobody, which is a
@@ -775,9 +613,8 @@ impl Active {
     /// The Account to treat as active, which during a Landing is the one being
     /// left.
     ///
-    /// Nothing has been recorded as having moved, so the Account Perch was on
-    /// is the last thing it established — and every path that could *lose*
-    /// something by believing it settles the Landing first.
+    /// Nothing has been recorded as having moved, and every path that could
+    /// *lose* something by believing it settles the Landing first.
     pub fn whose(&self) -> Option<&str> {
         match self {
             Active::Nobody => None,
@@ -801,24 +638,11 @@ impl Active {
         }
     }
 
-    /// The Switch that was in flight and never recorded, said out loud, or
-    /// `None` on the machines where there was not one.
+    /// The Switch that was in flight and never recorded, said out loud.
     ///
-    /// Said at all because half of why this hazard survived is that a machine
-    /// mid-Landing is indistinguishable from a healthy one, so nobody looks
-    /// (ADR a-switch-is-written-down-first). It never changes an exit code:
-    /// Perch reports what it found rather than judging it
-    /// (ADR a-figure-carries-its-age), and a state the next Switch resolves by
-    /// itself should not fail somebody's shell prompt.
-    ///
-    /// Here rather than in the command, beside [`document`], because two
-    /// commands say it and both have to say the same thing — `perch status`
-    /// about the Account you are on, and `perch list` about the set it sits in,
-    /// at whatever breadth that was asked for (ADR the-listing-owns-the-set).
-    /// What it qualifies is whichever line says which Account is active, and
-    /// there is one of those in each.
-    ///
-    /// [`document`]: Active::document
+    /// Never changes an exit code: the next Switch resolves this by itself. Here
+    /// rather than in a command, because `perch status` and `perch list` both
+    /// say it.
     pub fn a_switch_in_flight(&self) -> Option<String> {
         let Active::Landing { leaving, arriving } = self else {
             return None;
@@ -837,14 +661,8 @@ impl Active {
     /// The Switch that was in flight and never recorded, as a script reads it,
     /// and `null` on every machine that is not mid-Landing.
     ///
-    /// Beside whichever key a document already uses for who is active rather
-    /// than folded into it, and the same shape in every document that carries
-    /// one. The two answer different questions — *which Account* against
-    /// *whether Perch can say* — and a script that only ever wanted the first
-    /// should not have to learn what a Landing is to go on getting it
-    /// (ADR a-switch-is-written-down-first). Absent reads as false wherever a
-    /// script asks whether it is set, which is how [`Quarantine::document`]
-    /// beside it is read.
+    /// Beside whichever key already says who is active rather than folded into
+    /// it: *which Account* and *whether Perch can say* are different questions.
     pub fn document(&self) -> serde_json::Value {
         match self {
             Active::Landing { leaving, arriving } => {
@@ -874,36 +692,26 @@ impl Active {
 #[serde(deny_unknown_fields)]
 pub struct Registry {
     pub version: u32,
-    /// The active Account, or the Switch that was under way when Perch last
-    /// wrote this down.
+    /// The active Account, or the Switch under way when this was last written.
     ///
-    /// Private, and the only field here that is. Every other field is a thing
-    /// somebody declared; this one is a thing Perch *did*, and the three states
-    /// it moves between are the whole of ADR a-switch-is-written-down-first. A
-    /// `= Active::Settled(…)` anywhere is a Switch recorded without having been
-    /// written down first, which is precisely the write
-    /// [`crate::switch::switch_to`] exists to be the one door for. So it is
-    /// reached through [`Registry::begin_landing`], [`Registry::settle`] and
-    /// [`Registry::abandon_landing`], each of which names a transition, and
-    /// read through [`Registry::active`].
+    /// Private, and the only field here that is: assigning it directly is a
+    /// Switch recorded without having been written down first. Reached through
+    /// `begin_landing`, `settle` and `abandon_landing`.
     #[serde(default, skip_serializing_if = "Active::is_nobody")]
     active: Active,
     #[serde(default)]
     pub accounts: Vec<Account>,
-    /// Alias to Account email. Empty until aliases land.
+    /// Alias to Account email.
     #[serde(default)]
     pub aliases: BTreeMap<String, String>,
     /// The Groups the user has declared, with the Settings each one holds. A
-    /// Group exists here even when it holds no Accounts: it is a statement the
-    /// user made, not a summary of where the Accounts happen to be — and it
-    /// exists here holding the compiled-in defaults, which is a Group nobody
-    /// has said anything about yet.
+    /// Group exists here even when it holds no Accounts: it is a statement
+    /// somebody made, not a summary of where the Accounts happen to be.
     #[serde(default)]
     pub groups: BTreeMap<String, Settings>,
-    /// What the Accounts in no Group hold, taken as one Scope
-    /// (ADR a-group-is-a-declaration, amended). Not a Group and never one; it
-    /// is here rather than under a reserved key in `groups` so that nothing can
-    /// walk it as one.
+    /// What the Accounts in no Group hold, taken as one Scope. Not a Group and
+    /// never one; here rather than under a reserved key in `groups` so that
+    /// nothing can walk it as one.
     #[serde(default)]
     pub ungrouped: UngroupedConfig,
     /// What the last scheduled Check did in each Group. Written by `perch
@@ -935,9 +743,8 @@ impl Account {
     /// The Profile this Account's Credential lives in.
     ///
     /// Derived from the email address the registry already keys on rather than
-    /// recorded beside it: two statements of one fact can disagree, and this is
-    /// the fact every Credential Store is derived from in turn
-    /// (ADR claude-code-chooses-the-store).
+    /// recorded beside it (ADR claude-code-chooses-the-store): two statements of
+    /// one fact can disagree.
     pub fn profile_dir(&self, host: &dyn Host) -> Result<PathBuf> {
         profile_dir_for(host, self.email())
     }
@@ -975,22 +782,18 @@ impl Registry {
     }
 
     /// Which Account is active, or the Switch that was in flight when this was
-    /// last written (ADR a-switch-is-written-down-first).
+    /// last written.
     ///
-    /// Reading is nobody's to get wrong, so it is open to everybody. Writing is
-    /// three named transitions and nothing else.
+    /// Reading is nobody's to get wrong. Writing is three named transitions.
     pub fn active(&self) -> &Active {
         &self.active
     }
 
     /// Writes down that a Switch is about to move the live Credential, naming
-    /// both Accounts it could then belong to
-    /// (ADR a-switch-is-written-down-first).
+    /// both Accounts it could then belong to.
     ///
-    /// Hands back what it replaced, because the Landing has to reach disk
-    /// before it means anything: a save that fails leaves a caller holding a
-    /// registry claiming a Switch is in flight that never started, and this is
-    /// what it puts back with [`Registry::abandon_landing`].
+    /// Hands back what it replaced, because the Landing has to reach disk before
+    /// it means anything — see [`Registry::abandon_landing`].
     pub fn begin_landing(&mut self, leaving: Option<String>, arriving: &str) -> Active {
         std::mem::replace(
             &mut self.active,
@@ -1004,52 +807,26 @@ impl Registry {
     /// Puts back what [`Registry::begin_landing`] replaced, where the save that
     /// would have carried it did not happen.
     ///
-    /// Not the same transition as [`Registry::settle`] even though it leaves
-    /// the same field holding the same kind of thing: this one is a Landing
-    /// that never existed anywhere but in memory, and nothing has moved.
+    /// Not [`Registry::settle`]: this Landing never existed anywhere but in
+    /// memory, and nothing has moved.
     pub fn abandon_landing(&mut self, before: Active) {
         self.active = before;
     }
 
-    /// Records who is active now that a Switch is over — landed, refused, or
-    /// resolved afterwards off the live Credential. `None` is a machine on
-    /// nobody.
+    /// Records who is active now that a Switch is over. `None` is a machine on
+    /// nobody, and what is passed is whose Credential the machine is holding.
     ///
-    /// Being active is a fact about which Credential is in the Default Profile
-    /// rather than a wish, so what is passed is who the machine is holding the
-    /// Credential of.
-    ///
-    /// It takes an address rather than an [`Active`], which is what makes
-    /// "settled" true of what it leaves behind: handed the enum it would accept
-    /// [`Active::Landing`], and a Landing written by anything but
-    /// [`Registry::begin_landing`] is a Switch recorded without having been
-    /// written down first — the one state ADR a-switch-is-written-down-first
-    /// exists to keep impossible, walking back in through the door built to
-    /// stop it.
+    /// An address rather than an [`Active`], which is what makes "settled" true
+    /// of what it leaves: handed the enum it would accept a Landing.
     pub fn settle(&mut self, on: Option<String>) {
         self.active = Active::settled_on(on);
     }
 
     /// Whether this address is the one the registry records as active.
     ///
-    /// One place, and case-folded like every other way the registry is asked
-    /// about a name. A dozen call sites spelled this as
-    /// `registry.active().whose() == Some(account.email())`, which is the one
-    /// comparison in Perch that answered a question about an address by exact
-    /// bytes — while [`account`] beside it has always answered the same question
-    /// with [`same_name`].
-    ///
-    /// The two agree only while `active` holds the identical spelling of the
-    /// entry it names, which is true today and is nothing that guarantees it:
-    /// `upsert` matches an existing entry with `same_name` and stores the
-    /// incoming spelling, so an Identity re-read with different capitalization
-    /// replaces the Account and leaves `active` naming it the old way. From
-    /// there `observe::holding` reads the Account's own Profile instead of the
-    /// Default Profile, finds the store empty, and records `NoCredential` — a
-    /// permanent Quarantine off a comparison every other part of the registry
-    /// makes case-insensitively.
-    ///
-    /// [`account`]: Registry::account
+    /// Case-folded, like every other way the registry is asked about a name:
+    /// `upsert` stores the incoming spelling, so an Identity re-read with
+    /// different capitalization would leave an exact `==` answering wrongly.
     pub fn is_active(&self, email: &str) -> bool {
         self.active
             .whose()
@@ -1066,11 +843,7 @@ impl Registry {
     /// capitalized as.
     ///
     /// Through [`declared_group`](Self::declared_group), because that is how
-    /// every other question about a Group name is answered here: two names
-    /// differing only in case are one name. A bare `groups.get` agreed with
-    /// that only by accident of the caller having the declared spelling
-    /// already, and nothing in the signature said so — which is a trap set for
-    /// whoever reaches for this next.
+    /// every other question about a Group name is answered here.
     pub fn group(&self, name: &str) -> Option<&Settings> {
         self.groups.get(self.declared_group(name)?)
     }
@@ -1086,12 +859,10 @@ impl Registry {
         every
     }
 
-    /// The Settings a Scope holds (ADR a-setting-names-its-scope).
+    /// The Settings a Scope holds.
     ///
-    /// A lookup rather than a cascade: there is nothing above a Scope, so this
-    /// walks no chain — there is no chain. A Group Perch does not hold is not a
-    /// Scope at all, and answers with the compiled-in defaults rather than with
-    /// somebody else's values.
+    /// A lookup rather than a cascade: there is no chain. A Group Perch does not
+    /// hold is not a Scope, and answers with the compiled-in defaults.
     pub fn settings(&self, scope: &Scope) -> Settings {
         match scope {
             Scope::Ungrouped => self.ungrouped.settings,
@@ -1112,13 +883,8 @@ impl Registry {
     }
 
     /// The Scope an Account's Settings come from: its Group, or the Ungrouped
-    /// Accounts.
-    ///
-    /// One place, because the rule is ADR a-group-is-a-declaration's and there
-    /// is nothing to it but this match — which is exactly the kind of thing
-    /// that gets written out again at a call site and then goes on being
-    /// written out. `permitted` had its own copy while this had no caller at
-    /// all.
+    /// Accounts. One place, because there is nothing to the rule but this match,
+    /// which is exactly what gets written out again at a call site.
     pub fn scope_of(&self, account: &Account) -> Scope {
         match &account.group {
             Some(name) => Scope::Group(name.clone()),
@@ -1140,7 +906,7 @@ impl Registry {
     }
 
     /// The Accounts that are in no Group — the ordinary starting state, not an
-    /// error (ADR a-group-is-a-declaration).
+    /// error.
     pub fn ungrouped_accounts(&self) -> Vec<&Account> {
         self.accounts
             .iter()
@@ -1149,9 +915,8 @@ impl Registry {
     }
 
     /// The Group declared under a name, whatever it was capitalized as. Two
-    /// names that differ only in case are one name here (see
-    /// [`refuse_taken_names`](Self::refuse_taken_names)), so this is how a
-    /// Group typed in passing is matched to the one that exists.
+    /// names that differ only in case are one name here, so this is how a Group
+    /// typed in passing is matched to the one that exists.
     pub fn declared_group(&self, name: &str) -> Option<&str> {
         self.groups
             .keys()
@@ -1164,40 +929,16 @@ impl Registry {
     pub fn declare_group(&mut self, name: &str) -> Result<()> {
         self.refuse_a_name_nothing_may_answer_to(NameKind::Group, name, None)?;
         // At the compiled-in defaults, which is what every Setting means until
-        // somebody says otherwise about this Group. Nothing said elsewhere
-        // reaches it — including a `watcher-may-act true` said about another
-        // Scope, which is the whole point of a grant being said about the Scope
-        // it grants (ADR a-setting-names-its-scope).
+        // somebody says otherwise about this Group.
         self.groups.insert(name.to_string(), Settings::default());
         Ok(())
     }
 
-    /// Refuses a name nothing may answer to: one that is not usable at all, one
-    /// another name of the same kind already answers to, or one the other half
-    /// of the shared namespace holds.
+    /// Refuses a name nothing may answer to: one that is not usable, one another
+    /// name of the same kind holds, or one the other namespace half holds.
     ///
-    /// One function for both halves. Every way a name enters the registry asks
-    /// this — `perch group add`, `perch group rename`, `perch alias` and
-    /// `perch add` — so what the two halves accept
-    /// cannot come apart, and a caller cannot get the order wrong. The order is
-    /// load-bearing: shape before collision, because `refuse_taken_names` opens
-    /// by asking whether the Alias and the Group are the same name, and with it
-    /// reversed `perch add --alias '' --group ''` was refused as "`` cannot be
-    /// both an Alias and a Group name" — a Conflict about two names neither of
-    /// which was usable in the first place.
-    ///
-    /// `instead_of` is the name this one is replacing, where it is replacing
-    /// one: the Group's current name, or the Alias the Account already answers
-    /// to. A name renaming itself does not collide with itself, and that
-    /// includes recapitalizing it.
-    ///
-    /// Nothing else is waived by it. The shared namespace is still checked, so
-    /// a recapitalization cannot walk into the other half — which the Group
-    /// path has always done and the two Alias paths did not: both returned `Ok`
-    /// on a self-rename without asking anything. That was sound, but only by an
-    /// argument about what `declare_group` would have refused earlier, and an
-    /// inference held in one head is the kind that stops being true when
-    /// somebody adds a third way to make a name.
+    /// Shape before collision. `instead_of` is the name this replaces, and
+    /// renaming itself waives only the same-kind collision.
     pub fn refuse_a_name_nothing_may_answer_to(
         &self,
         kind: NameKind,
@@ -1209,9 +950,8 @@ impl Registry {
         let renaming_itself = instead_of.is_some_and(|held| same_name(held, name));
         if !renaming_itself {
             // The same-kind collision. Asked here for a Group and inside
-            // `refuse_taken_names` for an Alias, because that function is
-            // asymmetric: given an Alias it checks both halves, and given a
-            // Group only the Alias half.
+            // `refuse_taken_names` for an Alias, which is asymmetric: given an
+            // Alias it checks both halves, and given a Group only the Alias one.
             if let (NameKind::Group, Some(declared)) = (kind, self.declared_group(name)) {
                 return Err(PerchError::Conflict(format!(
                     "There is already a Group called `{declared}`."
@@ -1223,8 +963,7 @@ impl Registry {
             NameKind::Group => self.refuse_taken_names(None, Some(name)),
             NameKind::Alias => match renaming_itself {
                 // An Account keeping its own Alias under another capitalization
-                // cannot collide with the Alias it is giving up, and
-                // `refuse_taken_names` would find exactly that.
+                // cannot collide with the Alias it is giving up.
                 true => self.refuse_a_group_of_this_name(name),
                 false => self.refuse_taken_names(Some(name), None),
             },
@@ -1244,29 +983,14 @@ impl Registry {
 
     /// Renames a Group, keeping everything it carries.
     ///
-    /// `held` is the name as this registry holds it — what
-    /// [`declared_group`](Self::declared_group) answered, rather than what
-    /// somebody typed. The caller establishes there is a Group under it, because
-    /// what to say about a name nothing holds is the caller's: a typed one gets
-    /// the sentence every mistyped Group name gets, and this is not the place
-    /// that knows it.
-    ///
-    /// Three things move with the name, and they are the whole of the change:
-    /// the Settings the Group holds, the Accounts that claim it, and what
-    /// the last scheduled Check left behind. That last one is the difference
-    /// between this and a remove and an add — [`forget_group`](Self::forget_group)
-    /// drops the Check record because a Group declared under the same name later
-    /// would be a different Group, while a rename is the *same* Group, so a
-    /// rename that dropped it would be a way to make the watcher Switch again at
-    /// once.
+    /// `held` is the name as this registry holds it. Three things move with it:
+    /// the Settings, the Accounts that claim it, and what the last scheduled
+    /// Check left — dropping that would let the watcher Switch again at once.
     pub fn rename_group(&mut self, held: &str, to: &str) -> Result<()> {
         self.refuse_a_name_nothing_may_answer_to(NameKind::Group, to, Some(held))?;
 
         // Through `declared_group`, which is how every other question about a
-        // Group name is answered here. A bare `groups.remove(held)` agreed with
-        // that only by accident of the caller having case-folded first, and the
-        // `expect` under it turned a second caller that had not into an abort
-        // out of a function whose signature says it refuses.
+        // Group name is answered here.
         let Some(declared) = self.declared_group(held).map(str::to_string) else {
             return Err(PerchError::NotFound(format!(
                 "no Group is called `{held}`."
@@ -1289,12 +1013,11 @@ impl Registry {
         Ok(())
     }
 
-    /// Declares a Group unless it is already there, for the commands that name
-    /// a Group in passing rather than to create one — `perch add --group`.
+    /// Declares a Group unless it is already there, for the commands that name a
+    /// Group in passing rather than to create one — `perch add --group`.
     ///
-    /// Returns the name to record, which is the spelling the Group was
-    /// declared under: naming `Work` in passing joins `work` rather than
-    /// leaving the Account in a Group nothing else can see.
+    /// Returns the spelling the Group was declared under: naming `Work` in
+    /// passing joins `work`.
     pub fn ensure_group(&mut self, name: &str) -> Result<String> {
         if let Some(declared) = self.declared_group(name) {
             return Ok(declared.to_string());
@@ -1303,12 +1026,11 @@ impl Registry {
         Ok(name.to_string())
     }
 
-    /// Forgets a Group. The caller establishes that nothing is left in it:
-    /// dropping the Group is not a way to empty it.
+    /// Forgets a Group. The caller establishes nothing is left in it: dropping
+    /// the Group is not a way to empty it.
     ///
-    /// What a scheduled Check left behind goes with it. A Group that is gone
-    /// paces nothing, and a record kept past it would be a cooldown a Group
-    /// declared under the same name later inherited from a Group it never was.
+    /// What a scheduled Check left goes with it, or a Group declared under the
+    /// same name later would inherit a cooldown from a Group it never was.
     pub fn forget_group(&mut self, name: &str) {
         let Some(declared) = self.declared_group(name).map(str::to_string) else {
             return;
@@ -1328,9 +1050,8 @@ impl Registry {
 
     /// Records a Switch a Check made, for the next one to be paced by.
     ///
-    /// Filed under the spelling the Group was declared under, so a Check that
-    /// named it in another case does not leave a second record beside the first
-    /// — which is a Cooldown neither of them is paced by.
+    /// Filed under the spelling the Group was declared under, so a Check naming
+    /// it in another case does not leave a second record pacing nothing.
     pub fn record_check(&mut self, group: &str, at: DateTime<Utc>) {
         let under = self.declared_group(group).unwrap_or(group).to_string();
         self.checks.insert(under, Checked { switched_at: at });
@@ -1344,17 +1065,9 @@ impl Registry {
 
     /// The same, where the Account has to be there.
     ///
-    /// Eight call sites reached for [`Self::account`] behind an `expect` saying
-    /// resolution had named an Account Perch holds — the proof dropped at the
-    /// seam and bought again, eight times, as an assertion. What they are
-    /// asserting is real and [`validate`] owns it: an Alias or an `active`
-    /// naming an Account that is not there is refused on the way in and, since
-    /// `save` validates too, on the way out.
-    ///
-    /// So this is the same defense in depth `save` keeps: the state cannot
-    /// happen, and if it does the answer is a refusal naming what could not be
-    /// found rather than a panic. Nothing a person can act on — which is why it
-    /// says so — but a wedged machine is worse than a bad sentence.
+    /// The state cannot happen — [`validate`] refuses every registry that could
+    /// produce it, on the way in and, since `save` validates too, on the way out
+    /// — so a refusal naming what could not be found beats a panic.
     pub fn held(&self, email: &str) -> Result<&Account> {
         self.account(email).ok_or_else(|| no_such_account(email))
     }
@@ -1395,16 +1108,9 @@ impl Registry {
 
     /// Refuses an Alias and a Group name that would not both be free.
     ///
-    /// Aliases and Group names share one namespace, so neither can shadow the
-    /// other and the single Target on `switch` and `run` always has one
-    /// answer. The pair is checked together as well as against what is already
-    /// held: a command that sets both at once could otherwise plant the
-    /// collision it is meant to prevent.
-    ///
-    /// Two names that differ only in case are the same name. Nobody remembers
-    /// which way they capitalized a Group months ago, so `work` and `Work`
-    /// reaching different Accounts is the ambiguity this exists to prevent
-    /// even though a lookup could tell them apart.
+    /// The pair is checked against each other as well as against what is held: a
+    /// command setting both at once could otherwise plant the collision it is
+    /// meant to prevent. Two names differing only in case are one name.
     pub fn refuse_taken_names(&self, alias: Option<&str>, group: Option<&str>) -> Result<()> {
         if let (Some(alias), Some(group)) = (alias, group)
             && same_name(alias, group)
@@ -1420,11 +1126,8 @@ impl Registry {
                     "`{held}` already names {target}. Free it with `perch alias {held} --unset` first."
                 )));
             }
-            // The same lookup and the same sentence
-            // [`Self::refuse_a_group_of_this_name`] is, which exists because an
-            // Alias renaming itself needs this half without the one above it.
-            // Two copies of one refusal is what the whole of
-            // `refuse_a_name_nothing_may_answer_to` was written to end.
+            // The same lookup and sentence `refuse_a_group_of_this_name` is,
+            // which an Alias renaming itself needs without the one above it.
             self.refuse_a_group_of_this_name(alias)?;
         }
 
@@ -1440,40 +1143,17 @@ impl Registry {
     }
 
     /// Names an Account, refusing a name that is not usable or already means
-    /// something else. Hands back the Alias the Account gave up, where it had
-    /// one.
-    ///
-    /// The check is not the caller's to remember, for the reason
-    /// [`declare_group`](Self::declare_group) does not leave it to one either:
-    /// this was three primitives — `validate_name`, then a self-rename waiver,
-    /// then `refuse_taken_names` — reassembled at every call site, in an order
-    /// that had already been got wrong once. The Group half has had one door
-    /// since it was written and the Alias half had none.
+    /// something else. Hands back the Alias it gave up, where it had one.
     ///
     /// An Account answers to one Alias, so naming one that already had a name
-    /// replaces it: a name the user has moved on from should not go on
-    /// reaching the Account behind their back.
-    ///
-    /// An address is compared the way a name is, with [`same_name`], which is
-    /// what every lookup in this module does — so `CAFÉ@example.com` reaches
-    /// the Account held as `café@example.com` rather than quietly naming
-    /// nothing.
+    /// replaces it rather than adding to it.
     pub fn name_account(&mut self, alias: &str, email: &str) -> Result<Option<String>> {
         let previous = self.alias_of(email).map(str::to_string);
         self.refuse_a_name_nothing_may_answer_to(NameKind::Alias, alias, previous.as_deref())?;
 
-        // The address as the registry *holds* it, not as it was typed. The
-        // paragraph above is about the lookup — `CAFÉ@example.com` reaches the
-        // Account held as `café@example.com` — and then this stored the
-        // capitalized spelling as the map's value, so the Alias pointed at a
-        // string no `accounts` entry has.
-        //
-        // `target::matched` is where the two come apart: its Account arm hands
-        // back `account.email()` and its Alias arm hands back this value, so one
-        // Target carried the held spelling and the other did not. Every
-        // downstream lookup folds case, which is why nothing breaks today — and
-        // is exactly the shape `is_active`'s own doc spends a paragraph warning
-        // about, one exact `==` away from a wrong answer.
+        // The address as the registry *holds* it, not as it was typed: the
+        // lookup above folds case, and storing the typed spelling would point
+        // the Alias at a string no `accounts` entry has.
         let held = self
             .account(email)
             .map_or_else(|| email.to_string(), |account| account.email().to_string());
@@ -1493,14 +1173,8 @@ impl Registry {
     /// Records that an Account's Credential can no longer be used, and says
     /// whether that is news.
     ///
-    /// An Account is never dropped for this: it stays listed, keeps its Alias,
-    /// its Group and its place, and goes on being named. An Account that
-    /// vanishes reads as data loss, and a broken one reads as something needing
-    /// attention — which is what it is.
-    ///
-    /// The first reason stands. A Quarantined Account asked a second question
-    /// fails a second way, and the reason worth keeping is the one that says how
-    /// it broke rather than the last thing that could not be done to it since.
+    /// The first reason stands: a Quarantined Account asked a second question
+    /// fails a second way, and the reason worth keeping is how it broke.
     pub fn quarantine(&mut self, email: &str, why: Quarantine) -> bool {
         match self.account_mut(email) {
             Some(account) if account.quarantine.is_none() => {
@@ -1518,39 +1192,18 @@ impl Registry {
         self.account_mut(email)?.quarantine.take()
     }
 
-    /// Forgets an Account: the entry, the Alias that reached it, and its place
-    /// as the active one.
+    /// Forgets an Account: the entry, the Alias, and its place as the active one.
     ///
-    /// Its Group is left declared. A Group is something the user said rather
-    /// than a summary of where the Accounts happen to be, so emptying one is not
-    /// a reason to withdraw the statement — and `perch group remove` is how it
-    /// is withdrawn.
-    ///
-    /// The Credential is not this to delete: what a Profile holds is the
-    /// caller's to take away before the row that names it goes, so a store that
-    /// will not give it up is met while the Account can still be named.
+    /// Its Group is left declared, and the Credential is not this to delete —
+    /// what a Profile holds is the caller's to take away first, while the Account
+    /// can still be named.
     pub fn forget(&mut self, email: &str) {
         self.accounts
             .retain(|account| !same_name(account.email(), email));
         self.aliases.retain(|_, named| !same_name(named, email));
-        // Either half of a Landing, and not only the Account being treated as
-        // active: a Landing naming an Account Perch no longer holds is a
-        // dangling pointer the registry refuses to load, and half a Switch is
-        // not a thing to keep a record of once one of its two ends is gone.
-        //
-        // What it settles *on* is the other half, where the other half is still
-        // held. Settling on nobody threw away an Account the registry was
-        // treating as active: forgetting the *arriving* half of a Landing left
-        // `leaving` held and named by nothing, so the next Capture had no
-        // Profile to file the live Credential into. `settled_on` is the answer
-        // to "what does a Landing come back to when nothing moved", which is
-        // this question exactly.
-        //
-        // Through `settle`, because that is what the field being private is
-        // for: `active` is reached through `begin_landing`, `settle` and
-        // `abandon_landing`, each of which names a transition, and a fourth
-        // writer inside the one module the rule is aimed at is the one a later
-        // reader copies.
+        // Either half of a Landing, and it comes back to whichever half is
+        // still held: a Landing naming an Account Perch no longer holds is a
+        // dangling pointer `load` refuses. Through `settle`, like every writer.
         if self.active.names(email) {
             let comes_back_to = self
                 .active
@@ -1574,22 +1227,10 @@ impl Registry {
 }
 
 /// `$PERCH_HOME`, or `~/.config/perch` — an error when neither is knowable,
-/// because a machine that cannot say where home is gets a refusal rather than a
-/// registry written into the filesystem root.
+/// rather than a registry written into the filesystem root.
 ///
-/// Under `~/.config` rather than directly in home. A tool that keeps its state
-/// in the home directory adds a line to what somebody sees every time they list
-/// it, and Perch's state is not something anybody reads by hand.
-///
-/// The same path on every platform, Windows included, rather than
-/// `%APPDATA%`: one rule is easier to document, to support and to keep in the
-/// Host port, which exposes a home directory and nothing else. It is a
-/// preference rather than a constraint — nothing in the design breaks under a
-/// platform-specific path — and `$PERCH_HOME` is there for anybody who wants
-/// one.
-///
-/// `~/.config` is created if it is not there — at 0700, along with everything
-/// below it, since what goes under it here is Credentials.
+/// The same path on every platform rather than `%APPDATA%`, because one rule is
+/// easier to keep in a Host port exposing only a home directory. A preference.
 pub fn perch_home(host: &dyn Host) -> Result<PathBuf> {
     if let Some(overridden) = host.env_var("PERCH_HOME") {
         return Ok(PathBuf::from(overridden));
@@ -1610,49 +1251,17 @@ pub fn profiles_dir(host: &dyn Host) -> Result<PathBuf> {
     Ok(perch_home(host)?.join("profiles"))
 }
 
-/// The Default Profile, as everything that reads or writes the live Credential
+/// The Default Profile, as everything reading or writing the live Credential
 /// means it: the directory Claude Code falls back to, and never a Profile.
 ///
-/// `CLAUDE_CONFIG_DIR` is honored, because somebody who moved their
-/// configuration directory moved the live Credential along with it — but never
-/// when it names a Profile, and pointing it at one is exactly what a Run does.
-/// The client a Run launches passes that variable on to everything it starts,
-/// so a `perch` typed inside one is told a Profile is the default. It is not.
-///
-/// Here rather than in [`crate::probe`] because the question is which
-/// directories are Perch's own, which is this module's to answer, and one place
-/// because every surface that got this wrong got it wrong the same way. A
-/// Switch taking `CLAUDE_CONFIG_DIR` at its word inside a Run wrote a third
-/// Account's Credential into the running Account's Profile, superseded the copy
-/// it had, and left the registry naming an Account the machine was not on — the
-/// disagreement between Credential and Identity that
-/// ADR a-switch-is-written-down-first exists to keep impossible, arriving by
-/// way of the environment.
-///
-/// Asked of the whole of [`perch_home`] rather than of `profiles`, because a
-/// Profile is not the only directory Perch points that variable at: a login
-/// runs in [`pending_login_dir`], and the client it launches passes the
-/// variable on to everything it starts just as a Run does. A `perch switch`
-/// typed inside a login session was told the pending directory was the Default
-/// Profile, Captured the live Credential into a directory `login` deletes when
-/// the command ends, and recorded the registry as active on an Account the
-/// machine was not on. No directory under Perch's own home is ever the Default
-/// Profile, which is what the rule above already claims it is.
+/// `CLAUDE_CONFIG_DIR` is honored, but no directory under Perch's own home is
+/// ever the Default Profile — and both a Run and a login point it at one.
 pub fn the_default_profile(host: &dyn Host) -> Result<crate::probe::Store> {
     let told = crate::probe::default_store(host)?;
     let home = perch_home(host)?;
-    // Both sides resolved before they are compared, and through *every* link on
-    // the path rather than one at the end: `starts_with` matches path
-    // components, so a `CLAUDE_CONFIG_DIR` reaching a Profile by another name —
-    // `~/claude` linked at `~/.config/perch/profiles`, or a relative
-    // `PERCH_HOME`, which `perch_home` takes verbatim — is a different string
-    // and slips past. The link that does it is usually a directory *above* the
-    // one named, which is why the last component alone is not enough.
-    //
-    // Past it, a `perch switch` typed in that shell Captures the live
-    // Credential into a Profile another Account may be running against, which
-    // is the failure the paragraph above describes reached by the route it did
-    // not check. `reconcile` resolves this same class the same way.
+    // Both sides resolved through *every* link on the path, not one at the end:
+    // `starts_with` matches components, so a `CLAUDE_CONFIG_DIR` reaching a
+    // Profile by another name is a different string and slips past.
     let told_at = crate::host::through_every_link(host, &told.config_dir);
     if told_at.starts_with(crate::host::through_every_link(host, &home)) {
         return crate::probe::default_profile_store(host);
@@ -1660,24 +1269,18 @@ pub fn the_default_profile(host: &dyn Host) -> Result<crate::probe::Store> {
     Ok(told)
 }
 
-/// The Profile directory for an Account. The email is slugged because the path
-/// is hashed into a keychain service name and has to be stable and printable.
+/// The Profile directory for an Account. The email is slugged because the path is
+/// hashed into a keychain service name and has to be stable and printable.
 ///
-/// An address with no alphanumeric character in it slugs to nothing, and
-/// joining nothing onto a path gives back the path: the Profile of such an
-/// Account would *be* `profiles/`, the directory holding every other Account's.
-/// `perch remove` deletes a Profile directory whole, so that Account is one
-/// removal away from taking every Credential Perch holds with it. Refused here,
-/// at the one place every store and every keychain namespace is derived from,
-/// rather than trusted to whatever wrote the address.
+/// An address that slugs to nothing is refused here, at the one place every store
+/// is derived from.
 pub fn profile_dir_for(host: &dyn Host, email: &str) -> Result<PathBuf> {
     let profiles = profiles_dir(host)?;
     let slugged = slug(email);
     let dir = profiles.join(&slugged);
 
-    // Two ways of asking the same question, because the answer is the whole
-    // machine: an empty slug, and — for whatever a future slug might let
-    // through — a path that is not one directory below the one it was joined to.
+    // Two ways of asking one question, because the answer is the whole machine:
+    // an empty slug, and a path that is not one directory below `profiles/`.
     if slugged.is_empty() || dir.parent() != Some(profiles.as_path()) {
         return Err(PerchError::Invalid(format!(
             "`{email}` has no character a Profile directory can be named after, \
@@ -1692,10 +1295,9 @@ pub fn profile_dir_for(host: &dyn Host, email: &str) -> Result<PathBuf> {
 
 /// Where a login lives while Perch is running it.
 ///
-/// A Profile is named after the Account it holds, and which Account that is
-/// only becomes knowable once the login has finished — so the login happens
-/// here and its Credential is moved into a Profile afterwards. Nothing outlives
-/// the command: this directory is removed whether the login worked or not.
+/// Named after the moment it started, because a Profile is named after the
+/// Account it holds and which Account that is only becomes knowable once the
+/// login has finished (ADR a-login-perch-does-not-need).
 pub fn pending_login_dir(host: &dyn Host, started_at: DateTime<Utc>) -> Result<PathBuf> {
     Ok(pending_logins_dir(host)?.join(format!("login-{}", started_at.timestamp_millis())))
 }
@@ -1707,9 +1309,8 @@ pub fn pending_logins_dir(host: &dyn Host) -> Result<PathBuf> {
 }
 
 /// When the login that made this directory started, as its name records.
-///
-/// The name is `login-<millis>`, written by [`pending_login_dir`], and it is
-/// the only account of the directory's age that nothing later moves.
+/// `login-<millis>`, written by [`pending_login_dir`], and the only account of
+/// the directory's age that nothing later moves.
 pub fn pending_login_started_at(dir: &Path) -> Option<DateTime<Utc>> {
     let millis: i64 = dir
         .file_name()?
@@ -1739,9 +1340,8 @@ pub fn slug(email: &str) -> String {
 /// How long a Perch that died holding the registry lock keeps it.
 ///
 /// Longer than the Claude Code locks a Switch takes, because it is the outer
-/// lock: everything one of those waits for happens inside this one. Short
-/// enough that a machine whose Perch was killed mid-command is usable again
-/// within a minute rather than needing the directory removed by hand.
+/// lock; short enough that a killed Perch leaves a usable machine within a
+/// minute.
 const REGISTRY_STALE_MILLIS: i64 = 90_000;
 const REGISTRY_UPDATE_MILLIS: i64 = 5_000;
 
@@ -1749,9 +1349,7 @@ const REGISTRY_UPDATE_MILLIS: i64 = 5_000;
 /// the same time.
 ///
 /// A directory, taken with the same `mkdir`-or-fail primitive the Claude Code
-/// locks use, for the same reason: the call both asks and answers, with nothing
-/// in between. It excludes only other Perches — Claude Code has no interest in
-/// this file — which is exactly the set that needs excluding.
+/// locks use: the call both asks and answers, with nothing in between.
 pub fn lock_spec(host: &dyn Host) -> Result<LockSpec> {
     Ok(LockSpec {
         name: "the Perch registry lock",
@@ -1767,20 +1365,9 @@ pub fn lock_spec(host: &dyn Host) -> Result<LockSpec> {
 
 /// How long a Watcher that died holding the watcher lock keeps it.
 ///
-/// Derived rather than chosen, and the derivation is the whole of the number: a
-/// Watcher renews this once a round, so the longest it can go quiet while
-/// perfectly healthy is the longest wait it ever takes between rounds — the
-/// bounded back-off — plus the round that follows it. Anything shorter would
-/// have a Watcher backed off against a failing endpoint declared dead by the
-/// next `perch watcher run` to come along, and two Watchers is the state this
-/// lock exists to prevent (ADR the-machine-runs-the-watcher).
-///
-/// It is deliberately long, and what pays for it is that nothing waits on it. A
-/// Watcher that finds the lock held **holds and comes back** rather than
-/// exiting, so a lock left behind by a `kill -9` costs a restarted Service some
-/// held rounds it prints the reason for, and costs it nothing else. Exiting
-/// would have made this number the length of a crash loop, which is the whole
-/// of why it is not one.
+/// Derived rather than chosen: the longest a healthy Watcher goes quiet is its
+/// longest wait between rounds plus the round after it. Deliberately long, and
+/// what pays for it is that a Watcher finding the lock held holds and comes back.
 const WATCHER_STALE_MILLIS: i64 =
     (crate::watch::LONGEST_WAIT_MILLIS + crate::watch::REFRESH_INTERVAL_MILLIS) as i64;
 
@@ -1790,22 +1377,13 @@ const WATCHER_UPDATE_MILLIS: i64 = 60_000;
 /// The lock that makes a Watcher the only one on this machine
 /// (ADR the-machine-runs-the-watcher).
 ///
-/// Two loops for one person watch the same active Account and each keeps its
-/// Cooldown in memory, where neither can see the other's — so the pacing the
-/// Cooldown exists to impose is undone by running the thing twice. A Check takes the same lock for the same reason: the
-/// in-memory Cooldown and the one in `checks` cannot see each other either.
-///
-/// This is the one artifact a Watcher leaves behind, and it repeals the promise
-/// the loop used to print on the way out. It is given back when the process
-/// ends, however it ends, because [`crate::lock::Held`] gives its locks back
-/// when it is dropped.
+/// Two loops each keep their Cooldown in memory, where neither can see the
+/// other's, so running the thing twice undoes the pacing. A Check too.
 pub fn watcher_lock_spec(host: &dyn Host) -> Result<LockSpec> {
     Ok(LockSpec {
         name: "the Perch watcher lock",
-        // The Watcher rather than one of its three arrangements: whoever holds
-        // this is a loop, a Check or a Service, and which of them it is neither
-        // changes what to do about it nor is knowable from here
-        // (ADR a-command-names-its-noun).
+        // The Watcher rather than one of its three arrangements: which of them
+        // holds this neither changes what to do about it nor is knowable here.
         held_by: "another Watcher",
         dir: perch_home(host)?.join(".watch.lock"),
         stale_millis: WATCHER_STALE_MILLIS,
@@ -1816,28 +1394,11 @@ pub fn watcher_lock_spec(host: &dyn Host) -> Result<LockSpec> {
     })
 }
 
-/// Shuts every other Perch out of the registry until the returned hold is
-/// dropped.
+/// Shuts every other Perch out of the registry until the hold is dropped.
 ///
-/// Every command is a load, some changes made in memory, and a save of the
-/// whole thing — so two of them overlapping does not merge, it discards. The
-/// hold is taken for the span of the command rather than for the span of the
-/// write, because it is the *read* that goes stale: a `perch add` that saved
-/// its copy after a `perch switch` had landed would put `active` back to
-/// whatever it was before the Switch, and the next Capture would then write the
-/// live Credential into the wrong Account's Profile
-/// (ADR a-switch-is-written-down-first).
-///
-/// Never held across a browser login. That is minutes of somebody else's time,
-/// and the commands that spend it take this afterwards, against a registry read
-/// fresh.
-///
-/// Perch's home comes into being on the way to the lock, and privately, because
-/// on a fresh machine this is the first thing to need it. That is
-/// [`lock::take_all`]'s doing rather than this function's: it creates every
-/// lock's parent privately, and this lock's parent *is* Perch's home. A second
-/// copy here was the same call with the same message, guarding the case the
-/// first one already covers.
+/// The hold spans the command rather than the write, because it is the *read*
+/// that goes stale: a copy saved after somebody else's Switch landed would put
+/// `active` back and send the next Capture to the wrong Profile.
 pub fn lock(host: &dyn Host) -> Result<lock::Held<'_>> {
     lock::take_all(host, vec![lock_spec(host)?])
 }
@@ -1856,16 +1417,9 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
         }
     };
 
-    // The version first, off a shape that is only the version, and before the
-    // whole document is read as a Registry.
-    //
-    // This is the order the guard needs to be any use. A newer Perch is exactly
-    // the thing that writes a value this build has no variant for — a Strategy
-    // it added, a Quarantine reason — and reading the document first fails on
-    // that with serde's own words: "unknown variant `least-recently-used`",
-    // about a file that is perfectly well-formed, with nothing in the sentence
-    // saying the build in front of them is simply too old. That is the
-    // misdiagnosis the version field exists to prevent.
+    // The version first, off a shape that is only the version. A newer Perch is
+    // exactly the thing that writes a value this build has no variant for, and
+    // reading the document first fails on that with serde's own words.
     if let Some(version) = crate::error::claimed_version(&contents)
         && version > CURRENT_VERSION
     {
@@ -1879,14 +1433,7 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
 
     // Strictly, so a key nobody recognizes is a refusal naming it rather than a
     // value that quietly did nothing. Every type here is Perch's own — Claude
-    // Code's `.claude.json` is read through `probe`'s own lenient shapes, which
-    // have to tolerate whatever Anthropic adds — so there is nothing upstream
-    // for this to be brittle about. What it catches is a hand edit: one
-    // transposed letter in `watcher_threshold_percent` used to deserialize as
-    // Global's value, run the watcher at a threshold nobody set, and then be
-    // erased by the next command that wrote the file, with nothing said at any
-    // point. The version guard above runs first, so a genuinely newer Perch is
-    // still diagnosed as one rather than as a typo.
+    // Code's `.claude.json` is read through `probe`'s lenient shapes instead.
     let registry: Registry = serde_json::from_str(&contents).map_err(|err| {
         PerchError::Malformed {
             path: path.display().to_string(),
@@ -1902,14 +1449,9 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
 
 /// Where to put right something only a hand edit could have put wrong.
 ///
-/// The rule [`validate`] states is about the registry; this is about the file it
-/// happens to be written in, and only a caller that read one can say which file
-/// that is. Kept apart because the other caller — [`save`] — is holding a
-/// registry nobody hand-edited, and telling somebody to go and edit a value that
-/// is not in the file yet is the one sentence that would make it worse.
-///
-/// Named as one sentence rather than spelled at each refusal, which is where it
-/// was: seven copies, of which one had already drifted to the singular.
+/// Kept apart from [`validate`]'s rule because [`save`] is holding a registry
+/// nobody hand-edited, and telling somebody to edit a value that is not in the
+/// file yet is the one sentence that would make it worse.
 pub fn the_file_to_edit(path: &Path) -> String {
     format!(
         "It is in {}, and every Perch command reads that file — including the \
@@ -1920,9 +1462,8 @@ pub fn the_file_to_edit(path: &Path) -> String {
 
 /// The refusal for an Account that was named and is not there.
 ///
-/// Unreachable by construction — [`validate`] refuses every registry that could
-/// produce it, on the way in and on the way out — so this is worded as what it
-/// is rather than as something to go and fix.
+/// Unreachable by construction, so it is worded as what it is rather than as
+/// something to go and fix.
 fn no_such_account(email: &str) -> PerchError {
     PerchError::Other(format!(
         "Perch was asked for {email}, which it does not hold, by something that \
@@ -1935,53 +1476,19 @@ fn no_such_account(email: &str) -> PerchError {
 
 /// Everything a registry has to be true of before any command acts on it.
 ///
-/// Checked on the way in rather than where each value is read, because the
-/// thing that reads them is a loop nobody is watching: a value that means
-/// nothing would otherwise sit in the file until the watcher next went round
-/// and surprise somebody by acting on it.
-///
-/// Checked here means every command meets it, including `perch config set` —
-/// the one that would otherwise be the repair. A value only a hand edit can
-/// produce is a value only a hand edit can take back out, so a caller that read
-/// the registry off a disk says where to do that, with
-/// [`the_file_to_edit`]. The rule itself names no file, because the other
-/// caller is holding a registry that came from nowhere but Perch.
-///
-/// Public because an Import writes a registry without reading one first, and
-/// was running a narrower check of its own — so a file `perch holdings import`
-/// accepted could be one every later command refused to read, which leaves a
-/// machine with no working command on it and no `perch holdings purge` either.
-/// One function, so what an Import will accept and what a load will accept
-/// cannot differ.
+/// Checked on the way in rather than where each value is read, because the thing
+/// that reads them is a loop nobody is watching. Public because an Import writes
+/// a registry without reading one, and what it accepts must not differ.
 pub fn validate(registry: &Registry) -> Result<()> {
-    // Every Scope, and every Scope is all of them: with no layer above, a
-    // Setting is read from the Scope that holds it and nowhere else, so one
+    // Every Scope, and every Scope is all of them: with no layer above, one
     // walk over the Scopes is the whole of the check.
     for scope in registry.scopes() {
         registry.settings(&scope).validate(&scope)?;
     }
 
-    // The Group *names* an Account claims, for the same reason.
-    // `with_every_claimed_group_declared` repairs a hand-edited registry by
-    // declaring what it finds — and a hand-edited registry is exactly where a
-    // name nothing would have accepted comes from. Declared by a raw insert, a
-    // claim of `none` became a Group `move_account` can never move an Account
-    // into, because `means_no_group` is asked first; a claim of `my work`
-    // became one whose `perch config get` line cannot be typed back into
-    // `perch config set`, which is the round trip whitespace is refused to
-    // protect; and a claim colliding with an Alias planted the namespace
-    // collision `refuse_taken_names` exists to make impossible, after which
-    // `target::matched` resolves the name to the Alias and the Group is
-    // unreachable.
-    //
-    // Declared Groups are walked as well as claimed ones, and Aliases with
-    // them. Only claims were checked, which left the two other halves of the
-    // same namespace to be hand-edited freely: a declared Group nobody is in
-    // never reached the loop at all, so `my work` sat in the file printing a
-    // `perch config get` line that cannot be typed back in. And the `aliases`
-    // map was never looked at, so an Alias keyed by an email address resolved
-    // ahead of the Account of that name — the Target with two answers the `@`
-    // rule exists to make impossible.
+    // The Group *names* an Account claims, the declared Groups, and the Aliases
+    // with them: a hand-edited registry is exactly where a name nothing would
+    // have accepted comes from, in any of the three.
     let claimed = registry
         .accounts
         .iter()
@@ -1993,18 +1500,9 @@ pub fn validate(registry: &Registry) -> Result<()> {
         refuse_a_name_nothing_would_have_accepted(registry, NameKind::Alias, name)?;
     }
 
-    // What each Alias points *at*, which the loop above does not look at: it
-    // asks whether the key is a name Perch would have given, and never whether
-    // the value names an Account Perch holds.
-    //
-    // A dangling one is not a refusal anywhere downstream — it is a panic.
-    // `target::matched` builds a `Target::Alias` straight out of the map with no
-    // existence check, and `perch switch`, `perch remove`, `perch relogin` and
-    // `perch run` all then reach for `registry.account(&email)` behind an
-    // `expect` that says resolution named an Account Perch holds. The `active`
-    // pointer has never had this problem, because `active_account` resolves
-    // through `and_then(account)` and its callers turn `None` into a refusal;
-    // the Alias half had no equivalent.
+    // What each Alias points *at*, which the loop above does not look at. A
+    // dangling one is not a refusal downstream — it is the `expect` in every
+    // command that resolves a Target.
     let mut named: Vec<(&str, &str)> = Vec::new();
     for (alias, email) in &registry.aliases {
         if registry.account(email).is_none() {
@@ -2013,16 +1511,9 @@ pub fn validate(registry: &Registry) -> Result<()> {
                  an Account Perch holds.",
             )));
         }
-        // One Account, one Alias. `set_alias` enforces it by dropping the old key
-        // — "a name the user has moved on from should not go on reaching the
-        // Account behind their back" — and nothing was asking it of a file.
-        //
-        // With two, `alias_of` returns whichever the map yields first, so `perch
-        // list` and every sentence Perch writes show one of them while `perch
-        // switch` answers to both, and `perch alias <the other> --unset` reports
-        // a name freed that was never the one being shown. That is the same "which
-        // one a Target finds is not decided by anything" harm as two names that
-        // differ only in case, one map value away.
+        // One Account, one Alias. With two, `alias_of` returns whichever the map
+        // yields first, so `perch list` shows one while `perch switch` answers to
+        // both — the same undecided answer as two names differing only in case.
         if let Some((already, _)) = named.iter().find(|(_, held)| same_name(held, email)) {
             return Err(PerchError::Invalid(format!(
                 "The registry gives {email} both the Alias `{already}` and the \
@@ -2034,20 +1525,9 @@ pub fn validate(registry: &Registry) -> Result<()> {
         named.push((alias, email));
     }
 
-    // The other pointer into the Accounts, and the one the Alias check above was
-    // written for: "a dangling one is not a refusal anywhere downstream — it is
-    // a panic". `active` has exactly the same shape and had no such check. It
-    // survives today because `active_account` resolves through `and_then` and
-    // its callers turn `None` into a refusal — which means a dangling pointer
-    // reads as "no Account is active", and the repair somebody is offered is to
-    // switch to one, on a machine where the Account they are on is right there
-    // in the file.
-    //
-    // Holding nothing is a state and not a fault: a machine that has never
-    // switched has no active Account.
-    //
-    // Both ends of a Landing, because both are pointers into the Accounts and
-    // resolving one reads the Credential of the other.
+    // The other pointer into the Accounts, and both ends of a Landing, because
+    // resolving one reads the Credential of the other. Holding nothing is a
+    // state and not a fault.
     match &registry.active {
         Active::Nobody => {}
         Active::Settled(active) => refuse_a_dangling_pointer(
@@ -2071,21 +1551,9 @@ pub fn validate(registry: &Registry) -> Result<()> {
         }
     }
 
-    // The third member of the namespace, which nothing was checking. A Target is
-    // an Alias, a Group name or an Account's address, and `validate_name` keeps
-    // the first two tellable from the third by refusing an `@` in them —
-    // "because a Target that could be either has no single answer". The mirror
-    // rule, that an address actually looks like one, was never stated anywhere:
-    // `probe::read_identity` asks only for one alphanumeric character, and
-    // `refuse_taken_names` consults the Aliases and the Groups but never the
-    // Accounts.
-    //
-    // So an Account called `work` beside a Group called `work` resolved to the
-    // Account, leaving the Group reachable from `perch group list` and `perch
-    // config set` and unreachable from `perch switch` and `perch run`; beside an
-    // *Alias* called `work` it left the Account reachable by no Target at all.
-    // Refused here, one rule is what makes `refuse_taken_names`' two-way check
-    // correct without it needing a third lookup.
+    // The third member of the namespace. `validate_name` keeps an Alias and a
+    // Group name tellable from an address by refusing an `@`; the mirror rule,
+    // that an address looks like one, is this.
     for account in &registry.accounts {
         if !account.email().contains('@') {
             return Err(PerchError::Invalid(format!(
@@ -2097,12 +1565,9 @@ pub fn validate(registry: &Registry) -> Result<()> {
         }
     }
 
-    // One entry per Account, for the same reason and with a worse ending.
-    // `upsert` is what every command writes an Account through and it replaces
-    // the matching entry, so two entries for one address are something only a
-    // hand edit produces — after which `account` and `account_mut` silently act
-    // on the first of them, `perch list` renders one Account as two rows, and a
-    // Cycle counts it twice when it ranks the Group.
+    // One entry per Account. `upsert` replaces the matching entry, so two for
+    // one address is a hand edit — after which `account` acts on the first,
+    // `perch list` renders two rows, and a Cycle counts it twice.
     if let Some((already, again)) = first_collision(registry.accounts.iter().map(Account::email)) {
         return Err(PerchError::Invalid(format!(
             "The registry holds two Accounts spelled `{already}` and `{again}`, \
@@ -2111,29 +1576,9 @@ pub fn validate(registry: &Registry) -> Result<()> {
         )));
     }
 
-    // Two names in the *same* half of the namespace that differ only in case.
-    // The loop above catches the collision across the two halves, and
-    // `declare_group` and `refuse_taken_names` refuse both kinds at creation —
-    // but nothing was asking it of a file somebody had edited, and `target`
-    // states the answer as an assumption: "the registry refuses an Alias or a
-    // Group that differs from a held name only in case, so there is never more
-    // than one candidate to find".
-    //
-    // With two, which one is found is which one a `BTreeMap` yields first.
-    // `aliases` holding both `work` and `Work` renders one of them in `perch
-    // list` and resolves `perch switch work` to the other, and freeing `work`
-    // frees neither reliably.
-    // What `checks` is keyed on, which is the one pointer into the Group
-    // namespace nothing was asking about. `record_check` falls back to the name
-    // it was handed when it cannot resolve one — which it has to, because the
-    // Ungrouped Scope is not a declared Group and still keeps a Cooldown — and
-    // `forget_group` only clears entries for names it *can* resolve. So an
-    // entry could outlive every Group that could explain it, pacing a Scope
-    // nothing else in the file mentions.
-    //
-    // Refused here for the reason the dangling-Alias check above is: this
-    // module already declines a dangling `active` and a dangling `aliases`, and
-    // `checks` was the third pointer with no such rule.
+    // What `checks` is keyed on, the one pointer into the Group namespace with no
+    // rule of its own: `record_check` keeps the name it was handed when it cannot
+    // resolve one, and `forget_group` only clears what it can.
     for named in registry.checks.keys() {
         if same_name(named, UNGROUPED) || registry.declared_group(named).is_some() {
             continue;
@@ -2148,27 +1593,9 @@ pub fn validate(registry: &Registry) -> Result<()> {
     refuse_two_names_that_differ_only_in_case(NameKind::Group, registry.groups.keys())?;
     refuse_two_names_that_differ_only_in_case(NameKind::Alias, registry.aliases.keys())?;
 
-    // The percentages a Cycle ranks on, checked the way a Group's are and for
-    // the reason `GroupConfig::validate` states: the thing that reads them is a
-    // loop nobody is watching. `watcher_threshold_percent` was range-checked
-    // here and `used_percent` — the figure that loop compares *against* the
-    // threshold — was not, though `anthropic::understand` clamps it to 0–100 on
-    // the way in, so the invariant is real and was simply enforced in one of the
-    // two places a figure can enter the registry.
-    //
-    // The other place is a hand edit or a restored Export, which is what every
-    // check above is written against. `"used_percent": -50` gives
-    // `cycle::headroom_of` 150% of headroom, so the Account outranks a genuinely
-    // untouched one and the watcher's `used_percent >= threshold` never fires:
-    // an Account that can never be moved off, and cannot be seen to be wrong
-    // from `perch list` either, which renders it as nothing but an odd
-    // percentage. `150` is the mirror: negative headroom, so an Account with
-    // room to spare is ranked below one that has none.
-    //
-    // A range and not a finiteness check as well: serde_json refuses a literal
-    // it cannot hold in an `f64` — `1e400` is "number out of range" before this
-    // is reached — and JSON has no way to spell a NaN. The range is the whole of
-    // what is left to ask, and it answers `false` for either anyway.
+    // The percentages a Cycle ranks on. A negative figure gives
+    // `cycle::headroom_of` over 100% of headroom, so `used_percent >= threshold`
+    // never fires; serde_json already refuses a literal too large for an `f64`.
     for account in &registry.accounts {
         for window in account
             .utilization
@@ -2226,16 +1653,8 @@ fn refuse_two_names_that_differ_only_in_case<'a>(
 /// The first pair of names in a sequence that [`same_name`] cannot tell apart,
 /// earlier one first.
 ///
-/// Three loops in this module were this loop: two names in one half of the
-/// namespace, two Accounts spelled alike, and two Aliases given to one Account.
-/// They differ only in the sentence they raise, which is the part worth writing
-/// three times — every one of them says *which* answer is not decided by
-/// anything, and that is different each time.
-///
-/// Quadratic, deliberately. It is a registry: a machine with enough Accounts for
-/// that to matter is one nobody has, and the alternative is a map keyed on a
-/// lowercased copy of every name — which is the allocation this comparison
-/// avoids, spent to save a comparison nobody is waiting on.
+/// Quadratic, deliberately: it is a registry, and the alternative is a map keyed
+/// on a lowercased copy of every name.
 fn first_collision<'a>(names: impl Iterator<Item = &'a str>) -> Option<(&'a str, &'a str)> {
     let mut seen: Vec<&str> = Vec::new();
     for name in names {
@@ -2247,36 +1666,19 @@ fn first_collision<'a>(names: impl Iterator<Item = &'a str>) -> Option<(&'a str,
     None
 }
 
-/// Refuses a name in the registry that `declare_group` or `perch alias` would
-/// not have allowed in the first place.
+/// Refuses a name in the registry that nothing would have accepted.
 ///
-/// Named rather than repaired, for the reason the configuration check above
-/// gives: a value only a hand edit can produce is a value only a hand edit can
-/// take back out, and every command reads this file — including the ones that
-/// would otherwise be the repair.
-///
-/// One function for both halves of the namespace, because the namespace is
-/// shared and what makes a name unacceptable is the same list either way. Two
-/// copies is how one of them comes to allow what the other refuses, which is
-/// the state this exists to find.
-///
-/// The collision between the two halves is asked from the Group side only. It
-/// is one fact about a pair, and every Group is walked — declared and claimed
-/// alike — so asking again from the Alias side would be a branch nothing could
-/// reach.
+/// Named rather than repaired: a value only a hand edit can produce is one only a
+/// hand edit can take out. The cross-half collision is asked from the Group side
+/// only, because every Group is walked either way.
 fn refuse_a_name_nothing_would_have_accepted(
     registry: &Registry,
     kind: NameKind,
     name: &str,
 ) -> Result<()> {
-    // `none` is not a case of its own here. `validate_name` already refuses it,
-    // for both kinds, in words true of a claim and a declaration alike — "means
-    // no Group at all on `perch group move`, so it cannot also name one" —
-    // whereas the sentence this used to carry said "an Account cannot be in
-    // it", which is a statement about Accounts and this loop walks *declared*
-    // Groups too. A registry of no Accounts and a Group called `none` was
-    // refused with a claim about the Accounts it does not hold, and two
-    // sentences for one rule is how the two come to disagree about it.
+    // `none` is not a case of its own here: `validate_name` already refuses it
+    // for both kinds, in words true of a claim and a declaration alike — and
+    // this loop walks *declared* Groups too.
     let refused = validate_name(kind, name)
         .err()
         .map(|refusal| refusal.to_string())
@@ -2304,25 +1706,9 @@ fn refuse_a_name_nothing_would_have_accepted(
 
 /// Declares any Group an Account claims but nothing declared.
 ///
-/// The invariant `group_names` states — "a Group an Account claims is always
-/// declared too, `load` sees to that" — and which nothing was enforcing. An
-/// Account claiming an undeclared Group falls out of `perch list` entirely,
-/// because the listing walks the declared Groups and then the Accounts in none
-/// of them (ADR the-listing-owns-the-set), so it becomes an Account nothing
-/// shows; and `perch switch <that group>` refuses while `perch list` shows the
-/// Group.
-///
-/// Declared rather than refused, because the Group's settings are what is
-/// missing and the defaults are what a freshly declared Group carries anyway.
-///
-/// A claim that differs from a declaration only in case is the *same* Group,
-/// and is rewritten to the declared spelling rather than declared a second
-/// time. Everywhere else in this module two names differing in case are one
-/// name — [`same_name`] is what `declare_group` refuses on and what
-/// [`Registry::ensure_group`] returns the held spelling for — so a second key
-/// here would be a Group nothing but this function believes in: an empty
-/// section in the listing, an `accounts_in` that matches nobody, and a
-/// `declared_group` answering with whichever the map happened to order first.
+/// One nothing declares falls out of `perch list`, which walks the declared
+/// Groups and then the Accounts in none (ADR the-listing-owns-the-set). A claim
+/// differing only in case joins rather than becoming a second key.
 fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
     let claimed: Vec<String> = registry
         .accounts
@@ -2350,29 +1736,15 @@ fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
 
 /// Writes the registry, under the hold the caller took to read it.
 ///
-/// The hold is asked for rather than assumed, and it is the reason this
-/// signature is the shape it is: the invariant the whole module turns on is
-/// that a registry is only ever written by the Perch that read it, and a
-/// parameter is the only way to say that once rather than in every caller.
-///
-/// It is also the one place every command reliably passes through after however
-/// long its work took, which makes it where the hold is renewed. A hold that
-/// was lost — Perch stalled past the staleness window and another `perch` took
-/// the lock over and ran a whole command under it — is a hold whose registry is
-/// behind the one on disk, and writing it back would revert that command
-/// wholesale. So it is refused, and the caller says what that cost.
-///
-/// It is also where [`validate`] is asked on the way out, so that what this
-/// writes and what [`load`] will accept cannot come apart.
+/// The hold is a parameter because a registry is only ever written by the Perch
+/// that read it. It is also where the hold is renewed and [`validate`] is asked
+/// on the way out, so what this writes and what [`load`] accepts cannot differ.
 pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -> Result<()> {
     perch.renew();
     if !perch.still_held() {
-        // A general failure rather than `Busy`, and deliberately
-        // (ADR a-refusal-is-a-promise). `Busy` promises that nothing was
-        // changed, and `perch watcher run` branches on that promise by going
-        // round again — but this save is reached after a Switch has already
-        // moved a Credential as often as before anything has been written, and
-        // from here there is no telling which.
+        // A general failure rather than `Busy`, deliberately
+        // (ADR a-refusal-is-a-promise): `Busy` promises nothing was changed, and
+        // this save is reached as often after a Credential moved as before.
         return Err(PerchError::Other(
             "Another `perch` took the registry lock over while this command was \
              working, and has changed the registry since this one read it. \
@@ -2382,24 +1754,9 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) ->
         ));
     }
 
-    // What `load` will accept, asked before `load` has to refuse it.
-    //
-    // Eight invariants were enforced on the way in and none on the way out, so
-    // a command could write a file every later command declined to read — which
-    // leaves a machine with no working `perch` on it and no `perch holdings
-    // purge` either. That gap has been found twice from the other side: `perch
-    // holdings import` ran a narrower check of its own until `validate` was
-    // made public for it, and `used_percent` was range-checked in one of the
-    // two places a figure can enter the registry. Both repairs added an
-    // obligation to a caller. This one removes the need for it.
-    //
-    // Nothing reachable trips it today — the whole suite is green without this
-    // line — which is what it is for: the failure it catches is a bug in Perch,
-    // and the value of catching it is that the file is never written. So it is
-    // a refusal in the shipped binary rather than a `debug_assert`, and it says
-    // what it is rather than telling somebody to hand-edit a value that is not
-    // in the file. `Other` rather than the `Invalid` the rule raises, because a
-    // script reading exit 14 is being told its input was wrong, and it was not.
+    // What `load` will accept, asked before `load` has to refuse it: a command
+    // writing a file every later command declined to read would leave a machine
+    // with no working `perch` on it, and no `perch holdings purge` either.
     validate(registry).map_err(|invalid| {
         PerchError::Other(format!(
             "{invalid}\n\n{}\n\
@@ -2409,11 +1766,8 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) ->
     })?;
 
     let path = registry_path(host)?;
-    // Stamped rather than carried through. `load` returns whatever version the
-    // file claimed and this writes it back, so a document claiming something
-    // else kept claiming it through every write this build made — and the field
-    // is documented as "the version this build writes". A guard that describes
-    // the last writer rather than this one is a guard about nothing.
+    // Stamped rather than carried through: the field is the version *this build*
+    // writes, and a guard describing the last writer is a guard about nothing.
     let body = serde_json::to_string_pretty(&Registry {
         version: CURRENT_VERSION,
         ..registry.clone()
@@ -2424,28 +1778,9 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) ->
 
 /// Replaces the registry in one step, or not at all, and for its owner alone.
 ///
-/// **In one step**, with the same care `.claude.json` gets and for a sharper
-/// reason: this file is the whole of Perch's state, and every command reads it
-/// before it does anything. A truncate-then-write leaves a window in which a
-/// reader — `perch status`, which is advertised for shell prompts and may run
-/// several times a minute — sees half a file and reports it as malformed; and a
-/// crash inside that window leaves it half-written for good, with no command
-/// able to run until somebody edits it by hand.
-///
-/// **For its owner alone**, because the registry holds no Credential but holds
-/// everything else: every Account's email address, organization, plan, Alias,
-/// Group and Quarantine reason, and the Utilization history behind them. That
-/// is a full picture of somebody's Anthropic relationships, and the Profile
-/// directories it sits beside are already 0700
-/// (ADR claude-code-chooses-the-store) — this file was the gap. A
-/// `~/.config/perch` that already exists keeps the mode it has, as `mkdir -p`
-/// does everywhere else in Perch, but the file is replaced on every save and so
-/// comes back narrow from the first one. The directory above it is not made
-/// here. `write_private_file` is documented as creating a file "and any
-/// directory above it" with that mode, and both Hosts do exactly that — so the
-/// call this used to make first was the same call against the same path with
-/// the same mode. That is the duplicate [`lock`] records having already been
-/// removed once; this was the copy that survived it.
+/// One step because every command reads this file first, and a crash mid-write
+/// would leave it half written for good. Its owner alone because it holds no
+/// Credential and everything else about every Account.
 fn write(host: &dyn Host, path: &Path, contents: &str) -> Result<()> {
     host.write_private_file(path, contents)
         .map_err(|err| PerchError::file_write(path, err))
@@ -2462,10 +1797,6 @@ mod tests {
         assert_eq!(slug("Someone@Example.com"), "someone-example-com");
     }
 
-    /// `join("")` gives back the path it was joined to, so an address with
-    /// nothing nameable in it would put an Account's Profile *at* the
-    /// directory holding every other Account's — and `perch remove` deletes a
-    /// Profile directory whole.
     #[test]
     fn an_address_that_names_no_directory_is_refused_rather_than_naming_them_all() {
         let host = crate::host::FakeHost::new();
@@ -2485,8 +1816,6 @@ mod tests {
         );
     }
 
-    /// Every command is a load, some changes made in memory and a save of the
-    /// whole thing, so two of them overlapping does not merge — it discards.
     #[test]
     fn one_perch_changes_the_registry_at_a_time() {
         let host = crate::host::FakeHost::new();
@@ -2505,16 +1834,6 @@ mod tests {
         lock(&host).expect("a lock given back can be taken again");
     }
 
-    /// An address is a name, and is compared the way every other name here is.
-    ///
-    /// It was not: the lookups compared with `==` while everything feeding them
-    /// — `target::matched`, `add`, `relogin`, `remove` and `validate` — compared
-    /// with [`same_name`]. Sound, but only because resolution always hands back
-    /// the spelling the registry holds, which was prose in five places and the
-    /// thing eight `expect`s downstream rested on. `validate` refuses two
-    /// Accounts whose addresses differ only in case, on the way in and now on
-    /// the way out, so inside a registry Perch will load there is never more
-    /// than one to find.
     #[test]
     fn an_account_is_found_however_its_address_is_capitalized() {
         let mut registry = Registry::default();
@@ -2574,14 +1893,6 @@ mod tests {
         registry
     }
 
-    /// Forgetting either half of a Landing takes the Landing with it — a Switch
-    /// with one end gone is not a record worth keeping, and one naming an
-    /// Account Perch no longer holds is a dangling pointer `load` refuses.
-    ///
-    /// What it comes back to is the half that is still held. Settled on nobody,
-    /// forgetting the *arriving* half threw away the Account the registry was
-    /// treating as active: `leaving` stayed in `accounts`, named by nothing, and
-    /// the next Capture had no Profile to file the live Credential into.
     #[test]
     fn forgetting_the_arriving_half_of_a_landing_comes_back_to_the_one_being_left() {
         let mut registry = holding_two();
@@ -2600,8 +1911,6 @@ mod tests {
         );
     }
 
-    /// The other half of the same rule: forgetting the Account being left
-    /// settles on nobody, because there is nobody left to come back to.
     #[test]
     fn forgetting_the_leaving_half_of_a_landing_settles_on_nobody() {
         let mut registry = holding_two();
@@ -2612,14 +1921,6 @@ mod tests {
         assert_eq!(*registry.active(), Active::Nobody);
     }
 
-    /// An Account that was named and is not there is a refusal, not a panic.
-    ///
-    /// Eight call sites asserted this with `expect`, each having thrown away
-    /// the proof resolution gave them and bought it back as a lookup. The state
-    /// cannot happen — `validate` refuses every registry that could produce it,
-    /// on the way in and, since `save` validates too, on the way out — which is
-    /// exactly why the answer to it happening anyway should be a machine that
-    /// still works.
     #[test]
     fn an_account_that_was_named_and_is_not_there_is_refused_rather_than_panicked_on() {
         let registry = Registry::default();
@@ -2638,10 +1939,8 @@ mod tests {
         );
         assert_eq!(refused.exit_code(), crate::error::EXIT_GENERAL);
 
-        // The mutable half answers the same way. Two functions rather than one
-        // because a caller that goes on to change what it finds needs the other
-        // borrow, and a refusal that differed between them would be the two
-        // halves of one rule disagreeing.
+        // The mutable half answers the same way: a caller that goes on to change
+        // what it finds needs the other borrow.
         let mut registry = Registry::default();
         assert_eq!(
             registry
@@ -2652,20 +1951,9 @@ mod tests {
         );
     }
 
-    /// The pointer the Alias check was written for, asked of the other one.
-    ///
-    /// `validate` refuses an Alias naming an Account Perch does not hold,
-    /// because "a dangling one is not a refusal anywhere downstream — it is a
-    /// panic". `active` is the same shape and had no check: it reads as "no
-    /// Account is active", so the repair somebody is offered is to switch to
-    /// one, on a machine where the Account they are on is right there in the
-    /// file.
-    ///
     /// The `active` states here are written to the field rather than through the
-    /// transitions, and this is the one place that is right: `validate` guards a
-    /// registry Perch is *reading*, and a dangling pointer is a state no
-    /// transition can produce — a hand-edited file is what the rule is written
-    /// against.
+    /// transitions, and this is the one place that is right: a dangling pointer
+    /// is a state no transition can produce.
     #[test]
     fn an_active_pointer_naming_nothing_is_refused_like_a_dangling_alias() {
         let mut registry = Registry {
@@ -2683,14 +1971,6 @@ mod tests {
         validate(&registry).expect("holding nothing is a state rather than a fault");
     }
 
-    /// Both ends of a Landing, because both are pointers into the Accounts and
-    /// resolving one reads the Credential of the other
-    /// (ADR a-switch-is-written-down-first).
-    ///
-    /// The end that dangles is named, rather than the pair reported as one
-    /// broken `active`: a hand-edited registry is what this rule is written
-    /// against, and which of the two addresses to put right is the whole of
-    /// what the person editing it needs to be told.
     #[test]
     fn both_ends_of_a_landing_are_refused_when_they_name_nothing() {
         let held = "someone@example.com";
@@ -2749,14 +2029,8 @@ mod tests {
         validate(&registry).expect("a Switch left in flight is a machine to load, not to refuse");
     }
 
-    /// Every rule the shared namespace has, asked of both halves of it.
-    ///
-    /// A table because the rules are one fact with two spellings, and they had
-    /// come apart: the Group half funneled through a single private check and
-    /// the Alias half was three primitives reassembled at each of its three
-    /// call sites, in an order one of them had already got wrong. Asked here of
-    /// the one function all four callers now go through, so a fifth cannot
-    /// reassemble it differently.
+    /// A table, because the rules are one fact with two spellings — asked of the
+    /// one function all four callers go through.
     #[test]
     fn what_a_name_may_be_is_one_rule_for_both_halves_of_the_namespace() {
         /// An Account answering to `work`, and a Group called `personal`.
@@ -2801,13 +2075,10 @@ mod tests {
                 Some("already a Group name"),
             ),
             // Renaming itself is not colliding with itself, recapitalization
-            // included — the same waiver on both halves, which is new for the
-            // Alias one.
+            // included, and the same waiver on both halves.
             (NameKind::Group, "Personal", Some("personal"), None),
             (NameKind::Alias, "Work", Some("work"), None),
-            // Shape before collision. `perch add --alias '' --group ''` was
-            // refused as "`` cannot be both an Alias and a Group name" — a
-            // Conflict, about two names neither of which was usable at all.
+            // Shape before collision.
             (NameKind::Group, "", None, Some("cannot be empty")),
             (NameKind::Alias, "", None, Some("cannot be empty")),
             (
@@ -2836,15 +2107,9 @@ mod tests {
         }
     }
 
-    /// The half of the check an Alias renaming itself used to skip.
-    ///
-    /// Both Alias paths returned `Ok` the moment the new name matched the held
-    /// one, without asking the other half of the namespace anything. That was
-    /// sound — a Group cannot be declared under a name an Alias already holds —
-    /// but only by an argument about what `declare_group` would have refused
-    /// earlier, which is why the registry here is built by hand: nothing
-    /// reachable can produce it. It is what a third way of making a name would
-    /// walk into, and it now has one answer rather than an inference.
+    /// The registry here is built by hand because nothing reachable produces it:
+    /// a Group cannot be declared under a name an Alias already holds. It is what
+    /// a third way of making a name would walk into.
     #[test]
     fn recapitalizing_an_alias_still_cannot_walk_into_a_group() {
         let mut registry = Registry::default();
@@ -2865,18 +2130,9 @@ mod tests {
         );
     }
 
-    /// A registry `load` would refuse is one `save` declines to write.
-    ///
-    /// Nothing reachable produces one — every command in the suite passes with
-    /// this guard in place, and `registry_of` runs `load` after each of them —
-    /// so what is asserted here is the guard rather than the property. The
-    /// property is already covered; the part that is not is what happens on the
-    /// day a command gets it wrong, and the whole value of that is that the file
-    /// on disk is left alone.
-    ///
-    /// The message is asserted too. A refusal that told somebody to edit a value
-    /// in a file it just declined to write would send them looking for something
-    /// that is not there, which is how the wording drifts back.
+    /// Nothing reachable produces one, so what is asserted is the guard rather
+    /// than the property: what happens on the day a command gets it wrong, and
+    /// that the file on disk is left alone.
     #[test]
     fn a_registry_load_would_not_read_is_one_save_declines_to_write() {
         let host = crate::host::FakeHost::new();
@@ -2885,9 +2141,8 @@ mod tests {
         save(&host, &mut perch, &Registry::default()).expect("an empty one is fine");
         let before = host.file(&path).expect("it was written");
 
-        // An Alias naming an Account Perch does not hold: a dangling one is not
-        // a refusal downstream, it is the `expect` in every command that
-        // resolves a Target.
+        // A dangling Alias is not a refusal downstream — it is the `expect` in
+        // every command that resolves a Target.
         let mut broken = Registry::default();
         broken
             .aliases
@@ -2914,17 +2169,13 @@ mod tests {
         );
     }
 
-    /// The hold spans the whole command, and a command can stall for as long as
-    /// somebody takes to answer a `[y/N]`. Renewed at every write, so the
-    /// ordinary long command keeps the lock it took rather than letting it
-    /// expire silently underneath itself.
     #[test]
     fn a_command_that_takes_its_time_keeps_the_lock_it_took() {
         let host = crate::host::FakeHost::new();
         let mut perch = lock(&host).expect("the registry lock is free");
 
-        // Comfortably past the staleness window, several times over: exactly
-        // the shape of a `perch remove` waiting on somebody who walked away.
+        // Past the staleness window several times over: the shape of a
+        // `perch remove` waiting on somebody who walked away.
         for _ in 0..4 {
             host.sleep(REGISTRY_STALE_MILLIS as u64 - 10_000);
             save(&host, &mut perch, &Registry::default()).expect("it is still Perch's to write");
@@ -2937,11 +2188,6 @@ mod tests {
         );
     }
 
-    /// The other direction, and the reason the hold is checked rather than
-    /// assumed: a Perch that did stall past the window has had its lock taken
-    /// over, and the registry it read before that is however many commands out
-    /// of date. Writing it back would revert every one of them wholesale — so
-    /// the write is refused, and the user is told to run the command again.
     #[test]
     fn a_registry_read_before_somebody_elses_command_is_not_written_over_theirs() {
         let host = crate::host::FakeHost::new();
@@ -2970,11 +2216,8 @@ mod tests {
         );
     }
 
-    /// Perch's home holds Profile directories full of Credentials, and on a
-    /// fresh machine the *lock* is what brings it into being — before any
-    /// registry has been written into it. Created privately there rather than
-    /// at whatever the umask happens to be, or the narrow modes below it guard
-    /// files inside a directory anybody may walk into.
+    /// On a fresh machine the *lock* is what brings Perch's home into being,
+    /// before any registry has been written into it.
     #[test]
     fn the_home_the_lock_creates_is_the_owners_alone() {
         let host = crate::host::FakeHost::new();
@@ -2987,16 +2230,6 @@ mod tests {
         );
     }
 
-    /// No directory under Perch's own home is the Default Profile — including
-    /// one reached by another name.
-    ///
-    /// The guard was `told.config_dir.starts_with(perch_home)`, which compares
-    /// path components, so a link anywhere above the directory named makes two
-    /// spellings of one place and only one of them matches. Past it, a `perch
-    /// switch` typed in that shell Captures the live Credential into a Profile
-    /// another Account may be running against and records Perch as active on an
-    /// Account the machine is not on — the failure this function's own doc
-    /// describes, reached by the route it did not check.
     #[test]
     fn a_profile_reached_through_a_link_is_still_not_the_default_profile() {
         let home = "/Users/someone/.config/perch";
@@ -3025,15 +2258,6 @@ mod tests {
         );
     }
 
-    /// A Check recorded against a Group nothing declares is refused, like every
-    /// other pointer in the file.
-    ///
-    /// `active` and `aliases` have had a dangling-pointer rule for as long as
-    /// they have pointed anywhere; `checks` is the third and had none.
-    /// `record_check` keeps the name it was handed when it cannot resolve one —
-    /// which it must, because the Ungrouped Scope is not a declared Group and
-    /// still keeps a Cooldown — and `forget_group` only clears what it can
-    /// resolve, so an entry could outlive every Group that explains it.
     #[test]
     fn a_check_against_a_group_nothing_declares_is_not_a_registry() {
         let mut registry = Registry::default();
@@ -3062,15 +2286,6 @@ mod tests {
         validate(&registry).expect("the Accounts in no Group Cycle too");
     }
 
-    /// An Alias points at the address the registry holds, whichever spelling
-    /// was typed to set it.
-    ///
-    /// `name_account` looks the Account up with `same_name`, so
-    /// `CAFÉ@example.com` reaches the Account held as `café@example.com` — and
-    /// then stored the capitalized spelling as the map's value, pointing the
-    /// Alias at a string no `accounts` entry has. `target::matched` hands back
-    /// `account.email()` for an Account and this value for an Alias, so the two
-    /// Targets carried different spellings of one Account.
     #[test]
     fn an_alias_points_at_the_address_as_the_registry_holds_it() {
         let mut registry = Registry::default();
@@ -3099,16 +2314,6 @@ mod tests {
         );
     }
 
-    /// A key nobody recognizes is a refusal naming it, rather than a value that
-    /// quietly did nothing and was then erased.
-    ///
-    /// Every other way of getting this file wrong by hand has a named refusal —
-    /// a bad version, a bad Strategy, a percentage out of range, a dangling
-    /// Alias, an address with no `@`. A transposed letter had neither a refusal
-    /// nor an effect: `watcher_treshold_percent` deserialized as the default,
-    /// so the Group went on running at a threshold nobody set, and the next
-    /// command that wrote the file re-serialized the Group without it — the
-    /// edit gone, with nothing said at any point in between.
     #[test]
     fn a_key_the_registry_does_not_know_is_refused_rather_than_ignored() {
         let path = "/Users/someone/.config/perch/registry.json";
@@ -3124,11 +2329,9 @@ mod tests {
                 format!("{{\"version\":{CURRENT_VERSION},\"accounts\":[],\"aliasses\":{{}}}}"),
                 "aliasses",
             ),
-            // The Landing was the one shape exempt from this, because `Active`
-            // was the one type without the attribute. A transposed `leaving`
-            // deserialized as `None`, which is not nothing: it is the Landing
-            // saying Perch had been on nobody, so the Capture that resumes it
-            // has no Profile to file the outgoing Credential into.
+            // A transposed `leaving` deserializes as `None`, which is not
+            // nothing: it is the Landing saying Perch had been on nobody, so the
+            // Capture that resumes it has no Profile to file into.
             (
                 format!(
                     "{{\"version\":{CURRENT_VERSION},\"accounts\":[],\"active\":\
@@ -3154,10 +2357,6 @@ mod tests {
         }
     }
 
-    /// The registry is the whole of Perch's state and every command reads it
-    /// first, so a write that stops half way must not be visible: a reader
-    /// would call the file malformed, and a crash inside that window would
-    /// leave it malformed for good.
     #[test]
     fn a_save_that_fails_leaves_the_registry_exactly_as_it_was() {
         let path = "/Users/someone/.config/perch/registry.json";
@@ -3185,10 +2384,6 @@ mod tests {
         );
     }
 
-    /// No Credential, but every Account's address, organization, plan, Alias,
-    /// Group, Quarantine reason and Utilization history — a full picture of
-    /// somebody's Anthropic relationships, beside Profile directories that are
-    /// already 0700.
     #[test]
     fn the_registry_is_written_for_its_owner_alone() {
         let host = crate::host::FakeHost::new();
@@ -3230,9 +2425,6 @@ mod tests {
         assert_eq!(back.active_account().unwrap().plan.as_deref(), Some("pro"));
     }
 
-    /// What a scheduled Check leaves for the next one, and nothing where none
-    /// has Switched: a key in every registry on every machine would be a
-    /// promise the watcher had run, which for nearly all of them it has not.
     #[test]
     fn what_a_check_recorded_survives_the_file_and_is_absent_until_one_switches() {
         let mut registry = Registry::default();
@@ -3256,8 +2448,6 @@ mod tests {
         );
     }
 
-    /// A Group that is gone paces nothing, and a record kept past it would be a
-    /// cooldown inherited by a Group declared under the same name later.
     #[test]
     fn forgetting_a_group_forgets_what_a_check_recorded_against_it() {
         let mut registry = Registry::default();
@@ -3269,9 +2459,6 @@ mod tests {
         assert_eq!(registry.checked("work"), None);
     }
 
-    /// Not so that anything can be migrated — nothing is running this yet, so
-    /// there is nothing to migrate from. It is there so a build that
-    /// understands less than the file it is handed says so.
     #[test]
     fn the_version_is_recorded_so_an_older_build_can_refuse_the_file() {
         let json = serde_json::to_string(&Registry::default()).unwrap();
@@ -3314,9 +2501,6 @@ mod tests {
         assert!(!back.account("someone@example.com").unwrap().quarantined());
     }
 
-    /// The positive state has no name (ADR a-command-names-its-noun), so the
-    /// file says nothing about an Account nobody has taken out of Cycling — the
-    /// same shape, and the same reason, as the Quarantine above it.
     #[test]
     fn an_account_nobody_has_disabled_records_no_disable_at_all() {
         let mut registry = Registry::default();
@@ -3351,10 +2535,7 @@ mod tests {
         );
     }
 
-    /// `enabled` was the same bool spelled the other way round, and
-    /// ADR a-command-names-its-noun renamed it rather than teaching this build
-    /// to read both. A registry carrying it is refused, which is what
-    /// `deny_unknown_fields` is for.
+    /// `enabled` is `disabled` spelled the other way round.
     #[test]
     fn a_registry_that_still_says_enabled_is_refused_rather_than_read() {
         let held: std::result::Result<Registry, _> = serde_json::from_str(
@@ -3416,8 +2597,6 @@ mod tests {
         );
     }
 
-    /// A freshly declared Group holds the compiled-in defaults, and nothing
-    /// said about another Scope reaches it (ADR a-setting-names-its-scope).
     #[test]
     fn a_new_group_holds_the_defaults_and_leaves_the_watcher_alone() {
         let mut registry = Registry::default();
@@ -3441,9 +2620,6 @@ mod tests {
         );
     }
 
-    /// The grant that has to be said about the Scope it grants: a Group
-    /// declared after somebody let the watcher into another one is a Group
-    /// nobody has said anything about (ADR a-setting-names-its-scope).
     #[test]
     fn a_group_declared_later_is_not_reached_by_a_grant_made_earlier() {
         let mut registry = Registry::default();
@@ -3465,18 +2641,14 @@ mod tests {
         );
     }
 
-    /// The one number the watcher's policy still carries
-    /// (ADR a-watcher-knob-is-arithmetic). Asserted as the number rather than
-    /// as the constant, because a default is a promise made in the docs and a
-    /// test that reads the constant back cannot notice it change.
+    /// Asserted as the number rather than as the constant, because a default is
+    /// a promise made in the docs and a test reading the constant back cannot
+    /// notice it change.
     #[test]
     fn the_watchers_policy_has_the_default_it_is_documented_with() {
         assert_eq!(Settings::default().watcher_threshold_percent, 80);
     }
 
-    /// A number a setting cannot hold is refused with the ones it can — from a
-    /// hand-edited registry as much as from a mistyped command, because both
-    /// readers have the same next question.
     #[test]
     fn a_number_out_of_range_is_refused_with_the_range() {
         let cases: [(Settings, &str, &str); 1] = [(
@@ -3514,42 +2686,33 @@ mod tests {
                 " ",
                 "none",
                 "None",
-                // The other word that already addresses something. A Group
-                // called `ungrouped` is one no `perch config set` could reach;
-                // an Alias called `ungrouped` is the same collision from the
-                // other side, and was the case nothing asked about.
+                // A Group called `ungrouped` is one no `perch config set` could
+                // reach; an Alias is the same collision from the other side.
                 "ungrouped",
                 "Ungrouped",
                 " work",
                 "work ",
-                // Not only at the ends: `perch config get` prints settings as
-                // the `perch config set` that would restore them, read back a
-                // word at a time, so a name with a space in it is one no line
-                // of that output could name.
+                // Not only at the ends: a `perch config get` line is read back
+                // a word at a time, so no line of it could name this.
                 "my work",
                 "Overflow Ltd",
                 "two\twords",
                 "someone@example.com",
-                // The word people mean Global by. Not a Scope anything
-                // addresses — Global is addressed by naming none — which is
-                // precisely why a Group taking the name is dangerous: `perch
-                // config set global strategy …` would land on the Group and
-                // leave Global as it was.
+                // The word people mean every Scope at once by. There is no such
+                // Scope, so a Group taking the name would take every
+                // `perch config set global …` quietly.
                 "global",
                 "Global",
-                // Spelled like a flag. `perch run`'s program goes after `--`,
-                // so a Target beginning with `-` is one that command can never
-                // be given, however it is quoted.
+                // Spelled like a flag: `perch run`'s program goes after `--`,
+                // so this is a Target that command can never be given.
                 "-dev",
                 "--work",
                 "-",
             ] {
                 let refused = validate_name(kind, name)
                     .expect_err(&format!("`{name}` should not be usable as a {kind:?} name"));
-                // And the refusal states the rule the user broke rather than a
-                // rule about the other half of the namespace. `none` and
-                // `ungrouped` both told somebody naming an Account that their
-                // name could not also name a Group.
+                // And the refusal states the rule that was broken rather than
+                // one about the other half of the namespace.
                 assert!(
                     refused.to_string().contains(kind.names())
                         || refused.to_string().contains(kind.article()),
@@ -3592,10 +2755,8 @@ mod tests {
             .expect("naming it again in passing is not a conflict");
     }
 
-    /// The machine-readable name of a Quarantine, which is what `--json` puts in
-    /// front of a script (`reason`, beside the prose `detail`). Every kind needs
-    /// one, and no two may share it: a script branching on why an Account is
-    /// Quarantined branches on this string and nothing else.
+    /// A script branching on why an Account is Quarantined branches on this
+    /// string and nothing else, so every kind needs one and no two may share it.
     #[test]
     fn every_quarantine_has_its_own_machine_readable_name() {
         let every = [
@@ -3629,9 +2790,6 @@ mod tests {
         }
     }
 
-    /// `PERCH_HOME` moves everything Perch keeps, which is what lets a test —
-    /// or a second Perch on one machine — run without touching the real one.
-    /// It passes through verbatim: no `.config/perch` is appended to it.
     #[test]
     fn perch_home_is_taken_from_the_environment_verbatim_when_it_is_set() {
         let host = crate::host::FakeHost::new()
@@ -3659,10 +2817,6 @@ mod tests {
         );
     }
 
-    /// A registry that is not there is a Perch that holds nothing, and a
-    /// registry that is there and will not be read is a failure. Saying "no
-    /// Accounts" for the second would be a Perch that quietly forgot everything
-    /// the moment a permission went wrong.
     #[test]
     fn a_registry_that_cannot_be_read_is_a_failure_rather_than_an_empty_perch() {
         let absent = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
@@ -3686,14 +2840,6 @@ mod tests {
         );
     }
 
-    /// The invariant `group_names` states, now that something holds it.
-    ///
-    /// A Group's Settings are answered whatever the name was capitalized as,
-    /// like every other question the registry answers about a name.
-    ///
-    /// `groups.get` agreed with that only while the caller already held the
-    /// declared spelling, and nothing in the signature said it had to — a trap
-    /// set for whoever reached for this next.
     #[test]
     fn a_groups_settings_are_found_however_the_name_was_capitalized() {
         let mut registry = Registry::default();
@@ -3704,16 +2850,6 @@ mod tests {
         assert!(registry.group("play").is_none());
     }
 
-    /// And so is every other question the registry answers about a Group.
-    ///
-    /// `group` was repaired and the five methods around it were not, each one a
-    /// bare `groups.get`/`checks.get` against the name it was handed. That is
-    /// the trap `group`'s own comment names: `settings` answered with the
-    /// compiled-in defaults for a Group Perch holds — so a Threshold somebody
-    /// set read as the default with nothing said — `settings_mut` answered
-    /// `None`, which `Setting::write` turned into an abort, `rename_group`
-    /// aborted out of a function whose signature says it refuses, and a Check
-    /// filed its Cooldown under a second spelling that paced nothing.
     #[test]
     fn every_question_about_a_group_is_answered_however_the_name_was_capitalized() {
         let mut registry = Registry::default();
@@ -3763,13 +2899,10 @@ mod tests {
         registry.forget_group("OFFICE");
         assert!(registry.group("office").is_none());
         assert!(registry.checked("office").is_none());
-        // And forgetting one nothing declared is nothing to do rather than
-        // something to do to whatever the name happens to match.
+        // And forgetting one nothing declared is nothing to do.
         registry.forget_group("office");
     }
 
-    /// A rename of a Group nothing declared is a refusal, which is what the
-    /// signature says. It used to be an abort.
     #[test]
     fn renaming_a_group_nothing_declared_is_refused_rather_than_panicked_on() {
         let mut registry = Registry::default();
@@ -3781,10 +2914,6 @@ mod tests {
         assert!(error.to_string().contains("work"), "{error}");
     }
 
-    /// An Account claiming a Group nothing declared falls out of `perch list`
-    /// entirely — the listing walks the declared Groups and then the Accounts
-    /// in none of them (ADR the-listing-owns-the-set) — which makes it an
-    /// Account nothing shows, while `perch switch <that group>` refuses.
     #[test]
     fn a_group_an_account_claims_is_declared_by_the_time_anything_reads_it() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
@@ -3809,13 +2938,6 @@ mod tests {
         assert_eq!(registry.accounts_in("work").len(), 1);
     }
 
-    /// The other half of the same repair, and the reason it is a repair rather
-    /// than a bare insert: two names differing only in case are one name
-    /// everywhere else in this module, so a claim spelled `Work` against a
-    /// declared `work` must join it rather than become a second Group nothing
-    /// else believes in — an empty section in the listing, an `accounts_in` that
-    /// matches nobody, and a `declared_group` answering with whichever the map
-    /// ordered first.
     #[test]
     fn a_group_an_account_claims_in_another_case_joins_the_one_that_is_declared() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
@@ -3841,15 +2963,6 @@ mod tests {
         );
     }
 
-    /// The repair declares what it finds, and a hand-edited registry is exactly
-    /// where a name nothing would have accepted comes from. Inserted raw, each
-    /// of these produced a Group that exists and cannot be used: `none` is one
-    /// `move_account` can never move an Account into, because `means_no_group`
-    /// is asked first; `my work` is one whose `perch config get` line cannot be
-    /// typed back into `perch config set`, which is the round-trip whitespace is
-    /// refused to protect; and a claim colliding with an Alias plants the
-    /// namespace collision `refuse_taken_names` exists to make impossible, after
-    /// which the name resolves to the Alias and the Group is unreachable.
     #[test]
     fn a_claim_declare_group_would_have_refused_is_named_rather_than_declared() {
         let claims = [
@@ -3887,14 +3000,6 @@ mod tests {
         }
     }
 
-    /// The other two halves of the same namespace, which only a *claim* being
-    /// walked left unguarded. A declared Group nobody is in was never looked at,
-    /// so `my work` sat in the file printing a `perch config get` line that
-    /// cannot be typed back into `perch config set` — the round trip whitespace
-    /// is refused to protect. And the `aliases` map was never looked at at all,
-    /// so an Alias keyed by an email address resolved ahead of the Account of
-    /// that name: `perch switch someone@example.com` landing on somebody else,
-    /// which is the Target with two answers the `@` rule exists to prevent.
     #[test]
     fn a_declared_group_or_an_alias_nothing_would_have_accepted_is_named_too() {
         let holdings = [
@@ -3921,10 +3026,8 @@ mod tests {
                 said.contains(expected),
                 "`{held}` should be refused for `{expected}`: {said}"
             );
-            // These registries hold no Accounts at all, so a refusal that
-            // explains itself in terms of what an Account can be in is a
-            // statement about nothing. `validate_name`'s own wording is true of
-            // a declaration and a claim alike, which is why there is one of it.
+            // These registries hold no Accounts at all, so a refusal explaining
+            // itself in terms of what an Account can be in says nothing.
             assert!(
                 !said.contains("an Account cannot be in it"),
                 "a declared Group is refused in words about the name rather \
@@ -3937,18 +3040,10 @@ mod tests {
         }
     }
 
-    /// What `perch add` may offer as a Group name, and — the part that had no
-    /// test at all — what it must decline to offer.
-    ///
-    /// The offer is made from an organization name, which is whatever Anthropic
-    /// holds rather than anything anybody chose. `add` picks a different
-    /// question depending on whether there is an offer, so a `None` that
-    /// stopped being a `None` would put a name in front of somebody that
-    /// `validate_name` refuses one keystroke later — at the one moment the
-    /// browser round trip has already been spent, which is the cost the code
-    /// there is written around. A personal-plan organization rendered from an
-    /// email address is the likeliest of these, and it is exactly the shape the
-    /// `@` rule exists to refuse.
+    /// `add` picks a different question depending on whether there is an offer,
+    /// so a `None` that stopped being one would put a name in front of somebody
+    /// that `validate_name` refuses a keystroke later — after the browser round
+    /// trip has been spent.
     #[test]
     fn a_group_name_is_offered_only_where_it_is_one_perch_would_accept() {
         assert_eq!(
@@ -3975,16 +3070,9 @@ mod tests {
         }
     }
 
-    /// A registry this build cannot read is never reported as one that is not
-    /// JSON, because most of the time it *is* JSON.
-    ///
-    /// The version guard above closes this for a document claiming a version
-    /// from the future, which is one of the ways a build meets a value it has no
-    /// variant for. It is not the only one: a hand edit picks the same wrong
-    /// spelling, and every other way serde declines a well-formed document —
-    /// a missing `version`, a number that will not fit — arrives the same way.
-    /// Told "not valid JSON", somebody goes looking for a syntax error that is
-    /// not there, past the half of the sentence that says what is wrong.
+    /// Both files parse as JSON perfectly well — a Strategy this build has no
+    /// variant for, and a missing `version`. Told "not valid JSON", somebody goes
+    /// looking for a syntax error that is not there.
     #[test]
     fn a_registry_that_is_json_and_still_unreadable_is_not_called_bad_json() {
         let files = [
@@ -4010,22 +3098,6 @@ mod tests {
         }
     }
 
-    /// The figure a Cycle ranks on, checked the way a Group's thresholds are.
-    ///
-    /// `GroupConfig::validate` refuses a `watcher-threshold-percent` outside
-    /// 0–100 because "the thing that reads them is a loop nobody is watching".
-    /// `used_percent` is the number that same loop compares *against* that
-    /// threshold, and it went unchecked — clamped on the way in by
-    /// `anthropic::understand` and by nothing at all on the way a hand edit or a
-    /// restored Export takes.
-    ///
-    /// Both of these are silent rather than loud. A negative figure gives
-    /// `cycle::headroom_of` more than 100% of headroom, so the Account outranks
-    /// one that has genuinely never been touched and the watcher's `>=
-    /// threshold` never fires — an Account nothing will move off, showing in
-    /// `perch list` as an odd percentage and nothing more. An overflowing
-    /// literal deserializes to infinity, and makes an Account no Cycle will ever
-    /// choose.
     #[test]
     fn a_percentage_that_is_not_one_is_refused_rather_than_ranked_on() {
         for figure in ["-50", "150"] {
@@ -4063,14 +3135,6 @@ mod tests {
         load(&host).expect("0 and 100 are both percentages");
     }
 
-    /// What an Alias points at, which walking the keys never asked.
-    ///
-    /// Downstream this is not a refusal but a panic: `target::matched` builds a
-    /// `Target::Alias` straight out of the map, and `perch switch`, `perch
-    /// remove`, `perch relogin` and `perch run` all then reach for the Account
-    /// behind an `expect` saying resolution named one Perch holds. A file that
-    /// `load` accepts and every command panics on is the state `validate` exists
-    /// to turn into a sentence.
     #[test]
     fn an_alias_for_an_account_perch_does_not_hold_is_refused_and_names_both() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
@@ -4095,22 +3159,12 @@ mod tests {
         );
     }
 
-    /// Two names in one half of the namespace that only case tells apart.
-    ///
-    /// `declare_group` and `refuse_taken_names` refuse both kinds at creation,
-    /// and the collision *across* the halves is already caught — but nothing
-    /// asked it of a hand-edited file, while `target` states the answer as an
-    /// assumption it relies on: "the registry refuses an Alias or a Group that
-    /// differs from a held name only in case, so there is never more than one
-    /// candidate to find". With two, which one is found is whichever a
-    /// `BTreeMap` happens to yield first, so `perch list` renders one and `perch
-    /// switch` lands on the other.
     #[test]
     fn two_names_in_one_half_of_the_namespace_that_differ_only_in_case_are_refused() {
         let holdings = [
             r#""groups":{"work":{},"Work":{}}"#,
-            // Two Accounts, one Alias each: giving both names to one Account is a
-            // different refusal, and this one is about the pair of names.
+            // Two Accounts, one Alias each: giving both names to one Account is
+            // a different refusal.
             r#""aliases":{"work":"someone@example.com","Work":"other@example.com"}"#,
         ];
 
@@ -4134,15 +3188,6 @@ mod tests {
         }
     }
 
-    /// The namespace has three members and only two of them were guarded.
-    ///
-    /// `validate_name` refuses an `@` in an Alias or a Group name so that a
-    /// Target is never ambiguous; nothing said that an Account's address has to
-    /// look like one. An Account called `work` beside a Group called `work`
-    /// resolved to the Account, so `perch group list` and `perch config set` went
-    /// on showing and editing a Group that `perch switch` and `perch run` could
-    /// no longer reach — and beside an *Alias* of that name it was the Account
-    /// that became reachable by no Target at all.
     #[test]
     fn an_account_address_a_name_could_be_confused_with_is_refused() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
@@ -4165,20 +3210,6 @@ mod tests {
         );
     }
 
-    /// One entry per Account and one Alias per Account, asked of a file.
-    ///
-    /// `upsert` and `set_alias` both enforce these — `set_alias` drops the old key
-    /// so "a name the user has moved on from should not go on reaching the Account
-    /// behind their back", and `upsert` replaces the matching entry rather than
-    /// adding a second. Nothing was asking either of a registry somebody edited,
-    /// and both land in the same place as two names that differ only in case:
-    /// which one a command reads is whichever a `BTreeMap` or a `Vec` happens to
-    /// yield first.
-    ///
-    /// Two Aliases showed one of them in `perch list` while `perch switch`
-    /// answered to both, and freeing either reported a name freed that was not the
-    /// one being shown. Two entries had `perch list` render one Account as two
-    /// rows and a Cycle count it twice when ranking the Group.
     #[test]
     fn one_account_reached_twice_over_is_refused() {
         let cases = [
@@ -4188,8 +3219,7 @@ mod tests {
             ),
             (
                 r#""aliases":{}"#,
-                // Two entries for one address, spelled differently, which is what
-                // `same_name` decides over the whole of Unicode.
+                // Two entries for one address, spelled differently.
                 "which are one Account",
             ),
         ];
@@ -4217,12 +3247,6 @@ mod tests {
         }
     }
 
-    /// A number that means nothing is refused where the file is read, so a
-    /// watcher nobody is looking at never acts on one. That is the right place
-    /// for it, and it has one consequence worth writing down: every command
-    /// reads the registry, so a hand-edited value out of range turns all of
-    /// them away — `perch config set` among them, which is otherwise the
-    /// repair. The refusal has to name the file, or it is a dead end.
     #[test]
     fn a_number_out_of_range_in_the_file_is_refused_by_the_read_and_names_the_file() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
@@ -4247,12 +3271,6 @@ mod tests {
         );
     }
 
-    /// What this build writes is what the file says it was written by.
-    ///
-    /// `load` hands back whatever version the document claimed and `save` used
-    /// to write it straight back, so a file claiming something else kept
-    /// claiming it through every write — about a document this build had just
-    /// produced.
     #[test]
     fn a_registry_this_build_writes_says_so() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
