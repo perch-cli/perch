@@ -3,11 +3,9 @@
 //!
 //! Three commands that had no shared prefix because the noun they share had no
 //! name. An Export writes the Holdings to one file, an Import puts them back,
-//! and a Purge gives them up — and none of the three takes a Target, which is
-//! the same fact about all three said once.
+//! and a Purge gives them up — and none of the three takes a Target.
 //!
-//! Nothing of what they do is here. This is where the noun is written down and
-//! the three verbs are placed under it; what each one *is* stays in
+//! Nothing of what they do is here: what each one *is* stays in
 //! [`crate::commands::export`], [`crate::commands::import`] and
 //! [`crate::commands::purge`].
 
@@ -24,9 +22,8 @@ pub enum HoldingsCommand {
     /// Write everything Perch holds to one encrypted file.
     ///
     /// The registry and every Credential, in the `age` format, so a dead
-    /// machine or a new laptop does not cost a login for every subscription
-    /// (ADR the-holdings-go-out-sealed). There is no per-Account form: a
-    /// selective export is a partial restore.
+    /// machine or a new laptop does not cost a login for every subscription.
+    /// There is no per-Account form: a selective export is a partial restore.
     ///
     /// The passphrase is prompted and confirmed, and cannot be passed as an
     /// argument — an argument sits in the process table for anything on this
@@ -42,9 +39,8 @@ pub enum HoldingsCommand {
     ///
     /// The exact inverse of an export: the registry and every Credential, so a
     /// new machine arrives with the setup the old one had rather than a pile of
-    /// nameless logins (ADR the-holdings-go-out-sealed). Credentials land
-    /// wherever this machine's Claude Code keeps one, whatever store the file
-    /// was written from.
+    /// nameless logins. Credentials land wherever this machine's Claude Code
+    /// keeps one, whatever store the file was written from.
     ///
     /// It refuses a Perch that already holds an Account and names `perch
     /// holdings purge` as the way to make room — merging two machines is a
@@ -59,9 +55,8 @@ pub enum HoldingsCommand {
     /// Give the machine back the state it had before Perch.
     ///
     /// Every Profile, every Credential Perch holds and its own registry, gone
-    /// in one act — the exact inverse of an import, and what makes room for one
-    /// (ADR the-holdings-go-out-sealed). It takes no target: giving up one
-    /// Account is `perch remove`.
+    /// in one act — the exact inverse of an import, and what makes room for
+    /// one. It takes no target: giving up one Account is `perch remove`.
     ///
     /// It offers to write an export first, lists the Accounts that will go by
     /// email address, and wants the word `purge` typed rather than a letter.

@@ -65,8 +65,6 @@ fn live_credential(host: &FakeHost) -> Option<String> {
     host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME)
 }
 
-/// The whole of what a Purge promises: every Profile, every Credential Perch
-/// holds, and Perch's own registry, gone in one act.
 #[test]
 fn a_purge_takes_every_profile_every_credential_and_the_registry() {
     let host = a_machine_to_give_back();
@@ -91,9 +89,7 @@ fn a_purge_takes_every_profile_every_credential_and_the_registry() {
     );
     // One line, asserted whole (ADR perch-says-what-it-did): how many, and the
     // directory they were kept in. That every Profile and every Credential went
-    // with them is what a Purge *is* — it was said in the question this was
-    // agreed to, and saying it again afterwards is the ordinary case announcing
-    // itself (ADR perch-says-what-it-did).
+    // with them is what a Purge *is*, and was said in the question.
     assert!(
         printed.trim_end().ends_with(&format!(
             "Purged 3 Accounts, and {} is gone.",
@@ -123,10 +119,9 @@ fn the_login_claude_code_is_running_on_is_left_exactly_where_it_is() {
         Some(IDENTITY_FILE),
         "and the file naming who that is was not touched"
     );
-    // Said where it is load-bearing — in the question this Purge was agreed
-    // to — rather than again in the report, which is every Purge saying what
-    // every Purge does (ADR perch-says-what-it-did). Asserted whole, because
-    // the claim is the sentence (ADR perch-says-what-it-did).
+    // Said where it is load-bearing — in the question this Purge was agreed to —
+    // rather than again in the report. Asserted whole, because the sentence is
+    // the claim.
     assert!(
         printed.contains(
             "Claude Code goes on running as whatever it is logged in as — the \
@@ -138,8 +133,7 @@ fn the_login_claude_code_is_running_on_is_left_exactly_where_it_is() {
 }
 
 /// Off macOS that login is a file inside the Default Profile rather than a
-/// keychain item (ADR claude-code-chooses-the-store), and the Purge that
-/// empties every Profile Perch made leaves that directory standing.
+/// keychain item (ADR claude-code-chooses-the-store).
 #[test]
 fn the_credential_the_default_profile_keeps_in_a_file_is_left_alone_too() {
     let host = logged_in_machine_off_macos().with_answers(&["n", "purge"]);
@@ -159,8 +153,6 @@ fn the_credential_the_default_profile_keeps_in_a_file_is_left_alone_too() {
     assert!(!host.path_exists(Path::new(PERCH_HOME)), "{printed}");
 }
 
-/// The prompt is harder than every other prompt in Perch: what will go, said by
-/// email address, and that nothing brings it back.
 #[test]
 fn the_prompt_lists_the_accounts_by_email_and_says_nothing_undoes_it() {
     let host = a_machine_to_give_back();
@@ -175,8 +167,6 @@ fn the_prompt_lists_the_accounts_by_email_and_says_nothing_undoes_it() {
     assert!(printed.contains(&perch_home_as_written(&host)), "{printed}");
 }
 
-/// A `y` is what fingers answer before eyes have read anything, and this is the
-/// one command nothing undoes.
 #[test]
 fn a_letter_is_not_enough_to_purge() {
     for answered in [&["n", "y"], &["n", "yes"], &["n", "PURG"]] {
@@ -195,8 +185,6 @@ fn a_letter_is_not_enough_to_purge() {
     }
 }
 
-/// The word, however it was typed: a Purge refused over a trailing space or a
-/// Caps Lock would only be typed again, and the guard is against the reflex.
 #[test]
 fn the_word_is_taken_however_it_was_typed() {
     for answered in [&["n", "  purge  "], &["n", "PURGE"]] {
@@ -208,8 +196,6 @@ fn the_word_is_taken_however_it_was_typed() {
     }
 }
 
-/// End of input is not agreement. A pipe that closed is the one thing that must
-/// never read as somebody agreeing to give up every Credential on the machine.
 #[test]
 fn end_of_input_purges_nothing() {
     let host = machine_with_three_accounts();
@@ -228,9 +214,6 @@ fn end_of_input_purges_nothing() {
     );
 }
 
-/// Perch cannot verify that an Export exists — the file is wherever the user put
-/// it, possibly on another machine — so it is offered rather than required, and
-/// a no is an answer.
 #[test]
 fn declining_the_export_still_purges() {
     let host = a_machine_to_give_back();
@@ -247,8 +230,6 @@ fn declining_the_export_still_purges() {
     assert_eq!(registry_on(&host), None, "{printed}");
 }
 
-/// The offer is the only thing that makes a Purge survivable, so it is written
-/// before anything is destroyed — and it survives the Purge that offered it.
 #[test]
 fn the_export_it_offers_is_written_before_anything_is_destroyed() {
     let host = a_machine_to_give_back()
@@ -274,15 +255,9 @@ fn the_export_it_offers_is_written_before_anything_is_destroyed() {
     );
 }
 
-/// The path typed at this prompt is the one path in Perch that no shell has
-/// been over.
-///
-/// `perch holdings export ~/perch-backup.age` works because the shell expanded
-/// the tilde before Perch saw it. The same characters read from standard input
-/// are a directory called `~` — and `~/perch-backup.age` is the likeliest thing
-/// anybody types here. Refused, it stopped the whole Purge, and every question
-/// before it had to be answered again, over a refusal that reads as a bug
-/// rather than as an instruction.
+/// The path typed at this prompt is the one path in Perch no shell has been
+/// over, and `~/perch-backup.age` is the likeliest thing anybody types here —
+/// where a refusal stops the whole Purge and every answer has to be given again.
 #[test]
 fn a_tilde_typed_at_the_export_prompt_means_home_because_no_shell_will_say_so() {
     let host = a_machine_to_give_back()
@@ -304,15 +279,9 @@ fn a_tilde_typed_at_the_export_prompt_means_home_because_no_shell_will_say_so() 
     );
 }
 
-/// **`forget_what_the_registry_does_not_name` did not do what its name says.**
-///
-/// It walked every directory under Perch's home with no filter, so every
-/// Account the pass above had just emptied was emptied a second time. On macOS
-/// that is a `security delete-generic-password` per Account per pass — twice
-/// the shell-outs, on the command whose whole job is to finish.
-///
-/// `refuse_while_anything_is_running` filters the same walk by the same
-/// registry; this is the copy that did not.
+/// A walk with no filter empties every Account the pass above has just emptied a
+/// second time: on macOS that is a `security delete-generic-password` per Account
+/// per pass, on the command whose whole job is to finish.
 #[test]
 fn a_purge_empties_each_credential_store_once() {
     let host = a_machine_to_give_back();
@@ -335,13 +304,8 @@ fn a_purge_empties_each_credential_store_once() {
     );
 }
 
-/// The same on the platform that writes the other separator.
-///
-/// `~\backups\perch.age` is what somebody on Windows types, and only `~/` was
-/// read as home — so it fell into the refusal below, which aborts the whole
-/// Purge and makes every question already answered have to be answered again,
-/// over a path that was perfectly clear. Perch reads a Windows path spelled
-/// either way everywhere else it reads one.
+/// `~\backups\perch.age` is what somebody on Windows types, and Perch reads a
+/// Windows path spelled either way everywhere else it reads one.
 #[test]
 fn a_windows_tilde_means_home_too_because_windows_writes_the_other_separator() {
     let host = a_machine_to_give_back()
@@ -358,15 +322,9 @@ fn a_windows_tilde_means_home_too_because_windows_writes_the_other_separator() {
     );
 }
 
-/// A `~` this prompt cannot expand is refused rather than read as a filename.
-///
-/// Only `~/` is a home directory. A bare `~`, a `~backups` and a `~someone/`
-/// were all taken verbatim, and every guard downstream let them through: the
-/// parent of `~` is the current directory, which exists; nothing is at that path
-/// yet; and it does not start with Perch's home, so the Purge would not take it.
-/// So the Export was written to `./~`, the report said "Exported 3 Accounts to
-/// ~", the user typed `purge`, and every Credential on the machine went — with
-/// the only copy of them in whatever directory the command was run from.
+/// Every guard downstream lets a verbatim `~` through: its parent is the current
+/// directory, which exists; nothing is at that path; and it is not under Perch's
+/// home, so the Purge would not take it. The Export lands at `./~`.
 #[test]
 fn a_tilde_this_prompt_cannot_expand_is_refused_rather_than_written_beside_the_cwd() {
     for typed in ["~", "~backups", "~someone/perch.age"] {
@@ -390,11 +348,8 @@ fn a_tilde_this_prompt_cannot_expand_is_refused_rather_than_written_beside_the_c
 }
 
 /// The Export is offered before the word is asked for, so a Purge can be
-/// declined *after* one has been written. That leaves a file holding a working
-/// Credential for every Account at a path the user is about to stop thinking
-/// about — and `perch holdings export` refuses a path that is taken, so the
-/// next `perch holdings purge` offering the same one aborts before it asks
-/// anything. Both are things "Nothing was purged." on its own does not say.
+/// declined *after* one is written — and `perch holdings export` refuses a path
+/// that is taken, so the next Purge offering the same one aborts.
 #[test]
 fn declining_after_an_export_was_written_says_the_file_is_there() {
     let host = a_machine_to_give_back()
@@ -420,10 +375,8 @@ fn declining_after_an_export_was_written_says_the_file_is_there() {
     );
 }
 
-/// Written before anything is destroyed means exactly that: an Export that could
-/// not be written stops the Purge, with everything still there. A path that is
-/// taken is something somebody has to go and settle, and nothing has been lost
-/// while they do.
+/// A path that is taken is something somebody has to go and settle, and nothing
+/// has been lost while they do.
 #[test]
 fn an_export_that_cannot_be_written_purges_nothing() {
     let host = a_machine_to_give_back()
@@ -436,9 +389,8 @@ fn an_export_that_cannot_be_written_purges_nothing() {
     let refused = outcome.expect_err("something is already at that path");
     assert!(refused.to_string().contains(AT), "{refused}");
     // The Export's own refusal is about the Export, and true — but somebody who
-    // typed `perch holdings purge` is waiting to hear about the Purge. Every
-    // other way this command stops says so, and this was the one that left them
-    // reading a sentence about a file and inferring the rest.
+    // typed `perch holdings purge` is waiting to hear about the Purge rather than
+    // to infer it from a sentence about a file.
     assert!(
         refused.to_string().contains("Nothing was purged"),
         "a Purge stopped by the Export it offered still has to say the Purge is \
@@ -457,8 +409,6 @@ fn an_export_that_cannot_be_written_purges_nothing() {
     assert_eq!(credential_of(&host, EMAIL).as_deref(), Some(CREDENTIAL));
 }
 
-/// An Export written under Perch's own home would be taken by the Purge that
-/// offered it, which is the one place a backup must not go.
 #[test]
 fn an_export_inside_what_the_purge_will_take_is_refused() {
     let inside = format!("{PERCH_HOME}/backup.age");
@@ -479,7 +429,6 @@ fn an_export_inside_what_the_purge_will_take_is_refused() {
     );
 }
 
-/// The pair is the point: an Export written before a Purge, an Import after it.
 /// Asserted end to end, because a Purge is only as survivable as the file it
 /// offers actually being restorable.
 #[test]
@@ -513,9 +462,8 @@ fn what_a_purge_gives_back_an_import_puts_back() {
     }
 }
 
-/// Every capability is reachable from a script (ADR perch-does-not-draw), so
-/// the flag answers ahead of time — and answers both questions, because an
-/// Export is a path somebody names and a passphrase somebody types.
+/// Every capability is reachable from a script (ADR perch-does-not-draw), and the
+/// flag answers both questions, because an Export is a path and a passphrase.
 #[test]
 fn the_flag_purges_without_asking_anything() {
     let host = machine_with_three_accounts().without_terminal();
@@ -534,9 +482,6 @@ fn the_flag_purges_without_asking_anything() {
     );
 }
 
-/// Without the flag there is nobody to type the word, and a Purge that read that
-/// as agreement would be the one command a closed pipe costs every Credential
-/// on the machine.
 #[test]
 fn without_a_terminal_and_without_the_flag_a_purge_is_refused_and_names_it() {
     let host = machine_with_three_accounts().without_terminal();
@@ -557,9 +502,8 @@ fn without_a_terminal_and_without_the_flag_a_purge_is_refused_and_names_it() {
     );
 }
 
-/// A Purge deletes the Profiles a client would be holding files in, so it is
-/// refused while one is — the same rule every other write into a Live Profile
-/// obeys (ADR a-profile-is-live-by-evidence), at its extreme.
+/// The rule every other write into a Live Profile obeys
+/// (ADR a-profile-is-live-by-evidence), at its extreme.
 #[test]
 fn a_client_running_against_a_profile_stops_the_purge() {
     let host = a_machine_to_give_back();
@@ -582,13 +526,9 @@ fn a_client_running_against_a_profile_stops_the_purge() {
     );
 }
 
-/// The registry is not the whole account of what Perch holds, and the Purge's
-/// own deletion pass says so at length: a login abandoned or in progress lives
-/// under `pending/` and is in no `registry.accounts`. It is still a directory
-/// this command deletes, and it was the one Live Profile nothing protected —
-/// a `perch add` sitting at the browser step in another terminal had the login
-/// deleted out from under it, and the Anthropic session it had just created went
-/// with it.
+/// The registry is not the whole account of what Perch holds: a login in
+/// progress lives under `pending/` and is in no `registry.accounts`, and it is
+/// still a directory this command deletes.
 #[test]
 fn a_login_in_progress_stops_the_purge_though_no_account_names_it() {
     let host = a_machine_to_give_back();
@@ -621,10 +561,8 @@ fn a_login_in_progress_stops_the_purge_though_no_account_names_it() {
     );
 }
 
-/// The refusal above is checked before the questions and again after them, and
-/// the window in between is however long somebody takes over four prompts. A
-/// client started in there was not running when the first check ran, and its
-/// Profile is what the next line would delete.
+/// The window between the two checks is however long somebody takes over four
+/// prompts, and a client started in it was not running when the first one ran.
 #[test]
 fn a_client_that_starts_while_the_questions_are_answered_stops_the_purge_too() {
     let host = a_machine_to_give_back()
@@ -647,11 +585,8 @@ fn a_client_that_starts_while_the_questions_are_answered_stops_the_purge_too() {
 }
 
 /// An Export written a question ago is a file full of working Credentials at a
-/// path the user is about to stop thinking about — and `perch holdings export`
-/// refuses a path that is taken, so the next `perch holdings purge` offering
-/// the same one aborts before it asks anything. Only the *declined* Purge said
-/// so, and every other way one can stop after that point said nothing at all:
-/// every failure test here answers `n` to the offer, which is why.
+/// path the user is about to stop thinking about — and every other failure test
+/// here answers `n` to the offer, which is why nothing was catching this.
 #[test]
 fn a_purge_that_wrote_an_export_and_then_stopped_says_the_file_is_there() {
     let host = a_machine_to_give_back()
@@ -688,17 +623,9 @@ fn a_purge_that_wrote_an_export_and_then_stopped_says_the_file_is_there() {
     );
 }
 
-/// The terminal going away between the write and the line about it is still an
-/// Export that exists, and it still has to be said.
-///
 /// `write_the_export` does one more fallible thing after the bytes have landed:
-/// it reports what it wrote. A closed pty, a SIGHUP, a `head` that stopped
-/// reading — any of them fails that `say`, and the caller used to conclude from
-/// the `Err` that no Export had been written. What actually sat on the disk was
-/// an armored file holding a working Credential for every Account, at a path
-/// nothing had mentioned; and the next `perch holdings purge` offering that
-/// same path aborted before asking anything, because an Export refuses a path
-/// that is taken.
+/// it reports what it wrote. An `Err` from that is not an Export that was never
+/// written, and the armored file at the path is what has to be said.
 #[test]
 fn a_terminal_that_goes_away_after_the_export_lands_does_not_lose_the_file() {
     /// Writes until the Export's own report starts, and then is not there.
@@ -750,9 +677,8 @@ fn a_terminal_that_goes_away_after_the_export_lands_does_not_lose_the_file() {
     );
 }
 
-/// A Purge that stopped part way is run again, and finishes. The Credentials go
-/// first and the registry naming them goes last, so what has already been
-/// deleted is found already gone rather than lost track of.
+/// The Credentials go first and the registry naming them goes last, so what is
+/// already deleted is found already gone rather than lost track of.
 #[test]
 fn a_purge_that_stopped_part_way_finishes_when_it_is_run_again() {
     let second_profile = format!("{PERCH_HOME}/profiles/overflow-example-com/.credentials.json");
@@ -790,10 +716,8 @@ fn a_purge_that_stopped_part_way_finishes_when_it_is_run_again() {
     }
 }
 
-/// The last thing a Purge does is take Perch's home, and a home left behind with
-/// no registry in it is what an interrupted one leaves. Running it again takes
-/// it, rather than reporting there is nothing to do and leaving the directory
-/// standing.
+/// A home left behind with no registry in it is what an interrupted Purge
+/// leaves, rather than a machine with nothing to do.
 #[test]
 fn a_home_left_behind_with_no_registry_is_taken_by_the_next_purge() {
     let host = machine_with_three_accounts().with_answers(&["purge"]);
@@ -815,8 +739,6 @@ fn a_home_left_behind_with_no_registry_is_taken_by_the_next_purge() {
     );
 }
 
-/// A machine Perch has never run on has nothing to give back, and saying so is
-/// not a failure worth a stack of advice.
 #[test]
 fn a_machine_perch_never_ran_on_has_nothing_to_give_back() {
     let host = machine_with_claude_code().with_answers(&["purge"]);
@@ -835,10 +757,8 @@ fn a_machine_perch_never_ran_on_has_nothing_to_give_back() {
     );
 }
 
-/// A keychain item is filed under `$USER`, and a delete that finds nothing
-/// reports success. The Account is still given up; what must not happen is Perch
-/// claiming a Credential is beyond recovery when it may be sitting in a keychain
-/// under a different login name.
+/// A keychain item is filed under `$USER` and a delete that finds nothing reports
+/// success, so a Credential may be sitting in a keychain under another name.
 #[test]
 fn a_purge_that_found_no_credential_does_not_claim_to_have_deleted_one() {
     let host = a_machine_to_give_back();
@@ -852,13 +772,9 @@ fn a_purge_that_found_no_credential_does_not_claim_to_have_deleted_one() {
     assert_eq!(registry_on(&host), None, "and the Purge still finished");
 }
 
-/// The same sentence off macOS, where every word of it used to be false.
-///
-/// There is no keychain and nothing is filed under `$USER`: a Credential lives
-/// in a file inside the Profile (ADR claude-code-chooses-the-store), so the
-/// Profile going is the Credential going. Told the macOS story anyway, somebody
-/// is sent looking in a keychain their machine does not have, by the one
-/// sentence that exists to say where a Credential might still be.
+/// Off macOS there is no keychain and nothing is filed under `$USER`, so the one
+/// sentence that exists to say where a Credential might still be would send
+/// somebody looking in a keychain their machine does not have.
 #[test]
 fn a_purge_off_macos_explains_the_store_that_machine_actually_has() {
     let host = logged_in_machine_off_macos().with_answers(&["n", "purge"]);
@@ -883,12 +799,9 @@ fn a_purge_off_macos_explains_the_store_that_machine_actually_has() {
     );
 }
 
-/// The questions a Purge asks are the one wait in Perch with no bound on them —
-/// somebody may type the word in a second or come back after lunch — and the
-/// registry lock is held across them. A hold this Perch has lost is a registry
-/// somebody else has been changing since it was read, and everything past the
-/// question deletes Credentials. Refused before the first of them rather than
-/// discovered afterwards, by which point they are already gone.
+/// The questions a Purge asks are the one wait in Perch with no bound on them,
+/// and the registry lock is held across them — so a hold this Perch has lost is
+/// a registry somebody else has been changing since it was read.
 #[test]
 fn an_answer_that_arrives_after_another_perch_took_the_lock_purges_nothing() {
     let host = a_machine_to_give_back()
@@ -921,9 +834,7 @@ fn an_answer_that_arrives_after_another_perch_took_the_lock_purges_nothing() {
     );
 }
 
-/// A Purge reads what is stored and asks Anthropic nothing: it is not a moment
-/// to spend somebody's rate limit, and a Renewal on the way past would Rotate a
-/// token on its way to being deleted.
+/// A Renewal on the way past would Rotate a token on its way to being deleted.
 #[test]
 fn nothing_is_asked_of_anthropic_by_a_purge() {
     let host = a_machine_to_give_back();
@@ -933,14 +844,9 @@ fn nothing_is_asked_of_anthropic_by_a_purge() {
     assert!(host.http_calls().is_empty(), "{:?}", host.http_calls());
 }
 
-/// A Purge derives the Credential Stores it empties from the registry, and the
-/// registry is not the whole account of what Perch is holding. A login
-/// abandoned at the browser step leaves a working Credential in a `pending/`
-/// directory, and nothing reaps one under thirty minutes old — so the ordinary
-/// sequence of Ctrl-C at the login and `perch holdings purge` a few minutes
-/// later used to destroy the directory the keychain item's service name is
-/// derived from, leaving a live refresh token nothing could ever find again
-/// while the report said the machine had been given back.
+/// A login abandoned at the browser step leaves a working Credential under
+/// `pending/`, and nothing reaps one under thirty minutes old — so Ctrl-C and a
+/// Purge a few minutes later is the ordinary sequence, not an exotic one.
 #[test]
 fn a_purge_takes_the_credential_an_abandoned_login_left_as_well() {
     let host = machine_with_two_accounts();
@@ -969,8 +875,8 @@ fn a_purge_takes_the_credential_an_abandoned_login_left_as_well() {
     assert!(!host.path_exists(Path::new(PERCH_HOME)));
 }
 
-/// The same hole from the other side: a `perch add` whose registry write failed
-/// leaves a Profile holding a live Credential that no Account names.
+/// The same from the other side: a `perch add` whose registry write failed
+/// leaves a Profile holding a live Credential no Account names.
 #[test]
 fn a_purge_takes_the_credential_of_a_profile_the_registry_never_recorded() {
     let host = machine_with_two_accounts();
@@ -998,10 +904,8 @@ fn a_purge_takes_the_credential_of_a_profile_the_registry_never_recorded() {
     );
 }
 
-/// The home directory goes last and goes whole, so a home that will not go is a
-/// Purge that took every Credential and stopped one step from done. It has to
-/// say both halves: the Credentials really are gone, and the one thing left is
-/// a directory that running it again will take.
+/// A home that will not go is a Purge that took every Credential and stopped one
+/// step from done, so it has to say both halves.
 #[test]
 fn a_home_that_will_not_go_says_the_credentials_are_gone_and_the_rest_finishes_later() {
     let host = a_machine_to_give_back()
@@ -1043,10 +947,8 @@ fn a_home_that_will_not_go_says_the_credentials_are_gone_and_the_rest_finishes_l
     assert!(!host.path_exists(Path::new(PERCH_HOME)), "{printed}");
 }
 
-/// A Profile the registry does not name is reached by walking the directory, so
-/// the walk is where a store that will not give a Credential up shows up. It
-/// must not be shrugged off: a Purge that reported success with a Credential
-/// still on the machine is the one failure this command cannot have.
+/// A Purge reporting success with a Credential still on the machine is the one
+/// failure this command cannot have, whichever pass reached it.
 #[test]
 fn a_leftover_profile_whose_credential_will_not_go_stops_the_purge_rather_than_being_skipped() {
     let host = machine_with_two_accounts();
@@ -1081,21 +983,10 @@ fn a_leftover_profile_whose_credential_will_not_go_stops_the_purge_rather_than_b
     );
 }
 
-/// The other half of the same walk answers the way the first half does: a
-/// directory that will not say where its Credential lives stops the Purge.
-///
-/// Reached the way it happens — a Purge that stopped in its last step, so the
-/// registry is already gone — on a machine whose keychain account name cannot
-/// be derived at all.
-///
-/// The two halves used to disagree. A store is unnameable when the platform
-/// will not say who the user is, which is not a fact about one directory, so
-/// `erase` refused at the first Account in the registry and shrugged the
-/// identical directory off in the walk — Perch refusing to purge a machine
-/// holding Accounts and reporting success on the same machine holding only
-/// their leftovers. Removing the directory says nothing about the keychain item
-/// beside it, and "the machine is given back" is exactly the claim a Purge must
-/// not make while a working login is still stored.
+/// A store is unnameable when the platform will not say who the user is, which
+/// is not a fact about one directory — so both halves of the walk have to answer
+/// the same way, or Perch refuses one machine and reports success on its
+/// leftovers. Reached the way it happens: a Purge that stopped in its last step.
 #[test]
 fn a_leftover_directory_that_names_no_store_stops_the_purge_rather_than_being_passed_over() {
     let host = machine_with_three_accounts();
@@ -1118,15 +1009,9 @@ fn a_leftover_directory_that_names_no_store_stops_the_purge_rather_than_being_pa
     );
 }
 
-/// The same file, and the same silence, one question later.
-///
 /// Between the Export landing and the note that mentions it there is one more
 /// prompt: the word `purge`, written to the terminal and answered from it. A
-/// closed pty or a SIGHUP fails that too — and this was the one failure path
-/// between the two that carried nothing, so somebody read "could not read your
-/// answer" with no word of the armored file holding a working Credential for
-/// every Account sitting at a path they had typed once and would not think
-/// about again.
+/// closed pty fails that too.
 #[test]
 fn a_terminal_that_goes_away_at_the_last_question_does_not_lose_the_export() {
     /// Writes until the Purge asks for the word, and then is not there.
@@ -1171,18 +1056,9 @@ fn a_terminal_that_goes_away_at_the_last_question_does_not_lose_the_export() {
     );
 }
 
-/// A Purge that cannot list one of the two parents it walks stops, rather than
-/// reading "cannot be listed" as "there is nothing there".
-///
-/// `everything_perch_holds` swallowed every `list_dir` failure on the reasoning
-/// that an unreadable directory would be caught by the deletion pass, which
-/// refuses a Profile it cannot name. But that pass walks the very list this
-/// builds, so an unlistable `pending/` produced an empty set and there was
-/// nothing left to refuse. The home directory then went whole — and a
-/// Credential Store's service name is derived from the directory it belongs to,
-/// so the only name that could ever have reached a keychain item under
-/// `pending/` went with it: a live refresh token, unnameable, under a report
-/// saying the machine had been given back.
+/// The deletion pass walks the list `everything_perch_holds` builds, so an
+/// unlistable `pending/` read as empty leaves that pass nothing to refuse — and
+/// the home goes whole, taking the only name reaching a keychain item under it.
 #[test]
 fn a_directory_perch_cannot_list_stops_the_purge_rather_than_reading_as_empty() {
     let host = a_machine_to_give_back();

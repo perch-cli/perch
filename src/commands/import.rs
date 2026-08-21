@@ -3,24 +3,11 @@
 //!
 //! The exact inverse of `perch holdings export`: the registry and every
 //! Credential, so a new laptop arrives with the setup the old one had rather
-//! than a pile of nameless logins. That pair — an Export written before a
-//! Purge, an Import after it — is the whole of what makes "I can move to a new
-//! machine" true.
+//! than a pile of nameless logins.
 //!
-//! **It refuses a machine that already holds an Account.** Merging is where
-//! every hard case lives, and refusing keeps an Import the exact inverse of a
-//! Purge rather than a second, quieter way of changing what Perch holds.
-//!
-//! **It adopts nothing.** Every other command reads the registry through
-//! [`crate::adopt`], which takes the existing Claude Code login over the first
-//! time Perch runs — which here would be an Import that made the machine
-//! non-empty on the way to refusing itself for being non-empty. So this one
-//! reads the registry directly, and the login that is on the machine is left
-//! exactly where it is.
-//!
-//! **Nothing is made active.** The Account that was active where the Export was
-//! taken says nothing about what this machine is running as, so the user
-//! Switches afterwards.
+//! It refuses a machine that already holds an Account, it adopts nothing —
+//! [`crate::adopt`] would make the machine non-empty on the way to refusing
+//! itself for being non-empty — and nothing is made active.
 
 use std::io::Write;
 use std::path::Path;
@@ -37,8 +24,7 @@ use crate::registry;
 pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     // Both before the passphrase, because both are refusals somebody should meet
     // before typing one. The file comes first: a path that is a typo is answered
-    // by naming the path, not by advice about a machine the user was never
-    // asking about.
+    // by naming the path, not by advice about a machine nobody asked about.
     refuse_without_a_terminal(host, "perch holdings import")?;
     let sealed = read_the_file(host, path)?;
 
@@ -50,15 +36,9 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     let export = export::unseal(&sealed, &passphrase)?;
     let restored = import::restored(&export, &registry::registry_path(host)?)?;
 
-    // Nothing above this line has written anything, which is the whole of what
-    // "a wrong passphrase fails before anything is written" means.
-    //
-    // And the last thing before something is: the passphrase prompt above is
-    // the one wait here with no bound on it, so the hold taken before it may
-    // have gone stale under another `perch` that has since taken it and added
-    // an Account. Asked here rather than at the save, because `place` writes
-    // every Credential the file holds — and finding out at the save is finding
-    // out after the rollback has deleted whatever that other Perch put down.
+    // Nothing above this line has written anything, and the passphrase prompt is
+    // the one wait here with no bound on it — so the hold taken before it may be
+    // one another `perch` has since claimed and put an Account down under.
     still_ours(&mut perch, "imported")?;
     let placed = import::place(host, &export)?;
     registry::save(host, &mut perch, &restored).map_err(|error| {
@@ -71,15 +51,8 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     })?;
 
     // The Import is complete by this line: every Credential is placed and the
-    // registry is written. What is left is saying so, and a terminal that has
-    // gone away — a closed pty, a `SIGHUP`, a pipe whose reader exited — makes
-    // that write fail. Raised bare, a machine that *is* restored reported a
-    // non-zero exit with nothing saying otherwise, and the obvious next move
-    // then hits `refuse_a_machine_that_is_not_empty`, whose advice is that
-    // `perch holdings purge` "gives the machine back and is what makes room".
-    //
-    // `commands::export` carries `landed` for this and `purge::still_standing`
-    // closes the same gap; an Import is the one of the three that never got it.
+    // registry is written. What is left is saying so, and raised bare, a terminal
+    // that has gone away makes a machine that *is* restored exit non-zero.
     report(out, path, &export).map_err(|error| {
         error.with_note(
             "The Import itself finished: every Credential the Export held is \
@@ -100,16 +73,9 @@ fn read_the_file(host: &dyn Host, path: &Path) -> Result<String> {
             "There is no file at {}, so there is nothing to import.",
             path.display(),
         ))),
-        // An Export is `age`'s *armored* form — its text encoding — which is
-        // what lets it go through the Host port's ordinary private write. So
-        // the read is a read of text, and a binary `age` file fails UTF-8
-        // decoding here, before `unseal` ever sees it and before any of the
-        // four refusals it distinguishes can speak.
-        //
-        // Worth naming rather than passing through as "stream did not contain
-        // valid UTF-8", because the person who reaches it is somebody who took
-        // their own backup with plain `age -p` — the binary default — and is
-        // reading this on the day the machine it would have restored is gone.
+        // An Export is `age`'s *armored* form, so the read is a read of text and
+        // a binary `age` file fails UTF-8 decoding here, before any of `unseal`'s
+        // four refusals can speak. Plain `age -p` writes the binary default.
         Err(HostError::Io(err)) if err.kind() == std::io::ErrorKind::InvalidData => {
             Err(PerchError::Invalid(format!(
                 "{} is not text, so it is not an Export. An Export is `age`'s \
@@ -126,16 +92,9 @@ fn read_the_file(host: &dyn Host, path: &Path) -> Result<String> {
 
 /// The passphrase, asked for once and never shown.
 ///
-/// Once rather than twice, which is the one place an Import differs from the
-/// Export it mirrors: a passphrase being *chosen* is confirmed because a file
-/// nobody can open is not discovered until it is needed, and a passphrase being
-/// *checked* is answered by the file itself a moment later.
-///
-/// And asked bare, which is the second place. The Export's prompt is preceded
-/// by what the passphrase is protecting, because somebody choosing one has a
-/// decision to make and no way back from it; there is no decision here, and a
-/// preamble before every Import would be prose earning its place from the
-/// question rather than from the answer (ADR perch-says-what-it-did).
+/// Once rather than twice, and bare rather than after a preamble, the two places
+/// an Import differs from the Export it mirrors: a passphrase being *checked* is
+/// answered by the file, and no decision needs one (ADR perch-says-what-it-did).
 fn the_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<String>> {
     ask_passphrase(host, out, "Passphrase: ")?.ok_or_else(|| {
         PerchError::Invalid(
@@ -148,11 +107,9 @@ fn the_passphrase(host: &dyn Host, out: &mut dyn Write) -> Result<Zeroizing<Stri
 
 /// What arrived.
 ///
-/// Nothing arrives active on any Import and an Import carries the whole
-/// registry on every one, so neither is said here: both are what the guide
-/// establishes once rather than what this repeats (ADR perch-says-what-it-did).
-/// The Accounts the file held no Credential for are the one thing this can
-/// report that another Import would not.
+/// Nothing arrives active on any Import and an Import carries the whole registry
+/// on every one, so neither is said here: the guide establishes both. The
+/// Accounts the file held no Credential for are what this can report.
 fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
     let accounts = export.accounts();
     say(
@@ -164,10 +121,9 @@ fn report(out: &mut dyn Write, path: &Path, export: &Export) -> Result<()> {
         ),
     )?;
 
-    // The repair, which is nothing where nothing came back bare, and is the
-    // whole of what this paragraph is for — so it is the condition rather than
-    // a second thing asked after one. The mirror of this in `export.rs` gets
-    // the plural right by not naming an Account at all.
+    // The repair, which is nothing where nothing came back bare, so it is the
+    // condition rather than a second thing asked after one. The mirror of this in
+    // `export.rs` gets the plural right by not naming an Account at all.
     let bare = export.without_a_credential();
     if let Some(repair) = registry::how_to_repair_them(&bare) {
         say(

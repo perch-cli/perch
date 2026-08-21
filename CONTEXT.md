@@ -65,12 +65,13 @@ _Avoid_: uninstall, reset, wipe, remove
 **Export**:
 The Holdings, written to one file: the whole registry — every Account, its
 Alias, its Group, whether Cycling may choose it, why it is Quarantined where it
-is, and what each Group carries — alongside every Credential. Takes no Target,
-because a selective one is a partial restore, which is the failure it exists to
-prevent. Encrypted with a passphrase that is required rather than offered, and in
-a format something other than Perch maintains, so a backup meant to outlive the
-machine does not depend on Perch still existing. A backup is what one is *for*,
-and the word is fine for that; the thing itself is an Export.
+is, and what each Group carries — alongside every Credential and each Profile's
+own `.claude.json`. Takes no Target, because a selective one is a partial
+restore, which is the failure it exists to prevent. Encrypted with a passphrase
+that is required rather than offered, and in a format something other than Perch
+maintains, so a backup meant to outlive the machine does not depend on Perch
+still existing. A backup is what one is *for*, and the word is fine for that;
+the thing itself is an Export.
 _Avoid_: dump, snapshot, archive
 
 **Import**:

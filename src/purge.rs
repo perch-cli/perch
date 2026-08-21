@@ -1,28 +1,13 @@
 //! Giving the machine back the state it had before Perch
 //! (ADR the-holdings-go-out-sealed).
 //!
-//! The exact inverse of an Import, and the other half of what makes "I can move
-//! to a new machine" true: every Profile, every Credential Perch holds, and
-//! Perch's own registry, gone in one act.
+//! Two things live here, and the second is all effect. **Refusing** a machine
+//! something is running against is asked before anything is destroyed, because a
+//! Purge deletes the Profiles a client would be holding files in. **Erasing** is
+//! the act: every Credential out of its store, then Perch's home whole.
 //!
-//! Two things live here, and the second one is all effect. **Refusing** a
-//! machine something is running against is a question asked before anything is
-//! destroyed, because a Purge deletes the Profiles a client would be holding
-//! files in. **Erasing** is the act: every Credential out of the store it lives
-//! in, and then Perch's home directory whole.
-//!
-//! That order is the whole of what makes a Purge that stopped part way
-//! re-runnable. A Credential in the operating system's keychain lives *outside*
-//! Perch's home, so a Purge that removed the home first would leave items behind
-//! with nothing left recording which they were. Taking the Credentials first
-//! means the registry naming them is the last thing to go — so a Purge that
-//! failed anywhere before that can simply be run again, and finds every
-//! Credential it already deleted already gone.
-//!
-//! What it does not touch is the Credential in the Default Profile. That is
-//! Claude Code's own login rather than a copy Perch holds, and a Purge that
-//! logged the user out of the tool they are using would be doing more than
-//! giving the machine back.
+//! That order is what makes a Purge that stopped part way re-runnable: a
+//! Credential in the keychain lives outside the home that names it.
 
 use std::path::PathBuf;
 
@@ -46,26 +31,9 @@ pub struct Purged {
 
 /// Refuses while a client is running against a Profile a Purge would delete.
 ///
-/// The same rule every other write obeys, at its extreme: writing into a Live
-/// Profile is refused because something else is holding those files
-/// (ADR a-profile-is-live-by-evidence), and a Purge does not write into one —
-/// it deletes it. Asked of every Account before anything is destroyed, because
-/// a Purge is all or nothing and a refusal discovered half way through is the
-/// partial state the command exists to avoid.
-///
-/// Doubt counts as a client here. A marker that can be neither corroborated nor
-/// dismissed is a Profile that may be in use, and the cost of the two mistakes is
-/// not the same: waiting costs a command run again once the client is quit, and
-/// not waiting costs whatever that client had open.
-///
-/// Asked of the same two parents [`forget_what_the_registry_does_not_name`]
-/// empties rather than of the registry alone, for the reason that function
-/// argues at length: the registry is not the whole account of what Perch holds.
-/// A `perch add` sitting at the browser step in another terminal is a client
-/// running against a directory under `pending/`, and it was the one Live
-/// Profile nothing protected — `perch holdings purge --yes` deleted the login
-/// out from under it, and the Anthropic session it had just created went with
-/// it.
+/// ADR a-profile-is-live-by-evidence's rule at its extreme: a Purge deletes those
+/// directories rather than writing into them, and doubt counts as a client. Asked
+/// of the same set [`forget_what_the_registry_does_not_name`] empties.
 pub fn refuse_while_anything_is_running(host: &dyn Host, registry: &Registry) -> Result<()> {
     let mut running: Vec<String> = registry
         .accounts
@@ -102,26 +70,10 @@ pub fn refuse_while_anything_is_running(host: &dyn Host, registry: &Registry) ->
 }
 
 /// Every directory under Perch's home that is or was a Profile: one under
-/// `profiles/`, and one under `pending/` that a login ran in.
+/// `profiles/`, one under `pending/` that a login ran in.
 ///
-/// One walk, so the refusal above and the deletion below are looking at the same
-/// machine. That they were not is how a login in progress came to be deleted by
-/// a Purge that had just asked whether anything was running.
-///
-/// Silent about a parent that is not *there*. Absent is the ordinary case for
-/// both — no login has been abandoned here, or every Profile the registry names
-/// is every Profile there is.
-///
-/// Every other failure stops the Purge. This used to swallow those too, on the
-/// reasoning that "a directory that genuinely cannot be read is answered by the
-/// deletion pass, which refuses by name" — but that pass walks
-/// [`what_the_registry_does_not_name`], which is this list filtered, so an
-/// unreadable `pending/` answered "there is nothing there" and the deletion pass
-/// had nothing to refuse. `erase` then took the home directory whole, and on
-/// macOS a Credential Store's service name is derived from the directory it
-/// belonged to — so the only names that could ever have reached those keychain
-/// items went with it. A live refresh token, unnameable, under a report saying
-/// the machine had been given back.
+/// A parent that is not there is ordinary; every other failure stops the Purge,
+/// or an unlistable `pending/` reads as empty and `erase` takes the home whole.
 fn everything_perch_holds(host: &dyn Host) -> Result<Vec<std::path::PathBuf>> {
     let mut found = Vec::new();
     for parent in [
@@ -153,36 +105,18 @@ fn everything_perch_holds(host: &dyn Host) -> Result<Vec<std::path::PathBuf>> {
 
 /// Deletes every Credential Perch holds, and then everything Perch keeps.
 ///
-/// A store that will not give its Credential up stops the Purge rather than
-/// being shrugged off: reporting a machine given back while a keychain goes on
-/// holding a working Credential is the one wrong answer here. Nothing is undone
-/// on the way out — every step of a Purge is a step the user asked for, and the
-/// registry is still there, so running it again finishes it.
-///
-/// The home directory goes last and goes whole, which takes every Profile, the
-/// registry, any login nobody came back from, and the lock this is running
-/// under. Losing the lock artifact costs nothing: what it excludes is another
-/// Perch changing a registry that no longer exists.
-///
-/// It takes the hold rather than trusting the caller's last check of it, and
-/// renews around every store it empties. The caller's `still_ours` is asked
-/// before the first deletion and nothing renewed the artifact after that, but
-/// what happens here is unbounded: one Credential Store per Account, and the
-/// keychain half of each is a `security delete-generic-password` that can stop
-/// for an authorization dialog. Perch's registry lock goes stale after ninety
-/// seconds, so a Purge of a handful of Accounts on macOS could read as abandoned
-/// while it was still running — and a `perch add` in another terminal that took
-/// it over would write a Profile into a home this is about to `remove_dir_all`,
-/// leaving that Account's keychain item live and unnameable for ever. That is
-/// verbatim the failure [`forget_what_the_registry_does_not_name`] exists to
-/// prevent, reached through the lock it assumed was held.
+/// A store that will not give its Credential up stops the Purge. Nothing is
+/// undone — the registry is still there, so running it again finishes it — and
+/// the home goes last and whole, lock artifact and all.
 pub fn erase(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -> Result<Purged> {
     // Resolved before anything is deleted, although it is not needed until the
     // end: every Profile is derived from it, so a machine that cannot say where
-    // home is must not have half its Credentials taken on the way to finding
-    // that out.
+    // home is must not lose half its Credentials on the way to finding out.
     let home = registry::perch_home(host)?;
 
+    // Renewed around every store rather than trusted from the caller's last
+    // check, because what happens here is unbounded: one Store per Account, and
+    // a keychain delete can stop for a dialog while the hold goes stale.
     let mut credentials = 0;
     for account in &registry.accounts {
         perch.renew();
@@ -193,11 +127,9 @@ pub fn erase(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -
     perch.renew();
     forget_what_the_registry_does_not_name(host, registry)?;
 
-    // The last thing asked before the one deletion that cannot be finished by
-    // running this again. Everything above is idempotent — a Credential Store
-    // already empty is one this walks past — but a home that has gone takes
-    // whatever another Perch put in it while this was working, and there is
-    // nothing left afterwards that could name it.
+    // The last thing asked before the one deletion running this again cannot
+    // finish: a home that has gone takes whatever another Perch put in it while
+    // this was working, with nothing left afterwards that could name it.
     crate::commands::still_ours(perch, "given back")?;
 
     host.remove_dir_all(&home).map_err(|err| {
@@ -217,42 +149,14 @@ pub fn erase(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -
 }
 
 /// Empties the Credential Store of every directory under Perch's home that has
-/// one, whether or not the registry names it.
-///
-/// The registry is not the whole account of what Perch is holding, and the
-/// difference is not exotic. A login abandoned at the browser step leaves a
-/// working Credential in `pending/login-<millis>/` — Ctrl-C there is the
-/// documented flow rather than an accident — and nothing reaps one under thirty
-/// minutes old. A Profile whose Credential Store would not empty is kept where
-/// it is by [`profile::discard`], because the directory is the only thing that
-/// can still name that store. Neither is in `registry.accounts`.
-///
-/// [`profile::discard`]: crate::profile::discard
-///
-/// What makes that fatal rather than untidy is where a Credential lives. On
-/// macOS it is a keychain item outside Perch's home, and its service name is
-/// derived from the directory — so `remove_dir_all` destroys the only thing
-/// that could ever name it again. The item stays, live, holding a refresh
-/// token, while the Purge reports the machine given back.
-///
-/// Deletions are counted for nothing and reported as nothing: what these
-/// directories hold are Credentials for Accounts the user does not believe they
-/// have, and a Purge that announced two more than it was asked about would be
-/// answering a question nobody put.
+/// one, whether or not the registry names it: a Store is derived from its
+/// directory, so a home taken whole destroys the only name reaching a keychain
+/// item outside it. Reported as nothing — these are Accounts nobody believes in.
 fn forget_what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) -> Result<()> {
     for dir in what_the_registry_does_not_name(host, registry)? {
         // The same answer `forget_the_credential` gives, and for its reason: a
         // store that cannot even be named is one whose Credential cannot be
-        // deleted, and passing over it would report a machine given back while
-        // a keychain went on holding a working login.
-        //
-        // These two disagreed. A store is unnameable when the platform will not
-        // say who the user is, which is not a fact about one directory — so a
-        // Purge failed on the first Account in the registry and shrugged the
-        // identical directory off here, and the walk is only reached at all
-        // once the registry is empty. Perch was refusing to purge a machine
-        // holding Accounts and reporting success on the same machine holding
-        // only their leftovers.
+        // deleted, and passing over it reports a machine given back.
         let store = probe::store_for_profile(host, &dir).map_err(|error| {
             error.with_note(&format!(
                 "Perch's registry is untouched and every Credential already \
@@ -270,14 +174,8 @@ fn forget_what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) 
 /// Every directory Perch holds that no Account of its names.
 ///
 /// One walk, because the refusal and the deletion have to be looking at the same
-/// set: what `refuse_while_anything_is_running` declines to purge is exactly
-/// what `forget_what_the_registry_does_not_name` then empties, and the two are
-/// only that if they filter the same way. They were written out separately and
-/// had already drifted once over how to answer an unnameable store — this
-/// module's own commentary calls it out ("Perch was refusing to purge a machine
-/// holding Accounts and reporting success on the same machine holding only
-/// their leftovers"), which is the argument for there being one of these rather
-/// than two.
+/// set: what `refuse_while_anything_is_running` declines to purge is exactly what
+/// `forget_what_the_registry_does_not_name` empties.
 fn what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) -> Result<Vec<PathBuf>> {
     let recorded: Vec<PathBuf> = registry
         .accounts
@@ -293,10 +191,8 @@ fn what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) -> Resu
 /// Empties both of a Profile's Credential Stores, and says whether either held
 /// anything.
 ///
-/// One function because there are two passes over the same act — the Accounts
-/// the registry names, and the directories it does not — and the sentence a
-/// failure carries is the whole of what a half-finished Purge can promise. Two
-/// copies of it is how the second of them ships without it.
+/// One function for two passes over the same act, because the sentence a failure
+/// carries is the whole of what a half-finished Purge can promise.
 fn empty_the_stores(host: &dyn Host, store: &probe::Store) -> Result<bool> {
     let mut held = false;
     for kept_in in credentials::stores_for(host, store) {
@@ -316,19 +212,15 @@ fn empty_the_stores(host: &dyn Host, store: &probe::Store) -> Result<bool> {
 /// Takes an Account's Credential out of both of its stores, and says whether
 /// either of them held one.
 fn forget_the_credential(host: &dyn Host, account: &Account) -> Result<bool> {
-    // An address no Profile could ever have been named after has no Profile and
-    // no Credential Store to empty. `perch add` and adoption both refuse such an
-    // address where it is derived, so the only way one reaches the registry is
-    // by hand — and [`registry::profile_dir_for`] says it has to be taken out of
-    // the registry by hand again. A Purge is exactly that, automated, so it must
-    // not be the one command such an Account can stop.
+    // An address no Profile could be named after has no Profile and no Store to
+    // empty. One reaches the registry only by hand, and a Purge is taking it out
+    // by hand, automated — so it must not be the command such an Account stops.
     let Ok(dir) = account.profile_dir(host) else {
         return Ok(false);
     };
     // Anything the store itself refuses to say is propagated rather than skipped
-    // the same way: a store that cannot even be named is one whose Credential
-    // cannot be deleted, and passing over it would report a machine given back
-    // while a keychain went on holding a working login.
+    // the same way: a store that cannot be named is one whose Credential cannot
+    // be deleted, and passing over it reports a machine given back regardless.
     let store = probe::store_for_profile(host, &dir)?;
     empty_the_stores(host, &store)
 }

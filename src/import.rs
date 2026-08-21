@@ -1,25 +1,13 @@
-//! The exact inverse of an Export: one `age` file, put back on a machine (ADR
-//! the-holdings-go-out-sealed).
+//! The exact inverse of an Export: one `age` file, put back on a machine
+//! (ADR the-holdings-go-out-sealed).
 //!
 //! Two halves, the same way [`crate::export`] has two. **Reading** an Export is
 //! arithmetic — given one, say whether this build understands it and what
-//! registry it restores to — and needs no machine to be tested against.
-//! **Placing** is the effect: every Credential into the Credential Store this
-//! machine's Claude Code would use, so an Export written on macOS lands in
-//! files on Linux and the other way round without either side knowing about the
-//! other's store (ADR claude-code-chooses-the-store).
+//! registry it restores to. **Placing** is the effect: every Credential into the
+//! Credential Store this machine's Claude Code would use, so an Export written
+//! on macOS lands in files on Linux (ADR claude-code-chooses-the-store).
 //!
-//! An Import refuses a machine that already holds an Account, and it does not
-//! merge. Merging is where every hard case lives — the same Account on both
-//! sides one Rotation apart, with no way to tell which Credential is live; an
-//! Alias meaning different Accounts on two machines; a Group that exists in both
-//! with different members. That is a real feature and it is not this one.
-//! Refusing keeps an Import the exact inverse of a Purge, and that pair is what
-//! makes "I can move to a new machine" true.
-//!
-//! It is also all-or-nothing. A machine holding some of an Export is the partial
-//! restore the file exists to prevent, so anything that fails part way takes
-//! back what it had already placed.
+//! An Import does not merge, and it is all or nothing.
 
 use std::collections::BTreeMap;
 use zeroize::Zeroizing;
@@ -35,9 +23,8 @@ use crate::registry::{self, Registry};
 /// Refuses to import onto a machine that is already holding Accounts, and names
 /// the one command that makes room.
 ///
-/// `None` is a machine Perch has never run on, which is the case this command is
-/// written for. A registry that is there and holds nothing — what a Purge leaves
-/// — is just as empty, and is imported into just as happily.
+/// `None` is a machine Perch has never run on. A registry that is there and
+/// holds nothing — what a Purge leaves — is just as empty.
 pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()> {
     let accounts = held.map_or(0, |registry| registry.accounts.len());
     if accounts == 0 {
@@ -58,52 +45,23 @@ pub fn refuse_a_machine_that_is_not_empty(held: Option<&Registry>) -> Result<()>
 
 /// The registry an Export restores to, or a refusal to guess at one.
 ///
-/// The Export's own envelope was checked when it was unsealed; this is the
-/// registry that traveled inside it, which carries its own version and answers
-/// the same question about its own shape. A machine holding two builds — the
-/// newer one writing the file, the older one restoring it — is the case both
-/// guards exist for.
-///
-/// Nothing arrives active. Being active is a claim about which Credential is in
-/// this machine's Default Profile, and no Import puts one there: the Account
-/// that was active where the Export was taken says nothing about what this
-/// machine is running as. So the user Switches afterwards, and until they do
-/// whatever Claude Code was logged in as goes on running.
-///
-/// Nothing arrives having just been checked either, and for the same reason.
-/// [`Registry::checks`] is what a `perch watcher check` on the *other* machine
-/// did — when it Switched — and the cooldown is measured from it. Carried
-/// across, an Export taken this morning has the first check on the new machine
-/// reporting `cooling` on the strength of something that happened somewhere
-/// else. That is a claim about a watcher, and no watcher has run here yet.
+/// Nothing arrives active and nothing arrives having just been checked: being
+/// active is a claim about *this* machine's Default Profile, and
+/// [`Registry::checks`] is a claim about a watcher that has not run here.
 pub fn restored(export: &Export, path: &std::path::Path) -> Result<Registry> {
-    // The registry's own version is not checked here. `export::unseal` reads
-    // both versions off a shape that is only the versions, *before* the document
-    // is read as an Export, and it has to: a newer Perch is exactly the thing
-    // that writes a value this build has no variant for, and reading the
-    // document first fails on that with serde's own words. So nothing can reach
-    // this function without having passed the identical check, and a second
-    // spelling of it was two things to keep in step for one guard.
+    // Both versions are read in `export::unseal`, off a shape that is only the
+    // versions and before the document is read as an Export — so nothing reaches
+    // here unchecked, and a second spelling is two guards to keep in step.
 
-    // The check the registry gets on the way in off disk, and the same one: an
-    // Import writes a registry without reading one first, so anything this
-    // accepts and `load` does not is a machine with no working command left on
-    // it — including the `perch holdings purge` that would make room to try
-    // again. This was a narrower copy that walked Group configuration alone, so
-    // an Export holding an Alias keyed by an email address, or a Group name
-    // with a space in it, imported cleanly and wedged the machine on the next
-    // command.
-    //
-    // The path named is where the registry is about to be written rather than
-    // where it came from, because that is the file the refusal tells them to
-    // edit — and the Export it came from is encrypted.
+    // The same check `load` makes off disk, because an Import writes a registry
+    // without reading one: anything this accepts and `load` refuses is a machine
+    // with no working command left, including the Purge that would make room.
     registry::validate(&export.registry)
         .map_err(|refusal| refusal.with_note(&registry::the_file_to_edit(path)))?;
 
     // Named one at a time rather than as a struct update, because who is active
     // is not a field anybody may set: an Import lands on nobody, which is a
-    // transition of its own (ADR a-switch-is-written-down-first) and the one an
-    // arriving registry gets.
+    // transition of its own (ADR a-switch-is-written-down-first).
     let mut restored = export.registry.clone();
     restored.settle(None);
     restored.checks = BTreeMap::new();
@@ -131,26 +89,11 @@ pub struct Placed {
 }
 
 impl Placed {
-    /// Takes back everything this Import *made*, leaving the machine as it was.
+    /// Takes back what this Import *made*, best-effort.
     ///
-    /// Best-effort, like every other undo in Perch: the interesting failure is
-    /// the one that got us here, not the tidying up.
-    ///
-    /// Made, and not merely written into. The reasoning this used to be blunt on
-    /// — "an Import only ever runs on a machine holding no Accounts, so every
-    /// Profile it removes is one it made moments ago" — reads the refusal one
-    /// step wider than it goes: it is the *registry* that has to be empty, and a
-    /// Profile directory nothing names outlives every command that would have
-    /// named it. So an Import that failed at the store of an Account whose
-    /// directory was already there deleted that directory, and on macOS the
-    /// keychain item outside it that only its name could still reach — a live
-    /// refresh token for a login nobody was importing.
-    ///
-    /// What is left instead is a Profile holding the Credential this Import put
-    /// in it, which costs nothing that has not already been paid: the Export
-    /// file still holds every Credential in it, the directory was already
-    /// unnamed before any of this started, and `perch holdings purge` walks it
-    /// and the next `perch add` reaps it.
+    /// Made rather than written into: it is the *registry* an Import needs empty,
+    /// and a Profile directory nothing names outlives every command that would
+    /// have named it — on macOS, the only name reaching a live Credential.
     pub fn undo(&self, host: &dyn Host) {
         for touched in &self.touched {
             if touched.was_already_there {
@@ -168,28 +111,14 @@ impl Placed {
 }
 
 /// Puts every Credential the Export holds into the Profile of the Account it
-/// belongs to.
-///
-/// Where that is is this machine's answer rather than the Export's: the file
-/// records a Credential against an email address and nothing about the store it
-/// came out of, so one written on macOS lands in a file on Linux and the other
-/// way round (ADR claude-code-chooses-the-store). Each one goes through
-/// [`profile::store_credential`], so an Import gets the read-back guard every
-/// other write of a Credential gets.
-///
-/// An Account the Export holds no Credential for gets no Profile. That is how a
-/// Quarantined Account travels, reason and all, and the Account is still
-/// restored — one Perch has forgotten is worse news than one that needs logging
-/// in again. Nothing is Quarantined here for it: the commands that need a
-/// Credential discover there is none and record why, which is the one place that
-/// decision is made.
+/// belongs to, wherever this machine keeps one, through
+/// [`profile::store_credential`] so an Import gets the read-back guard. An
+/// Account it holds no Credential for gets no Profile, is restored anyway, and
+/// is not Quarantined here for it.
 pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
-    // Every Credential in the file belongs to an Account the file lists, or
-    // this is not the whole restore it claims to be. `gather` cannot write such
-    // an Export, so this is about a file written by something else — and the
-    // failure it guards is the one ADR the-holdings-go-out-sealed exists to
-    // prevent, arriving quietly: an Import that reports success having restored
-    // less than the file held.
+    // Every Credential in the file belongs to an Account the file lists, or this
+    // is not the whole restore it claims to be. `gather` cannot write such an
+    // Export, so this is about a file written by something else.
     let unlisted: Vec<&str> = export
         .credentials
         .keys()
@@ -210,17 +139,8 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
     }
 
     // Two keys in either map that fold to one address, refused for the reason
-    // the `unlisted` guard above exists and reached by the same fold it uses.
-    // `Export::credential_for` finds the *first* case-insensitive match, so
-    // `ONE@example.com` beside `one@example.com` both passed that guard — each
-    // names a listed Account — and then only one was ever placed. The other was
-    // discarded in silence under a report saying the file had been restored
-    // whole, which is the partial-restore-wearing-success's-clothes
-    // ADR the-holdings-go-out-sealed exists to prevent.
-    //
-    // Both maps, because `identity_file_for` folds the same way: a `.claude.json`
-    // dropped this way is a Profile that meets the onboarding dialog on every
-    // Run, said to have been restored.
+    // above and by the same fold: `credential_for` answers with the first match,
+    // so only one of the two is ever placed, under a report saying it was whole.
     for (what, keys) in [
         ("a Credential", &export.credentials),
         ("a `.claude.json`", &export.identity_files),
@@ -244,18 +164,13 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
         }
     }
 
-    // Every Profile is named before any is made. Where one of them lands is
-    // derivation and not a write, and an address no directory can be named after
-    // is a refusal (see [`registry::profile_dir_for`]) — meeting it half way
-    // through would mean undoing work that never had to be started.
-    // And no two of them may land in one place. Two addresses can flatten to one
-    // Profile name — `user+work@` and `user.work@` do — and `perch add` refuses
-    // that collision where a login enters, because storing over it supersedes
-    // the Credential already there and destroys a refresh token nothing can
-    // recover. An Export written on a machine that never had both can still be
-    // restored onto one where they collide, and this loop wrote the second over
-    // the first and reported success. Named before anything is made, like every
-    // other refusal here.
+    // Every Profile is named before any is made. Where one lands is derivation
+    // rather than a write, and an address no directory can be named after is a
+    // refusal — met half way through, it means undoing work never started.
+
+    // And no two may land in one place: `user+work@` and `user.work@` flatten to
+    // one Profile name, and storing over it supersedes the Credential already
+    // there, which `perch add` refuses where a login enters.
     for (at, account) in export.registry.accounts.iter().enumerate() {
         if let Some(clash) = export.registry.accounts[..at]
             .iter()
@@ -276,34 +191,17 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
     let mut placements = Vec::new();
     for account in &export.registry.accounts {
         let store = account.store(host)?;
-        // Keyed the way the guard above asked the question, which is
-        // `Export::credential_for` rather than a `BTreeMap` lookup: `account`
-        // folds case (`registry::same_name`) and a lookup by key does not, so an
-        // Export spelling a credential key `ONE@example.com` beside an account
-        // entry `one@example.com` passed the unlisted-Credential check — the key
-        // is listed — and then missed here, leaving that Account with no Profile
-        // and no Credential while the Import reported success. That is exactly
-        // the partial restore the guard exists to prevent, arriving through the
-        // one comparison it does not share with placement.
+        // Keyed the way the guard above asked the question: `credential_for`
+        // folds case and a `BTreeMap` lookup does not, so a key spelled
+        // `ONE@example.com` is listed by the one and missed by the other.
         if let Some(credential) = export.credential_for(account.email()) {
-            // The Profile's own `.claude.json` travels beside its Credential.
-            // Where the Export carries one it is written verbatim, because the
-            // `oauthAccount` block Claude Code wrote holds fields the registry
-            // does not record and a Switch prefers it over anything Perch would
-            // compose. Where it carries none, one is composed — a Profile
-            // without this file Carries nothing, so every Run against it would
-            // meet the onboarding dialog afresh
-            // (ADR everything-but-the-account). `Zeroizing`, because
-            // `Export::drop` goes to the trouble of wiping `identity_files` and
-            // this cloned a copy out from under it. A `.claude.json` is not
-            // only onboarding state: `login.rs` says why it is held like a
-            // Credential — "an MCP server entry routinely carries an API key in
-            // its `env` block" — so a plain `String` here outlived the guard
-            // and was dropped untouched.
-            //
-            // The composed fallback is not secret, and is wrapped anyway: one
-            // type for one value is what stops the next reader having to work
-            // out which of the two arms they are holding.
+            // Verbatim where the Export carries one, because Claude Code's
+            // `oauthAccount` block holds fields the registry does not record and
+            // a Switch prefers it (ADR everything-but-the-account).
+
+            // `Zeroizing` because `Export::drop` wipes `identity_files` and this
+            // clones out from under it: a `.claude.json` routinely carries an API
+            // key in an MCP server's `env` block. Both arms, so one type does.
             let identity_file = Zeroizing::new(
                 export
                     .identity_file_for(account.email())
@@ -321,21 +219,9 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
         }
     }
 
-    // A Profile something is running against is one nothing writes into, and
-    // `profile::store_credential`'s own doc names this as the one obligation it
-    // cannot check for itself. Every other writer honors it — a Switch, a login,
-    // a Carry, a Purge — and an Import did not.
-    //
-    // An Import runs on a machine holding no *Accounts*, which is not the same
-    // as a machine holding no Profiles: `Touched::was_already_there` exists
-    // because a Purge that failed at its last step leaves `profiles/` populated
-    // with no registry above it. Somebody who then opens a terminal against one
-    // of those directories and runs `perch holdings import` had that session's
-    // Credential replaced underneath it.
-    //
-    // Asked over everything about to be written, before the first write, which
-    // is the same bargain every other refusal here makes: named before anything
-    // is made.
+    // A Profile something is running against is one nothing writes into, which
+    // `profile::store_credential` names as the obligation it cannot check for
+    // itself. Asked over every placement before the first of them is written.
     let live: Vec<String> = placements
         .iter()
         .filter(|(_, store, _, _)| probe::anything_running(host, &store.config_dir))
@@ -352,13 +238,9 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
 
     let mut placed = Placed::default();
     for (email, store, credential, identity_file) in placements {
-        // Recorded before it is written rather than after it worked, because
-        // what has to come back out is everything this made: a Profile
-        // directory made for a Credential that then would not go into it is
-        // exactly the orphan an Import promises not to leave.
-        //
-        // And asked before the directory is made, which is the only moment the
-        // answer is still knowable — see [`Placed::undo`] for what turns on it.
+        // Recorded before it is written, because what has to come back out is
+        // everything this made — and asked before the directory is made, which
+        // is the only moment the answer is still knowable.
         placed.touched.push(Touched {
             was_already_there: host.path_exists(&store.config_dir),
             store: store.clone(),
@@ -368,9 +250,9 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
             .and_then(|()| login::carry_identity_file(host, &identity_file, &store))
         {
             placed.undo(host);
-            // Said as "every Profile this had made" rather than as a count,
-            // because the count is nothing at all when the first Account is the
-            // one that fails, and "the 0 already imported" is not a sentence.
+            // Said as "every Profile this had made" rather than as a count: the
+            // count is nothing when the first Account is the one that fails, and
+            // "the 0 already imported" is not a sentence.
             return Err(error.with_note(&format!(
                 "Nothing was imported. {email}'s Credential could not be stored, \
                  and every Profile this had already made has been taken back out \
@@ -626,13 +508,9 @@ mod tests {
         );
     }
 
-    /// A Credential for an Account the file does not list is a file that is not
-    /// the whole restore it claims to be.
-    ///
     /// `gather` cannot write one, so this is about a file written by something
-    /// else — and dropping it silently is the failure
-    /// ADR the-holdings-go-out-sealed exists to prevent, arriving as a success
-    /// message.
+    /// else — and dropping it silently is a success message over a restore that
+    /// was not whole.
     #[test]
     fn a_credential_for_an_account_the_export_does_not_list_is_refused() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
@@ -649,15 +527,11 @@ mod tests {
         );
     }
 
-    /// Two keys that fold to one address is one Credential restored and one
-    /// discarded, under a report saying the file was restored whole.
-    ///
     /// The `unlisted` guard folds case, so both keys name a listed Account and
-    /// both pass it. `credential_for` folds case too and answers with the
-    /// *first* — so the second was never placed, never mentioned, and never
-    /// counted. ADR the-holdings-go-out-sealed supports a hand-written Export
-    /// (`age -a -p`), which is where a capitalization that differs between two
-    /// keys comes from.
+    /// both pass it, and `credential_for` folds case too and answers with the
+    /// *first* — so the second is never placed, mentioned or counted. A
+    /// hand-written Export (`age -a -p`) is where two spellings of one address
+    /// come from.
     #[test]
     fn an_export_holding_one_address_under_two_spellings_is_refused() {
         for (what, mut export) in [
@@ -692,11 +566,9 @@ mod tests {
     }
 
     /// Two addresses can flatten to one Profile name, and plus-addressing on a
-    /// single inbox is exactly how somebody comes to hold several Accounts.
-    /// `perch add` refuses that collision where a login enters, because storing
-    /// over it supersedes the Credential already there and destroys a refresh
-    /// token nothing can recover. An Import placed the second over the first and
-    /// reported success.
+    /// single inbox is how somebody comes to hold several Accounts. `perch add`
+    /// refuses that collision where a login enters, because storing over it
+    /// destroys a refresh token nothing can recover.
     #[test]
     fn two_accounts_that_would_share_one_profile_are_refused_before_either_is_placed() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");

@@ -2,18 +2,12 @@
 //! alone.
 //!
 //! Perch patches files it does not own — `.claude.json` holds project history,
-//! MCP configuration and settings beside the one block that belongs to an
-//! Account (ADR everything-but-the-account). Parsing such a file and writing it
-//! back would reorder keys, reformat numbers and drop the shape its owner
-//! wrote, all invisibly. So the value is found as a span of text and spliced,
-//! and the rest of the file is never touched.
+//! MCP configuration and settings beside the one block belonging to an Account
+//! (ADR everything-but-the-account). Parsing such a file and writing it back
+//! would reorder keys, reformat numbers and drop the shape its owner wrote, all
+//! invisibly, so the value is found as a span of text and spliced.
 //!
-//! Deliberately narrow: it finds the value of one top-level key. Anything
-//! deeper is this applied twice — the value of `projects` is itself a document
-//! with keys of its own, so reading one entry out of it and writing one entry
-//! into it is the same pair of calls a second time. It is not a JSON library,
-//! and nothing here decides which key matters: that is [`crate::probe`]'s
-//! business and [`crate::carry`]'s, and this module never names one.
+//! Narrow, and not a JSON library: one top-level key, and deeper is this twice.
 
 /// The value of a top-level `key`, exactly as it is written, whatever kind of
 /// value it is.
@@ -33,16 +27,9 @@ pub fn object_at<'a>(contents: &'a str, key: &str) -> Option<&'a str> {
 
 /// The same document with `key` holding `value` — replacing what it held, or
 /// writing it as the document's first member where it held nothing. Every byte
-/// outside that value is identical.
-///
-/// The value is written at the indentation of the key that introduces it,
-/// whatever indentation it arrived with, so a block copied between two files
-/// does not step further right each time.
-///
-/// Written first rather than last because that is the one position needing no
-/// commas moved: the member the file already opens with keeps its comma, and
-/// everything after it is untouched. Where the document is not an object at
-/// all there is nowhere to write, and nothing is.
+/// outside that value is identical, and the value is written at the indentation
+/// of the key that introduces it, so a block copied between two files does not
+/// step further right each time.
 pub fn set_value_at(contents: &str, key: &str, value: &str) -> Option<String> {
     let Some((start, end)) = span_of(contents, key) else {
         return insert(contents, key, value);
@@ -56,6 +43,10 @@ pub fn set_value_at(contents: &str, key: &str, value: &str) -> Option<String> {
 }
 
 /// Writes a key the document does not have yet, as the first member of it.
+///
+/// First rather than last because it is the one position needing no commas
+/// moved: the member the file already opens with keeps its comma, and everything
+/// after it is untouched. A document that is not an object has nowhere to write.
 fn insert(contents: &str, key: &str, value: &str) -> Option<String> {
     let bytes = contents.as_bytes();
     let open = skip_whitespace(bytes, 0);
@@ -104,10 +95,8 @@ fn member_indentation(contents: &str, open: usize, inside: &str) -> usize {
 /// A key as it is written in a document, quotes, escapes and all.
 ///
 /// Compared and written in this form rather than decoded, because a key here is
-/// routinely a path — `projects` is keyed by directory, and a Windows one is a
-/// string of backslashes that only means what it says once escaped. Matching
-/// the text is exact for a document written by `JSON.stringify`, which is what
-/// Claude Code writes.
+/// routinely a path: `projects` is keyed by directory, and a Windows one is a
+/// string of backslashes that only means what it says once escaped.
 fn quoted(key: &str) -> String {
     serde_json::to_string(key).expect("a string serializes")
 }
@@ -250,14 +239,9 @@ fn indentation_of_the_line(contents: &str, at: usize) -> usize {
 
 /// Rewrites a block at a given indentation, whatever it was written at before.
 ///
-/// Counted in characters, as [`indentation_of_the_line`] counts the
-/// indentation it is being matched to. The block is read verbatim out of a
-/// `.claude.json` Perch does not own, so its whitespace can be anything Unicode
-/// calls whitespace — and a width measured in bytes and then used to cut a
-/// string would slice one of those characters in half and panic. Not somewhere
-/// a panic can be afforded: this runs inside `patch_identity`, after the
-/// incoming Credential is already live, where what the user needs is the
-/// recovery instructions rather than a backtrace.
+/// Counted in characters, as [`indentation_of_the_line`] counts what it is being
+/// matched to: the block is read verbatim out of a file Perch does not own, so a
+/// width measured in bytes would slice a character in half and panic.
 fn indent_to_match(block: &str, indentation: usize) -> String {
     let width_of = |line: &str| line.chars().take_while(|c| c.is_whitespace()).count();
     let own = block
@@ -288,11 +272,8 @@ fn indent_to_match(block: &str, indentation: usize) -> String {
 mod tests {
     use super::*;
 
-    /// The block is read verbatim out of a `.claude.json` Perch does not own,
-    /// so its whitespace is whatever is in that file. A width measured in bytes
-    /// and then used to cut a string slices a multi-byte character in half —
-    /// and this runs after the incoming Credential is already live, where a
-    /// panic replaces the recovery instructions the user actually needs.
+    /// This runs after the incoming Credential is already live, where a panic
+    /// replaces the recovery instructions the user actually needs.
     #[test]
     fn a_block_indented_with_multi_byte_whitespace_is_re_indented_rather_than_split() {
         // U+00A0 NO-BREAK SPACE: two bytes, one character, and whitespace as
@@ -456,16 +437,9 @@ mod tests {
     }
 
     /// A document written on one line, which is what a hand edit or anything
-    /// that minified it leaves — the one object shape between the two the tests
-    /// above cover, and the one nothing asked about.
-    ///
-    /// The member goes in as the first one and everything that was there
-    /// afterwards stays exactly as it was, byte for byte, which is the contract
-    /// this module keeps with a file it does not own. That leaves the member it
-    /// displaced sharing a line with it, and that is the honest consequence of
-    /// the contract rather than a shortcoming of it: reflowing the tail would
-    /// mean rewriting bytes outside the value, which is the one thing this is
-    /// written not to do.
+    /// that minified it leaves. The member it displaces shares a line with it,
+    /// and that is the contract rather than a shortcoming: reflowing the tail
+    /// would mean rewriting bytes outside the value.
     #[test]
     fn a_key_written_into_a_document_on_one_line_leaves_the_rest_of_it_alone() {
         let written = set_value_at(r#"{"numStartups": 4}"#, "hasSeenTasksHint", "true").unwrap();
