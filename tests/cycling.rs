@@ -1,11 +1,8 @@
 //! Behavior: what bare `perch switch` picks, and the three ways it honestly
 //! picks nothing.
 //!
-//! This is the command someone types mid-task when quota just ran out, so the
-//! tests are as much about what it refuses to do — prompt, leave the Group,
-//! land somewhere useless — as about which Account it lands on. Ranking reads
-//! the cache and nothing else (ADR a-figure-carries-its-age), so every fixture
-//! here seeds figures rather than arranging replies.
+//! Ranking reads the cache and nothing else (ADR a-figure-carries-its-age), so
+//! every fixture here seeds figures rather than arranging replies.
 
 mod common;
 
@@ -20,7 +17,7 @@ use perch::host::fake::Effect;
 use perch::host::prelude::*;
 
 /// Declares the ungrouped Accounts interchangeable
-/// (ADR a-group-is-a-declaration), the way a user declares it.
+/// (ADR a-group-is-a-declaration), the way a person declares it.
 fn ungrouped_declared_interchangeable(host: &FakeHost) {
     config_set(host, &["ungrouped", "interchangeable", "true"])
         .0
@@ -124,17 +121,9 @@ fn ranking_reads_each_accounts_worst_quota_window() {
 }
 
 /// The specimen ADR perch-says-what-it-did is written around: three lines, each
-/// of them something that happened.
-///
-/// The headroom the ranking was made on used to be quoted here — 60%, and true
-/// of every one of this Account's windows — and the figures underneath are what
-/// say it now. Both windows are shown, so the worst of them is there to be read
-/// rather than argued for, and what the ranking rested on survives beside the
-/// Account it landed on while the defense of it does not.
-///
-/// Counted as well as read, because "and nothing else" is the claim: a
-/// `contains` per line passes just as happily on a rationale sitting between
-/// them.
+/// of them something that happened. Counted as well as read, because "and
+/// nothing else" is the claim, and a `contains` per line passes just as happily
+/// on a rationale sitting between them.
 #[test]
 fn a_bare_switch_says_where_it_landed_and_what_it_bought_and_nothing_else() {
     let host = three_accounts_in_one_group();
@@ -152,8 +141,8 @@ fn a_bare_switch_says_where_it_landed_and_what_it_bought_and_nothing_else() {
     assert_eq!(
         said.len(),
         3,
-        "a landing line and one line per Quota Window is the whole of it \
-         (ADR perch-says-what-it-did): {printed}"
+        "a landing line and one line per Quota Window is the whole of it: \
+         {printed}"
     );
     assert_eq!(
         said[0],
@@ -171,7 +160,7 @@ fn a_bare_switch_says_where_it_landed_and_what_it_bought_and_nothing_else() {
     assert_eq!(
         printed.matches("as of 4m ago").count(),
         2,
-        "each carrying its own age (ADR a-figure-carries-its-age): {printed}"
+        "each carrying its own age: {printed}"
     );
 }
 
@@ -265,16 +254,6 @@ fn every_account_exhausted_picks_nothing_and_names_the_one_that_frees_up_soonest
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
 }
 
-/// A cached figure outlives the window it describes
-/// (ADR a-figure-carries-its-age), so an exhausted reading whose reset has
-/// already gone by says nothing about when that Account comes back — the window
-/// came back, and the percentage beside it is stale.
-///
-/// Read as a fact it sorted wrong twice: the soonest reset is the *earliest*, so
-/// among Accounts whose windows had all come back the stalest reading won, and
-/// `reset_phrase` renders a past instant as "(any moment now)". The refusal
-/// named a six-hour-old figure and announced it as freeing up any moment, while
-/// the one actually resetting within the hour went unmentioned.
 #[test]
 fn a_reset_that_has_already_gone_by_is_not_what_frees_up_soonest() {
     let host = three_accounts_in_one_group();
@@ -399,13 +378,8 @@ fn a_bare_switch_never_prompts() {
     );
 }
 
-/// A Cycle ranks on the cache and says so by dating what it shows, rather than
-/// by pre-empting a disappointment that has not happened
-/// (ADR perch-says-what-it-did).
-///
-/// The age is the whole of the promise Perch can make about a cached figure
-/// (ADR a-figure-carries-its-age), and it is made where the figure is rather
-/// than in a paragraph underneath it.
+/// The age is the whole of the promise Perch makes about a cached figure, and it
+/// is made where the figure is rather than in a paragraph underneath it.
 #[test]
 fn the_figures_a_choice_was_made_on_are_dated_and_never_read_from_the_network() {
     let host = three_accounts_in_one_group();
@@ -426,7 +400,7 @@ fn the_figures_a_choice_was_made_on_are_dated_and_never_read_from_the_network() 
     );
     assert!(
         host.http_calls().is_empty(),
-        "ranking reads the cache and never the network (ADR a-figure-carries-its-age)"
+        "ranking reads the cache and never the network"
     );
 }
 
@@ -512,7 +486,7 @@ fn the_setting_that_lets_ungrouped_accounts_cycle_is_off_until_it_is_turned_on()
     assert!(
         !registry_of(&host).ungrouped.interchangeable,
         "being ungrouped is the absence of a declaration that Accounts are \
-         interchangeable, not a weaker form of one (ADR a-group-is-a-declaration)"
+         interchangeable, not a weaker form of one"
     );
 }
 
@@ -532,11 +506,8 @@ fn a_group_with_nobody_left_to_cycle_to_says_so_rather_than_switching() {
     assert_eq!(error.exit_code(), EXIT_NO_CANDIDATE);
     assert!(error.to_string().contains("work"), "{error}");
 
-    // Two Accounts with full headroom are sitting in that Group, and the fix is
-    // `perch enable` rather than waiting for a quota reset. The refusal was
-    // measured over the candidates alone, so it said "every Account in Group
-    // `work` is exhausted" and then advised waiting — about a Group where
-    // nothing was exhausted but the one Account being left.
+    // Two Accounts with full Headroom are sitting in that Group, and the fix is
+    // `perch enable` rather than waiting for a quota reset.
     let said = error.to_string();
     assert!(
         said.contains("2 disabled"),
@@ -671,13 +642,8 @@ fn credentials_written(host: &FakeHost) -> usize {
         .count()
 }
 
-/// ADR a-group-is-a-declaration, amended: the Accounts in no Group are a Scope,
-/// so Cycling among them reads a Strategy somebody can set.
-///
-/// Before this there was no key, no Group and no command that could change it —
-/// the code read `Strategy::default()` because there was nothing to ask. It is
-/// the only behavior in Perch a person could not configure, and this is the
-/// test that it has stopped being one.
+/// The Accounts in no Group are a Scope, so Cycling among them reads a Strategy
+/// somebody can set rather than a constant compiled into Perch.
 #[test]
 fn cycling_among_ungrouped_accounts_reads_the_strategy_that_scope_holds() {
     let host = machine_with_three_accounts();

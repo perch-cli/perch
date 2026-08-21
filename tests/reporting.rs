@@ -127,13 +127,10 @@ fn json_carries_an_observation_time_on_every_utilization_figure() {
     assert_eq!(windows[0]["observed_seconds_ago"], 180);
 }
 
-/// A machine mid-Landing is indistinguishable from a healthy one, which is half
-/// of why the hazard survived: nobody looks
-/// (ADR a-switch-is-written-down-first). So status says a Switch was in flight
-/// and not recorded — as a line and as a `--json` field — and it **exits 0**,
-/// because status reports what it found rather than judging it
-/// (ADR a-figure-carries-its-age) and a state the next Switch settles by itself
-/// should not fail somebody's shell prompt.
+/// A machine mid-Landing is indistinguishable from a healthy one
+/// (ADR a-switch-is-written-down-first), so status says a Switch was in flight
+/// and not recorded and exits 0: it reports what it found rather than judging
+/// it, and a state the next Switch settles should not fail a shell prompt.
 #[test]
 fn status_says_a_switch_was_in_flight_and_not_recorded_and_still_exits_zero() {
     let host = machine_with_two_accounts();
@@ -160,13 +157,8 @@ fn status_says_a_switch_was_in_flight_and_not_recorded_and_still_exits_zero() {
 }
 
 /// A Landing that left nobody behind is the one shape with no Account under it
-/// to describe — Perch was on nobody when the Switch started — and it is still
-/// a state to report rather than an absence to fail on. So the line and the
-/// field are said alone, and the command exits 0.
-///
-/// Before, `perch status` answered this machine with "Perch holds no active
-/// Account" and a non-zero exit: true, unhelpful, and silent about the one
-/// thing that explains it.
+/// to describe, and it is still a state to report rather than an absence to fail
+/// on: the line and the field are said alone, and the command exits 0.
 #[test]
 fn a_switch_in_flight_from_nobody_is_still_reported_and_still_exits_zero() {
     let host = machine_with_two_accounts();
@@ -196,14 +188,10 @@ fn a_switch_in_flight_from_nobody_is_still_reported_and_still_exits_zero() {
     );
 }
 
-/// The listing widens the question to "where would I land", and which Account
-/// you are standing on is not a fact that stops being worth qualifying because
-/// of it: the `*` a listing draws is on the Account Perch was on rather than one
-/// it can establish is live.
-///
-/// Said at every breadth the listing has (ADR the-listing-owns-the-set), off
-/// the one sentence and the one field both documents share — narrowing to a
-/// Scope narrows which Accounts are shown and not which facts are true of them.
+/// The `*` a listing draws is on the Account Perch was on rather than one it can
+/// establish is live, and it is said at every breadth the listing has
+/// (ADR the-listing-owns-the-set): narrowing to a Scope narrows which Accounts
+/// are shown and not which facts are true of them.
 #[test]
 fn a_switch_in_flight_is_said_by_the_listing_at_every_breadth() {
     let host = machine_with_two_accounts();
@@ -248,16 +236,9 @@ fn status_json_says_no_switch_is_in_flight_rather_than_leaving_the_field_out() {
     assert!(document["landing"].is_null(), "{printed}");
 }
 
-/// One Account is one shape, whichever command is describing it.
-///
-/// `status --json` described its Account with `account_uuid` and neither
-/// `alias`, `group` nor `disabled`; `list --json` described one with those three
-/// and no `account_uuid`. Two non-overlapping key sets for the same thing, so a
-/// script asking which Group the Account it is on belongs to had to run a second
-/// command, and one written against either could not be pointed at the other.
-///
-/// What each *document* answers still differs — one Account under `active`, a
-/// set under `sections` — and that is the difference worth having.
+/// One Account is one shape, whichever command is describing it. What each
+/// *document* answers still differs — one Account under `active`, a set under
+/// `sections` — and that is the difference worth having.
 #[test]
 fn the_account_status_describes_has_the_same_keys_the_listing_gives_one() {
     let host = adopted_machine(OBSERVED_THREE_MINUTES_AGO);
@@ -307,16 +288,10 @@ fn json_says_a_figure_has_never_been_observed_rather_than_reporting_zero() {
     assert_eq!(utilization["windows"].as_array().unwrap().len(), 0);
 }
 
-/// The Utilization is said once, under the Account it is of.
-///
-/// It was also at the top level, for the `jq .utilization` in somebody's shell
-/// prompt, and that earned its keep against a document which — under the flag
-/// that widened this command to a Group — also answered about a set: the
-/// duplicate was insurance against reaching into the wrong shape. This document
-/// answers about exactly one Account and cannot be anything else
-/// (ADR the-listing-owns-the-set), so there is no wrong shape left to reach
-/// into and the same figure written twice is two places for one answer to go
-/// stale from.
+/// The Utilization is said once, under the Account it is of. This document
+/// answers about exactly one Account and cannot be anything else, so there is no
+/// wrong shape for a top-level copy to insure against — and the same figure
+/// written twice is two places for one answer to go stale from.
 #[test]
 fn the_document_carries_the_utilization_under_the_account_and_nowhere_else() {
     let host = adopted_machine(OBSERVED_THREE_MINUTES_AGO);
@@ -353,14 +328,10 @@ fn a_registry_from_a_newer_perch_is_refused_rather_than_misread() {
 }
 
 /// The version has to be read *before* the document is, or the guard only fires
-/// for registries a newer Perch happened to keep readable by this one.
-///
-/// A newer Perch is exactly the thing that writes a value this build has no
-/// variant for — a Strategy it added, a Quarantine reason. Deserializing first
-/// failed on that with serde's words, and the user was told `registry.json` is
-/// not valid JSON, about a file that is perfectly valid JSON. That is the
-/// misdiagnosis the version field exists to prevent, met in the one case it was
-/// added for.
+/// for registries a newer Perch happened to keep readable by this one — and a
+/// newer Perch is exactly the thing that writes a value this build has no
+/// variant for, which deserializing first reports as invalid JSON about a file
+/// that is perfectly valid JSON.
 #[test]
 fn a_registry_from_a_newer_perch_says_so_even_when_it_spells_things_this_build_cannot_read() {
     let host = logged_in_machine().with_file(
@@ -379,10 +350,8 @@ fn a_registry_from_a_newer_perch_says_so_even_when_it_spells_things_this_build_c
     assert!(error.to_string().contains("Upgrade Perch"), "{error}");
 }
 
-/// With Accounts held but Perch on nobody, a login is not the answer: Perch
-/// has Credentials and has simply been left on nobody, which is what `perch
-/// switch` is for — and what `perch remove` itself recommends when it leaves
-/// the machine in this state.
+/// With Accounts held but Perch on nobody, a login is not the answer: Perch has
+/// Credentials and has been left on nobody, which is what `perch switch` is for.
 #[test]
 fn status_with_no_active_account_names_the_remedy_that_applies() {
     let host = machine_with_two_accounts().with_answers(&["y"]);
@@ -405,13 +374,10 @@ fn status_with_no_active_account_names_the_remedy_that_applies() {
     );
 }
 
-/// `perch status` is the command advertised for a shell prompt, where it may
-/// run several times a minute — and two prompts drawing at once is the ordinary
-/// case rather than a race. Taking the registry lock to read would have one of
-/// them wait out the other and then fail, so a prompt would show an error
-/// because a second prompt happened to draw at the same moment.
-///
-/// Nothing is written without `--refresh`, so nothing needs shutting out.
+/// `perch status` is advertised for a shell prompt, where two of them drawing at
+/// once is ordinary rather than a race: taking the registry lock to read would
+/// have one wait out the other and then fail. Nothing is written without
+/// `--refresh`, so nothing needs shutting out.
 #[test]
 fn status_reads_alongside_another_perch_rather_than_waiting_on_it() {
     let host = machine_with_two_accounts();

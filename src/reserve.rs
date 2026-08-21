@@ -1,22 +1,13 @@
 //! What a Scope has left to draw on, said without inventing a number.
 //!
-//! One Account is measured by its most constrained Quota Window, and that
-//! figure is its Headroom (ADR headroom-is-the-worst-window). A Scope has no
-//! equivalent single figure and never will: its Accounts sit on different
-//! plans, Perch only ever sees percentages, and a `pro` Account at 50% and a
-//! `max` Account at 50% do not have the same quota left. Summing or averaging
-//! them produces a number that looks quantitative, is not, and is exactly the
-//! kind of number people plan around.
+//! The **Reserve** is how many of a Scope's Accounts still have Headroom and how
+//! much the best of them has — a count and one Account's own figure, never a
+//! pooled one, because a Scope has no single figure to pool
+//! (ADR headroom-is-the-worst-window).
 //!
-//! So the **Reserve** is how many of a Scope's Accounts still have Headroom and
-//! how much the best of them has — a count and one Account's own figure, every
-//! part of it something an Account actually reported rather than something Perch
-//! worked out.
-//!
-//! Said only where a heading has already named the Scope it is about, which is
-//! a narrowed `perch list` and nothing else on the human surface
-//! (ADR the-listing-owns-the-set). A `--json` section names its own Scope in a
-//! key, so every one of them carries it.
+//! Said only under a heading that has already named the Scope, which is a
+//! narrowed `perch list` and nothing else on the human surface
+//! (ADR the-listing-owns-the-set); a `--json` section names its Scope in a key.
 
 use chrono::{DateTime, Utc};
 use serde_json::json;
@@ -28,18 +19,14 @@ use crate::utilization;
 
 /// What a Scope has left to draw on.
 ///
-/// Held over the Accounts a Cycle may land on, because drawing on a Scope is
-/// what Cycling within it does: a Quarantined Account's Credential does not
-/// work and a Disabled one is never chosen, so counting either as something the
-/// Scope still has would be counting quota nothing can spend. They are still
-/// listed, and still said here — as what is out of the running rather than as
-/// part of what is left.
+/// Held over the Accounts a Cycle may land on: a Quarantined Credential does not
+/// work and a Disabled Account is never chosen, so counting either would count
+/// quota nothing can spend. Both are still said, as what is out of the running.
 pub struct Reserve<'a> {
     /// The Accounts a Cycle may land on, in the order the registry holds them.
-    /// Nothing here reads them in order — `best` reads the separately sorted
-    /// `with_headroom`, and the rest are counts — so this is deliberately not
-    /// the Cycle's ranking: claiming an order nothing establishes is an
-    /// invitation for the next caller to rely on one that is not there.
+    /// Deliberately not the Cycle's ranking — `best` reads the separately sorted
+    /// `with_headroom` and the rest are counts — because claiming an order
+    /// nothing establishes invites the next caller to rely on it.
     candidates: Vec<&'a Account>,
     /// Those of them with Headroom, best first — an Account and the room in its
     /// fullest Quota Window.
@@ -48,22 +35,18 @@ pub struct Reserve<'a> {
     exhausted: usize,
     /// Candidates Perch has never read a figure for.
     unobserved: usize,
-    /// How many Accounts the scope holds that a Cycle may not choose at all,
-    /// and which way each of them left the running — counted by
-    /// [`cycle::out_of_the_running`], so this says what the refusal to Cycle
-    /// says.
+    /// How many Accounts the Scope holds that a Cycle may not choose at all, and
+    /// which way each left the running — counted by [`cycle::out_of_the_running`],
+    /// so this says what the refusal to Cycle says.
     not_candidates: usize,
     out_of_the_running: String,
 }
 
 impl<'a> Reserve<'a> {
-    /// What one scope has left, read from the cache alone
-    /// (ADR a-figure-carries-its-age).
-    ///
-    /// Every candidate is classified exactly once, into exactly one of the three
-    /// answers [`HowMuchIsLeft`] has. That is what makes the counts add up to
-    /// the Accounts on screen: two passes asking two questions could disagree,
-    /// and a tally nobody can check is a tally nobody should read.
+    /// What one Scope has left, read from the cache alone
+    /// (ADR a-figure-carries-its-age). Every candidate is classified exactly
+    /// once into one of [`HowMuchIsLeft`]'s three answers, which is what makes
+    /// the counts add up to the Accounts on screen.
     pub fn of(registry: &'a Registry, scope: &Scope) -> Reserve<'a> {
         let accounts = scope.accounts(registry);
         let candidates: Vec<&Account> = accounts
@@ -82,12 +65,9 @@ impl<'a> Reserve<'a> {
                 HowMuchIsLeft::NeverObserved => unobserved += 1,
             }
         }
-        // Best first. Stable, so a tie keeps the order the registry holds them
-        // in and the same Scope says the same thing twice — which is all that is
-        // claimed here. It is deliberately *not* a claim about where a Cycle
-        // would land: under `soonest-reset` the Account with the most room is
-        // not the one a Cycle prefers, and a Reserve is about what is there
-        // rather than about which of it gets chosen.
+        // Best first, stable, so a tie keeps the registry's order. Deliberately
+        // not a claim about where a Cycle would land: under `soonest-reset` the
+        // Account with the most room is not the one a Cycle prefers.
         with_headroom.sort_by(|(_, ours), (_, theirs)| theirs.total_cmp(ours));
 
         Reserve {
@@ -100,19 +80,15 @@ impl<'a> Reserve<'a> {
         }
     }
 
-    /// The Reserve as it is read: a count, and the best Account's own figure
-    /// with the age of the observation it came from.
-    ///
-    /// Never one pooled figure, whichever way it falls. Where nothing is left
-    /// the answer is what is in the way — exhausted, never observed, or out of
-    /// the running — because "none" without a reason is a Scope somebody stares
-    /// at wondering which.
+    /// The Reserve as it is read: a count, and the best Account's own figure with
+    /// the age of the observation it came from. Where nothing is left, the answer
+    /// is what is in the way — exhausted, never observed, or out of the running —
+    /// because "none" without a reason is a Scope somebody stares at wondering
+    /// which.
     pub fn lines(&self, now: DateTime<Utc>) -> Vec<String> {
         let mut lines = vec![match self.best() {
-            // The age is the best Account's own, read off the observation its
-            // Headroom was measured from — which is why there is one to read:
-            // Room is what an Account with a figure has, and the two absences
-            // [`HowMuchIsLeft`] tells apart are the other two arms.
+            // The best Account's own age, read off the observation its Headroom
+            // was measured from — which is why there is one to read at all.
             Some((_, percent)) => format!(
                 "Reserve: {} of {} {} Headroom, the best {}% left (as of {})",
                 self.with_headroom.len(),
@@ -125,17 +101,9 @@ impl<'a> Reserve<'a> {
                     now,
                 ),
             ),
-            // Nothing was read to reach this one: being Disabled or Quarantined
-            // is a fact about the registry rather than an observation, so there
-            // is no age to carry and none is invented.
-            //
-            // Something is always in the way here, and the parenthetical is not
-            // guarded against being empty. Candidates come out empty only by
-            // every Account the Scope holds leaving the running; a Scope holding
-            // no Account at all would reach this branch with nothing to name,
-            // and it cannot — the listing says its own better sentence, that the
-            // Scope holds no Accounts yet, and returns before any of this is
-            // asked for.
+            // No age: being Disabled or Quarantined is a fact about the
+            // registry rather than an observation. The parenthetical is never
+            // empty — an empty Scope is the listing's own sentence, said first.
             None if self.candidates.is_empty() => format!(
                 "Reserve: none — no Account here may be Cycled to ({})",
                 self.out_of_the_running,
@@ -148,19 +116,9 @@ impl<'a> Reserve<'a> {
             ),
         }];
 
-        // The count above is read from cache like every other figure, so it
-        // says how old the readings behind it are
-        // (ADR a-figure-carries-its-age). The oldest of them, because that is
-        // the weakest thing the count rests on — and on a line of its own,
-        // because the sentence above is already as long as a terminal is wide.
-        //
-        // Gated on there being no best, this said the one thing it is for only
-        // in the case where the count is nought. With a best, the only age on
-        // the line belonged to the *freshest* Account: "2 of 3 have Headroom,
-        // the best 93% left (as of 4m ago)" is a count resting on a reading
-        // eight hours old and reads as four minutes old. So it is said whenever
-        // the oldest is not the one already shown, which is also what keeps it
-        // off the line when there is nothing more to add.
+        // The oldest reading the count rests on, which is the weakest thing it
+        // rests on — the age already shown belongs to the best Account alone. On
+        // a line of its own, because the sentence above is as wide as a terminal.
         if let Some(oldest) = self.oldest_reading()
             && self.best_read_at() != Some(oldest)
         {
@@ -186,20 +144,11 @@ impl<'a> Reserve<'a> {
         lines
     }
 
-    /// The same facts as a script reads them.
-    ///
-    /// Fields rather than the sentence [`lines`] renders, because the listing's
-    /// document is structured throughout and a prose sentence in a document is
-    /// a thing scripts end up regexing (ADR the-listing-owns-the-set).
-    ///
-    /// Every count is over the Accounts a Cycle may choose, so `with_headroom`,
-    /// `exhausted` and `never_observed` add up to `candidates`, and those plus
-    /// `out_of_the_running` add up to the Accounts in the section beside it.
-    /// Which way each of those left the running is not counted again here: the
-    /// section's own Accounts carry `disabled` and `quarantined`, and a second
-    /// tally of the same fact is how one comes to disagree with the other.
-    ///
-    /// [`lines`]: Reserve::lines
+    /// The same facts as a script reads them: fields rather than the sentence
+    /// [`Reserve::lines`] renders, since a prose sentence in a document is a
+    /// thing scripts end up regexing. Every count is over the Accounts a Cycle
+    /// may choose, so they add up to the Accounts in the section beside it, and
+    /// which way each left the running is not counted a second time here.
     pub fn document(&self) -> serde_json::Value {
         json!({
             "candidates": self.candidates.len(),
@@ -207,22 +156,16 @@ impl<'a> Reserve<'a> {
             "exhausted": self.exhausted,
             "never_observed": self.unobserved,
             "out_of_the_running": self.not_candidates,
-            // One Account's own figure, named — never a pooled one, and never
-            // one no Account reported. `null` where nothing here has Headroom,
-            // which is a state rather than nought room (`cycle::headroom_document`
-            // refuses the same conflation one Account at a time).
-            //
-            // Unrounded, like every other percentage in a document: rounding is
-            // what a column does to fit.
+            // One Account's own figure, named. `null` where nothing here has
+            // Headroom, which is a state rather than nought room. Unrounded,
+            // like every percentage in a document.
             "best": self.best().map(|(account, percent)| json!({
                 "email": account.email(),
                 "percent": percent,
                 "observed_at": self.best_read_at().map(|at| at.to_rfc3339()),
             })),
             // The weakest reading the counts above rest on, which is what the
-            // sentence quotes for the same reason
-            // (ADR a-figure-carries-its-age). `null` where no candidate has
-            // ever been read.
+            // sentence quotes. `null` where no candidate has ever been read.
             "oldest_observed_at": self.oldest_reading().map(|at| at.to_rfc3339()),
         })
     }
@@ -282,7 +225,6 @@ mod tests {
         Reserve::of(registry, &work()).lines(now())
     }
 
-    /// The count and one Account's own figure — never a pooled one.
     #[test]
     fn a_reserve_is_a_count_and_the_best_accounts_own_figure() {
         let registry = holding(vec![
@@ -297,9 +239,6 @@ mod tests {
         );
     }
 
-    /// A `pro` Account at 50% and a `max` Account at 50% do not have the same
-    /// quota left, and Perch never sees the allowance behind either — so the
-    /// only figure it may quote is one an Account reported.
     #[test]
     fn no_figure_in_a_reserve_is_one_no_account_reported() {
         let registry = holding(vec![
@@ -318,14 +257,6 @@ mod tests {
         }
     }
 
-    /// The count rests on every candidate's reading, so the age beside it has to
-    /// be the oldest of them rather than the best one's own.
-    ///
-    /// The line was gated on there being no best, so it said the one thing it is
-    /// for only when the count was nought. With a best, the only age on screen
-    /// belonged to the *freshest* Account: a count of two resting on a reading
-    /// eight hours old read as four minutes old, which is the direction that
-    /// matters — it overstates what Perch knows.
     #[test]
     fn the_age_beside_a_count_is_the_oldest_reading_it_rests_on() {
         let mut stale = account("stale@example.com", vec![window("5-hour", 60.0)]);
@@ -349,7 +280,6 @@ mod tests {
         );
     }
 
-    /// "None" without a reason is a Scope somebody stares at wondering which.
     #[test]
     fn a_scope_with_nothing_left_says_what_is_in_the_way() {
         let registry = holding(vec![
@@ -361,17 +291,11 @@ mod tests {
             reserve_of(&registry),
             [
                 "Reserve: none of 2 Accounts have Headroom (1 exhausted, 1 never observed)",
-                // Counted from cache like every other figure, so it says how
-                // old the readings behind it are.
                 "Read 4m ago at the oldest.",
             ]
         );
     }
 
-    /// A Quarantined Credential does not work and a Disabled Account is never
-    /// chosen, so neither is part of what a Scope has left — and both are said,
-    /// because a count that quietly dropped them would not add up to the
-    /// Accounts on screen.
     #[test]
     fn what_a_cycle_may_not_choose_is_not_counted_as_something_the_scope_has() {
         let mut spared = account("spared@example.com", vec![window("5-hour", 0.0)]);
@@ -393,8 +317,6 @@ mod tests {
         );
     }
 
-    /// Counting to "0 of 0" would be arithmetic about a Scope nothing may
-    /// reach. What is in the way is the answer instead.
     #[test]
     fn a_scope_nothing_may_cycle_to_says_that_rather_than_counting_to_zero() {
         let mut broken = account("broken@example.com", vec![window("5-hour", 0.0)]);
@@ -406,10 +328,8 @@ mod tests {
         );
     }
 
-    /// The same facts, as the shape a script reads
-    /// (ADR the-listing-owns-the-set) — with the counts adding up to the
-    /// Accounts beside them, which is what makes the document checkable against
-    /// its own `accounts` array.
+    /// The counts add up to the Accounts beside them, which is what makes the
+    /// document checkable against its own `accounts` array.
     #[test]
     fn the_document_says_the_same_counts_the_sentence_does() {
         let mut broken = account("broken@example.com", vec![window("5-hour", 0.0)]);
@@ -449,9 +369,6 @@ mod tests {
         );
     }
 
-    /// No figure is invented for a Scope nothing has ever been read for — a
-    /// `percent` of nought and no reading at all are opposite pieces of advice,
-    /// and the document says the second as absence rather than as a number.
     #[test]
     fn a_document_reports_no_figure_for_a_scope_nothing_was_ever_read_for() {
         let registry = holding(vec![
