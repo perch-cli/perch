@@ -1,34 +1,13 @@
 //! Conformance: the two adapters at the Host port, asked the same questions.
 //!
-//! The Host trait's interface is not its signatures. It is the sentences on
-//! them — an absent directory reports `NotFound` rather than emptiness, a
-//! removed file that was not there is not a failure, `link_target` answers for
-//! the link and not for what it points at, `create_dir_exclusive` never
-//! succeeds quietly. Those sentences had two implementations and no reader:
-//! [`RealHost`] and [`FakeHost`] were kept in step by hand, commit by commit,
-//! and the fake's own doc comments are a list of the times that failed —
-//! reads that did not follow a symbolic link, a private write that skipped the
-//! choreography it was supposed to model, and three more.
+//! The port's interface is not its signatures but the sentences on them — an
+//! absent directory reports `NotFound` rather than emptiness, `link_target`
+//! answers for the link and not for what it points at, `create_dir_exclusive`
+//! never succeeds quietly. A sentence with two implementations and no reader is
+//! one they drift apart on, so the table asks both, and its shape is what lets
+//! a failure name which adapter and which sentence.
 //!
-//! So the sentences are executed here, once, against both. A case that passes
-//! for one adapter and fails for the other is the finding; the table shape is
-//! what lets a failure say which one and which sentence, rather than stopping
-//! at the first assertion of a long function.
-//!
-//! Not the whole port. What a scratch directory can drive is the filesystem and
-//! the links — nineteen methods. The clock, the keychain, the processes, the
-//! terminal and the network are either the machine's own state, which a test
-//! has no business owning, or the very things a fake exists to invent: a fake
-//! clock that agreed with the real one would be no use to anybody. The keychain
-//! is asserted against the real one by `your_machine.rs`, behind the feature
-//! that suite needs; the processes by `corroboration.rs`, which needs no
-//! feature because the only processes it reads are its own.
-//!
-//! Ungated, unlike `your_machine.rs`. That one is held back because its outcome
-//! is not this repository's to determine (ADR an-assumption-is-probed). This
-//! asks whether Perch's two adapters still agree with each other, in scratch
-//! directories of its own, and a failure here is a fault in the change that
-//! caused it — so it runs on every pull request, on every platform CI has.
+//! Ungated, unlike `your_machine.rs` (ADR a-suite-is-named-and-gated).
 
 use std::path::{Path, PathBuf};
 
@@ -38,14 +17,10 @@ use perch::host::{
     Platform, RealHost,
 };
 
-/// This machine, as the port names it — so the fake is asked to be the platform
-/// the real host is already on.
-///
-/// Without it the two are not answering about the same machine and any
-/// agreement between them is a coincidence: `RealHost::file_mode` is gated on
-/// `#[cfg(unix)]` at compile time while the fake's is gated on this value at run
-/// time, so a fake left at its default would claim macOS permissions on a
-/// Windows runner.
+/// This machine, as the port names it, so the fake is asked to be the platform
+/// the real host is already on. `RealHost` gates on `#[cfg]` and the fake on
+/// this value, so a fake left at its default claims macOS permissions on a
+/// Windows runner and any agreement between the two is a coincidence.
 fn this_platform() -> Platform {
     if cfg!(target_os = "macos") {
         Platform::MacOs
@@ -72,18 +47,14 @@ fn scratch(case: &str) -> PathBuf {
     dir
 }
 
-/// Which links this machine will actually make, asked of the real filesystem.
-///
-/// A Windows without Developer Mode makes no symbolic link, and that is a fact
-/// about the *machine* rather than about either adapter. The fake models it with
-/// a knob that defaults to off, so left alone the two answer differently and
-/// each skips on its own: the fake skips every symbolic case while the real host
-/// asserts them, both tests pass, and the suite reports an agreement it never
-/// checked. So the machine is asked once and the fake is told the answer.
+/// Which links this machine will make, asked of the real filesystem: a Windows
+/// without Developer Mode makes no symbolic link, and that is a fact about the
+/// *machine* rather than about either adapter. The fake's knob for it defaults
+/// to off, so left alone each adapter skips a different set and the suite
+/// reports an agreement it never checked.
 fn links_this_machine_makes() -> &'static [Link] {
-    // Asked once. The two tests run in parallel and the answer is a property of
-    // the machine rather than of either of them, so asking twice would be two
-    // threads racing over one scratch directory for the same answer.
+    // Once: the answer belongs to the machine rather than to either test, and
+    // the two run in parallel over one scratch directory.
     static MADE: std::sync::OnceLock<Vec<Link>> = std::sync::OnceLock::new();
     MADE.get_or_init(|| {
         let host = RealHost::new();
@@ -97,10 +68,9 @@ fn links_this_machine_makes() -> &'static [Link] {
     })
 }
 
-/// Whether this machine will make a link of this kind at all — a Windows
-/// without Developer Mode will not make a symbolic one, which is the case the
-/// other two kinds exist for. Said out loud, because a case that skipped itself
-/// and a case that asserted look identical otherwise.
+/// Whether this machine will make a link of this kind at all. Said out loud,
+/// because a case that skipped itself and a case that asserted must not look
+/// identical.
 fn can_link(host: &dyn Filesystem, kind: Link, root: &Path, adapter: &str) -> bool {
     let target = root.join("can-link-target");
     let at = root.join("can-link-at");
@@ -128,16 +98,11 @@ struct Case {
     /// because the useful failure is "the fake fails this one and the real host
     /// does not".
     named: &'static str,
-    /// The adapter's own `now`, handed in rather than reached for.
-    ///
-    /// One sentence here spans two concerns: `lock.rs` reads a holder's
-    /// staleness as `now() - modified_at(artifact)`, so an adapter whose clock
-    /// and whose mtimes disagreed would break every staleness rule while
-    /// answering both questions plausibly. The table takes a `&dyn Filesystem`
-    /// because that is what a scratch directory drives, so the clock cannot be
-    /// reached from inside a case — the driver, which holds the concrete
-    /// adapter, reads it and passes it. Cases that do not need it take `_now`
-    /// (ADR the-port-fits-the-machine).
+    /// The adapter's own `now`, handed in because a case holds a
+    /// `&dyn Filesystem` and cannot reach the concrete clock
+    /// (ADR the-port-fits-the-machine). `lock.rs` reads staleness as
+    /// `now() - modified_at(artifact)`, so an adapter whose clock and whose
+    /// mtimes disagree answers both questions plausibly and breaks every rule.
     asserts: fn(&dyn Filesystem, &Path, &str, DateTime<Utc>),
 }
 
@@ -177,13 +142,9 @@ const CASES: &[Case] = &[
             );
         },
     },
-    // Both of these are about a lock artifact that is a dangling link, which is
-    // the state `reconcile`'s denylist exists to keep Perch out of and
-    // `lock::clear_the_abandoned` has to be able to meet anyway. The fake used
-    // to answer the opposite way on both — a modification time where the
-    // machine says `NotFound`, and `ENOTDIR` where the machine removes the link
-    // — so it modeled Perch as permanently wedged on a path the machine
-    // recovers from on the next command, and the recovery had never run.
+    // Both are about a lock artifact that is a dangling link: the state
+    // `reconcile`'s denylist keeps Perch out of and `lock::clear_the_abandoned`
+    // has to be able to meet anyway.
     Case {
         named: "asking when a dangling link was written is not an answer",
         asserts: |host, root, adapter, _now| {
@@ -241,15 +202,9 @@ const CASES: &[Case] = &[
             }
         },
     },
-    // The case above asks for a mode no umask widens, so it answered the same
-    // whether or not the umask had been taken out of it. This one asks for a
-    // bit every ordinary umask strips — 022, 002 and 077 all clear at least one
-    // of these — so it can only pass where the mode is the creation's.
-    //
-    // What it guards is `write_atomically`, which reads the target's mode and
-    // writes the replacement with it: a `.claude.json` its owner keeps at 0644
-    // came back at 0600 from a Switch run in a shell with a tight umask, and
-    // nothing said so.
+    // Bits every ordinary umask strips, unlike the case above, so this can
+    // only pass where the mode is the creation's — which `write_atomically`
+    // rests on, reading a target's mode and writing the replacement with it.
     Case {
         named: "the mode asked for survives a umask that would have taken bits out of it",
         asserts: |host, root, adapter, _now| {
@@ -302,10 +257,9 @@ const CASES: &[Case] = &[
                     Some(PRIVATE_FILE_MODE),
                     "{adapter}: the owner and nobody else (ADR claude-code-chooses-the-store)"
                 );
-                // The half this case has always been named for and never
-                // asked. A Credential at 0600 inside a directory anybody may
-                // list is a Credential whose name, size and mtime are public,
-                // and the directory here is one this very call made.
+                // A Credential at 0600 inside a directory anybody may list is
+                // one whose name, size and mtime are public — and the directory
+                // here is one this very call made.
                 assert_eq!(
                     host.file_mode(&dir).ok().flatten(),
                     Some(PRIVATE_DIR_MODE),
@@ -314,10 +268,9 @@ const CASES: &[Case] = &[
             }
         },
     },
-    // The two steps have different owners where this is relied on: a Profile's
-    // directory is made by one module and its Credential written by another,
-    // which is exactly how a directory ends up wearing the mode of whichever of
-    // them got there first.
+    // The two steps have different owners: a Profile's directory is made by one
+    // module and its Credential written by another, so a directory otherwise
+    // wears the mode of whichever got there first.
     Case {
         named: "a write into a directory already made private leaves it private",
         asserts: |host, root, adapter, _now| {
@@ -387,11 +340,9 @@ const CASES: &[Case] = &[
     Case {
         named: "narrowing an existing file leaves nobody but the owner",
         asserts: |host, root, adapter, _now| {
-            // The one `chmod` Perch performs, and the place the two adapters are
-            // gated differently: `RealHost::make_private` is `#[cfg(unix)]` and a
-            // silent no-op elsewhere, while the fake gates on the runtime
-            // Platform. Asked through `file_mode`, which answers `None` where
-            // bits mean nothing, the two agree — this is what says so.
+            // The one `chmod` Perch performs, and the place the adapters are
+            // gated differently — `#[cfg(unix)]` against the runtime Platform.
+            // Asked through `file_mode` they agree.
             let path = root.join("was-open");
             host.create_file_with_mode(&path, "found looser than it should be", 0o644)
                 .expect("it is created");
@@ -417,11 +368,9 @@ const CASES: &[Case] = &[
             if !can_link(host, Link::Symbolic, root, adapter) {
                 return;
             }
-            // The store this narrows sits under `CLAUDE_CONFIG_DIR`, which is
-            // taken verbatim and can name a directory somebody else can write.
-            // A `chmod` on a *name* follows a link, so a link planted at that
-            // name sent the mode to whatever it pointed at — a file the user can
-            // read and did not mean to expose.
+            // The store this narrows sits under `CLAUDE_CONFIG_DIR`, taken
+            // verbatim, so it can name a directory somebody else writes. A
+            // `chmod` on a *name* follows a link; `O_NOFOLLOW` refuses.
             let elsewhere = root.join("someone-elses-file");
             host.create_file_with_mode(&elsewhere, "not mine", 0o644)
                 .expect("it is created");
@@ -430,15 +379,13 @@ const CASES: &[Case] = &[
                 .expect("linked");
 
             match modes_mean_something() {
-                // A `chmod` on a name follows a link, and `O_NOFOLLOW` is what
-                // refuses one.
                 true => {
                     host.make_private(&planted)
                         .expect_err("a link is refused rather than followed");
                 }
-                // No mode to send anywhere: the narrowing is a documented no-op
-                // where permission bits mean nothing, so there is no
-                // redirection for it to refuse.
+                // No mode to send anywhere: the narrowing is a documented
+                // no-op where bits mean nothing, so there is nothing to
+                // redirect.
                 false => {
                     host.make_private(&planted).unwrap_or_else(|err| {
                         panic!("{adapter}: a no-op cannot be redirected: {err}")
@@ -491,9 +438,7 @@ const CASES: &[Case] = &[
 
             // `NotFound` is load-bearing at this port — `CredentialStore::read`
             // reads it as "this store holds nothing" and `clients_in` as
-            // "nothing is running" — so a rename that answered with it was an
-            // answer the next caller would have been written against, and only
-            // one of the two adapters gave it.
+            // "nothing is running" — so a rename must not spend it.
             assert!(
                 !matches!(failed, HostError::NotFound { .. }),
                 "{adapter}: a rename propagates what the filesystem said rather \
@@ -518,10 +463,9 @@ const CASES: &[Case] = &[
     Case {
         named: "an absent directory is NotFound rather than empty",
         asserts: |host, root, adapter, _now| {
-            // Load-bearing: `probe::clients_in` is built on this distinction,
-            // so a fake answering `Ok(vec![])` would silently disarm
-            // ADR a-profile-is-live-by-evidence — "nothing is running" and
-            // "nowhere to look" are different answers.
+            // `probe::clients_in` is built on this distinction: "nothing is
+            // running" and "nowhere to look" are different answers
+            // (ADR a-profile-is-live-by-evidence).
             match host.list_dir(&root.join("no-such-directory")) {
                 Err(HostError::NotFound { .. }) => {}
                 other => panic!("{adapter}: expected NotFound, got {other:?}"),
@@ -531,17 +475,9 @@ const CASES: &[Case] = &[
     Case {
         named: "listing a file is an error, and not the absent-directory one",
         asserts: |host, root, adapter, _now| {
-            // The other half of the sentence above, and the half nothing asked
-            // for until now. `probe::clients_in` reads `NotFound` as "no client
-            // has ever run here, so nothing is running" and lets a Switch
-            // replace the live Credential; anything else is doubt it refuses
-            // on. So a `<profile>/sessions` that is a regular file — a botched
-            // restore, a name crossed by a hard link — must not read as idle.
-            //
-            // The two adapters phrase the refusal differently, and are entitled
-            // to: the machine says `ENOTDIR` and the fake says so in a
-            // sentence. What has to agree is which side of the one distinction
-            // a caller acts on they land, so that is what is asserted.
+            // The other half: `NotFound` lets a Switch replace the live
+            // Credential, so a `sessions` that is a file must not read as idle.
+            // The two may word it differently; the side they land must agree.
             let file = root.join("not-a-directory");
             host.create_file_with_mode(&file, "x", PRIVATE_FILE_MODE)
                 .expect("a file to ask about");
@@ -649,10 +585,9 @@ const CASES: &[Case] = &[
     Case {
         named: "a lock carries the time it was taken",
         asserts: |host, root, adapter, now| {
-            // The other half of what makes a directory a lock. Exclusivity says
-            // who gets it; the age is how a holder that died holding it is told
-            // from one still working, and every staleness rule in `lock.rs`
-            // reads it off the artifact rather than off a file inside.
+            // Exclusivity says who gets the lock; the age is how a holder that
+            // died holding it is told from one still working, read off the
+            // artifact rather than off a file inside.
             let dir = root.join("the-dated-lock");
             host.create_dir_exclusive(&dir).expect("it is taken");
 
@@ -691,11 +626,9 @@ const CASES: &[Case] = &[
             );
         },
     },
-    // The property every share rests on, and the one a copy would fail: what is
-    // read through the link is what the Default Profile holds *now*, not what
-    // it held when Reconcile made it (ADR everything-but-the-account). "a read
-    // follows a symbolic link" above only reads a file that was already
-    // written.
+    // The property every share rests on, and the one a copy would fail: what
+    // is read through the link is what the Default Profile holds *now*, not
+    // what it held when Reconcile made it (ADR everything-but-the-account).
     Case {
         named: "a write after the link is made is read through it",
         asserts: |host, root, adapter, _now| {
@@ -719,9 +652,9 @@ const CASES: &[Case] = &[
             );
         },
     },
-    // The same for a directory, and the part an allowlist would have got wrong:
-    // a file that appears in the Default Profile after the link was made is
-    // reachable through it without anything being told.
+    // The same for a directory, and the part an allowlist gets wrong: a file
+    // appearing in the Default Profile after the link was made is reachable
+    // through it without anything being told.
     Case {
         named: "a directory link shows what the directory gains afterwards",
         asserts: |host, root, adapter, _now| {
@@ -729,15 +662,15 @@ const CASES: &[Case] = &[
             let link = root.join("shared-plugins");
             host.create_dir_all(&real).expect("a directory to share");
 
-            // What Reconcile itself picks for a directory on this platform, so
-            // this is the junction path on a Windows without Developer Mode.
+            // What Reconcile picks for a directory here, so this is the
+            // junction path on a Windows without Developer Mode.
             let kind = if cfg!(windows) {
                 Link::Junction
             } else {
                 Link::Symbolic
             };
-            // A junction needs no privilege. A symbolic one is the kind a
-            // machine may decline, and `can_link` is what asks it.
+            // A junction needs no privilege; a symbolic one a machine may
+            // decline.
             if kind == Link::Symbolic && !can_link(host, kind, root, adapter) {
                 return;
             }
@@ -764,8 +697,8 @@ const CASES: &[Case] = &[
     Case {
         named: "a link whose target has gone is still a link",
         asserts: |host, root, adapter, _now| {
-            // The whole of how a broken one is found and repaired
-            // (`reconcile::establish` branches three ways on exactly this).
+            // How a broken one is found and repaired: `reconcile::establish`
+            // branches three ways on exactly this.
             let real = root.join("about-to-go");
             let link = root.join("left-dangling");
             host.create_file_with_mode(&real, "briefly", PRIVATE_FILE_MODE)
@@ -821,13 +754,9 @@ const CASES: &[Case] = &[
     Case {
         named: "making a directory at a link uses what it points at",
         asserts: |host, root, adapter, _now| {
-            // The state ADR everything-but-the-account is about: a Profile
-            // whose `sessions` is a link into another configuration directory.
-            // `probe::claim` does `create_dir_all` on that path, so what this
-            // answers decides whether the Marker lands in the Profile or
-            // somewhere else — and the fake used to insert a directory
-            // *shadowing* the link, which is a third behavior no filesystem
-            // has.
+            // `probe::claim` does `create_dir_all` on a Profile's `sessions`,
+            // so this decides where the Marker lands; a directory *shadowing*
+            // the link is a third behavior no filesystem has.
             let elsewhere = root.join("another-profile-sessions");
             let here = root.join("sessions");
             host.create_dir_all(&elsewhere)
@@ -847,12 +776,9 @@ const CASES: &[Case] = &[
                 "{adapter}: the link is still a link rather than shadowed"
             );
 
-            // And the other half of what "uses what it points at" means: a
-            // write under the link lands in the target. This is the whole
-            // hazard ADR everything-but-the-account names — a Marker written
-            // into a Profile's `sessions` reaching the Default Profile's — and
-            // the fake could not model it, because it stored files at the name
-            // it was given while reading *through* the link.
+            // The other half of "uses what it points at": a write under the
+            // link lands in the target, which is the hazard — a Marker written
+            // into a Profile's `sessions` reaching the Default Profile's.
             host.create_file_with_mode(&here.join("a-marker"), "written", PRIVATE_FILE_MODE)
                 .expect("a file under it");
             assert!(
@@ -864,12 +790,9 @@ const CASES: &[Case] = &[
     Case {
         named: "making a directory where a file already sits is refused",
         asserts: |host, root, adapter, _now| {
-            // The third answer `create_dir_all` has, and the one the fake had
-            // no branch for at all: `mkdir` answers EEXIST and the `is_dir` it
-            // falls back on says no, so this fails rather than succeeding
-            // quietly or replacing what is there. Reachable wherever a Profile
-            // holds a regular file at a name Perch expects a directory at — a
-            // botched restore, or a `sessions` crossed by a hard link.
+            // `create_dir_all`'s third answer, reachable wherever a Profile
+            // holds a file at a name Perch expects a directory: `mkdir` says
+            // EEXIST and the `is_dir` fallback says no, so this fails.
             let occupied = root.join("not-a-directory");
             host.create_file_with_mode(&occupied, "a file", PRIVATE_FILE_MODE)
                 .expect("the file");
@@ -890,9 +813,9 @@ const CASES: &[Case] = &[
     Case {
         named: "making a directory at a link to nothing is refused",
         asserts: |host, root, adapter, _now| {
-            // `mkdir` answers EEXIST and the `is_dir` that `create_dir_all`
-            // falls back on follows the link and finds nothing — so this is the
-            // one shape of `mkdir -p` that fails on a path nothing occupies.
+            // `mkdir` says EEXIST and the `is_dir` it falls back on follows
+            // the link and finds nothing — the one shape of `mkdir -p` that
+            // fails on a path nothing occupies.
             let gone = root.join("target-that-was-removed");
             let dangling = root.join("points-at-nothing");
             host.create_dir_all(&gone).expect("somewhere to point at");
@@ -914,10 +837,9 @@ const CASES: &[Case] = &[
     Case {
         named: "an exclusive directory is mkdir rather than mkdir -p",
         asserts: |host, root, adapter, _now| {
-            // The fake inserted the path whatever was above it, so a lock could
-            // be taken inside a Profile that does not exist — and a behavior
-            // test could then show a Switch proceeding under a lock the machine
-            // would have refused to give it.
+            // Not `mkdir -p`: a lock taken inside a Profile that does not
+            // exist is a Switch proceeding under a lock the machine would have
+            // refused it.
             let missing = root.join("no-such-profile");
             match host.create_dir_exclusive(&missing.join(".oauth_refresh.lock")) {
                 Err(HostError::NotFound { .. }) => {}
@@ -932,11 +854,9 @@ const CASES: &[Case] = &[
     Case {
         named: "touching a path that is not there reports NotFound",
         asserts: |host, root, adapter, _now| {
-            // `NotFound` is the answer `lock::renew` reads as "the artifact has
-            // gone, so this hold is no longer mine". `touch_now` funneled every
-            // `utimes` failure into `Io` while the fake resolved first and
-            // answered `NotFound`, so the two adapters disagreed about the one
-            // variant this port treats as meaningful.
+            // The answer `lock::renew` reads as "the artifact has gone, so
+            // this hold is no longer mine" — so a `utimes` failure funneled
+            // into `Io` loses the one variant this port treats as meaningful.
             match host.touch(&root.join("no-such-artifact")) {
                 Err(HostError::NotFound { .. }) => {}
                 other => panic!("{adapter}: expected NotFound, got {other:?}"),
@@ -946,12 +866,9 @@ const CASES: &[Case] = &[
     Case {
         named: "a link onto an occupied name reports AlreadyExists",
         asserts: |host, root, adapter, _now| {
-            // The variant this port treats as meaning contention rather than
-            // breakage — `mod.rs` calls it "the whole of what makes a lock a
-            // lock". The real host let `?` flatten EEXIST into `Io` while the
-            // fake answered `AlreadyExists`, so a caller that branched on it
-            // would have been written against the fake and been wrong on the
-            // machine.
+            // The variant this port treats as contention rather than
+            // breakage, so a `?` that flattens EEXIST into `Io` is a caller
+            // written against the fake and wrong on the machine.
             let target = root.join("something-to-point-at");
             let taken = root.join("already-here");
             host.create_file_with_mode(&target, "x", PRIVATE_FILE_MODE)
@@ -971,13 +888,9 @@ const CASES: &[Case] = &[
     Case {
         named: "removing a link refuses anything that is not one",
         asserts: |host, root, adapter, _now| {
-            // The one call whose whole contract is that it only ever takes away
-            // Perch's own share. Asserted here rather than only against the
-            // fake, because that is how the Windows arm came to read the
-            // attributes purely to choose between `remove_dir` and
-            // `remove_file` and then remove whatever was at the name: the
-            // refusal was proven by the adapter that had it, on every platform
-            // including the one that did not.
+            // The one call whose whole contract is that it takes away only
+            // Perch's own share — and the refusal is per-adapter, so asking
+            // the fake alone proves it of the adapter that has it.
             let plain = root.join("the-persons-own-file");
             host.create_file_with_mode(&plain, "not Perch's", PRIVATE_FILE_MODE)
                 .expect("the file");
@@ -998,10 +911,9 @@ const CASES: &[Case] = &[
     Case {
         named: "a kind this platform will not make is refused rather than substituted",
         asserts: |host, root, adapter, _now| {
-            // A junction is Windows' link for a directory and exists nowhere
-            // else. Which kind was made decides what happens when the target is
-            // replaced, so a platform that cannot make one says so rather than
-            // quietly putting a symbolic link there instead.
+            // A junction is Windows' link for a directory. Which kind was made
+            // decides what happens when the target is replaced, so a platform
+            // that cannot make one says so rather than substituting.
             let target = root.join("a-directory");
             host.create_dir_all(&target).expect("something to point at");
             let at = root.join("the-junction");
@@ -1047,10 +959,9 @@ const CASES: &[Case] = &[
     Case {
         named: "a hard link stops naming a file that is replaced rather than written",
         asserts: |host, root, adapter, _now| {
-            // Why Reconcile re-establishes a hard link before every Run instead
-            // of trusting the one it left: it is a second name for a *file*, so
-            // the write-beside-then-rename-over an editor performs when it saves
-            // leaves the name behind on the file nobody can reach any more.
+            // Why Reconcile re-establishes a hard link before every Run: it
+            // names a *file*, so the write-beside-then-rename-over an editor
+            // performs leaves the name on a file nobody can reach.
             let real = root.join("settings.json");
             let second = root.join("shared-settings.json");
             host.create_file_with_mode(&real, "first", PRIVATE_FILE_MODE)
@@ -1081,8 +992,8 @@ const CASES: &[Case] = &[
     },
 ];
 
-/// A run in which every link case skipped is a run that checked nothing about
-/// the half of this port that ADR everything-but-the-account turns on.
+/// A run in which every link case skipped checked nothing about the half of
+/// this port a Profile's shares rest on.
 fn refuse_a_run_with_no_links_in_it(made: &[Link]) {
     assert!(
         made.iter()
@@ -1115,8 +1026,8 @@ fn the_fake_host_conforms_to_the_port() {
 
     for case in CASES {
         let host = FakeHost::new().with_platform(this_platform());
-        // What the machine the real host is on will actually make, so the two
-        // skip the same cases rather than each skipping its own.
+        // What the machine will actually make, so the two skip the same cases
+        // rather than each skipping its own.
         let host = match developer_mode {
             true => host.with_developer_mode(),
             false => host,

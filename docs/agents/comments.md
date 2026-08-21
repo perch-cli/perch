@@ -136,7 +136,7 @@ cannot follow the citation and did not ask for it. `CHANGELOG.md` is the other
 exemption, in the other direction — it records what happened on a date, so a
 number there is not a citation and may name a document that is gone.
 
-Checked by `tests/citing.rs`: a slug resolving to exactly one file, a slug
+Checked by `tests/citation.rs`: a slug resolving to exactly one file, a slug
 within cap and hyphenated, and nothing citing a number. Two exemptions stand
 until the area passes run — the guide, which loses its `ADR` mentions rather
 than gaining slugs, and `docs/research/adr-inventory.md`, a dated read of the 64

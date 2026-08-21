@@ -3,16 +3,13 @@ name: CI
 on:
   push:
     branches: [main]
-  # The default types, and deliberately not `edited`. The pull request title
-  # check needs that one — a title nobody can re-check after fixing it is a
-  # check nobody can satisfy — but types belong to the workflow rather than the
-  # job, so asking for it here rebuilt a three-platform Rust matrix every time
-  # somebody edited a description. It lives in `pr-title.yml` instead, which is
-  # one grep and costs seconds.
+  # The default types, deliberately not `edited`: types belong to the workflow
+  # rather than the job, so asking for it here rebuilds this matrix on every
+  # edited description. The title check needs it and lives in `pr-title.yml`.
   pull_request:
-  # `your_machine.rs` exists to find Claude Code drift before a user does, and
   # Claude Code updates continuously while this repository may not change for a
-  # week. A weekly run is what turns "we would have noticed" into "we did".
+  # week, so the weekly run is what turns "we would have noticed" into "we did"
+  # (ADR an-assumption-is-probed).
   schedule:
     - cron: "0 6 * * 1"
 
@@ -26,14 +23,9 @@ env:
 
 jobs:
   check:
-    # This job was macOS-only while the keychain and the `security` binary
-    # were the point. Perch now claims full parity, so every platform runs
-    # everything it can: the keychain cases in `your_machine.rs` still assert
-    # only on macOS (they carry a `cfg` each and are compiled out elsewhere),
-    # and everything about the file store, the links and the session markers
-    # runs everywhere. Windows is the one to watch — its credential store is
-    # the least-established belief in the design, which is exactly where a
-    # canary belongs.
+    # Every platform runs everything it can, because Perch claims full parity.
+    # Windows is the one to watch: its credential store is the
+    # least-established belief in the design, which is where a canary belongs.
     strategy:
       fail-fast: false
       matrix:
@@ -41,19 +33,19 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      # Actions are pinned to commit SHAs, not tags: a tag is mutable and can be
-      # repointed at new code by whoever owns the action. The trailing comment is
-      # the tag the SHA stood for when it was pinned.
+      # Pinned to commit SHAs rather than tags: a tag is mutable and can be
+      # repointed at new code by whoever owns the action. The trailing comment
+      # is the tag the SHA stood for when it was pinned.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Keeps GITHUB_TOKEN out of .git/config. Cargo runs build.rs from every
-          # dependency during the build, so a hostile crate would otherwise have
-          # a credential sitting on disk to read.
+          # Keeps GITHUB_TOKEN out of .git/config: Cargo runs build.rs from
+          # every dependency, so a hostile crate would otherwise have a
+          # credential sitting on disk to read.
           persist-credentials: false
 
       # No toolchain action: rust-toolchain.toml pins the channel and its
-      # components, so the version lives in one place rather than two that can
-      # drift apart. rustup on the runner installs it on first use.
+      # components, so the version lives in one place rather than two. rustup
+      # on the runner installs it on first use.
       - name: Toolchain
         run: |
           rustup show active-toolchain
@@ -65,14 +57,9 @@ jobs:
         run: cargo fmt --all -- --check
 
       # Perch writes American English — CLAUDE.md says why, typos.toml is the
-      # rule. Beside Format because it is the same kind of check: a mechanical
-      # convention, decided once, enforced rather than reviewed. Prose is the one
-      # thing here nothing else checks, and it is the half a reader sees first.
-      #
-      # Three invocations rather than one, because `typos` skips any file its own
-      # config could live in, and both of the files it skips are tracked. One
-      # platform, like the other steps that install a tool: spelling is a
-      # property of the code rather than of the runner.
+      # rule. Three invocations rather than one, because `typos` skips any file
+      # its own config could live in and both files it skips are tracked. One
+      # platform: spelling is a property of the code, not of the runner.
       - name: Spelling
         if: runner.os == 'Linux'
         run: |
@@ -81,35 +68,27 @@ jobs:
           typos - < Cargo.toml
           typos - < typos.toml
 
-      # --all-features so `your_machine.rs` is linted too: it is held back from
-      # `cargo test` by a feature, and without this it would go unlinted.
+      # --all-features so the gated suite is linted too: held back from
+      # `cargo test` by a feature, it would otherwise go unlinted.
       - name: Lint
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      # Everything the default feature set builds — lib, bin, doc tests, and
-      # every tests/*.rs Cargo finds. Nothing to add here when a suite is:
-      # `your_machine.rs` is the only one held back, and it is held back by
-      # `required-features` in Cargo.toml rather than by being absent from a
-      # list somebody has to remember to extend. It has a step of its own
-      # below, so a failure there reads as what it is.
-      #
-      # --locked because a resolver that is free to update Cargo.lock is a CI
-      # run that tested a dependency set no one has committed.
+      # Everything the default feature set builds, so nothing is added here
+      # when a suite is: what is held back is held back by `required-features`
+      # rather than by absence from a list. --locked, because a resolver free to
+      # update Cargo.lock is a run that tested a set nobody has committed.
       - name: Unit and behavior tests
         run: cargo test --locked
 
-      # The binary somebody downloads, built with the feature set it ships with
-      # — which is the one the fake is held back from. `cargo test` turns
-      # `fakes` on through the dev-dependency, so it is the only thing that
-      # proves nothing outside a test reaches for `FakeHost`: a single stray
-      # reference fails here and nowhere else.
+      # The binary somebody downloads, built with the feature set it ships
+      # with. `cargo test` turns `fakes` on through the dev-dependency, so this
+      # is the only thing that catches a stray reference to `FakeHost`.
       - name: The shipped binary carries no fake
         run: cargo build --locked --bin perch
 
-      # A dependency that nothing imports is compile time and audit surface for
-      # no call site, and it is invisible: nothing fails when the last use of a
-      # crate is deleted. This is the check that would have caught ratatui and
-      # crossterm sitting unused (ADR a-crate-must-not-cost-a-seam).
+      # A dependency nothing imports is compile time and audit surface for no
+      # call site, and it is invisible: nothing else fails when the last use of
+      # a crate goes (ADR a-crate-must-not-cost-a-seam).
       - name: Unused dependencies
         if: runner.os == 'Linux'
         run: |
@@ -124,32 +103,21 @@ jobs:
           cargo install cargo-audit --locked --version 0.22.2
           cargo audit --deny warnings
 
-      # `rust-version` in Cargo.toml is a claim, and a claim nothing checks is a
-      # claim that quietly stops being true the first time somebody uses a
-      # newer language feature. Checked rather than tested: building is what the
-      # promise is about.
-      #
-      # --all-features for the reason the Lint step above gives: without it
-      # `your_machine.rs` and the fakes were exempt from the claim, and the
-      # exemption grew every time one of them did.
+      # `rust-version` in Cargo.toml is a claim, and a claim nothing checks
+      # stops being true the first time somebody reaches for a newer language
+      # feature. Checked rather than tested: building is what it promises, and
+      # --all-features is what keeps the gated suite and the fakes inside it.
       - name: Minimum supported Rust version
         if: runner.os == 'Linux'
         run: |
           rustup toolchain install 1.97 --profile minimal
           cargo +1.97 check --locked --all-targets --all-features
 
-      # Gives the step below a real bundle to assert against. If the install
-      # is unavailable those tests assert the "no Claude Code here" branch
-      # instead, so an outage upstream does not turn every pull request red.
-      #
-      # The installer is pinned by checksum but the version deliberately is not:
-      # ADR an-assumption-is-probed wants the beliefs asserted against whatever
-      # Claude Code is current, so pinning the version would freeze the drift
-      # this job exists to detect. Pin the code that runs, float the product it
-      # installs.
-      #
-      # When this step fails on a checksum, Anthropic has almost certainly just
-      # updated install.sh. Diff it, satisfy yourself, then bump INSTALL_SHA.
+      # Gives the step below a real bundle, and an outage upstream degrades to
+      # the "no Claude Code here" branch rather than turning a request red. Pin
+      # the code that runs, float the product it installs: pinning the version
+      # would freeze the drift this exists to detect. A checksum failure is
+      # almost always an updated install.sh — diff it, then bump INSTALL_SHA.
       - name: Install Claude Code
         if: runner.os != 'Windows'
         env:
@@ -162,10 +130,8 @@ jobs:
             exit 0
           fi
 
-          # A checksum mismatch is not an outage. Fail hard rather than warn:
-          # a warning here would let the install quietly stop happening, the
-          # tests below fall back to the absent branch, and CI stay green with
-          # drift detection switched off.
+          # A checksum mismatch is not an outage. Warning instead would let CI
+          # stay green with drift detection quietly switched off.
           echo "$INSTALL_SHA  /tmp/install.sh" | shasum -a 256 -c -
 
           bash /tmp/install.sh latest
@@ -198,20 +164,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $env:USERPROFILE ".local\bin")
 
-      # The suite that is held back because it needs the developer's own machine
-      # — the installed Claude Code, the real `~/.claude`, and on macOS the real
-      # login keychain (ADR an-assumption-is-probed). A runner is the one
-      # machine that can be asked for that consent, so this is where it is
-      # asked, and drift is found here rather than by a user being logged out by
-      # a background auto-update. Kept as a step of its own so a failure here
-      # reads as upstream drift rather than as a fault in the pull request.
-      #
-      # --nocapture so the "skipping:" lines are visible: a suite that skipped
-      # itself and a suite that asserted look identical otherwise.
-      #
-      # No `--lib`. It was here because naming `--test` targets suppresses the
-      # default set, and two unit tests were held back by this same feature and
-      # so ran nowhere at all. Both run by default now, in the step above.
+      # Held back because it needs state a developer owns and did not offer,
+      # and a runner is the one machine that can be asked for that consent
+      # (ADR a-suite-is-named-and-gated). A step of its own, so a failure reads
+      # as upstream drift. --nocapture because a suite that skipped and a suite
+      # that asserted must not look identical.
       - name: The tests that need your machine
         run: cargo test --locked --features your-machine --test your_machine -- --nocapture
 
@@ -269,21 +226,11 @@ jobs:
           }
           Write-Output "install.ps1 parses cleanly"
 
-  # The site is built on every pull request, for the same reason the installers
-  # are checked on one: a site that will not build should be found on the pull
-  # request that broke it rather than by a deploy that cannot run.
-  #
-  # What this proves is the *next* release's site, not the one being served:
-  # `pages.yml` publishes the guide from the newest release and only the
-  # installers from main (ADR one-thing-renders-the-site). That is the check
-  # that was wanted either way.
-  #
-  # What gives this teeth is what Starlight refuses: a page with no `title` in
-  # its frontmatter, and — because of the one plugin this site has — a relative
-  # markdown link naming a page that is not there
-  # (ADR one-thing-renders-the-site). The rest of what could go quietly wrong, a
-  # README pointing at a page that moved or an installer URL that grew a prefix,
-  # is `tests/publication.rs`, which runs with the other suites.
+  # Built on every pull request, for the same reason the installers are checked
+  # on one, and what it proves is the *next* release's site rather than the one
+  # being served (ADR one-thing-renders-the-site). What gives it teeth is what
+  # Starlight refuses: a page with no `title`, and a relative link naming a page
+  # that is not there. The rest of it is `tests/publication.rs`.
   site:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -301,15 +248,13 @@ jobs:
         with:
           node-version: 24
 
-      # Which pnpm is `packageManager` in pages/package.json, and corepack is
-      # what reads it — so CI and the deploy take their version from the one
-      # place, and no third-party action is added to the supply chain to do it.
+      # Which pnpm is `packageManager` in pages/package.json and corepack reads
+      # it, so CI and the deploy agree without a third-party action.
       - name: pnpm
         run: corepack enable pnpm
 
-      # --frozen-lockfile is what replaced the mdBook tarball's `sha256`: the
-      # lockfile carries an integrity hash for the whole tree, and this refuses
-      # to install anything else.
+      # --frozen-lockfile: the lockfile carries an integrity hash for the whole
+      # tree, and this refuses to install anything else.
       - name: Install
         run: pnpm install --frozen-lockfile
 
@@ -320,13 +265,10 @@ jobs:
         run: pnpm build
 
   # Which lines the suites reach, reported to Codecov and shown as the README's
-  # badge. One platform rather than three: coverage is a property of the code
-  # rather than of the runner, so a matrix would upload three near-identical
-  # reports for Codecov to merge at three times the minutes.
-  #
-  # A job of its own rather than a step in `check`, because instrumented tests
-  # run slower than plain ones and the three-platform matrix is what gates a
-  # pull request. Coverage informs; it does not gate.
+  # badge. One platform, because coverage is a property of the code rather than
+  # of the runner. A job of its own rather than a step in `check`, because
+  # instrumented tests run slower and the matrix is what gates a pull request:
+  # coverage informs, it does not gate.
   coverage:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -336,34 +278,27 @@ jobs:
           persist-credentials: false
 
       # Not in rust-toolchain.toml's `components`, for the reason its comment
-      # gives about `targets`: this is wanted by one CI job and by nobody
-      # building Perch, and listing it there would make every contributor
-      # download it to compile a binary that does not need it.
+      # gives about `targets`: one CI job wants this and nobody building Perch
+      # does, so listing it there costs every contributor the download.
       - name: Toolchain
         run: rustup component add llvm-tools-preview
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
-      # `cargo install` rather than a tool-installer action, which is how
-      # cargo-machete and cargo-audit already arrive: one fewer third-party
-      # action to pin, review and trust.
+      # `cargo install` rather than a tool-installer action, as cargo-machete
+      # and cargo-audit arrive: one fewer third-party action to trust.
       - name: cargo-llvm-cov
         run: cargo install cargo-llvm-cov --locked --version 0.8.7
 
-      # The default feature set, deliberately. `your_machine.rs` is held back
-      # by `required-features` because its outcome is the developer's machine's
-      # to decide rather than this repository's (ADR an-assumption-is-probed),
-      # and instrumenting it here would count the lines it covers on a runner
-      # where it is compiled out — a figure that moved with the runner rather
-      # than with the tests.
+      # The default feature set, deliberately: instrumenting the gated suite
+      # would count its lines on a runner where it is compiled out, which is a
+      # figure that moves with the runner rather than with the tests.
       - name: Coverage
         run: cargo llvm-cov --locked --lcov --output-path lcov.info
 
-      # The upload is conditional because the token is a repository secret, and
-      # a pull request from a fork is not given one. Without this the job would
-      # fail on every outside contribution, which is the opposite of what a
-      # coverage report is for. `secrets` is not readable from an `if:`, so the
-      # answer is computed here where it is.
+      # Conditional because the token is a repository secret and a fork's pull
+      # request is not given one, so an outside contribution would otherwise
+      # fail. `secrets` is unreadable from an `if:`, so it is computed here.
       - name: Is there a token to upload with
         id: token
         run: echo "present=${{ secrets.CODECOV_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
@@ -385,16 +320,11 @@ jobs:
         run: |
           echo "::warning::CODECOV_TOKEN is not set, so the report was measured but not uploaded. The README's coverage badge stays unknown until it is."
 
-  # The name branch protection listens to for this file, however the matrix
-  # above grows or renames its legs. `if: always()` with an explicit verdict,
-  # because a plain `needs:` job is skipped when a leg fails — and a skipped
-  # required check satisfies branch protection, which would wave the failure
-  # through.
-  #
-  # It does not speak for `pr-title.yml`. Aggregating across workflows is not
-  # something a job can do, so that check is required in its own right; the
-  # alternative was letting a description edit skip this matrix and report
-  # green on a commit whose real verdict was red.
+  # The name branch protection listens to, however the matrix above grows or
+  # renames its legs. `if: always()` with an explicit verdict, because a plain
+  # `needs:` job is skipped when a leg fails and a skipped required check
+  # satisfies branch protection. It does not speak for `pr-title.yml`: a job
+  # cannot aggregate across workflows, so that one is required in its own right.
   success:
     needs: [check, installers, site]
     if: always()
