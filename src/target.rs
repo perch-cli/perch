@@ -24,9 +24,9 @@ pub enum Target {
 }
 
 impl Target {
-    /// How the Target matched, ready to print on its own line — so "Perch
-    /// understood me" is something the user reads rather than infers from the
-    /// outcome. Hands back the *held* spelling rather than what was typed.
+    /// How the Target matched, on its own line: which of three kinds a name
+    /// turned out to be is the part nobody could have predicted
+    /// (ADR perch-says-what-it-did). The *held* spelling, not what was typed.
     pub fn matched(&self) -> String {
         match self {
             Target::Alias { name, email } => format!("`{name}` is an Alias for {email}."),
@@ -187,7 +187,7 @@ fn near_matches(candidates: &[String], target: &str) -> Vec<String> {
         .collect();
     // A started name sorts in its own bucket first, because on raw distance a
     // long address loses to any three-letter near-miss and the list is cut at
-    // three. Plainly, because the tuple already orders that way.
+    // three.
     scored.sort();
     scored
         .into_iter()

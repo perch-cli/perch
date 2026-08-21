@@ -4,8 +4,6 @@ import type { SatteriProcessorOptions } from "@astrojs/markdown-satteri";
 type HastPlugin = NonNullable<SatteriProcessorOptions["hastPlugins"]>[number];
 
 /**
- * Rewrites the guide's relative markdown links into the paths the site serves.
- *
  * A page cross-references its neighbors as `switching.md#cycling`, which GitHub
  * resolves and a browser cannot (ADR one-thing-renders-the-site). Anything of
  * another shape is refused rather than guessed at: neither this nor

@@ -8,10 +8,9 @@
 
 const ISSUES: &str = "https://github.com/perch-cli/perch/issues";
 
-/// Adds Perch's own section to whatever the runtime already prints for a panic.
 /// The default hook stays underneath rather than being replaced — it already
-/// prints the payload, the location and the backtrace — so what is added is only
-/// the part a bug report needs and the runtime has no way to know.
+/// prints the payload, the location and the backtrace — so what is added is
+/// only the part a bug report needs and the runtime has no way to know.
 pub fn install_panic_hook() {
     let runtime = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic| {
@@ -20,18 +19,17 @@ pub fn install_panic_hook() {
     }));
 }
 
-/// Whether the runtime just printed a backtrace. Split from the reading of the
-/// variable so the rule can be tested without mutating the environment of a
-/// process running three hundred other tests in parallel.
+/// Whether the runtime just printed one. Split from the reading of the variable
+/// so the rule can be tested without mutating the environment of a process
+/// running the rest of the suite alongside it.
 fn backtrace_was_asked_for() -> bool {
     asked_for(std::env::var_os("RUST_BACKTRACE").as_deref())
 }
 
-/// The runtime's own reading of `RUST_BACKTRACE`: nought is off, anything else is
-/// on, unset is off. The variable's mere presence is not the question —
-/// `RUST_BACKTRACE=0` is how the runtime is told *not* to print one, so reading
-/// it as agreement withholds the suggestion from the one person with no
-/// backtrace to send.
+/// The runtime's own reading of `RUST_BACKTRACE`: nought is off, anything else
+/// is on, unset is off. `RUST_BACKTRACE=0` is how the runtime is told *not* to
+/// print one, so reading the variable's presence as agreement withholds the
+/// suggestion from the one person with no backtrace to send.
 fn asked_for(set: Option<&std::ffi::OsStr>) -> bool {
     set.is_some_and(|asked| asked != "0")
 }
@@ -50,9 +48,8 @@ pub(crate) fn this_is_a_bug() -> String {
     )
 }
 
-/// The section Perch adds, as one block of text. A separate function because a
-/// panic hook runs once, on the worst day somebody is having with this tool, and
-/// is not somewhere to find out that a line was wrong.
+/// A function of its own so the text can be asserted: a panic hook runs once,
+/// and is not somewhere to find out that a line was wrong.
 fn bug_report(backtrace_was_asked_for: bool) -> String {
     let mut said = format!("\n{}", this_is_a_bug());
     if !backtrace_was_asked_for {
@@ -76,7 +73,6 @@ mod tests {
         assert!(said.contains("RUST_BACKTRACE=1"), "{said}");
     }
 
-    /// Nobody needs telling to do the thing they have already done.
     #[test]
     fn a_run_that_already_asked_for_a_backtrace_is_not_asked_again() {
         assert!(!bug_report(true).contains("RUST_BACKTRACE"));

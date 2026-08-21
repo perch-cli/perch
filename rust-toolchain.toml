@@ -4,9 +4,6 @@
 channel = "1.97.1"
 components = ["rustfmt", "clippy"]
 
-# No `targets`. A release builds each target on a runner of its own
-# architecture, so the only cross-compile is x86_64 macOS from an arm64 one and
-# the release workflow adds that where it needs it. Listing them here instead
-# would make every contributor download five standard libraries to build for
-# the one they are sitting in front of. The two Apple targets that used to be
-# here were left over from when Perch was macOS-only and nothing read them.
+# No `targets`: listing them makes every contributor download five standard
+# libraries to build for the one they are sitting in front of. A release names
+# the one cross-compile it needs, in the workflow that needs it.

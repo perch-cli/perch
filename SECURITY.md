@@ -41,8 +41,8 @@ a fix may take longer than that — the acknowledgment will say where it stands.
 
 Perch holds Claude Code credentials wherever the installed Claude Code keeps
 one — the macOS keychain, or a file inside a profile directory on Linux and
-Windows (ADR claude-code-chooses-the-store). Both stores are in scope, and the
-file store is the one with the least behind it:
+Windows. Both stores are in scope, and the file store is the one with the least
+behind it:
 
 - Reading, writing, or deleting keychain entries that are not Perch's own.
 - Anything that writes a credential to disk, a log, the terminal, or `argv`.

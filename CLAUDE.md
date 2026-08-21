@@ -49,7 +49,7 @@ typos - < typos.toml
 
 ## A comment earns its place
 
-Every comment in `src/` and `tests/` says one of four things:
+Every comment in this repository says one of four things:
 
 1. **The road not taken.** Why this and not the alternative a reader reaches for.
 2. **The invariant.** What this upholds, or what breaks if it moves.
@@ -63,11 +63,17 @@ State the fact. No rhetoric, no restatement for effect, no sentence whose work i
 emphasis. `CONTEXT.md`'s nouns — Account, Credential, Headroom — are vocabulary
 rather than jargon, and the shortest correct phrasing available.
 
-| | job | cap |
+| tier | job | cap |
 | --- | --- | --- |
-| `//!` | what the module is for, and the decisions governing it | 10 lines |
-| `///` | the item's contract, and why it has this shape | 5 lines |
-| `//` | a local surprise, at the site | 3 lines |
+| header | what the file is for, and the decisions governing it | 10 lines |
+| declaration | the item's contract, and why it has this shape | 5 lines |
+| site | a local surprise, where it surprises | 3 lines |
+
+Rust spells the three `//!`, `///` and `//`. Every other syntax has one marker
+and takes its tier from where the block sits: a file's first block is its
+header, a block a line of code follows documents that declaration, and anything
+else is a note at a site. A block that wants the header's cap is moved to the
+top of the file rather than argued about.
 
 Argued once, at the widest scope that owns it: what the header says is not said
 again at a site. **Over the cap is not a long comment — it is a decision with no
@@ -77,6 +83,11 @@ A decision is cited once per file. Present tense only: a rejected alternative
 stays, stated as a live alternative, and what the code *used to do* goes. A
 test's name is its claim, so a test carries a comment only where the fixture
 surprises.
+
+`tests/comment.rs` holds the two clauses a text comparison reaches: the caps,
+and one citation per decision per file. **Passing it is not passing the
+standard** — which of the four things a comment says, and whether it says it in
+the present tense, need a reader.
 
 This binds comments, not documents. `src/` states facts, `docs/adr/` makes the
 case, `CONTEXT.md` defines terms — a deliberate split, not an oversight.
@@ -96,8 +107,10 @@ One form everywhere — Rust, Markdown, TOML, YAML, TypeScript — and never a p
 or a link, because the slug is the identity and a path names the number instead.
 A citation names a document, never a section.
 
-A citation addresses an agent reading the tree, so two places never carry one:
-the guide under `pages/src/content/docs/`, and anything Perch says to a person.
+A citation addresses a reader with the tree in front of them. The guide under
+`pages/src/content/docs/`, `README.md` and `SECURITY.md` face one who has not,
+and so does everything Perch says at a terminal — including a `///` clap renders
+into `--help`. None of them carries a citation.
 
 Worked examples and the reasoning: `docs/agents/comments.md`.
 
