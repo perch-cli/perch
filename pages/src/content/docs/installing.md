@@ -5,8 +5,8 @@ sidebar:
 ---
 
 Perch is pre-1.0. Every release is real and works, but the command line may
-still change between them, so no channel hands it to you by default — you ask
-for it by name. macOS, Linux and Windows, on both Arm and Intel except Windows,
+still change between them, and the changelog marks every change that breaks
+something. macOS, Linux and Windows, on both Arm and Intel except Windows,
 which is x64 only. Claude Code has to be installed for Perch to have anything
 to switch between.
 

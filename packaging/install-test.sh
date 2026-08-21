@@ -1,19 +1,14 @@
 #!/bin/sh
-# Runs the real install.sh against a fabricated release and asserts on the
+# Runs the real install.sh against a fabricated Release and asserts on the
 # advice it prints about PATH.
 #
 #   sh packaging/install-test.sh
 #
-# The installer's download base is documented as overridable, and curl speaks
-# file://, so a temporary directory holding a tarball and a SHA256SUMS is a
-# whole release as far as the installer is concerned — no server, no network.
-#
-# Each case runs under `env -i` with a fabricated HOME and a PATH holding
-# nothing but symlinks to the tools the installer needs. `gh` is deliberately
-# not among them: the provenance check is binding when `gh` is installed and
-# logged in, and a fabricated archive can never satisfy it. That is the check
-# doing its job, and the way past it is to run without `gh` rather than to give
-# the installer a flag that switches a security check off forever.
+# The download base is overridable and curl speaks file://, so a temporary
+# directory holding a tarball and a SHA256SUMS is a whole Release here. Each case
+# runs under `env -i`, with a PATH of symlinks to the tools the installer needs
+# and no `gh`: the provenance check is binding where `gh` is logged in, and no
+# fabricated archive can satisfy it.
 
 # Every tilde below is a fragment of text the installer prints for a person to
 # read, and is meant not to expand.
@@ -24,8 +19,7 @@ set -eu
 unset CDPATH
 here=$(cd -- "$(dirname -- "$0")" && pwd)
 # The installer is served from the root of the site, so it lives with the site
-# rather than beside this script (ADR one-thing-renders-the-site). This is no
-# part of what anybody downloads, which is why it is here and not there.
+# rather than beside this script (ADR one-thing-renders-the-site).
 installer="$here/../pages/public/install.sh"
 version="v0.0.0-test"
 
@@ -120,15 +114,10 @@ refute() {
     fi
 }
 
-# Runs the installer once, in a fabricated home of its own.
-#
-#   $1  what the case is called, for the report
-#   $2  the value of $SHELL to run under, or "" to run with it unset
-#   $3  what the fabricated home holds: none, or a ~/.profile carrying the
-#       guard in its home, expanded or tilde form — or homeless, which is a run
-#       with no $HOME set at all
-#   $4  fresh, or precreated to create the install directory before the run
-#   $5  where to install, relative to the fabricated home
+# Runs the installer once, in a fabricated home of its own: the case's name, the
+# $SHELL to run under or "" for unset, what the home holds (none, home, or
+# homeless for a run with no $HOME at all), fresh or precreated, and where to
+# install relative to the home.
 run_case() {
     name=$1
     shell_value=$2
@@ -141,9 +130,8 @@ run_case() {
     install_dir="$home/$relative_dir"
     mkdir -p "$home"
 
-    # Debian and Ubuntu write this guard with $HOME unexpanded, which is the
-    # form that a grep for the expanded path misses entirely. The single quotes
-    # are what keeps the fixture in that form.
+    # Debian and Ubuntu write this guard with $HOME unexpanded, which is the form
+    # a grep for the expanded path misses. The single quotes keep it that way.
     # shellcheck disable=SC2016
     case "$fixture" in
     none | homeless) profile="" ;;
@@ -191,23 +179,17 @@ fi" ;;
     output=$(env -i "$@" /bin/sh "$installer" 2>&1) ||
         fail "the installer exited non-zero"
 
-    # Every case is also a check that the install itself worked, because advice
-    # asserted against an installer that died early would pass by saying
-    # nothing.
+    # Every case is also a check that the install worked: advice asserted against
+    # an installer that died early would pass by saying nothing.
     expect "installed to $install_dir/perch"
 
-    # The shim PATH deliberately has no `gh` on it, so every case here is also
-    # the skipped-provenance case — and ADR an-upgrade-asks-its-channel says the
-    # one check that did not happen is the one that most has to be said out
-    # loud. Silence here reads exactly like a check that passed.
+    # No `gh` on the shim PATH, so every case is also the skipped-provenance case
+    # — which has to be said out loud (ADR an-upgrade-asks-its-channel).
     expect "provenance not checked"
 
-    # The Unix installer writes nothing but the install directory. Anything
-    # else appearing under the fabricated home — a file or a directory — is the
-    # whole decision undone, so this looks at both rather than at files alone.
-    #
-    # The directories on the way down to the install directory are the install
-    # directory being created, which is the one thing the installer may do.
+    # The Unix installer writes nothing but the install directory, so anything
+    # else under the home — file or directory — is the whole decision undone. The
+    # directories on the way down to it are that directory being created.
     stray=$(find "$home" -mindepth 1 ! -path "$install_dir" ! -path "$install_dir/*" ! -path "$home/.profile" |
         while IFS= read -r entry; do
             case "$install_dir/" in
@@ -232,18 +214,11 @@ report() {
     fi
 }
 
-# ------------------------------------------------------------------ the whole
-# matrix
+# ------------------------------------------------------------ the whole matrix
 
-# Every combination of the three things the advice turns on: whether we made
-# the directory, whether ~/.profile already names it, and which shell is being
-# advised.
-#
-# One rule decides all sixteen — the new-login-shell answer belongs to a
-# directory we created whose ~/.profile already names it, in a shell that reads
-# that file, and every other cell gets the advice for its own shell — so each
-# expectation is worked out from the rule rather than written out sixteen
-# times. Writing them out is how a table ends up agreeing with the bug.
+# Every combination of the three things the advice turns on. Each expectation is
+# worked out from the rule rather than written out sixteen times, because a table
+# written out is how one ends up agreeing with the bug.
 for created in fresh precreated; do
     for guard in none home; do
         for chosen_shell in /bin/bash /bin/zsh /usr/bin/fish ""; do

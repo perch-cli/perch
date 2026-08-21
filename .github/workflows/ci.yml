@@ -215,11 +215,9 @@ jobs:
       - name: The tests that need your machine
         run: cargo test --locked --features your-machine --test your_machine -- --nocapture
 
-  # The installers, and the packages a channel installs, are the one part of
-  # Perch that is not Rust, so nothing else in this file would notice a mistake
-  # in them — and the installers are the copy people pipe into a shell without
-  # reading. shellcheck, node and the PowerShell parser are all already on the
-  # runners, so this costs a minute.
+  # The installers and the packages a Channel installs are the part of Perch that
+  # is not Rust, so nothing else here would notice a mistake in them
+  # (ADR this-repo-assembles-a-release). The tools are already on the runners.
   installers:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
@@ -243,22 +241,17 @@ jobs:
           shellcheck --shell=sh packaging/homebrew/formula.sh
           shellcheck --shell=sh packaging/npm/build-test.sh
 
-      # Runs the real install.sh against a fabricated release and asserts on
-      # the PATH advice. The test builds its own PATH holding only the tools
-      # the installer needs, which is how `gh` is kept off it: the provenance
+      # Runs the real install.sh against a fabricated Release and asserts on the
+      # PATH advice. `gh` is kept off the PATH it builds, because the provenance
       # check is binding by design and would refuse a fabricated archive.
       - name: install.sh advises correctly
         if: runner.os == 'Linux'
         run: sh packaging/install-test.sh
 
-      # Runs the real build.mjs against fabricated binaries and asserts on the
-      # six packages it assembles. Nothing else runs that script before a tag
-      # is pushed, and the way it fails there is an npm page that publishes
-      # blank — on the one channel that cannot be withheld from `latest`.
-      #
-      # Linux only. The script is platform-blind, and the Windows target is
-      # exercised by fabricating a file called perch.exe, which any machine can
-      # do — so a Windows leg would assert the same things twice.
+      # Runs the real build.mjs against fabricated binaries and asserts on the six
+      # packages it assembles — the only thing that runs it before a tag is
+      # pushed. Linux only: the script is platform-blind, and the Windows target
+      # is exercised by fabricating a file called perch.exe.
       - name: build.mjs assembles the packages
         if: runner.os == 'Linux'
         run: sh packaging/npm/build-test.sh

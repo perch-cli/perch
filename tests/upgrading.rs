@@ -5,10 +5,7 @@
 //! what is asserted here is *which program was run* — and, for the two Channels
 //! Perch does not run anything for, that nothing was.
 //!
-//! Nothing here arranges a registry, and one test asserts that on purpose: an
-//! Installation is the counterpart to what Perch holds rather than part of it,
-//! so an Upgrade on a machine with four Accounts is the same command as on one
-//! with none.
+//! Nothing here arranges a registry, and one test asserts that on purpose.
 
 mod common;
 
@@ -57,9 +54,6 @@ fn ran(host: &FakeHost) -> Vec<Launched> {
 
 // ---- the Channels Perch hands the work back to ---------------------------
 
-/// The `brew` beside the Cellar, rather than the first one on `PATH`: a machine
-/// with two Homebrew prefixes has two `brew`s, and only the one that owns this
-/// Installation can replace it.
 #[test]
 fn a_homebrew_installation_is_handed_to_the_brew_that_owns_it() {
     let host = machine().installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch");
@@ -110,14 +104,8 @@ fn an_npm_installation_is_handed_to_npm() {
     assert!(said.contains("npm update -g perch-cli"), "{said}");
 }
 
-/// npm would be replacing `perch.exe` while it is the running process, and
-/// Windows holds a running executable open — so the one thing that must not
-/// happen is Perch running it anyway and reporting whatever npm made of that.
-///
-/// Reported as nothing done, because nothing was. A `0` here is a script's
-/// `perch upgrade && restart-my-thing` restarting the old binary on the
-/// strength of an Upgrade that only printed a suggestion, and `15` is already
-/// the code for a request understood and a machine left as it was.
+/// A `0` here is a script's `perch upgrade && restart-my-thing` restarting the
+/// old binary on the strength of an Upgrade that only printed a suggestion.
 #[test]
 fn npm_on_windows_is_printed_rather_than_run_because_it_cannot_work_from_here() {
     let host = machine()
@@ -148,9 +136,6 @@ fn npm_on_windows_is_printed_rather_than_run_because_it_cannot_work_from_here() 
 
 // ---- the one Channel Perch replaces itself for ---------------------------
 
-/// The installer that made the Installation is the thing that replaces it,
-/// embedded rather than fetched, and told which Release by the one variable it
-/// takes.
 #[test]
 fn an_installer_installation_runs_the_embedded_installer_at_the_tag() {
     let host = machine().installed_at("/Users/someone/.local/bin/perch");
@@ -161,10 +146,8 @@ fn an_installer_installation_runs_the_embedded_installer_at_the_tag() {
     let launched = ran(&host);
     assert_eq!(launched.len(), 1);
     assert_eq!(launched[0].0, "/bin/sh");
-    // As a path rather than as a string: `perch_home` is built with
-    // `Path::join`, which spells with whatever separator the build prefers, and
-    // on Windows `/` and `\` are one separator — so two spellings here are one
-    // path.
+    // As a path rather than as a string: `perch_home` is spelled with whatever
+    // separator the build prefers, and on Windows `/` and `\` are one.
     assert_eq!(
         std::path::Path::new(&launched[0].1[0]),
         std::path::Path::new("/Users/someone/.config/perch/perch-upgrade.sh")
@@ -178,10 +161,8 @@ fn an_installer_installation_runs_the_embedded_installer_at_the_tag() {
     assert!(said.contains(&format!("v{NEWER}")), "{said}");
 }
 
-/// The installers do not put a binary in the same place on both platforms, and
-/// the Windows one is `%LOCALAPPDATA%\Perch\bin`. Assuming the Unix default
-/// read every Windows installer Installation as a binary Perch had not placed
-/// — refusing to upgrade the one Channel Perch is able to upgrade itself.
+/// The Windows installer's default is `%LOCALAPPDATA%\Perch\bin`, which is not
+/// the Unix one.
 #[test]
 fn a_windows_installer_installation_is_recognized_where_windows_puts_it() {
     let host =
@@ -209,12 +190,9 @@ fn windows_machine() -> perch::host::FakeHost {
         .with_env("SystemRoot", "C:\\Windows")
 }
 
-/// PowerShell is run by the path Windows says it is at, never by its bare name.
-///
-/// A bare name is searched for in the current working directory before `PATH`,
-/// so `perch upgrade` typed in a downloads folder holding a `powershell.exe`
-/// would run that one — with `-ExecutionPolicy Bypass`, and handed a script
-/// whose whole job is to replace the Perch binary
+/// A bare name is searched for in the working directory before `PATH`, so a
+/// downloads folder holding a `powershell.exe` would answer instead — with
+/// `-ExecutionPolicy Bypass`, and a script that replaces the Perch binary
 /// (ADR a-crate-must-not-cost-a-seam).
 #[test]
 fn the_installer_is_run_by_the_powershell_windows_says_it_has() {
@@ -231,8 +209,7 @@ fn the_installer_is_run_by_the_powershell_windows_says_it_has() {
     );
 }
 
-/// And a machine that will not say where Windows is gets a refusal rather than
-/// a walk of `PATH`, which is the same answer `curl` gets there.
+/// The same answer `curl` gets on a machine that will not say where Windows is.
 #[test]
 fn a_windows_that_does_not_say_where_it_is_installed_runs_no_installer() {
     let host = machine()
@@ -247,8 +224,6 @@ fn a_windows_that_does_not_say_where_it_is_installed_runs_no_installer() {
     assert!(ran(&host).is_empty(), "nothing was run");
 }
 
-/// Both installers take `PERCH_INSTALL_DIR` above their own default, so a
-/// person who used it still has an Installation Perch made.
 #[test]
 fn an_installer_installation_somewhere_chosen_is_still_the_installers() {
     let host = machine()
@@ -261,9 +236,6 @@ fn an_installer_installation_somewhere_chosen_is_still_the_installers() {
     assert_eq!(ran(&host).len(), 1);
 }
 
-/// Left behind, it is an executable script in Perch's own directory that
-/// nothing will run again and that a later Perch could not tell from one it was
-/// about to use.
 #[test]
 fn the_embedded_installer_is_cleared_away_afterwards() {
     let host = machine().installed_at("/Users/someone/.local/bin/perch");
@@ -278,11 +250,8 @@ fn the_embedded_installer_is_cleared_away_afterwards() {
     );
 }
 
-/// A program about to be run, written where a second user on the machine could
-/// edit it between the write and the run, is a program somebody else chose.
-///
-/// Asserted on the effect rather than on the file, because the file is
-/// deliberately not there afterwards.
+/// Asserted on the effect rather than on the file, which is deliberately not
+/// there afterwards.
 #[test]
 fn the_embedded_installer_is_written_for_its_owner_alone() {
     let host = machine().installed_at("/Users/someone/.local/bin/perch");
@@ -302,9 +271,6 @@ fn the_embedded_installer_is_written_for_its_owner_alone() {
     );
 }
 
-/// What is run is the installer this repository ships, rather than something
-/// fetched at the moment of running it: whatever else changes, the bytes come
-/// from the build.
 #[test]
 fn the_installer_that_runs_is_the_one_embedded_in_the_binary() {
     let host = machine().installed_at("/Users/someone/.local/bin/perch");
@@ -324,10 +290,6 @@ fn the_installer_that_runs_is_the_one_embedded_in_the_binary() {
 
 // ---- the Installation Perch will not touch -------------------------------
 
-/// The Release page is a Channel, and what it leaves is indistinguishable from
-/// any other hand-placed binary. Overwriting a file Perch did not put there is
-/// the one irreversible thing this command could do, so it is the one thing it
-/// does not do.
 #[test]
 fn a_binary_perch_did_not_place_is_refused_rather_than_written_over() {
     for exe in ["/usr/local/bin/perch", "/opt/perch/perch"] {
@@ -347,16 +309,9 @@ fn a_binary_perch_did_not_place_is_refused_rather_than_written_over() {
     }
 }
 
-/// The same binary, asked a question rather than told to replace itself.
-///
 /// A check writes nothing, so the refusal that protects a hand-placed binary
-/// has nothing to protect here — and it used to fire anyway, because the
-/// Channel was resolved before `--check` was consulted. What a script got back
-/// was "Perch will not write over a file it did not put there", a sentence
-/// about an act it had not asked for, and no `installed` or `newest` at all. A
-/// check is a question and answering it is success whichever way the answer
-/// went (ADR an-upgrade-asks-its-channel); the Channel is the one thing that
-/// cannot be answered, so it is `null`.
+/// has nothing to protect here. The Channel is the one thing it cannot answer,
+/// so that is `null` and the two facts a script came for are still there.
 #[test]
 fn a_check_answers_on_a_binary_perch_did_not_place_rather_than_refusing() {
     let host = machine().installed_at("/usr/local/bin/perch");
@@ -388,10 +343,6 @@ fn a_check_answers_on_a_binary_perch_did_not_place_rather_than_refusing() {
     assert!(ran(&host).is_empty(), "a check runs nothing");
 }
 
-/// The escape hatch for the machine where the path is wrong — a relocated
-/// binary, or one reached through a symlink Perch could not follow. What is
-/// named is taken as given rather than checked back against the path, because
-/// the path being wrong is the whole of why somebody typed it.
 #[test]
 fn a_named_channel_is_taken_over_what_the_path_says() {
     let host = machine().installed_at("/opt/perch/perch");
@@ -408,10 +359,7 @@ fn a_named_channel_is_taken_over_what_the_path_says() {
     assert_eq!(ran(&host).len(), 1);
 }
 
-/// A named Homebrew carries no prefix, because somebody typing it is saying
-/// which Channel this is and not where its `brew` lives — so that half falls
-/// back to the search on `PATH`. `brew` is taken as well as `homebrew`, which
-/// is what people type.
+/// `brew` is taken as well as `homebrew`, which is what people type.
 #[test]
 fn a_named_homebrew_finds_its_brew_on_the_path() {
     for word in ["homebrew", "brew", "Homebrew"] {
@@ -432,9 +380,6 @@ fn a_named_homebrew_finds_its_brew_on_the_path() {
     }
 }
 
-/// The Channel is known and the program that owns it is not there. Naming the
-/// command is the whole of what is useful, because the repair is to put it back
-/// on `PATH` and run exactly that.
 #[test]
 fn a_channel_whose_own_tool_is_missing_says_which_command_would_have_run() {
     // A *named* Homebrew carries no prefix, so nothing but `PATH` can answer
@@ -467,8 +412,6 @@ fn a_channel_whose_own_tool_is_missing_says_which_command_would_have_run() {
     assert!(ran(&npmless).is_empty());
 }
 
-/// The Channel a check reports is the one it would act through, named the same
-/// way `--channel` takes it.
 #[test]
 fn a_check_names_the_channel_in_the_words_the_flag_takes() {
     for (exe, word) in [
@@ -515,11 +458,6 @@ fn a_channel_that_is_not_one_is_refused_by_name() {
 /// A check may go without the answer read off the *path* — that is what lets a
 /// hand-unpacked Perch ask what is newest — and a word somebody typed wrongly
 /// is not that answer.
-///
-/// Swallowed with the rest, `--check --channel homebre` dropped the refusal
-/// naming the three Channels and reported "channel unknown (nothing about this
-/// binary's path says)", with advice to pass the flag that had just been
-/// passed, on a machine whose path says perfectly well which Channel it is.
 #[test]
 fn a_check_refuses_a_channel_word_that_is_not_one_rather_than_reporting_none() {
     let host = machine().installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch");
@@ -544,9 +482,8 @@ fn a_check_refuses_a_channel_word_that_is_not_one_rather_than_reporting_none() {
 
 // ---- asking rather than installing ---------------------------------------
 
-/// A check is a question, and answering it is success whichever way the answer
-/// went. Every other non-zero code Perch has is a refusal, and "there is news"
-/// is not one.
+/// Every other non-zero code Perch has is a refusal, and "there is news" is not
+/// one.
 #[test]
 fn a_check_exits_nought_whether_or_not_there_is_news() {
     for published in [NEWER, upgrade_installed()] {
@@ -604,8 +541,6 @@ fn the_release_that_is_already_installed_is_nothing_to_do() {
 
 // ---- naming a Release ----------------------------------------------------
 
-/// Refused before the network, because a typo that reaches it comes back as a
-/// 404 about an archive — a sentence about the wrong thing.
 #[test]
 fn a_release_that_is_not_one_is_refused_without_asking_anybody() {
     let host = machine().installed_at("/Users/someone/.local/bin/perch");
@@ -623,8 +558,6 @@ fn a_release_that_is_not_one_is_refused_without_asking_anybody() {
     assert!(host.http_calls().is_empty(), "nothing was asked");
 }
 
-/// `npm update` only ever goes to the newest, so naming a Release is a
-/// different command rather than a flag on the same one.
 #[test]
 fn a_named_release_reaches_npm_as_an_install_of_that_version() {
     let host = machine().with_file("/usr/bin/npm", "").installed_at(
@@ -651,10 +584,6 @@ fn a_named_release_reaches_npm_as_an_install_of_that_version() {
     );
 }
 
-/// Homebrew installs whatever the formula names and cannot be pointed at a
-/// Release. Silently installing the newest instead is the failure where
-/// somebody finds out by reading `perch --version` afterwards, if they think
-/// to.
 #[test]
 fn a_named_release_is_refused_on_homebrew_rather_than_quietly_ignored() {
     let host = machine().installed_at("/opt/homebrew/Cellar/perch/0.1.1/bin/perch");
@@ -672,13 +601,8 @@ fn a_named_release_is_refused_on_homebrew_rather_than_quietly_ignored() {
     assert!(ran(&host).is_empty(), "and nothing was run");
 }
 
-/// The same refusal, for a Release older than the one installed — which is the
-/// ordering that was wrong.
-///
-/// The refusal used to sit after the downgrade agreement, so this asked "Install
-/// the older Release? [y/N]", waited for somebody to type `y`, and only then
-/// said Homebrew cannot be pointed at a Release at all. Nobody should be asked
-/// to agree to something that is going to be refused whatever they answer.
+/// Nobody is asked to agree to something that is refused whatever they answer,
+/// so this refusal comes before the downgrade agreement.
 #[test]
 fn a_named_release_older_than_this_one_is_refused_before_anybody_agrees_to_it() {
     let host = machine()
@@ -702,9 +626,8 @@ fn a_named_release_older_than_this_one_is_refused_before_anybody_agrees_to_it() 
     assert!(ran(&host).is_empty(), "and nothing was run");
 }
 
-/// The same again with no terminal to agree on, which is where the ordering
-/// gave advice that could not work: the downgrade refusal names `--yes` as the
-/// way past it, and `--yes` reached the Homebrew refusal instead.
+/// The same again with no terminal to agree on, where the downgrade refusal
+/// would otherwise name `--yes` as a way past a refusal it does not reach.
 #[test]
 fn a_named_release_on_homebrew_is_refused_as_itself_where_there_is_no_terminal() {
     let host = machine()
@@ -729,10 +652,6 @@ fn a_named_release_on_homebrew_is_refused_as_itself_where_there_is_no_terminal()
 
 // ---- going backwards -----------------------------------------------------
 
-/// Named as a downgrade and told what it costs. The cost is specific and not
-/// obvious: a Perch older than the one that last wrote the registry refuses to
-/// read it, so going back far enough leaves a working machine with a binary
-/// that will not read its own state.
 #[test]
 fn an_older_release_is_named_as_one_and_says_what_it_costs() {
     let host = machine()
@@ -756,8 +675,6 @@ fn an_older_release_is_named_as_one_and_says_what_it_costs() {
     assert_eq!(ran(&host).len(), 1);
 }
 
-/// Both spellings of yes, and everything else is a no. A question answered
-/// `yes` that installed nothing would be the worst of the three outcomes.
 #[test]
 fn the_agreement_takes_both_spellings_of_yes_and_nothing_else() {
     for (answer, expected) in [("y", 1), ("yes", 1), ("Y", 1), ("sure", 0), ("", 0)] {
@@ -829,9 +746,7 @@ fn an_older_release_with_nobody_to_ask_is_refused_unless_agreed_ahead_of_time() 
 
 // ---- what an Upgrade is not ----------------------------------------------
 
-/// An Installation is the counterpart to what Perch holds rather than part of
-/// it. Nothing here reads the registry, takes the lock, or goes near a
-/// Credential — which is also why this whole suite arranges no Accounts.
+/// Which is also why this whole suite arranges no Accounts.
 #[test]
 fn an_upgrade_touches_nothing_perch_holds() {
     let host = machine().installed_at("/Users/someone/.local/bin/perch");
@@ -863,9 +778,8 @@ fn an_upgrade_touches_nothing_perch_holds() {
 
 // ---- the line `perch --version` adds ------------------------------------
 
-/// The half of this that gives up what ADR an-upgrade-asks-its-channel was
-/// protecting: `perch --version` was silent on the network and no longer is.
-/// Everything below is the bounding of that.
+/// `perch --version` is the one place Perch says anything about its own version
+/// without being asked, and everything below is the bounding of that.
 #[test]
 fn a_newer_release_is_mentioned_under_the_version() {
     let host = machine();
@@ -879,10 +793,9 @@ fn a_newer_release_is_mentioned_under_the_version() {
     );
 }
 
-/// The shape `perch --version` prints, held still here because `main` is the
-/// one place no test reaches. The first line is spelled exactly as clap spelled
-/// it — the Homebrew formula's test block asserts on `perch #{version}` — and
-/// the second appears only when there is something to say.
+/// The first line is spelled exactly as clap spelled it — the Homebrew formula's
+/// test block asserts on `perch #{version}` — and the second appears only when
+/// there is something to say.
 #[test]
 fn the_version_report_is_the_version_and_at_most_one_line_more() {
     let quiet =
@@ -907,8 +820,8 @@ fn nothing_is_said_when_nothing_newer_has_been_published() {
     assert_eq!(perch::upgrade::notice(&host), None);
 }
 
-/// An opt-out that is checked *before* the request rather than after it: the
-/// objection somebody has to this is the network call, not the line.
+/// Checked before the request rather than after it: the objection somebody has
+/// to this is the network call, not the line.
 #[test]
 fn the_variable_that_switches_it_off_stops_the_request_rather_than_the_line() {
     let host = machine().with_env(perch::upgrade::NO_CHECK, "1");
@@ -921,9 +834,8 @@ fn the_variable_that_switches_it_off_stops_the_request_rather_than_the_line() {
     );
 }
 
-/// Not a terminal is not a person. A script parsing `perch --version` and the
-/// Homebrew formula's test block both read this output — neither wants a
-/// second line, and neither should pay for a request.
+/// A script parsing `perch --version` and the Homebrew formula's test block both
+/// read this output.
 #[test]
 fn nothing_is_said_and_nothing_is_asked_when_there_is_no_terminal() {
     let host = machine().without_terminal();
@@ -932,9 +844,6 @@ fn nothing_is_said_and_nothing_is_asked_when_there_is_no_terminal() {
     assert!(host.http_calls().is_empty());
 }
 
-/// A machine that is offline, behind a proxy, missing `curl` or being
-/// rate-limited loses the line and nothing else. This is a line nobody
-/// requested, printed underneath one they did.
 #[test]
 fn a_machine_that_cannot_answer_loses_the_line_and_nothing_else() {
     // A FakeHost with no arranged reply is a machine with no network.
@@ -951,9 +860,8 @@ fn a_machine_that_cannot_answer_loses_the_line_and_nothing_else() {
     assert_eq!(perch::upgrade::notice(&tagless), None);
 }
 
-/// `perch --version` was instant. The line it now carries is worth a pause
-/// nobody notices, and not a wait they do — so the request is abandoned long
-/// before the thirty seconds a Refresh is allowed.
+/// Abandoned long before the thirty seconds a Refresh is allowed: the line is
+/// worth a pause nobody notices and not a wait they do.
 #[test]
 fn the_check_is_given_a_short_bound_where_a_refresh_is_not() {
     let host = machine();
@@ -968,7 +876,7 @@ fn the_check_is_given_a_short_bound_where_a_refresh_is_not() {
     );
 }
 
-/// Where a check somebody *typed* is not bounded that way: they asked, and are
+/// Where a check somebody typed is not bounded that way: they asked, and are
 /// waiting for the answer rather than for something else.
 #[test]
 fn a_check_somebody_asked_for_is_not_cut_short() {

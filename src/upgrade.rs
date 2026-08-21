@@ -22,10 +22,8 @@ pub const LATEST_URL: &str = "https://api.github.com/repos/perch-cli/perch/relea
 
 /// How long the check on `perch --version` may take before it is abandoned.
 ///
-/// Short because nobody asked for it. `perch --version` was instant and silent
-/// on the network before this existed, and the line it now prints is worth a
-/// pause somebody would not notice — not a wait they would
-/// (ADR an-upgrade-asks-its-channel).
+/// Short because nobody asked for it: the line it prints is worth a pause
+/// somebody would not notice, not a wait they would.
 pub const CHECK_WITHIN_MILLIS: u64 = 2_000;
 
 /// The variable that switches the check on `perch --version` off.
@@ -39,10 +37,8 @@ pub fn installed() -> &'static str {
 /// One route by which this machine's Installation arrived, as far as its own
 /// path can say.
 ///
-/// Three rather than four: the Release page is a Channel and leaves an
-/// Installation indistinguishable from a hand-placed binary, so it arrives here
-/// as no answer at all rather than as a fourth variant that would have to be
-/// guessed at.
+/// Three rather than four: what the Release page leaves cannot be told from a
+/// hand-placed binary, so it is no answer at all rather than a fourth variant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Channel {
     /// Installed by Homebrew, from the Tap. Carries the prefix above the
@@ -94,11 +90,8 @@ impl Channel {
 
 /// Where the installer script puts the binary on this machine.
 ///
-/// Three answers rather than one, because the installers have three: they take
-/// `PERCH_INSTALL_DIR` above everything, and their defaults do not agree
-/// across platforms. A single hard-coded `~/.local/bin` would have read every
-/// Windows Installation as one Perch did not make, and refused to upgrade the
-/// Channel it is the only one able to upgrade.
+/// Three answers rather than one: the installers take `PERCH_INSTALL_DIR` above
+/// everything, and their own defaults do not agree across platforms.
 pub fn installer_dir(host: &dyn Host) -> Result<PathBuf> {
     if let Some(chosen) = host.env_var("PERCH_INSTALL_DIR") {
         return Ok(PathBuf::from(chosen));
@@ -111,10 +104,9 @@ pub fn installer_dir(host: &dyn Host) -> Result<PathBuf> {
     let home = home.display().to_string();
 
     Ok(match host.platform() {
-        // `%LOCALAPPDATA%` is its own variable rather than a place under the
-        // home directory, so it is asked for first — and derived from home only
-        // where the machine will not say, which is where the installer's own
-        // `Join-Path $env:LOCALAPPDATA` would have failed anyway.
+        // `%LOCALAPPDATA%` is its own variable rather than a place under home,
+        // so it is asked for first — and derived from home only where the machine
+        // will not say, which is where the installer's own `Join-Path` fails too.
         Platform::Windows => {
             let local = host
                 .env_var("LOCALAPPDATA")
@@ -127,17 +119,9 @@ pub fn installer_dir(host: &dyn Host) -> Result<PathBuf> {
 
 /// A path built from its parts, spelled with `/`.
 ///
-/// Rather than `Path::join`, for the reason [`crate::probe::on_path`] gives
-/// about the same choice: `join` picks the separator of whatever platform this
-/// build runs on, where every other decision in this module follows the
-/// platform the *Host* reports. The two disagree in exactly one place that
-/// matters — a Windows build driving a Host that says it is anything else, and
-/// the reverse — and there the directory Perch computed and the directory it
-/// compared against were spelled differently and never matched, so no
-/// Installation was ever the installer's.
-///
-/// Windows accepts either separator and [`segments`] reads both, so this costs
-/// nothing on the platform it looks foreign on.
+/// Rather than `Path::join`, for the reason [`crate::probe::on_path`] gives:
+/// `join` follows the platform this build runs on, where everything here follows
+/// the platform the *Host* reports. [`segments`] reads either separator.
 fn beneath(parts: &[&str]) -> PathBuf {
     PathBuf::from(parts.join("/"))
 }
@@ -145,37 +129,27 @@ fn beneath(parts: &[&str]) -> PathBuf {
 /// Which Channel left the binary at this path, or `None` when nothing about the
 /// path says.
 ///
-/// The path is the whole of the evidence. Every Channel installs the same bytes
-/// (ADR an-upgrade-asks-its-channel), so there is nothing inside the binary to
-/// read and no marker file to trust — one placed beside the binary would be
-/// absent for Homebrew and npm both, making its absence mean two different
-/// things.
+/// The path is the whole of the evidence: every Channel installs the same bytes,
+/// and a marker file beside one would be absent for Homebrew and npm both.
 pub fn channel_at(platform: Platform, installer_dir: &Path, exe: &Path) -> Option<Channel> {
     let parts = segments(platform, exe);
 
-    // npm first, because an npm prefix can sit anywhere — including under a
-    // Homebrew prefix, which is where `brew install node` puts it. A path
-    // holding both a Cellar and a `node_modules` is an npm Installation of
-    // Perch under a Homebrew installation of Node, and reading it as Homebrew's
-    // would route `brew upgrade perch` at a formula that is not installed.
+    // npm first: `brew install node` puts an npm prefix inside a Homebrew one,
+    // so a path holding both is npm's Perch under Homebrew's Node.
     if parts.iter().any(|part| part == "node_modules") {
         return Some(Channel::Npm);
     }
 
-    // The Cellar names the Channel, and the prefix above it names the `brew`
-    // that owns it — `/opt/homebrew` on Apple silicon, `/usr/local` on Intel,
-    // and anywhere at all for a prefix somebody chose. Homebrew is not a
-    // Windows Channel, so the capital is the one this compares.
+    // The Cellar names the Channel and the prefix above it names the `brew` that
+    // owns it. Homebrew is not a Windows Channel, so the capital is compared.
     if let Some(at) = parts.iter().position(|part| part == "Cellar") {
         return Some(Channel::Homebrew {
             prefix: PathBuf::from(format!("/{}", parts[..at].join("/"))),
         });
     }
 
-    // Exactly where the installer puts it, and nowhere else. `/usr/local/bin`
-    // is deliberately not here: that is where somebody who unpacked the Release
-    // page's archive by hand would have put it, and Perch overwriting a binary
-    // it did not place is the one irreversible thing this command can do.
+    // Exactly where the installer puts it, and nowhere else. `/usr/local/bin` is
+    // where a hand-unpacked Release lands, and is deliberately not here.
     let holding = &parts[..parts.len().saturating_sub(1)];
     match holding == segments(platform, installer_dir) {
         true => Some(Channel::Installer),
@@ -183,16 +157,11 @@ pub fn channel_at(platform: Platform, installer_dir: &Path, exe: &Path) -> Optio
     }
 }
 
-/// A path as the parts that name it, compared the way the platform compares
-/// them.
+/// A path as the parts that name it, compared as the platform compares them.
 ///
-/// Not `Path::components`, for two reasons that only show up on Windows and
-/// both of which would make an installer Installation there unrecognizable.
-/// `std::fs::canonicalize` hands back a verbatim path — `\\?\C:\Users\...` —
-/// which no plain comparison against `%LOCALAPPDATA%` can match; and Windows
-/// paths are case-insensitive, so `C:\Users` and `c:\users` are one directory
-/// that two `PathBuf`s call different. Neither applies anywhere else, so
-/// neither is done anywhere else.
+/// Not `Path::components`: on Windows `canonicalize` hands back a verbatim path
+/// no comparison against `%LOCALAPPDATA%` matches, and two spellings differing
+/// in case are one directory. Neither applies anywhere else.
 fn segments(platform: Platform, path: &Path) -> Vec<String> {
     let text = path.to_string_lossy();
     let windows = platform == Platform::Windows;
@@ -217,13 +186,9 @@ pub fn channel(host: &dyn Host) -> Result<Option<Channel>> {
 
 /// A Release as somebody typed it, as the number Perch compares.
 ///
-/// `v0.2.0` and `0.2.0` both arrive, because the tag carries a `v` and every
-/// other Channel does not — Homebrew's formula strips it, npm never had it. So
-/// both are accepted and one is kept.
-///
-/// Checked here rather than left to the download, because a typo that reaches
-/// the network comes back as a 404 about an archive, which is a sentence about
-/// the wrong thing.
+/// `v0.2.0` and `0.2.0` both arrive: the tag carries a `v` and no other Channel
+/// does. Checked here rather than at the download, because a typo that reaches
+/// the network comes back as a 404 about an archive.
 pub fn version_typed(typed: &str) -> Result<String> {
     let bare = typed.strip_prefix('v').unwrap_or(typed);
     let plausible = {
@@ -232,15 +197,8 @@ pub fn version_typed(typed: &str) -> Result<String> {
             part.is_some_and(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
         };
         // The third part carries any pre-release or build suffix —
-        // `0.2.0-rc.1`, `0.2.0+build.3` — so it is digits followed by an
-        // optional suffix rather than digits alone.
-        //
-        // The suffix is spelled out rather than left unchecked. Requiring only
-        // that the part *start* with a digit accepted every byte after the
-        // first: `0.2.0/../../whatever` and `0.2.0 && x` both passed, went into
-        // `PERCH_VERSION`, and came back from the installer as the
-        // 404-about-an-archive this function exists to turn into a sentence
-        // about the thing that is actually wrong.
+        // `0.2.0-rc.1`, `0.2.0+build.3` — so it is digits and then an optional
+        // suffix, spelled out rather than left as "starts with a digit".
         let major = numeric(parts.next());
         let minor = numeric(parts.next());
         let patch = parts.next().is_some_and(|part| {
@@ -276,21 +234,10 @@ pub fn tag_of(version: &str) -> String {
     format!("v{version}")
 }
 
-/// Which of two Releases is newer.
-///
-/// Numeric part by numeric part, so `0.10.0` is newer than `0.9.0` where a
-/// string comparison would have it the other way. A pre-release suffix is
-/// compared as text after the numbers agree, which puts `0.2.0-rc.1` before
-/// `0.2.0` — the ordering semver gives it, arrived at from the other direction:
-/// an empty suffix sorts last rather than first.
-///
-/// Build metadata is dropped before any of that, which is the other half of the
-/// same rule: semver says `+build.3` has no bearing on precedence, so `0.2.0`
-/// and `0.2.0+build.3` are one Release. Kept, it was compared as a pre-release
-/// suffix — and since `+` sorts below `-`, `--release 0.2.0+build.3` against an
-/// installed `0.2.0` took the "older" arm and asked "Install the older
-/// Release?" about the version that was already there. `version_typed` accepts
-/// the spelling deliberately, so it is reachable rather than hypothetical.
+/// Which of two Releases is newer, by semver's ordering: numbers part by part,
+/// then a pre-release suffix as text once they agree — an empty suffix sorts
+/// last, which is what puts `0.2.0-rc.1` before `0.2.0` — with build metadata
+/// dropped first, because semver gives it no bearing on precedence.
 pub fn compare(a: &str, b: &str) -> Ordering {
     let split = |version: &str| -> (Vec<u64>, Vec<String>) {
         let version = match version.find('+') {
@@ -304,14 +251,9 @@ pub fn compare(a: &str, b: &str) -> Ordering {
         (
             numbers
                 .split('.')
-                // Saturating rather than zero. Every version that reaches here
-                // has been through `version_typed`, on both paths — what
-                // somebody typed and the `tag_name` `newest` reads — so each
-                // component is a run of ASCII digits and the only way this
-                // parse fails is a number too big for a `u64`. Read as zero, a
-                // `--release 99999999999999999999.0.0` compared as `0.0.0` and
-                // was offered as "the older Release", which is the
-                // wrong-direction prompt the `+build.3` rule above is about.
+                // Saturating rather than zero: every version here has been
+                // through `version_typed`, so the only way the parse fails is a
+                // number too big for a `u64` — which is newer, not oldest.
                 .map(|part| part.parse::<u64>().unwrap_or(u64::MAX))
                 .collect(),
             match pre_release.is_empty() {
@@ -338,16 +280,8 @@ pub fn compare(a: &str, b: &str) -> Ordering {
 /// Two pre-release suffixes, compared the way semver says: field by field,
 /// numerically wherever both fields are numbers.
 ///
-/// Compared as one string it was the same trap the numbers above are split for:
-/// `-rc.10` against `-rc.9` is `'1'` against `'9'`, so `rc.10` came out *older*
-/// than `rc.9` and `perch upgrade --release 0.2.0-rc.10` asked "Install the
-/// older Release?" about the newer one — and non-interactively refused it
-/// outright. `version_typed` accepts the spelling deliberately, so it is
-/// reachable by typing rather than hypothetical.
-///
-/// A number always sorts below a word, which is semver's rule and not an
-/// arbitrary one: it is what keeps `1.0.0-alpha` above `1.0.0-1`. And where one
-/// suffix runs out first, the longer one is the newer — `rc.1.1` after `rc.1`.
+/// A number sorts below a word, which is what keeps `1.0.0-alpha` above
+/// `1.0.0-1`; where one suffix runs out first the longer one is the newer.
 fn by_identifier(a: &[String], b: &[String]) -> Ordering {
     for (ours, theirs) in a.iter().zip(b) {
         let ordered = match (a_number(ours), a_number(theirs)) {
@@ -375,9 +309,8 @@ fn a_number(field: &str) -> Option<u64> {
 /// The newest published Release, asked for now.
 ///
 /// No cache and no interval: this happens because somebody typed a command, and
-/// the machinery for holding an answer and reasoning about its age is the thing
-/// ADR an-upgrade-asks-its-channel refused and ADR an-upgrade-asks-its-channel
-/// did not build.
+/// the machinery for holding an answer and reasoning about its age is not built
+/// a second time for a notification.
 pub fn newest(host: &dyn Host, within_millis: Option<u64>) -> Result<String> {
     // GitHub answers an unidentified caller with a 403, and `curl`'s default
     // agent is enough on its own — but a request that says which program made
@@ -422,11 +355,8 @@ pub fn newest(host: &dyn Host, within_millis: Option<u64>) -> Result<String> {
 /// The line `perch --version` adds when there is a newer Release, and nothing
 /// at all otherwise.
 ///
-/// Every reason not to ask is checked before asking, and the ask itself
-/// swallows whatever went wrong. This is a line nobody requested printed
-/// underneath one they did, so a machine that is offline, has no `curl`, sits
-/// behind a proxy, or is being rate-limited loses the line and nothing else
-/// (ADR an-upgrade-asks-its-channel).
+/// Every reason not to ask is checked before asking, and the ask swallows
+/// whatever went wrong: an offline machine loses a line nobody requested.
 pub fn notice(host: &dyn Host) -> Option<String> {
     if host.env_var(NO_CHECK).is_some() {
         return None;
@@ -449,12 +379,9 @@ pub fn notice(host: &dyn Host) -> Option<String> {
 
 /// The whole of what `perch --version` says.
 ///
-/// Here rather than in `main`, because `main` is the one place no test reaches:
-/// what is printed, whether the second line appears at all, and the fact that
-/// the first is spelled exactly as clap spelled it — `perch <version>`, which
-/// the Homebrew formula's test block asserts on — are the parts worth holding
-/// still, and none of them can be held still inside a function that only runs
-/// as a process.
+/// Here rather than in `main`, the one place no test reaches: what is printed,
+/// whether the second line appears, and that the first is spelled `perch
+/// <version>` as clap spelled it — which the formula's test block asserts on.
 pub fn version_report(host: &dyn Host) -> String {
     let installed = installed();
     match notice(host) {
@@ -465,11 +392,9 @@ pub fn version_report(host: &dyn Host) -> String {
 
 /// The command that hands the work back to Homebrew, as program and arguments.
 ///
-/// The `brew` beside the Cellar rather than the first one on `PATH`, for the
-/// reason ADR a-crate-must-not-cost-a-seam gives about every program Perch
-/// runs: a machine with two Homebrew prefixes has two `brew`s, and the one that
-/// owns this Installation is the one that can replace it. A Channel named by
-/// `--channel` carries no prefix, so that case falls back to the search.
+/// The `brew` beside the Cellar rather than the first one on `PATH`
+/// (ADR a-crate-must-not-cost-a-seam): a machine with two Homebrew prefixes has
+/// two `brew`s, and only the one that owns this Installation can replace it.
 pub fn homebrew_command(host: &dyn Host, prefix: &Path) -> Result<(PathBuf, Vec<String>)> {
     let brew = match prefix.as_os_str().is_empty() {
         true => crate::probe::on_path(host, "brew"),
@@ -517,11 +442,9 @@ pub fn npm_command(host: &dyn Host, version: Option<&str>) -> Result<(PathBuf, V
 
 /// The installer this platform is upgraded by, embedded rather than fetched.
 ///
-/// `include_str!` at build time, because the alternative is downloading a shell
-/// script at run time and executing it, which is a sentence a program built
-/// around being careful with Credentials should not have to defend
-/// (ADR an-upgrade-asks-its-channel). What the copy is pinned to costs nothing:
-/// the only thing passed into it is a tag.
+/// `include_str!` at build time: downloading a script at run time and executing
+/// it is a sentence a program that holds Credentials should not have to defend.
+/// Pinning the copy to the build costs nothing — a tag is all that goes in.
 pub fn installer_for(platform: Platform) -> (&'static str, &'static str) {
     match platform {
         Platform::Windows => (
@@ -571,10 +494,6 @@ mod tests {
         }
     }
 
-    /// A machine with Node installed by Homebrew puts npm's prefix *inside* a
-    /// Homebrew one, so the path holds a Cellar and a `node_modules` both.
-    /// Reading it as Homebrew would run `brew upgrade perch` against a formula
-    /// that is not installed, and report success having changed nothing.
     #[test]
     fn an_npm_installation_under_a_homebrew_prefix_is_npms() {
         assert_eq!(
@@ -593,10 +512,6 @@ mod tests {
         );
     }
 
-    /// The Release page is a Channel too, and what it leaves is a binary
-    /// somebody moved into place themselves. There is no telling it from any
-    /// other hand-placed binary, so it is not told: overwriting a file at a path
-    /// Perch never wrote is the one thing here that cannot be taken back.
     #[test]
     fn a_binary_perch_did_not_place_is_no_channel_at_all() {
         for exe in [
@@ -610,21 +525,13 @@ mod tests {
         }
     }
 
-    /// The installers do not agree on where they put a binary, and both take
-    /// `PERCH_INSTALL_DIR` above their own default. A single hard-coded
-    /// `~/.local/bin` read every Windows Installation as one Perch had not
-    /// made, and refused to upgrade the one Channel it can upgrade itself.
     #[test]
     fn the_installers_directory_is_the_one_that_installer_would_have_used() {
         use crate::host::FakeHost;
 
-        // Compared as text rather than as a `PathBuf`, which is the whole
-        // point: a `PathBuf` comparison is separator-agnostic on Windows and so
-        // said nothing about *spelling*. This is built with `Path::join` and
-        // spelled with the build's separator, while `segments` reads it against
-        // the platform the Host reports — and on a Windows build driving a Host
-        // that says otherwise the two never matched, so no Installation was
-        // ever the installer's and every upgrade was refused.
+        // Compared as text rather than as a `PathBuf`, which is the whole point:
+        // a `PathBuf` comparison is separator-agnostic on Windows, and so says
+        // nothing about the spelling this is here to hold still.
         let spelling = |host: &FakeHost| installer_dir(host).expect("a home").display().to_string();
 
         assert_eq!(spelling(&FakeHost::new()), "/Users/someone/.local/bin");
@@ -640,9 +547,7 @@ mod tests {
              reads both"
         );
 
-        // Derived from home only where the machine will not say — which is
-        // where the installer's own `Join-Path $env:LOCALAPPDATA` would have
-        // failed too.
+        // Derived from home only where the machine will not say.
         let quiet = FakeHost::new().with_platform(Platform::Windows);
         assert_eq!(spelling(&quiet), "/Users/someone/AppData/Local/Perch/bin");
 
@@ -658,10 +563,6 @@ mod tests {
         }
     }
 
-    /// Both of the Windows-only readings, neither of which any other platform
-    /// needs: a canonicalized path there is verbatim — `\\?\C:\Users\...` —
-    /// and the filesystem does not distinguish case. Either one left alone made
-    /// every Windows installer Installation unrecognizable.
     #[test]
     fn a_windows_path_is_read_the_way_windows_reads_it() {
         let installer = Path::new("C:\\Users\\someone\\AppData\\Local\\Perch\\bin");
@@ -689,8 +590,6 @@ mod tests {
         );
     }
 
-    /// The same folding must not happen off Windows, where two paths differing
-    /// in case are two files.
     #[test]
     fn case_is_not_folded_where_the_filesystem_does_not_fold_it() {
         assert_eq!(channel_of("/home/someone/.local/BIN/perch"), None);
@@ -708,8 +607,6 @@ mod tests {
         assert_eq!(tag_of("0.2.0"), "v0.2.0");
     }
 
-    /// Refused here rather than at the download, where the answer is a 404
-    /// about an archive nobody asked for by name.
     #[test]
     fn something_that_is_not_a_release_is_refused_before_the_network() {
         for typed in [
@@ -720,11 +617,8 @@ mod tests {
             "",
             "banana",
             "0.x.0",
-            // Everything after the first digit of the patch component used to
-            // go unread, so all of these were accepted, put into
-            // `PERCH_VERSION` and handed to the installer — which built an
-            // archive name and a download URL out of them and came back with
-            // the 404 this refusal exists to replace.
+            // Everything after the patch component's first digit, which is what
+            // reaches `PERCH_VERSION` and then the installer's download URL.
             "0.2.0/../../whatever",
             "0.2.0 && echo",
             "0.2.0\nv0.3.0",
@@ -747,8 +641,6 @@ mod tests {
         assert_eq!(compare("0.1.0", "0.2.0"), Ordering::Less);
     }
 
-    /// An unfinished Release comes before the finished one of the same number,
-    /// which falls out of an empty suffix sorting last rather than first.
     #[test]
     fn a_pre_release_comes_before_the_release_it_is_a_run_up_to() {
         assert_eq!(compare("0.2.0-rc.1", "0.2.0"), Ordering::Less);
@@ -756,33 +648,19 @@ mod tests {
         assert_eq!(compare("0.2.0-rc.2", "0.2.0-rc.1"), Ordering::Greater);
     }
 
-    /// A run-up is numbered, and a number is not spelled: `rc.10` follows
-    /// `rc.9`.
-    ///
-    /// Compared as one string it was `'1'` against `'9'`, so `perch upgrade
-    /// --release 0.2.0-rc.10` on an installed `0.2.0-rc.9` asked "Install the
-    /// older Release?" about the newer one, and refused it outright where
-    /// nobody was there to answer.
     #[test]
     fn a_run_up_is_ordered_by_its_number_rather_than_by_its_spelling() {
         assert_eq!(compare("0.2.0-rc.10", "0.2.0-rc.9"), Ordering::Greater);
         assert_eq!(compare("0.2.0-rc.9", "0.2.0-rc.10"), Ordering::Less);
         assert_eq!(compare("0.2.0-rc.10", "0.2.0-rc.10"), Ordering::Equal);
-        // Semver's other two rules about a suffix, which fall out of the same
-        // walk: a number sorts below a word, and where one suffix runs out
-        // first the longer one is the newer.
+        // Semver's other two rules about a suffix, from the same walk.
         assert_eq!(compare("0.2.0-alpha", "0.2.0-1"), Ordering::Greater);
         assert_eq!(compare("0.2.0-1", "0.2.0-alpha"), Ordering::Less);
         assert_eq!(compare("0.2.0-rc.1.1", "0.2.0-rc.1"), Ordering::Greater);
     }
 
-    /// Build metadata has no bearing on precedence, which semver states and
-    /// `version_typed` deliberately accepts the spelling of.
-    ///
-    /// Compared as a suffix it was worse than ignored: `+` sorts below `-`, so
-    /// `0.2.0+build.3` came out below both `0.2.0` and `0.2.0-rc.1`, and
-    /// `perch upgrade --release 0.2.0+build.3` on an installed `0.2.0` asked
-    /// "Install the older Release?" about the version already there.
+    /// `version_typed` accepts the spelling deliberately, so this is reachable
+    /// by typing rather than hypothetical.
     #[test]
     fn build_metadata_does_not_decide_which_release_is_newer() {
         assert_eq!(compare("0.2.0+build.3", "0.2.0"), Ordering::Equal);
@@ -792,13 +670,6 @@ mod tests {
         assert_eq!(compare("0.3.0+build.3", "0.2.0"), Ordering::Greater);
     }
 
-    /// A component too big for a `u64` is bigger than any Release, not smaller
-    /// than all of them.
-    ///
-    /// `version_typed` accepts any run of ASCII digits, so this is reachable by
-    /// typing rather than hypothetical — and read as zero it compared as
-    /// `0.0.0` and was offered as "the older Release", the wrong-direction
-    /// prompt the build-metadata rule above is about.
     #[test]
     fn a_number_too_big_to_read_is_the_newer_release_rather_than_the_oldest_possible() {
         let enormous = "99999999999999999999.0.0";

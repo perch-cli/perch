@@ -257,12 +257,9 @@ enum Command {
         /// The Release to install, with or without its leading `v`. Without
         /// this, the newest.
         ///
-        /// Not with `--check`, which asks what the *newest* Release is and has
-        /// no use for a named one. Refused rather than ignored: `--check
-        /// --release 0.1.0` answered about the newest and never mentioned that
-        /// the version named had been thrown away, which is the same silent
-        /// ignore `refuse_a_release_homebrew_cannot_take` exists to prevent one
-        /// branch over.
+        /// Not with `--check`, which asks what the newest Release is and has no
+        /// use for a named one. Refused rather than ignored, because a named
+        /// Release that is quietly thrown away is one nobody is told about.
         #[arg(long, value_name = "TAG", conflicts_with = "check")]
         release: Option<String>,
 

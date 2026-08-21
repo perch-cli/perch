@@ -1,14 +1,12 @@
 #!/bin/sh
-# Writes the Homebrew formula for one release to stdout.
+# Writes the Homebrew formula for one Release to stdout.
 #
 #   packaging/homebrew/formula.sh <version-without-v> <path-to-SHA256SUMS>
 #
-# The checksums come from the SHA256SUMS the release published rather than from
-# a recomputation here, so the formula can only ever point at bytes that are
-# actually on the Release page.
-#
-# A binary formula rather than a source one: building from source would make
-# every `brew install perch` install a Rust toolchain first.
+# The checksums come from the SHA256SUMS the Release published rather than from a
+# recomputation, so the formula can only point at bytes on the Release page. A
+# binary formula rather than a source one, which would put a Rust toolchain in
+# front of every `brew install perch` (ADR this-repo-assembles-a-release).
 
 set -eu
 
@@ -31,7 +29,7 @@ hash_for() {
 }
 
 # Read every one before writing anything, so a missing archive fails with a
-# clear message rather than half a formula.
+# message rather than half a formula.
 darwin_arm=$(hash_for aarch64-apple-darwin)
 darwin_intel=$(hash_for x86_64-apple-darwin)
 linux_arm=$(hash_for aarch64-unknown-linux-musl)

@@ -26,7 +26,7 @@ binary genuinely worse.
 
 And musl's allocator, which is the reason performance-sensitive programs avoid
 it, is arithmetic Perch never does: it reads a registry, writes a credential,
-and draws a screen.
+and prints a table.
 
 ## The consequence worth writing down
 

@@ -1,17 +1,13 @@
 name: PR title
 
-# A workflow of its own, for one job that takes five seconds, because the event
-# types are a property of the workflow and not of the job. This one needs
-# `edited`: a title is the one thing a check can ask the author to change, and
-# without it the check never runs again when they change it — the verdict stays
-# red on the old title until an unrelated push happens to refresh the payload,
-# so the only ways out were a junk commit or closing and reopening the pull
-# request. Asking `ci.yml` for `edited` meant a three-platform Rust matrix
-# rebuilding every time somebody fixed a typo in a description.
+# A workflow of its own, because the event types are a property of the workflow
+# rather than of the job. This one needs `edited`: a title is the one thing a
+# check asks the author to change, and without it the verdict stays red on the
+# old title. Asking `ci.yml` for it would rebuild a three-platform Rust matrix
+# on every typo fixed in a description.
 #
-# `synchronize` is here despite a push never changing a title, because a
-# required check is required *per commit*: a run against the old head does not
-# satisfy branch protection for the new one.
+# `synchronize` is here despite a push never changing a title, because a required
+# check is required *per commit*.
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
@@ -25,27 +21,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # release-plz reads commit subjects to decide the next version, and this
-  # repository squash-merges with the pull request title as the subject, so the
-  # title *is* the commit it reads. A title that says nothing about the change
-  # does not break anything visibly — it silently produces the wrong version
-  # number, which is precisely the failure the tool was adopted to prevent.
-  # Checked here so it fails loudly instead, in the one place someone is already
-  # looking.
-  #
-  # Only the subject line carries the type. release-plz parses the whole commit
-  # message but takes `feat`/`fix`/`!` from the first line alone, so the
-  # `* feat: ...` bullets GitHub assembles into the squash body from the branch
-  # commits are read as prose and change nothing.
+  # This repository squash-merges with the pull request title as the subject, so
+  # the title *is* the commit release-plz reads to decide the next version
+  # (ADR this-repo-assembles-a-release), and unchecked it fails as a wrong number
+  # rather than as anything visible. Only the subject line carries the type, so
+  # the `* feat: ...` bullets in the squash body are read as prose.
   title:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Conventional Commits
-        # Through the environment rather than `${{ }}` inside the script. A
-        # pull request title is text a stranger chooses, and interpolating it
-        # into a shell would run whatever a `$(...)` in it said, with this
-        # workflow's token.
+        # Through the environment rather than `${{ }}` inside the script: a title
+        # is text a stranger chooses, and interpolating it into a shell runs
+        # whatever a `$(...)` in it says, with this workflow's token.
         env:
           TITLE: ${{ github.event.pull_request.title }}
         run: |
