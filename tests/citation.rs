@@ -260,3 +260,54 @@ fn every_document_is_named_by_its_own_title() {
         wrong.join("\n")
     );
 }
+
+/// The prefix's own half. Band `N` occupies `N01` through `N99`, so lexicographic
+/// sort is the intended order and a new document appends inside its band. Which
+/// band a document belongs to is a judgment; that a band runs from `01` with no
+/// gap and no number twice is not, and a gap is what a merge leaves behind.
+#[test]
+fn every_band_is_contiguous_from_its_base() {
+    let mut positions: BTreeMap<u32, BTreeMap<u32, Vec<String>>> = BTreeMap::new();
+    let mut malformed = Vec::new();
+    for entry in std::fs::read_dir(repo().join("docs/adr")).expect("docs/adr is a directory") {
+        let path = entry.expect("a readable entry").path();
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        let prefix = stem.split('-').next().unwrap_or("");
+        let number = (prefix.len() == 4 && prefix.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| prefix.parse::<u32>().expect("four digits"));
+        match number {
+            Some(number) => positions
+                .entry(number / 100)
+                .or_default()
+                .entry(number % 100)
+                .or_default()
+                .push(relative(&path)),
+            None => malformed.push(relative(&path)),
+        }
+    }
+
+    let mut wrong = malformed;
+    for (band, within) in &positions {
+        for (offset, (at, documents)) in within.iter().enumerate() {
+            let expected = offset as u32 + 1;
+            if documents.len() > 1 {
+                wrong.push(format!(
+                    "{band:02}{at:02} names {}",
+                    documents.join(" and ")
+                ));
+            } else if *at != expected {
+                wrong.push(format!(
+                    "{} sits at {at:02}, not {expected:02}",
+                    documents[0]
+                ));
+            }
+        }
+    }
+    wrong.sort();
+
+    assert!(
+        wrong.is_empty(),
+        "band N runs N01 upward, four digits, no gap and no number twice:\n{}",
+        wrong.join("\n")
+    );
+}

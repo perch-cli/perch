@@ -89,11 +89,12 @@ A decision is cited as `ADR <slug>`: `(ADR perch-does-not-draw)`. The slug is
 the document's H1 kebab-cased, and is the tail of its filename in `docs/adr/` —
 at most 30 characters, always hyphenated, never one word. The numeric prefix is a
 sort key: it appears in no citation, and the document is found by globbing
-`docs/adr/*-<slug>.md`.
+`docs/adr/*-<slug>.md`. Band `N` occupies `N01` through `N99`, the bands running
+in `CONTEXT.md`'s section order, so a new document appends inside its band.
 
 One form everywhere — Rust, Markdown, TOML, YAML, TypeScript — and never a path
-or a link, because the set is contiguous from 0001 and adding a document moves
-every number after it. A citation names a document, never a section.
+or a link, because the slug is the identity and a path names the number instead.
+A citation names a document, never a section.
 
 A citation addresses an agent reading the tree, so two places never carry one:
 the guide under `pages/src/content/docs/`, and anything Perch says to a person.
