@@ -2,10 +2,9 @@
 //!
 //! The order of the effects is asserted rather than inferred, because it is the
 //! visible contract with a Claude Code running at the same time
-//! (ADR a-switch-is-written-down-first): the Capture has to reach the outgoing
-//! Profile before the live store is written, the Identity has to be patched
-//! last, and all of it has to happen inside Claude Code's own locks, taken in
-//! Claude Code's own order.
+//! (ADR a-switch-is-written-down-first): the Capture reaches the outgoing
+//! Profile before the live store is written, the Identity is patched last, and
+//! all of it happens inside Claude Code's own locks, in Claude Code's own order.
 
 mod common;
 
@@ -50,14 +49,9 @@ fn live_credential(host: &FakeHost) -> Option<String> {
 const ROTATED: &str = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-rotated","refreshToken":"sk-ant-ort01-rotated","expiresAt":1790000000000,"subscriptionType":"pro"}}"#;
 
 /// A Switch that a session marker did not hold back, asserted on what it did
-/// rather than on its not having been refused.
-///
-/// Every one of the markers below used to be checked with a bare `expect` and
-/// nothing else, which measures only "not refused" — a Perch that judged the
-/// Profile idle and then skipped the Capture entirely passed all five. So the
-/// live Credential is Rotated first, and what is asserted is the whole of what a
-/// Switch owes: the Rotation went back into the outgoing Account's Profile, the
-/// incoming Credential is the live one, and Perch records who is active.
+/// rather than on its not having been refused: the live Credential is Rotated
+/// first, so a Perch that judged the Profile idle and skipped the Capture is not
+/// mistaken for one that switched.
 fn assert_the_switch_captured_and_landed(host: &FakeHost, why: &str) {
     host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, ROTATED);
 
@@ -131,13 +125,6 @@ fn trace(host: &FakeHost) -> Vec<String> {
         .collect()
 }
 
-/// One `perch switch` asks the installed Claude Code its version once.
-///
-/// Every refusal the probe raises names the Claude Code it was reading
-/// (ADR an-assumption-is-probed), and both halves of a Switch — the question of
-/// whether it has already landed, and the Switch itself — used to read it for
-/// themselves. That is a `PATH` walk and a subprocess each, twice per command,
-/// for a sentence neither of them usually prints.
 #[test]
 fn a_switch_asks_which_claude_code_is_installed_once() {
     let host = machine_with_two_accounts();
@@ -154,16 +141,6 @@ fn a_switch_asks_which_claude_code_is_installed_once() {
     assert_eq!(asked, 1, "{:?}", host.effects());
 }
 
-/// A Switch that cannot work out where the Default Profile is has not landed,
-/// and says so as a Switch rather than as a probe.
-///
-/// It is the one way `perch switch` can fail before it has taken a lock or read
-/// a Credential — the store a Profile derives is keyed by the login name, and
-/// on macOS with neither `USER` nor `USERNAME` set there is nothing to derive
-/// it from (ADR claude-code-chooses-the-store). Nothing has been written and
-/// nothing can have moved, so `perform` hands back a Landing that did not land:
-/// the same shape every other outcome takes, so that recording it is the same
-/// one way out.
 #[test]
 fn a_switch_that_cannot_place_the_default_profile_changes_nothing() {
     let host = machine_with_two_accounts().without_env("USER");
@@ -271,13 +248,6 @@ fn the_credential_the_outgoing_account_rotated_to_is_captured_before_it_is_repla
     );
 }
 
-/// Perch is not the only thing that writes the Default Profile. Somebody who
-/// runs `claude` and logs in directly leaves Perch's record of who is active
-/// behind, and the live Credential is then a stranger's. Capturing it into the
-/// Profile of the Account Perch *believes* is active would overwrite that
-/// Account's own Credential with somebody else's — and a later Switch back
-/// would make the stranger's Credential live under the Account's name, so
-/// Claude Code would act as one person while displaying another.
 #[test]
 fn a_live_credential_belonging_to_a_login_made_outside_perch_is_not_captured() {
     let host = machine_with_two_accounts();
@@ -302,22 +272,6 @@ fn a_live_credential_belonging_to_a_login_made_outside_perch_is_not_captured() {
     );
 }
 
-/// A stale Identity is not evidence, and it is Perch that leaves them stale.
-///
-/// `Landing::record` files the incoming Account as active whenever its
-/// Credential went live — including when the patch of `.claude.json` failed
-/// afterwards, which is a state the suite above already produces on purpose. So
-/// the registry says B and Claude Code's file still says A. B then runs and
-/// Anthropic Rotates it.
-///
-/// On the next Switch, to a third Account, the Identity said A, the Capture was
-/// declined as "not B's", and the incoming Credential went over the only copy
-/// of B's Rotation — the loss ADR a-switch-is-written-down-first exists to
-/// prevent, reached by believing a file Perch had just failed to write. The
-/// report said the live Credential was A's and had been left alone, which was
-/// untrue twice over.
-///
-/// Nothing on the machine says whose Rotation it is, so nothing is written.
 #[test]
 fn a_rotation_is_not_lost_to_an_identity_perch_itself_failed_to_patch() {
     // Three, because the Switch that loses the Rotation is the one to a *third*
@@ -354,10 +308,6 @@ fn a_rotation_is_not_lost_to_an_identity_perch_itself_failed_to_patch() {
     );
 }
 
-/// The mirror, so the guard above cannot be satisfied by never Capturing at
-/// all: an Identity that says nothing is no evidence against, and a Rotation
-/// made under a Profile Claude Code has never written an Identity into must
-/// still be kept.
 #[test]
 fn a_live_credential_with_no_identity_beside_it_is_captured_rather_than_left() {
     let host = machine_with_two_accounts();
@@ -480,11 +430,9 @@ fn switching_back_names_the_account_perch_adopted_with_every_field_it_had() {
 
 #[test]
 fn a_switch_never_writes_one_accounts_identity_into_anothers_profile() {
-    // The state that makes this possible to get wrong: a Switch interrupted
-    // between writing the Credential and patching the Identity, so that Perch
-    // and Claude Code disagree about who is active. Anything copying "the
-    // Identity that is live" into "the Account being left" copies the wrong one
-    // here, and nothing afterwards would ever correct it.
+    // A Switch interrupted between writing the Credential and patching the
+    // Identity, so Perch and Claude Code disagree about who is active. Anything
+    // copying the live Identity into the Account being left copies the wrong one.
     let host = machine_with_two_accounts().with_unwritable_file(IDENTITY_PATH, "read-only file");
     run_switch(&host, SECOND_EMAIL)
         .0
@@ -511,12 +459,6 @@ fn a_switch_never_writes_one_accounts_identity_into_anothers_profile() {
     }
 }
 
-/// The Capture is not among them, and that is the decision rather than an
-/// omission: it happens before every Switch without exception
-/// (ADR a-switch-is-written-down-first), so announcing it is the ordinary case
-/// announcing that it was ordinary (ADR perch-says-what-it-did). That it
-/// happened is asserted where it can be seen — the outgoing Account's own
-/// Profile — rather than by a sentence about it.
 #[test]
 fn the_switch_reports_where_it_landed_and_what_the_cache_says_about_it() {
     let host = machine_with_two_accounts();
@@ -547,16 +489,6 @@ fn the_switch_reports_where_it_landed_and_what_the_cache_says_about_it() {
     );
 }
 
-/// A sessions directory that is there and will not be read is doubt, not
-/// emptiness.
-///
-/// `sudo claude` leaves `sessions` owned by root inside a Profile the user
-/// owns, and from then on listing it fails with a permission error rather than
-/// saying the directory is absent. Reading that as "nothing is running" would
-/// let a Switch Capture over the Credential a client is holding — the mid-task
-/// logout ADR a-profile-is-live-by-evidence exists to prevent, arriving through
-/// the one answer the Host port goes out of its way to keep distinct from an
-/// absent directory.
 #[test]
 fn a_sessions_directory_that_will_not_be_read_stops_the_switch_rather_than_reading_as_empty() {
     let host = machine_with_two_accounts()
@@ -582,9 +514,6 @@ fn a_sessions_directory_that_will_not_be_read_stops_the_switch_rather_than_readi
     assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
 }
 
-/// An absent one is the ordinary case and still means nothing is running: a
-/// machine where no client has ever started has no such directory, and refusing
-/// there would refuse every first Switch.
 #[test]
 fn a_profile_that_never_ran_a_client_has_no_sessions_directory_and_switches() {
     let host = machine_with_two_accounts();
@@ -595,9 +524,6 @@ fn a_profile_that_never_ran_a_client_has_no_sessions_directory_and_switches() {
     assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
 }
 
-/// The Capture is the write, and it writes into the *outgoing* Account's own
-/// Profile — so that Profile being Live is what stops a Switch
-/// (ADR a-switch-is-written-down-first).
 #[test]
 fn switching_away_from_a_profile_a_client_is_running_against_is_refused() {
     let host = client_running_against(machine_with_two_accounts(), FIRST_PROFILE, 77);
@@ -617,14 +543,6 @@ fn switching_away_from_a_profile_a_client_is_running_against_is_refused() {
     assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
 }
 
-/// A live store holding bytes that are not a Credential is the state a
-/// truncating keychain leaves (ADR claude-code-chooses-the-store), and it used
-/// to wedge the machine. Every Switch read the live Credential and parsed it —
-/// `already_landed` only to ask whether one was there, the Capture only to copy
-/// the bytes back out — so the assumption refusal came out of both, and the
-/// command that repairs the store by writing a good Credential over the bad one
-/// was turned away on the strength of the file it was about to replace. There
-/// was no way out through Perch at all.
 #[test]
 fn a_live_credential_perch_cannot_read_is_repaired_by_switching_rather_than_refused() {
     let host = machine_with_two_accounts();
@@ -650,9 +568,6 @@ fn a_live_credential_perch_cannot_read_is_repaired_by_switching_rather_than_refu
     );
 }
 
-/// The same store, and a Switch onto somebody else: it lands too. The Account
-/// being left keeps the Credential its own Profile already held, which is the
-/// whole of what the Capture was protecting.
 #[test]
 fn a_live_credential_perch_cannot_read_does_not_stop_a_switch_to_another_account() {
     let host = machine_with_two_accounts();
@@ -674,16 +589,6 @@ fn a_live_credential_perch_cannot_read_does_not_stop_a_switch_to_another_account
     );
 }
 
-/// A store that will not answer is not a store holding rubbish.
-///
-/// The two arrived at the same place: `read_credential` failed, the Capture was
-/// declined, and the Switch went on to write the incoming Credential over
-/// whatever was there. For bytes that are not a Credential that is right —
-/// nothing is lost, and the write is the repair. For a `.credentials.json` left
-/// owned by root by a `sudo claude`, it is not: the file very likely holds the
-/// outgoing Account's own Credential, Rotated several times past the copy in
-/// its Profile, and the store said nothing at all about what it holds. The
-/// Switch destroyed the only good copy and reported success.
 #[test]
 fn a_live_store_that_will_not_answer_stops_the_switch_rather_than_being_written_over() {
     let host = two_accounts_off_macos();
@@ -710,9 +615,6 @@ fn a_live_store_that_will_not_answer_stops_the_switch_rather_than_being_written_
     );
 }
 
-/// The same machine, and a store that answers with bytes nothing understands:
-/// still a declined Capture and still a Switch that lands, because that is the
-/// one the store cannot be repaired without.
 #[test]
 fn a_live_store_that_answers_with_rubbish_is_still_switched_over() {
     let host = two_accounts_off_macos();
@@ -733,14 +635,6 @@ fn a_live_store_that_answers_with_rubbish_is_still_switched_over() {
     );
 }
 
-/// The other direction is not the same danger and is not refused
-/// (ADR a-profile-is-live-by-evidence).
-///
-/// A Switch only ever *reads* the incoming Account's Profile, to copy its
-/// Credential into the Default Profile, and reading takes nothing away from the
-/// session using it. Refusing this would make a Run and a Switch lock each other
-/// out for no reason: the Account you are running in one terminal is exactly the
-/// one you would want active in the others.
 #[test]
 fn switching_onto_a_profile_a_client_is_running_against_lands() {
     let host = client_running_against(machine_with_two_accounts(), SECOND_PROFILE, 4242);
@@ -757,19 +651,6 @@ fn switching_onto_a_profile_a_client_is_running_against_lands() {
     assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
 }
 
-/// A `~/.claude.json` managed by stow, chezmoi or yadm, switched over.
-///
-/// The link is followed and the file in the dotfiles repository is the one that
-/// changes — but the half worth asserting is what *survives*: `numStartups`,
-/// the project history, the MCP configuration. `patch_identity` reads the file
-/// before it writes it, and a read that answered `NotFound` took the branch
-/// written for "a Claude Code that has never run here", which composes a whole
-/// new `.claude.json` from the Identity alone. Followed by a write that *does*
-/// go through the link, that is somebody's dotfiles repository overwritten with
-/// a two-key file, committed by whatever runs next.
-///
-/// Untestable until now: `FakeHost` followed a link on no read at all, so this
-/// machine could not be built here.
 #[test]
 fn a_switch_on_a_machine_whose_identity_file_is_a_managed_link_writes_through_it() {
     let host = machine_with_two_accounts();
@@ -801,15 +682,6 @@ fn a_switch_on_a_machine_whose_identity_file_is_a_managed_link_writes_through_it
     );
 }
 
-/// A Profile whose `sessions` is a link into the Default Profile reports the
-/// Default Profile's clients as its own.
-///
-/// That is the hazard ADR everything-but-the-account names and
-/// `reconcile::HELD_BACK` exists to prevent, and nothing could stand on it:
-/// reading a linked `sessions` means `list_dir` following the link, which the
-/// fake did not do. So the Switch is refused here for a client that is running
-/// somewhere else entirely — one Account made unreachable by a link in another
-/// Account's directory.
 #[test]
 fn a_profile_whose_sessions_is_a_link_reads_the_clients_at_the_other_end() {
     let host = client_running_against(machine_with_two_accounts(), "/Users/someone/.claude", 4242);
@@ -855,20 +727,6 @@ fn a_marker_whose_pid_now_belongs_to_a_younger_process_is_not_a_live_profile() {
     assert_the_switch_captured_and_landed(&host, "that client died; the pid was recycled");
 }
 
-/// The ordering ADR a-profile-is-live-by-evidence corroborates a Marker by
-/// compares two clocks, and on Linux only one of them stands still.
-///
-/// `/proc/<pid>/stat` gives a process's start in ticks since boot, and the
-/// kernel derives `btime` as realtime minus uptime — so when a marker records a
-/// session at noon and NTP then steps the wall clock forward two seconds, the
-/// very process that wrote it reads back as having begun at 12:00:02. Read
-/// strictly, its own Marker dismissed it: the Profile stopped being Live under
-/// a running client, and the Renewal that followed Rotated the Credential that
-/// client was holding.
-///
-/// A pid the operating system has handed out again belongs to a process a whole
-/// session younger, which is what the test above is about and what the margin
-/// leaves untouched.
 #[test]
 fn a_clock_that_stepped_forward_does_not_dismiss_the_marker_of_a_running_client() {
     let session_began = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
@@ -903,15 +761,6 @@ fn a_marker_that_does_not_say_when_its_session_began_is_no_evidence_of_a_client(
     );
 }
 
-/// A marker Perch cannot see the *contents* of is a different thing from one
-/// whose contents say nothing.
-///
-/// Root-owned after a `sudo claude`, or halfway through being written by a
-/// client that is starting up right now. Nothing about it has been established,
-/// so it resolves the way every other doubt in the probe resolves — towards
-/// Live — rather than being read as an empty Profile a Switch may write under.
-/// That is the mid-task logout ADR a-profile-is-live-by-evidence exists to
-/// prevent.
 #[test]
 fn a_marker_that_cannot_be_read_at_all_holds_the_profile_of_a_running_client() {
     let host = machine_with_two_accounts()
@@ -932,17 +781,6 @@ fn a_marker_that_cannot_be_read_at_all_holds_the_profile_of_a_running_client() {
     );
 }
 
-/// A `sessions` that is a file rather than a directory is doubt, not emptiness.
-///
-/// `clients_in` reads exactly two answers out of `list_dir`: `NotFound` means
-/// no client has ever run here, so nothing is running and a Switch may replace
-/// the live Credential, and everything else is doubt it refuses on. A regular
-/// file of that name — a botched restore, a name crossed by a hard link — is
-/// `ENOTDIR` on a real filesystem, which is the second answer. `FakeHost`
-/// answered `NotFound` for it, so this read as an idle Profile in every
-/// behavior test and as a refusal on the machine: the two states this whole
-/// probe exists to keep apart, swapped, in the direction that logs somebody out
-/// mid-task.
 #[test]
 fn a_sessions_that_is_a_file_is_doubt_rather_than_an_idle_profile() {
     let host = machine_with_two_accounts().with_file(format!("{FIRST_PROFILE}/sessions"), "");
@@ -957,9 +795,6 @@ fn a_sessions_that_is_a_file_is_doubt_rather_than_an_idle_profile() {
     );
 }
 
-/// The same file with nothing running under it is litter, not doubt. A marker
-/// nobody can read beside a process that is not there must not refuse every
-/// Switch against this Profile for ever.
 #[test]
 fn an_unreadable_marker_whose_process_is_gone_holds_nothing() {
     let host = machine_with_two_accounts()
@@ -972,15 +807,6 @@ fn an_unreadable_marker_whose_process_is_gone_holds_nothing() {
     assert_the_switch_captured_and_landed(&host, "no client is holding that Profile");
 }
 
-/// The same marker with its process alive is doubt — and the refusal has to say
-/// which belief failed (ADR an-assumption-is-probed), which here is a file
-/// Perch could not read.
-///
-/// It shared a sentence with the case below, whose cause is an operating system
-/// that would not say when a process began. So somebody meeting a marker left
-/// root-owned by a `sudo claude` — a file they can `chmod` — was told Perch
-/// could not find out when a process started, and sent looking at the wrong
-/// thing entirely.
 #[test]
 fn an_unreadable_marker_whose_process_is_alive_names_the_file_rather_than_the_clock() {
     let host = machine_with_two_accounts()
@@ -1083,11 +909,6 @@ fn a_switch_that_cannot_patch_the_identity_says_what_it_left_where() {
     );
 }
 
-/// `.claude.json` holds MCP configuration, and an MCP server entry routinely
-/// carries an API key in its `env` block. The Identity is patched by writing a
-/// replacement and moving it over the file, and a replacement created at the
-/// process umask would hand every one of those secrets to every other user on
-/// the machine — permanently, from the first Switch, with no race to lose.
 #[test]
 fn patching_the_identity_leaves_it_as_narrow_as_it_was_found() {
     let host = machine_with_two_accounts().with_file_mode(IDENTITY_PATH, 0o600);
@@ -1102,9 +923,6 @@ fn patching_the_identity_leaves_it_as_narrow_as_it_was_found() {
     );
 }
 
-/// The other half of the same rule: a file that was open stays as it was, since
-/// Perch is patching one key of a file it does not own and its permissions are
-/// not Perch's to decide either way.
 #[test]
 fn patching_the_identity_does_not_narrow_a_file_that_was_open() {
     let host = machine_with_two_accounts().with_file_mode(IDENTITY_PATH, 0o644);
@@ -1153,14 +971,6 @@ fn switching_to_the_account_that_is_already_active_changes_nothing() {
     );
 }
 
-/// `claude /logout` empties the live store and leaves `.claude.json` naming
-/// whoever was there. Perch's record still says that Account is active, and it
-/// is — as a claim about which Credential is live, which is now none.
-///
-/// Read off the Identity alone that looks like a Switch that already landed,
-/// and the command turned away as unnecessary is precisely the one that would
-/// put the Credential back. It is the interrupted Switch's half-state reached
-/// from the other side, and it wants the same answer: run it.
 #[test]
 fn switching_to_the_active_account_after_a_logout_puts_its_credential_back() {
     let host = machine_with_two_accounts();
@@ -1203,16 +1013,6 @@ fn a_switch_takes_a_lock_a_process_died_holding_and_waits_for_one_still_held() {
     );
 }
 
-/// An abandoned lock that is a directory and simply would not go is contention,
-/// not the wedge above.
-///
-/// `clear_the_abandoned` reported every failure as "is not a lock directory",
-/// but the refusal only diagnoses one of them. A child held open on Windows is
-/// the sharing violation `rename_replacing` retries for arriving here instead,
-/// and EBUSY and EACCES are the same shape — each aborted the whole Switch on
-/// the first of five attempts, telling somebody their lock path is not a
-/// directory when it is, and to go and delete it by hand when waiting one more
-/// second would have done.
 #[test]
 fn an_abandoned_lock_that_would_not_be_cleared_is_waited_on_rather_than_declared_broken() {
     let host = machine_with_two_accounts();
@@ -1240,23 +1040,13 @@ fn an_abandoned_lock_that_would_not_be_cleared_is_waited_on_rather_than_declared
     );
 }
 
-/// The case the listing test still got wrong: a directory that can be neither
-/// removed nor walked.
-///
-/// A lock left root-owned inside a Profile by a `sudo claude`, or a Profile
-/// whose read bit somebody took away, is stat-ed from its parent perfectly well
-/// and fails both `remove_dir_all` and the listing with EACCES. Told apart by
-/// whether it could be listed, it was reported as not being a directory when it
-/// is — the one message that turns an unrecoverable state into a five-second
-/// fix, printed about a state that is neither.
 #[test]
 fn an_abandoned_lock_that_cannot_even_be_walked_is_still_waited_on_rather_than_declared_broken() {
     let host = machine_with_two_accounts();
     let long_ago = host.now() - chrono::Duration::seconds(120);
-    // One arrangement rather than two. `with_unlistable_dir` says what it means
-    // — "`remove_dir_all` and the listing both fail EACCES" — and the fake now
-    // answers both, so a test no longer has to describe one real state by
-    // turning two knobs that could be turned apart.
+    // One arrangement rather than two: `with_unlistable_dir` says what it means
+    // — `remove_dir_all` and the listing both fail EACCES — so one real state is
+    // not described by turning two knobs that could be turned apart.
     let host = host
         .with_dir_held_since(REFRESH_LOCK, long_ago)
         .with_unlistable_dir(REFRESH_LOCK, "Permission denied");
@@ -1278,16 +1068,6 @@ fn an_abandoned_lock_that_cannot_even_be_walked_is_still_waited_on_rather_than_d
     );
 }
 
-/// Something at a lock path that is not a lock is said, rather than reported as
-/// a Claude Code that will not let go.
-///
-/// A lock is a directory and `remove_dir_all` does not follow the last
-/// component, so a plain file there fails with `ENOTDIR` every time. That
-/// failure was discarded, which turned it into five attempts of no progress and
-/// then "is held by Claude Code and was not given back. … quit it and run this
-/// again" — about a path with no Claude Code behind it, where the advice can
-/// never work. Every Switch, Run and Renewal failed that way until somebody
-/// deleted the path by hand.
 #[test]
 fn something_at_a_lock_path_that_is_not_a_lock_is_named_rather_than_blamed_on_claude_code() {
     let host = machine_with_two_accounts().with_file(REFRESH_LOCK, "not a lock directory");
@@ -1301,9 +1081,8 @@ fn something_at_a_lock_path_that_is_not_a_lock_is_named_rather_than_blamed_on_cl
         "it says what is wrong: {said}"
     );
     // The file name rather than the whole path: a `Path` renders with the
-    // separator of whatever is running the test, so a fixture spelled with `/`
-    // comes back mixed on Windows and an assertion on the whole string would be
-    // testing the separator rather than the message.
+    // separator of whatever is running the test, so an assertion on the whole
+    // string would be testing the separator rather than the message.
     assert!(
         said.contains(
             Path::new(REFRESH_LOCK)
@@ -1320,19 +1099,13 @@ fn something_at_a_lock_path_that_is_not_a_lock_is_named_rather_than_blamed_on_cl
     assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
 }
 
-/// A takeover on the last attempt gets the lock it just freed.
-///
-/// The takeover used to `continue`, which spent the attempt — so a holder that
-/// died just before the final try was cleared and then reported as holding the
-/// lock this very call had freed.
 #[test]
 fn a_lock_abandoned_on_the_last_attempt_is_taken_rather_than_reported_as_held() {
     let host = machine_with_two_accounts();
     let now = host.now();
-    // The refresh lock goes stale at 60s, and each of the four waits advances
-    // the fake clock by a second. Held since 56.5s ago, it reads as alive on
-    // attempts one to four and as abandoned on the fifth — the last one there
-    // is.
+    // The refresh lock goes stale at 60s and each of the four waits advances the
+    // fake clock by a second, so a lock held since 56.5s ago reads as alive on
+    // attempts one to four and as abandoned on the fifth — the last there is.
     let host = host.with_dir_held_since(REFRESH_LOCK, now - chrono::Duration::milliseconds(56_500));
 
     run_switch(&host, SECOND_EMAIL)
@@ -1419,14 +1192,6 @@ fn a_locked_keychain_reads_as_locked_rather_than_as_a_missing_account() {
     assert_eq!(error.exit_code(), EXIT_KEYCHAIN_UNAVAILABLE);
 }
 
-/// The window a liveness refusal asked before the locks leaves open.
-///
-/// Taking Claude Code's locks can take seconds — the wait is four of them. A
-/// `claude` started inside that wait is one a check made beforehand never saw,
-/// and the Switch would go on to replace the Credential that session is
-/// holding: the mid-task logout ADR a-profile-is-live-by-evidence exists to
-/// prevent. So the question is asked again once the locks are held and nothing
-/// can change the answer.
 #[test]
 fn a_client_that_starts_during_the_lock_wait_still_stops_the_switch() {
     let host = machine_with_two_accounts();
@@ -1457,17 +1222,6 @@ fn a_client_that_starts_during_the_lock_wait_still_stops_the_switch() {
     );
 }
 
-/// Claude Code writes `.claude.json` the first time it is run — onboarding, a
-/// theme, a project entry — and writes the `oauthAccount` block into it only
-/// when somebody logs in through it. A machine restored from an Export has
-/// never logged in through Claude Code, so "the file is there and the block is
-/// not" is an ordinary state rather than drift.
-///
-/// Refusing it wedged the Switch permanently rather than failing it: the
-/// Credential is already live and the registry already records the Account by
-/// the time the Identity is patched, so every retry got exactly this far and
-/// stopped in the same place. The note advising another run was advice that
-/// could never work, and hand-editing `.claude.json` was the only way out.
 #[test]
 fn a_switch_finishes_against_a_claude_json_that_has_no_identity_block_yet() {
     let host = machine_with_two_accounts();
@@ -1497,10 +1251,6 @@ fn a_switch_finishes_against_a_claude_json_that_has_no_identity_block_yet() {
     );
 }
 
-/// A Capture needs somewhere to put what it finds, and a Perch that records no
-/// active Account has nowhere. Saying so matters because it is the one case
-/// where whatever was live is replaced rather than kept anywhere: it belonged
-/// to no Account Perch holds, so no Profile is the right home for it.
 #[test]
 fn switching_with_no_active_account_recorded_says_there_was_nothing_to_capture() {
     let host = machine_with_two_accounts();
@@ -1523,10 +1273,6 @@ fn switching_with_no_active_account_recorded_says_there_was_nothing_to_capture()
     assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
 }
 
-/// Switching away from a Claude Code that is logged out. Worth saying rather
-/// than passing over in silence, because it is the one case where switching
-/// *back* to that Account will need a login rather than just working: there was
-/// no live Credential to put back into its Profile.
 #[test]
 fn switching_from_a_logged_out_claude_code_says_there_was_nothing_live_to_capture() {
     let host = machine_with_two_accounts();
@@ -1547,16 +1293,6 @@ fn switching_from_a_logged_out_claude_code_says_there_was_nothing_live_to_captur
     );
 }
 
-/// Perch does not move the live Credential until it has written down that it is
-/// about to (ADR a-switch-is-written-down-first), so a registry that will not
-/// take a write is a Switch that never starts.
-///
-/// This is the path the whole decision rests on, and it needs no crash to
-/// reach: the registry hold goes stale in ninety seconds, a keychain that stops
-/// to ask the user for permission runs that out during the Capture, and the
-/// save afterwards then cannot happen. Before, the machine had already moved by
-/// then and Perch could only narrate it. Now the failure arrives one step
-/// earlier, with nothing moved, which is an ordinary refusal.
 #[test]
 fn a_switch_perch_cannot_write_down_moves_nothing_at_all() {
     let host = machine_with_two_accounts().with_unwritable_file(REGISTRY_PATH, "read-only");
@@ -1582,13 +1318,6 @@ fn a_switch_perch_cannot_write_down_moves_nothing_at_all() {
     );
 }
 
-/// A Switch that wrote its Landing down and then moved nothing takes it back,
-/// so the ordinary failure at step two does not leave `perch status` announcing
-/// a Switch in flight that the failure in front of the user says never started.
-///
-/// Nothing is lost either way — a Landing left behind is settled by the next
-/// Switch off the two Credentials it names — which is why the take-back is best
-/// effort. What it buys is that the registry agrees with the sentence.
 #[test]
 fn a_switch_that_moves_nothing_takes_its_landing_back() {
     let host = two_accounts_off_macos().with_unwritable_file(CREDENTIALS_PATH, "read-only file");
@@ -1624,12 +1353,6 @@ fn two_accounts_off_macos() -> FakeHost {
     host
 }
 
-/// The Capture is the first write a Switch makes, and the one thing that must
-/// never be got wrong: it is the only good copy of the outgoing Account's live
-/// Credential (ADR a-switch-is-written-down-first). When it fails, nothing has
-/// moved — and the note has to say so plainly, because the reasonable fear on
-/// reading a failed Switch is that the Credential was lost somewhere between
-/// the two Profiles.
 #[test]
 fn a_switch_that_cannot_capture_says_nothing_moved_and_moves_nothing() {
     let host = two_accounts_off_macos();
@@ -1659,11 +1382,6 @@ fn a_switch_that_cannot_capture_says_nothing_moved_and_moves_nothing() {
     assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
 }
 
-/// The live write failing with no active Account recorded. There is no
-/// outgoing Profile to reassure anybody about and nothing was Captured, so the
-/// note is the one fact that holds: the live Credential was not replaced. It
-/// still has to name the Account that did not become active, or the failure
-/// says nothing about what was being attempted.
 #[test]
 fn a_live_write_that_fails_with_nothing_active_names_the_account_that_did_not_land() {
     let host = two_accounts_off_macos();
@@ -1692,9 +1410,6 @@ fn a_live_write_that_fails_with_nothing_active_names_the_account_that_did_not_la
     );
 }
 
-/// Between the Capture and the live write, the outgoing Credential is safe in
-/// its own Profile and the incoming one is not yet live. The note has to say
-/// both halves: nothing was lost, and the Switch did not happen.
 #[test]
 fn a_switch_that_captured_but_could_not_go_live_says_nothing_was_lost() {
     let host = two_accounts_off_macos().with_unwritable_file(CREDENTIALS_PATH, "read-only file");
@@ -1720,10 +1435,6 @@ fn a_switch_that_captured_but_could_not_go_live_says_nothing_was_lost() {
     );
 }
 
-/// The same step, from a logged-out Claude Code: there was no live Credential
-/// to Capture, so the reassurance above would be a claim about a write that
-/// never happened. What is true instead is that the outgoing Profile is as it
-/// was found.
 #[test]
 fn a_live_write_that_fails_with_nothing_captured_says_the_profile_is_unchanged() {
     let host = two_accounts_off_macos();
@@ -1746,9 +1457,6 @@ fn a_live_write_that_fails_with_nothing_captured_says_the_profile_is_unchanged()
     );
 }
 
-/// The last step of a Switch, failing with no outgoing Account recorded. The
-/// machine has moved — the incoming Credential is live — but `.claude.json`
-/// still names whoever it named, and Perch does not know who that was.
 #[test]
 fn an_identity_that_cannot_be_patched_with_nothing_active_still_says_what_to_run() {
     let host = machine_with_two_accounts().with_unwritable_file(IDENTITY_PATH, "read-only file");
@@ -1776,10 +1484,6 @@ fn an_identity_that_cannot_be_patched_with_nothing_active_still_says_what_to_run
     );
 }
 
-/// A `.claude.json` that is not JSON at all. The Switch has already made the
-/// incoming Credential live by the time the file is read, so this is the same
-/// half-finished state — and it must be reported as one rather than as a parse
-/// error with no advice attached.
 #[test]
 fn an_identity_file_that_is_not_json_leaves_a_switch_that_says_how_to_finish_it() {
     let host = machine_with_two_accounts();
@@ -1797,17 +1501,6 @@ fn an_identity_file_that_is_not_json_leaves_a_switch_that_says_how_to_finish_it(
     assert_eq!(live_credential(&host).as_deref(), Some(SECOND_CREDENTIAL));
 }
 
-/// The same file, and the Switch that repairs it: onto the Account Perch
-/// already records as active.
-///
-/// `already_landed` asks Claude Code's own file whether the machine already says
-/// what this Switch would make it say, and it read that file with a `?`. So an
-/// `oauthAccount` with no `emailAddress` — a state `perch adopt`'s own suite
-/// shows is real — refused the one command that rewrites it, while a Switch to
-/// any *other* Account went through untroubled: `capture` swallows the identical
-/// failure and the patch only needs the file to be a JSON object. An Identity
-/// naming nobody is a Switch that has not landed, which is the answer the
-/// unreadable Credential beside it already gets.
 #[test]
 fn a_switch_onto_the_active_account_repairs_an_identity_naming_nobody() {
     let host = machine_with_two_accounts();
@@ -1831,9 +1524,6 @@ fn a_switch_onto_the_active_account_repairs_an_identity_naming_nobody() {
     );
 }
 
-/// A `.claude.json` that cannot be read at all is different from one that is
-/// absent: absent is a Claude Code that has never run here and is written
-/// fresh, unreadable is a file that is there and says nothing.
 #[test]
 fn an_identity_file_that_cannot_be_read_stops_the_switch_at_its_last_step() {
     let host = machine_with_two_accounts().with_unreadable_file(IDENTITY_PATH, "permission denied");
@@ -1860,9 +1550,6 @@ fn an_identity_file_that_cannot_be_read_stops_the_switch_at_its_last_step() {
     );
 }
 
-/// A Credential Perch holds that is no longer in a shape Perch understands.
-/// Quarantining is for a Credential that is *missing*; this one is present and
-/// unreadable, which is a refusal that names the Account and changes nothing.
 #[test]
 fn a_stored_credential_that_cannot_be_understood_stops_the_switch_before_it_writes() {
     let host = machine_with_two_accounts();
@@ -1893,15 +1580,6 @@ fn a_stored_credential_that_cannot_be_understood_stops_the_switch_before_it_writ
     assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
 }
 
-/// A client launched by a Run hands `CLAUDE_CONFIG_DIR` on to everything it
-/// starts, so a `perch switch` typed inside one arrives with a Profile named in
-/// its environment. It is not the Default Profile, and taking it for one wrote a
-/// third Account's Credential into the Profile the Run is working in — which
-/// superseded the copy that Profile held, logged that session out mid-task, and
-/// left the registry naming an Account the machine was not on.
-///
-/// The Run-side half of the same rule is
-/// `shared_state_is_read_from_the_default_profile_even_inside_another_run`.
 #[test]
 fn a_switch_typed_inside_a_run_lands_on_the_default_profile_rather_than_the_runs() {
     let inside_a_run =
@@ -1929,17 +1607,6 @@ fn a_switch_typed_inside_a_run_lands_on_the_default_profile_rather_than_the_runs
     );
 }
 
-/// A Profile is not the only directory Perch points `CLAUDE_CONFIG_DIR` at. A
-/// login runs in a pending directory of Perch's own, and the client it launches
-/// hands the variable on to everything it starts exactly as a Run does — so a
-/// `perch switch` typed inside a login session arrives with that directory named
-/// in its environment.
-///
-/// Taken for the Default Profile it Captured the live Credential into a
-/// directory the login deletes when it ends, wrote the incoming Credential
-/// there instead of where every client reads one, and left the registry naming
-/// an Account the machine was not on. No directory under Perch's own home is
-/// ever the Default Profile.
 #[test]
 fn a_switch_typed_inside_a_login_lands_on_the_default_profile_rather_than_the_pending_one() {
     let host = machine_with_two_accounts();
@@ -1971,10 +1638,6 @@ fn a_switch_typed_inside_a_login_lands_on_the_default_profile_rather_than_the_pe
     );
 }
 
-/// The other half, as the Run path already states it: a configuration directory
-/// somebody deliberately moved is where the live Credential is, and a Switch
-/// writes it there. Only a Profile is disqualified, because only a Profile is
-/// somewhere Perch itself pointed the variable.
 #[test]
 fn a_configuration_directory_that_is_not_a_profile_is_where_a_switch_lands() {
     let moved = Path::new("/Users/someone/elsewhere");
@@ -2034,17 +1697,6 @@ fn a_machine_on_an_accented_account() -> FakeHost {
     host
 }
 
-/// Whose Credential the live store holds is decided over the whole of Unicode,
-/// not over the ASCII letters of an address.
-///
-/// Claude Code writes `.claude.json` itself, and nothing makes it agree with
-/// the registry about the case of a letter outside ASCII. Compared with ASCII
-/// folding, `CAFÉ@example.com` and `café@example.com` are two different people:
-/// the Capture decided the live Credential was somebody else's and skipped it,
-/// so every Switch away from that Account silently destroyed whatever Rotation
-/// had happened while it was active — the poisoning
-/// ADR a-switch-is-written-down-first exists to prevent, on the one Account
-/// whose address is not plain ASCII.
 #[test]
 fn a_rotation_is_captured_however_the_identity_file_cases_a_non_ascii_address() {
     let host = a_machine_on_an_accented_account();
@@ -2066,10 +1718,6 @@ fn a_rotation_is_captured_however_the_identity_file_cases_a_non_ascii_address() 
     assert_eq!(live_credential(&host).as_deref(), Some(SECOND_CREDENTIAL));
 }
 
-/// The mirror: a Switch onto the Account the machine is already acting as is
-/// recognized as having landed, however the identity file cases the address. It
-/// was not, so `perch switch café@example.com` re-ran the whole Switch — with
-/// the Capture above declining, which is the destructive half.
 #[test]
 fn a_switch_onto_the_account_already_active_is_recognized_whatever_the_case() {
     let host = a_machine_on_an_accented_account();
@@ -2085,22 +1733,6 @@ fn a_switch_onto_the_account_already_active_is_recognized_whatever_the_case() {
     );
 }
 
-/// A Perch that died mid-Switch must not send the next one to file the
-/// Credential it made live into somebody else's Profile.
-///
-/// This is the hole the Landing exists to close, and it is not the one you
-/// would guess: a Switch interrupted after the Credential moved, followed by a
-/// Switch to a **third** Account. `.claude.json` names the Account being left,
-/// the registry named it too, the two agree — and both are wrong. That evidence
-/// is indistinguishable from an ordinary Capture of a Rotation, which is the
-/// case ADR a-switch-is-written-down-first exists to serve, so no rule reading
-/// only that evidence can separate them: the Capture files the *incoming*
-/// Account's Credential into the *outgoing* Account's Profile, over the copy
-/// the interrupted Switch had just correctly saved there.
-///
-/// What separates them is the Landing, written down before the Credential moved
-/// and settled before this Switch decides anything
-/// (ADR a-switch-is-written-down-first).
 #[test]
 fn a_landing_left_behind_by_a_death_does_not_cost_the_outgoing_account_its_credential() {
     let host = machine_with_three_accounts();
@@ -2136,15 +1768,6 @@ fn a_landing_left_behind_by_a_death_does_not_cost_the_outgoing_account_its_crede
     );
 }
 
-/// The four readings a Landing can be settled from, in the order they are
-/// asked (ADR a-switch-is-written-down-first). Each is a machine holding one
-/// Credential and a registry holding one Landing, and what settles it is
-/// byte-equality against copies Perch already holds — the live Credential
-/// carries no owner, so there is nothing else it could be.
-///
-/// Asserted through a command that settles and then leaves who is active alone
-/// — `perch remove` of an Account nobody is on. A `perch switch` settles too,
-/// and then moves the very answer under test.
 #[test]
 fn a_landing_is_settled_onto_whoever_the_live_credential_belongs_to() {
     struct Case {
@@ -2212,19 +1835,6 @@ fn a_landing_is_settled_onto_whoever_the_live_credential_belongs_to() {
     }
 }
 
-/// **A Landing is resolved under Claude Code's own locks**, like every other
-/// reading of the live Credential (ADR a-switch-is-written-down-first).
-///
-/// The evidence a Landing is settled from is byte-equality against copies Perch
-/// holds, so a Rotation landing during the read leaves nothing on the machine
-/// that says whose those bytes are — and the `Conflict` that follows is one no
-/// later run can clear, because every later run re-reads the same rotated
-/// bytes. ADR a-switch-is-written-down-first accepts a Rotation *since the
-/// interruption* defeating resolution; it does not have to accept one Perch
-/// could have locked out.
-///
-/// Asserted through `perch remove` of an Account nobody is on, which settles and
-/// then leaves who is active alone — the same door the four readings above use.
 #[test]
 fn a_landing_is_resolved_with_claude_codes_locks_held() {
     let host = machine_with_three_accounts();
@@ -2262,14 +1872,6 @@ fn a_landing_is_resolved_with_claude_codes_locks_held() {
     }
 }
 
-/// The live Credential is the whole of the evidence a Landing is resolved from,
-/// so a store that will not answer settles nothing.
-///
-/// Refused for the reason the Capture refuses the same silence: a store that
-/// would not answer says nothing about what it holds, and "the keychain was
-/// locked" is not evidence that it is safe to write over a refresh token. A
-/// Switch that has to be run again after a `chmod` is recoverable where a lost
-/// refresh token is not.
 #[test]
 fn a_live_store_that_will_not_answer_resolves_no_landing() {
     let host = two_accounts_off_macos();
@@ -2299,12 +1901,6 @@ fn a_live_store_that_will_not_answer_resolves_no_landing() {
     );
 }
 
-/// The same undecidable corner, from a machine that was on nobody: there is no
-/// second reading to name, because there was no Account to go back to.
-///
-/// Worth its own case because the refusal has to stay a sentence rather than
-/// become one with a hole where an address should be — this is the state a
-/// `perch switch` from a machine Perch had never Switched leaves behind.
 #[test]
 fn a_landing_that_left_nobody_behind_is_refused_without_naming_one() {
     let host = machine_with_two_accounts();
@@ -2331,13 +1927,6 @@ fn a_landing_that_left_nobody_behind_is_refused_without_naming_one() {
     );
 }
 
-/// The corner that stays undecidable: a Landing in flight, and a live Credential
-/// matching nobody's stored copy — a Rotation after the interruption, and
-/// nothing on the machine to say whose.
-///
-/// Refused, naming both readings, with `perch relogin` as the way through
-/// either way. Not a Quarantine: nothing is lost in that state and the live
-/// Credential very likely works. The bar is *never silently*, not *never*.
 #[test]
 fn a_landing_nothing_accounts_for_is_refused_naming_both_readings() {
     let host = machine_with_two_accounts();
@@ -2376,17 +1965,6 @@ fn a_landing_nothing_accounts_for_is_refused_naming_both_readings() {
     );
 }
 
-/// The repair for an interrupted Switch must not destroy a Rotation that
-/// happened while the machine was in that half-state.
-///
-/// After a Switch that stopped before patching `.claude.json`, the incoming
-/// Account is live and recorded as active while Claude Code's own file still
-/// names the one it was leaving. So on the re-run that Account is both the
-/// incoming and the outgoing one, and the Identity — which is exactly what is
-/// stale — said the live Credential belonged to somebody else. The Capture was
-/// declined on that reading and the write that followed put the Account's older
-/// Profile copy over its own Rotation: the only good refresh token, gone, on the
-/// command the previous failure told the user to run.
 #[test]
 fn repairing_an_interrupted_switch_never_writes_over_a_rotation_it_declined_to_save() {
     let host = machine_with_two_accounts().with_unwritable_file(IDENTITY_PATH, "read-only file");
@@ -2422,24 +2000,6 @@ fn repairing_an_interrupted_switch_never_writes_over_a_rotation_it_declined_to_s
     );
 }
 
-/// Everything Perch is holding has to survive the slow steps of a Switch, not
-/// only Claude Code's locks.
-///
-/// `perform` renews those between each of its three steps and says why — "a
-/// keychain that stops to ask the user for permission stretches either without
-/// warning". All three ran under Perch's own registry hold, which was not
-/// touched until the `registry::save` afterwards and goes stale in ninety
-/// seconds. Let run out, it is `record_active` that refuses: the live
-/// Credential belongs to the incoming Account while the registry still names
-/// the outgoing one, which sends the *next* Switch to Capture the live
-/// Credential into the outgoing Account's Profile and destroy its only copy
-/// (ADR a-switch-is-written-down-first). Re-running the Switch does not repair
-/// it — `already_there` answers before `record_active` is reached.
-///
-/// What renewing buys is the accumulation: several steps each comfortably inside
-/// the window that together run past it. A single write that outlasts the whole
-/// ninety seconds on its own is not something anything at this layer can hold
-/// through, so what is asserted is that the hold is kept up as the Switch goes.
 #[test]
 fn a_keychain_dialog_somebody_walked_away_from_does_not_cost_perch_its_registry_hold() {
     let host = machine_with_two_accounts().with_a_keychain_that_asks_first(20_000);
@@ -2463,18 +2023,6 @@ fn a_keychain_dialog_somebody_walked_away_from_does_not_cost_perch_its_registry_
     );
 }
 
-/// Two addresses that differ only in characters a Profile directory does not
-/// keep apart derive one Profile, one Credential Store, and one Credential
-/// between them. `perch add` refuses to make that state and `perch remove`
-/// degrades rather than deleting into it; a Switch had no guard at all.
-///
-/// What it would have done is the one disagreement
-/// ADR a-switch-is-written-down-first exists to keep impossible: read the
-/// shared store, write whichever Credential is in it to the Default Profile,
-/// and then patch the Identity of the *other* Account over it. The machine acts
-/// as one Account, Claude Code displays the other, the registry records the
-/// other, and nothing afterwards can tell which of the two the live Credential
-/// belongs to.
 #[test]
 fn a_switch_onto_an_account_that_shares_a_profile_is_refused() {
     let host = logged_in_machine();

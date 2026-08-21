@@ -1,12 +1,10 @@
 //! Behavior: forgetting an Account when a subscription is retired.
 //!
-//! Removal is the one command that destroys something, so most of these tests
-//! are about what it refuses to destroy silently. Removing an Account nobody is
-//! on is unremarkable — the entry goes, the Credential goes, the Alias comes
-//! free. Removing the **active** Account is the case that needs care: Perch
-//! names the Account it will leave active, lands on it before anything is
-//! deleted, and asks first — so nobody ends up running as an Account Perch has
-//! forgotten.
+//! Most of these are about what a removal refuses to destroy silently. Removing
+//! an Account nobody is on is unremarkable — the entry goes, the Credential
+//! goes, the Alias comes free. Removing the **active** Account is the case that
+//! needs care: Perch names the Account it will leave active, lands on it before
+//! anything is deleted, and asks first (ADR a-removal-lands-first).
 
 mod common;
 
@@ -66,11 +64,9 @@ fn removing_an_account_forgets_it_and_deletes_the_credential_perch_held() {
         "a removed Account stops appearing in the listing:\n{listed}"
     );
 
-    // And the report is one line, asserted whole (ADR perch-says-what-it-did).
-    // Every Remove that finds a Credential deletes it and leaves nothing
-    // listing or Cycling to the Account — the ordinary case announcing that it
-    // was ordinary (ADR perch-says-what-it-did). What that sentence promised is
-    // asserted above, off the machine.
+    // The report is one line, asserted whole: every Remove that finds a
+    // Credential deletes it, so saying so is the ordinary case announcing that
+    // it was ordinary (ADR perch-says-what-it-did).
     assert_eq!(
         printed.trim_end().lines().last(),
         Some(format!("Removed {SECOND_EMAIL}.").as_str()),
@@ -175,13 +171,6 @@ fn removing_the_active_account_names_what_will_be_active_and_asks_first() {
     assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
 }
 
-/// The window between the two halves of removing the active Account: the
-/// successor's Credential is live, and the Account being given up has not been
-/// destroyed yet. A failure in there must leave the record agreeing with the
-/// machine — because `active` is what the next Switch Captures *into*, and one
-/// naming the Account whose Credential is no longer live would copy the
-/// successor's over that Account's own good copy and destroy it
-/// (ADR a-switch-is-written-down-first).
 #[test]
 fn a_removal_that_fails_after_landing_still_records_who_is_live() {
     let host = machine_with_two_accounts()
@@ -205,18 +194,6 @@ fn a_removal_that_fails_after_landing_still_records_who_is_live() {
     );
 }
 
-/// A Profile has two Credential Stores and they are emptied in order, so by the
-/// time the second refuses the first may already be empty. The refusal used to
-/// say "Nothing was removed" in that case, which is a claim about a Credential
-/// that is gone — and the Account it is about is one `perch switch` can no
-/// longer use.
-///
-/// What it said instead was that the Account "is Quarantined", which is a claim
-/// about the *registry*: a Quarantine is a state Perch records, carrying the
-/// reason it happened, and this path records none — the failure leaves `run`
-/// before `registry.forget` and before any save, which is what makes running
-/// the command again the answer. So the user was told a word, ran `perch list`,
-/// and saw a healthy Account.
 #[test]
 fn a_removal_that_emptied_one_store_and_not_the_other_does_not_say_nothing_happened() {
     let host = machine_with_two_accounts().with_answers(&["y"]);
@@ -402,15 +379,6 @@ fn removing_the_active_account_is_refused_while_a_client_is_running_against_the_
     assert_eq!(live_credential(&host).as_deref(), Some(CREDENTIAL));
 }
 
-/// Retiring a lapsed subscription on a machine that no longer runs Claude Code.
-///
-/// Nothing about a removal needs one: whether a client is holding the Profile
-/// is answered by the session markers in it, and the version is only what a
-/// refusal quotes when those cannot be read. Asked for outright, it refused the
-/// whole removal — and `perch holdings purge`, which gives up everything, was
-/// the only way left to give up one Account. `perch holdings export` already
-/// tolerates exactly this machine, and for the same stated reason: it is the
-/// one somebody is decommissioning.
 #[test]
 fn an_account_is_given_up_on_a_machine_that_no_longer_has_claude_code_on_it() {
     let host = machine_with_two_accounts();
@@ -427,14 +395,6 @@ fn an_account_is_given_up_on_a_machine_that_no_longer_has_claude_code_on_it() {
     );
 }
 
-/// The same machine, giving up the Account you are *on*.
-///
-/// The tolerance above stopped short of the landing: `switch::make_live` probed
-/// for a Claude Code of its own, so removing the active Account on an
-/// uninstalled machine ran every check, showed the consequence, took the "y" —
-/// and then failed with "no `claude` was found on PATH", having removed
-/// nothing. `perch holdings purge` was still the only way out, which is the
-/// state the swallow was written to end.
 #[test]
 fn the_account_you_are_on_is_given_up_on_a_machine_with_no_claude_code_either() {
     let host = machine_with_two_accounts().with_answers(&["y"]);
@@ -572,11 +532,6 @@ fn a_target_that_names_nothing_is_refused_with_what_it_nearly_matched() {
     assert_eq!(registry_of(&host).accounts.len(), 2);
 }
 
-/// A keychain item is filed under `$USER`. If that is not the name it was
-/// written under — a login rename, `sudo -u`, a launchd context, or a shell
-/// with `USER` unset — the delete finds nothing and reports success, while the
-/// keychain goes on holding a working Credential. The plaintext copy and the
-/// Profile directory do go, so there is nothing left for the user to notice by.
 #[test]
 fn a_removal_that_found_no_credential_does_not_claim_to_have_deleted_one() {
     let host = machine_with_two_accounts();
@@ -588,12 +543,9 @@ fn a_removal_that_found_no_credential_does_not_claim_to_have_deleted_one() {
 
     result.expect("the Account is still forgotten");
     assert!(!holds(&host, SECOND_EMAIL), "{printed}");
-    // Asserted whole, because the claim is the sentence
-    // (ADR perch-says-what-it-did). A Remove that deletes a Credential says
-    // nothing about it — that is what every Remove does
-    // (ADR perch-says-what-it-did) — so this is one of the two outcomes that
-    // speaks at all, and what it must not do is claim a deletion that never
-    // happened.
+    // Asserted whole, because the claim is the sentence: one of the two
+    // outcomes that speaks at all, and what it must not do is claim a deletion
+    // that never happened.
     assert!(
         printed.contains(&format!(
             "Removed {SECOND_EMAIL}. Neither of its Credential Stores held \
@@ -606,13 +558,6 @@ fn a_removal_that_found_no_credential_does_not_claim_to_have_deleted_one() {
     );
 }
 
-/// The same sentence off macOS, where every word of it used to be false.
-///
-/// There is no keychain there and nothing is filed under `$USER` — a Credential
-/// lives in a file inside the Profile (ADR claude-code-chooses-the-store). Told
-/// the macOS story anyway, somebody is sent looking in a keychain their machine
-/// does not have, by the one sentence that exists to say where a Credential
-/// might still be.
 #[test]
 fn a_removal_off_macos_explains_the_store_that_machine_actually_has() {
     let host = logged_in_machine_off_macos().with_answers(&["y"]);
@@ -635,11 +580,6 @@ fn a_removal_off_macos_explains_the_store_that_machine_actually_has() {
     );
 }
 
-/// Removing the last Account while Perch is on nobody used to be confirmed with
-/// a sentence about Claude Code "going on running as" that Account — which is
-/// not true: it is not the active one, and the live store may hold somebody
-/// else's Credential or none at all. Asking somebody to agree to a description
-/// of a state that is not theirs is asking them to agree to nothing.
 #[test]
 fn the_last_account_is_confirmed_without_claiming_it_is_the_one_running() {
     let host = machine_with_two_accounts().with_answers(&["y", "y"]);
@@ -663,14 +603,6 @@ fn the_last_account_is_confirmed_without_claiming_it_is_the_one_running() {
     assert!(printed.contains("on no Account"), "{printed}");
 }
 
-/// `perch remove` asks before it gives up the active Account, and a question
-/// put to a person is the one wait in Perch with no bound on it. The registry
-/// lock is held across it — the whole command is one load, one decision and one
-/// save — so a question nobody answers for a while is where that lock can go
-/// stale under a command that is otherwise behaving perfectly.
-///
-/// A lock that is still Perch's is one this command may go on using, however
-/// long the answer took.
 #[test]
 fn a_question_somebody_takes_their_time_over_does_not_cost_the_lock() {
     let host = machine_with_two_accounts()
@@ -688,12 +620,6 @@ fn a_question_somebody_takes_their_time_over_does_not_cost_the_lock() {
     );
 }
 
-/// The other direction, and the reason the hold is checked rather than assumed.
-/// If the answer took so long that another `perch` found the lock abandoned and
-/// took it over, this one is working from a registry that is however many
-/// commands out of date — and everything past the question deletes Credentials.
-/// Refused before the first irreversible thing rather than discovered at the
-/// save, by which point the Credential is already gone.
 #[test]
 fn an_answer_that_arrives_after_another_perch_took_the_lock_removes_nothing() {
     let credential_before = credential_of(&machine_with_two_accounts(), EMAIL);
@@ -725,10 +651,9 @@ fn an_answer_that_arrives_after_another_perch_took_the_lock_removes_nothing() {
         credential_before,
         "and its Credential was never touched"
     );
-    // The refusal has to land before the landing, not after it. Making the
-    // successor live is the first irreversible step of a removal: it replaces
-    // the Credential a running client is holding, and the `active` that records
-    // it is in the registry this command may no longer write.
+    // The refusal has to land before the landing: making the successor live
+    // replaces the Credential a running client is holding, and the `active` that
+    // records it is in a registry this command may no longer write.
     assert_eq!(
         host.keychain_item(DEFAULT_SERVICE, LOGIN_NAME).as_deref(),
         Some(CREDENTIAL),
@@ -736,15 +661,6 @@ fn an_answer_that_arrives_after_another_perch_took_the_lock_removes_nothing() {
     );
 }
 
-/// The refusals above run before the question, and the question is the one wait
-/// in Perch with no bound on it. A client started while somebody was deciding
-/// was not running when the check ran — and the very next thing this command
-/// does is delete that Profile's Credential and then the Profile itself, out
-/// from under a session mid-task.
-///
-/// `perch holdings purge` and `perch relogin` both ask twice over exactly this
-/// window. `perch remove` is the only command that deletes an Account's
-/// Credential, and it was the one asking once.
 #[test]
 fn a_client_that_starts_while_the_question_is_answered_stops_the_removal() {
     let host = machine_with_two_accounts()
@@ -769,15 +685,6 @@ fn a_client_that_starts_while_the_question_is_answered_stops_the_removal() {
     );
 }
 
-/// The lock somebody else is holding is the one failure a Remove reports that
-/// resolves on its own, and the exit code is the only place that says so.
-///
-/// Removing the active Account lands on its successor first
-/// (ADR a-removal-lands-first), and landing takes Claude Code's locks. A
-/// `claude` holding one of them stops the removal before anything is deleted —
-/// which is a "try again in a moment", not a fault. It is reported with a note
-/// about what the machine is holding, and the note must not cost the code the
-/// scheduler branches on.
 #[test]
 fn a_lock_somebody_is_holding_stops_a_removal_as_held_rather_than_as_a_fault() {
     let host = machine_with_two_accounts();
@@ -811,10 +718,6 @@ fn a_lock_somebody_is_holding_stops_a_removal_as_held_rather_than_as_a_fault() {
     );
 }
 
-/// The Credential is deleted before Perch's own record is written, because a
-/// record naming an Account whose Credential is gone is recoverable and a
-/// Credential deleted for an Account nothing records is not. When the record
-/// then cannot be written, the note has to say which way round it failed.
 #[test]
 fn a_removal_that_deleted_the_credential_but_could_not_be_recorded_says_so() {
     let host = machine_with_two_accounts().with_unwritable_file(REGISTRY_PATH, "read-only");
@@ -842,13 +745,6 @@ fn a_removal_that_deleted_the_credential_but_could_not_be_recorded_says_so() {
     );
 }
 
-/// Removing the active Account lands on a successor before deleting anything,
-/// and that landing does not begin until Perch has written down that it is
-/// about to (ADR a-switch-is-written-down-first). So a registry that will not
-/// take a write removes nothing and moves nothing: the state a later Switch
-/// would Capture over — a Credential live for an Account Perch does not call
-/// active — never comes into being at all, where before it was reached by a
-/// failure this command could only narrate.
 #[test]
 fn a_landing_perch_cannot_write_down_removes_nothing_and_moves_nothing() {
     let host = machine_with_two_accounts().with_unwritable_file(REGISTRY_PATH, "read-only");
@@ -877,9 +773,6 @@ fn a_landing_perch_cannot_write_down_removes_nothing_and_moves_nothing() {
     );
 }
 
-/// Removing the active Account out of three, with nowhere to land. Perch says
-/// how many are left rather than naming one, because with more than one there
-/// is no "the one it still holds" to name.
 #[test]
 fn removing_the_active_account_with_several_left_counts_them_rather_than_naming_one() {
     let host = machine_with_three_accounts();
@@ -908,8 +801,6 @@ fn removing_the_active_account_with_several_left_counts_them_rather_than_naming_
     );
 }
 
-/// The same with one Account left, where counting would read as evasion: there
-/// is exactly one, and naming it as such is what a person would say.
 #[test]
 fn removing_the_active_account_with_one_left_names_it_as_the_one() {
     let host = machine_with_two_accounts();
@@ -930,17 +821,12 @@ fn removing_the_active_account_with_one_left_names_it_as_the_one() {
     assert!(!printed.contains("one of the 1"), "{printed}");
 }
 
-/// A Profile directory that will not go is worth a note and not a failure: the
-/// Credential is out of the Credential Store by then, and what is left is a
-/// directory holding nothing secret.
 #[test]
 fn a_profile_directory_that_will_not_go_is_a_note_rather_than_a_failure() {
     let host = machine_with_two_accounts();
-    // Derived the way the note derives it rather than spelled by hand: a
-    // Windows build joins paths with the other separator, so the directory this
-    // is about renders as `/Users/someone\.config\...` there and a fixture
-    // holding the forward-slash spelling would be asserting on a path nothing
-    // ever prints.
+    // Derived the way the note derives it rather than spelled by hand: a Windows
+    // build joins paths with the other separator, so a fixture holding the
+    // forward-slash spelling would assert on a path nothing ever prints.
     let profile = store_of(&host, SECOND_EMAIL).config_dir;
     let host = host.with_undeletable_file(&profile, "in use");
 

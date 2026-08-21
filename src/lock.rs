@@ -1,17 +1,13 @@
 //! Claude Code's own locks, taken in Claude Code's own order.
 //!
-//! Perch does not invent a scheme of its own: it takes the locks the process it
-//! is racing already takes, because a lock only excludes whoever agrees to
-//! honor it (ADR claude-code-chooses-the-store). Under them, Claude Code's
-//! double-checked re-read of the credential store sees a swapped, non-expired
-//! Credential and abandons the refresh it was about to make — which is what
-//! makes swapping a live Credential safe at all.
+//! Perch invents no scheme of its own: it takes the locks the process it is
+//! racing already takes, because a lock only excludes whoever agrees to honor it
+//! (ADR claude-code-chooses-the-store). Under them, Claude Code's re-read of the
+//! store sees a swapped, non-expired Credential and abandons its own refresh.
 //!
-//! A lock artifact is a directory. `mkdir` either creates one or fails, with
-//! nothing in between, so the same call both asks and answers. Which
-//! directories, in which order, and under what staleness is Claude Code's
-//! business and therefore [`crate::probe`]'s; this module knows only how to
-//! hold what it is handed.
+//! A lock artifact is a directory: `mkdir` either creates one or fails, so the
+//! same call asks and answers. Which directories, in which order and under what
+//! staleness is [`crate::probe`]'s.
 
 use std::path::{Path, PathBuf};
 
@@ -42,14 +38,10 @@ pub struct Held<'a> {
 struct Taken {
     lock: LockSpec,
     /// The artifact's modification time as Perch last left it, and `None` once
-    /// Perch has established that it no longer holds this lock.
-    ///
-    /// A lock artifact carries no holder identity — it is a bare directory,
-    /// which is Claude Code's protocol and not Perch's to change. But Perch is
-    /// the only thing that touches a lock it holds, so the timestamp it last
-    /// wrote *is* an identity of a kind: an artifact still saying what Perch
-    /// left it saying is the artifact Perch took, and one saying anything else
-    /// belongs to somebody who took it over.
+    /// Perch has established that it no longer holds this lock. A lock artifact
+    /// carries no holder identity, so that timestamp is one: Perch alone touches
+    /// a lock it holds, and an artifact saying anything else belongs to somebody
+    /// who took it over.
     stamp: Option<DateTime<Utc>>,
     /// When Perch last said the lock was still there, on Perch's own clock.
     said: DateTime<Utc>,
@@ -67,25 +59,10 @@ impl Taken {
     }
 
     /// Ends the hold if the artifact has not been touched inside its own
-    /// staleness window, whatever the reason it was not.
-    ///
-    /// What bounds "a hiccup is not a takeover". The two branches of [`renew`]
-    /// that decline to conclude anything — the artifact there and unreadable,
-    /// and a touch that would not go through — were bounded by nothing at all,
-    /// so a filesystem that kept faltering left Perch reporting a hold it no
-    /// longer had, indefinitely. The comment that excused it argued
-    /// `update_millis` gives "a dozen more chances before the artifact goes
-    /// stale", which is true of the two Refresh locks at 60s against 5s and
-    /// false of the config lock, where `probe` sets 10s against 5s: there, one
-    /// missed renewal reaches the boundary and two are past it.
-    ///
-    /// Judged on the stamp rather than on Perch's own patience, because a
-    /// contender decides by the stamp. Once the artifact is older than
-    /// `stale_millis`, any Claude Code is entitled to clear it and take it —
-    /// so a hold Perch went on claiming past that point is one two processes
-    /// believe they have, which is the state locks exist to prevent.
-    ///
-    /// [`renew`]: Held::renew
+    /// staleness window, whatever the reason it was not. What bounds "a hiccup
+    /// is not a takeover", and judged on the stamp rather than on Perch's
+    /// patience because a contender decides by the stamp: past `stale_millis`,
+    /// any Claude Code is entitled to clear the artifact and take the lock.
     fn let_go_if_stale(&mut self, host: &dyn Host, now: DateTime<Utc>) {
         let Some(stamp) = self.stamp else { return };
         if (now - stamp).num_milliseconds() <= self.lock.stale_millis {
@@ -106,12 +83,10 @@ impl Taken {
 
 impl<'a> Held<'a> {
     /// Says that the locks are still held, for the holders of the ones whose
-    /// update interval has passed.
-    ///
-    /// A holder that goes quiet for longer than a lock's staleness window is
-    /// taken to have died, and another process will take the lock out from
-    /// under it. Perch's hold is short, but a keychain that stops to ask the
-    /// user for permission can stretch it without warning.
+    /// update interval has passed. A holder that goes quiet for longer than a
+    /// lock's staleness window is taken to have died; Perch's hold is short, but
+    /// a keychain that stops to ask the user for permission stretches it without
+    /// warning.
     pub fn renew(&mut self) {
         let host = self.host;
         let now = host.now();
@@ -124,25 +99,14 @@ impl<'a> Held<'a> {
                 continue;
             }
 
-            // Asked *before* the touch, and this is the whole of the ordering:
-            // the timestamp Perch last left is the only identity a lock
-            // artifact has, and touching overwrites the very evidence the
-            // question is about. Asked afterwards, every renewal compares a
-            // stamp against the one it has just replaced and reports a takeover
-            // that never happened.
-            //
-            // A lock that no longer says what Perch left it saying is one
-            // somebody else has taken over. It is said out loud, and the lock
-            // is never given back afterwards, because giving back somebody
-            // else's lock is how the loss spreads to a third process.
-            //
-            // A stamp that disagrees, and an artifact that is not there at all,
-            // are both that. Anything *else* the filesystem says is Perch's own
-            // I/O faltering, and is told apart below rather than folded in with
-            // it: giving a hold up is expensive in three separate ways, and
-            // none of them is worth spending on a filesystem that hiccuped.
+            // Asked *before* the touch: the timestamp Perch last left is the
+            // only identity a lock artifact has, and touching overwrites the
+            // evidence the question is about.
             match host.modified_at(&taken.lock.dir) {
                 Ok(seen) if still_ours(taken, seen) => {}
+                // A stamp that disagrees and an artifact that is gone are both
+                // a takeover, said out loud and never given back afterwards.
+                // Anything else is Perch's own I/O, and is told apart below.
                 Ok(_) | Err(HostError::NotFound { .. }) => {
                     taken.give_up(
                         host,
@@ -154,38 +118,26 @@ impl<'a> Held<'a> {
                     );
                     continue;
                 }
-                // There and unreadable. Nothing here is evidence either way, so
-                // nothing is concluded and nothing is touched — touching an
-                // artifact Perch cannot check would overwrite the one stamp
-                // that makes the check possible. The next `renew` asks again.
-                // One that never becomes readable ends as a genuine takeover,
-                // which the arm above catches as one — or, before that, as an
-                // artifact that has outlived its own staleness window, which
-                // `let_go_if_stale` catches here.
+                // There and unreadable. Nothing is evidence either way, so
+                // nothing is concluded and nothing is touched: touching would
+                // overwrite the one stamp that makes the check possible.
                 Err(_) => {
                     taken.let_go_if_stale(host, now);
                     continue;
                 }
             }
 
-            // Ours, and the artifact would not take a fresh timestamp. On
-            // Windows that is the handle contention `rename_replacing` retries
-            // for, arriving at a `touch_now` that does not — a hiccup rather
-            // than a loss. Nothing is inconsistent in leaving the hold as it
-            // was: an artifact that was not touched still carries the stamp
-            // Perch knows, so the next `renew` simply tries again — for as long
-            // as that stamp is one a contender would still respect.
+            // Ours, and the artifact would not take a fresh timestamp: on
+            // Windows the handle contention `rename_replacing` retries for, so a
+            // hiccup rather than a loss. The stamp Perch knows is still there.
             if host.touch(&taken.lock.dir).is_err() {
                 taken.let_go_if_stale(host, now);
                 continue;
             }
 
-            // Touched, and then the artifact would not say what it now carries.
-            // This is the one branch where the hold really is over: the stamp
-            // Perch remembers has just been overwritten by one it cannot read,
-            // so every question asked later answers the wrong way — the same
-            // dead end `take` refuses a lock outright for. Given up rather than
-            // held blind, and said as what it is rather than as a takeover.
+            // Touched, and then unreadable: the stamp Perch remembers has been
+            // overwritten by one it cannot read, so every later question answers
+            // the wrong way. Given up rather than held blind.
             match host.modified_at(&taken.lock.dir) {
                 Ok(stamp) => taken.stamp = Some(stamp),
                 Err(err) => taken.give_up(
@@ -202,47 +154,25 @@ impl<'a> Held<'a> {
         }
     }
 
-    /// Whether every lock taken is still Perch's, as of the last [`renew`].
-    ///
-    /// [`renew`]: Held::renew
-    ///
-    /// A hold that has been lost is not a hold that can be regained: whoever
-    /// took it over is working under it now. What a caller does about that
-    /// depends on what it was going to do next — [`crate::registry::save`]
-    /// refuses to write, where a Switch already half done finishes.
+    /// Whether every lock taken is still Perch's, as of the last `renew`. A hold
+    /// that has been lost cannot be regained: whoever took it over is working
+    /// under it now, so [`crate::registry::save`] refuses to write where a
+    /// Switch already half done finishes.
     pub fn still_held(&self) -> bool {
         self.taken.iter().all(|taken| taken.stamp.is_some())
     }
 
     /// Gives every lock back, last taken first.
     ///
-    /// Only the ones that are still Perch's. Removing whatever happens to be at
-    /// the path would take a new holder's lock away and leave two processes
-    /// believing they have it — turning one lost lock into two.
-    ///
-    /// Best-effort otherwise: the work under the lock has already happened by
-    /// the time this runs, and a release that fails costs another process the
-    /// staleness window rather than costing anyone their Credential.
+    /// Only the ones that are still Perch's: removing whatever happens to be at
+    /// the path would take a new holder's lock away. Best effort otherwise — the
+    /// work under the lock has already happened by the time this runs.
     fn release(&mut self) {
         let host = self.host;
         for taken in self.taken.drain(..).rev() {
-            // The same three answers [`renew`] tells apart, for the same reason
-            // they are worth telling apart. A stamp that disagrees, and an
-            // artifact that is not there, are somebody else's lock: leaving it
-            // is the whole point. Anything *else* the filesystem says is Perch's
-            // own I/O faltering and is evidence of nothing — and folded in with
-            // a takeover it cost the artifact its removal, so Perch's own lock
-            // sat there until it went stale. The next command then waited out
-            // its attempts and reported the lock as held by Claude Code, with
-            // advice — quit it and run this again — that cannot work.
-            //
-            // Removed on no evidence, then, because it is Perch's until
-            // something says otherwise, and this is the last chance to give it
-            // back. `still_ours` is already `false` for a hold Perch has
-            // established it no longer has, which is what a `stamp` of `None`
-            // means, and that arm is not reached from here.
-            //
-            // [`renew`]: Held::renew
+            // Removed on no evidence, because the artifact is Perch's until
+            // something says otherwise and this is the last chance to give it
+            // back. A stamp that disagrees or is gone is somebody else's lock.
             let ours = match host.modified_at(&taken.lock.dir) {
                 Ok(seen) => still_ours(&taken, seen),
                 Err(HostError::NotFound { .. }) => false,
@@ -257,11 +187,9 @@ impl<'a> Held<'a> {
 
 /// Whether the artifact still says what Perch last left it saying.
 ///
-/// `seen` is a stamp the filesystem answered with, so it is a stamp rather than
-/// an `Option`: both callers reach this inside an `Ok(seen) =>` arm, and the
-/// artifact that is not there at all is answered by the `Err(NotFound)` arm
-/// beside them. Taken as an `Option`, the catch-all read as if a missing
-/// artifact were handled here, which is the one place it is not.
+/// `seen` is a stamp rather than an `Option` because both callers reach this
+/// inside an `Ok(seen)` arm, and the artifact that is not there at all is
+/// answered by the `Err(NotFound)` arm beside them.
 fn still_ours(taken: &Taken, seen: DateTime<Utc>) -> bool {
     taken.stamp == Some(seen)
 }
@@ -272,20 +200,11 @@ impl Drop for Held<'_> {
     }
 }
 
-/// Two holds that have to move together.
-///
-/// A Switch runs under Claude Code's locks *and* Perch's registry lock, and
-/// both go stale on their own clocks — ten seconds for the config file, ninety
-/// for the registry. So every slow step has to renew both, and the two lines
-/// doing it appeared in lockstep five times across [`crate::switch`] because
-/// nothing said they were one act. Nothing stopped a sixth step renewing one of
-/// them, and a hold renewed only after a slow step is a hold that was already
-/// lost while it ran.
-///
-/// The pairing is the whole of what this is for: it holds no state of its own
-/// and adds no protocol. What it buys is that "the slow steps" becomes
-/// something that can be grepped for, rather than a discipline kept by reading
-/// a comment.
+/// Two holds that have to move together: a Switch runs under Claude Code's locks
+/// *and* Perch's registry lock, and both go stale on their own clocks — ten
+/// seconds for the config file, ninety for the registry — so every slow step has
+/// to renew both. It holds no state of its own; what it buys is that "the slow
+/// steps" can be grepped for rather than kept by reading a comment.
 pub struct Holds<'a, 'one, 'other> {
     one: &'a mut Held<'one>,
     other: &'a mut Held<'other>,
@@ -299,12 +218,11 @@ impl<'a, 'one, 'other> Holds<'a, 'one, 'other> {
         Holds { one, other }
     }
 
-    /// Runs something slow with both holds renewed either side of it.
-    ///
-    /// Before as well as after. A renewal that only happens *between* steps
-    /// leaves the longest step of all running under a lock somebody else may
-    /// take over, and the takeover is then discovered afterwards — when
-    /// whatever that step did has already happened.
+    /// Runs something slow with both holds renewed either side of it. Before as
+    /// well as after: a renewal that only happens *between* steps leaves the
+    /// longest step of all running under a lock somebody else may take over, and
+    /// the takeover is then discovered when whatever that step did has already
+    /// happened.
     pub fn around<T>(&mut self, work: impl FnOnce() -> T) -> T {
         self.renew();
         let done = work();
@@ -314,14 +232,9 @@ impl<'a, 'one, 'other> Holds<'a, 'one, 'other> {
 
     /// The same, for the one step that has to *use* a hold rather than only be
     /// protected by it: writing the registry down mid-Switch
-    /// (ADR a-switch-is-written-down-first), which is a save and therefore
-    /// takes the hold it is being renewed with.
-    ///
-    /// It is handed the second of the two, and that is not a coincidence to be
-    /// generalized away: Claude Code's locks protect files Perch writes through
-    /// the Host and are never passed to anything, and Perch's own registry lock
-    /// is the one a `save` asks for. Named for the write rather than for the
-    /// hold, so nothing reaches for it to borrow a lock for something else.
+    /// (ADR a-switch-is-written-down-first), which is a save and so takes the
+    /// hold it is renewed with. Named for the write rather than for the hold, so
+    /// nothing reaches for it to borrow a lock for something else.
     pub fn around_a_registry_write<T>(&mut self, write: impl FnOnce(&mut Held<'other>) -> T) -> T {
         self.renew();
         let done = write(self.other);
@@ -338,10 +251,8 @@ impl<'a, 'one, 'other> Holds<'a, 'one, 'other> {
 /// Runs `work` with every lock in `locks` held, in the order given, and gives
 /// them all back afterwards however it ends.
 ///
-/// The work says how it fails, and a lock that could not be taken becomes that
-/// same kind of failure. Callers that answer in something richer than a
-/// [`PerchError`] — an outcome per Account, say — then have one way to fail
-/// rather than two, and nothing has to be carried out of the closure by hand.
+/// A lock that could not be taken fails the way the work fails, so a caller
+/// answering in something richer than a [`PerchError`] has one way to fail.
 pub fn under<T, E: From<PerchError>>(
     host: &dyn Host,
     locks: Vec<LockSpec>,
@@ -351,12 +262,11 @@ pub fn under<T, E: From<PerchError>>(
     work(&mut held)
 }
 
-/// Takes every lock in `locks`, in the order given, and hands back the hold —
-/// which gives them all back when it is dropped.
-///
-/// [`under`] is the shape to reach for. This one is for a hold that has to last
-/// as long as a whole command rather than as long as a closure: Perch's own
-/// registry lock spans a load, whatever the command does, and the save.
+/// Takes every lock in `locks`, in the order given, and hands back the hold,
+/// which gives them all back when it is dropped. [`under`] is the shape to reach
+/// for; this one is for a hold that has to last as long as a whole command
+/// rather than a closure — Perch's registry lock spans a load, whatever the
+/// command does, and the save.
 pub fn take_all(host: &dyn Host, locks: Vec<LockSpec>) -> Result<Held<'_>> {
     let mut held = Held {
         host,
@@ -364,20 +274,9 @@ pub fn take_all(host: &dyn Host, locks: Vec<LockSpec>) -> Result<Held<'_>> {
     };
 
     for lock in locks {
-        // Locks live beside and inside the config directory. Claude Code
-        // creates that directory before locking it, and so does Perch: a lock
-        // that cannot be taken because its parent is missing would read as
-        // contention, which is a different problem with a different answer.
-        //
-        // Privately, because every parent a lock has is a directory that holds
-        // or is about to hold a Credential — a Profile, or Perch's own home.
-        // Every lock's parent, which is the whole of it: a Profile for Claude
-        // Code's three, and Perch's own home for the registry's.
-        // `observe::renew_under_the_lock` takes a Profile's lock off a purely
-        // derived path, so before this a `perch status --refresh` was enough to
-        // create the Profile of an Account whose directory had gone, at 0755,
-        // ready for the next `perch relogin` to write a plaintext Credential
-        // into.
+        // Claude Code creates the config directory before locking it, and so
+        // does Perch: a lock refused for a missing parent would read as
+        // contention. Privately, because every lock's parent holds a Credential.
         if let Some(parent) = lock.dir.parent() {
             host.create_private_dir_all(parent).map_err(|err| {
                 PerchError::Other(format!("could not create {}: {err}", parent.display()))
@@ -387,15 +286,8 @@ pub fn take_all(host: &dyn Host, locks: Vec<LockSpec>) -> Result<Held<'_>> {
         take(host, &lock)?;
 
         // The stamp is the only identity a lock artifact has, so a take that
-        // cannot read one is a take that failed — every question asked later
-        // answers the wrong way without it. `renew` skips the touch and says
-        // nothing, so the lock goes stale under a command that is behaving
-        // perfectly; `still_held` is false for ever, so `registry::save`
-        // refuses to write and tells the user another `perch` took the lock
-        // over when none did; and `release` will not give the artifact back, so
-        // Perch's own lock leaks for the whole staleness window. There is no
-        // right behavior left, so the directory just created goes back and the
-        // failure is reported as itself.
+        // cannot read one is a take that failed: `renew`, `still_held` and
+        // `release` all answer the wrong way without it.
         let stamp = match host.modified_at(&lock.dir) {
             Ok(stamp) => stamp,
             Err(err) => {
@@ -420,25 +312,11 @@ pub fn take_all(host: &dyn Host, locks: Vec<LockSpec>) -> Result<Held<'_>> {
     Ok(held)
 }
 
-/// Whether somebody is holding a lock *right now*, without waiting to find out.
-///
-/// The same question [`take`] answers, minus the part that makes it a request:
-/// `mkdir` either creates the directory or does not, and either way the answer
-/// is the one asked for. Taking it properly and giving it straight back would
-/// answer too — but only after four one-second waits, because `Busy` is what
-/// `take` says when it has run out of attempts. That made the *healthy* machine
-/// the slow one: `perch watcher status` on a machine where the Service is
-/// running, which is the machine the command exists for, sat there for four
-/// seconds saying nothing, and a Purge paid the same on its way to the
-/// question.
-///
-/// A stale artifact reads as nobody holding it, which is the same rule `take`
-/// goes by. Nothing is cleared here — that is a takeover, and a takeover is
-/// something a caller asks for by asking to hold the lock.
-///
-/// `None` where the lock could not be asked about at all. That is not
-/// contention and must not be read as it: a parent directory that cannot be
-/// created, an artifact whose time will not be read.
+/// Whether somebody is holding a lock *right now*, without waiting to find out:
+/// the question [`take`] answers, minus the part that makes it a request. Taking
+/// it properly and giving it back would answer too, but only after four
+/// one-second waits, which makes the healthy machine the slow one. `None` where
+/// the lock could not be asked about at all, which is not contention.
 pub fn is_held(host: &dyn Host, lock: &LockSpec) -> Option<bool> {
     match host.create_dir_exclusive(&lock.dir) {
         Ok(()) => {
@@ -448,6 +326,9 @@ pub fn is_held(host: &dyn Host, lock: &LockSpec) -> Option<bool> {
             let _ = host.remove_dir_all(&lock.dir);
             Some(false)
         }
+        // A stale artifact reads as nobody holding it, which is `take`'s rule.
+        // Nothing is cleared here: a takeover is something a caller asks for by
+        // asking to hold the lock.
         Err(HostError::AlreadyExists { .. }) => Some(!abandoned(host, lock)),
         Err(_) => None,
     }
@@ -461,14 +342,8 @@ fn take(host: &dyn Host, lock: &LockSpec) -> Result<()> {
             Ok(()) => return Ok(()),
             Err(HostError::AlreadyExists { .. }) => {
                 // Asked here only to keep the ordinary contended wait free of
-                // the artifact below: a lock Claude Code is holding right now is
-                // the common case, and it is not a takeover. The answer that
-                // decides anything is the one `take_over` asks under the claim.
-                //
-                // `take_over` answers whether it took the lock, not merely
-                // whether it cleared one: the creation happens under the claim,
-                // where nothing else can be clearing. A `false` is somebody else
-                // holding it, which makes them a holder like any other.
+                // the claim below. `take_over` answers whether it took the lock
+                // rather than whether it cleared one, so `false` is a holder.
                 if abandoned(host, lock) && take_over(host, lock)? {
                     return Ok(());
                 }
@@ -488,8 +363,7 @@ fn take(host: &dyn Host, lock: &LockSpec) -> Result<()> {
 
     // Busy rather than a general failure: nothing is wrong and nothing was
     // changed, and the two callers that run unattended have to tell this from a
-    // fault. `perch watcher run` holds the round and comes back; a scheduler
-    // reading the exit code of `perch watcher check` does the same.
+    // fault.
     Err(PerchError::Busy(format!(
         "{} ({}) is held by {} and was not given back.\n\
          Nothing was changed. Try again in a moment; if it persists, quit it \
@@ -503,12 +377,8 @@ fn take(host: &dyn Host, lock: &LockSpec) -> Result<()> {
 /// Where a process says it is the one clearing this abandoned lock.
 ///
 /// Beside the lock rather than inside it, because what is being claimed is the
-/// right to *delete* the lock. Held for the two calls it takes to ask whether
-/// the lock is stale and to remove it, and given back on every way out.
-///
-/// [`crate::reconcile`] holds this back along with the lock it guards: it is an
-/// answer about one configuration directory, and one crossed into another is
-/// the hazard ADR everything-but-the-account's denylist exists for.
+/// right to *delete* the lock. [`crate::reconcile`] holds it back along with the
+/// lock it guards (ADR everything-but-the-account).
 fn takeover_claim(lock: &LockSpec) -> PathBuf {
     let mut claim = lock.dir.clone().into_os_string();
     claim.push(TAKEOVER_SUFFIX);
@@ -516,45 +386,17 @@ fn takeover_claim(lock: &LockSpec) -> PathBuf {
 }
 
 /// The suffix that names one.
-///
-/// Private, though the coupling it used to be public for is real: `reconcile`
-/// does have to keep a claim from crossing into a Profile, and it does so by
-/// matching the *prefix* `probe::REFRESH_LOCK` rather than this suffix — so the
-/// `pub` pointed at a mechanism nothing used it for.
 const TAKEOVER_SUFFIX: &str = ".perch-takeover";
 
-/// Clears an abandoned lock, but only for the one process that gets to.
-///
-/// Answers whether this call is now free to create the lock. `false` is
-/// "somebody else is doing this, or it turned out not to be abandoned after
-/// all" — both of which mean waiting like an ordinary contender.
-///
-/// The claim is what this is for. `abandoned` and `remove_dir_all` are two
-/// calls with a gap between them, and two perches that both read the same stale
-/// timestamp both removed and both created: the second one's `remove_dir_all`
-/// took away the lock the first had *just made*, and both walked away believing
-/// they held it. `mkdir` is the only operation here that cannot be raced, so it
-/// is what decides who clears — and the staleness question is asked again
-/// underneath it, where the answer cannot change. That second ask is the whole
-/// of the fix: the loser arrives after the winner has already taken the lock,
-/// finds an artifact touched a moment ago, and waits on it.
-///
-/// A claim outliving the process that made it would stop this lock ever being
-/// taken over again, which is the wedge [`clear_the_abandoned`] is written
-/// about. So one as stale as the lock it guards is itself cleared, and the next
-/// attempt a second later gets it.
-///
-/// The *taking* happens here too, and that is the half the claim was missing.
-/// Clearing under the claim and creating outside it left the winner's `mkdir`
-/// unguarded: between dropping the claim and making the lock, a second perch
-/// could take the free claim, find the lock momentarily absent — which
-/// [`gone_quiet_for`] reads as abandoned — and `remove_dir_all` the lock the
-/// winner had just made. Both then walked away believing they held it, which is
-/// the exact outcome the claim exists to prevent, reached through the one step
-/// it did not cover. So `mkdir` on the lock sits between the second staleness
-/// question and the claim's release, where nothing else can be clearing.
+/// Clears an abandoned lock for the one process that gets to, answering whether
+/// this call may now create it — `false` being somebody else clearing, or a lock
+/// that was not abandoned after all. `mkdir` cannot be raced, so the claim
+/// decides who clears; staleness is asked again under it, and the lock is taken
+/// under it too, so the lock is never absent while the claim is free.
 fn take_over(host: &dyn Host, lock: &LockSpec) -> Result<bool> {
     let claim = takeover_claim(lock);
+    // A claim outliving the process that made it would stop this lock ever
+    // being taken over again, so one as stale as the lock it guards is cleared.
     if let Err(refused) = host.create_dir_exclusive(&claim) {
         if matches!(refused, HostError::AlreadyExists { .. })
             && gone_quiet_for(host, &claim, lock.stale_millis)
@@ -579,47 +421,18 @@ fn take_over(host: &dyn Host, lock: &LockSpec) -> Result<bool> {
 }
 
 /// Clears a lock nobody is holding any more, refusing rather than spinning when
-/// what is in the way is not a lock at all.
-///
-/// A lock is a directory, and `remove_dir_all` does not follow the last
-/// component — so a plain file at the path fails with `ENOTDIR`, for ever. (A
-/// symlink is taken away by the same call and answers `Ok`, so it clears on the
-/// next command; it is the plain file that is permanent.) Discarded, that
-/// failure became five attempts of no progress and then `Busy`, which says the
-/// lock "is held by Claude Code and was not given back" and advises quitting it
-/// and trying again. There is no Claude Code to quit and the advice never
-/// works: every Switch, every Run and every Renewal against that path fails
-/// that way until somebody deletes it by hand.
-///
-/// So this is a refusal of its own, naming the path and saying what is wrong
-/// with it — the one message that turns an unrecoverable state into a
-/// five-second fix.
-/// `Ok(true)` when the lock was cleared, `Ok(false)` when it was not and trying
-/// again might work, and a refusal for the wedge above.
-///
-/// The two are told apart by asking whether the path is a directory at all,
-/// because that is the whole of what the refusal claims. Every failure was being
-/// reported as the wedge, and most of them are not it: a child held open on
-/// Windows is the sharing violation `rename_replacing` retries for, arriving
-/// here instead, and EBUSY and EACCES are the same shape. Each of those aborted
-/// the whole Switch on the first of five attempts — telling somebody their lock
-/// path is not a directory when it is, and to delete it by hand when waiting one
-/// more second would have done — while the state the message describes is the
-/// one it never actually diagnosed.
+/// what is in the way is not a lock at all: `remove_dir_all` does not follow the
+/// last component, so a plain file at the path fails with `ENOTDIR` for ever and
+/// no amount of waiting changes it. `Ok(true)` where the lock was cleared,
+/// `Ok(false)` where trying again might work, a refusal for the wedge.
 fn clear_the_abandoned(host: &dyn Host, lock: &LockSpec) -> Result<bool> {
     let Err(err) = host.remove_dir_all(&lock.dir) else {
         return Ok(true);
     };
 
-    // Asked as `is_file`, which is the definition of the thing the refusal says
-    // this is: a plain file, and not a directory, a link or an absent path.
-    //
-    // Asked as "can it be listed" it was still wrong for a subset of the cases
-    // it was added for. A directory that cannot be *walked* — one a `sudo
-    // claude` left root-owned inside a Profile, one whose read bit somebody
-    // took away — fails `remove_dir_all` with EACCES and fails `list_dir` with
-    // EACCES too, so it was reported as not being a directory when it is, and
-    // told the user to delete a path by hand where waiting would have done.
+    // Asked as `is_file`, which is the definition of what the refusal claims.
+    // Asked as "can it be listed", a root-owned directory a `sudo claude` left
+    // fails the same way and would be reported as not being a directory.
     if !host.is_file(&lock.dir) {
         return Ok(false);
     }
@@ -652,10 +465,8 @@ fn gone_quiet_for(host: &dyn Host, at: &Path, stale_millis: i64) -> bool {
         // Gone between the two calls: whoever held it has given it back, and
         // the next attempt simply takes it.
         Err(HostError::NotFound { .. }) => true,
-        // Anything else says nothing about the holder, and a lock nothing can
-        // be established about is one to wait on rather than one to take over.
-        // Waiting costs a command that has to be run again; taking costs two
-        // processes writing one Credential.
+        // Anything else says nothing about the holder, and a lock nothing can be
+        // established about is one to wait on rather than one to take over.
         Err(_) => false,
     }
 }
@@ -681,14 +492,8 @@ mod tests {
     }
 
     /// A lock somebody else is already holding, planted the way the machine
-    /// would have to produce one.
-    ///
-    /// The parent is made first because `create_dir_exclusive` is `mkdir`
-    /// rather than `mkdir -p`: a lock inside a Profile that does not exist is
-    /// `ENOENT` on a real filesystem, and `take_all` creates that Profile
-    /// before it ever asks for the lock. Planted without it, these cases were
-    /// asserting against a machine that cannot exist — which the fake used to
-    /// allow, because it inserted the path whatever was above it.
+    /// would have to produce one: the parent first, because
+    /// `create_dir_exclusive` is `mkdir` rather than `mkdir -p`.
     fn already_held(host: &FakeHost, lock: &LockSpec) {
         if let Some(parent) = lock.dir.parent() {
             host.create_dir_all(parent).expect("the Profile is there");
@@ -719,16 +524,6 @@ mod tests {
         );
     }
 
-    /// The renewal has to survive itself. A holder says it is still there by
-    /// touching the artifact, and the artifact's timestamp is also the only
-    /// evidence that the artifact is still Perch's — so a renewal that checks
-    /// the evidence *after* writing it reads its own touch as somebody else's
-    /// and declares the lock lost on the first renewal of every hold.
-    ///
-    /// What that costs is here rather than in the ordering: work carries on
-    /// under a hold Perch has stopped renewing, the lock goes stale under it,
-    /// and it is never given back — so the next command waits out a staleness
-    /// window on an artifact nobody holds.
     #[test]
     fn renewing_a_lock_nobody_touched_keeps_it_rather_than_losing_it_to_itself() {
         let host = FakeHost::new();
@@ -779,11 +574,6 @@ mod tests {
         );
     }
 
-    /// A lock artifact carries no holder identity, so a release that removed
-    /// whatever happened to be at the path would take the *new* holder's lock
-    /// away — turning one lost lock into two processes each believing they have
-    /// it. What Perch last left the artifact saying is the only identity there
-    /// is, and it is checked before anything is given back.
     #[test]
     fn a_lock_somebody_else_has_taken_over_is_not_given_back_for_them() {
         let host = FakeHost::new();
@@ -812,21 +602,6 @@ mod tests {
         );
     }
 
-    /// A slow step under two holds leaves both of them held — because both
-    /// were renewed *before* it started, not only after it finished.
-    ///
-    /// The case a Switch is made of. `prepare` reads a Credential before the
-    /// first write, and a keychain that stops to ask the user for permission
-    /// stretches it without warning; then the write itself is slow for the same
-    /// reason. Neither exceeds the window on its own, and together they do — so
-    /// a hold renewed only between steps is one somebody else may take over
-    /// while the longest step of all is running, discovered afterwards, when
-    /// whatever that step did has already happened.
-    ///
-    /// Both holds, because a step that outlasts one outlasts the other. The
-    /// pair had no test of any kind: this suite covers the artifact protocol
-    /// thoroughly and said nothing about holding one across something slow,
-    /// which is the only reason `renew` exists.
     #[test]
     fn a_slow_step_renews_both_holds_before_it_starts_and_not_only_after() {
         let theirs = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
@@ -873,10 +648,9 @@ mod tests {
             host.notes()
         );
 
-        // And the contender is a real one. Left alone past the window, the same
-        // fixture takes the lock — without which the assertion above would pass
-        // just as well for a contender that never looks, which is a test that
-        // proves nothing.
+        // And the contender is a real one: left alone past the window, the same
+        // fixture takes the lock. Without this the assertion above would pass
+        // for a contender that never looks.
         let alone = a_lock("/Users/someone/.claude/.unrenewed.lock");
         let left_alone: Result<()> = under(&host, vec![alone.clone()], |_| {
             let taken_at = host.modified_at(&alone.dir).expect("it was taken");
@@ -892,17 +666,6 @@ mod tests {
         left_alone.expect("the work finishes");
     }
 
-    /// The mirror, and the reason a takeover is read off the stamp alone: a
-    /// touch that will not go through is this machine's I/O faltering, not
-    /// another process arriving. On Windows it is the handle contention
-    /// `rename_replacing` retries for, reaching a `touch_now` that does not.
-    ///
-    /// Read as a loss it would cost three things at once, none of them
-    /// recoverable within the command: `still_held` false for the rest of it,
-    /// so `registry::save` refuses and blames a `perch` that does not exist; a
-    /// `release` that then declines to give Perch's *own* artifact back,
-    /// leaving the next command to wait out the whole staleness window; and a
-    /// line telling somebody their lock was taken when it was not.
     #[test]
     fn a_touch_that_will_not_go_through_is_a_hiccup_rather_than_a_takeover() {
         let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
@@ -935,10 +698,6 @@ mod tests {
         );
     }
 
-    /// The same for the read either side of the touch. An artifact that is
-    /// there and will not say when it was written is no evidence about who
-    /// holds it — and it is deliberately not touched on the way past, because
-    /// touching would overwrite the one stamp that makes the check possible.
     #[test]
     fn an_artifact_that_will_not_say_when_it_was_written_is_left_alone() {
         let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
@@ -971,20 +730,8 @@ mod tests {
         );
     }
 
-    /// What bounds the two cases above, and the reason the bound is the stamp
-    /// rather than Perch's patience.
-    ///
-    /// Tolerating a hiccup was tolerating it for ever: neither branch compared
-    /// anything against `stale_millis`, so a filesystem that kept faltering left
-    /// Perch reporting a hold indefinitely. Meanwhile the artifact sits there
-    /// untouched, and once it is older than the staleness window every Claude
-    /// Code on the machine is entitled to clear it and take the lock — so the
-    /// hold Perch went on claiming is one two processes believe they have,
-    /// which is the whole of what a lock is for.
-    ///
     /// The config lock is where this bites: `probe` gives it 10s against a 5s
-    /// update, so one missed renewal reaches the boundary rather than the dozen
-    /// the old comment claimed.
+    /// update, so one missed renewal reaches the boundary.
     #[test]
     fn a_hiccup_that_outlasts_the_staleness_window_is_a_hold_perch_stops_claiming() {
         for (what, unreadable) in [("the touch", false), ("the read", true)] {
@@ -1029,18 +776,6 @@ mod tests {
         }
     }
 
-    /// The same evidence, at the moment the lock is given back rather than
-    /// while it is held.
-    ///
-    /// `release` asked one question — "does the artifact still say what Perch
-    /// left it saying?" — and read "the filesystem would not answer" as a yes to
-    /// somebody else having taken it. So a hold Perch never lost was left
-    /// behind, silently, for the whole staleness window: the next command spends
-    /// its attempts waiting and then reports the lock as held by Claude Code,
-    /// with advice — quit it and run this again — that cannot possibly work.
-    ///
-    /// Nothing has said otherwise, so the artifact is still Perch's, and this is
-    /// the last chance to give it back.
     #[test]
     fn a_lock_perch_still_holds_is_given_back_even_when_the_artifact_will_not_be_read() {
         let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
@@ -1063,10 +798,6 @@ mod tests {
         );
     }
 
-    /// The other half of the same rule, and the reason the one above cannot
-    /// simply remove whatever is at the path: an artifact carrying a stamp Perch
-    /// did not leave is somebody else's lock, and giving back a lock that is not
-    /// yours leaves two processes believing they hold it.
     #[test]
     fn a_lock_somebody_else_has_taken_over_is_left_where_it_is() {
         let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
@@ -1087,15 +818,6 @@ mod tests {
         );
     }
 
-    /// Every parent a lock has is a directory that holds or is about to hold a
-    /// Credential — a Profile, or Perch's own home — so bringing one into being
-    /// at whatever the umask happens to be is not a thing this may do.
-    /// `registry::lock` creates its own parent privately and says exactly this,
-    /// which left the instance here as the one that could still do it: a
-    /// Profile's lock is taken off a derived path by
-    /// `observe::renew_under_the_lock`, so a `perch status --refresh` against an
-    /// Account whose directory had gone was enough to make it, 0755, ready for
-    /// the next `perch relogin` to write a plaintext Credential into.
     #[test]
     fn the_directory_a_lock_brings_into_being_is_the_owners_alone() {
         let host = FakeHost::new();
@@ -1111,10 +833,6 @@ mod tests {
         );
     }
 
-    /// The other direction: a modification time that cannot be read says
-    /// nothing about the holder, and a lock nothing can be established about is
-    /// one to wait on. Taking it over costs two processes writing one
-    /// Credential; waiting costs a command that has to be run again.
     #[test]
     fn a_lock_nothing_can_be_established_about_is_waited_on_rather_than_taken() {
         let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
@@ -1133,15 +851,6 @@ mod tests {
         );
     }
 
-    /// And a lock that is *taken* and then will not say when it was written is
-    /// a take that failed, rather than a hold with no identity.
-    ///
-    /// The stamp is the only identity a lock artifact has. Without one, `renew`
-    /// skips the touch and says nothing — so the lock goes stale under a
-    /// command that is behaving perfectly — `still_held` is false for ever, so
-    /// `registry::save` refuses to write and blames a `perch` that does not
-    /// exist, and `release` will not give the artifact back. Three wrong
-    /// answers, none of them recoverable, so the take is what fails.
     #[test]
     fn a_lock_that_will_not_say_when_it_was_written_is_given_back_rather_than_held() {
         let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
@@ -1201,8 +910,7 @@ mod tests {
         assert!(!host.path_exists(Path::new(&first.dir)));
     }
 
-    /// A lock whose holder died is taken over, which is the behavior every
-    /// rule below is a qualification of.
+    /// The behavior every rule below is a qualification of.
     #[test]
     fn a_lock_that_has_gone_quiet_for_longer_than_its_window_is_taken_over() {
         let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
@@ -1219,15 +927,6 @@ mod tests {
         );
     }
 
-    /// The race the claim exists for.
-    ///
-    /// `abandoned` and `remove_dir_all` are two calls with a gap between them.
-    /// Two perches that both read the same stale timestamp both removed and
-    /// both created — and the second one's removal took away the lock the first
-    /// had just made, so both walked away believing they held it. Two processes
-    /// writing one Credential, which is the one thing the lock exists to
-    /// prevent.
-    ///
     /// Asserted as the loser sees it: while somebody else holds the claim, an
     /// abandoned lock is not cleared however stale it looks.
     #[test]
@@ -1254,10 +953,8 @@ mod tests {
         );
     }
 
-    /// The winner's side of the same moment, which is what makes the loser's
-    /// wait right rather than merely late: by the time the claim is free, the
-    /// lock is one somebody is holding, and the staleness question asked under
-    /// the claim says so.
+    /// The winner's side of the same moment: by the time the claim is free, the
+    /// lock is one somebody is holding.
     #[test]
     fn a_lock_taken_over_while_this_one_waited_is_not_taken_over_again() {
         let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
@@ -1273,15 +970,7 @@ mod tests {
         assert!(host.path_exists(&lock.dir), "somebody is holding it");
     }
 
-    /// The other half of the same race, and the one the claim did not cover.
-    ///
-    /// Clearing happened under the claim and creating happened after it, so the
-    /// winner's own `mkdir` was unguarded: a second perch could take the freed
-    /// claim, find the lock momentarily absent — which reads as abandoned — and
-    /// remove the lock the winner had just made. Both then held it.
-    ///
-    /// Asserted as an ordering, because that is the whole of the fix: the lock
-    /// comes into being before the claim on it is given back, so there is no
+    /// Asserted as an ordering, because that is the whole of it: there is no
     /// moment at which the lock is absent and the claim is free.
     #[test]
     fn the_lock_a_takeover_makes_comes_into_being_before_the_claim_is_given_back() {
@@ -1314,10 +1003,6 @@ mod tests {
         assert!(!host.path_exists(&claim), "with the claim given back");
     }
 
-    /// A claim outliving the process that made it would stop this lock ever
-    /// being taken over again — the wedge `clear_the_abandoned` exists to keep
-    /// a machine out of, arriving through the thing that fixed it. So one as
-    /// stale as the lock it guards is cleared, and the next attempt gets it.
     #[test]
     fn a_claim_left_behind_by_a_death_is_cleared_rather_than_waited_on_for_ever() {
         let lock = a_lock("/Users/someone/.claude/.oauth_refresh.lock");
@@ -1341,21 +1026,10 @@ mod tests {
 }
 
 /// The exclusivity claim itself, on a real filesystem and with real threads.
-///
-/// `mkdir` either creates a directory or fails, with nothing in between, and
-/// that is the whole of the lock protocol — every other rule here is about who
-/// may take over from whom. Everything above checks it sequentially, which is
-/// to say it checks a claim about concurrency without any.
-///
-/// Runs with everything else, and the wall clock is why it nearly did not.
-/// Eight threads contending really do wait on each other, and that cost was
-/// once thought to earn a gate — but a gate asks for consent, and this works in
-/// a directory of its own in `temp_dir` and touches nothing the developer owns
-/// (ADR a-suite-is-named-and-gated). What settled it is what is underneath:
-/// this is the only execution of the exclusivity claim anywhere in the
-/// repository, and it had already gone unexecuted once, because naming `--test`
-/// targets in CI quietly suppressed the default set. A claim that has been
-/// silently skipped once does not go back behind a flag.
+/// `mkdir` either creates a directory or fails, and that is the whole of the
+/// lock protocol; everything above checks it sequentially. Ungated, because it
+/// works in a directory of its own in `temp_dir` and touches nothing the
+/// developer owns (ADR a-suite-is-named-and-gated).
 #[cfg(test)]
 mod exclusivity {
     use std::path::PathBuf;
@@ -1386,9 +1060,8 @@ mod exclusivity {
         };
 
         // Incremented on the way in and decremented on the way out, so anything
-        // above one means two holders overlapped. `taken` counts how many holds
-        // actually happened, since a thread that loses every attempt proves
-        // nothing either way.
+        // above one means two holders overlapped. `taken` counts the holds that
+        // happened, since a thread that loses every attempt proves nothing.
         static INSIDE: AtomicUsize = AtomicUsize::new(0);
         static MOST: AtomicUsize = AtomicUsize::new(0);
         static TAKEN: AtomicUsize = AtomicUsize::new(0);

@@ -104,9 +104,6 @@ fn a_run_launches_claude_code_against_that_accounts_profile() {
     );
 }
 
-/// The whole of what makes a Run not a Switch: no Credential is written to the
-/// Default Profile, no Identity is patched, and Perch's own record of who is
-/// active is exactly where it was.
 #[test]
 fn the_active_account_and_the_default_profile_are_untouched() {
     let host = machine();
@@ -140,9 +137,6 @@ fn the_active_account_and_the_default_profile_are_untouched() {
     );
 }
 
-/// A Profile is storage every other day and a live configuration directory for
-/// the length of a Run, so the pass that makes Shared State reachable happens
-/// before the client that has to see it.
 #[test]
 fn shared_state_is_reconciled_before_the_client_is_launched() {
     let host = machine_with_shared_state();
@@ -173,12 +167,6 @@ fn shared_state_is_reconciled_before_the_client_is_launched() {
     );
 }
 
-/// A client launched by a Run hands `CLAUDE_CONFIG_DIR` on to everything it
-/// starts, so a `perch run` typed inside one arrives with a Profile named in its
-/// environment. Shared State is still read from the Default Profile: a Profile
-/// holds links rather than the person's things, and sharing out of one would
-/// share links to links — or nothing at all, silently, where the Account whose
-/// Profile it is has just been added.
 #[test]
 fn shared_state_is_read_from_the_default_profile_even_inside_another_run() {
     let host = machine_with_shared_state()
@@ -200,10 +188,6 @@ fn shared_state_is_read_from_the_default_profile_even_inside_another_run() {
     }
 }
 
-/// The other half of the same rule: a configuration directory somebody has
-/// deliberately moved is where their Shared State is, and Perch reads it from
-/// there. Only a Profile is disqualified, because only a Profile is somewhere
-/// Perch itself pointed the variable.
 #[test]
 fn a_configuration_directory_that_is_not_a_profile_is_where_shared_state_is_read() {
     let moved = "/Users/someone/elsewhere";
@@ -220,9 +204,6 @@ fn a_configuration_directory_that_is_not_a_profile_is_where_shared_state_is_read
     );
 }
 
-/// Reconcile refuses rather than copying, and a Run served a copy of somebody's
-/// memory is the failure that refusal exists to prevent — so the refusal has to
-/// stop the launch rather than be printed beside one.
 #[test]
 fn a_run_that_cannot_reconcile_does_not_launch() {
     let host = machine_with_shared_state();
@@ -241,9 +222,6 @@ fn a_run_that_cannot_reconcile_does_not_launch() {
     assert!(launched(&host).is_empty(), "{:?}", launched(&host));
 }
 
-/// Two terminals running two Accounts is the point of the feature rather than
-/// an edge case: the second Run is started from inside the first one's client,
-/// so nothing Perch holds can be held for as long as a session lasts.
 #[test]
 fn a_second_run_works_while_the_first_client_is_still_running() {
     let inside = Rc::new(RefCell::new(None));
@@ -282,8 +260,6 @@ fn a_second_run_works_while_the_first_client_is_still_running() {
     );
 }
 
-/// The refusal every Quarantine gets, because the repair every Quarantine has
-/// is the same one: no amount of re-running the command reaches it.
 #[test]
 fn a_quarantined_account_is_refused_and_nothing_is_launched() {
     let host = machine();
@@ -303,9 +279,6 @@ fn a_quarantined_account_is_refused_and_nothing_is_launched() {
     assert!(launched(&host).is_empty(), "{:?}", launched(&host));
 }
 
-/// A Group names a set of Accounts declared interchangeable. A Cycle can act on
-/// that; a Run has one process to point at one directory, and guessing which
-/// Account was meant is the failure the refusal prevents.
 #[test]
 fn a_group_target_is_refused_as_naming_no_one_account() {
     let host = machine();
@@ -358,12 +331,6 @@ fn which_kind_of_target_matched_is_said_before_the_client_takes_the_terminal() {
     );
 }
 
-/// The client inherits this process's standard output, and a Run is meant to
-/// stand in a script wherever `claude` would — so `perch run dev -- claude -p
-/// … --output-format json | jq .` has to be a document `jq` can read. Two lines
-/// of Perch's own in front of it is not. Everything a Run says about the machine
-/// goes to standard error, which is where every other remark of Perch's already
-/// goes.
 #[test]
 fn a_run_says_nothing_on_the_stream_the_client_writes_to() {
     let host = machine();
@@ -385,8 +352,6 @@ fn a_run_says_nothing_on_the_stream_the_client_writes_to() {
     );
 }
 
-/// Said before the client takes the screen, because it is the difference
-/// between the command that was typed and the one next to it.
 #[test]
 fn a_run_says_which_account_stays_active_everywhere_else() {
     let host = machine();
@@ -400,16 +365,6 @@ fn a_run_says_which_account_stays_active_everywhere_else() {
     );
 }
 
-/// And says nothing about it where nothing has settled who is active.
-///
-/// A Switch written down and not yet recorded is a **Landing**, and
-/// `Active::whose` answers one with the Account being *left* — the last thing
-/// Perch established rather than anything it knows. Said off that answer, a Run
-/// promised that Account "stays the active Account everywhere else" while the
-/// other one's Credential may already be the live one. That is the same claim
-/// ADR an-ordering-is-a-type had taken out of `perch watcher run`'s opening
-/// line, still being made by the command whose whole point is the second half
-/// of the sentence.
 #[test]
 fn a_run_claims_nothing_about_who_is_active_while_a_switch_is_in_flight() {
     let host = machine();
@@ -428,9 +383,6 @@ fn a_run_claims_nothing_about_who_is_active_while_a_switch_is_in_flight() {
     );
 }
 
-/// A Run against the Account that is already active is not the "nothing to do"
-/// a Switch to it would be: it still gets a Profile of its own, which is what
-/// keeps the session out of the way of a later Switch.
 #[test]
 fn running_the_account_that_is_already_active_is_not_refused() {
     let host = machine();
@@ -445,9 +397,6 @@ fn running_the_account_that_is_already_active_is_not_refused() {
     );
 }
 
-/// A Run is a way of launching a program, so what the program said is what a
-/// script reads — a wrapper that flattened it into success or failure would be
-/// unusable in anything that branches.
 #[test]
 fn the_clients_exit_code_is_perchs_exit_code() {
     for status in [0, 1, 2, 42, 130] {
@@ -459,10 +408,6 @@ fn the_clients_exit_code_is_perchs_exit_code() {
     }
 }
 
-/// Everything after `--` belongs to the launched program. Perch has flags of
-/// its own spelled the same way, and the whole of the separator's job is that it
-/// stops reading at it: a `--json` after `--` is Claude Code's `--json`, not the
-/// one `perch list` takes.
 #[test]
 fn arguments_after_the_separator_reach_the_client_verbatim() {
     let host = machine();
@@ -490,10 +435,6 @@ fn arguments_after_the_separator_reach_the_client_verbatim() {
     );
 }
 
-/// A word that is not a flag names the program, which is what makes a Run a way
-/// of running anything under an Account rather than a way of running Claude
-/// Code (ADR a-run-is-one-shot). The Profile is still what the program is
-/// pointed at: that is the point of running it here rather than in the shell.
 #[test]
 fn a_program_named_after_the_separator_is_what_runs() {
     let host = machine();
@@ -520,10 +461,6 @@ fn a_program_named_after_the_separator_is_what_runs() {
     );
 }
 
-/// Said before the program takes the terminal, because "you are about to run
-/// this, as this Account" is the whole of what a Run announces — and naming
-/// Claude Code where something else is launching would be a lie about which
-/// program is about to write in that Profile.
 #[test]
 fn the_program_being_launched_is_named_when_it_is_not_claude_code() {
     let host = machine();
@@ -546,9 +483,6 @@ fn the_program_being_launched_is_named_when_it_is_not_claude_code() {
     );
 }
 
-/// Shared State is what a Run is for, and a program other than Claude Code reads
-/// the same directory: `npm test` inside a Profile that cannot see the person's
-/// settings is the same failure as a client that cannot.
 #[test]
 fn another_program_is_reconciled_for_like_any_other_run() {
     let host = machine_with_shared_state();
@@ -567,10 +501,6 @@ fn another_program_is_reconciled_for_like_any_other_run() {
     }
 }
 
-/// The probe finds Claude Code, and it is reached only where Claude Code is what
-/// is being launched: a Run of `npm` on a machine Perch could not find a client
-/// on is still a Run of `npm`, and only the Run that needed a client is refused
-/// for the want of one.
 #[test]
 fn another_program_runs_on_a_machine_with_no_claude_code_to_find() {
     let host = machine().without_env("PATH");
@@ -591,8 +521,6 @@ fn another_program_runs_on_a_machine_with_no_claude_code_to_find() {
     assert_eq!(refusal.exit_code(), EXIT_PROBE_REFUSED);
 }
 
-/// The refusals a Run makes are about the Account rather than about the program,
-/// so naming one changes nothing about them.
 #[test]
 fn a_quarantined_account_is_refused_whatever_is_being_launched() {
     let host = machine();
@@ -606,7 +534,7 @@ fn a_quarantined_account_is_refused_whatever_is_being_launched() {
     assert!(launched(&host).is_empty(), "{:?}", launched(&host));
 }
 
-// ---- a Run makes the Profile Live (ADR a-run-is-one-shot)
+// ---- a Run makes the Profile Live
 // ---------------------------
 
 /// The processes Perch would say are running against a Profile right now.
@@ -619,9 +547,6 @@ fn live_against(host: &FakeHost, email: &str) -> Vec<u32> {
     .expect("every marker here can be corroborated or dismissed")
 }
 
-/// A Profile with a Run against it is a Live Profile, and stops being one when
-/// the Run ends. Asserted from inside the program the Run launched, because
-/// "while it lasts" is the only moment the claim is about.
 #[test]
 fn a_run_marks_its_profile_live_for_as_long_as_it_lasts() {
     let seen = Rc::new(RefCell::new(Vec::new()));
@@ -645,19 +570,6 @@ fn a_run_marks_its_profile_live_for_as_long_as_it_lasts() {
     );
 }
 
-/// A marker arrives whole or not at all.
-///
-/// Written straight into place, the file is truncated and then filled, and a
-/// reader catching it between the two reads a file it can see all of and that
-/// says nothing — which `clients_in` settles as "nothing is running", the
-/// opposite of the arm whose comment names this very case ("halfway through
-/// being written by a client that is starting up right now"). A `perch switch`
-/// landing in that window Captures the Credential the Run is about to hand a
-/// client, which is the mid-task logout ADR a-run-is-one-shot's marker exists
-/// to prevent.
-///
-/// Asserted as a rename, because that is what makes a write atomic: the reader
-/// sees the old name or the new one and never a prefix of either.
 #[test]
 fn a_runs_marker_arrives_whole_rather_than_being_filled_in_place() {
     let host = machine_with_two_accounts();
@@ -676,10 +588,6 @@ fn a_runs_marker_arrives_whole_rather_than_being_filled_in_place() {
     );
 }
 
-/// The consequence that matters: while somebody is working in a Profile, the
-/// Capture that a Switch away from that Account would perform is refused. That
-/// write would land under a client holding the same file, which is the mid-task
-/// logout ADR a-profile-is-live-by-evidence exists to prevent.
 #[test]
 fn a_capture_into_the_profile_a_run_is_against_is_refused() {
     let refused = Rc::new(RefCell::new(None));
@@ -708,10 +616,6 @@ fn a_capture_into_the_profile_a_run_is_against_is_refused() {
     );
 }
 
-/// And the direction that is allowed. Reading a Credential out of a Profile to
-/// copy it into the Default Profile takes nothing away from the session using
-/// it, and an Account you are running in one terminal is exactly the one you
-/// would want active in the others.
 #[test]
 fn switching_onto_the_account_a_run_is_against_succeeds() {
     let landed = Rc::new(RefCell::new(None));
@@ -732,10 +636,6 @@ fn switching_onto_the_account_a_run_is_against_succeeds() {
     assert_eq!(registry_of(&host).active().whose(), Some(SECOND_EMAIL));
 }
 
-/// A Run is killed often — closing the terminal is how a session usually ends —
-/// so the marker outliving the process it names is the ordinary case rather
-/// than the exception. It says nothing once that process is gone
-/// (ADR a-profile-is-live-by-evidence).
 #[test]
 fn a_run_that_was_killed_does_not_leave_a_profile_live_for_ever() {
     let host = machine();
@@ -748,9 +648,6 @@ fn a_run_that_was_killed_does_not_leave_a_profile_live_for_ever() {
         .expect("nothing is holding that Profile");
 }
 
-/// The same marker, with its pid worn by something that started later. A
-/// recycled pid necessarily belongs to a process younger than the marker, which
-/// is what makes the check exact rather than a guess.
 #[test]
 fn a_killed_runs_marker_does_not_come_back_to_life_with_a_recycled_pid() {
     let host = machine();
@@ -768,11 +665,6 @@ fn a_killed_runs_marker_does_not_come_back_to_life_with_a_recycled_pid() {
         .expect("that Run died; the pid was recycled");
 }
 
-/// Liveness is a fact about one configuration directory, so the directory that
-/// records it is the one entry a Reconcile holds back that is neither the
-/// person's nor the Account's (ADR everything-but-the-account). Shared, a Run
-/// against one Account would make every Profile on the machine Live at once,
-/// and its own marker would land in the Default Profile.
 #[test]
 fn a_run_answers_for_its_own_profile_and_for_nobody_elses() {
     let elsewhere = Rc::new(RefCell::new(Vec::new()));
@@ -811,10 +703,6 @@ fn a_run_answers_for_its_own_profile_and_for_nobody_elses() {
     );
 }
 
-/// What the marker buys is that no other Perch Captures or Renews the Credential
-/// this session is holding. A Run that cannot claim its Profile is a Run nothing
-/// is protecting, so it is refused rather than launched unguarded — and a person
-/// told beforehand has lost a command rather than a session.
 #[test]
 fn a_run_that_cannot_mark_its_profile_live_does_not_launch() {
     let host = machine();
@@ -831,8 +719,6 @@ fn a_run_that_cannot_mark_its_profile_live_does_not_launch() {
     assert!(launched(&host).is_empty(), "{:?}", launched(&host));
 }
 
-/// Nothing is launched for an Account Perch does not hold, and the refusal is
-/// the one every mistyped Target gets.
 #[test]
 fn a_target_that_names_nothing_is_refused_before_anything_is_linked() {
     let host = machine();
@@ -850,14 +736,6 @@ fn a_target_that_names_nothing_is_refused_before_anything_is_linked() {
     assert!(launched(&host).is_empty(), "{:?}", launched(&host));
 }
 
-/// An empty first word names a program no more than a leading `-` does.
-///
-/// The rule after `--` is that the first word decides, and decides totally: a
-/// word beginning with `-` is an argument because nothing beginning with `-`
-/// names a program the operating system would find. The empty string does not
-/// either — `PATH` is searched for names and a path is written with a separator
-/// — but it does not begin with `-`, so it was taken as the program and handed
-/// to the operating system to launch, under the announcement "Running `` as".
 #[test]
 fn an_empty_first_word_is_an_argument_rather_than_a_program() {
     let host = machine();
@@ -909,14 +787,6 @@ fn machine_holding_the_two_that_share_a_profile() -> FakeHost {
     host
 }
 
-/// A Run against a Profile two Accounts share is refused, the way a Switch onto
-/// one is.
-///
-/// One directory means one Credential Store and one Credential, so the client
-/// this launches runs as whichever of the two is in it — while the line Perch
-/// prints a moment earlier names the other. `perch switch` refuses exactly this
-/// (ADR a-switch-is-written-down-first); the Run reached the same directory by
-/// another route and did not.
 #[test]
 fn a_run_against_a_profile_two_accounts_share_is_refused() {
     let host = machine_holding_the_two_that_share_a_profile().with_login(client_exiting(0));
@@ -932,17 +802,6 @@ fn a_run_against_a_profile_two_accounts_share_is_refused() {
     assert!(launched(&host).is_empty(), "and nothing was launched");
 }
 
-/// A Run claims its Profile before it links anything into it, so nothing else
-/// can take the Profile away while it is being prepared.
-///
-/// Reconcile and Carry are both filesystem-bound over a whole Profile, and the
-/// Marker used to be written after both. Until it exists nothing on the machine
-/// knows the Run is happening: `perch remove` asks twice whether the Profile is
-/// Live, is told no both times, and then deletes the Credential and
-/// `remove_dir_all`s the directory this command is still linking into. What
-/// starts is a client pointed at an empty configuration directory asking its
-/// user to log in — the state `refuse_a_quarantined_account` exists to prevent,
-/// reached by a different road.
 #[test]
 fn a_run_marks_its_profile_live_before_it_touches_anything_in_it() {
     // With Shared State to link and a `.claude.json` to Carry, so there is
@@ -977,22 +836,6 @@ fn a_run_marks_its_profile_live_before_it_touches_anything_in_it() {
     );
 }
 
-/// A Profile whose `sessions` is a link into another configuration directory is
-/// refused rather than written through.
-///
-/// `create_dir_all` at a link to a directory succeeds and uses the target, so
-/// every write under it lands there. `reconcile::sweep` exists to take that
-/// link away — its comment names this exact hazard, "its own Run's marker would
-/// land in the Default Profile" — but a Run claims *before* it reconciles, and
-/// on purpose (ADR a-run-is-one-shot): until the Marker exists nothing on the
-/// machine knows the Run is happening, so a `perch remove` in another terminal
-/// would be free to delete the Profile out from under it.
-///
-/// Claimed through the link, the Marker makes the Default Profile report a live
-/// corroborated client, which refuses every Capture, Switch and Renewal on the
-/// machine for as long as the Run lasts. Then the sweep removes the link and
-/// `Claim::drop` deletes a path that no longer resolves, leaving the Marker
-/// behind in a directory it was never about.
 #[test]
 fn a_run_whose_sessions_is_a_link_is_refused_rather_than_marking_somewhere_else() {
     let profile = profile_string(SECOND_EMAIL);

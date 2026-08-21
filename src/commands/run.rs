@@ -2,36 +2,12 @@
 //! Switch (ADR a-run-is-one-shot).
 //!
 //! One process is pointed at one Profile by setting `CLAUDE_CONFIG_DIR` for it
-//! and nothing else. The active Account, every other terminal, the editor
-//! extension and the desktop app go on as they were: nothing is Captured,
-//! nothing is written to the Default Profile, and no Identity is patched. A Run
-//! is not a Switch and shares none of its machinery.
-//!
-//! Several Runs coexist. Two terminals running two Accounts is what the command
-//! is for rather than an edge case, so nothing here may hold anything for as
-//! long as the client lives — the registry least of all, which is read and let
-//! go before the launch.
-//!
-//! A Run is the one path where a Profile is a live configuration directory
-//! rather than storage, so it is the one path that has to Reconcile
-//! ([`crate::reconcile`]) — and it does so before every launch, because Shared
-//! State moves underneath it between Runs. A Run that cannot Reconcile does not
-//! launch: a client served a Profile it cannot see the person's memory,
-//! settings and plugins through is worse than one that did not start.
-//!
-//! It is also the one path that makes a Profile **Live**
-//! (ADR a-run-is-one-shot). A Run writes the session marker that says so and
-//! takes it away when the Run ends, which is what stops another Perch
-//! Capturing, Renewing or writing `.claude.json` into a Profile somebody is
-//! working in. Reading out of one is untouched: a Switch onto the Account a Run
-//! is against still lands.
-//!
-//! Everything Perch says about a Run goes to standard error, which every other
-//! remark about the machine already does. The client inherits this process's
-//! standard output, and a Run is meant to stand in a script wherever `claude`
-//! would — so two lines of Perch's own in front of `claude -p … --output-format
-//! json` is a document that no longer parses. What the client says on stdout is
-//! the whole of what a Run says on stdout.
+//! and nothing else, so a Run shares none of a Switch's machinery. Several Runs
+//! coexist, which is why nothing here holds anything for as long as the client
+//! lives — the registry least of all. It is the one path where a Profile is a
+//! live configuration directory, so the one path that Reconciles and the one
+//! that makes a Profile Live. Perch's own remarks go to standard error, because
+//! what the client says on stdout is the whole of what a Run says on stdout.
 
 use std::io::Write;
 
@@ -51,78 +27,48 @@ pub struct RunArgs {
     /// What was typed after `--`, one word per element and none of them read:
     /// the program to run and its arguments, or Claude Code's own arguments
     /// where the first word is a flag. Empty is `perch run <target>` on its own.
-    ///
-    /// Text, like every other word Perch takes. A word that is not text is
-    /// refused by the parser rather than mangled here, which is the honest
-    /// answer until somebody has one to forward — and forwarding it would mean
-    /// an `OsString` in every hand it passes through.
+    /// Text, like every other word Perch takes; one that is not text is refused
+    /// by the parser rather than mangled here.
     pub command: Vec<String>,
 }
 
 /// Launches a client against the named Account's Profile and reports the status
-/// it exited with.
-///
-/// The status comes back rather than being folded into success or failure: a
-/// Run is a way of launching a program, and a wrapper that flattened what the
-/// program said would break every script that branches on it.
+/// it exited with. The status comes back rather than being folded into success
+/// or failure: a Run is a way of launching a program, and flattening what it
+/// said would break every script that branches on it.
 pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
     // Read and let go, never held. A Run lasts as long as somebody's session,
-    // and a registry lock held across that would shut every other Perch on the
-    // machine out for the afternoon — including the second Run this command
-    // exists to make possible.
+    // and a registry lock held across that would shut every other Perch out —
+    // including the second Run this command exists to make possible.
     let registry = adopt::ensure_adopted(host)?;
 
-    // A Group names a set of Accounts declared interchangeable, which is what a
-    // Cycle needs and nothing a Run can act on: there is no one Profile to point
-    // a process at. Refused here, in the one place every command that acts on
-    // exactly one Account refuses it.
+    // A Group names a set of Accounts declared interchangeable, which is
+    // nothing a Run can act on: there is no one Profile to point a process at.
     let found = target::resolve_account(&registry, &args.target)?;
     host.note(&found.matched);
     refuse_a_quarantined_account(&registry, &found.email)?;
     // Beside the Quarantine refusal, and for a reason of the same size: a
-    // Profile two Accounts share holds one Credential, so the client this
-    // launches runs as whichever of them is in it — while the line above it has
-    // just named the other. A Switch refuses this; a Run reached the same
-    // directory by another route and did not.
+    // Profile two Accounts share holds one Credential, so the client runs as
+    // whichever of them is in it while the line above named the other.
     switch::refuse_a_shared_profile(registry.held(&found.email)?, &registry)?;
 
-    // Settled before anything is linked. Where this is the Claude Code the probe
+    // Settled before anything is linked: where this is the Claude Code the probe
     // has to find, a machine without one is a refusal that should cost the
-    // filesystem nothing — and the launch is the only thing Reconcile is
-    // preparation for either way.
+    // filesystem nothing.
     let launch = what_to_launch(host, &args.command)?;
     let profile = registry::profile_dir_for(host, &found.email)?;
     let default_profile = registry::the_default_profile(host)?;
 
-    // Claimed before anything is linked rather than immediately before the
-    // launch (ADR a-run-is-one-shot). Reconcile and Carry are both
-    // filesystem-bound over a whole Profile, and until the Marker exists
-    // nothing on the machine knows this Run is happening: a `perch remove` in
-    // another terminal asks whether the Profile is Live, is told no — twice,
-    // both times before this Marker was written — and then deletes the
-    // Credential and the directory while this command is still linking into it.
-    // What starts is a client pointed at an empty configuration directory,
-    // asking its user to log in, which is the state
-    // `refuse_a_quarantined_account` above exists to prevent.
-    //
-    // Nothing is lost by claiming early. The `Claim` takes its Marker back when
-    // it drops, so a Run that fails between here and the launch leaves nothing
-    // behind — which is what "the marker cannot outlive a Run that never
-    // started" asked for, and it was the ordering rather than the Drop that
-    // used to be relied on.
+    // Claimed before anything is linked: until the Marker exists nothing on the
+    // machine knows this Run is happening, and a `perch remove` elsewhere would
+    // be told the Profile is idle and delete it while this is linking into it.
     let _live = probe::claim(host, &profile)?;
 
     reconcile::reconcile(host, &default_profile.config_dir, &profile)?;
 
     // The one file Reconcile cannot link, because it holds the Account as well
-    // as the person (ADR everything-but-the-account). Handled key by key, and
-    // afterwards: Reconcile is what makes the Profile a directory at all. The
-    // one reader here that asks whether a Landing is in flight rather than
-    // settling one, and for the reason `perch watcher run`'s opening line asks
-    // (ADR an-ordering-is-a-type): a Run holds no registry lock by design, and
-    // a Switch left in flight is exactly the state where "who is active" has no
-    // answer — `Active::whose` hands back the Account being *left*, which is
-    // the last thing Perch established rather than anything it knows.
+    // as the person (ADR everything-but-the-account). It asks whether a Landing
+    // is in flight rather than settling one, since a Run holds no registry lock.
     let settled = switch::nothing_in_flight(&registry);
 
     carry::carry(
@@ -140,10 +86,9 @@ pub fn run(host: &dyn Host, args: RunArgs, out: &mut dyn Write) -> Result<i32> {
         &launch.said,
         settled.as_ref(),
     ));
-    // Flushed before the client is handed the terminal. Nothing of Perch's own
-    // goes to standard output here, but a command run before this one may have
-    // left something in the buffer, and it would be delivered after the output
-    // of the thing it was announcing.
+    // Flushed before the client is handed the terminal: a command run before
+    // this one may have left something in the buffer, and it would be delivered
+    // after the output of the thing it was announcing.
     out.flush().map_err(commands::write_failed)?;
 
     // The environment of this one process, and the whole of what makes the Run
@@ -171,24 +116,16 @@ struct Launch {
     said: String,
 }
 
-/// Reads the words after `--` as a command line (ADR a-run-is-one-shot).
+/// Reads the words after `--` as a command line.
 ///
-/// The first word decides, and decides totally: a word beginning with `-` is an
-/// argument, because nothing that begins with `-` can name a program the
-/// operating system would find — `PATH` is searched for names and a path is
-/// written with a `/`, and somebody with a file called `-resume` reaches it as
-/// `./-resume`. So `perch run dev -- --resume` is Claude Code resuming and
-/// `perch run dev -- npm test` is `npm`, with nothing guessed in either case.
-///
-/// Nothing after `--`, and nothing after the Target at all, is Claude Code with
-/// no arguments: the command's first and commonest form.
+/// The first word decides totally: a word beginning with `-` is an argument,
+/// because nothing beginning with `-` can name a program the operating system
+/// would find. Nothing after `--` at all is Claude Code with no arguments.
 fn what_to_launch(host: &dyn Host, command: &[String]) -> Result<Launch> {
     match command.split_first() {
         // The empty string names a program the operating system would find no
         // more than a leading `-` does, and for the same reason: `PATH` is
-        // searched for names and a path is written with a separator. Without
-        // this, `perch run dev -- '' --resume` announced "Running `` as …" and
-        // handed `""` to the operating system to launch.
+        // searched for names and a path is written with a separator.
         Some((program, args)) if !program.is_empty() && !program.starts_with('-') => Ok(Launch {
             program: program.clone(),
             args: args.to_vec(),
@@ -205,28 +142,11 @@ fn what_to_launch(host: &dyn Host, command: &[String]) -> Result<Launch> {
     }
 }
 
-/// Refuses `perch run <target> <anything>`, where what was meant for the
-/// program was typed without the separator that says so
-/// (ADR a-run-is-one-shot).
-///
-/// Read off the command line before the parser sees it, because the parser is
-/// what the rule exists to protect against: clap will claim `--resume` for Perch
-/// and report an unknown argument, which is true and is not the thing the person
-/// needs to be told. Both readings of that line are real — Perch has a `--json`
-/// and so does Claude Code — so the answer is neither reading, and the message
-/// is the line that would have worked.
-///
-/// A word that is not a flag is caught by the same rule and told the same thing,
-/// because `perch run dev npm test` is the same mistake made without a dash:
-/// nothing but `--` follows a Target, so there is no reading of it to argue
-/// about, only a separator to put in.
-///
-/// It ends at the Target, and only where the Target is the first word after
-/// `run`. Anything before it is the parser's: a flag there is Perch's beyond
-/// doubt — `perch run --help` is a request for help with `run`, and no program
-/// has been named yet for it to have belonged to — and a line the parser will
-/// reject anyway should be rejected in its words rather than answered here with
-/// a suggestion that quietly drops half of what was typed.
+/// Refuses `perch run <target> <anything>`, where what was meant for the program
+/// was typed without the separator that says so. Read off the command line
+/// before the parser sees it, because the parser is what the rule protects
+/// against: clap claims `--resume` for Perch and reports an unknown argument. It
+/// ends at the Target — anything before one is Perch's beyond doubt.
 pub fn refuse_a_flag_without_the_separator(typed: &[String]) -> Result<()> {
     let typed = words(typed);
     let ["run", target, rest @ ..] = typed.as_slice() else {
@@ -254,11 +174,9 @@ pub fn refuse_a_flag_without_the_separator(typed: &[String]) -> Result<()> {
     )))
 }
 
-/// Why the word was not Perch's to read, said in its own terms.
-///
-/// A flag is genuinely two things at once and the sentence says so. A bare word
-/// never was — it names a program — so telling somebody Perch could not tell
-/// whose it was would be inventing an ambiguity to explain.
+/// Why the word was not Perch's to read, said in its own terms. A flag is
+/// genuinely two things at once and the sentence says so; a bare word names a
+/// program, so claiming an ambiguity there would be inventing one.
 fn whose(word: &str) -> String {
     if word.starts_with('-') {
         format!("`{word}` could be Perch's flag or the program's, and Perch will not guess which.")
@@ -301,12 +219,9 @@ fn quoted_for_a_shell(word: &str) -> String {
 }
 
 /// Refuses to launch a client against an Account whose Credential is known not
-/// to work.
-///
-/// The remedy is the one every Quarantine has and no other refusal in Perch has,
-/// so it carries the same exit code: no amount of re-running repairs it, and
-/// `perch relogin` does. Without this the user finds out by being asked to log
-/// in by a Claude Code that has already taken the terminal.
+/// to work. It carries the Quarantine exit code: no amount of re-running repairs
+/// it, and `perch relogin` does. Without this the user finds out from a Claude
+/// Code that has already taken the terminal.
 pub(crate) fn refuse_a_quarantined_account(registry: &Registry, email: &str) -> Result<()> {
     crate::commands::refuse_a_quarantined_account(
         registry,
@@ -318,9 +233,9 @@ pub(crate) fn refuse_a_quarantined_account(registry: &Registry, email: &str) -> 
 
 /// What is about to happen, and what is not.
 ///
-/// The second half is the whole point of the command, and the difference from
-/// the command next to it: somebody who typed `run` where they meant `switch`
-/// should be able to see that nothing moved before the client takes the screen.
+/// The second half is the whole point of the command: somebody who typed `run`
+/// where they meant `switch` sees that nothing moved before the client takes the
+/// screen.
 fn launching(
     registry: &Registry,
     email: &str,
@@ -328,21 +243,14 @@ fn launching(
     settled: Option<&switch::Settled>,
 ) -> String {
     let named = registry.named_for_the_user(email);
-    // Nothing about who is active where nothing has settled who is active. The
-    // second half of the sentence is the whole point of the command — that
-    // nothing moved — and saying it about the Account a Switch was leaving is
-    // saying it about the one Account it may no longer be true of.
+    // Nothing about who is active where nothing has settled who is active:
+    // saying it about the Account a Switch was leaving is saying it about the
+    // one Account it may no longer be true of.
     let active = settled.and_then(|_| registry.active().whose());
     match active {
-        // Both Accounts are named the way every other command names one, so the
-        // sentence that contrasts them does not hand one of them its Alias and
-        // take the other's away.
-        //
-        // Asked through `is_active`, which is the one place the registry answers
-        // a question about an address: compared by bytes, an Account reached by
-        // an Alias whose spelling `upsert` has since replaced was named as two
-        // Accounts in one sentence — "Running … as X. X stays the active Account
-        // everywhere else."
+        // Both Accounts named the way every other command names one, through
+        // `is_active` — the one place the registry answers a question about an
+        // address, so an Alias `upsert` has respelled is not named twice.
         Some(active) if !registry.is_active(email) => format!(
             "Running {said} as {named}, in this terminal alone. {} stays the \
              active Account everywhere else.",
@@ -389,9 +297,6 @@ mod tests {
         assert_eq!(refusal.exit_code(), EXIT_NOT_UNDERSTOOD);
     }
 
-    /// Everything the person typed comes back in the suggestion, in the order
-    /// they typed it: a corrected line missing half the command is a second
-    /// thing for them to get right.
     #[test]
     fn the_suggested_line_carries_every_word_that_followed() {
         let said = refusal_for("run dev --resume --model opus -p hello");
@@ -402,8 +307,6 @@ mod tests {
         );
     }
 
-    /// The suggestion is meant to be pasted, and a word with a space in it that
-    /// came off the command line as one word has to go back as one word.
     #[test]
     fn a_word_that_needs_quoting_is_quoted_in_the_suggestion() {
         let said = refuse_a_flag_without_the_separator(&[
@@ -418,9 +321,6 @@ mod tests {
         assert!(said.contains("perch run dev -- -p 'two words'"), "{said}");
     }
 
-    /// The same mistake without a dash on it. Nothing but `--` may follow a
-    /// Target, so a program typed straight after one is told where it goes
-    /// rather than left to the parser to call an unexpected argument.
     #[test]
     fn a_program_typed_without_the_separator_is_told_where_it_goes() {
         let said = refusal_for("run dev npm test");
@@ -446,12 +346,9 @@ mod tests {
         }
     }
 
-    /// A flag before the Target belongs to Perch beyond doubt — there is no
-    /// program named yet for it to have been meant for — so the parser answers
-    /// for it, and answers with help rather than with a refusal. The parser also
-    /// keeps the lines it would reject anyway: a suggestion built from a line
-    /// with an unknown flag in front of the Target would drop that flag on the
-    /// floor and read as though it had been accepted.
+    /// A suggestion built from a line with an unknown flag in front of the
+    /// Target would drop that flag on the floor and read as though it had been
+    /// accepted, so the parser keeps those lines.
     #[test]
     fn a_flag_before_the_target_is_the_parsers_business() {
         for line in ["run --help", "run -h", "run --json dev --resume"] {
@@ -462,8 +359,6 @@ mod tests {
         }
     }
 
-    /// Every other command has flags of its own and none of them launches
-    /// anything, so the rule is `run`'s alone.
     #[test]
     fn no_other_command_is_touched() {
         for line in ["list --json", "list work --refresh", "add --no-group"] {

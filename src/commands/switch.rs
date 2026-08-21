@@ -1,18 +1,13 @@
 //! `perch switch [<target>]` — make an Account active everywhere.
 //!
-//! Every client reads the same Default Profile, so one Switch moves the
-//! terminal you are in, the ones you are not, the editor extension and the
-//! desktop app together. The work itself — and every refusal that protects it —
-//! is [`crate::switch`] — including everything it owes the registry afterwards.
-//! What lives here is deciding which Account was meant, declining to do it
-//! again when it is already done, and saying where you landed.
-//!
-//! With no Target the Account is chosen rather than named — a Cycle within the
-//! current Account's Group ([`crate::cycle`]), which is the command someone
-//! types mid-task when quota just ran out. It asks nothing, under any
-//! circumstances (ADR perch-does-not-draw). What it chose is what `perch list`
-//! shows: the ranking is made once and printed rather than drawn
-//! (ADR the-listing-owns-the-set).
+//! Every client reads the same Default Profile, so one Switch moves the terminal
+//! you are in, the ones you are not, the editor extension and the desktop app
+//! together. The work itself and every refusal that protects it is
+//! [`crate::switch`]'s; what lives here is deciding which Account was meant,
+//! declining to do it again, and saying where you landed. With no Target the
+//! Account is chosen rather than named — a Cycle within the current Account's
+//! Group ([`crate::cycle`]) — and it asks nothing, ever
+//! (ADR perch-does-not-draw).
 
 use std::io::Write;
 
@@ -38,10 +33,9 @@ pub struct SwitchArgs {
 /// The Account to switch to, and what deciding on it left to be said.
 struct Decision {
     incoming: Account,
-    /// What a Cycle chose this Account on, and the Scope it stayed inside,
-    /// ready to go on the end of the landing line. Absent when somebody named
-    /// the Account, because then nothing was chosen
-    /// (ADR perch-says-what-it-did).
+    /// What a Cycle chose this Account on, and the Scope it stayed inside, ready
+    /// to go on the end of the landing line. Absent when somebody named the
+    /// Account, because then nothing was chosen (ADR perch-says-what-it-did).
     chosen: Option<String>,
 }
 
@@ -50,32 +44,22 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
 
     // Before anything is decided, because everything after this reads which
     // Account is active and a registry holding a Landing does not know
-    // (ADR a-switch-is-written-down-first). A step of its own: the Cycle below
-    // picks a Scope from the Account Perch is on, `already_there` compares
-    // against it, and the Capture files the live Credential under it.
+    // (ADR a-switch-is-written-down-first).
     switch::resolve_a_landing(host, &mut perch, &mut registry)?;
 
     let Decision { incoming, chosen } = decide(&registry, args.target.as_deref(), host.now(), out)?;
     let outgoing = registry.active_account().cloned();
 
-    // Read once, for the whole command. Both the question below and the Switch
+    // Read once, for the whole command: both the question below and the Switch
     // after it name the Claude Code they were reading in anything they refuse
-    // (ADR an-assumption-is-probed), and each used to ask it for itself — so
-    // one `perch switch` ran `claude --version` twice, walking `PATH` and
-    // spawning a subprocess each time, for a sentence neither of them usually
-    // prints.
+    // (ADR an-assumption-is-probed).
     let installed = Installed::probed(host)?;
 
     already_there(host, &installed, &registry, &incoming)?;
 
-    // Everything the Switch owes the registry — the Quarantine it may have
-    // discovered, which Account is active now — is written by `switch_to`,
-    // which is the only way to reach what the Switch found. What is left here is
-    // saying it.
-    //
-    // `Reason::Asked` is the whole of what this caller differs by: somebody
-    // typed this, so there is nothing to pace and nothing else to write down
-    // beside it (ADR a-watcher-knob-is-arithmetic).
+    // Everything the Switch owes the registry is written by `switch_to`, which
+    // is the only way to reach what the Switch found. `Reason::Asked` is all
+    // this caller differs by: somebody typed it, so nothing paces anything.
     let Switched { captured, .. } = switch::switch_to(
         host,
         &mut perch,
@@ -98,11 +82,9 @@ pub fn run(host: &dyn Host, args: SwitchArgs, out: &mut dyn Write) -> Result<()>
 
 /// Which Account this Switch is for, and how it was arrived at.
 ///
-/// A Target that names a Group is not a Target that names nothing: it names a
-/// set of Accounts declared interchangeable, which is exactly what a Cycle
-/// needs. So the three forms — an Account, a Group, and no Target at all —
-/// differ only in how the Account is arrived at, and the Switch that follows is
-/// the same one.
+/// A Target naming a Group names a set of Accounts declared interchangeable,
+/// which is what a Cycle needs — so the three forms differ only in how the
+/// Account is arrived at, and the Switch that follows is the same one.
 fn decide(
     registry: &Registry,
     target: Option<&str>,
@@ -131,9 +113,8 @@ fn decide(
     };
 
     // Nothing is set aside: a Cycle somebody asked for is one they get, and the
-    // margin and the cooldown are the watcher's rules for acting unasked
-    // (ADR a-watcher-knob-is-arithmetic) rather than rules about where a Switch
-    // may land.
+    // margin and the cooldown are the Watcher's rules for acting unasked
+    // (ADR a-watcher-knob-is-arithmetic).
     let choice = cycle::choose(
         registry,
         &scope,
@@ -150,10 +131,8 @@ fn decide(
 /// Refuses to make a Credential live that is known not to work.
 ///
 /// Cycling has never been able to choose a Quarantined Account; naming one is
-/// where the user would otherwise find out by losing the session they were in.
-/// The refusal is a code of its own because the answer is one of its own: no other
-/// refusal in Perch is answered by logging in again, and none of them is
-/// answered by trying the same command a second time.
+/// where the user would otherwise find out by losing the session they were in. A
+/// code of its own, because no other refusal is answered by logging in again.
 pub(crate) fn refuse_a_quarantined_account(registry: &Registry, incoming: &Account) -> Result<()> {
     crate::commands::refuse_a_quarantined_account(
         registry,
@@ -179,8 +158,7 @@ fn leaving(registry: &Registry) -> Result<&Account> {
 ///
 /// Perch's own record is not enough to establish that: a Switch interrupted
 /// between writing the Credential and patching the Identity is recorded as
-/// active while Claude Code still names somebody else, and running the same
-/// command again is how that is repaired.
+/// active while Claude Code still names somebody else.
 fn already_there(
     host: &dyn Host,
     installed: &Installed,
@@ -210,18 +188,11 @@ fn report(
 ) -> Result<()> {
     match captured {
         // Said by nothing, because it happens before every Switch without
-        // exception (ADR a-switch-is-written-down-first) — which is what makes
-        // it the ordinary case announcing that it was ordinary. The reassurance
-        // is real and it is the guide's to give once
-        // (ADR perch-says-what-it-did). Every other outcome below is a case
-        // where what happened is not what the guide describes, which is exactly
-        // what earns a sentence.
+        // exception — the ordinary case announcing that it was ordinary. The
+        // reassurance is the guide's to give once.
         Captured::Copied { .. } => {}
         // The one case where a Capture was declined rather than found
-        // unnecessary, so it says both what was live and what was spared: the
-        // Account Perch believed was active keeps the Credential it already
-        // held, and the login somebody made outside Perch is about to be
-        // replaced without ever having been filed anywhere.
+        // unnecessary, so it says what was live and what was spared.
         Captured::NotTheirs { outgoing, live } => say(
             out,
             &format!(
@@ -231,17 +202,15 @@ fn report(
                  switching to keep one."
             ),
         )?,
-        // Worth saying, because it is the one case where switching back to that
-        // Account will need a login rather than just working.
+        // The one case where switching back to that Account needs a login
+        // rather than just working.
         Captured::NothingLive => say(
             out,
             "There was no live Credential to Capture — Claude Code was logged out.",
         )?,
-        // The live store held something and it was not a Credential. Said
-        // rather than swallowed, because the Account being left is now relying
-        // on whatever its Profile already held — but not refused either: bytes
-        // nothing can read are not a Rotation, and this Switch is what puts a
-        // Credential Claude Code can use back in front of it.
+        // The live store held something that was not a Credential. Said rather
+        // than swallowed, and not refused either: bytes nothing can read are not
+        // a Rotation, and this Switch puts a usable Credential back in front.
         Captured::Unreadable { outgoing, why } => say(
             out,
             &format!(
@@ -256,9 +225,7 @@ fn report(
             "Perch held no active Account, so there was nothing to Capture.",
         )?,
         // The repair for a Switch that stopped before it named the Account it
-        // had landed on. Nothing was Captured because nothing had moved on:
-        // saying so keeps the report honest about a Switch that only patched
-        // `.claude.json`.
+        // had landed on. Nothing was Captured because nothing had moved on.
         Captured::NothingToSave => say(
             out,
             &format!(
@@ -272,9 +239,7 @@ fn report(
 
     // Where it landed, and — where the Account was chosen rather than named —
     // what it was chosen on and the Scope the Cycle stayed inside. One line,
-    // because the guard rail is worth claiming beside the Account it landed on
-    // and the ranking is not worth defending at all
-    // (ADR perch-says-what-it-did).
+    // because the ranking is not worth defending.
     let named = registry.named_for_the_user(incoming.email());
     say(
         out,
@@ -284,8 +249,8 @@ fn report(
         },
     )?;
 
-    // What the Switch bought, as of the cache and never from the network
-    // (ADR a-figure-carries-its-age): the figures are shown with their age so a
+    // As of the cache and never from the network
+    // (ADR a-figure-carries-its-age): the figures are shown with their age, so a
     // stale one reads as stale rather than as a promise.
     utilization::write_figures(out, incoming, now)
 }
