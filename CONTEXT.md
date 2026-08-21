@@ -267,7 +267,7 @@ _Avoid_: excluded, paused, off, archived, reserved
 **Strategy**:
 Which Account a Cycle prefers when more than one would serve — the one with the
 most headroom, or the one whose Quota Window resets soonest so perishable quota
-is not wasted. Each Group carries its own.
+is not wasted. Each Scope carries its own.
 _Avoid_: policy, mode, algorithm, preference
 
 **Watcher**:
@@ -296,7 +296,7 @@ _Avoid_: daemon, agent, background job, autostart
 
 **Threshold**:
 How full the Account you are on has to be before the Watcher wants to move off
-it. A Group's, as a percentage of the fullest Quota Window.
+it. A Scope's, as a percentage of the fullest Quota Window.
 _Avoid_: limit, cap, trigger
 
 **Margin**:

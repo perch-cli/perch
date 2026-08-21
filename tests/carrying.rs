@@ -1,10 +1,9 @@
 //! Behavior tests for the `.claude.json` keys a Run copies into the Profile it
 //! is about to launch (ADR everything-but-the-account).
 //!
-//! This is the one file Reconcile cannot link, because it holds the Account as
-//! well as the person — so what belongs to the person crosses key by key, by a
-//! named set, and everything keyed to the Account stays exactly where it is.
-//! What every one of these is really asserting is which of those two a key is.
+//! The one file Reconcile cannot link, because it holds the Account as well as
+//! the person. What every one of these is really asserting is which of those
+//! two a key is.
 
 mod common;
 
@@ -111,9 +110,6 @@ fn used_at(host: &FakeHost, path: impl AsRef<Path>, hour: u32) {
     host.touch(path.as_ref()).expect("the file is there");
 }
 
-/// The first Run against a fresh Profile is the failure this exists to prevent:
-/// without these keys the client believes it has never been used, and the
-/// person answers the onboarding questions again mid-task.
 #[test]
 fn onboarding_tips_and_notifications_cross_into_a_fresh_profile() {
     let host = machine();
@@ -133,9 +129,9 @@ fn onboarding_tips_and_notifications_cross_into_a_fresh_profile() {
     );
 }
 
-/// What ADR everything-but-the-account was written for: the trust and the tool
-/// approvals of the repository the person is standing in, so a second Account
-/// in the same terminal does not re-approve them one dialog at a time.
+/// The trust and tool approvals of the repository the person is standing in, so
+/// a second Account in the same terminal does not re-approve them one dialog at
+/// a time.
 #[test]
 fn the_project_entry_for_this_directory_crosses() {
     let host = machine();
@@ -153,8 +149,6 @@ fn the_project_entry_for_this_directory_crosses() {
     );
 }
 
-/// One directory, not the person's whole history of them. An Account does not
-/// need the tool approvals of work it is not doing.
 #[test]
 fn a_project_entry_for_another_directory_stays_behind() {
     let host = machine();
@@ -170,8 +164,6 @@ fn a_project_entry_for_another_directory_stays_behind() {
     );
 }
 
-/// The directory the Run was typed in decides, so the same pair of Accounts in
-/// a different repository carries that repository's approvals and no others.
 #[test]
 fn the_directory_the_run_was_typed_in_is_the_one_that_crosses() {
     let host = machine().in_directory(ELSEWHERE);
@@ -183,9 +175,9 @@ fn the_directory_the_run_was_typed_in_is_the_one_that_crosses() {
     assert!(carried["projects"][HERE].is_null(), "{carried}");
 }
 
-/// The whole reason the set is named rather than inverted. A Profile keeps its
-/// own Account, and the figures Anthropic gave for somebody else's subscription
-/// would be shown under this Account's name (ADR a-figure-names-its-account).
+/// The whole reason the set is named rather than inverted: figures Anthropic
+/// gave for one subscription would be shown under another Account's name
+/// (ADR a-figure-names-its-account).
 #[test]
 fn nothing_keyed_to_the_other_account_crosses() {
     let host = machine();
@@ -208,8 +200,6 @@ fn nothing_keyed_to_the_other_account_crosses() {
     }
 }
 
-/// A bounded read and a bounded write, key by key: everything the Profile
-/// already held is still there, spelled the way it was spelled.
 #[test]
 fn everything_outside_the_keys_that_cross_is_left_as_it_was() {
     let host = machine();
@@ -224,9 +214,6 @@ fn everything_outside_the_keys_that_cross_is_left_as_it_was() {
     assert!(after.contains(r#""numStartups": 1"#), "{after}");
 }
 
-/// A Group is a declaration that its Accounts are interchangeable, and tool
-/// approvals are permissions: carrying a work Account's approvals into a
-/// personal Account's session is the crossing the scoping prevents.
 #[test]
 fn nothing_crosses_between_accounts_that_share_no_group() {
     let host = machine_with_two_accounts().with_login(client_exiting(0));
@@ -240,10 +227,9 @@ fn nothing_crosses_between_accounts_that_share_no_group() {
     assert!(carried["projects"][HERE].is_null(), "{carried}");
 }
 
-/// An Account's own state crosses to its own Profile whatever Group it is in:
-/// the active Account works in the Default Profile, and a Run of it lands
-/// somewhere else, so without this the Account that has been used all day
-/// arrives in its own Profile as a stranger.
+/// The active Account works in the Default Profile and a Run of it lands
+/// somewhere else, so an Account's own state has to cross to its own Profile
+/// whatever Group it is in.
 #[test]
 fn the_active_accounts_own_state_crosses_to_its_own_profile() {
     let host = machine_with_two_accounts().with_login(client_exiting(0));
@@ -260,8 +246,6 @@ fn the_active_accounts_own_state_crosses_to_its_own_profile() {
     );
 }
 
-/// The most recently used one of them, because within a Group the Accounts have
-/// been declared interchangeable and the freshest answer is the useful one.
 #[test]
 fn the_most_recently_used_profile_in_the_group_is_the_one_copied() {
     let host = machine_with_three_accounts().with_login(client_exiting(0));
@@ -287,8 +271,6 @@ fn the_most_recently_used_profile_in_the_group_is_the_one_copied() {
     );
 }
 
-/// The other way round, with nothing else changed: the Profile another Run
-/// wrote most recently is what the next one copies.
 #[test]
 fn a_profile_used_after_the_default_one_is_what_is_copied() {
     let host = machine_with_three_accounts().with_login(client_exiting(0));
@@ -313,10 +295,9 @@ fn a_profile_used_after_the_default_one_is_what_is_copied() {
     );
 }
 
-/// The precondition ADR everything-but-the-account puts on the write. A client
-/// rewrites this file wholesale on its way out, so anything Perch spliced into
-/// it while one was running would be thrown away — or worse, written over what
-/// the client had.
+/// A client rewrites this file wholesale on its way out, so anything Perch
+/// spliced into it while one was running would be thrown away — or worse,
+/// written over what the client had.
 #[test]
 fn nothing_is_written_while_a_client_is_running_against_that_profile() {
     let host = machine();
@@ -340,16 +321,10 @@ fn nothing_is_written_while_a_client_is_running_against_that_profile() {
     );
 }
 
-/// The same precondition, read from the other end. A Run makes the Profile it
-/// launches Live (ADR a-run-is-one-shot), and it does so *before* it Carries —
-/// so the Carry has to discount the Run's own claim, or it would meet that
-/// claim and refuse its own write, silently, on every Run, leaving every first
-/// Run of an Account to the onboarding questions.
-///
-/// The claim comes first because until the Marker exists nothing on the machine
-/// knows this Run is happening: a `perch remove` in another terminal asks
-/// whether the Profile is Live, is told no, and deletes the directory while
-/// this command is still linking into it.
+/// The same precondition from the other end: a Run makes the Profile it launches
+/// Live (ADR a-run-is-one-shot) *before* it Carries, because until the Marker
+/// exists nothing on the machine knows the Run is happening — so the Carry has
+/// to discount the Run's own claim.
 #[test]
 fn a_run_marks_the_profile_live_before_it_carries_and_carries_anyway() {
     let host = machine();
@@ -378,10 +353,9 @@ fn a_run_marks_the_profile_live_before_it_carries_and_carries_anyway() {
     );
 }
 
-/// A Profile that will not take the write is a remark rather than a refusal:
-/// the Run is what the person asked for, and what they lose without it is an
-/// onboarding question. Said, though, because meeting that question on every
-/// Run with nothing explaining it is worse than the question.
+/// A remark rather than a refusal, because what is lost is an onboarding
+/// question — but said, because meeting it on every Run with nothing to explain
+/// it is worse than the question.
 #[test]
 fn a_profile_that_cannot_be_written_is_remarked_on_and_the_run_happens_anyway() {
     let identity = {
@@ -402,20 +376,11 @@ fn a_profile_that_cannot_be_written_is_remarked_on_and_the_run_happens_anyway() 
     );
 }
 
-/// A source that stops mid-token leaves the destination exactly as it was.
-///
-/// Nothing parses this file — the whole point of the key-by-key splice is that
-/// it does not — so a value is found by running to the `,` or the brace that
-/// ends it. A file truncated partway through `true` has no such byte, and the
-/// span handed back is `tru`, which used to be spliced in verbatim. What that
-/// wrote was a `.claude.json` that is not JSON, in the Profile about to be
-/// launched, and it is the file holding `oauthAccount`: every later read of
-/// this Account's Identity fails on it, while the Switch path goes on writing
-/// into it because it never parses either.
-///
-/// Reachable rather than theoretical — `carry` asks whether anything is running
-/// against the *destination*, and the source is a Default Profile a client
-/// rewrites wholesale on its way out.
+/// Nothing parses this file, so a value is found by running to the `,` or the
+/// brace that ends it — and a source truncated partway through `true` has no
+/// such byte. Reachable rather than theoretical: `carry` asks whether anything
+/// is running against the *destination*, and the source is a Default Profile a
+/// client rewrites wholesale on its way out.
 #[test]
 fn a_source_that_stops_mid_value_leaves_the_destination_alone() {
     let host = machine();
@@ -445,15 +410,9 @@ fn a_source_that_stops_mid_value_leaves_the_destination_alone() {
         .expect("and what the Profile holds is still JSON");
 }
 
-/// Nothing to copy *into* is not a failure either, and it is the first thing
-/// `carry` asks: a Profile with no `.claude.json` of its own is one there is
-/// nowhere to splice a key into. The Run is what matters, and a person who
-/// answers one onboarding question has lost less than one who was refused a
-/// client.
-///
-/// This test used to run against the ordinary fixture, whose Default Profile is
-/// full of things to copy from, and assert only that the Run returned nought —
-/// so it passed whatever `carry` did, under a name claiming otherwise.
+/// A Profile with no `.claude.json` of its own is one there is nowhere to splice
+/// a key into, which is the first thing `carry` asks. The fixture is deliberately
+/// not the ordinary one, whose Default Profile is full of things to copy from.
 #[test]
 fn a_profile_with_no_identity_file_of_its_own_is_never_given_one() {
     let host = machine();
@@ -481,9 +440,9 @@ fn a_profile_with_no_identity_file_of_its_own_is_never_given_one() {
     );
 }
 
-/// The second Run of the same pair has nothing left to say, and a file rewritten
-/// with the bytes it already held is a modification time that lies about when
-/// the Profile was last used — which is the thing the next Run ranks on.
+/// A file rewritten with the bytes it already held is a modification time that
+/// lies about when the Profile was last used, which is what the next Run ranks
+/// on.
 #[test]
 fn a_profile_that_already_holds_all_of_it_is_not_written_again() {
     let host = machine();
@@ -508,8 +467,6 @@ fn a_profile_that_already_holds_all_of_it_is_not_written_again() {
     assert!(writes.is_empty(), "{writes:?}");
 }
 
-/// The set is one list in one place, and the Run path reaches for that list
-/// rather than spelling the keys again.
 #[test]
 fn the_keys_that_cross_are_named_in_one_place() {
     let host = machine();

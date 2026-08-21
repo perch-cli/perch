@@ -1,19 +1,13 @@
 //! Behavior: `perch config set` and `perch config get`.
 //!
-//! Perch has to be complete over SSH and in CI, so every capability is
-//! available non-interactively (ADR perch-does-not-draw) — this is the one that
-//! changes how a Group behaves. The tests are as much about the refusals as the
-//! settings: a key or a value Perch does not understand is answered with the
-//! ones it does, because a script that mistyped a setting must not go on
-//! believing it took.
+//! As much about the refusals as the Settings: a key or a value Perch does not
+//! understand is answered with the ones it does, because a script that mistyped
+//! a Setting must not go on believing it took (ADR perch-does-not-draw).
 //!
-//! A Group's Strategy decides which Account a bare `perch switch` lands on, and
-//! the global ungrouped-Cycling setting decides whether it may land anywhere at
-//! all from an Account in no Group (ADR a-group-is-a-declaration). The
-//! watcher's fields govern `perch watcher run` and nothing else, which is
-//! asserted here too: setting them switches nothing on, because nothing acts on
-//! them until somebody runs the loop (ADR a-watcher-knob-is-arithmetic). What
-//! the loop then does with them is `watching.rs`.
+//! The watcher's fields govern `perch watcher run` and nothing else, which is
+//! asserted here too — setting them switches nothing on
+//! (ADR a-watcher-knob-is-arithmetic). What the loop does with them is
+//! `watching.rs`.
 
 mod common;
 
@@ -75,14 +69,10 @@ fn a_groups_setting_is_set_from_a_script_and_read_back() {
         printed.trim(),
         "work strategy soonest-reset",
         "a value read back is the tail of the `set` that would restore it, so \
-         reading and writing are one vocabulary — and the word count is what \
-         says the value is this Group's Override rather than Global's default"
+         reading and writing are one vocabulary"
     );
 }
 
-/// The one key one Scope carries. It is said about the Accounts in no Group
-/// like every other Setting, because that is the Scope it governs
-/// (ADR a-setting-names-its-scope).
 #[test]
 fn the_declaration_the_ungrouped_accounts_carry_is_set_and_read_back() {
     let host = machine_with_two_accounts();
@@ -131,7 +121,7 @@ fn every_setting_reads_back_in_the_form_that_would_set_it_again() {
     assert!(
         !printed.contains("work interchangeable"),
         "and no line a Group could not take back: a Group is the declaration \
-         that its Accounts are interchangeable (ADR a-setting-names-its-scope): {printed}"
+         that its Accounts are interchangeable: {printed}"
     );
     for line in printed.lines().filter(|line| !line.trim().is_empty()) {
         let words: Vec<&str> = line.split_whitespace().collect();
@@ -215,9 +205,8 @@ fn the_soonest_resetting_strategy_still_measures_headroom_by_the_worst_window() 
     let host = three_accounts_in_one_group();
     observed(&host, EMAIL, vec![window("5-hour", 96.0)]);
     // Resets soonest by a distance, and is exhausted on a window that is not
-    // the one you hit first. ADR headroom-is-the-worst-window fixes how
-    // headroom is measured; the Strategy is a separate axis on top of it, not a
-    // way round it.
+    // the one you hit first: how headroom is measured is a separate axis from
+    // which Account a Cycle prefers (ADR headroom-is-the-worst-window).
     observed(
         &host,
         SECOND_EMAIL,
@@ -282,7 +271,7 @@ fn cycling_among_ungrouped_accounts_is_off_until_it_is_turned_on() {
         printed.trim(),
         "ungrouped interchangeable false",
         "being ungrouped is the absence of a declaration that Accounts are \
-         interchangeable, not a weaker form of one (ADR a-group-is-a-declaration)"
+         interchangeable, not a weaker form of one"
     );
 }
 
@@ -300,14 +289,12 @@ fn the_watchers_fields_are_stored_and_govern_a_loop_that_has_to_be_run() {
         printed.contains("perch watcher run"),
         "and what now may act is named: {printed}"
     );
-    // The distinction this has always protected, and which matters more now
-    // that a Service exists rather than less: granting permission is not
-    // starting anything. Somebody who typed this and walked away has a Group
-    // that *may* be acted on and nothing acting on it.
+    // Granting permission is not starting anything: somebody who typed this
+    // and walked away has a Group that *may* be acted on and nothing acting.
     assert!(
         printed.contains("Nothing here starts one"),
         "a Group that may be acted on is not a Watcher that has been switched \
-         on (ADR a-watcher-knob-is-arithmetic, ADR the-machine-runs-the-watcher): {printed}"
+         on (ADR the-machine-runs-the-watcher): {printed}"
     );
     assert!(
         printed.contains("perch watcher install"),
@@ -321,14 +308,13 @@ fn the_watchers_fields_are_stored_and_govern_a_loop_that_has_to_be_run() {
         .expect("50 is a percentage");
     assert_eq!(group_config(&host, "work").watcher_threshold_percent, 50);
 
-    // Both Accounts are well past a 50% threshold and the watcher has been
-    // told it may act — and nothing has switched, because nothing is running
-    // the loop that would.
+    // Both Accounts are well past a 50% threshold and the watcher may act —
+    // and nothing has switched, because nothing is running the loop.
     assert_eq!(
         active(&host).as_deref(),
         Some(EMAIL),
         "permission is not a process: configuring a Group switches nothing \
-         until `perch watcher run` is running (ADR a-watcher-knob-is-arithmetic)"
+         until `perch watcher run` is running"
     );
 }
 
@@ -343,12 +329,11 @@ fn the_watchers_may_act_field_is_off_until_it_is_asked_for() {
         printed.trim(),
         "work watcher-may-act false",
         "a Group only ever changes underneath someone because they said it \
-         could (ADR a-group-is-a-declaration), and the line says which Group that is"
+         could, and the line says which Group that is"
     );
 }
 
-/// The default ADR a-watcher-knob-is-arithmetic names, as `perch config get`
-/// reports it. A default is a promise, and this is where it is kept.
+/// A default is a promise, and this is where it is kept.
 #[test]
 fn a_group_starts_with_the_watcher_policy_the_adr_names() {
     let host = three_accounts_in_one_group();
@@ -362,8 +347,6 @@ fn a_group_starts_with_the_watcher_policy_the_adr_names() {
     );
 }
 
-/// A number the policy cannot hold is refused with the numbers it can, so the
-/// script that mistyped one is not left to guess twice.
 #[test]
 fn a_watcher_number_out_of_range_is_refused_with_the_range_it_accepts() {
     let host = three_accounts_in_one_group();
@@ -390,9 +373,8 @@ fn a_watcher_number_out_of_range_is_refused_with_the_range_it_accepts() {
     );
 }
 
-/// The three the Watcher shed (ADR a-watcher-knob-is-arithmetic). A departed
-/// Setting is refused in the same words any other unknown key is — there is no
-/// half-life in which it is still typed and quietly ignored.
+/// The three the Watcher does not carry: refused in the same words any other
+/// unknown key is, with no half-life in which they are quietly ignored.
 #[test]
 fn the_settings_the_watcher_shed_are_no_longer_keys_a_scope_carries() {
     let host = three_accounts_in_one_group();
@@ -441,10 +423,6 @@ fn an_unknown_key_is_refused_and_names_the_ones_a_group_carries() {
     assert!(message.contains("watcher-threshold-percent"), "{message}");
 }
 
-/// A `set` naming a key and a value and no Scope is the form that used to set a
-/// value everywhere, and there is no everywhere
-/// (ADR a-setting-names-its-scope). The refusal names the Scopes, because "name
-/// a Scope" is no use to somebody who does not know what theirs are called.
 #[test]
 fn a_set_naming_a_key_but_no_scope_is_refused_and_names_the_scopes_there_are() {
     let host = three_accounts_in_one_group();
@@ -467,10 +445,6 @@ fn a_set_naming_a_key_but_no_scope_is_refused_and_names_the_scopes_there_are() {
     );
 }
 
-/// And a word that is no key either is a word that was meant to name a Scope,
-/// which is the mistake the three-word form is already answered for. Recast as
-/// a key it sent somebody looking for a spelling mistake in the wrong word —
-/// and, for `global`, past the one refusal written to meet it.
 #[test]
 fn a_set_naming_neither_a_scope_nor_a_key_is_answered_about_the_scope() {
     let host = three_accounts_in_one_group();
@@ -496,13 +470,6 @@ fn a_set_naming_neither_a_scope_nor_a_key_is_answered_about_the_scope() {
     );
 }
 
-/// The word somebody types when they mean *everywhere*. There is no
-/// everywhere, and the refusal is where they find that out — a better place
-/// than a Setting that appeared to take (ADR a-setting-names-its-scope). Left
-/// to fall through it would be answered with "Declare it with
-/// `perch group add global`", after which a Group by that name takes every
-/// later `perch config set global …` quietly and leaves every other Scope as it
-/// was.
 #[test]
 fn naming_global_as_a_scope_says_there_is_no_such_scope_rather_than_offering_a_group() {
     let host = three_accounts_in_one_group();
@@ -534,10 +501,6 @@ fn naming_global_as_a_scope_says_there_is_no_such_scope_rather_than_offering_a_g
     );
 }
 
-/// The same word, refused as a Group name and as an Alias, for the same reason
-/// (ADR a-setting-names-its-scope). Kept reserved because somebody typing it
-/// means something Perch does not have, and a Group quietly answering to it
-/// would take the value.
 #[test]
 fn global_is_still_a_reserved_word_and_the_refusal_says_why() {
     let host = machine_with_two_accounts();
@@ -663,10 +626,6 @@ fn a_key_named_with_no_value_is_refused_with_the_form_the_command_takes() {
     );
 }
 
-/// One word to `get` is a Scope. When it is not, the answer has to name what a
-/// Scope is rather than only "not found": a mistyped word read back as an error
-/// with no alternatives is a script that goes on believing it asked something
-/// meaningful.
 #[test]
 fn a_get_of_one_word_that_is_no_scope_is_refused_the_way_a_typo_always_is() {
     let host = three_accounts_in_one_group();
@@ -682,9 +641,6 @@ fn a_get_of_one_word_that_is_no_scope_is_refused_the_way_a_typo_always_is() {
     );
 }
 
-/// A key where a Scope goes is a form mistake rather than a mistyped Group, and
-/// is answered as one: being sent to check the spelling of a Group is being
-/// sent to look for a mistake that is not the problem.
 #[test]
 fn a_get_of_a_key_alone_says_a_setting_is_read_about_a_scope() {
     let host = three_accounts_in_one_group();
@@ -701,9 +657,6 @@ fn a_get_of_a_key_alone_says_a_setting_is_read_about_a_scope() {
     );
 }
 
-/// `get` and `set` do not take the same shapes — naming fewer words asks about
-/// more rather than being short of a value — so being told the forms of `set`
-/// after mis-addressing a `get` would name a form that does not exist.
 #[test]
 fn a_get_of_too_many_words_is_answered_with_the_forms_get_takes() {
     let host = three_accounts_in_one_group();
@@ -725,7 +678,6 @@ fn a_get_of_too_many_words_is_answered_with_the_forms_get_takes() {
     );
 }
 
-/// A count of one is said as one word rather than "1 words".
 #[test]
 fn a_single_word_is_counted_as_one_word() {
     let host = three_accounts_in_one_group();
@@ -737,9 +689,6 @@ fn a_single_word_is_counted_as_one_word() {
     assert!(!said.contains("1 words"), "{said}");
 }
 
-/// Two words to `set` are a Scope and a key with no value — said as what is
-/// missing rather than as "no such key", which would send somebody looking for
-/// a spelling mistake that is not the problem.
 #[test]
 fn a_set_naming_a_group_and_a_key_says_the_value_is_what_is_missing() {
     let host = three_accounts_in_one_group();
@@ -765,13 +714,6 @@ fn a_set_naming_a_group_and_a_key_says_the_value_is_what_is_missing() {
     );
 }
 
-/// The same shape with a second word that is not a key at all.
-///
-/// The guard establishes that the *first* word is a Scope and then asserted the
-/// second was a key without ever asking. So a mistyped key was answered with
-/// "nothing to set it to" — pointing at a value the user had not got to yet, and
-/// away from the mistake they had actually made. They add a value, run it again,
-/// and only then find out.
 #[test]
 fn a_set_naming_a_group_and_a_word_that_is_no_key_says_what_is_wrong_with_the_word() {
     let host = three_accounts_in_one_group();
@@ -791,14 +733,6 @@ fn a_set_naming_a_group_and_a_word_that_is_no_key_says_what_is_wrong_with_the_wo
     );
 }
 
-/// `perch config get` writes nothing, so it does not wait on a writer.
-///
-/// The same rule `perch status` states for itself and `perch list` follows.
-/// Both halves of `perch config` took the write lock, so reading a setting
-/// while `perch watcher run` was between rounds — it takes that lock every
-/// round, and `perch status --refresh` holds it across every network read —
-/// waited the wait out and then failed with "another `perch` holds it", about a
-/// command that only ever reads.
 #[test]
 fn getting_a_setting_reads_alongside_another_perch_rather_than_waiting_on_it() {
     let host = three_accounts_in_one_group();
@@ -811,7 +745,6 @@ fn getting_a_setting_reads_alongside_another_perch_rather_than_waiting_on_it() {
     drop(held);
 }
 
-/// The other half of the same rule: `set` writes, so it does take the lock.
 #[test]
 fn setting_one_waits_for_the_other_perch_because_it_writes() {
     let host = three_accounts_in_one_group();
@@ -826,13 +759,6 @@ fn setting_one_waits_for_the_other_perch_because_it_writes() {
     );
 }
 
-/// The round trip above is why a Group name cannot hold a space.
-///
-/// `perch config get` prints `<group> <key> <value>` and `perch config set`
-/// reads it back by counting words, so a Group called `my work` would print a
-/// four-word line that `set` answers with "how a `set` is addressed". Refused at
-/// the one moment somebody can still choose another name, rather than printing
-/// output that cannot be typed back in.
 #[test]
 fn a_group_name_with_a_space_in_it_is_refused_rather_than_breaking_the_round_trip() {
     let host = machine_with_two_accounts();
@@ -856,10 +782,6 @@ fn a_group_name_with_a_space_in_it_is_refused_rather_than_breaking_the_round_tri
     );
 }
 
-/// A Setting is said about the Scope it governs, and reaches no other
-/// (ADR a-setting-names-its-scope). There is no layer for a value to arrive by,
-/// so the Group nobody said anything about is at the compiled-in default rather
-/// than at somebody else's number.
 #[test]
 fn a_setting_said_about_one_scope_reaches_no_other() {
     let host = three_accounts_in_one_group();
@@ -883,9 +805,6 @@ fn a_setting_said_about_one_scope_reaches_no_other() {
     );
 }
 
-/// The grant is the one this matters most for: consent said about one Scope
-/// authorizes that Scope, and a Group declared afterwards is a Group nobody has
-/// said anything about (ADR a-setting-names-its-scope).
 #[test]
 fn a_group_declared_after_a_grant_is_not_covered_by_it() {
     let host = three_accounts_in_one_group();
@@ -902,8 +821,6 @@ fn a_group_declared_after_a_grant_is_not_covered_by_it() {
     );
 }
 
-/// Every line names the Scope it is about, because that is what would set it
-/// again — a script reads provenance off the line rather than off its length.
 #[test]
 fn every_line_names_the_scope_it_is_about() {
     let host = three_accounts_in_one_group();
@@ -930,10 +847,6 @@ fn every_line_names_the_scope_it_is_about() {
     }
 }
 
-/// The Accounts in no Group are a Scope (ADR a-group-is-a-declaration,
-/// amended), so Cycling among them reads a Strategy somebody can set rather
-/// than one compiled into Perch — and the Scope is addressed the way every
-/// other one is.
 #[test]
 fn the_ungrouped_accounts_are_a_scope_that_can_be_addressed() {
     let host = machine_with_two_accounts();
@@ -953,8 +866,6 @@ fn the_ungrouped_accounts_are_a_scope_that_can_be_addressed() {
     assert_eq!(read_back.trim(), "ungrouped strategy soonest-reset");
 }
 
-/// A Group cannot be called `ungrouped`, because the Scope answers to that name
-/// first and the Group would be one no `perch config set` could reach.
 #[test]
 fn a_group_cannot_take_the_name_that_addresses_the_ungrouped_scope() {
     let host = machine_with_two_accounts();
@@ -974,8 +885,6 @@ fn a_group_cannot_take_the_name_that_addresses_the_ungrouped_scope() {
     );
 }
 
-/// The Ungrouped Scope's Settings survive a round trip through `get`, like
-/// every other Scope's.
 #[test]
 fn the_ungrouped_scopes_settings_read_back_in_the_form_that_would_set_them() {
     let host = machine_with_two_accounts();
@@ -992,8 +901,6 @@ fn the_ungrouped_scopes_settings_read_back_in_the_form_that_would_set_them() {
     );
 }
 
-/// `perch config get <scope>` on the Ungrouped Scope shows the declaration
-/// only that Scope carries, beside the Settings every Scope carries.
 #[test]
 fn the_ungrouped_page_shows_the_declaration_it_carries() {
     let host = machine_with_two_accounts();
@@ -1011,9 +918,6 @@ fn the_ungrouped_page_shows_the_declaration_it_carries() {
     );
 }
 
-/// The one key one Scope carries, refused of the others in the words that say
-/// why — and absent from their pages, because a line `perch config set` would
-/// refuse to take back is a line `perch config get` must not print.
 #[test]
 fn a_group_neither_shows_nor_takes_the_declaration_that_is_a_group() {
     let host = three_accounts_in_one_group();
@@ -1041,18 +945,9 @@ fn a_group_neither_shows_nor_takes_the_declaration_that_is_a_group() {
     assert!(printed.is_empty(), "{printed}");
 }
 
-/// The Ungrouped Scope is named the way a sentence names it, wherever in the
-/// sentence it lands.
-///
-/// `Scope::described` is documented as "the subject of a sentence" and returns
-/// "The Ungrouped Scope" — right at the front of one, and wrong the moment
-/// anything is said before it. Three of `perch config`'s sentences put it in
-/// the middle, so they read "`strategy` on The Ungrouped Scope is now
-/// soonest-reset" and "`foo` is not a Setting The Ungrouped Scope carries."
-///
-/// A Group hid it: "Group `work`" is a name, and a name is spelled the same
-/// wherever it appears, so every one of these sentences reads correctly until
-/// somebody has no Group.
+/// A Group hides this: "Group `work`" is a name, and a name is spelled the same
+/// wherever it appears, so every sentence here reads correctly until somebody
+/// has no Group.
 #[test]
 fn the_ungrouped_scope_is_named_mid_sentence_the_way_a_sentence_names_it() {
     let host = machine_with_two_accounts();

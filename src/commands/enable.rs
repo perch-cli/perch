@@ -1,22 +1,13 @@
 //! `perch disable` / `perch enable` — keeping an Account out of Cycling
 //! without giving it up.
 //!
-//! Disabling is the narrowest thing Perch can be told about an Account: it is
-//! no longer a Cycle candidate, and that is the whole of it. It stays listed,
-//! keeps its Alias, its Group and its stored Credential, and naming it on
-//! `perch switch` still switches to it. Removing the Account would be the blunt
-//! instrument this exists to avoid — you keep the login you are keeping it for.
+//! The narrowest thing Perch can be told about an Account: no longer a Cycle
+//! candidate, and that is the whole of it. It stays listed, keeps its Alias,
+//! its Group and its Credential, and naming it on `perch switch` still switches
+//! to it. The pair is reversible and idempotent.
 //!
-//! So the pair is fully reversible and idempotent: `perch enable` puts it back,
-//! and asking for a state the Account is already in says so rather than
-//! failing, because a script that runs twice has not done anything wrong.
-//!
-//! What the pair says is what it changed, and nothing about what a disabled
-//! Account still is: that promise holds after every run of either command, so
-//! it is the guide's to make once (ADR perch-says-what-it-did). The exception
-//! is a Quarantined Account, which is promised nothing — its Credential does
-//! not work whatever the Cycling pool says, and being told it was enabled
-//! without being told that is being told the smaller half.
+//! What either half says is what it changed (ADR perch-says-what-it-did) —
+//! except a Quarantine, which is promised nothing whatever the pool says.
 
 use std::io::Write;
 
@@ -76,20 +67,11 @@ fn set(registry: &mut Registry, target: &AccountTarget, command: &EnableCommand)
     ))
 }
 
-/// The one thing about the Account's state that the verb did not already say.
-///
-/// A Quarantined Account is promised nothing its Credential cannot deliver:
-/// whether it is in the Cycling pool and whether it works at all are separate
-/// facts with separate fixes, and enabling it is not one of them. So this is
-/// said whichever way the pair was asked, and it is said in full — an Account
-/// that will not be switched to at all is a refusal wearing an outcome's
-/// clothes.
-///
-/// Nothing is said about an Account that is not Quarantined. What Cycling does
-/// with a disabled Account, and that a disabled one stays listed and named, are
-/// true after every single run of these two commands — which is what makes them
-/// the guide's to establish rather than the command's to repeat
-/// (ADR perch-says-what-it-did).
+/// The one thing about the Account's state the verb did not already say. Whether
+/// an Account is in the Cycling pool and whether it works at all are separate
+/// facts with separate fixes, so a Quarantine is said whichever way the pair was
+/// asked and said in full: an Account that will not be switched to at all is a
+/// refusal wearing an outcome's clothes.
 fn what_the_quarantine_still_denies(quarantine: Option<Quarantine>, target: &str) -> String {
     match quarantine {
         Some(why) => format!(

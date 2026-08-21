@@ -1,43 +1,13 @@
 //! `perch config` — changing the rules Perch chooses Accounts by, from a
 //! script.
 //!
-//! Perch has to be complete over SSH and in CI, so every capability it has is
-//! reachable non-interactively (ADR perch-does-not-draw). This is the one that
-//! changes the rules rather than the state: which Account a Cycle prefers,
-//! whether the watcher may act, and whether the ungrouped Accounts may be
-//! Cycled among at all.
+//! The **grammar** only: which word goes where, which form somebody seems to
+//! have meant when the words were not one, and the line that reads back as the
+//! `set` that would restore it. What a Setting *is* is [`crate::config`]'s,
+//! because surfaces that are not this command name keys too.
 //!
-//! **A Setting is said about the Scope it governs**
-//! (ADR a-setting-names-its-scope). A Scope — each Group, and the Accounts in
-//! no Group taken together — holds its own full Settings, and there is nothing
-//! above it: what nobody has said anything about is the compiled-in default
-//! rather than somebody else's value. Nothing is two layers deep and an Account
-//! carries nothing at all.
-//!
-//! So every `set` is `<scope> <key> <value>`, and a `set` that names no Scope is
-//! refused rather than landing somewhere. There is no word for "everywhere" —
-//! `global` is reserved so that the refusal, rather than a Setting that appeared
-//! to take, is where somebody finds that out.
-//!
-//! **Reading is not writing.** Bare `perch config get` survives and prints every
-//! Scope's Config in full: a read has no subject to be wrong about, and a write
-//! does. Every line it prints is the tail of the `perch config set` that would
-//! restore it, so reading the Config and writing it back are the same
-//! vocabulary and a script needs no parser.
-//!
-//! The watcher's two fields say whether `perch watcher run` may Switch within a
-//! Scope and at what Utilization it does (ADR a-watcher-knob-is-arithmetic).
-//! Every message that describes the watcher *acting* says the same thing about
-//! what it is not: a Scope that may be acted on is not a service that has been
-//! switched on, because nothing acts on it unless somebody is running the loop.
-//! The one message that need not is the one saying the watcher may not act on
-//! this Scope at all.
-//!
-//! What a Setting *is* — its name, which Scope carries it, the values it takes
-//! and what having set it means — is [`crate::config`]'s, because surfaces that
-//! are not this command name keys too. What is here is the **grammar**: which
-//! word goes where, which form somebody seems to have meant when the words were
-//! not one, and the line that reads back as the `set` that would restore it.
+//! Every `set` is `<scope> <key> <value>` and reading is not writing
+//! (ADR a-setting-names-its-scope).
 
 use std::io::Write;
 
@@ -48,11 +18,10 @@ use crate::error::{PerchError, Result};
 use crate::host::Host;
 use crate::registry::{self, Registry, Scope, UNGROUPED};
 
-/// What was asked of `perch config`, as the words that were typed.
-///
-/// The words are carried rather than resolved because telling somebody which
-/// form they seem to have meant is part of what this command does, and a parser
-/// that had already thrown the words away could not.
+/// What was asked of `perch config`, as the words that were typed — carried
+/// rather than resolved, because telling somebody which form they seem to have
+/// meant is part of what this command does, and a parser that had thrown the
+/// words away could not.
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum ConfigCommand {
     /// Set one Setting on one Scope, and say what it now means.
@@ -80,18 +49,13 @@ pub enum ConfigCommand {
 }
 
 pub fn run(host: &dyn Host, command: ConfigCommand, out: &mut dyn Write) -> Result<()> {
-    // The lock is taken inside the match rather than above it, so it is taken
-    // only by the half that writes. `perch config get` reads, and a reader
-    // that takes the write lock waits out whatever holds it and then fails with
-    // "another `perch` holds it" — `perch watcher run` takes that lock every
-    // round, and `perch status --refresh` holds it across every network read.
-    // Same rule `perch status` states for itself and `perch list` follows.
+    // Taken inside the match, so only by the half that writes: a reader that
+    // takes the write lock waits out whatever holds it and then fails with
+    // "another `perch` holds it".
     match command {
         // The half that writes changes the registry and reaches nothing else,
         // which is the whole of what `only_the_registry` is for
-        // (ADR one-door-to-the-registry). The shape was written here first and
-        // lived here alone; `enable`, `alias` and `group` were spelling it out
-        // by hand.
+        // (ADR one-door-to-the-registry).
         ConfigCommand::Set { words } => {
             only_the_registry(host, out, |registry| set(registry, &words))
         }
@@ -127,11 +91,9 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
             ])
         }
         [first, second] => match addressed(registry, first) {
-            // A Scope and a key with nothing to set them to. The key is parsed
-            // first so that a mistyped one is answered as what it is: told only
-            // that the *value* was missing, somebody who mistyped the key adds a
-            // value, runs it again, and only then learns what the mistake was —
-            // and the first message pointed away from it.
+            // The key is parsed first, so a mistyped one is answered as what it
+            // is: told only that the *value* is missing, somebody adds one, runs
+            // it again, and only then learns what the mistake was.
             Ok(scope) => {
                 Setting::parse(second, &scope)?;
                 Err(PerchError::Invalid(format!(
@@ -141,18 +103,14 @@ fn set(registry: &mut Registry, words: &[String]) -> Result<Vec<String>> {
                     scope.mentioned(),
                 )))
             }
-            // A key where the Scope goes is the form that set a value
-            // everywhere, and there is no everywhere
-            // (ADR a-setting-names-its-scope) — answered as the missing subject
-            // it is.
+            // A key where the Scope goes is a Setting with no subject, and
+            // there is no everywhere for it to have been about.
             Err(_) if Setting::parse_quietly(first).is_some() => {
                 Err(no_scope_was_named(registry, first, second))
             }
-            // Anything else is a word that was meant to name a Scope and does
-            // not, which is the mistake the three-word form is already answered
-            // for. Handed back as it came rather than recast as a key: `perch
-            // config set wrok strategy` is a Group typo, and being offered
-            // `wrok` as a Setting sends somebody looking for the wrong mistake.
+            // Handed back as it came rather than recast as a key: `perch config
+            // set wrok strategy` is a Group typo, and being offered `wrok` as a
+            // Setting sends somebody looking for the wrong mistake.
             Err(refusal) => Err(refusal),
         },
         _ => Err(how_set_is_addressed(registry, words)),
@@ -176,13 +134,9 @@ fn get(registry: &Registry, words: &[String]) -> Result<Vec<String>> {
     }
 }
 
-/// Every Setting Perch holds, Scope by Scope.
-///
-/// The whole of it, and no shorter than that: with no layer above a Scope,
-/// every value a Scope holds is a value said about that Scope, and a line left
-/// out here would be a line nothing else prints. Which is also why this is
-/// [`scope_lines`] over every Scope rather than a second idea of what a Config
-/// is — the two used to differ, and the difference was the layer.
+/// Every Setting Perch holds, Scope by Scope, and no shorter than that: a line
+/// left out here is a line nothing else prints. [`scope_lines`] over every Scope
+/// rather than a second idea of what a Config is.
 fn everything(registry: &Registry) -> Vec<String> {
     registry
         .scopes()
@@ -226,12 +180,9 @@ fn addressed(registry: &Registry, name: &str) -> Result<Scope> {
     if registry::means_ungrouped(name) {
         return Ok(Scope::Ungrouped);
     }
-    // The one word that has to be answered here rather than left to fall
-    // through. `global` is what somebody types when they mean every Scope at
-    // once, and `no_such_group` would answer it with "Declare it with `perch
-    // group add global`" — advice the registry refuses, and which would be
-    // worse if it did not: a Group by that name would take every later `perch
-    // config set global …` quietly and leave every other Scope as it was.
+    // Answered here rather than left to fall through, which would offer
+    // "Declare it with `perch group add global`" — advice the registry refuses,
+    // and which would be worse if it did not.
     if registry::means_global(name) {
         return Err(PerchError::NotFound(format!(
             "There is no Scope every other one falls back to, so there is no \
@@ -249,12 +200,10 @@ fn addressed(registry: &Registry, name: &str) -> Result<Scope> {
     }
 }
 
-/// A key typed where a Scope goes, which is what the two-word form used to be.
-///
-/// `None` for a word that is not a key either, which is an ordinary mistyped
-/// Group name and is `group::no_such_group`'s to answer. Kept apart because the
-/// two send somebody to different places: one to the spelling of a Group, and
-/// one to the form that has a subject in it.
+/// A key typed where a Scope goes. `None` for a word that is not a key either,
+/// which is an ordinary mistyped Group name and `group::no_such_group`'s to
+/// answer — kept apart because the two send somebody to different places, one
+/// to the spelling of a Group and one to the form that has a subject in it.
 fn a_setting_is_not_a_scope(word: &str) -> Option<PerchError> {
     let key = Setting::parse_quietly(word)?.as_str();
     Some(PerchError::NotFound(format!(
@@ -264,9 +213,7 @@ fn a_setting_is_not_a_scope(word: &str) -> Option<PerchError> {
     )))
 }
 
-/// Two words with no Scope among them, which is the form that set a value
-/// everywhere until there was no everywhere to set it at
-/// (ADR a-setting-names-its-scope).
+/// Two words with no Scope among them: a Setting with no subject.
 fn no_scope_was_named(registry: &Registry, key: &str, value: &str) -> PerchError {
     PerchError::Invalid(format!(
         "`perch config set {key} {value}` names no Scope, and every Setting is \
@@ -338,8 +285,6 @@ mod tests {
         Scope::Group("work".to_string())
     }
 
-    /// Every Setting has a subject, and a `set` that names none is refused
-    /// rather than landing somewhere (ADR a-setting-names-its-scope).
     #[test]
     fn a_set_that_names_no_scope_is_refused_and_names_the_scopes() {
         let mut registry = holding_a_group();
@@ -362,8 +307,6 @@ mod tests {
         );
     }
 
-    /// A Setting said about one Scope reaches that Scope and no other. There is
-    /// no layer for it to arrive by, which is the whole of the decision.
     #[test]
     fn a_setting_said_about_one_scope_reaches_no_other() {
         let mut registry = holding_a_group();
@@ -391,9 +334,8 @@ mod tests {
         );
     }
 
-    /// The grant is the one that matters most: a Group declared after somebody
-    /// let the watcher into another one is a Group nobody has said anything
-    /// about (ADR a-setting-names-its-scope).
+    /// The grant is the case this matters most for: a Group declared after
+    /// somebody let the watcher into another one.
     #[test]
     fn a_group_declared_later_is_not_reached_by_a_grant_made_earlier() {
         let mut registry = holding_a_group();
@@ -440,8 +382,6 @@ mod tests {
         assert_eq!(restored.ungrouped, registry.ungrouped);
     }
 
-    /// Every line names the Scope it is about, because that is what would set it
-    /// again — there is no second reading in the word count any more.
     #[test]
     fn every_line_names_the_scope_it_is_about() {
         let registry = holding_a_group();
@@ -456,8 +396,6 @@ mod tests {
         );
     }
 
-    /// The one key one Scope carries. A Group is the declaration that its
-    /// Accounts are interchangeable, so it neither shows the line nor takes it.
     #[test]
     fn only_the_ungrouped_accounts_carry_the_declaration_that_they_are_a_set() {
         let mut registry = holding_a_group();
@@ -486,8 +424,8 @@ mod tests {
         );
     }
 
-    /// A Group named after a key is now an ordinary Scope: with every Setting
-    /// said about one, a word in the Scope's place can only be a Scope.
+    /// A word in the Scope's place can only be a Scope, so a Group may be named
+    /// after a key.
     #[test]
     fn a_group_named_after_a_key_is_addressed_like_any_other() {
         let mut registry = Registry::default();
@@ -512,9 +450,8 @@ mod tests {
         );
     }
 
-    /// A word in the Scope's place that is a key is a `set` missing its subject,
-    /// not a Group nobody declared — and being sent to check the spelling of a
-    /// Group is being sent to look for a mistake that is not the problem.
+    /// Being sent to check the spelling of a Group is being sent to look for a
+    /// mistake that is not the problem.
     #[test]
     fn a_key_where_a_scope_goes_says_a_setting_needs_a_subject() {
         let registry = holding_a_group();
@@ -527,7 +464,6 @@ mod tests {
         assert!(!said.contains("No Group called"), "{said}");
     }
 
-    /// The refusal for a Scope named with a key and nothing to set it to.
     #[test]
     fn a_scope_and_a_key_with_nothing_to_set_it_to_says_which_form_was_meant() {
         let mut registry = holding_a_group();

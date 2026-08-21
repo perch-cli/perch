@@ -58,11 +58,9 @@ fn a_declared_group_survives_a_restart() {
         },
     );
     assert!(result.is_ok(), "{:?}", result.err());
-    // One line, and not the two rows saying what governs it. A Group is
-    // declared at the compiled-in defaults every time, so those two rows are
-    // the same two rows on every run — `perch group list` is where they are
-    // read (ADR perch-says-what-it-did). What they hold is asserted below, off
-    // the registry.
+    // One line, and not the two rows saying what governs it: a Group is
+    // declared at the compiled-in defaults every time
+    // (ADR perch-says-what-it-did).
     assert_eq!(
         printed.trim_end(),
         "Declared the Group `work`.",
@@ -82,7 +80,7 @@ fn a_declared_group_survives_a_restart() {
         !registry_of(&host)
             .settings(&perch::registry::Scope::Group("work".to_string()))
             .watcher_may_act,
-        "unattended switching is off until the user says otherwise (ADR a-group-is-a-declaration)"
+        "unattended switching is off until the user says otherwise"
     );
 }
 
@@ -403,14 +401,9 @@ fn group_list_shows_every_group_with_its_accounts_and_its_configuration() {
 }
 
 /// What the summary says about the ungrouped Accounts and what the watcher does
-/// about them, asserted together so the two cannot drift apart again.
-///
-/// `watcher-may-act` is not the whole of whether the watcher acts there:
-/// `interchangeable` is a separate declaration that those Accounts are a set at
-/// all (ADR a-group-is-a-declaration). Read from the permission alone, the
-/// summary announced "may switch unattended at 80%" about a Scope `perch
-/// watcher run` refuses outright — and it printed the same Cycling line
-/// whichever way the gate was set, so neither direction was falsifiable.
+/// about them, asserted together: `watcher-may-act` is not the whole of whether
+/// it acts there, because `interchangeable` is a separate declaration that those
+/// Accounts are a set at all (ADR a-group-is-a-declaration).
 #[test]
 fn what_group_list_says_about_ungrouped_cycling_is_what_the_watcher_does() {
     let host = machine_with_two_accounts();
@@ -523,9 +516,6 @@ fn managing_groups_makes_no_network_call() {
     assert!(host.http_calls().is_empty());
 }
 
-/// Moving an Account out of no Group into no Group. It is not a failure — the
-/// Account is where it was asked to be — but it must not be reported as a move
-/// either, or a script reads a no-op as a change.
 #[test]
 fn moving_an_ungrouped_account_out_of_a_group_says_it_was_already_in_none() {
     let host = machine_with_two_accounts();
@@ -546,10 +536,6 @@ fn moving_an_ungrouped_account_out_of_a_group_says_it_was_already_in_none() {
     assert_eq!(registry_of(&host).account(EMAIL).expect("held").group, None);
 }
 
-/// A Group name nothing resembles, with Groups declared. The refusal names the
-/// ones that exist and how to declare the one that does not — a near miss gets
-/// the suggestion instead, on the grounds that it is a typo rather than an
-/// intention.
 #[test]
 fn a_group_name_resembling_nothing_is_answered_with_the_groups_that_exist() {
     let host = three_accounts_in_one_group();
@@ -565,10 +551,8 @@ fn a_group_name_resembling_nothing_is_answered_with_the_groups_that_exist() {
     );
 }
 
-/// A Group whose watcher has been turned on reads as one that may act, with
-/// the whole policy rather than the threshold alone: a summary naming only when
-/// it acts would read as the whole of what it does
-/// (ADR a-group-is-a-declaration).
+/// The whole policy rather than the threshold alone: a summary naming only when
+/// the watcher acts would read as the whole of what it does.
 #[test]
 fn a_group_listing_says_when_its_watcher_may_switch_unattended() {
     let host = three_accounts_in_one_group();
@@ -590,12 +574,10 @@ fn a_group_listing_says_when_its_watcher_may_switch_unattended() {
     );
 }
 
-/// The piece a remove-and-add would get *wrong* rather than merely lose. What
+/// The piece a remove-and-add would get *wrong* rather than merely lose: what
 /// the last scheduled Check left behind is keyed by the Group's name, and
-/// `perch group remove` deliberately drops it — a record kept past a removal
-/// would be a cooldown a Group declared under the same name later inherited
-/// from a Group it never was. A rename is the *same* Group, so a rename that
-/// dropped it would be a way to make the watcher Switch again at once.
+/// `perch group remove` drops it deliberately. A rename is the *same* Group, so
+/// dropping it there would be a way to make the watcher Switch again at once.
 #[test]
 fn a_rename_keeps_the_cooldown_the_watcher_is_pacing_by() {
     let host = machine_with_two_accounts();
@@ -618,8 +600,6 @@ fn a_rename_keeps_the_cooldown_the_watcher_is_pacing_by() {
     );
 }
 
-/// The Settings are the whole point: what a rename by hand loses is precisely
-/// the part somebody deliberately said.
 #[test]
 fn a_rename_keeps_the_settings_the_group_holds() {
     let host = three_accounts_in_one_group();
@@ -644,10 +624,8 @@ fn a_rename_keeps_the_settings_the_group_holds() {
         "and the old name holds nothing: {:?}",
         registry.groups.keys().collect::<Vec<_>>()
     );
-    // Both names and the Accounts that came with them, asserted whole
-    // (ADR perch-says-what-it-did) — and no row for the Setting above, which a
-    // rename never touches: reporting it would be Perch describing work it did
-    // not do (ADR perch-says-what-it-did).
+    // Both names and the Accounts that came with them, asserted whole — and no
+    // row for the Setting above, which a rename never touches.
     assert_eq!(
         printed.trim_end(),
         "Renamed the Group `work` to `day-job`, which still holds 3 Accounts.",
@@ -677,8 +655,6 @@ fn a_rename_leaves_the_accounts_in_the_group() {
     );
 }
 
-/// The same refusal `perch group add` gives, because a rename must not reach a
-/// state a declaration could not.
 #[test]
 fn renaming_onto_a_name_already_spoken_for_is_refused_and_nothing_is_written() {
     let host = three_accounts_in_one_group();
@@ -705,8 +681,6 @@ fn renaming_onto_a_name_already_spoken_for_is_refused_and_nothing_is_written() {
     }
 }
 
-/// A name Perch would refuse to declare is refused here too, with the outcome
-/// of its own that a name it will not accept has.
 #[test]
 fn renaming_to_a_name_that_would_be_ambiguous_is_refused_with_its_own_code() {
     let host = three_accounts_in_one_group();
@@ -728,14 +702,12 @@ fn renaming_to_a_name_that_would_be_ambiguous_is_refused_with_its_own_code() {
     );
 }
 
-/// `perch alias` states this rule for an Account renaming itself, and the Group
-/// half must not disagree with it.
 #[test]
 fn recapitalizing_a_group_is_a_rename_rather_than_a_collision_with_itself() {
     let host = three_accounts_in_one_group();
     config_set(&host, &["work", "watcher-threshold-percent", "55"])
         .0
-        .expect("the Override is set");
+        .expect("the Setting is set");
 
     let (result, _) = rename_group(&host, "work", "Work");
 
@@ -767,8 +739,6 @@ fn recapitalizing_a_group_is_a_rename_rather_than_a_collision_with_itself() {
     );
 }
 
-/// A typo is a typo wherever it is made, so it gets the sentence every mistyped
-/// Group name gets.
 #[test]
 fn renaming_a_group_perch_does_not_hold_is_refused_the_way_every_mistyped_group_is() {
     let host = three_accounts_in_one_group();
@@ -786,7 +756,6 @@ fn renaming_a_group_perch_does_not_hold_is_refused_the_way_every_mistyped_group_
     );
 }
 
-/// `perch group list` writes nothing, so it does not wait on a writer either.
 #[test]
 fn listing_the_groups_reads_alongside_another_perch_rather_than_waiting_on_it() {
     let host = three_accounts_in_one_group();
@@ -799,14 +768,8 @@ fn listing_the_groups_reads_alongside_another_perch_rather_than_waiting_on_it() 
     drop(held);
 }
 
-/// A word that could never be a Group is told why, rather than offered a
-/// `perch group add` the next command refuses.
-///
-/// `global` is the sharpest case, because `registry::validate_name` reserves it
-/// *specifically* so that "Declare it with `perch group add global`" can never
-/// be made as an offer — and `no_such_group`, which `group remove`, `group
-/// rename` and `group move` all reach, was making it. Typing the offered
-/// command back gets a refusal, which is a dead end wherever it happens.
+/// `global` is the sharpest case: typing back an offered `perch group add
+/// global` gets a refusal, which is a dead end wherever it happens.
 #[test]
 fn a_name_no_group_could_have_is_refused_rather_than_offered_as_one_to_declare() {
     let host = machine_with_two_accounts();
