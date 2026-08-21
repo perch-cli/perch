@@ -10,13 +10,13 @@
     "check": "astro sync && tsc --noEmit && oxlint && oxfmt --check"
   },
   "dependencies": {
-    "@astrojs/markdown-satteri": "^0.3.5",
+    "@astrojs/markdown-satteri": "^0.3.6",
     "@astrojs/starlight": "^0.41.7",
-    "astro": "^7.2.2"
+    "astro": "^7.2.3"
   },
   "devDependencies": {
-    "oxfmt": "^0.63.0",
-    "oxlint": "^1.78.0",
+    "oxfmt": "^0.64.0",
+    "oxlint": "^1.79.0",
     "typescript": "^7.0.2"
   },
   "packageManager": "pnpm@11.22.0"
