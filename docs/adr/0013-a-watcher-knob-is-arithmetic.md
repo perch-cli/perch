@@ -1,250 +1,257 @@
 # A Watcher knob is arithmetic
 
-> **Superseded in part by ADR the-machine-runs-the-watcher.**
-> `perch service install` now writes a unit the machine's own service manager
-> owns, so the Watcher can be run for you at login. The title is no longer true.
->
-> Three things below were repealed and are named here so nobody implements them
-> from this record: the loop no longer **stops** when a grant is withdrawn — `14`
-> and `18` become a `Held` round, because a supervisor crash-loops on a
-> deliberate exit and launchd cannot be told otherwise; a Watcher now **takes a
-> lock** and is one per person per machine, so "it leaves nothing behind" is no
-> longer the whole truth; and an identical hold is now said **once an hour**
-> rather than every round, because in a log nobody reads, repetition is what
-> buries the line that matters. `perch watch --once` keeps `14` and `18`
-> unchanged.
->
-> Everything else stands exactly as written, and is still the governing record
-> for it: polling only the active Account, the two-and-a-half-minute interval
-> and why it is a constant, the Back-off curve, the Cooldown, the Margin, the
-> no-return, what a Check records and why, and the whole exit-code table.
-> ADR the-machine-runs-the-watcher says which of this record's arguments it kept
-> and which one it found had already been spent.
+Somebody rotating between subscriptions wants to stop noticing that they ran
+out. That wants something watching Utilization and Switching when a Threshold is
+crossed, without being asked: `perch watcher run` as a loop in a terminal,
+`perch watcher check` as one round for a scheduler, and a Service running the
+same loop for you (ADR the-machine-runs-the-watcher). One policy in three
+arrangements, and the policy is this record.
 
-Someone rotating between subscriptions wants to stop noticing that they ran out.
-That needs something watching utilization and switching when a threshold is
-crossed, without being asked.
+Five numbers pace it — the interval between Refreshes, the Back-off after a
+Refresh that could not be read, the Cooldown between two Switches, the Margin
+under the Threshold, and the Threshold itself. **Only the Threshold is anyone's
+to set.** The other four are arithmetic, about Anthropic's allowance or about
+how fast a Quota Window moves, and a Setting is where somebody's preference
+enters rather than where a derivation is retyped. A Group that could poll every
+ten seconds would be a Group configured to be refused.
 
-`perch watch` is that, as a loop in a terminal the user can see and kill.
-`perch watch --once` performs a single check-and-switch and reports the outcome
-in its exit code, so anyone wanting it truly unattended can schedule it with
-cron or a systemd timer. A group's configuration says whether the watcher may
-act on it, and that is off by default.
+## It Refreshes the active Account, every two and a half minutes
 
-A managed background daemon was rejected. It would mutate credentials while
-nobody is watching — every hazard in ADR a-switch-is-written-down-first firing
-unattended — and would need service lifecycle management on three platforms, in
-exchange for convenience the user's own scheduler already provides. Scheduling
-is the operating system's job.
+Anthropic's usage endpoint allows roughly 28-30 reads an hour per Account. Two
+and a half minutes is twenty-four of them, which leaves room for the
+`perch status --refresh` somebody types while the Watcher is running: a loop
+that spent the whole allowance would answer the user's own question with a
+throttle.
+
+The same arithmetic read the other way is why only the active Account is
+Refreshed. At twenty-four an hour each, a Group of two would already be at the
+limit and a Group of four past it — so polling the whole Group would make the
+size of a Group a scaling limit, to keep figures fresh that are read only at a
+crossing. Candidates are read at the moment a decision is taken instead, which
+is also the moment they are cheapest: a candidate is by definition an Account
+nothing is running against, so ADR a-profile-is-live-by-evidence permits
+Renewing it to ask.
+
+## It never acts on a figure it did not just read
+
+A Refresh that could not be read holds the round: nothing is decided, and
+nothing is decided on the figure Perch already had. Acting on a cached figure
+would be a Switch made on evidence the user already has, and the two costs are
+not comparable — a held decision costs nothing, and a wrong Switch costs a
+Capture, a Credential write and possibly an Account more exhausted than the one
+it left. A reply that arrives carrying no Quota Window Perch can read is a
+failed Refresh too, and not a reading of zero: an Account with nothing used is
+the one reading that can never be over any Threshold.
+
+This is the one place the Watcher diverges from every other surface. Elsewhere a
+Refresh degrades the display rather than failing the command
+(ADR a-figure-carries-its-age), because those surfaces show a person a number
+they will judge for themselves. The Watcher shows nobody anything; it acts.
+
+**The Back-off doubles from the interval and stops at twenty minutes.** It
+starts at the ordinary two and a half rather than under it, so no retry ever
+asks faster than a working loop does and the arithmetic above covers a failing
+endpoint unchanged. At twenty minutes a persistent failure asks three times an
+hour instead of twenty-four. It is bounded there because the endpoint coming
+back does not announce itself and the only way the Watcher finds out is by
+asking: a loop that had doubled its way to an hour would come back long after
+the crossing it was left running for. The first Refresh that works drops the
+whole of it rather than winding it down a step, because pacing the loop on a
+failure that has stopped happening is pacing it on nothing.
+
+A Back-off is the loop's own memory and nobody's to configure — a Group that
+could set it could set it to nothing, and nothing is what the endpoint is
+already refusing. A Cooldown paces Switches the Watcher makes; a Back-off paces
+questions nobody is answering.
+
+## The Margin refuses a destination nearly as full as the one being left
+
+Usage on the Account you are on climbs. Usage on the Accounts you are not on
+does not. Two Accounts therefore do not trade places — **they walk upward
+together.** With no Margin at a Threshold of 80: A is at 80 and B at 79, so you
+are moved to B; you burn B to 80; one Cooldown later you are moved back to A,
+still at 80. That repeats every Cooldown, and each move lands you on an Account
+with almost nothing left. The Cooldown sets how often the pointless move
+happens and never stops it happening. Only the Margin does, by turning the round
+into `Exhausted` — exit `17` — which is the true answer: there is nowhere better
+to go.
+
+**The Margin is ten points, relative to the Threshold.** Relative rather than
+absolute, so it tracks the Threshold as it changes: "ten points under" still
+means something once somebody sets the Threshold to 60, where a fixed 70 would
+quietly stop meaning anything. A constant rather than a Setting because nobody
+wants the low end and the high end is already reachable by moving the
+Threshold — and the low end permits a contradiction, since an Account is left on
+`>=` the Threshold and a candidate is set aside on `>` the ceiling, so at a
+Margin of nothing an Account at exactly 80% would be full enough to leave and
+clear enough to arrive at.
+
+Collapsing the Margin into the Threshold is refused. Making the rule symmetric —
+you are moved off above the line and never onto anything above it — is one
+number with one meaning in both directions and repairs that asymmetry by
+construction, but it is exactly a Margin of nothing with the comparison
+tightened, so it re-buys the walk upward the Margin exists to stop. The concept
+has to survive; only a knob for it does not.
+
+The Margin sets candidates aside before the Strategy ranks them rather than
+vetoing the winner afterwards. A `soonest-reset` Group would otherwise be told
+there is nowhere to go while a perfectly empty Account sat behind the fullest
+one, and the Strategy is entitled to prefer among whatever clears the ceiling.
+An Account Perch has never read a figure for is set aside too: ranking puts an
+unknown above a window that is certainly full, which is right for a Switch
+somebody asked for, and unasked it is a move onto an Account the Watcher knows
+nothing about.
+
+## The Cooldown is the Watcher's rather than the machine's
+
+**Fifteen minutes.** A five-hour window moves slowly enough that fifteen
+minutes never misses a real crossing, and often enough that a Watcher which has
+just moved you is not about to move you again. That is arithmetic about how fast
+a Quota Window moves rather than anyone's taste, and what is left for a person
+to express — how promptly they are moved after a real crossing — has a right
+answer. A Cooldown of a week against a five-hour window is a way of spelling *do
+not watch*.
+
+It is asked before the candidates are read rather than after, because a round
+that may not act has no business spending an allowance on figures it cannot use.
+
+**The loop keeps it in memory and nowhere else.** A Cooldown is about the loop
+somebody is running rather than about the machine: recording it in the registry
+would have one person's Watcher pacing another's decisions. Stopping the loop
+and starting it again is a person saying "go on then", and a loop starts with
+nothing to wait for.
+
+**A `perch watcher check` records it, because there is no loop for it to live
+in.** Scheduled, the Watcher is a sequence of processes and no one of them is
+it, so a Cooldown kept in memory would be a Cooldown that never held anything
+and a Check every minute would Switch every minute whatever the Group said. What
+one Check Switched, and when, is written against the Group in the registry for
+the next Check to read — in the same save as the Switch it paces. Per Group
+rather than per machine, because a Switch within one Group has nothing to say
+about how soon another may move, and only a Switch that happened writes one: a
+Check that changed nothing has nothing to pace.
+
+None of that makes the Cooldown the machine's. Two people running two loops pace
+themselves separately; the record is the scheduled Watcher's memory, kept where
+that Watcher can reach it, and the loop neither reads nor writes it.
+
+**There is no no-return.** Nothing is Switched during a Cooldown, so nothing can
+be Switched back either, and a rule barring the Account just left could never
+change what Perch does. What it would cost is a Setting, a field on four types, a
+parameter threaded through the ranking and into the sentence explaining why an
+Account was passed over, four branches of advice, a row in the guide and an
+entry in the glossary — for a branch that is unreachable by construction. A
+Setting that prints a sentence about itself which is not true is the clearest
+failure there is of the yardstick this record is taken by. The guard the rule
+was for is kept here instead, at no surface at all:
+
+> **If the Cooldown ever stops gating Switches outright — becoming per-Account,
+> or pacing rather than barring — a no-return has to come back.** It is absent
+> because the Cooldown subsumes it, not because returning immediately is
+> acceptable.
+
+## The Threshold is the one preference
+
+How full is too full cannot be derived from Anthropic's allowance or from the
+length of a window. Somebody who never wants to hit a wall mid-task sets 60;
+somebody squeezing every drop sets 95; both are coherent, and nothing in the
+endpoint's behavior prefers either. It is the one place a person's appetite for
+risk enters the loop, and it is Overridable per Scope for the same reason — a
+work Group wanting a different Threshold from a personal one.
+
+It is reached at rather than passed: a Threshold of 80 is the figure somebody
+set as the point they want to be moved at, and an 80 that waited for 81 would be
+a Setting that means something other than what it says. A Threshold under the
+Margin is in range, and is a Group that will only move onto an Account with
+nothing used at all — a coherent thing to ask for, and refusing it would make
+the order two `perch config set`s are typed in matter.
+
+It keeps its `watcher-` prefix, which groups the two Settings the Watcher owns
+and separates a Watcher rule from `strategy`, which governs Cycles nobody is
+watching.
+
+## It acts only where two statements have been made
+
+A Scope that has not said `watcher-may-act` is a Scope the Watcher decides
+nothing about, and an Account in no Group needs `interchangeable` as well —
+being interchangeable at all is its own yes, and it is a declaration somebody
+makes rather than a grant the Watcher inherits (ADR a-group-is-a-declaration).
+
+Both are read every round rather than only at the first, because either can be
+taken back while the loop is sleeping: a `perch switch` in another terminal can
+leave an ungrouped Account active, and a Group can be told the Watcher may no
+longer act on it. Nothing changes underneath you unless you said it could. A
+loop holds on a withdrawn statement rather than stopping
+(ADR the-machine-runs-the-watcher); a Check exits `18` for the ungrouped Account
+and `14` for the Group, because a scheduler has to be told that this machine is
+not arranged for what it was asked to do.
+
+## The decision log is one line a round
+
+Every round prints one line to standard output, including the rounds where
+nothing happens, which are most of them. The log is the whole of the evidence
+that the policy works — it is what makes *why did it Switch just then*
+answerable without reading the source — so a line names the figure that was
+read and then what was decided about it, in that order, every time.
+
+What follows the figure is where ADR perch-says-what-it-did cuts. `waiting` and
+`switched` are the loop doing what the opening line said it would do, so they
+stop at the figure: the Threshold is the opening's to declare once for the run,
+and a verdict the status word already gives is a verdict said twice. `cooling`,
+`nowhere`, `held` and `refused` are refusals — nothing happened, and the reader
+cannot see why — so they keep their sentence whole. A `switched` line still
+names where it went, which is the one thing about it nobody could have
+predicted, and says what could not be re-read on the way, which is the one thing
+that can make a Switch land somewhere worse than it left.
+
+Every held round says which failure held it and when the Watcher will ask again.
+A hold whose line said neither reads as a Watcher that has given up.
+
+## What a Check reports
+
+`perch watcher check` reports in its exit code: `0` Switched, `15` nothing to do
+now, `17` a Switch was wanted and every candidate was exhausted, `18` ungrouped,
+`20` held because the figures were stale.
+
+Three outcomes share `15`, and deliberately: under the Threshold, inside the
+Cooldown, and a Switch the machine turned away all leave a scheduler the same
+thing to do — nothing now, and come back at the next Check. Which of them it was
+is on the decision line, where a person reading a cron mailbox needs it and a
+script can do nothing with it. A code per outcome would be a distinction nobody
+could act on, and the refusal a person typed already has `16` of its own.
+
+Anything that stops a Check from deciding keeps the code its failure earned,
+before the round or during it: a Scope that has not said the Watcher may act
+exits `14`, and a Switch that made the incoming Credential live and then failed
+exits with whatever failed. Those are failures rather than decisions, and
+folding them into the table would report `0` or `15` about a machine that is
+part way through a Switch. The table is what a Check *decided*.
+
+A Quarantined active Account is a figure that cannot be read, so a Check holds
+and exits `20` as it would for a throttle. `19` says more — it is the one
+failure `perch relogin` repairs — and it is not in the table a Check promises,
+so that distinction is carried on the decision line instead. Neither is
+anything a scheduler can act on: both mean this Check decided nothing.
 
 ## Consequences
 
-The watcher polls `/api/oauth/usage`, which allows roughly 28-30 requests per
-hour per account. Polling must be adaptive — watching busy accounts more closely
-than exhausted ones — or a handful of accounts will saturate the budget and the
-numbers it decides on will be stale exactly when they matter.
+A Switch that changed nothing is a decision; one that changed something and then
+failed stops the loop. A Capture refused because a client is running against the
+outgoing Profile (ADR a-profile-is-live-by-evidence) leaves the machine exactly
+as it was and clears itself when that client exits, so it is printed and the
+loop goes on watching. A Switch that made the incoming Credential live and then
+failed has left the machine part way through, and a Watcher that carried on
+polling would be deciding what to do next about a machine nobody has looked at.
 
-It must also not flip-flop. A cooldown between switches and a margin around the
-threshold are required, so two accounts hovering near the line do not ping-pong.
+Everything the Watcher does when it acts is a Switch, whole: the outgoing
+Credential is Captured first (ADR a-switch-is-written-down-first), Claude Code's
+locks are taken, and a Live Profile's token is never Renewed. Running while
+Claude Code is working is the normal case rather than the exception.
 
-Everything the watcher does is a Switch, so it captures the outgoing credential
-first (ADR a-switch-is-written-down-first), takes Claude Code's locks, and never
-refreshes a live profile's token (ADR a-profile-is-live-by-evidence). Running
-while Claude Code is working is the normal case, not the exception.
-
-## Amended: the numbers this asked for
-
-> **Superseded in full by ADR a-watcher-knob-is-arithmetic.** This section — and
-> only this section — is no longer the governing record. Everything above it
-> stands exactly as written.
->
-> The claim that decayed is that the cooldown, the margin and the no-return are
-> "per-group configuration beside `watcher-threshold-percent`, not constants".
-> They are constants, on this section's own test: it made the interval a constant
-> because the interval is arithmetic rather than preference, and then justified
-> the cooldown's fifteen minutes with arithmetic about how fast a five-hour window
-> moves. `watcher-no-return` is gone entirely — `Recently::barred` is only ever
-> consulted in the branch where the cooldown has already returned `None`, so it
-> could never change what the watcher did. The paragraph below that calls the two
-> "a second lock on the same door" understated it.
->
-> The margin's *mechanism* is unchanged and still described correctly here: it
-> sets candidates aside before the strategy ranks them. Its *rationale* is
-> wrong. Two Accounts do not trade places — they walk upward together, and
-> ADR a-watcher-knob-is-arithmetic says why that matters.
->
-> Nothing else below moved. The interval and why it is a constant, the back-off
-> curve, the cooldown living in the loop while a `--once` Check records it against
-> its Group, the ungrouped refusal, both grants read every round, and the exit-code
-> table are all still this record's.
-
-This record required adaptive polling, a cooldown and a margin, and named none
-of them. They are named here so the watcher is a policy that can be argued
-with rather than a set of constants discovered in the source.
-
-**It polls only the active account.** One account watched continuously fits
-inside the ~28-30 requests per hour comfortably. Candidates are ranked at the
-moment a decision is taken, not kept warm — they are idle by definition then,
-so ADR a-profile-is-live-by-evidence permits renewing them. Polling every
-account in the group instead would spend every account's budget to keep figures
-fresh that are read only at a threshold crossing, and would make the size of a
-group a scaling limit.
-
-**It polls every two and a half minutes.** Twenty-four reads an hour, which
-sits inside the ~28-30 the endpoint allows with room left for the `perch status
---refresh` somebody types while the watcher is running — a loop that spent the
-whole allowance would answer the user's own question with a throttle. It is a
-constant rather than a setting: it is derived from Anthropic's allowance rather
-than from anyone's preference, and a group configured to poll every ten seconds
-would be a group configured to be refused.
-
-**It never acts on a figure it did not just refresh.** A failed refresh holds
-the decision, backs off and retries. Acting on a cached figure would be a
-switch made on evidence the user already had; a held decision costs nothing,
-and a wrong switch costs a capture, a credential write, and possibly an account
-more exhausted than the one it left.
-
-This is the one place the watcher diverges from every other surface.
-ADR a-figure-carries-its-age has a refresh degrade the display rather than fail
-the command, and ADR a-figure-carries-its-age has everything served from cache,
-because those surfaces show a person a number they will judge for themselves.
-The watcher shows nobody anything; it acts. A reply that arrived but carries no
-quota window perch can read is a failed refresh too, and not a reading of zero —
-an account with nothing used is the one reading that can never be over any
-threshold.
-
-**Back-off doubles from the interval and stops at twenty minutes.** It starts
-at the ordinary two and a half rather than under it, so no retry ever asks
-faster than a working loop does and the arithmetic above covers a failing
-endpoint unchanged. At twenty minutes a persistent failure asks three times an
-hour instead of twenty-four. It is bounded there because the endpoint coming
-back does not announce itself and the only way the watcher finds out is by
-asking — a loop that had doubled its way to an hour would come back long after
-the crossing it was left running for. Twenty minutes is the order of thing a
-five-hour window forgives, which is the same reasoning the cooldown's fifteen
-was set on. The first refresh that works drops the whole of it rather than
-winding it down a step, because pacing the loop on a failure that has stopped
-happening is pacing it on nothing. It lives in the running loop beside the
-cooldown and is nobody's to configure — a group that could set it could set it
-to nothing, and nothing is what the endpoint is already refusing.
-
-Every held round says which failure held it and when the watcher will ask
-again. A hold whose line said neither reads as a watcher that has given up.
-
-**Cooldown 15 minutes, margin 10 points, no return for one cooldown.** A
-five-hour window moves slowly enough that fifteen minutes never misses a real
-crossing. The margin is what kills the ping-pong: at an 80% threshold nothing
-is switched to unless it is at 70% or better. All three are per-group
-configuration beside `watcher-threshold-percent`, not constants —
-`watcher-cooldown-minutes`, `watcher-margin-percent` and `watcher-no-return`.
-
-The margin sets candidates aside before the strategy ranks them rather than
-vetoing the winner afterwards. A `soonest-reset` group would otherwise be told
-there is nowhere to go while a perfectly empty account sat behind the fullest
-one, and the strategy is entitled to prefer among whatever clears the ceiling.
-An account perch has never read a figure for is set aside too. Ranking puts an
-unknown above a window that is certainly full, which is right for a switch
-somebody asked for; unasked it is a move onto an account the watcher knows
-nothing about.
-
-The cooldown lives in the running loop and nowhere else. A cooldown is about
-the loop somebody is running, not about the machine — recording it in the
-registry would have one person's watcher pacing another's decisions, and would
-give `perch watch` a file to write when the whole of the record above is that
-it leaves nothing behind. Stopping the loop and starting it again is a person
-saying "go on then".
-
-**A `--once` check records it, because there is no loop for it to live in.**
-The reasoning above turns on a watcher being one process: memory that outlives
-every round it paces, and dies when the person watching stops watching.
-Scheduled, the watcher is a sequence of processes and no one of them is it — so
-a cooldown kept in memory would be a cooldown that never held anything, and a
-`--once` every minute would switch every minute whatever the group said. What
-one check switched, and when, is written against the group in the registry for
-the next check to read. It is per group rather than per machine, because a
-cooldown is a group's setting and a switch within one group has nothing to say
-about how soon another may move. Only a switch that happened writes one: a
-check that changed nothing has nothing to pace.
-
-This does not make the cooldown the machine's after all. Two people running two
-loops still pace themselves separately, and a loop still starts with nothing to
-wait for — the record is the scheduled watcher's memory, kept where that
-watcher can reach it, and the loop neither reads nor writes it.
-
-The cooldown and no-return hold the same window by construction: nothing is
-switched during the cooldown, so nothing can be switched back either. The
-cooldown always gets there first, and `watcher-no-return` changes no trace the
-watcher can be shown today — including at `watcher-cooldown-minutes 0`, where a
-no-return of no minutes bars nothing. This is stated plainly rather than dressed
-up, and `perch config` says it back when either is set.
-
-It is still written as two rules, because they answer different questions —
-*whether* to move and *where* not to — and the second is what a later change to
-the first would otherwise silently repeal. A per-account cooldown, or one that
-paces switches rather than gating them, would leave no-return doing the work
-alone. Unit tests pin it directly; the loop cannot, because the loop never gets
-far enough to ask.
-
-A margin at or above the threshold is not out of range. It is a group that will
-only move onto an account with nothing used at all, which is a coherent thing to
-ask for; refusing it would make the order two `perch config set`s are typed in
-matter.
-
-**It never acts on an ungrouped account.** `cycle-ungrouped`
-(ADR a-group-is-a-declaration) lets a bare `perch switch` cycle among accounts
-in no group; it grants the watcher nothing. Permission to switch when asked and
-permission to switch while nobody is looking are different grants, and the
-second has no owner when there is no group to carry it. `perch watch` started on
-an ungrouped account says so and exits rather than idling forever having decided
-nothing.
-
-**Both grants are read every round, not only at the first.** Either can be
-taken back while the loop is sleeping: a `perch switch` in another terminal can
-leave an ungrouped account active, and a group can be told the watcher may no
-longer act on it. A loop still running on permission that has been withdrawn is
-the exact thing "nothing changes underneath you unless you said it could" is
-about, so it stops on the message it would have refused to start on — `18` for
-the ungrouped account and `14` for the group, as at the first round.
-
-**A Switch that changed nothing is a decision; one that changed something and
-then failed stops the loop.** A Capture refused because a client is running
-against the outgoing Profile (ADR a-profile-is-live-by-evidence) leaves the
-machine exactly as it was and clears itself when that client exits, so it is
-printed and the loop goes on watching. A Switch that made the incoming
-Credential live and then failed has left the machine part way through, and a
-watcher that carried on polling would be deciding what to do next about a
-machine nobody has looked at.
-
-**Its decision log goes to standard output.** This is a loop in a terminal the
-user can see; a rotated logfile is what a daemon needs because nobody is
-watching, and the whole of this record is that Perch is not one. Redirection is
-the user's call, and `--once` under cron has its output captured already.
-
-`--once` reports in its exit code, reusing the table rather than growing it:
-`0` switched, `15` below threshold so nothing to do, `17` a switch was wanted
-and every candidate was exhausted, `18` ungrouped. One code is new — `20`, held
-because the figures were stale — because a scheduler retrying shortly needs to
-tell that apart from `17`, and only one of the two resolves itself.
-
-Three outcomes share `15`, and deliberately: under the threshold, inside the
-cooldown, and a switch the machine turned away all leave a scheduler the same
-thing to do — nothing now, and come back at the next check. Which of them it was
-is on the decision line, where a person reading a cron mailbox needs it and a
-script can do nothing with it. A code per outcome would be a distinction
-nobody could act on, and the refusal already has a code of its own (`16`) for
-the command a person typed.
-
-Anything that stops a check from deciding keeps its own code, before the round
-or during it: a group that has not said the watcher may act exits `14` as it
-does from the loop, and a switch that made the incoming credential live and
-then failed exits with whatever failed, as the loop stops on it. Those are
-failures rather than decisions, and folding them into the table would report
-`0` or `15` about a machine that is part way through a switch. The table is
-what a check *decided*.
-
-A quarantined active account is a figure that cannot be read, so a check holds
-and exits `20`, as it would for a throttle. `19` says more — it is the one
-failure `perch relogin` repairs — and it is not in the table `--once` promises,
-so that distinction is carried on the decision line, which names the quarantine
-and the repair. Neither is anything the scheduler itself can act on: both mean
-this check decided nothing.
+`perch config` carries two Watcher Settings — `watcher-may-act` and
+`watcher-threshold-percent` — beside `strategy`, and `interchangeable` on the
+Ungrouped Scope alone. **All four pacing concepts survive as concepts.** Threshold,
+Margin, Cooldown and Back-off are each still an idea and each keeps its glossary
+entry: a person meets these words in a `cooling` line and in a held round, and a
+term you meet but cannot look up is worse conceptual surface than one you can.
+What is settable is smaller than what is named.

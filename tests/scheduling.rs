@@ -1,16 +1,12 @@
-//! Behavior: `perch watcher check` — one check, and what it reports to
-//! whatever scheduled it.
+//! Behavior: `perch watcher check` — one check, and what it reports to whatever
+//! scheduled it.
 //!
-//! The loop is a person watching; this is a machine watching, and the
-//! difference is entirely in how the answer is delivered. Scheduling is the
-//! operating system's job (ADR a-watcher-knob-is-arithmetic), so what a Check
-//! owes cron is a decision line it can capture and an exit code it can branch
-//! on — nothing else, and nothing left running.
+//! What a Check owes cron is a decision line it can capture and an exit code it can
+//! branch on — nothing else, and nothing left running.
 //!
-//! Two properties are what this mode is for, and each has tests here that fail
-//! if it stops holding: the policy is the loop's policy run once, and the
-//! cooldown that paces it survives between invocations, because every one of
-//! them is a fresh process.
+//! Two properties, each with tests that fail if it stops holding: the policy is the
+//! loop's policy run once (ADR a-watcher-knob-is-arithmetic), and the cooldown that
+//! paces it survives between invocations, because every one of them is a fresh process.
 
 mod common;
 
@@ -25,12 +21,9 @@ use perch::host::FakeHost;
 use perch::host::fake::Effect;
 use perch::host::prelude::*;
 
-/// A machine where a check finds the active Account following `here` and the
-/// Account it could move to following `there` — one figure per reading, the
-/// last of them for every reading after the trace runs out.
-///
-/// Nobody interrupts it, because nothing here waits: a check that had to be
-/// stopped would be a loop.
+/// A machine where a check finds the active Account following `here` and the Account it
+/// could move to following `there` — one figure per reading, the last of them for every
+/// reading after the trace runs out. Nobody interrupts it, because nothing here waits.
 fn checked(here: &[f64], there: &[f64]) -> FakeHost {
     let host = answering(watched(), ACTIVE_TOKEN, EMAIL, here);
     answering(host, SPARE_TOKEN, SECOND_EMAIL, there)
@@ -40,8 +33,8 @@ fn active(host: &FakeHost) -> Option<String> {
     registry_of(host).active().whose().map(str::to_string)
 }
 
-/// Everything the check waited for, which is what a scheduled command has no
-/// business doing any of.
+/// Everything the check waited for, which is what a scheduled command has no business
+/// doing any of.
 fn waits(host: &FakeHost) -> Vec<u64> {
     host.effects()
         .iter()
@@ -63,8 +56,6 @@ fn decision(printed: &str) -> String {
     decisions.into_iter().next().expect("the one decision")
 }
 
-/// The whole of what a Check is: one round, one line, one exit code, and
-/// nothing left running.
 #[test]
 fn one_check_switches_and_reports_it_in_the_exit_code() {
     let host = checked(&[86.0], &[5.0]);
@@ -99,8 +90,6 @@ fn one_check_switches_and_reports_it_in_the_exit_code() {
     );
 }
 
-/// The ordinary answer, and the one a scheduler gets most of the time: the
-/// Account is not full enough to want moving off, so there was nothing to do.
 #[test]
 fn a_check_under_the_threshold_exits_fifteen_and_changes_nothing() {
     let host = checked(&[40.0], &[5.0]);
@@ -117,7 +106,7 @@ fn a_check_under_the_threshold_exits_fifteen_and_changes_nothing() {
     assert_eq!(
         decision, "2026-08-04T12:00:00Z  waiting   40% used, fullest 5-hour",
         "and the whole of it, because a round that did what it was asked to do \
-         has nothing to explain (ADR perch-says-what-it-did)"
+         has nothing to explain"
     );
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
     assert_eq!(
@@ -127,9 +116,6 @@ fn a_check_under_the_threshold_exits_fifteen_and_changes_nothing() {
     );
 }
 
-/// A Switch was wanted and every candidate was exhausted. Nothing to retry and
-/// nothing to fix: the answer is to wait, and under cron waiting is the next
-/// invocation.
 #[test]
 fn a_check_with_nowhere_to_go_exits_seventeen() {
     let host = checked(&[100.0], &[100.0]);
@@ -146,16 +132,13 @@ fn a_check_with_nowhere_to_go_exits_seventeen() {
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
 }
 
-/// The one code that is new, and the reason it had to be: a scheduler retrying
-/// in five minutes needs to tell a stale figure from a Group with nowhere to
-/// go, because only one of the two resolves itself.
 #[test]
 fn a_check_that_could_not_read_a_current_figure_exits_twenty() {
     let host = answering(watched(), SPARE_TOKEN, SECOND_EMAIL, &[5.0])
         .with_reply_to(PROFILE_URL, ACTIVE_TOKEN, 200, &profile_of(EMAIL))
         .with_reply(USAGE_URL, 429, "{}");
-    // A cached figure well over the threshold: acting on it would switch, and
-    // acting on it is the whole of what the watcher refuses to do.
+    // A cached figure well over the threshold: acting on it would switch, and acting on
+    // it is the whole of what the watcher refuses to do.
     observed(&host, EMAIL, vec![window("5-hour", 95.0)]);
 
     let (result, printed) = run_watch_once(&host);
@@ -179,10 +162,6 @@ fn a_check_that_could_not_read_a_current_figure_exits_twenty() {
     );
 }
 
-/// An Account whose Credential has stopped working is a figure that cannot be
-/// read, so a check holds on it like any other — `19` says more, and it is not
-/// in the table a Check promises, so the Quarantine and the repair go on the
-/// line instead. A scheduler could do nothing with the difference either way.
 #[test]
 fn a_check_on_a_quarantined_account_holds_and_names_the_repair() {
     let host = checked(&[86.0], &[5.0]);
@@ -200,9 +179,6 @@ fn a_check_on_a_quarantined_account_holds_and_names_the_repair() {
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
 }
 
-/// Nothing has said the ungrouped Accounts are interchangeable at all, so there
-/// is nowhere for the watcher to Switch to and it exits eighteen — naming both
-/// declarations, and the narrower statement a Group would be.
 #[test]
 fn a_check_on_an_ungrouped_account_exits_eighteen_and_names_both_declarations() {
     let host = checked(&[40.0], &[5.0]);
@@ -224,17 +200,6 @@ fn a_check_on_an_ungrouped_account_exits_eighteen_and_names_both_declarations() 
     );
 }
 
-/// **ADR a-setting-names-its-scope, in executable form.** A grant is said about
-/// the Scope it grants and nowhere else, so a `watcher-may-act true` said about
-/// a Group is a statement about that Group: it cannot authorize moving somebody
-/// off a work Account onto their personal subscription, because there is
-/// nowhere to write a grant that would.
-///
-/// This used to be an exception written into a uniform layer — a Global "yes"
-/// that reached every Scope except this one — and the exception was described in
-/// four places, tested in two and enforced in none. It is structural now, which
-/// is why the case that used to leak has nothing left to assert: the words that
-/// would have said it cannot be typed.
 #[test]
 fn a_grant_said_about_a_group_leaves_the_ungrouped_accounts_alone() {
     let host = checked(&[99.0], &[1.0]);
@@ -265,9 +230,6 @@ fn a_grant_said_about_a_group_leaves_the_ungrouped_accounts_alone() {
     assert!(host.sent_to(USAGE_URL).is_empty());
 }
 
-/// The first yes on its own is not enough either. Two independent declarations
-/// before anything moves unasked: one saying these Accounts are interchangeable
-/// at all, one saying something may act on them.
 #[test]
 fn a_check_on_ungrouped_accounts_declared_interchangeable_still_needs_the_watcher_let_in() {
     let host = checked(&[99.0], &[1.0]);
@@ -291,8 +253,6 @@ fn a_check_on_ungrouped_accounts_declared_interchangeable_still_needs_the_watche
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
 }
 
-/// And with both, the Ungrouped Scope is served like any other — which is the
-/// point of its being a Scope rather than a fallthrough.
 #[test]
 fn a_check_switches_among_ungrouped_accounts_once_both_declarations_are_made() {
     let host = checked(&[99.0], &[1.0]);
@@ -316,15 +276,9 @@ fn a_check_switches_among_ungrouped_accounts_once_both_declarations_are_made() {
     assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
 }
 
-/// The cooldown a check leaves behind is kept per Scope, so the Ungrouped
-/// Scope paces itself the way a Group does — and a Group cannot be named
-/// `ungrouped`, so the two can never pace each other.
 #[test]
 fn a_check_among_ungrouped_accounts_paces_the_next_one() {
-    // The Account being watched fills up, the check moves off it, and the one
-    // it moved to fills up in turn — the trace that would move every round if
-    // nothing
-    // paced it across invocations.
+    // The trace that would move every round if nothing paced it across invocations.
     let host = checked(&[99.0, 20.0], &[1.0, 90.0]);
     for email in [EMAIL, SECOND_EMAIL] {
         move_to_group(&host, email, "none").0.expect("it leaves");
@@ -348,8 +302,6 @@ fn a_check_among_ungrouped_accounts_paces_the_next_one() {
     assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
 }
 
-/// The other half of the same rule: a Group that has not said the watcher may
-/// act on it is not acted on, however it is invoked.
 #[test]
 fn a_check_on_a_group_that_has_not_said_the_watcher_may_act_names_the_setting() {
     let host = checked(&[40.0], &[5.0]);
@@ -365,22 +317,16 @@ fn a_check_on_a_group_that_has_not_said_the_watcher_may_act_names_the_setting() 
     assert!(host.sent_to(USAGE_URL).is_empty(), "and nothing was read");
 }
 
-/// The property that makes a Check a watcher rather than a Switch on a timer:
-/// every invocation is a fresh process, so the cooldown has to be written down
-/// somewhere it survives one.
 #[test]
 fn the_cooldown_holds_between_one_check_and_the_next() {
-    // The Account being watched fills up, the check moves off it, and the one
-    // it moved to fills up in turn — the trace that would move every round if
-    // nothing
-    // paced it across invocations.
+    // The trace that would move every round if nothing paced it across invocations.
     let host = checked(&[86.0, 20.0], &[5.0, 90.0]);
 
     let (first, _) = run_watch_once(&host);
     assert_eq!(first.expect("it switched"), EXIT_OK);
     assert_eq!(active(&host).as_deref(), Some(SECOND_EMAIL));
 
-    // Cron comes back five minutes later, well inside the Group's fifteen.
+    // Cron comes back five minutes later, well inside the fifteen.
     host.set_now(host.now() + Duration::minutes(5));
     let (second, printed) = run_watch_once(&host);
 
@@ -412,14 +358,10 @@ fn the_cooldown_holds_between_one_check_and_the_next() {
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
 }
 
-/// What one check leaves for the next: when it Switched, which is what the
-/// cooldown is measured from and the whole of what is recorded
-/// (ADR a-watcher-knob-is-arithmetic). Only a Switch that happened writes one,
-/// because a check that changed nothing has nothing to pace.
 #[test]
 fn a_check_records_when_it_switched() {
-    // Under the threshold, and then over it: two checks, of which only the
-    // second has anything to record.
+    // Under the threshold, and then over it: two checks, of which only the second has
+    // anything to record.
     let host = checked(&[40.0, 86.0], &[5.0]);
     let switched_at = host.now();
 
@@ -437,15 +379,11 @@ fn a_check_records_when_it_switched() {
     assert_eq!(recorded.switched_at, switched_at + Duration::minutes(30));
 }
 
-/// A Switch that was turned away changed nothing and clears itself when
-/// whatever is holding the Profile exits — so it is the same answer as a
-/// cooldown to a scheduler: nothing to do now, and the line says what.
 #[test]
 fn a_switch_the_machine_turned_away_exits_fifteen_and_says_so() {
     let host = checked(&[86.0], &[5.0]);
-    // A `perch run` against the Account being left: the Capture would write
-    // into a Profile something else is holding
-    // (ADR a-profile-is-live-by-evidence).
+    // A `perch run` against the Account being left: the Capture would write into a
+    // Profile something else is holding (ADR a-profile-is-live-by-evidence).
     a_run_against(&host, EMAIL, host.now());
 
     let (result, printed) = run_watch_once(&host);
@@ -469,21 +407,11 @@ fn a_switch_the_machine_turned_away_exits_fifteen_and_says_so() {
     );
 }
 
-/// The other half of the same rule, and the half a scheduler is hurt by.
-///
-/// "Nothing to do now" is a promise that coming back later is the answer, which
-/// is true of a client that will exit and untrue of a store nobody can write
-/// to. A check that reported the second as the first exited 15 every five
-/// minutes forever while a cron mailbox read "under the threshold" — and the
-/// exit-code table promises the failure's own code for exactly this.
 #[test]
 fn a_check_stopped_by_something_that_will_not_clear_itself_exits_on_it() {
-    // The Capture writes the live Credential back into the outgoing Account's
-    // Profile, and neither of that Profile's two stores will take it: the
-    // keychain hands back something other than what it was given —
-    // ADR claude-code-chooses-the-store's truncating `security -i`, which is
-    // why every Credential is read back before it is trusted — and the file it
-    // falls back to cannot be written either.
+    // The Capture writes the live Credential back into the outgoing Account's Profile,
+    // and neither of that Profile's two stores will take it (ADR
+    // claude-code-chooses-the-store).
     let host = checked(&[86.0], &[5.0]);
     let plaintext = store_of(&host, EMAIL).credentials_file;
     let host = host
@@ -506,10 +434,6 @@ fn a_check_stopped_by_something_that_will_not_clear_itself_exits_on_it() {
     );
 }
 
-/// Permission is read on every check rather than once, and the Account it is
-/// read about is the active one — so a machine that records nobody active has
-/// no check to make. Saying which command makes one active matters here more
-/// than elsewhere: whatever scheduled this is not watching the output.
 #[test]
 fn a_check_with_nobody_active_says_there_is_nothing_to_watch() {
     let host = checked(&[10.0], &[10.0]);
@@ -532,11 +456,6 @@ fn a_check_with_nobody_active_says_there_is_nothing_to_watch() {
     assert_eq!(printed, "", "nothing is decided, so nothing is logged");
 }
 
-/// A check reads a figure and writes it down, and the write can fail on its
-/// own. What the round decides is still made on the figure it just read — that
-/// one is current whatever happened to the record — and the user is told, once,
-/// that the next command will show the older figure
-/// (ADR a-figure-carries-its-age).
 #[test]
 fn figures_that_were_read_but_could_not_be_kept_are_said_rather_than_swallowed() {
     let host = checked(&[95.0], &[10.0]).with_unwritable_file(REGISTRY_PATH, "read-only");
@@ -551,8 +470,8 @@ fn figures_that_were_read_but_could_not_be_kept_are_said_rather_than_swallowed()
         host.notes()
     );
     let failed = result.expect_err("a record that will not take the Switch stops the check");
-    // Rendered as the Host built it rather than as the constant spells it: the
-    // registry is reached by joining, so the separators are the platform's.
+    // Rendered as the Host built it rather than as the constant spells it: the registry
+    // is reached by joining, so the separators are the platform's.
     let registry = perch::registry::registry_path(&host).expect("home is known");
     assert!(
         failed.to_string().contains(&registry.display().to_string()),
@@ -560,19 +479,11 @@ fn figures_that_were_read_but_could_not_be_kept_are_said_rather_than_swallowed()
     );
 }
 
-/// A check whose Switch went live and then failed still records the cooldown.
-///
-/// The Credential moved, so the check moved — and the pacing has to survive the
-/// process, because every check is a fresh one. Without that record the next
-/// scheduled check saw no cooldown at all, and was free to move straight back:
-/// "a check that moved and let the next one move straight back", which is what
-/// ADR a-watcher-knob-is-arithmetic says the persisted record exists to
-/// prevent.
 #[test]
 fn a_check_that_switched_and_then_failed_still_paces_the_next_one() {
     let host = checked(&[86.0], &[5.0]);
-    // The Credential is written and the Identity patch is what fails, so the
-    // machine is part way through a Switch rather than untouched.
+    // The Credential is written and the Identity patch is what fails, so the machine is
+    // part way through a Switch rather than untouched.
     let host = host.with_unwritable_file(IDENTITY_PATH, "read-only file");
     let switched_at = host.now();
 
