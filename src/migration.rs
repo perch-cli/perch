@@ -1,0 +1,478 @@
+//! A registry document from an older Perch, in the shape this build reads
+//! (ADR a-registry-comes-forward).
+//!
+//! On the document rather than on typed values: the shapes this reads —
+//! `Overrides`, `GlobalConfig`, `GroupConfig` — are gone from the tree, and
+//! bringing them back as mirror types would be a second definition of a shape
+//! nothing writes any more. What arrives is JSON and what leaves is JSON, so the
+//! step is arithmetic and needs no machine to test.
+//!
+//! The registry migrates and an Export refuses (ADR the-holdings-outlive-a-perch).
+
+use serde_json::{Map, Value};
+
+use crate::error::{PerchError, Result};
+use crate::host::Host;
+use crate::registry::{Settings, UngroupedConfig};
+
+/// The oldest version any published Perch stamped, and so the oldest shape this
+/// has. Below it is a number no Perch wrote.
+pub const EARLIEST_VERSION: u32 = 1;
+
+/// Whether a document says nothing about its version: no `version` in it, or a
+/// null one.
+///
+/// The one case worth a refusal of Perch's own. Any other kind of value there is
+/// serde's to describe, and a file that is no document is the caller's.
+pub fn says_no_version(text: &str) -> bool {
+    serde_json::from_str::<Value>(text)
+        .ok()
+        .as_ref()
+        .and_then(Value::as_object)
+        .is_some_and(|held| held.get("version").unwrap_or(&Value::Null).is_null())
+}
+
+/// Whether a document claims a version below the oldest any Perch stamped, or
+/// none at all.
+///
+/// The floor both readers of a registry hold. Neither number names a shape, and
+/// reading one as the current shape is the half-parse a version exists to stop.
+pub fn below_the_earliest(text: &str) -> bool {
+    says_no_version(text)
+        || crate::error::claimed_version(text).is_some_and(|claimed| claimed < EARLIEST_VERSION)
+}
+
+/// The registry document this build reads, or `None` where it already is one.
+///
+/// Nothing rather than an error over nonsense: what to make of that belongs to
+/// the caller, which knows what file it is holding. Idempotent, because it is
+/// reached twice — in memory on a read, and again on the run that writes it back.
+pub fn forward(document: &str) -> Result<Option<String>> {
+    let Ok(Value::Object(held)) = serde_json::from_str::<Value>(document) else {
+        return Ok(None);
+    };
+    if held.get("version").and_then(Value::as_u64) != Some(u64::from(EARLIEST_VERSION)) {
+        return Ok(None);
+    }
+
+    let mut moved = held.clone();
+    moved.insert("version".to_string(), Value::from(CARRIED_TO));
+
+    // Read before Global goes, since both of the Scopes below are made out of it.
+    let global = object(held.get("global"));
+    let inherited = object(global.get("settings"));
+
+    match held.get("active") {
+        Some(Value::String(email)) => {
+            moved.insert("active".to_string(), settled(email));
+        }
+        // Nobody is `Active`'s default and is not written down, so an `active`
+        // that named no Account leaves with the key gone rather than null.
+        None | Some(Value::Null) => {
+            moved.remove("active");
+        }
+        // A version 1 that already holds version 2's `Active` is a document
+        // whose number belies its shape. Dropping it would lose which Account
+        // the machine is on, silently.
+        Some(_) => return Err(shape_belies_the_version("active")),
+    }
+
+    if let Some(accounts) = held.get("accounts").and_then(Value::as_array) {
+        let carried: Vec<Value> = accounts.iter().map(cycling_may_choose_it).collect();
+        moved.insert("accounts".to_string(), Value::Array(carried));
+    }
+
+    let mut groups = Map::new();
+    for (name, held) in object(held.get("groups")) {
+        groups.insert(name.clone(), settings(&inherited, &object(Some(&held))));
+    }
+    moved.insert("groups".to_string(), Value::Object(groups));
+
+    moved.insert(
+        "ungrouped".to_string(),
+        ungrouped(&global, &inherited, &object(held.get("ungrouped"))),
+    );
+    moved.remove("global");
+
+    let mut checks = Map::new();
+    for (group, check) in object(held.get("checks")) {
+        let mut kept = object(Some(&check));
+        // The Account a Switch left was read by the no-return alone, and the
+        // no-return could never fire (ADR a-watcher-knob-is-arithmetic).
+        kept.remove("switched_off");
+        checks.insert(group.clone(), Value::Object(kept));
+    }
+    moved.insert("checks".to_string(), Value::Object(checks));
+
+    serde_json::to_string(&Value::Object(moved))
+        .map(Some)
+        .map_err(|err| PerchError::Other(format!("could not write the registry forward: {err}")))
+}
+
+/// Brings the registry on this machine forward, once, before anything reads it.
+///
+/// Shape 1's sequence without shape 1's door (ADR one-door-to-the-registry),
+/// which adopts a login where there is no registry. Reached from `main` because
+/// every path that writes takes the lock before the read `load` would do it in.
+pub fn bring_forward(host: &dyn Host) -> Result<()> {
+    let path = crate::registry::registry_path(host)?;
+    let Some(was) = behind(host, &path) else {
+        return Ok(());
+    };
+
+    let mut perch = crate::registry::lock(host)?;
+    // Asked again under the lock rather than trusted from outside it: between
+    // the two reads, another Perch may have brought the same file forward.
+    if behind(host, &path).is_none() {
+        return Ok(());
+    }
+    let Some(registry) = crate::registry::load(host)? else {
+        return Ok(());
+    };
+    // Through `save` rather than by writing what `forward` returned: it stamps
+    // the version, refuses what a later `load` could not read, and replaces the
+    // file in one step, so a migration that fails leaves the old shape intact.
+    crate::registry::save(host, &mut perch, &registry)?;
+
+    host.note(&format!(
+        "This machine's registry was written by an older Perch (version {was}), \
+         and has been brought forward to version {}. Nothing in it was lost, and \
+         no older Perch reads it now.",
+        crate::registry::CURRENT_VERSION,
+    ));
+    Ok(())
+}
+
+/// The version on disk, where [`forward`] has a step that moves it.
+///
+/// Asked of the step rather than of a range of its own: `save` stamps the current
+/// version on whatever it is given, so a document nothing moved must not be one
+/// this offers up — that would relabel a shape that never changed.
+fn behind(host: &dyn Host, path: &std::path::Path) -> Option<u32> {
+    let contents = host.read_file(path).ok()?;
+    let was = crate::error::claimed_version(&contents)?;
+    forward(&contents).ok()?.is_some().then_some(was)
+}
+
+/// The version [`forward`] leaves behind, which is the one this build reads. Its
+/// own name because the two numbers are one step rather than one field: a second
+/// step would read `CURRENT_VERSION` here and be wrong the day a third lands.
+const CARRIED_TO: u32 = crate::registry::CURRENT_VERSION;
+
+/// One Account, with the flag that inverted translated rather than dropped.
+///
+/// `enabled` defaulted to true where it was absent and `disabled` defaults to
+/// false, so only the Account that said `false` has anything to say now — and
+/// dropping the key instead would put a disabled Account back into Cycling.
+fn cycling_may_choose_it(account: &Value) -> Value {
+    let mut carried = object(Some(account));
+    let kept_out = carried
+        .remove("enabled")
+        .and_then(|enabled| enabled.as_bool())
+        .is_some_and(|enabled| !enabled);
+    if kept_out {
+        carried.insert("disabled".to_string(), Value::Bool(true));
+    }
+    Value::Object(carried)
+}
+
+/// What one Scope holds, out of what it said and what it Inherited.
+///
+/// Every Setting this build has, asked of the narrower first: reading what was
+/// Inherited off the compiled-in defaults would revert a value somebody set. A
+/// Setting this build lacks is never asked for, which is how the retired ones go.
+fn settings(inherited: &Map<String, Value>, said: &Map<String, Value>) -> Value {
+    let mut settings = object(serde_json::to_value(Settings::default()).ok().as_ref());
+    for (key, default) in settings.clone() {
+        let value = said
+            .get(&key)
+            .or_else(|| inherited.get(&key))
+            .cloned()
+            .unwrap_or(default);
+        settings.insert(key, value);
+    }
+    Value::Object(settings)
+}
+
+/// The Ungrouped Scope, which is Global's one Setting of its own beside the
+/// Settings the Accounts in no Group said for themselves.
+fn ungrouped(
+    global: &Map<String, Value>,
+    inherited: &Map<String, Value>,
+    said: &Map<String, Value>,
+) -> Value {
+    let mut ungrouped = object(
+        serde_json::to_value(UngroupedConfig::default())
+            .ok()
+            .as_ref(),
+    );
+    if let Some(declared) = global.get("cycle_ungrouped") {
+        ungrouped.insert("interchangeable".to_string(), declared.clone());
+    }
+    ungrouped.insert("settings".to_string(), settings(inherited, said));
+    Value::Object(ungrouped)
+}
+
+/// The Account the registry was left on, as `Active` spells it.
+fn settled(email: &str) -> Value {
+    let mut active = Map::new();
+    active.insert("settled".to_string(), Value::from(email));
+    Value::Object(active)
+}
+
+/// The refusal for a document holding one version's shape under another's
+/// number.
+///
+/// Neither mechanism catches it — the file parses and what comes back is wrong —
+/// so it is the one thing this step refuses rather than carries.
+fn shape_belies_the_version(field: &str) -> PerchError {
+    PerchError::Other(format!(
+        "This registry says it is version {EARLIEST_VERSION}, and its `{field}` \
+         is in a later shape. Perch will not guess which of the two the rest of \
+         the file is in."
+    ))
+}
+
+/// Whatever object was there, and an empty one otherwise. A v1 registry left out
+/// every key it had nothing to say about, so absent and empty are one case here.
+fn object(value: Option<&Value>) -> Map<String, Value> {
+    value
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A registry v0.2.0 wrote, serialized by v0.2.0's own serde impls.
+    const V0_2_0: &str = include_str!("../tests/fixtures/registry-v0.2.0.json");
+
+    /// A registry v0.1.1 wrote. The same `"version": 1` and a different shape:
+    /// whole `GroupConfig` values under `groups`, no `ungrouped`, and a `global`
+    /// holding nothing but the one flag.
+    const V0_1_1: &str = include_str!("../tests/fixtures/registry-v0.1.1.json");
+
+    fn forwarded(document: &str) -> Value {
+        let moved = forward(document)
+            .expect("a document a Perch wrote")
+            .expect("this one is not the shape this build reads");
+        serde_json::from_str(&moved).expect("what comes out is a document")
+    }
+
+    #[test]
+    fn a_document_this_build_already_reads_is_left_alone() {
+        let current = format!(
+            "{{\"version\":{},\"accounts\":[]}}",
+            crate::registry::CURRENT_VERSION
+        );
+        assert_eq!(forward(&current).expect("it is read"), None);
+    }
+
+    #[test]
+    fn nonsense_is_the_callers_to_refuse_rather_than_this_ones() {
+        for not_a_registry in ["", "not json at all", "[]", "{}"] {
+            assert_eq!(
+                forward(not_a_registry).expect("nothing is claimed about it"),
+                None,
+                "the case this is about: {not_a_registry:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_active_account_becomes_the_settled_one() {
+        assert_eq!(
+            forwarded(V0_2_0)["active"],
+            serde_json::json!({ "settled": "work@example.com" })
+        );
+    }
+
+    /// The polarity inverts, so dropping the key rather than translating it
+    /// would make a disabled Account live.
+    #[test]
+    fn an_account_kept_out_of_cycling_stays_out_of_it() {
+        let accounts = forwarded(V0_2_0)["accounts"].clone();
+        assert_eq!(accounts[0].get("disabled"), None, "one that was enabled");
+        assert_eq!(
+            accounts[1]["disabled"],
+            Value::Bool(true),
+            "and one that was not"
+        );
+        for account in accounts.as_array().expect("a list of Accounts") {
+            assert_eq!(account.get("enabled"), None, "under either spelling");
+        }
+    }
+
+    /// A Group that named two of its six Settings inherited the other four from
+    /// Global, and Global is what the migration has to read them out of: taking
+    /// the compiled-in defaults instead would silently revert a Setting somebody
+    /// set.
+    #[test]
+    fn a_group_that_overrode_some_settings_keeps_the_ones_it_inherited() {
+        assert_eq!(
+            forwarded(V0_2_0)["groups"]["work"],
+            serde_json::json!({
+                "strategy": "most-headroom",
+                "watcher_may_act": true,
+                "watcher_threshold_percent": 80,
+            })
+        );
+    }
+
+    #[test]
+    fn the_ungrouped_scope_is_global_and_what_the_ungrouped_accounts_said() {
+        assert_eq!(
+            forwarded(V0_2_0)["ungrouped"],
+            serde_json::json!({
+                "interchangeable": true,
+                "settings": {
+                    "strategy": "soonest-reset",
+                    "watcher_may_act": false,
+                    "watcher_threshold_percent": 85,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn a_scheduled_check_keeps_only_when_it_switched() {
+        assert_eq!(
+            forwarded(V0_2_0)["checks"]["work"],
+            serde_json::json!({ "switched_at": "2026-08-14T10:00:00Z" })
+        );
+    }
+
+    #[test]
+    fn what_never_moved_arrives_as_it_was() {
+        let moved = forwarded(V0_2_0);
+        assert_eq!(moved["version"], Value::from(2));
+        assert_eq!(
+            moved["aliases"],
+            serde_json::json!({ "w": "work@example.com" })
+        );
+        assert_eq!(moved["accounts"][0]["plan"], Value::from("max"));
+        assert_eq!(
+            moved["accounts"][0]["utilization"]["windows"][0]["used_percent"],
+            Value::from(42.0)
+        );
+        assert_eq!(moved.get("global"), None, "and Global is not among it");
+    }
+
+    /// The second shape `"version": 1` names. Its Groups are whole, so there is
+    /// nothing to inherit; its `global` holds no Settings to inherit from; and
+    /// the three retired watcher knobs are dropped rather than carried.
+    #[test]
+    fn the_shape_before_the_override_layer_comes_forward_too() {
+        let moved = forwarded(V0_1_1);
+        assert_eq!(
+            moved["groups"]["work"],
+            serde_json::json!({
+                "strategy": "most-headroom",
+                "watcher_may_act": true,
+                "watcher_threshold_percent": 80,
+            })
+        );
+        assert_eq!(
+            moved["ungrouped"],
+            serde_json::json!({
+                "interchangeable": true,
+                "settings": serde_json::to_value(Settings::default()).expect("the defaults"),
+            }),
+            "the Scope it never had, at the defaults it never said"
+        );
+        assert_eq!(moved["accounts"][1]["disabled"], Value::Bool(true));
+    }
+
+    /// Both documents, read as the types they are for rather than as JSON: the
+    /// one assertion that the shape is *this build's* and not merely close to it.
+    #[test]
+    fn what_comes_forward_is_what_this_build_deserializes() {
+        for (which, document) in [("v0.1.1", V0_1_1), ("v0.2.0", V0_2_0)] {
+            let moved = forward(document)
+                .expect("it comes forward")
+                .expect("it is not current");
+            let registry: crate::registry::Registry = serde_json::from_str(&moved)
+                .unwrap_or_else(|err| panic!("a registry {which} wrote should deserialize: {err}"));
+            assert_eq!(registry.version, crate::registry::CURRENT_VERSION);
+            assert_eq!(registry.accounts.len(), 2, "{which}");
+        }
+    }
+
+    /// Idempotence, which is what makes the step safe to reach twice: once in
+    /// memory on a read and once again on the run that writes it back.
+    #[test]
+    fn a_document_that_came_forward_does_not_come_forward_again() {
+        for document in [V0_1_1, V0_2_0] {
+            let moved = forward(document)
+                .expect("it comes forward")
+                .expect("it is not current");
+            assert_eq!(forward(&moved).expect("it is read"), None);
+        }
+    }
+
+    /// The refusal is about a version, so it is owed only where the document had
+    /// somewhere to say one and did not.
+    #[test]
+    fn a_document_that_says_no_version_is_told_from_one_serde_will_describe() {
+        assert!(says_no_version("{}"));
+        assert!(says_no_version(r#"{"accounts":[]}"#));
+        assert!(says_no_version(r#"{"version":null}"#));
+        assert!(!says_no_version(r#"{"version":2}"#));
+        assert!(
+            !says_no_version(r#"{"version":"2"}"#),
+            "a version that is not a number is said in serde's words about the value"
+        );
+        for not_a_document in ["not json at all", "[]", ""] {
+            assert!(!says_no_version(not_a_document), "{not_a_document:?}");
+        }
+    }
+
+    /// Both halves of the floor, which the registry and an Export's registry
+    /// share.
+    #[test]
+    fn a_version_below_the_earliest_and_none_at_all_are_one_answer() {
+        assert!(below_the_earliest(r#"{"version":0,"accounts":[]}"#));
+        assert!(below_the_earliest(r#"{"accounts":[]}"#));
+        assert!(!below_the_earliest(r#"{"version":1,"accounts":[]}"#));
+        assert!(!below_the_earliest(r#"{"version":2,"accounts":[]}"#));
+    }
+
+    /// A number that says one shape over a file holding another is the half-parse
+    /// both mechanisms miss, so it is refused rather than carried.
+    #[test]
+    fn a_version_1_holding_version_2s_active_is_refused() {
+        let belied = r#"{"version":1,"accounts":[],"active":{"settled":"someone@example.com"}}"#;
+
+        let refused = forward(belied).expect_err("it says 1 and holds 2");
+
+        assert!(refused.to_string().contains("later shape"), "{refused}");
+    }
+
+    #[test]
+    fn an_active_that_names_nobody_is_carried_as_nobody() {
+        for says_nobody in [
+            r#"{"version":1,"accounts":[]}"#,
+            r#"{"version":1,"accounts":[],"active":null}"#,
+        ] {
+            assert_eq!(
+                forwarded(says_nobody).get("active"),
+                None,
+                "the case this is about: {says_nobody}"
+            );
+        }
+    }
+
+    /// `UngroupedConfig`'s own default is where `interchangeable` being off
+    /// lives, so a v1 `global` that never said it is not a second place saying
+    /// so.
+    #[test]
+    fn a_global_that_declared_nothing_leaves_the_ungrouped_scope_at_its_default() {
+        let bare = r#"{"version":1,"accounts":[],"global":{}}"#;
+        assert_eq!(
+            forwarded(bare)["ungrouped"],
+            serde_json::to_value(UngroupedConfig::default()).expect("the defaults")
+        );
+    }
+}

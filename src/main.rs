@@ -362,6 +362,11 @@ fn main() {
 
     let cli = Cli::parse();
 
+    // Not the command's outcome, deliberately (ADR a-registry-comes-forward): an
+    // older registry is read correctly either way, so a lock somebody else holds
+    // costs the write-back alone and the next run takes it.
+    let _ = perch::migration::bring_forward(&host);
+
     let outcome = match cli.command {
         Command::Add {
             group,

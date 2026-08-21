@@ -5,14 +5,17 @@ mod common;
 use chrono::{TimeZone, Utc};
 use common::*;
 use perch::host::FakeHost;
-use perch::registry::Active;
+use perch::registry::{Active, CURRENT_VERSION};
 
 /// A machine where Perch has already adopted the login, with whatever
 /// Utilization the test wants in the cache.
+///
+/// Its version is read from the build rather than typed: a document whose
+/// number belies its shape is believed (ADR a-registry-comes-forward).
 fn adopted_machine(utilization: &str) -> FakeHost {
     let registry = format!(
         r#"{{
-  "version": 1,
+  "version": {CURRENT_VERSION},
   "active": {{"settled": "someone@example.com"}},
   "accounts": [
     {{

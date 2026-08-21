@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "active": "work@example.com",
+  "accounts": [
+    {
+      "identity": {
+        "email": "work@example.com",
+        "account_uuid": "uuid-work@example.com",
+        "organization_name": "Acme",
+        "organization_uuid": "org-1"
+      },
+      "plan": "max",
+      "enabled": true,
+      "group": "work",
+      "utilization": {
+        "observed_at": "2026-08-14T09:59:00Z",
+        "windows": [
+          {
+            "window": "5-hour",
+            "used_percent": 42.0,
+            "resets_at": "2026-08-14T13:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "identity": {
+        "email": "old@example.com",
+        "account_uuid": "uuid-old@example.com",
+        "organization_name": "Acme",
+        "organization_uuid": "org-1"
+      },
+      "enabled": false
+    }
+  ],
+  "aliases": {
+    "w": "work@example.com"
+  },
+  "groups": {
+    "work": {
+      "watcher_may_act": true,
+      "watcher_threshold_percent": 80
+    }
+  },
+  "ungrouped": {
+    "strategy": "soonest-reset"
+  },
+  "global": {
+    "cycle_ungrouped": true,
+    "settings": {
+      "strategy": "most-headroom",
+      "watcher_may_act": false,
+      "watcher_threshold_percent": 85,
+      "watcher_cooldown_minutes": 15,
+      "watcher_margin_percent": 10,
+      "watcher_no_return": true
+    }
+  },
+  "checks": {
+    "work": {
+      "switched_at": "2026-08-14T10:00:00Z",
+      "switched_off": "old@example.com"
+    }
+  }
+}
