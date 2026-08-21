@@ -59,8 +59,8 @@ pub fn forward(document: &str) -> Result<Option<String>> {
     moved.insert("version".to_string(), Value::from(CARRIED_TO));
 
     // Read before Global goes, since both of the Scopes below are made out of it.
-    let global = object(held.get("global"));
-    let inherited = object(global.get("settings"));
+    let global = object("global", held.get("global"))?;
+    let inherited = object("global.settings", global.get("settings"))?;
 
     match held.get("active") {
         Some(Value::String(email)) => {
@@ -78,25 +78,30 @@ pub fn forward(document: &str) -> Result<Option<String>> {
     }
 
     if let Some(accounts) = held.get("accounts").and_then(Value::as_array) {
-        let carried: Vec<Value> = accounts.iter().map(cycling_may_choose_it).collect();
+        let carried = accounts
+            .iter()
+            .map(cycling_may_choose_it)
+            .collect::<Result<Vec<Value>>>()?;
         moved.insert("accounts".to_string(), Value::Array(carried));
     }
 
     let mut groups = Map::new();
-    for (name, held) in object(held.get("groups")) {
-        groups.insert(name.clone(), settings(&inherited, &object(Some(&held))));
+    for (name, held) in object("groups", held.get("groups"))? {
+        let said = object(&format!("groups.{name}"), Some(&held))?;
+        groups.insert(name.clone(), settings(&inherited, &said));
     }
     moved.insert("groups".to_string(), Value::Object(groups));
 
+    let said = object("ungrouped", held.get("ungrouped"))?;
     moved.insert(
         "ungrouped".to_string(),
-        ungrouped(&global, &inherited, &object(held.get("ungrouped"))),
+        ungrouped(&global, &inherited, &said),
     );
     moved.remove("global");
 
     let mut checks = Map::new();
-    for (group, check) in object(held.get("checks")) {
-        let mut kept = object(Some(&check));
+    for (group, check) in object("checks", held.get("checks"))? {
+        let mut kept = object(&format!("checks.{group}"), Some(&check))?;
         // The Account a Switch left was read by the no-return alone, and the
         // no-return could never fire (ADR a-watcher-knob-is-arithmetic).
         kept.remove("switched_off");
@@ -164,8 +169,8 @@ const CARRIED_TO: u32 = crate::registry::CURRENT_VERSION;
 /// `enabled` defaulted to true where it was absent and `disabled` defaults to
 /// false, so only the Account that said `false` has anything to say now — and
 /// dropping the key instead would put a disabled Account back into Cycling.
-fn cycling_may_choose_it(account: &Value) -> Value {
-    let mut carried = object(Some(account));
+fn cycling_may_choose_it(account: &Value) -> Result<Value> {
+    let mut carried = object("an entry in `accounts`", Some(account))?;
     let kept_out = carried
         .remove("enabled")
         .and_then(|enabled| enabled.as_bool())
@@ -173,7 +178,7 @@ fn cycling_may_choose_it(account: &Value) -> Value {
     if kept_out {
         carried.insert("disabled".to_string(), Value::Bool(true));
     }
-    Value::Object(carried)
+    Ok(Value::Object(carried))
 }
 
 /// What one Scope holds, out of what it said and what it Inherited.
@@ -182,7 +187,7 @@ fn cycling_may_choose_it(account: &Value) -> Value {
 /// Inherited off the compiled-in defaults would revert a value somebody set. A
 /// Setting this build lacks is never asked for, which is how the retired ones go.
 fn settings(inherited: &Map<String, Value>, said: &Map<String, Value>) -> Value {
-    let mut settings = object(serde_json::to_value(Settings::default()).ok().as_ref());
+    let mut settings = own(serde_json::to_value(Settings::default()).unwrap_or_default());
     for (key, default) in settings.clone() {
         let value = said
             .get(&key)
@@ -201,11 +206,7 @@ fn ungrouped(
     inherited: &Map<String, Value>,
     said: &Map<String, Value>,
 ) -> Value {
-    let mut ungrouped = object(
-        serde_json::to_value(UngroupedConfig::default())
-            .ok()
-            .as_ref(),
-    );
+    let mut ungrouped = own(serde_json::to_value(UngroupedConfig::default()).unwrap_or_default());
     if let Some(declared) = global.get("cycle_ungrouped") {
         ungrouped.insert("interchangeable".to_string(), declared.clone());
     }
@@ -233,13 +234,35 @@ fn shape_belies_the_version(field: &str) -> PerchError {
     ))
 }
 
+/// The refusal for a field this step reads as an object and this document holds
+/// as something else.
+///
+/// Carrying it would mean carrying an empty one, which is the loss neither the
+/// migration nor a later refusal can catch.
+fn no_object_here(field: &str) -> PerchError {
+    PerchError::Other(format!(
+        "This registry says it is version {EARLIEST_VERSION}, and its `{field}` \
+         is not the shape a version {EARLIEST_VERSION} registry wrote. Perch \
+         will not read past it, because what it holds would be dropped rather \
+         than refused."
+    ))
+}
+
 /// Whatever object was there, and an empty one otherwise. A v1 registry left out
-/// every key it had nothing to say about, so absent and empty are one case here.
-fn object(value: Option<&Value>) -> Map<String, Value> {
-    value
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default()
+/// every key it had nothing to say about, so absent and empty are one case here
+/// — and anything that is no object at all is the case [`no_object_here`] is for.
+fn object(field: &str, value: Option<&Value>) -> Result<Map<String, Value>> {
+    match value {
+        None | Some(Value::Null) => Ok(Map::new()),
+        Some(Value::Object(held)) => Ok(held.clone()),
+        Some(_) => Err(no_object_here(field)),
+    }
+}
+
+/// A shape of Perch's own, as a map. Both callers serialize a struct, so there
+/// is no value here a document could have chosen.
+fn own(value: Value) -> Map<String, Value> {
+    value.as_object().cloned().unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -461,6 +484,39 @@ mod tests {
                 None,
                 "the case this is about: {says_nobody}"
             );
+        }
+    }
+
+    /// Every field this step reads as an object, held as something else. Each
+    /// was carried as an empty one before, which is a Setting reverted to a
+    /// default or a Cooldown gone — under a note saying nothing was lost.
+    #[test]
+    fn a_field_that_is_no_object_is_refused_rather_than_carried_as_an_empty_one() {
+        for (field, document) in [
+            ("global", r#"{"version":1,"accounts":[],"global":[]}"#),
+            (
+                "global.settings",
+                r#"{"version":1,"accounts":[],"global":{"settings":7}}"#,
+            ),
+            ("groups", r#"{"version":1,"accounts":[],"groups":[]}"#),
+            (
+                "groups.work",
+                r#"{"version":1,"accounts":[],"groups":{"work":"watcher_may_act"}}"#,
+            ),
+            ("ungrouped", r#"{"version":1,"accounts":[],"ungrouped":""}"#),
+            (
+                "checks",
+                r#"{"version":1,"accounts":[],"checks":[{"group":"work"}]}"#,
+            ),
+            (
+                "checks.work",
+                r#"{"version":1,"accounts":[],"checks":{"work":"2026-01-01T00:00:00Z"}}"#,
+            ),
+            ("an entry in `accounts`", r#"{"version":1,"accounts":["a"]}"#),
+        ] {
+            let refused = forward(document).expect_err("the case this is about: {document}");
+            let said = refused.to_string();
+            assert!(said.contains(field), "{field} is the one to name: {said}");
         }
     }
 
