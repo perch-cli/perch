@@ -2062,6 +2062,11 @@ impl port::Network for FakeHost {
     /// all otherwise — so a command that fetches when it should not fails rather
     /// than quietly succeeding. Every request is recorded either way.
     fn http(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, HostError> {
+        // Asked before the arrangement is consulted, because the real adapter
+        // asks before it spawns `curl`: a request it would refuse must not be
+        // one a suite can answer.
+        crate::host::sendable(request)?;
+
         let sent = Sent {
             url: request.url.to_string(),
             headers: request
@@ -2115,6 +2120,30 @@ mod tests {
     use super::*;
     // The one concern these tests reach that the file's own body does not.
     use super::port::Links as _;
+
+    /// An access token comes out of a file Perch does not author, so one
+    /// carrying a newline is a request the real adapter refuses before it
+    /// spawns `curl`. A fake that answered it would prove a Refresh, a Back-off
+    /// and a Quarantine decision against a request no machine would make.
+    #[test]
+    fn a_request_the_real_adapter_would_not_send_is_not_one_the_fake_answers() {
+        use super::port::Network as _;
+
+        let host = FakeHost::new().with_reply("https://example.test/usage", 200, "{}");
+
+        for refused in [
+            HttpRequest::get(
+                "https://example.test/usage",
+                &[("Authorization", "Bearer sk-ant\noutput = /tmp/taken")],
+            ),
+            HttpRequest::post("https://example.test/usage", &[], "@/etc/passwd"),
+        ] {
+            assert!(
+                host.http(&refused).is_err(),
+                "the fake answered what the real adapter refuses"
+            );
+        }
+    }
 
     /// The fixture is a Profile holding a link into a Default Profile that has
     /// gone, which `reconcile::sweep` exists to prevent and a machine can still

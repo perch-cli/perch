@@ -123,23 +123,7 @@ fn curl_config(request: &HttpRequest<'_>) -> Result<String, HostError> {
     // A configuration file is read a line at a time and has no escape a newline
     // could be quoted into, so a token carrying one would end the `header` line
     // and begin whatever the rest of it spelled.
-    super::inert("the URL", request.url)?;
-    for (name, value) in request.headers {
-        super::inert(&format!("the {name} header"), value)?;
-    }
-    if let Some(body) = request.body {
-        super::inert("the request body", body)?;
-        // `curl`'s own escape, which quoting does not disarm: a leading `@` in
-        // `data-binary` is read as a filename. Only the body, because `@` means
-        // nothing to `url` or to `header`.
-        if body.starts_with('@') {
-            return Err(HostError::Other(
-                "the request body begins with `@`, which curl reads as a \
-                 filename rather than as data"
-                    .to_string(),
-            ));
-        }
-    }
+    super::sendable(request)?;
 
     // Whole seconds, because that is the only unit `curl` takes here, and at
     // least one: a bound that rounded down to zero would mean *no* bound.

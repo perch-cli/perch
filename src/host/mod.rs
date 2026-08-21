@@ -256,6 +256,29 @@ pub fn inert(what: &str, value: &str) -> Result<(), HostError> {
     }
 }
 
+/// What no adapter may send, whichever one is answering.
+///
+/// The URL, every header value and the body are lines of a `curl` configuration
+/// file, and a `@` opening the body is a filename to it. Here rather than in the
+/// real adapter, so the fake cannot answer a request no machine would make.
+pub fn sendable(request: &HttpRequest<'_>) -> Result<(), HostError> {
+    inert("the URL", request.url)?;
+    for (name, value) in request.headers {
+        inert(&format!("the {name} header"), value)?;
+    }
+    if let Some(body) = request.body {
+        inert("the request body", body)?;
+        if body.starts_with('@') {
+            return Err(HostError::Other(
+                "the request body begins with `@`, which curl reads as a \
+                 filename rather than as data"
+                    .to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// The first control character in a value, named the way a refusal names one.
 /// Shared with [`crate::keychain`]'s refusal, for the reason [`double_quoted`]
 /// is one copy. What each caller *says* about it stays theirs: the two protocols
