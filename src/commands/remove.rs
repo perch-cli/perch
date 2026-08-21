@@ -1,24 +1,13 @@
 //! `perch remove <target>` — giving up an Account when a subscription is
 //! retired.
 //!
-//! The only command that destroys anything. It forgets the Account, deletes the
-//! Credential Perch holds for it and takes its Profile with it, so it stops
-//! being listed, stops being a Cycle candidate, and frees the Alias it answered
-//! to. Everything else about Perch is reversible; this is not, which is what
-//! shapes the rest of the command.
-//!
-//! Removing an Account nobody is on is unremarkable and asks nothing. Removing
-//! the **active** Account is the case that needs care, because the live
-//! Credential belongs to the Account being given up: Perch names the Account it
-//! will leave active, lands on it first, and only then deletes anything. So the
-//! machine is never left running as an Account Perch has forgotten
+//! It forgets the Account, deletes the Credential Perch holds for it and takes
+//! its Profile with it, so it stops being listed, stops being a Cycle candidate,
+//! and frees the Alias it answered to. None of that can be undone, which shapes
+//! the rest of the command: removing the **active** Account means the live
+//! Credential belongs to the Account being given up, so Perch names the Account
+//! it will leave active and lands on it first
 //! (ADR a-removal-lands-first).
-//!
-//! Where there is nowhere to land — the last Account, or nothing left that
-//! Cycling would ever choose — the removal is still allowed and still confirmed,
-//! and says plainly that Perch will hold no active Account afterwards. What it
-//! does not do is log anybody out: the live Credential in the Default Profile is
-//! not Perch's to take away.
 
 use std::io::Write;
 
@@ -36,11 +25,9 @@ use crate::target;
 
 /// Why this command writes into the Default Profile, named for the two places
 /// that have to agree about it: the refusal somebody meets *before* the
-/// question, and the one [`switch::make_live`] raises after it.
-///
-/// A constant because they are meant to be the same sentence and nothing was
-/// making them one. Two literals that must match by hand is how a user comes to
-/// be told one thing when Perch asks and another when it acts.
+/// question, and the one [`switch::make_live`] raises after it. A constant
+/// because two literals that must match by hand is how a user comes to be told
+/// one thing when Perch asks and another when it acts.
 const WHY_THE_DEFAULT_PROFILE: &str = "the Default Profile, which is where the Account Perch would land on has to \
      be written";
 
@@ -68,8 +55,7 @@ impl Consequence {
     /// Whether the user is asked before this happens.
     ///
     /// The two cases are the two that change what the machine is: giving up the
-    /// Account you are on, and giving up the last one Perch holds. Every other
-    /// removal takes away something nothing is using.
+    /// Account you are on, and giving up the last one Perch holds.
     fn is_asked_about(&self) -> bool {
         self.is_active || self.remaining == 0
     }
@@ -78,12 +64,9 @@ impl Consequence {
 pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()> {
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
 
-    // Removing the active Account lands somewhere first
-    // (ADR a-removal-lands-first), which reaches `make_live` — so this is a
-    // Switch path, and it resolves a Landing before anything reads which
-    // Account is active (ADR a-switch-is-written-down-first). Before the
-    // question rather than after it, because who is active is half of what the
-    // user is being asked to agree to.
+    // Removing the active Account lands somewhere first, which reaches
+    // `make_live` — so this is a Switch path, and it resolves a Landing before
+    // anything reads who is active (ADR a-switch-is-written-down-first).
     switch::resolve_a_landing(host, &mut perch, &mut registry)?;
 
     let found = target::resolve_account(&registry, &args.target)?;
@@ -94,26 +77,9 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     // not one to ask about giving up (ADR a-profile-is-live-by-evidence).
     let consequence = consequence_of(&registry, &account);
 
-    // Once per command, which is [`Installed`]'s own rule: the answer cannot
-    // change under a process that is already running, and the reading is a
-    // subprocess — a `PATH` walk and a `claude --version` each time. Probed
-    // inside the helper below, which is called twice, and again inside
-    // `make_live`, one removal ran three.
-    //
-    // A machine that cannot say which Claude Code it has is still a machine an
-    // Account can be given up on. The version is not what answers the liveness
-    // question — session markers are, and they are read straight off the
-    // Profile — it is only what a refusal quotes when the markers cannot be
-    // read. Propagated, it refused the whole removal on a machine where Claude
-    // Code had been uninstalled, leaving `perch holdings purge` as the only way
-    // to give up one lapsed subscription. `export::the_live_store` swallows it
-    // for the same reason.
-    //
-    // Hoisted here rather than left inside the helper so that the *landing*
-    // gets the same tolerance: `make_live` probed for itself, so removing the
-    // active Account on an uninstalled machine still failed — after the user
-    // had agreed to it, and with the escape hatch the swallow was written to
-    // avoid still being the only way out.
+    // Once per command, which is [`Installed`]'s own rule, and tolerated where
+    // it fails: the liveness question is answered by Markers rather than by the
+    // version, and giving up a lapsed subscription outlives the uninstall.
     let installed =
         Installed::probed(host).unwrap_or_else(|_| Installed::unknown("(not installed)"));
 
@@ -123,21 +89,14 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
         return say(out, "Nothing was removed.");
     }
 
-    // Asked again, for the same reason the hold below is re-checked and over
-    // the same window: somebody may have started a client while the question
-    // sat there, and an answer about the machine as it was before lunch says
-    // nothing about the Profile this is about to delete. `perch holdings purge`
-    // and `perch relogin` both ask twice; this is the only command that deletes
-    // a Credential, and it was asking once.
+    // Asked again: somebody may have started a client while the question sat
+    // there, and an answer about the machine as it was before lunch says nothing
+    // about the Profile this is about to delete.
     refuse_while_anything_is_running(host, &account, &consequence, &installed)?;
 
-    // The question above is the one wait in Perch with no bound on it — somebody
-    // may answer it in a second or walk away and answer it after lunch — so it
-    // is the one place the registry lock can go stale under a command that is
-    // otherwise behaving. Asked here, before the first irreversible thing:
-    // everything from this line on deletes Credentials, and finding out
-    // afterwards that the registry recording them was never ours to write is
-    // finding out too late.
+    // The question above is the one wait in Perch with no bound on it, so it is
+    // the one place the registry lock can go stale under a command that is
+    // otherwise behaving. Asked before the first thing that cannot be undone.
     still_ours(&mut perch, "removed")?;
 
     // Somewhere to land before anything is deleted. A failure here has cost
@@ -171,13 +130,10 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
 }
 
 /// The two Profiles this removal writes into, refused while a client is holding
-/// either.
-///
-/// One place, because it is asked twice — once so a machine that was never
-/// going to allow this is not put through the question, and once after the
-/// answer, because the question is unbounded and the first answer is about a
-/// machine that has moved on. Two spellings of the same pair of checks is how
-/// the second ask comes to be weaker than the first.
+/// either. One place, because it is asked twice — once so a machine that was
+/// never going to allow this is not put through the question, and once after the
+/// answer, because the question is unbounded and two spellings of one pair of
+/// checks is how the second ask comes to be weaker than the first.
 fn refuse_while_anything_is_running(
     host: &dyn Host,
     account: &Account,
@@ -203,42 +159,17 @@ fn consequence_of(registry: &Registry, account: &Account) -> Consequence {
             .then(|| successor(registry, account).cloned())
             .flatten(),
         // Saturating. The subtraction is sound only because
-        // `target::resolve_account` has already matched, so `accounts` is not
-        // empty — and nothing in the type or the signature says so. What
-        // `remaining == 0` decides is half of `Consequence::is_asked_about`,
-        // which is whether `perch remove` confirms before it deletes a
-        // Credential; and the release profile sets no `overflow-checks`, so a
-        // regression here would wrap to `usize::MAX` in the shipped binary and
-        // quietly stop asking rather than crash.
+        // `target::resolve_account` has matched, and the release profile sets no
+        // `overflow-checks`, so a regression would wrap and stop asking.
         remaining: registry.accounts.len().saturating_sub(1),
     }
 }
 
-/// The Account that will be left active when the active one is given up.
-///
-/// The Group comes first: Accounts in one Group are the ones the user has
-/// declared interchangeable (ADR a-group-is-a-declaration), so landing there is
-/// the only landing they have endorsed in advance. Failing that, any Account
-/// Perch holds will do — which is not a Cycle leaving its scope but a forced
-/// choice, made in front of the user and agreed to before it happens.
-///
-/// Never a Quarantined Account, whose Credential does not work, and never a
-/// disabled one: never being chosen for you is the whole of what disabled means,
-/// and this is Perch choosing.
-///
-/// Which is [`cycle::is_a_candidate`], and asked rather than written out again.
-/// It was the same pair of conditions spelled a second time, and that predicate
-/// exists precisely so what a Cycle may choose and what a figure is measured
-/// over cannot drift apart — a Remove choosing an Account no Cycle would is the
-/// same divergence arriving through a third door.
-///
-/// It stays here rather than joining `cycle`, because it is not a Cycle. A
-/// Cycle stays inside the scope it started in (ADR a-group-is-a-declaration)
-/// and this deliberately leaves one when it has to; what makes that acceptable
-/// is that it is said out loud and agreed to first (ADR a-removal-lands-first),
-/// which is a property of the command rather than of the rule. Filing it under
-/// `cycle` would put a forced choice among the choices the user endorsed in
-/// advance.
+/// The Account that will be left active when the active one is given up: one in
+/// the same Group first, because those are the ones the user has declared
+/// interchangeable (ADR a-group-is-a-declaration), then any
+/// [`cycle::is_a_candidate`]. Not filed under `cycle`, because a Cycle stays
+/// inside its scope and this leaves one when it has to.
 fn successor<'a>(registry: &'a Registry, leaving: &Account) -> Option<&'a Account> {
     let candidates = || {
         registry.accounts.iter().filter(|held| {
@@ -255,8 +186,7 @@ fn successor<'a>(registry: &'a Registry, leaving: &Account) -> Option<&'a Accoun
 /// Whether this removal is to go ahead.
 ///
 /// Everything that will happen is said before the question, because "removing
-/// the active Account" is only half of what the user needs to agree to — the
-/// other half is where they will be standing afterwards.
+/// the active Account" is only half of what the user needs to agree to.
 fn agreed(
     host: &dyn Host,
     out: &mut dyn Write,
@@ -308,12 +238,9 @@ fn what_it_would_leave(
              with it: holding it again would mean `perch add`.",
             registry.named_for_the_user(successor.email()),
         ),
-        // Two different states wear the same shape here. Removing the *active*
-        // Account with nowhere to land leaves the machine running as it, which
-        // is worth saying. Removing the last Account when Perch is on nobody
-        // does not: the live Credential may be another Account's, or there may
-        // be none, and asking the user to agree to a description of a state
-        // that is not theirs is asking them to agree to nothing.
+        // Removing the *active* Account with nowhere to land leaves the machine
+        // running as it, which is worth saying. Removing the last Account when
+        // Perch is on nobody describes a state that is not theirs.
         None if consequence.is_active => format!(
             "Nothing Perch holds can be left active in its place, so it will \
              hold no active Account afterwards. Claude Code goes on running as \
@@ -334,24 +261,10 @@ fn what_it_would_leave(
 }
 
 /// Makes the successor's Credential the live one before the Account being given
-/// up is destroyed, and records it as the active one the moment it becomes so.
-///
-/// Not a Switch, which Captures the outgoing Credential first
-/// (ADR a-switch-is-written-down-first). What is live here is the Credential of
-/// the Account being removed, and Capturing it would copy it into a Profile
-/// that is about to be deleted — work that can only fail, on the way to a
-/// directory that will not exist.
-///
-/// The active pointer is written here rather than with the rest of the registry
-/// at the end, because everything between the two is destructive and any of it
-/// can fail. Being active is a fact about which Credential is in the Default
-/// Profile, not a wish: a `remove` that stopped after the landing would
-/// otherwise leave `active` naming an Account whose Credential is no longer
-/// live, and the next Switch would Capture the successor's live Credential over
-/// that Account's own copy and destroy it (ADR a-switch-is-written-down-first).
-/// Written whether the landing finished or not, for the same reason — a
-/// Credential that reached the Default Profile is live even if the Identity
-/// beside it was never patched.
+/// up is destroyed, and records it as active the moment it becomes so — here
+/// rather than with the rest of the registry at the end, because everything
+/// between is destructive and can fail. Written whether the landing finished or
+/// not: a Credential that reached the Default Profile is live either way.
 fn land_on(
     host: &dyn Host,
     perch: &mut Held<'_>,
@@ -400,9 +313,8 @@ fn land_on(
     })?;
 
     // Which Account, and nothing about its Credential being the live one: a
-    // Landing that succeeded always made it so, and the two arms above are
-    // where one that did not says which half is behind
-    // (ADR perch-says-what-it-did).
+    // Landing that succeeded always made it so, and the two arms above are where
+    // one that did not says which half is behind (ADR perch-says-what-it-did).
     say(
         out,
         &format!(
@@ -420,8 +332,8 @@ enum Deleted {
     Credential,
     /// Both stores were asked and neither held anything to take. The Profile is
     /// gone, but nothing was destroyed — and saying otherwise would tell
-    /// somebody a Credential is beyond recovery when it may be sitting in a
-    /// keychain under a different `$USER` than this shell has.
+    /// somebody a Credential is beyond recovery when it may be in a keychain
+    /// under a different `$USER`.
     NothingWasThere,
     /// Left where it is, because another Account Perch holds keeps its own
     /// Credential in the same Profile.
@@ -429,27 +341,18 @@ enum Deleted {
 }
 
 /// Deletes the Credential Perch holds for an Account, and the Profile that held
-/// it.
-///
-/// A store that will not give its Credential up stops the removal rather than
-/// being shrugged off. This is the whole of what `perch remove` promises beyond
-/// forgetting a row, and it happens while the Account is still in the registry
-/// on purpose: an Account dropped first could not be named again to try it.
-///
-/// The directory is the other way round. Once both stores have given up what
-/// they hold it carries nothing secret — only the Identity block Claude Code
-/// wrote — so one that will not go is worth a remark rather than a refusal with
-/// nothing left to protect.
+/// it. A store that will not give its Credential up stops the removal, while the
+/// Account is still in the registry: one dropped first could not be named again
+/// to try it. The directory is the other way round — emptied of both stores it
+/// carries nothing secret, so one that will not go is a remark, not a refusal.
 fn delete_the_credential_and_its_profile(
     host: &dyn Host,
     registry: &Registry,
     account: &Account,
 ) -> Result<Deleted> {
-    // Two Accounts whose email addresses slug to one directory share a Profile,
-    // and with it a Credential Store. Deleting it would take the Credential of
-    // an Account nobody asked to give up — so the Account is still forgotten,
-    // and the outcome says the Credential is not gone rather than claiming a
-    // deletion that did not happen.
+    // Two Accounts whose addresses slug to one directory share a Credential
+    // Store, so deleting it would take the Credential of an Account nobody asked
+    // to give up. The Account is still forgotten; the outcome says which.
     if let Some(sharer) = registry.accounts.iter().find(|held| {
         !registry::same_name(held.email(), account.email())
             && registry::same_profile(held.email(), account.email())
@@ -462,24 +365,14 @@ fn delete_the_credential_and_its_profile(
     let store = account.store(host)?;
     let mut anything_was_there = false;
     for kept_in in credentials::stores_for(host, &store) {
-        // A Profile has two stores and they are emptied in order, so by the time
-        // the second refuses the first may already be empty. Saying "Nothing was
-        // removed" there is a claim about a Credential that is gone — on macOS
-        // the keychain item goes first and the file second, and a Profile with
-        // one of the two emptied is one `perch switch` may already be unable to
-        // use. The Account stays in the registry either way, so running the
-        // command again is still the answer; what changes is whether the user
-        // has been told they are now relying on it.
+        // A Profile has two stores emptied in order, so by the time the second
+        // refuses the first may be empty already — and "Nothing was removed"
+        // there is a claim about a Credential that is gone.
         let forgotten = kept_in.forget(host).map_err(|error| {
             let so_far = match anything_was_there {
                 // Said as the state it is rather than as a Quarantine, which
                 // this is not: a Quarantine is a thing the registry *records*,
-                // carrying the reason it happened, and nothing here records one
-                // — the failure leaves `run` before `registry.forget` and before
-                // any save, exactly as the paragraph above intends. A user told
-                // their Account was Quarantined and then shown `perch list`
-                // rendering it as healthy has been told about a state Perch does
-                // not hold.
+                // and nothing here records one.
                 true => format!(
                     "{}'s Credential has already been taken out of its other \
                      store, so a Switch onto it may no longer work",
@@ -520,11 +413,8 @@ fn report(
     deleted: &Deleted,
 ) -> Result<()> {
     // Silent on the ordinary outcome, which is every Remove that found a
-    // Credential and deleted it: that is what a Remove *is*, so saying it is
-    // the ordinary case announcing that it was ordinary
-    // (ADR perch-says-what-it-did). The two outcomes that are not what the
-    // guide describes still speak in full — one destroyed nothing, and one left
-    // a Credential where it was.
+    // Credential and deleted it: that is what a Remove *is*. The two that are
+    // not still speak in full.
     let credential = match deleted {
         Deleted::Credential => String::new(),
         Deleted::NothingWasThere => format!(

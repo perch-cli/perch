@@ -1,17 +1,13 @@
 //! Behavior: what Perch does with an Account whose Credential has stopped
 //! working for good.
 //!
-//! ADR a-switch-is-written-down-first makes this the terminal state of the
-//! capture design rather than a feature: a Rotation lost between two writes
-//! leaves an Account that no amount of retrying will fix. The whole of the
-//! design is that such an Account is *kept* — listed, named, and clearly
-//! broken, with the reason it broke — because an Account that vanishes reads as
-//! data loss while a broken one reads as something needing attention.
-//!
-//! So these tests are about three things: that the terminal failures are told
-//! apart from the ones worth retrying, that the reason survives to every surface
-//! a person or a script reads, and that nothing quietly switches to an Account
-//! Perch knows will not work.
+//! The terminal state of the Capture design rather than a feature
+//! (ADR a-switch-is-written-down-first): a Rotation lost between two writes
+//! leaves an Account no amount of retrying will fix, and such an Account is
+//! *kept* — listed, named and clearly broken, with the reason — because one that
+//! vanishes reads as data loss. So: the terminal failures told apart from the
+//! ones worth retrying, the reason surviving to every surface, and nothing
+//! quietly switching to an Account known to fail.
 
 mod common;
 
@@ -106,9 +102,8 @@ fn a_credential_anthropic_will_not_renew_quarantines_its_account() {
 #[test]
 fn a_rotation_that_could_not_be_stored_quarantines_rather_than_reading_as_a_failed_write() {
     // The Credential is in the file store, which is about to become unwritable,
-    // and the keychain will not take it either. Both halves of
-    // ADR a-switch-is-written-down-first's dangerous moment: Anthropic has
-    // retired the old refresh token and Perch cannot keep the new one.
+    // and the keychain will not take it either: Anthropic has retired the old
+    // refresh token and Perch cannot keep the new one.
     let host = machine_with_two_accounts()
         .with_unwritable_file(CREDENTIALS_PATH, "no space left on device")
         .with_reply(TOKEN_URL, 200, RENEWED);
@@ -128,13 +123,6 @@ fn a_rotation_that_could_not_be_stored_quarantines_rather_than_reading_as_a_fail
     );
 }
 
-/// The other half of the same moment, and the one that must not read the same
-/// way. A Renewal only sometimes Rotates: where Anthropic handed no new refresh
-/// token over, the one Perch holds is untouched and still buys a token, so the
-/// write that failed cost a cached access token and nothing else. Quarantining
-/// there would take an Account out for good over a keychain somebody had
-/// locked for the afternoon — and a `perch list <group> --refresh` would take
-/// the whole Group out that way, each with a reason that is not true.
 #[test]
 fn a_renewal_that_rotated_nothing_is_a_failed_reading_rather_than_a_quarantine() {
     let host = machine_with_two_accounts()
@@ -244,12 +232,6 @@ fn a_refusal_that_might_pass_is_not_a_quarantine() {
     );
 }
 
-/// The refusal that is about Perch rather than about the Account. A token
-/// endpoint answers `invalid_client` with a 401, and `invalid_client` is a
-/// statement about the `client_id` in the request — Perch's own, hard-coded,
-/// and the same in every renewal it ever sends. Read as "this refresh token is
-/// retired", one such answer walks a whole Group and Quarantines every Account
-/// in it in a single pass, and only a browser login for each would clear it.
 #[test]
 fn a_renewal_refused_over_something_other_than_the_token_quarantines_nobody() {
     let host = machine_with_two_accounts();
@@ -425,13 +407,6 @@ fn an_account_quarantined_by_a_refresh_leaves_the_cycling_pool_from_that_moment(
     assert_eq!(registry_of(&host).active().whose(), Some(EMAIL));
 }
 
-/// The Default Profile is not Perch's alone to write. Somebody who runs
-/// `claude` and logs in directly leaves Perch's record of who is active behind,
-/// and when *their* login later dies a refresh reads their dead Credential —
-/// and would condemn the Account Perch believes is active, whose own Profile
-/// still holds a perfectly good copy. ADR a-figure-names-its-account says a
-/// figure is recorded only against the Account it was read for, and a
-/// Quarantine is a recording too.
 #[test]
 fn a_credential_that_may_be_somebody_elses_quarantines_nobody() {
     let host = about_to_renew(SPENT).with_reply(TOKEN_URL, 401, RETIRED);
@@ -463,21 +438,6 @@ fn a_credential_that_may_be_somebody_elses_quarantines_nobody() {
     );
 }
 
-/// The half of a Landing that is *arriving* is asked about with the copy in its
-/// own Profile — and that copy is the one a Rotation of the live one retires.
-///
-/// A Switch writes the Landing down, copies the arriving Account's Credential
-/// into the Default Profile, and is killed before it records anything. That
-/// Credential is now live, and a Claude Code Renewal against it may Rotate —
-/// which retires the copy still sitting in the arriving Account's own Profile.
-/// A Refresh then reads that Profile, is turned down, and used to write a
-/// Quarantine that only a browser login clears, against an Account whose
-/// working Credential was live on the same machine the whole time.
-///
-/// `holding` reads *both* halves out of their own Profiles during a Landing —
-/// nothing is settled, so neither is the active one — so the `its_own_profile`
-/// arm of the ADR a-figure-names-its-account guard let the terminal verdict
-/// straight through.
 #[test]
 fn a_switch_in_flight_is_not_evidence_that_the_account_arriving_is_broken() {
     let host = machine_with_two_accounts();
@@ -507,15 +467,6 @@ fn a_switch_in_flight_is_not_evidence_that_the_account_arriving_is_broken() {
     );
 }
 
-/// A Quarantine reports the machine-readable reason and the failure underneath
-/// as two keys, because they are two facts.
-///
-/// `detail` means the same thing everywhere Perch says it — "whatever the
-/// failure underneath said" — and the refresh report put the *reason* there
-/// instead. So a script read `outcome: "quarantined"` beside `detail:
-/// "renewal-rejected"`, which is the outcome again in a second spelling, while
-/// the one thing the key promises was sitting unread in the value the human line
-/// prints.
 #[test]
 fn a_quarantine_in_json_carries_the_reason_and_the_failure_underneath_apart() {
     let host = about_to_renew(SPENT).with_reply(TOKEN_URL, 401, RETIRED);
