@@ -14,6 +14,7 @@ use std::rc::Rc;
 
 use chrono::{TimeZone, Utc};
 use common::*;
+use perch::commands::add::AddArgs;
 use perch::error::{EXIT_INVALID, EXIT_PROBE_REFUSED, EXIT_PROFILE_LIVE, EXIT_QUARANTINED};
 use perch::host::FakeHost;
 use perch::host::fake::{Effect, THIS_PROCESS};
@@ -22,6 +23,47 @@ use perch::host::prelude::*;
 /// The Default Profile: where Shared State lives, and what a Run has to
 /// Reconcile out of.
 const SHARED: &str = "/Users/someone/.claude";
+
+/// A Profile's path is hashed into a keychain service name, so the string the
+/// client is handed has to be the string the Credential Store was derived from.
+/// A `PERCH_HOME` holding `//` is enough to make those two different, and then
+/// Claude Code reads a namespace Perch never writes.
+#[test]
+fn the_client_is_pointed_at_the_directory_the_credential_store_was_derived_from() {
+    let host = machine_with_claude_code()
+        .with_env("PERCH_HOME", "/Users/someone//elsewhere")
+        .with_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, CREDENTIAL)
+        .with_file(IDENTITY_PATH, IDENTITY_FILE)
+        .with_login(login_producing(SECOND_CREDENTIAL, SECOND_IDENTITY_FILE));
+    run_add(
+        &host,
+        AddArgs {
+            no_group: true,
+            ..AddArgs::default()
+        },
+    )
+    .0
+    .expect("the second Account is added");
+    host.forget_effects();
+
+    let (outcome, _) = run_run(&host, SECOND_EMAIL);
+
+    outcome.expect("the client ran");
+    let store = perch::probe::store_for_profile(&host, &profile_of(&host, SECOND_EMAIL))
+        .expect("its Credential Store");
+    // As text, which is the whole point: `PathBuf` compares by component, so a
+    // `//` and a `/` are one path to it and two keychain service names to
+    // `short_hash`, which hashes the string.
+    let told: Vec<String> = launched(&host)
+        .into_iter()
+        .map(|(_, at)| at.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        told,
+        vec![store.config_dir.to_string_lossy().into_owned()],
+        "the client is told the spelling the store was derived from"
+    );
+}
 
 /// A machine holding two Accounts, with a client that exits cleanly standing in
 /// for the Claude Code a Run launches. The Accounts arrived by login, so the

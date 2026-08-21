@@ -379,11 +379,17 @@ pub fn store_for_profile(host: &dyn Host, config_dir: &Path) -> Result<Store> {
     store_for_directory(host, config_dir.to_path_buf(), false)
 }
 
+/// One spelling of a config directory, before anything is derived from it.
+///
+/// Every derivation reads the path as text, so two spellings are two keychain
+/// namespaces and two locks — and a client handed the other one writes where
+/// Perch will not read. `components` leaves `..`.
+pub fn one_spelling(config_dir: &Path) -> PathBuf {
+    config_dir.components().collect()
+}
+
 fn store_for_directory(host: &dyn Host, config_dir: PathBuf, is_default: bool) -> Result<Store> {
-    // One spelling, before anything is derived from it: every derivation below
-    // reads the path as text, so a trailing separator is the same directory with
-    // a different namespace and a different lock. `components` leaves `..`.
-    let config_dir: PathBuf = config_dir.components().collect();
+    let config_dir = one_spelling(&config_dir);
 
     Ok(Store {
         identity_file: identity_file_for(&config_dir, is_default, host)?,
