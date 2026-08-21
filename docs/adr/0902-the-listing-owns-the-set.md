@@ -166,7 +166,7 @@ writes in gets no noun of its own (ADR perch-says-what-it-did).
 **Reserve** says Scope rather than Group, matching how `Reserve::of` is typed and
 the case the gate admits.
 
-## Considered Options
+## Considered options
 
 **One command, with a flag deciding the breadth.** The strongest rival, and it
 turns entirely on whether the labeled block survives. If `perch status` were

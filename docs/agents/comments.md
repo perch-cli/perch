@@ -119,6 +119,13 @@ actually moved. The number survives as a sort key so the directory reads as a
 table of contents; it is in no citation, because identity that shows up in a
 citation has not moved.
 
+Band `N` occupies `N01` through `N99`. The thirteen run in `CONTEXT.md`'s
+section order, extended by the sections it has no entry for because they are
+about the repository rather than the product. A band is sized for its section
+rather than for the documents in it, so a new document appends at the end of its
+own band and nothing after it moves — the renumber this bought is the last one
+the tree pays for.
+
 There is no `docs/adr/README.md`. The prefixes put the section order in the
 listing, so a directory listing already reads as the table of contents an index
 would be — and an index is a second place every title has to be right, kept in
@@ -131,9 +138,9 @@ target: a target drifts across eleven passes, and unlike a comment cap this one
 has no "write the ADR" escape hatch. Hyphenation is what lets a check tell
 `ADR the-port-fits-the-machine` from the `ADR` in `## Flag ADR conflicts`.
 
-Never a path, so never clickable — that is the cost, paid because the set is
-contiguous from 0001 and adding a document renumbers every one after it. Markdown
-gets no dialect of its own for the same reason: one form, six file types.
+Never a path, so never clickable — that is the cost, paid because the slug is
+the identity and a path names the number instead. Markdown gets no dialect of
+its own for the same reason: one form, six file types.
 
 **Who a citation is for.** An agent reading the tree. So the guide never says
 `ADR`, and neither does anything Perch says to a person: a user reading a refusal
@@ -142,10 +149,11 @@ exemption, in the other direction — it records what happened on a date, so a
 number there is not a citation and may name a document that is gone.
 
 Checked by `tests/citation.rs`: a slug resolving to exactly one file, a slug
-within cap and hyphenated, a filename's tail matching its document's title, and
-nothing citing a number. The guide is checked the other way round — that it
-never says the word at all, since "the numbered ADRs" is not a citation and is
-the same defect. One exemption stands: `docs/research/adr-inventory.md`, a dated
+within cap and hyphenated, a filename's tail matching its document's title,
+every band contiguous from its base, and nothing citing a number. Which band a
+document belongs to is a judgment; that a band has no gap in it is not. The
+guide is checked the other way round — that it never says the word at all, since
+"the numbered ADRs" is not a citation and is the same defect. One exemption stands: `docs/research/adr-inventory.md`, a dated
 read of the 64 documents that indexes them by the number.
 
 **Present tense.** The same rule an ADR follows: state what stands, not the
@@ -165,3 +173,26 @@ needs nothing above it.
 answerable by the next reader, which is what ADR perch-says-what-it-did exists
 to prevent. The ADRs keep their prose on purpose. Written down so no session
 "fixes" them to match this rule.
+
+**A measurement in a document.** ADR a-crate-must-not-cost-a-seam retires a
+number in a comment that moves, and a document is held to it too — except that
+an ADR sometimes needs a measurement to have an argument at all. So the test is
+what the figure is doing. **Evidence** is restated as the method: *ambiguous at
+every one of the 233 `&dyn Host` sites* became *at every `&dyn Host` site in the
+tree*, because the argument survives a figure that has drifted and the figure
+does not survive the next commit. A **datum** stays, because it is the thing
+decided — ADR the-port-fits-the-machine's nine traits and 42 methods are
+countable in `src/host/mod.rs` today, and a reader who cannot count them cannot
+check the decision.
+
+A figure measuring something outside the tree is evidence unless the document
+names what it measured. ADR one-thing-renders-the-site's Astro 7.2.3 and its
+three companions stay, because the argument is *this was written against these*
+and the version is what makes the claim checkable at all. ADR
+claude-code-chooses-the-store counted 39 sites in a Claude Code build it does
+not name, which nobody could check on the day it was written; it now says
+*wherever it writes one*.
+
+Dating the measurement was refused. A date says when a number stopped being
+true, which is git's, and it invites a stale number to be trusted for carrying
+one.

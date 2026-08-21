@@ -45,7 +45,7 @@ the toolchain is pinned above that.
 
 Supertraits must not overlap. Traits named for consumers would: both a
 `Refreshing` and an `Upgrading` want `platform`, and two supertraits declaring
-it make `host.platform()` ambiguous at every one of the 233 `&dyn Host` sites.
+it make `host.platform()` ambiguous at every `&dyn Host` site in the tree.
 
 ## The nine, and the sum
 

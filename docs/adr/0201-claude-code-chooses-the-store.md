@@ -119,8 +119,8 @@ protected, but a leaked backup of `$HOME` yields more, and that is the strongest
 argument for the rejected alternative. A Credential *leaving* the machine is
 covered differently, by ADR the-holdings-go-out-sealed's required passphrase.
 
-Files holding a Credential are created 0600 and their directories 0700, matching
-what Claude Code does at 39 sites in its own binary — and so is any other file
+Files holding a Credential are created 0600 and their directories 0700, which is
+what Claude Code does wherever it writes one — and so is any other file
 Perch is the first to create inside a Profile, `.claude.json` among them, since
 an MCP server entry routinely carries an API key in its `env` block. The mode is
 set at creation rather than by a `chmod` afterwards, because `write_atomically`

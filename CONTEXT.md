@@ -356,9 +356,9 @@ _Avoid_: lock, pid file, session file, heartbeat, sentinel
 
 **Setting**:
 One named rule governing how Perch behaves rather than what it holds — which
-Account a Cycle prefers, whether the watcher may act, at what Utilization. Every
-one of them is reversible, which is what separates a Setting from everything
-else Perch can be told to do.
+Account a Cycle prefers, whether the watcher may act, at what Utilization. A
+Setting reaches no further than the registry, which is what separates it from
+everything else Perch can be told to do.
 _Avoid_: option, preference, flag, toggle, parameter
 
 **Config**:
