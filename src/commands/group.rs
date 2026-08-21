@@ -1,21 +1,12 @@
 //! `perch group` — declaring which Accounts are interchangeable
 //! (ADR a-group-is-a-declaration).
 //!
-//! A Group is the user's statement that Cycling may move them between these
-//! Accounts and no others: another work subscription, never their personal one.
-//! So it is recorded as something they said rather than inferred from where the
-//! Accounts happen to sit — an empty Group is still a Group, and an Account is
-//! never quietly dropped out of one.
-//!
-//! A Group can be renamed, and the rename keeps what the Group carries: its
-//! Settings, its Accounts, and what the last scheduled Check left behind. Doing
-//! it by hand — an add, a move per Account and a remove — would lose every
-//! Setting the old Group held, which is precisely the part somebody
-//! deliberately said.
-//!
-//! A Group also carries the configuration that would govern Cycling within it.
-//! v1 stores and validates those fields and reads none of them; `perch group
-//! list` shows them so the rules are visible without opening a config file.
+//! A Group is recorded as something the user said rather than inferred: an
+//! empty Group is still a Group, and an Account is never quietly dropped out of
+//! one. A rename keeps everything it carries — its Settings, its Accounts and
+//! the cooldown the watcher paces it by — because doing it by hand would lose
+//! every Setting somebody said. `perch group list` shows what governs Cycling
+//! in a Scope, so the rules are readable without opening a file.
 
 use std::io::Write;
 
@@ -32,7 +23,7 @@ use crate::target::{self, AccountTarget};
 pub enum GroupCommand {
     /// Declare a Group. It starts empty and at the compiled-in defaults —
     /// nothing said about another Scope reaches it, including a grant the
-    /// watcher already holds somewhere else (ADR a-setting-names-its-scope).
+    /// watcher already holds somewhere else.
     Add {
         /// The name, which shares one namespace with Aliases.
         name: String,
@@ -66,19 +57,17 @@ pub enum GroupCommand {
 const LABEL_WIDTH: usize = 13;
 
 pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Result<()> {
-    // Read-only where it reads. `perch group list` writes nothing, and taking
-    // the write lock to read it means waiting out a `perch watcher run` round
-    // or a `perch status --refresh` and then failing as though somebody else
-    // had done something wrong.
+    // `perch group list` writes nothing, and taking the write lock to read
+    // means waiting out a `perch watcher run` round and then failing as though
+    // somebody else had done something wrong.
     if let GroupCommand::List = command {
         return list(out, &adopt::ensure_adopted(host)?);
     }
 
     only_the_registry(host, out, |registry| match command {
-        // What it declared, and not what governs it. A Group is declared at
-        // the compiled-in defaults every time, so the two rows would be the
-        // same two rows on every run — `perch group list` is where they are
-        // read (ADR perch-says-what-it-did).
+        // What it declared, and not what governs it: a Group is declared at
+        // the compiled-in defaults every time, so those rows are the same on
+        // every run (ADR perch-says-what-it-did).
         GroupCommand::Add { name } => {
             registry.declare_group(&name)?;
             Ok(vec![format!("Declared the Group `{name}`.")])
@@ -89,8 +78,7 @@ pub fn run(host: &dyn Host, command: GroupCommand, out: &mut dyn Write) -> Resul
         }
         // The Accounts it still holds are said by `rename` itself, because a
         // rename could have lost them and did not. Its Settings are not: a
-        // rename never touches one, so printing them is Perch reporting work
-        // it did not do (ADR perch-says-what-it-did).
+        // rename never touches one.
         GroupCommand::Rename { from, to } => Ok(vec![rename(registry, &from, &to)?]),
         GroupCommand::Move { target, group } => {
             let account = target::resolve_account(registry, &target)?;
@@ -131,15 +119,10 @@ fn remove(registry: &mut Registry, name: &str) -> Result<String> {
 }
 
 /// Renames a Group. What moves with the name is
-/// [`Registry::rename_group`](Registry::rename_group)'s to say; what is here is
-/// the two things the command layer owns.
-///
-/// The old name is resolved the way every Group named in passing is, so a typo
-/// gets the sentence every mistyped Group name gets rather than one of its own.
-/// And the report says what the Group still holds, because "did my Accounts come
-/// too" is the other thing somebody renaming one wants to know and would
-/// otherwise need a second command to find out — said the way `remove` says it,
-/// since it is the same question answered from the other side.
+/// [`Registry::rename_group`](Registry::rename_group)'s to say; the two things
+/// here are the command layer's — a typo answered the way every mistyped Group
+/// name is, and a report saying what the Group still holds, which is the same
+/// question `remove` answers from the other side.
 fn rename(registry: &mut Registry, from: &str, to: &str) -> Result<String> {
     let held = match registry.declared_group(from) {
         Some(declared) => declared.to_string(),
@@ -189,16 +172,9 @@ fn move_account(registry: &mut Registry, target: &AccountTarget, group: &str) ->
 /// `perch config` and `perch list` address Groups too, and answer a typo with
 /// this same sentence rather than one of their own.
 pub(crate) fn no_such_group(registry: &Registry, name: &str) -> PerchError {
-    // A word that could never be a Group is told so, rather than offered a
-    // `perch group add` that the next command refuses. `global` is the sharpest
-    // case: `registry::validate_name` reserves it *specifically* so that
-    // "Declare it with `perch group add global`" can never be made as an
-    // offer — and this function, which every one of `group remove`, `group
-    // rename` and `group move` reaches, was making it.
-    //
-    // Asked here rather than at each caller, which is where the two ad-hoc
-    // `means_global` guards in `list` and `config` came from: one door, and
-    // whatever `validate_name` refuses is refused in its own words.
+    // A word that could never be a Group is told so rather than offered a
+    // `perch group add` the next command refuses — `global` above all. Asked
+    // here rather than at each caller, in `validate_name`'s own words.
     if let Err(why) = registry::validate_name(registry::NameKind::Group, name) {
         return PerchError::NotFound(format!("No Group called `{name}`. {why}"));
     }
@@ -230,9 +206,8 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
         )?;
     }
 
-    // Borrowed rather than collected into a `Vec<String>`: nothing here mutates
-    // the registry, so the map can be walked directly and the only clone left is
-    // the one `Scope::Group` genuinely needs.
+    // Borrowed rather than collected: nothing here mutates the registry, so the
+    // only clone left is the one `Scope::Group` genuinely needs.
     for name in registry.groups.keys() {
         say(out, name)?;
         let members = registry.accounts_in(name);
@@ -257,15 +232,11 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
             let label = if index == 0 { "Accounts" } else { "" };
             write_line(out, label, &registry.named_for_the_user(account.email()))?;
         }
-        // The rule, and then what it currently answers — said by the one
-        // function all three surfaces that show this Scope now ask, because
-        // three spellings of it had grown and one of them offered `on`/`off`,
-        // which is not a value the Setting takes.
+        // The rule and then what it currently answers, said by the one function
+        // all three surfaces that show this Scope ask — a second spelling of it
+        // offers `on`/`off`, which is not a value the Setting takes.
         write_line(out, "Cycling", &cycling_among_ungrouped(registry))?;
-        // The Accounts in no Group are a Scope (ADR a-group-is-a-declaration,
-        // amended), so what governs Cycling among them is a thing with an
-        // answer rather than a constant compiled into Perch. It is shown here
-        // for the same reason a Group's is: the rules Cycling will follow
+        // Shown for the same reason a Group's is: the rules Cycling will follow
         // should be readable without opening the registry.
         describe_configuration(out, registry, &Scope::Ungrouped)?;
     }
@@ -278,23 +249,12 @@ fn list(out: &mut dyn Write, registry: &Registry) -> Result<()> {
 /// No line naming which of them the Scope declared itself, because it declared
 /// all of them: a Scope holds its own full Settings and there is nothing above
 /// it for one to have come from (ADR a-setting-names-its-scope).
-///
-/// One function again rather than a `configuration_lines` beside it. That
-/// second half existed because `perch group add` and `perch group rename` went
-/// through [`crate::commands::only_the_registry`]
-/// (ADR one-door-to-the-registry), which hands the change no writer, so what
-/// those two had to say had to come back as words — and neither says it any
-/// more (ADR perch-says-what-it-did). What is left is one caller with a writer
-/// of its own.
 fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scope) -> Result<()> {
     let settings = registry.settings(scope);
     let strategy = labeled("Strategy", settings.strategy.as_str());
-    // The whole policy rather than the threshold alone: a summary that named
-    // only when the watcher acts would read as the whole of what it does, and
-    // the margin is what decides where it lands
-    // (ADR a-watcher-knob-is-arithmetic). Two of the three are constants now,
-    // and they are still shown — what the watcher will do here should be
-    // readable without knowing which of the numbers is anyone's.
+    // The whole policy rather than the threshold alone, two of whose three
+    // numbers are constants: a summary naming only when the watcher acts would
+    // read as the whole of what it does (ADR a-watcher-knob-is-arithmetic).
     let policy = crate::watch::Policy::of(&settings);
     let acting = format!(
         "at {}%, onto {}% or better, at most every {}m",
@@ -302,22 +262,15 @@ fn describe_configuration(out: &mut dyn Write, registry: &Registry, scope: &Scop
         policy.ceiling(),
         crate::watch::COOLDOWN_MINUTES,
     );
-    // Being allowed to act is not the whole of whether it does. Among the
-    // Accounts in no Group, `interchangeable` is a separate declaration that
-    // they are a set at all (ADR a-group-is-a-declaration), and without it
-    // there is nowhere for the watcher to Switch to — `perch watcher run`
-    // refuses outright and names both. Read from `watcher-may-act` alone, this
-    // line claimed unattended switching that the watcher declines, and said the
-    // same thing whichever way the gate was set, so it was unfalsifiable in
-    // both directions. `config::scope_lines` already answers this correctly.
+    // Being allowed to act is not the whole of whether it does: among the
+    // Accounts in no Group there is nowhere to Switch to until `interchangeable`
+    // says so, and `perch watcher run` refuses outright and names both.
     let interchangeable = crate::cycle::may_cycle_within(registry, scope);
     let watcher = match (settings.watcher_may_act, interchangeable) {
         (true, true) => format!("may switch unattended {acting}"),
-        // The Setting's own value, not `off`. `on`/`off` is not a value
-        // `interchangeable` takes, so a reader who typed back what they were
-        // shown was refused — which is the whole of why
-        // `commands::cycling_among_ungrouped` exists, and this line was
-        // printing the other spelling two rows below one that uses it.
+        // The Setting's own value, not `off`: `on`/`off` is not a value
+        // `interchangeable` takes, so a reader typing back what they were shown
+        // would be refused.
         (true, false) => format!(
             "off — `{}` is {}, so there is nowhere to Switch to (would act \
              {acting})",
@@ -336,9 +289,8 @@ fn write_line(out: &mut dyn Write, label: &str, value: &str) -> Result<()> {
 
 fn labeled(label: &str, value: &str) -> String {
     // Measured in cells rather than `char`s, for the reason
-    // `utilization::padded` was written: `{label:LABEL_WIDTH$}` counts
-    // characters, and a column counted that way steps out of line the first
-    // time something wide or combining goes through it.
+    // `utilization::padded` was written: a column counted in characters steps
+    // out of line the first time something wide goes through it.
     format!(
         "  {}{value}",
         crate::utilization::padded(label, LABEL_WIDTH)

@@ -1,33 +1,21 @@
 //! What a Setting *is*: what it is called, which Scope carries it, what values
-//! it takes, and what having set it means.
+//! it takes, and what having set it means (ADR a-setting-names-its-scope).
 //!
-//! A Setting is one named rule governing how Perch chooses between Accounts,
-//! said about the Scope it governs and nowhere else
-//! (ADR a-setting-names-its-scope). [`Registry`] holds what a Scope has been
-//! set to and refuses a value it cannot mean; everything about how that value
-//! is *named*, *typed* and *explained* is here.
+//! [`Registry`] holds what a Scope has been set to and refuses a value it
+//! cannot mean. What `perch config` *does* with the words on a command line is
+//! [`crate::commands::config`]'s.
 //!
-//! What `perch config` *does* — which words go where on a command line, which
-//! form somebody seems to have meant, how a line is printed so it reads back as
-//! the `set` that would restore it — is [`crate::commands::config`]'s.
-//!
-//! Here rather than there because a key's name is printed by surfaces that are
-//! not `perch config`. `perch group list` names `interchangeable` in the row
-//! explaining why the watcher will not act, and the clause `perch list` and
-//! `perch group list` share names it again. Both used to spell it as a literal,
-//! so the key could be renamed — as it was once already, from `cycle_ungrouped`
-//! — and leave two surfaces confidently printing a word `perch config set`
-//! would refuse.
+//! Here rather than there because surfaces that are not `perch config` name a
+//! key too, and a key spelled as a literal at one of those sites is a surface
+//! printing a word `perch config set` would refuse.
 
 use crate::error::{PerchError, Result};
 use crate::registry::{self, Registry, Scope, Strategy, UNGROUPED};
 
 /// One Setting, as Perch names it.
 ///
-/// One vocabulary rather than two. There were two — the keys a Scope carried and
-/// the keys addressed by naming no Scope — and the split was the layer: with
-/// every Setting said about a Scope, what is left is a single list, of which one
-/// entry is carried by one Scope alone (see [`Setting::carried_by`]).
+/// One vocabulary, because every Setting is said about a Scope. One entry of it
+/// is carried by one Scope alone (see [`Setting::carried_by`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Setting {
     Interchangeable,
@@ -56,15 +44,10 @@ impl Setting {
         }
     }
 
-    /// Whether this Scope carries the Setting at all.
-    ///
-    /// One Scope carries a key the others do not, and it is the Accounts in no
-    /// Group: `interchangeable` is the declaration that they are a set worth
-    /// Cycling within, and a Group **is** that declaration
-    /// (ADR a-group-is-a-declaration). Printing it against a Group and then
-    /// refusing to set it would break the invariant the whole command rests on
-    /// — every line `get` prints is the tail of the `set` that would restore it
-    /// — so the honest form is silence.
+    /// `interchangeable` is the Accounts in no Group's alone, because a Group
+    /// **is** that declaration (ADR a-group-is-a-declaration). Printed against
+    /// a Group and refused, it would break the invariant the command rests on:
+    /// every line `get` prints is the tail of the `set` that restores it.
     pub fn carried_by(self, scope: &Scope) -> bool {
         self != Setting::Interchangeable || *scope == Scope::Ungrouped
     }
@@ -80,8 +63,8 @@ impl Setting {
             Some(_) => Err(PerchError::Invalid(format!(
                 "`{}` is the declaration that the Accounts in no Group are \
                  interchangeable at all, and only they carry it — a Group is \
-                 that declaration rather than something that holds one (ADR \
-                 0002). `perch config set {UNGROUPED} {} <value>` says it.",
+                 that declaration rather than something that holds \
+                 one. `perch config set {UNGROUPED} {} <value>` says it.",
                 Setting::Interchangeable.as_str(),
                 Setting::Interchangeable.as_str(),
             ))),
@@ -114,43 +97,28 @@ impl Setting {
         }
     }
 
-    /// Sets this Setting on one Scope.
-    ///
-    /// Applied to a copy of what the Scope holds and checked over the whole of
-    /// it before anything lands, so configuration that would not mean anything
-    /// never reaches the Scope it was meant for: a refused `set` leaves every
-    /// Setting exactly as it found it. Asked again over the whole Scope after
-    /// the value parses, because the registry is the boundary every Config
-    /// crosses and this one is only a command line — and both refusals name the
-    /// same ranges, from the same constants.
+    /// Applied to a copy and checked over the whole Scope before anything
+    /// lands, so a refused `set` leaves every Setting as it found it. Checked
+    /// there rather than only here, because the registry is the boundary every
+    /// Config crosses and this one is only a command line.
     pub fn write(self, registry: &mut Registry, scope: &Scope, value: &str) -> Result<()> {
-        // The same question `parse` asks, asked again here — and for the reason
-        // this function already gives about `settings_mut` a few lines down: a
-        // `pub fn` on a `pub` type returning a `Result` should refuse rather
-        // than do something nobody asked for.
-        //
-        // What it did without this was write `interchangeable` onto the
-        // Ungrouped Scope when it was handed a *Group*: the Group's `Settings`
-        // were left alone, and the line at the end of this function assigned
-        // `registry.ungrouped.interchangeable` unconditionally. A Setting
-        // applied to a Scope nobody named. Unreachable through
-        // `commands::config`, which calls `parse` first, and unreachable is
-        // where a second caller comes from.
+        // Asked again here, for the reason `settings_mut` is asked about below:
+        // a `pub fn` on a `pub` type returning a `Result` refuses rather than
+        // writing a Setting onto a Scope nobody named.
         if !self.carried_by(scope) {
             return Err(PerchError::Invalid(format!(
                 "`{}` is the declaration that the Accounts in no Group are \
                  interchangeable at all, and only they carry it — a Group is \
-                 that declaration rather than something that holds one (ADR \
-                 0002). `perch config set {UNGROUPED} {} <value>` says it.",
+                 that declaration rather than something that holds \
+                 one. `perch config set {UNGROUPED} {} <value>` says it.",
                 Setting::Interchangeable.as_str(),
                 Setting::Interchangeable.as_str(),
             )));
         }
 
         let mut settings = registry.settings(scope);
-        // Carried beside the Settings rather than in them, because a Group has
-        // no such line: `parse` has already refused this key on any Scope but
-        // the Accounts in no Group.
+        // Beside the Settings rather than in them, because a Group has no such
+        // line.
         let mut interchangeable = registry.ungrouped.interchangeable;
         match self {
             Setting::Interchangeable => interchangeable = yes_or_no(self.as_str(), value)?,
@@ -161,11 +129,8 @@ impl Setting {
             }
         }
         settings.validate(scope)?;
-        // A refusal rather than an abort. `commands::config` resolves the Scope
-        // through `declared_group` before it gets here, so today's one caller
-        // cannot reach this — but this is a `pub fn` on a `pub` type returning a
-        // `Result`, and a signature that says it refuses should not be the thing
-        // that panics on the second caller.
+        // A refusal rather than an abort: a signature that says it refuses is
+        // not the thing that panics on the second caller.
         let Some(held) = registry.settings_mut(scope) else {
             let Scope::Group(name) = scope else {
                 unreachable!("the Ungrouped Scope is always there to write to")
@@ -180,13 +145,8 @@ impl Setting {
     }
 
     /// What the Scope now does, which is the half of the answer the value
-    /// itself does not give.
-    ///
-    /// What it does, and never why Perch decided it should. "Being ungrouped is
-    /// the absence of a declaration that Accounts are interchangeable, not a
-    /// weaker form of one" and "anything that changes underneath you only ever
-    /// does so because you said it could" were both Perch defending a design to
-    /// somebody who had just typed the command that accepts it
+    /// itself does not give — and never why Perch decided it should, which is a
+    /// design defended to somebody who just typed the command that accepts it
     /// (ADR perch-says-what-it-did).
     pub fn what_that_means(self, registry: &Registry, scope: &Scope) -> String {
         let settings = registry.settings(scope);
@@ -196,7 +156,7 @@ impl Setting {
                 "A bare `perch switch` from an Account in no Group now Cycles \
                  among the other ungrouped Accounts. That declares every \
                  ungrouped Account interchangeable at once, present and future \
-                 — including the next one `perch add` creates (ADR a-group-is-a-declaration)."
+                 — including the next one `perch add` creates."
                     .to_string()
             }
             Setting::Interchangeable => {
@@ -208,14 +168,14 @@ impl Setting {
             Setting::Strategy => match settings.strategy {
                 Strategy::MostHeadroom => format!(
                     "A Cycle {within} prefers the Account with the most \
-                     room left, measured by its worst Quota Window (ADR headroom-is-the-worst-window)."
+                     room left, measured by its worst Quota Window."
                 ),
                 Strategy::SoonestReset => format!(
                     "A Cycle {within} prefers the Account whose fullest \
                      Quota Window resets soonest, so perishable quota is spent \
                      rather than wasted. Headroom is still measured by the worst \
-                     window (ADR headroom-is-the-worst-window), so an exhausted Account is still never \
-                     chosen however soon it comes back."
+                     window, so an exhausted Account is still never chosen \
+                     however soon it comes back."
                 ),
             },
             Setting::WatcherMayAct if settings.watcher_may_act => format!(
@@ -236,57 +196,20 @@ impl Setting {
     }
 }
 
-/// What a Scope that has just grown still needs said about it before anything
-/// Cycles within it unasked, or `None` where it needs nothing.
-///
-/// A second Account in one Scope is the moment two deliberate defaults start to
-/// matter: `watcher-may-act` is false on every Scope, and the Accounts in no
-/// Group need `interchangeable` as well, because being ungrouped is the absence
-/// of a declaration that they are interchangeable rather than a weaker form of
-/// one (ADR a-group-is-a-declaration). Both are correct, and neither used to be
-/// said anywhere near the command that makes them relevant — the Scope simply
-/// held two interchangeable-looking Accounts and quietly did nothing with them.
-///
-/// **Said and never asked.** `watcher-may-act` is a consent gate, and a yes
-/// collected in the middle of adding an Account is not the yes Perch promises
-/// when it says nothing changes underneath you until you say it may. So this
-/// returns a statement of what is now true, which is [`crate::commands::add`]'s
-/// to print beside the rest of what it did (ADR perch-says-what-it-did).
-///
-/// Asked of a Scope rather than of a Group with the Ungrouped case bolted on:
-/// they are the same question, and the only difference is how many Settings
-/// come back.
-///
-/// Silent below two Accounts, because a rule for choosing has nothing to say to
-/// a set of one — which is the same reason no Setting is carried by an Account.
-///
-/// **It does not repeat [`ONLY_WHILE_IT_RUNS`], and that is deliberate.** Every
-/// sentence saying what `watcher-may-act` *does* carries that caveat, because a
-/// Scope that may be acted on is not a service that has been switched on
-/// (ADR a-watcher-knob-is-arithmetic). This sentence says the opposite — that
-/// the Setting is off and nothing is happening — and the sentence about what
-/// turning it on means is [`Setting::what_that_means`], which is printed by the
-/// very `perch config set` named here. So the caveat arrives at the moment it
-/// becomes true rather than three clauses early, in a command whose report
-/// ADR perch-says-what-it-did keeps to what it did.
-///
-/// **And it counts what the Scope holds rather than what a Cycle could choose.**
-/// [`Scope::accounts`] is the one idea of that set, and the narrower count would
-/// be a second: a Disabled or Quarantined Account beside the new one is still a
-/// pair a Cycle can move *between*, since either can be the one being left, and
-/// both states are reversible by a command that says nothing about Settings.
+/// What a Scope that has just grown still needs said about it, as a statement
+/// of what is now true rather than a question: consent is said and never asked.
+/// `None` below two Accounts, because a rule for choosing has nothing to say to
+/// a set of one — and no [`ONLY_WHILE_IT_RUNS`] caveat, because this is the
+/// sentence saying the Setting is off.
 pub fn what_the_scope_still_needs(registry: &Registry, scope: &Scope) -> Option<String> {
     let held = scope.accounts(registry).len();
     if held < 2 {
         return None;
     }
 
-    // The declaration before the grant, which is the order `perch watcher run`
-    // refuses in and for the same reason: somebody who has said neither is told
-    // about the declaration first, because that is the one that has to come
-    // first. `may_cycle_within` rather than a second reading of
-    // `interchangeable` — it is the one place that answers what a Group is
-    // exempt from, and a copy of it here would be a second idea of that.
+    // The declaration before the grant, which is the order it has to be said
+    // in. `may_cycle_within` rather than a second reading of `interchangeable`:
+    // it is the one place answering what a Group is exempt from.
     let mut needed = Vec::new();
     if !crate::cycle::may_cycle_within(registry, scope) {
         needed.push(Setting::Interchangeable);
@@ -299,9 +222,7 @@ pub fn what_the_scope_still_needs(registry: &Registry, scope: &Scope) -> Option<
     }
 
     // Named from the vocabulary rather than spelled here, for the reason at the
-    // top of this module: `interchangeable` has been renamed once already, and
-    // a surface printing the old word is a surface telling somebody to type
-    // something `perch config set` refuses.
+    // top of this module.
     let says: Vec<String> = needed
         .iter()
         .map(|key| format!("`perch config set {} {} true`", scope.word(), key.as_str()))
@@ -325,40 +246,34 @@ pub fn vocabulary(scope: &Scope) -> Vec<&'static str> {
 }
 
 /// The second yes the Accounts in no Group need, said wherever permission for
-/// the watcher to act is (ADR a-group-is-a-declaration).
+/// the watcher to act is.
 ///
-/// Two statements rather than one said twice: `interchangeable` declares those
-/// Accounts a set worth moving between, and `watcher-may-act` lets something
-/// move between them unasked. A Group needs only the second, because being a
-/// Group is the first. Named here rather than left to be discovered by the
-/// watcher declining.
+/// A Group needs only the grant, because being a Group is the declaration.
+/// Named here rather than left to be discovered by the watcher declining.
 fn gated(registry: &Registry, scope: &Scope) -> String {
     match scope {
         Scope::Ungrouped if !registry.ungrouped.interchangeable => format!(
             " It does not act there yet: `{}` is false, and that is a separate \
-             declaration that those Accounts are interchangeable at all (ADR \
-             0017) — `perch config set {UNGROUPED} {} true` makes it.",
+             declaration that those Accounts are interchangeable at all — \
+             `perch config set {UNGROUPED} {} true` makes it.",
             Setting::Interchangeable.as_str(),
             Setting::Interchangeable.as_str(),
         ),
         Scope::Ungrouped => format!(
             " Those Accounts have also been declared interchangeable, which is \
              the other half of it: the watcher acts here only where `{}` is on \
-             too (ADR a-group-is-a-declaration).",
+             too.",
             Setting::Interchangeable.as_str(),
         ),
         Scope::Group(_) => String::new(),
     }
 }
 
-/// Said of both of the watcher's fields, in one place, because two sentences
+/// Said of both of the watcher's fields in one place, because two sentences
 /// about it would sooner or later say two different things: nothing here is a
-/// service that has been switched on (ADR a-group-is-a-declaration).
-///
-/// All three ways of running one are named, because a setting that only
-/// governed the loop would be a setting somebody with a Service, or somebody
-/// scheduling a Check, had no reason to read
-/// (ADR the-machine-runs-the-watcher).
+/// service that has been switched on (ADR a-watcher-knob-is-arithmetic). All
+/// three ways of running one are named, or this would be a Setting somebody
+/// with a Service had no reason to read (ADR the-machine-runs-the-watcher).
 const ONLY_WHILE_IT_RUNS: &str = "Only while a Watcher is running — the loop in \
      the terminal you started it in, a Service `perch watcher install` set up, \
      or a `perch watcher check` your scheduler runs. Nothing here starts one.";
@@ -404,10 +319,9 @@ fn yes_or_no(key: &str, value: &str) -> Result<bool> {
 
 /// A percentage, refused with the numbers that would have been accepted.
 ///
-/// The range is the registry's to state (`a_percentage`), so the refusal a
-/// number too large for the field gets and the one a number the field can hold
-/// but the policy cannot gets are the same sentence. To the script that
-/// mistyped, `300` and `101` are the same mistake.
+/// The range is the registry's to state (`a_percentage`), so a number too large
+/// for the field and one the field holds but the policy will not are refused in
+/// one sentence: to the script that mistyped, `300` and `101` are one mistake.
 fn percentage(key: &str, value: &str) -> Result<u8> {
     value
         .parse::<u8>()
@@ -456,12 +370,9 @@ mod tests {
         Scope::Group("work".to_string())
     }
 
-    /// Every surface agrees what a percentage is.
-    ///
-    /// The bound is stated in three places — in `Settings::validate`, in the
-    /// parser here, and inside the sentence both of them quote — and a value
-    /// one of them takes and another refuses is a Setting somebody can write
-    /// and then not be allowed to keep.
+    /// The bound is stated in three places — `Settings::validate`, the parser
+    /// here, and the sentence both of them quote — and a value one takes and
+    /// another refuses is a Setting somebody can write and not keep.
     #[test]
     fn every_surface_agrees_what_a_percentage_is() {
         let most = registry::MAX_PERCENTAGE;
@@ -493,16 +404,6 @@ mod tests {
         );
     }
 
-    /// A Setting the Scope cannot carry is refused rather than written
-    /// somewhere else.
-    ///
-    /// `interchangeable` is the Ungrouped Scope's alone, and `write` never
-    /// asked. Handed a Group it left the Group's Settings untouched and then
-    /// assigned `registry.ungrouped.interchangeable` on the way out — a Setting
-    /// applied to a Scope nobody named. `commands::config` calls `parse` first
-    /// and so cannot reach it, which is the argument for the check rather than
-    /// against it: this function already makes it, one branch further down,
-    /// about `settings_mut`.
     #[test]
     fn a_setting_a_group_cannot_carry_is_refused_rather_than_written_elsewhere() {
         let mut registry = holding_a_group();
@@ -544,11 +445,8 @@ mod tests {
         );
     }
 
-    /// Every message about a watcher setting that describes the watcher acting
-    /// says what it is not — a Scope that may be acted on is not a service that
-    /// has been switched on (ADR a-group-is-a-declaration). Asserted over every
-    /// key in every shape its message branches on, because the branch that
-    /// forgets is always the one somebody added last.
+    /// Asserted over every key in every shape its message branches on, because
+    /// the branch that forgets the caveat is the one somebody added last.
     #[test]
     fn every_message_about_the_watcher_acting_says_it_only_acts_while_the_loop_runs() {
         for granted in [false, true] {
@@ -570,10 +468,6 @@ mod tests {
         }
     }
 
-    /// ADR a-group-is-a-declaration: the Accounts in no Group need two
-    /// independent yeses, and the message that grants the watcher names the
-    /// other one. A Group needs only the grant, because being a Group is the
-    /// declaration.
     #[test]
     fn granting_the_watcher_names_the_second_yes_the_ungrouped_accounts_need() {
         let mut registry = holding_a_group();
@@ -593,13 +487,8 @@ mod tests {
         );
     }
 
-    /// Writing a Setting onto a Group nothing declared is a refusal, which is
-    /// what the signature says. It used to be an abort.
-    ///
-    /// `commands::config` resolves the Scope through `declared_group` before it
-    /// gets here, so the CLI cannot reach this — but `Setting::write` is a
-    /// `pub fn` on a `pub` type returning a `Result`, and a signature that says
-    /// it refuses should not be the thing that panics on the second caller.
+    /// `commands::config` resolves the Scope before this is reached, so the CLI
+    /// cannot get here — and a `pub fn` returning a `Result` still refuses.
     #[test]
     fn setting_a_scope_nothing_declared_is_refused_rather_than_panicked_on() {
         let mut registry = Registry::default();
@@ -611,10 +500,8 @@ mod tests {
         assert!(error.to_string().contains("work"), "{error}");
     }
 
-    /// A Scope that has grown to two Accounts is told what it still cannot do,
-    /// and what it is told is the Settings it is actually missing — one for a
-    /// Group, two for the Accounts in no Group, and the declaration named
-    /// before the grant (ADR a-group-is-a-declaration).
+    /// One Setting missing for a Group, two for the Accounts in no Group, and
+    /// the declaration named before the grant.
     #[test]
     fn a_scope_of_two_is_told_the_yeses_it_is_still_missing() {
         let mut registry = holding_a_group();
@@ -634,7 +521,7 @@ mod tests {
         );
         assert!(
             !said.contains(Setting::Interchangeable.as_str()),
-            "a Group *is* that declaration (ADR a-group-is-a-declaration): {said}"
+            "a Group *is* that declaration: {said}"
         );
 
         let said =
@@ -651,9 +538,6 @@ mod tests {
         );
     }
 
-    /// The line says what is missing, so a Scope missing nothing says nothing —
-    /// and neither does a set of one, which is not a set a rule for choosing has
-    /// anything to say to.
     #[test]
     fn a_scope_that_is_permitted_or_holds_one_account_is_told_nothing() {
         let mut registry = holding_a_group();
@@ -675,8 +559,8 @@ mod tests {
         );
     }
 
-    /// An Account held by nothing but its email address and the Group it is in,
-    /// which is all the question above asks about.
+    /// An Account held by nothing but its address and its Group, which is all
+    /// the question above asks about.
     fn in_group(email: &str, group: Option<&str>) -> crate::registry::Account {
         crate::registry::Account {
             identity: crate::probe::Identity {
@@ -701,10 +585,7 @@ mod tests {
     }
 
     /// A key is named from one place, so a surface that prints it cannot be
-    /// left printing a word `perch config set` would refuse. It has been
-    /// renamed once already — `cycle_ungrouped` became `interchangeable` — and
-    /// the two surfaces that spell it outside this module are the ones that
-    /// would have been missed.
+    /// left printing a word `perch config set` would refuse.
     #[test]
     fn the_key_the_other_surfaces_name_is_the_key_this_one_takes() {
         let key = Setting::Interchangeable.as_str();

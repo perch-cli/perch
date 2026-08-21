@@ -1,10 +1,9 @@
 //! Behavior: keeping an Account out of Cycling without giving it up.
 //!
 //! Disabling is the smallest thing that can be said about an Account: it leaves
-//! the Cycling pool and nothing else changes. It stays listed, keeps its Alias
-//! and its Group, keeps its stored Credential, and is still switched to the
-//! moment you name it. So most of these tests are about what `perch disable`
-//! does *not* touch, and about the exclusion being fully reversible.
+//! the Cycling pool and nothing else changes. So most of these tests are about
+//! what `perch disable` does *not* touch, and about the exclusion being fully
+//! reversible.
 
 mod common;
 
@@ -252,10 +251,9 @@ fn disabling_a_quarantined_account_promises_no_switch_that_would_not_work() {
     let (result, printed) = disable_account(&host, SECOND_EMAIL);
 
     result.expect("an Account can leave the pool whatever its Credential is doing");
-    // The one thing either half of this pair says beyond what it changed, and
-    // the reason it is exempt: an Account nothing will switch to is a refusal
-    // wearing an outcome's clothes, so it keeps its explanation and its remedy
-    // (ADR perch-says-what-it-did).
+    // The one thing either half says beyond what it changed: an Account nothing
+    // will switch to is a refusal wearing an outcome's clothes, so it keeps its
+    // explanation and its remedy (ADR perch-says-what-it-did).
     assert!(
         printed.contains("It is Quarantined, though")
             && printed.contains("so nothing switches to it, Cycling or you."),
@@ -268,13 +266,9 @@ fn disabling_a_quarantined_account_promises_no_switch_that_would_not_work() {
     );
 }
 
-/// **What ADR perch-says-what-it-did leaves of these two.** A healthy Account
-/// is told what changed and nothing else.
-///
 /// What Cycling does with a disabled Account, and that a disabled one stays
-/// listed and named and can still be switched to by name, are true after every
-/// single run of `perch disable` — which is what makes them the guide's to
-/// establish rather than this command's to repeat.
+/// listed and named, are true after every single run — which makes them the
+/// guide's to establish rather than this command's to repeat.
 #[test]
 fn a_healthy_account_is_told_what_changed_and_nothing_about_what_that_means() {
     let host = machine_with_two_accounts();

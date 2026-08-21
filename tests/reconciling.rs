@@ -20,10 +20,8 @@ const SHARED: &str = "/Users/someone/.claude";
 const PROFILE: &str = "/Users/someone/.config/perch/profiles/someone-example-com";
 
 /// A machine whose Default Profile holds the spread a real one does: memory,
-/// settings, a plugins directory, the plans directory Claude Code grew after
-/// Perch was written — and the three entries that stay behind: the two that
-/// belong to the Account rather than to the person, and the one that belongs to
-/// the configuration directory itself.
+/// settings, plugins, plans — and the entries that stay behind, the two that
+/// belong to the Account and the one that belongs to the directory itself.
 fn machine() -> FakeHost {
     FakeHost::new()
         .with_file(shared("CLAUDE.md"), "remember this")
@@ -85,14 +83,9 @@ fn every_entry_of_the_default_profile_crosses_except_the_three_that_stay_behind(
     );
 }
 
-/// The third entry that stays behind, and the one that is neither the person's
-/// nor the Account's but the directory's own (ADR everything-but-the-account).
-///
-/// Shared, `sessions` would make one client's marker the answer for every
-/// Profile at once: a Run against one Account would make every other Account's
-/// Profile Live, and its own marker would land in the Default Profile. Liveness
-/// is a fact about one configuration directory, so the directory that records it
-/// is per-Profile.
+/// The third entry that stays behind, neither the person's nor the Account's but
+/// the directory's own: shared, one client's Marker would be the answer for
+/// every Profile at once.
 #[test]
 fn the_directory_that_records_who_is_running_does_not_cross() {
     let host = machine();
@@ -111,17 +104,9 @@ fn the_directory_that_records_who_is_running_does_not_cross() {
     );
 }
 
-/// The fourth entry that stays behind, and the same rule as `sessions`: it
-/// answers a question about *this* configuration directory, so it means nothing
-/// in another one.
-///
-/// `.oauth_refresh.lock` is the only one of Claude Code's three locks that sits
-/// inside the config directory rather than beside it, so it is the only one a
-/// Reconcile ever sees — and it is only there at all while somebody holds it,
-/// which is what made this rare enough to ship. Linked and then released, the
-/// Profile is left with a link to nothing: `mkdir` at a dangling link fails
-/// exactly as it does when the lock is held, so that Profile's client waits on
-/// a lock nobody holds, and `clear_the_abandoned` will not clear it either.
+/// The fourth, on the same rule — and the only one of Claude Code's three locks
+/// that sits inside the directory, so the only one a Reconcile ever sees. It is
+/// only there at all while somebody holds it, which is what makes this rare.
 #[test]
 fn the_lock_a_credential_is_renewed_under_does_not_cross() {
     let held = machine();
@@ -142,9 +127,6 @@ fn the_lock_a_credential_is_renewed_under_does_not_cross() {
     );
 }
 
-/// The reason the set is a denylist rather than a list in Perch's source: a
-/// Claude Code release that adds a directory has to follow the user without
-/// waiting for a Perch release.
 #[test]
 fn an_entry_perch_has_never_heard_of_crosses_without_a_code_change() {
     let host = machine()
@@ -178,9 +160,6 @@ fn off_windows_every_share_is_a_symbolic_link() {
     }
 }
 
-/// The platform the copy fallback used to exist for, and does not need one:
-/// junctions and hard links both work without Developer Mode and without
-/// elevation, and only symbolic links need either.
 #[test]
 fn windows_without_developer_mode_uses_junctions_and_hard_links() {
     let host = machine().with_platform(Platform::Windows);
@@ -199,9 +178,6 @@ fn windows_without_developer_mode_uses_junctions_and_hard_links() {
     }
 }
 
-/// A symbolic link is the better share where it can be had — it survives the
-/// file it names being replaced rather than written through — so it is what a
-/// Windows with the privilege gets.
 #[test]
 fn windows_with_developer_mode_prefers_a_symbolic_link_for_a_file() {
     let host = machine()
@@ -218,8 +194,6 @@ fn windows_with_developer_mode_prefers_a_symbolic_link_for_a_file() {
     );
 }
 
-/// The one thing Reconcile may never do, on any platform: hand a Run a copy,
-/// which would silently stop being the file the person is editing.
 #[test]
 fn nothing_is_ever_copied_into_the_profile() {
     for platform in [Platform::MacOs, Platform::Windows, Platform::Other] {
@@ -240,9 +214,6 @@ fn nothing_is_ever_copied_into_the_profile() {
     }
 }
 
-/// A refusal is recoverable and a diverged copy is not, so the failure is
-/// reported rather than worked around — and it names the entry, because the fix
-/// is the user's to apply.
 #[test]
 fn a_link_that_cannot_be_made_refuses_and_names_the_entry_and_the_reason() {
     let host = machine().with_unwritable_file(profile("plugins"), "Read-only file system");
@@ -260,8 +231,6 @@ fn a_link_that_cannot_be_made_refuses_and_names_the_entry_and_the_reason() {
     );
 }
 
-/// Both attempts are reported on Windows: which one a person can do something
-/// about depends on which privilege they are missing.
 #[test]
 fn a_windows_refusal_says_what_it_tried_and_what_would_let_it_through() {
     let host = machine()
@@ -293,9 +262,6 @@ fn a_link_pointing_somewhere_stale_is_repaired_rather_than_left() {
     );
 }
 
-/// A link to an entry the Default Profile no longer holds is not inert: Claude
-/// Code takes its locks with `mkdir`, and `mkdir` at a dangling link fails as
-/// though the lock were held.
 #[test]
 fn a_link_to_an_entry_that_has_gone_is_taken_away() {
     let host = machine().with_link(
@@ -310,8 +276,6 @@ fn a_link_to_an_entry_that_has_gone_is_taken_away() {
     assert!(!entries_of(&host).contains(&".oauth_refresh.lock".to_string()));
 }
 
-/// Only Perch's own shares are swept: a link somebody put in their Profile
-/// pointing anywhere else is theirs, broken or not.
 #[test]
 fn a_broken_link_that_is_not_a_share_of_the_default_profile_is_left_alone() {
     let host = machine().with_link(Link::Symbolic, "/Volumes/backup/notes", profile("notes"));
@@ -325,8 +289,6 @@ fn a_broken_link_that_is_not_a_share_of_the_default_profile_is_left_alone() {
     );
 }
 
-/// Where a share is a symbolic link, a link that is already right is left
-/// exactly as it is: re-making one is a window in which the entry is not there.
 #[test]
 fn a_second_pass_over_an_unchanged_machine_touches_nothing() {
     let host = machine();
@@ -348,18 +310,16 @@ fn a_second_pass_over_an_unchanged_machine_touches_nothing() {
     assert!(touched.is_empty(), "{touched:?}");
 }
 
-/// A hard link is a second name for a file, and an editor that writes beside a
-/// file and renames it into place leaves the Default Profile holding a new file
-/// and the Profile still naming the old one. Re-establishing it before every
-/// Run is what keeps that from being a divergence somebody discovers later.
+/// An editor that writes beside a file and renames it into place leaves the
+/// Default Profile holding a new file and the Profile still naming the old one,
+/// which is what re-establishing before every Run keeps down to one Run.
 #[test]
 fn a_hard_linked_file_is_re_established_every_pass() {
     let host = machine().with_platform(Platform::Windows);
     run_reconcile(&host).expect("the first pass links everything");
     assert_eq!(share_of(&host, "CLAUDE.md").0, Link::Hard);
 
-    // What a replacement looks like from outside: the same name, a different
-    // file behind it.
+    // A replacement from outside: the same name, a different file behind it.
     host.set_file(shared("CLAUDE.md"), "remember this instead");
     host.forget_effects();
     run_reconcile(&host).expect("the second pass re-establishes it");
@@ -381,9 +341,6 @@ fn a_hard_linked_file_is_re_established_every_pass() {
     );
 }
 
-/// Off Windows a share is a symbolic link, so anything else at that name is
-/// something Perch did not put there — and deleting what you cannot identify is
-/// how somebody loses work.
 #[test]
 fn something_that_is_not_a_link_in_the_way_is_refused_rather_than_deleted() {
     let host = machine().with_file(profile("CLAUDE.md"), "somebody's own file");
@@ -398,15 +355,12 @@ fn something_that_is_not_a_link_in_the_way_is_refused_rather_than_deleted() {
         host.file(profile("CLAUDE.md")).as_deref(),
         Some("somebody's own file")
     );
-    // The remedy is the one that fits: this is a path to move, not a privilege
-    // to turn on. A Run that cannot happen again until something is done says
-    // what that something is.
+    // This is a path to move rather than a privilege to turn on, and the
+    // remedy has to be the one that fits.
     assert!(said.contains("move it aside or remove it"), "{said}");
     assert!(!said.contains("filesystem that carries no links"), "{said}");
 }
 
-/// The Profile's own Credential and its own `oauthAccount` are what make it a
-/// Profile rather than a copy of the Default one. Nothing here goes near them.
 #[test]
 fn the_profiles_own_credential_and_identity_are_untouched() {
     let host = machine()
@@ -439,8 +393,6 @@ fn a_profile_that_is_not_there_yet_is_created_for_its_owner_alone() {
     assert_eq!(host.mode_of(PROFILE), Some(PRIVATE_DIR_MODE));
 }
 
-/// A machine Claude Code has never run on has nothing to share, which is not a
-/// failure.
 #[test]
 fn a_default_profile_that_is_not_there_shares_nothing() {
     let host = FakeHost::new();
@@ -455,9 +407,8 @@ fn a_default_profile_that_is_not_there_shares_nothing() {
     );
 }
 
-/// The same shape reached the other way, by a `CLAUDE_CONFIG_DIR` that puts a
-/// Profile inside the Default Profile: everything else crosses, and the Profile
-/// is not linked into itself.
+/// A `CLAUDE_CONFIG_DIR` that puts a Profile inside the Default Profile:
+/// everything else crosses, and the Profile is not linked into itself.
 #[test]
 fn a_profile_inside_the_default_profile_is_not_linked_into_itself() {
     let nested = shared("nested");
@@ -472,15 +423,9 @@ fn a_profile_inside_the_default_profile_is_not_linked_into_itself() {
     );
 }
 
-/// The same refusal at any depth, not only where the Profile is a direct child.
-///
 /// `PERCH_HOME=~/.claude/perch` under `CLAUDE_CONFIG_DIR=~/.claude` is the
-/// arrangement that reaches it: the entry that crosses is `~/.claude/perch` and
-/// the Profile sits three levels inside it, so the two are different paths and
-/// an equality check waved the link through. What it made was a link whose own
-/// subtree contained the Profile it was made in — so anything walking that
-/// Profile afterwards, Claude Code's plugin and memory discovery among it,
-/// descends for ever.
+/// arrangement that reaches this: the entry that crosses is `~/.claude/perch`
+/// and the Profile sits three levels inside it, so the two are different paths.
 #[test]
 fn an_entry_that_contains_the_profile_is_not_linked_into_it_however_deep_it_is() {
     let inside = format!("{SHARED}/perch/profiles/someone-example-com");
@@ -499,15 +444,9 @@ fn an_entry_that_contains_the_profile_is_not_linked_into_it_however_deep_it_is()
     );
 }
 
-/// And the same refusal where the containment is only true after a link is
-/// followed, which is the route the textual comparison could not see.
-///
-/// A `~/.claude/perch` that is a *link* to `~/.config/perch` is two different
-/// strings from the Profile under `~/.config/perch`, so `starts_with` waved it
-/// through — and what got made was `<profile>/perch -> ~/.claude/perch ->
-/// ~/.config/perch`, whose subtree holds the Profile the link sits in. The
-/// sweep then keeps it, because the path it points at does resolve to something
-/// that exists. One hop is all a dotfile manager makes, and all it takes.
+/// The same where the containment is only true after a link is followed: a
+/// `~/.claude/perch` that is a *link* to `~/.config/perch` is two different
+/// strings from the Profile under it. One hop is all a dotfile manager makes.
 #[test]
 fn an_entry_that_only_holds_the_profile_once_its_link_is_followed_is_not_linked_either() {
     let host = machine()
@@ -532,8 +471,6 @@ fn an_entry_that_only_holds_the_profile_once_its_link_is_followed_is_not_linked_
     );
 }
 
-/// The Default Profile already holds all of it, and a directory linked into
-/// itself is a shape nothing recovers from.
 #[test]
 fn the_default_profile_is_never_reconciled_into_itself() {
     let host = machine();
@@ -551,17 +488,10 @@ fn the_default_profile_is_never_reconciled_into_itself() {
     );
 }
 
-/// A link at a held-back name is taken away, whether or not its target is
-/// still there.
-///
-/// The denylist is enforced where links are *made*: those names are filtered
-/// out before anything is established. So nothing ever looked at one already
-/// sitting there, and a link at `.credentials.json` or `sessions` would stay
-/// for good. What it means is not a tidiness question — a Profile whose
-/// Credential Store is a link into the Default Profile has no Credential of its
-/// own, so a Capture or a `perch relogin` writing into it writes into the live
-/// store; and a `sessions` link makes every Profile Live at once
-/// (ADR everything-but-the-account).
+/// The denylist is enforced where links are *made*, so nothing else ever looks
+/// at one already sitting at a held-back name and it would stay for good — and a
+/// Profile whose Credential Store is a link into the Default Profile has no
+/// Credential of its own.
 #[test]
 fn a_link_at_a_held_back_name_is_taken_away_even_though_its_target_is_there() {
     let host = machine()
@@ -591,13 +521,9 @@ fn a_link_at_a_held_back_name_is_taken_away_even_though_its_target_is_there() {
     );
 }
 
-/// A link that will not *go* is a different problem from a link that cannot be
-/// *made*, and it used to be reported with the other one's remedy.
-///
 /// What refuses a `remove_link` is the directory holding it — a Profile left
 /// root-owned by a `sudo claude` is how that happens — and Developer Mode has
-/// nothing to say about it. `refused` states the rule this breaks: "A refusal
-/// that named the wrong one would be worse than one that named none."
+/// nothing to say about it, so it must not be the remedy named.
 #[test]
 fn a_link_that_cannot_be_taken_away_names_the_directory_rather_than_developer_mode() {
     let stale = profile("plugins");
