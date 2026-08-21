@@ -1,26 +1,11 @@
-//! The `/usr/bin/security` wrapper (ADR claude-code-chooses-the-store).
-//!
-//! macOS anchors a keychain item's access control to the binary that created
-//! it, so Perch drives the same binary Claude Code does rather than linking a
-//! keychain crate. Four constraints come with that binary, and all four live
-//! here and nowhere else:
-//!
-//! - writes hex-encode with `-X` and go in through `-i` so a Credential does
-//!   not reach `argv`, where any process can read it off the process table;
-//! - the `-i` stdin buffer is 4096 bytes and overflow truncates mid-argument,
-//!   silently corrupting the item, so writes near the limit fall back to argv
-//!   — the one exception to the line above, and one the user is told about as
-//!   it happens rather than left to discover: a Credential that reaches `argv`
-//!   is readable by anything running as them for as long as `security` does;
-//! - exit code 44 means "not found"; every other non-zero exit means locked,
-//!   denied, or unavailable, and is reported differently;
-//! - `-w` returns hex for non-printable data, so this is safe for the ASCII
-//!   JSON Claude Code stores and nothing else.
-//!
-//! What is here is the protocol and none of the spawning: building a command
-//! line, deciding which way it must travel, and reading an exit status. The
-//! process itself is started in [`crate::host::real`], where every other
+//! The `/usr/bin/security` protocol, and none of the spawning: building a
+//! command line, deciding which way it must travel, and reading an exit status.
+//! The process itself is started in [`crate::host::real`], where every other
 //! process Perch starts is.
+//!
+//! The four constraints that come with that binary are
+//! ADR claude-code-chooses-the-store's, and this module is the only place they
+//! are spelled.
 
 use crate::host::{Execution, double_quoted};
 use zeroize::Zeroizing;
@@ -82,16 +67,10 @@ pub fn classify(execution: &Execution, service: &str, account: &str) -> Keychain
 }
 
 /// The `-i` command line for a write, exactly as it is piped to `security`.
-///
-/// `-U` updates an existing item rather than failing; `-X` takes the secret as
-/// hex so no byte of it is ever quoted, escaped, or logged.
-///
-/// Refuses a service or account carrying a control character. `security -i` is
-/// line-oriented — one sub-command per line — so a newline in either of them
-/// does not need escaping, it needs rejecting: it ends this command and starts
-/// another, and `-i` reports a failed sub-command on stderr while still exiting
-/// 0, so an injected `delete-generic-password` that *works* is silent. The
-/// account name is `$USER` verbatim, which is somebody else's to set.
+/// `-U` updates rather than failing; `-X` takes the secret as hex, so no byte
+/// of it is quoted, escaped or logged. A control character is refused rather
+/// than quoted: `-i` reads one sub-command per line, and reports a failed one
+/// on stderr while still exiting 0.
 pub fn add_command_line(
     service: &str,
     account: &str,
@@ -99,11 +78,8 @@ pub fn add_command_line(
 ) -> Result<Zeroizing<String>, KeychainError> {
     inert("the keychain service name", service)?;
     inert("the keychain account name", account)?;
-    // `Zeroizing`, because this line holds the Credential — hex-encoded, which
-    // is an encoding and not a protection. The read path goes to the trouble of
-    // wiping `security`'s stdout and `StoredCredential` is `Zeroizing`
-    // throughout, so the invariant is explicit everywhere except the write that
-    // puts a Credential *there*, which is the one direction that had none.
+    // `Zeroizing`, because this line holds the Credential. Hex is an encoding
+    // and not a protection, and every other buffer on this path is wiped.
     Ok(Zeroizing::new(format!(
         "add-generic-password -U -s {} -a {} -X {}\n",
         double_quoted(service),
@@ -127,10 +103,8 @@ fn inert(what: &str, value: &str) -> Result<(), KeychainError> {
 
 /// Which path a write of this size must take.
 ///
-/// ADR claude-code-chooses-the-store says writes *near* the limit fall back,
-/// not writes past it: the failure is silent corruption, and the exact byte at
-/// which `security` starts truncating is an observation about one build of it,
-/// not a promise.
+/// Writes *near* the limit fall back, not writes past it: the byte at which
+/// `security` starts truncating is an observation about one build of it.
 pub fn write_path_for(command_line: &str) -> WritePath {
     if command_line.len() >= STDIN_BUFFER_LIMIT - STDIN_SAFETY_MARGIN {
         WritePath::Argv
@@ -142,14 +116,9 @@ pub fn write_path_for(command_line: &str) -> WritePath {
 pub fn hex_encode(bytes: &[u8]) -> Zeroizing<String> {
     use std::fmt::Write;
 
-    // Written into the buffer rather than formatted into a `String` per byte,
-    // which is a transient allocation for every one of the several thousand a
-    // Credential runs to — and every one of those would have been a fragment of
-    // the Credential in freed heap.
-    //
-    // The buffer is reserved at the full width for the same reason, so it never
-    // grows: a `Vec` that reallocates copies and frees the old block untouched,
-    // which is what `export::Wiping` exists to avoid one module over.
+    // One buffer, reserved at the full width so it never grows. A `String` per
+    // byte is a fragment of the Credential in freed heap several thousand times
+    // over, and a `Vec` that reallocates frees the old block untouched.
     let mut out = Zeroizing::new(String::with_capacity(bytes.len() * 2));
     for byte in bytes {
         let _ = write!(out, "{byte:02X}");
@@ -171,19 +140,11 @@ pub fn hex_decode(text: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
-/// `security -w` prints hex when the stored data is not printable, so a reply
-/// that is entirely hex digits is decoded before it is believed.
-///
-/// Exactly one newline is taken off, because exactly one is `security`'s: the
-/// rest are the Credential's. `trim_end_matches` took them all, and a Credential
-/// ending in a newline is ordinary — `~/.claude/.credentials.json` restored from
-/// a backup or touched by an editor has one. The write is `-X`, so the bytes
-/// stored are exact; only the read was lossy, which made `write_and_read_back`
-/// compare a Credential against itself minus a byte and conclude the keychain
-/// could not be written to. It then deleted the item it had just written and
-/// fell back to the plaintext store, saying so in a note that named the wrong
-/// cause — and every later write repeated it, so on macOS that Account's
-/// Credential stayed in a file on disk for good.
+/// `security -w` prints hex for data that is not printable, so a reply that is
+/// entirely hex digits is decoded before it is believed. Exactly one newline
+/// comes off, because exactly one is `security`'s and the rest are the
+/// Credential's — one restored from a backup ends in a newline, and the `-X`
+/// write stores it exactly.
 pub fn decode_password_output(stdout: &str) -> String {
     let trimmed = stdout.strip_suffix('\n').unwrap_or(stdout);
     match hex_decode(trimmed) {
@@ -207,12 +168,6 @@ mod tests {
         assert_eq!(hex_decode(&hex).unwrap(), secret.as_bytes());
     }
 
-    /// One newline is `security`'s and the rest are the Credential's. A
-    /// Credential ending in one is ordinary — a `.credentials.json` restored
-    /// from a backup or touched by an editor has one — and taking it off made
-    /// `write_and_read_back` compare a Credential against itself minus a byte,
-    /// conclude the keychain could not be written to, delete the item it had
-    /// just written, and fall back to storing it in plaintext for good.
     #[test]
     fn only_the_newline_security_added_is_taken_off_a_reply() {
         let credential = "{\"claudeAiOauth\":{}}";
@@ -257,12 +212,7 @@ mod tests {
         assert_eq!(write_path_for(&written), WritePath::Stdin);
     }
 
-    /// `security -i` reads one sub-command per line, so a newline in a value is
-    /// not something to escape — it is the end of this command and the start of
-    /// another. The account name is `$USER` verbatim, which is somebody else's
-    /// to set, and `-i` reports a failed sub-command on stderr while still
-    /// exiting 0: an injected `delete-generic-password` that worked would be
-    /// silent.
+    /// The account name is `$USER` verbatim, which is somebody else's to set.
     #[test]
     fn a_name_carrying_a_control_character_is_refused_rather_than_quoted() {
         let injected = "someone\ndelete-generic-password -s \"Claude Code-credentials\"";

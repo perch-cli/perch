@@ -1,25 +1,13 @@
 //! The beliefs that can only be checked against state the developer owns and
 //! did not offer: their login keychain, their `~/.claude`, the Claude Code they
 //! have installed, and whatever clients they happen to have open
-//! (ADR an-assumption-is-probed, ADR a-suite-is-named-and-gated).
+//! (ADR an-assumption-is-probed, ADR a-suite-is-named-and-gated). Everything
+//! that works in a directory of its own runs by default, in `conformance.rs`
+//! and `corroboration.rs`.
 //!
-//! That is the whole of why this suite is held back by the `your-machine`
-//! feature, and it is a question of consent rather than of damage. A read of
-//! the developer's real state counts as much as a write: nothing here is the
-//! repository's to determine, and a suite that reported green on Tuesday and
-//! skipped on Wednesday — same machine, same commit, according to whether a
-//! client was open — is the one thing a default-on suite must never be.
-//! Everything that works in a directory of its own runs by default instead, in
-//! `conformance.rs` and `corroboration.rs`.
-//!
-//! Gated per test rather than per file. A file-level `#![cfg(target_os =
-//! "macos")]` is what once narrowed a claim about every filesystem to one
-//! platform without anybody choosing it, so the keychain cases say `macos` for
-//! themselves and the ones that hold everywhere say nothing.
-//!
-//! On a machine with no Claude Code and no login — a CI runner, for instance —
-//! each test asserts the outcome that situation should produce, rather than
-//! quietly passing. None of them ever prints a Credential.
+//! Gated per test rather than per file: a file-level `#![cfg(target_os =
+//! "macos")]` is what narrows a claim about every filesystem to one platform
+//! without anybody choosing it.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -83,14 +71,10 @@ fn the_installed_claude_code_reports_a_version_perch_can_parse() {
     }
 }
 
-/// The load-bearing belief: `Claude Code-credentials-<sha256(dir)[0:8]>`. Get it
-/// wrong and Perch stores every Credential in a namespace no Profile is ever
-/// read from, silently.
-///
-/// It can only be checked against reality on a machine whose `CLAUDE_CONFIG_DIR`
-/// is set and logged in — Claude Code has to have written the item for there to
-/// be anything to find. Where that holds, this fails the moment the derivation
-/// drifts; elsewhere it asserts what it can and says what it skipped.
+/// The load-bearing belief: `Claude Code-credentials-<sha256(dir)[0:8]>`. Get
+/// it wrong and every Credential goes to a namespace no Profile is read from.
+/// Checkable only where `CLAUDE_CONFIG_DIR` is set and logged in, because
+/// Claude Code has to have written the item for there to be anything to find.
 #[test]
 #[cfg(target_os = "macos")]
 fn a_non_default_config_directory_finds_its_credential_under_the_derived_name() {
@@ -176,13 +160,9 @@ fn the_installed_claude_code_stores_what_perch_expects_to_find() {
     }
 }
 
-/// Takes the item back out of the real login keychain when the test ends,
-/// however it ends.
-///
-/// The straight-line `keychain_delete` these tests used runs only if every
-/// assertion before it passed, so the one run that fails is the one that leaves
-/// something behind — in the user's own keychain, on the day they are already
-/// looking at a failure.
+/// Takes the item back out of the real login keychain however the test ends. A
+/// straight-line `keychain_delete` runs only if every assertion before it
+/// passed, so the run that fails is the run that leaves something behind.
 #[cfg(target_os = "macos")]
 struct Reaped<'a> {
     host: &'a RealHost,
@@ -333,17 +313,11 @@ fn every_session_marker_claude_code_has_left_names_a_process() {
     }
 }
 
-/// The marker's shape, asserted against a client that is actually running: it
-/// names its process in its filename and in its body, and `startedAt` is when
-/// the session began, in milliseconds since the epoch. If Claude Code stops
-/// writing markers this way, every Profile on the machine reads as idle and
-/// the refusal that protects a running client stops firing — this is the test
-/// that should say so before a user does.
-///
-/// Here rather than beside the rest of ADR a-profile-is-live-by-evidence's
-/// corroboration, because what it reads is the developer's own
-/// `~/.claude/sessions`: whether it asserts or skips is decided by their
-/// afternoon rather than by this repository.
+/// The marker's shape, against a client that is actually running: it names its
+/// process in its filename and in its body, and `startedAt` is epoch
+/// milliseconds. Here rather than beside the rest of the corroboration
+/// (ADR a-profile-is-live-by-evidence) because what it reads is the developer's
+/// own `~/.claude/sessions`.
 #[test]
 fn a_running_clients_marker_is_the_shape_perch_believes_in() {
     let host = RealHost::new();
@@ -396,11 +370,9 @@ fn a_running_clients_marker_is_the_shape_perch_believes_in() {
             "startedAt is epoch milliseconds, not {session_began}"
         );
 
-        // The belief the whole of ADR a-profile-is-live-by-evidence turns on,
-        // held against a real client: a genuine session's process began no
-        // later than the marker says the session did. If the two clocks drift
-        // apart, running clients read as recycled PIDs and every Live Profile
-        // protection stops firing.
+        // A genuine session's process began no later than the marker says the
+        // session did. Where the two clocks drift apart, running clients read
+        // as recycled PIDs and every Live Profile protection stops firing.
         assert!(
             process_began.timestamp_millis() <= session_began,
             "{}: the process began at {} but the session claims {session_began} — \
@@ -423,29 +395,11 @@ fn a_running_clients_marker_is_the_shape_perch_believes_in() {
     }
 }
 
-/// [`probe::assumption::CREDENTIAL_LOCATION`], for the half of it that holds
-/// off macOS, and the only load-bearing belief there: the plaintext store sits
-/// inside the config directory Claude Code was given
-/// (ADR an-assumption-is-probed, ADR claude-code-chooses-the-store). Everything
-/// that makes a Profile a private place for a Credential rests on it — get it
-/// wrong and every Profile shares one file, which is every Account sharing one
-/// login.
-///
-/// Asserted the way it is relied on. Perch says where the store of a config
-/// directory is, a Credential is put exactly there, and the installed Claude
-/// Code is asked who it is: it answers out of that file, having answered
-/// "nobody" for the same directory a moment earlier. The empty answer is half
-/// the test — without it, a Claude Code reading the real login on this machine
+/// [`probe::assumption::CREDENTIAL_LOCATION`]: the plaintext store sits inside
+/// the config directory it was given (ADR claude-code-chooses-the-store), so
+/// getting it wrong is every Account sharing one login. The empty answer is
+/// half the test — without it, a Claude Code reading this machine's own login
 /// would look like one honoring the directory.
-///
-/// On macOS this also asserts that the plaintext store is consulted when the
-/// keychain holds nothing for that directory, which is the fallback half of the
-/// same composite. If that stops being true, this is the test that should say
-/// so.
-///
-/// Its own config directory, and yet gated: it runs the Claude Code the
-/// developer installed, which is a program of theirs executing on their machine
-/// rather than a filesystem call in `temp_dir`.
 #[test]
 fn claude_code_reads_the_credential_perch_would_write_for_a_config_directory() {
     let host = RealHost::new();
@@ -482,11 +436,9 @@ fn claude_code_reads_the_credential_perch_would_write_for_a_config_directory() {
 }
 
 /// Whether the installed Claude Code considers itself logged in when pointed at
-/// a config directory, or `None` when there is no Claude Code to ask.
-///
-/// `auth status` is the one question that reads the credential store and
-/// answers locally. It is asked with `CLAUDE_CONFIG_DIR` set, so the machine's
-/// own login is neither read nor disturbed.
+/// a config directory, or `None` when there is no Claude Code to ask. `auth
+/// status` is the one question that reads the credential store and answers
+/// locally, and `CLAUDE_CONFIG_DIR` keeps the machine's own login out of it.
 fn auth_status(config_dir: &Path) -> Option<bool> {
     let output = Command::new(installed_claude_code()?)
         .args(["auth", "status"])

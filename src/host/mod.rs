@@ -2,18 +2,12 @@
 //!
 //! Commands take a `&dyn Host` and nothing else, so behavior tests drive the
 //! real command code against [`fake::FakeHost`] and assert on outcomes rather
-//! than on mocks. One port, two implementations: [`real::RealHost`] and the
-//! fake that records what it was asked to do.
+//! than on mocks. One port, two implementations.
 //!
-//! [`Host`] declares nothing itself. It is the sum of nine traits, one per kind
-//! of effect, and a reader who wants to know what a module touches of the
-//! machine can read it off that module's signature — where one ever narrows.
-//! Today none does: every consumer of this port reaches across several
-//! concerns, because anything that touches the machine touches several of its
-//! surfaces at once. The port is 42 methods wide because the machine is, and
-//! ADR the-port-fits-the-machine carries the table that says so, consumer by
-//! consumer. It is the answer to the next reading that counts the methods and
-//! proposes cutting them up to make somebody's signature smaller.
+//! [`Host`] declares nothing itself: it is the sum of nine traits, one per kind
+//! of effect. No consumer narrows to one of them, because anything that touches
+//! the machine touches several of its surfaces at once — the port is 42 methods
+//! wide because the machine is (ADR the-port-fits-the-machine).
 
 use std::path::{Path, PathBuf};
 
@@ -43,16 +37,10 @@ pub struct Execution {
 }
 
 impl std::fmt::Debug for Execution {
-    /// Names the status and the sizes, never the bytes — the same redaction
-    /// [`crate::credentials::StoredCredential`] and [`crate::anthropic::Fresh`]
-    /// already hand-write, for the same secret one step earlier.
-    ///
-    /// This is the *first* shape a Credential takes: `security
-    /// find-generic-password -w` answers with one on stdout, so an `Execution`
-    /// returning from a keychain read is a struct holding a refresh token in a
-    /// public field. A derived `Debug` would print it, and the two types that
-    /// carry it afterwards had already been fixed while the one that carries it
-    /// first was still derived.
+    /// The status and the sizes, never the bytes. This is the *first* shape a
+    /// Credential takes: `security find-generic-password -w` answers with one on
+    /// stdout, so an `Execution` returning from a keychain read holds a refresh
+    /// token in a public field, and a derived `Debug` prints it.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             formatter,
@@ -83,17 +71,11 @@ impl From<std::process::Output> for Execution {
     }
 }
 
-/// A child's output as a `String`, moving the buffer where it can.
-///
-/// `String::from_utf8_lossy(..).into_owned()` allocates and copies even when the
-/// bytes are already valid UTF-8, which they are for every program Perch runs.
-/// This takes the `Vec` the child's output already is and hands it straight over
-/// in that case, falling back to the lossy read only where it has to.
-///
-/// The copy was worth removing for more than its cost. `security find-generic-password`
-/// answers with a Credential on stdout, so the copy was a second buffer holding
-/// a refresh token that nothing wipes and nothing reads again — one more place
-/// for it to outlive the process in a core dump or a swap file.
+/// A child's output as a `String`, moving the buffer where it can rather than
+/// through `from_utf8_lossy(..).into_owned()`, which copies even for bytes that
+/// are already UTF-8. `security find-generic-password` answers with a Credential
+/// on stdout, so that copy is a second buffer holding a refresh token nothing
+/// wipes and nothing reads again.
 fn taken_over(bytes: Vec<u8>) -> String {
     match String::from_utf8(bytes) {
         Ok(text) => text,
@@ -101,13 +83,10 @@ fn taken_over(bytes: Vec<u8>) -> String {
     }
 }
 
-/// One HTTP request, whole.
-///
-/// A request rather than a URL and some arguments beside it, because every part
-/// of one has to travel the same way: an access token is a Credential, and a
-/// header passed on a command line sits in `argv` where any process on the
-/// machine can read it off the process table — the same reason a Credential
-/// never reaches `security`'s command line (ADR claude-code-chooses-the-store).
+/// One HTTP request, whole — rather than a URL and some arguments beside it,
+/// because every part of one has to travel the same way. An access token is a
+/// Credential, and a header passed on a command line sits in `argv` where any
+/// process on the machine reads it off the process table.
 #[derive(Clone, PartialEq, Eq)]
 pub struct HttpRequest<'a> {
     pub url: &'a str,
@@ -116,21 +95,17 @@ pub struct HttpRequest<'a> {
     /// GET.
     pub body: Option<&'a str>,
     /// How long the whole request may take, or `None` for the ordinary bound.
-    ///
-    /// Part of the request rather than a setting on the Host for the same
-    /// reason the headers are: the two callers want different answers. A
-    /// Refresh is a figure somebody asked for and is worth waiting on; the
-    /// upgrade check on `perch --version` is a line nobody asked for, and a
-    /// black-holed network must cost it nothing
-    /// (ADR an-upgrade-asks-its-channel).
+    /// Part of the request rather than a setting on the Host, because the two
+    /// callers want different answers: a Refresh is a figure somebody asked for
+    /// and worth waiting on, and the upgrade check on `perch --version` is a
+    /// line nobody asked for.
     pub within_millis: Option<u64>,
 }
 
 impl std::fmt::Debug for HttpRequest<'_> {
     /// The url and the header *names*, never a header value and never the body.
-    /// The doc comment above says an access token is a Credential and travels
-    /// as a header; the renewal's body is a refresh token outright
-    /// ([`crate::anthropic::renew`]). A derived `Debug` printed both.
+    /// An access token travels as a header and the renewal's body is a refresh
+    /// token outright ([`crate::anthropic::renew`]).
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let names: Vec<&str> = self.headers.iter().map(|(name, _)| *name).collect();
         write!(
@@ -194,13 +169,10 @@ impl std::fmt::Debug for HttpResponse {
 }
 
 /// The machine, to the resolution Perch cares about: macOS keeps secrets in a
-/// keychain and no other platform does (ADR claude-code-chooses-the-store), and
-/// Windows finds programs through `PATHEXT` where everything else marks them
-/// executable.
-///
-/// An effect rather than a `cfg!`, so the behavior tests can drive every
-/// platform's Credential Store and program search whatever they are running
-/// on.
+/// keychain and no other platform does, and Windows finds programs through
+/// `PATHEXT` where everything else marks them executable. An effect rather than
+/// a `cfg!`, so behavior tests drive every platform's Credential Store and
+/// program search from whatever machine they run on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
     MacOs,
@@ -210,11 +182,9 @@ pub enum Platform {
 
 /// How one path is made to stand for another, which is the whole of how Shared
 /// State reaches the Profile a Run launches (ADR everything-but-the-account).
-///
-/// Three kinds rather than one, because the platforms do not agree on which of
-/// them a person may make: only symbolic links need Developer Mode or elevation
-/// on Windows, and junctions and hard links need neither. Which kind is used
-/// where is [`crate::reconcile`]'s decision; making one is the Host's.
+/// Three kinds, because only symbolic links need Developer Mode or elevation on
+/// Windows. Which kind is used where is [`crate::reconcile`]'s decision; making
+/// one is the Host's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Link {
     /// A path that names another path. What everything but Windows uses, and
@@ -241,13 +211,10 @@ impl Link {
     }
 }
 
-/// How a wait ended: on its own, or because the person at the terminal asked
-/// the loop to stop.
-///
-/// Its own type rather than a bare `bool`, because the two callers of a bare
-/// one would read it in opposite directions — a wait that "returned true" is
-/// either one that completed or one that was cut short, and only the loop that
-/// wrote it would know which.
+/// How a wait ended: on its own, or because the loop was asked to stop. Its own
+/// type rather than a `bool`, which two callers would read in opposite
+/// directions — a wait that "returned true" is either one that completed or one
+/// that was cut short.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Waited {
     /// The whole of the wait passed.
@@ -258,8 +225,7 @@ pub enum Waited {
 }
 
 /// The permissions a file holding a Credential is created with, and the mode
-/// anything looser is tightened to: the owner, and nobody else
-/// (ADR claude-code-chooses-the-store).
+/// anything looser is tightened to: the owner, and nobody else.
 pub const PRIVATE_FILE_MODE: u32 = 0o600;
 
 /// The same for the directory it sits in. A directory others may enter is a
@@ -267,31 +233,19 @@ pub const PRIVATE_FILE_MODE: u32 = 0o600;
 pub const PRIVATE_DIR_MODE: u32 = 0o700;
 
 /// A value as a double-quoted token, for the two line-oriented protocols Perch
-/// writes: `curl`'s configuration file and `security -i`'s command lines.
-///
-/// Quoted so that spaces and `#` are part of the value rather than punctuation,
-/// with backslashes and quotes escaped so JSON arrives as it was written. One
-/// copy rather than two identical ones, because two copies is how one of them
-/// gets fixed and the other does not.
-///
-/// It makes a value a *token*. It does not make it inert: neither protocol has
-/// an escape for a newline, so a value that could carry one is refused where it
-/// enters rather than quoted here.
+/// writes: `curl`'s configuration file and `security -i`'s command lines. One
+/// copy, because two is how one of them gets fixed and the other does not. It
+/// makes a value a *token* and not inert — neither protocol has an escape for a
+/// newline, so a value that could carry one is refused where it enters.
 pub fn double_quoted(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// The refusal [`double_quoted`] says has to happen somewhere else.
-///
-/// A control character is what neither protocol can be told to treat as data,
-/// so a value carrying one stops being a value and becomes further instructions:
-/// a newline in a `curl` configuration ends the option it was in and begins
-/// another, and `output =` writes a file while a second `url =` fetches one.
-///
-/// Perch does not author most of what goes through here. An access token is
-/// read out of a JSON file Perch does not own, where `\n` is an ordinary
-/// escape, so the value arriving with one is a thing that can happen rather
-/// than a thing that would have to be contrived.
+/// The refusal [`double_quoted`] says has to happen somewhere else. A newline in
+/// a `curl` configuration ends the option it was in and begins another, and
+/// `output =` writes a file while a second `url =` fetches one. Perch does not
+/// author most of what goes through here: an access token is read out of a JSON
+/// file it does not own, where `\n` is an ordinary escape.
 pub fn inert(what: &str, value: &str) -> Result<(), HostError> {
     match control_character_in(value) {
         Some(said) => Err(HostError::Other(format!(
@@ -303,14 +257,9 @@ pub fn inert(what: &str, value: &str) -> Result<(), HostError> {
 }
 
 /// The first control character in a value, named the way a refusal names one.
-///
-/// Shared with [`crate::keychain`]'s own refusal, which is the same check about
-/// the same hazard for the other line-oriented protocol Perch writes — its
-/// companion [`double_quoted`] was deliberately made one copy on the reasoning
-/// that "two copies is how one of them gets fixed and the other does not", and
-/// this half was left as two. What each caller *says* about it stays theirs:
-/// the two protocols break differently and the sentence explaining that is the
-/// part worth having twice.
+/// Shared with [`crate::keychain`]'s refusal, for the reason [`double_quoted`]
+/// is one copy. What each caller *says* about it stays theirs: the two protocols
+/// break differently, and that sentence is worth having twice.
 pub fn control_character_in(value: &str) -> Option<String> {
     value
         .chars()
@@ -319,13 +268,8 @@ pub fn control_character_in(value: &str) -> Option<String> {
 }
 
 /// A command as somebody would have typed it, for the line printed before it is
-/// run or the one that says what failed.
-///
-/// Here because it is about what goes through [`Processes::exec`], and because
-/// it was written twice — once in `upgrade` for the installer it drives and
-/// once in `service` for the service manager it drives — with the same doc
-/// comment reasoning above each. The two are read side by side in
-/// `perch upgrade` and `perch watcher install`, so two spellings of "as
+/// run or the one that says what failed. One copy: `perch upgrade` and
+/// `perch watcher install` are read side by side, so two spellings of "as
 /// somebody would have typed it" is two answers to one question.
 pub fn as_typed(program: &Path, args: &[String]) -> String {
     let mut line = program.to_string_lossy().into_owned();
@@ -362,8 +306,7 @@ pub enum HostError {
 /// age of an observation rather than wait for one.
 pub trait Clock {
     /// The current instant. Utilization is displayed as an observation with an
-    /// age (ADR a-figure-carries-its-age), so the clock is an effect like any
-    /// other.
+    /// age (ADR a-figure-carries-its-age).
     fn now(&self) -> DateTime<Utc>;
 }
 
@@ -378,49 +321,31 @@ pub trait Environment {
 
     /// The directory this command was typed in, which is the project a Run is
     /// about: Claude Code keys the trust it was given and the tools it was
-    /// allowed by exactly this path (ADR everything-but-the-account).
+    /// allowed by exactly this path.
     fn current_dir(&self) -> Result<PathBuf, HostError>;
 
     /// What a variable is set to, or `None` for one that is unset, empty, or
-    /// set to something that is not text.
-    ///
-    /// Those last two are folded in with "unset" because there is nothing
-    /// usable to hand back either way — every caller here wants a path or a
-    /// name, and one Perch cannot spell cannot be joined or compared. A value
-    /// that was *there* and could not be read is a remark on the way past, so
-    /// being ignored is a mistake somebody can see rather than a mystery.
+    /// set to something that is not text. The last two fold in with "unset"
+    /// because there is nothing usable to hand back either way, and a value that
+    /// was *there* and could not be read is a remark on the way past.
     fn env_var(&self, key: &str) -> Option<String>;
 
     /// Which platform this is, which is what decides where a Credential is
-    /// written (ADR claude-code-chooses-the-store).
+    /// written.
     fn platform(&self) -> Platform;
 
-    /// Where this Perch's own binary sits, with links followed.
-    ///
-    /// The only evidence there is about which Channel installed this machine's
-    /// Installation: every Channel points at the same Release and installs the
-    /// same bytes, so nothing inside the binary can say where it came from and
-    /// the path it sits at has to (ADR an-upgrade-asks-its-channel).
-    ///
-    /// Links followed because Homebrew's is the case that matters — what a
-    /// person runs is `<prefix>/bin/perch`, which is a symlink into the Cellar,
-    /// and the Cellar is the half that names the Channel.
+    /// Where this Perch's own binary sits, with links followed — the only
+    /// evidence there is about which Channel installed it, since every Channel
+    /// installs the same bytes (ADR an-upgrade-asks-its-channel). Homebrew is
+    /// why the links are followed: what a person runs is `<prefix>/bin/perch`,
+    /// and the Cellar it points into is the half that names the Channel.
     fn current_exe(&self) -> Result<PathBuf, HostError>;
 
-    /// Which user this process is running as, or `None` where the platform has
-    /// no such number.
-    ///
-    /// Two things need it, and both belong to `perch watcher`
-    /// (ADR the-machine-runs-the-watcher). It is what the root refusal is read
-    /// off — every Profile Perch holds is under one person's home directory, so
-    /// a Service installed by root is one watching a registry it does not own,
-    /// and on macOS one with no unlocked keychain to read
-    /// (ADR claude-code-chooses-the-store). And it names the domain a
-    /// LaunchAgent is bootstrapped into: `gui/<uid>` is the logged-in session,
-    /// which is the only place a Service belongs.
-    ///
-    /// `None` on Windows, where a logon task is registered against a named user
-    /// and there is neither a uid to quote nor a root to refuse.
+    /// Which user this process is running as, or `None` on Windows, where a
+    /// logon task names the user it runs as and there is neither a uid to quote
+    /// nor a root to refuse. Two things need it and both are `perch watcher`'s
+    /// (ADR the-machine-runs-the-watcher): the root refusal, and the `gui/<uid>`
+    /// domain a LaunchAgent is bootstrapped into.
     fn user_id(&self) -> Option<u32>;
 }
 
@@ -430,11 +355,8 @@ pub trait Files {
     fn read_file(&self, path: &Path) -> Result<String, HostError>;
 
     /// Writes a file created with exactly this mode, rather than with whatever
-    /// the process umask happens to be.
-    ///
-    /// The mode belongs to the *creation* for the same reason it does in
-    /// [`Files::write_private_file`]: a file opened and then `chmod`ed is a file
-    /// that was briefly readable. Where a mode means nothing this is an
+    /// the process umask happens to be: a file opened and then `chmod`ed is a
+    /// file that was briefly readable. Where a mode means nothing this is an
     /// ordinary write.
     fn create_file_with_mode(
         &self,
@@ -444,19 +366,14 @@ pub trait Files {
     ) -> Result<(), HostError>;
 
     /// Writes a file nobody but its owner can read, creating it — and any
-    /// directory above it — with that mode rather than tightening it
-    /// afterwards.
-    ///
-    /// A `chmod` after the fact leaves the secret on disk and readable for as
-    /// long as the two calls take, which is the whole of what the mode is for
-    /// (ADR claude-code-chooses-the-store).
+    /// directory above it — with that mode rather than tightening it afterwards.
+    /// A `chmod` after the fact leaves the secret readable for as long as the
+    /// two calls take, which is the whole of what the mode is for.
     fn write_private_file(&self, path: &Path, contents: &str) -> Result<(), HostError>;
 
     /// Creates a directory, and any above it, that nobody but its owner may
-    /// enter — for the directories that will come to hold a Credential.
-    ///
-    /// Like `mkdir -p`, a directory that is already there keeps the mode it
-    /// has: this sets a mode at creation and is not a `chmod` in disguise.
+    /// enter. Like `mkdir -p`, a directory that is already there keeps the mode
+    /// it has: this sets a mode at creation and is not a `chmod` in disguise.
     fn create_private_dir_all(&self, path: &Path) -> Result<(), HostError>;
 
     /// A file's permission bits, or `None` on a platform that does not answer
@@ -477,8 +394,8 @@ pub trait Files {
 
     /// Creates a directory only if nobody else has, reporting
     /// [`HostError::AlreadyExists`] when somebody has. `mkdir` either creates a
-    /// directory or fails, with no window in between, which is why Claude
-    /// Code's lock artifacts are directories and why Perch's are too.
+    /// directory or fails, with no window in between, which is why Claude Code's
+    /// lock artifacts are directories and why Perch's are too.
     fn create_dir_exclusive(&self, path: &Path) -> Result<(), HostError>;
 
     /// When a path was last written. A lock artifact's age is what says whether
@@ -507,50 +424,38 @@ pub trait Files {
 /// are and [`crate::reconcile`] chooses between them; making, reading and
 /// removing one is the machine's.
 pub trait Links {
-    /// Makes `at` a link of `kind` standing for `target`.
-    ///
-    /// The one way Shared State reaches a Run's Profile, because it is the only
-    /// one that cannot diverge (ADR everything-but-the-account). A kind the
-    /// platform will not make is an error rather than a quieter kind
-    /// substituted for it: which link was made decides what happens when the
-    /// target is replaced, so the caller chooses and hears about it.
+    /// Makes `at` a link of `kind` standing for `target`. A kind the platform
+    /// will not make is an error rather than a quieter kind substituted for it:
+    /// which link was made decides what happens when the target is replaced, so
+    /// the caller chooses and hears about it.
     fn link(&self, kind: Link, target: &Path, at: &Path) -> Result<(), HostError>;
 
     /// What a path links to, or `None` when what is there is not a link.
-    ///
-    /// Answers for the link itself rather than for what it points at, so a link
-    /// whose target has gone is still a link — which is the whole of how a
-    /// broken one is found and repaired. [`HostError::NotFound`] means nothing
-    /// is there at all, which is a third answer and a different repair.
-    ///
-    /// A hard link is not a link here, and cannot be: it is a name for a file,
-    /// indistinguishable from the file's first name.
+    /// Answers for the link itself, so a link whose target has gone is still a
+    /// link and [`HostError::NotFound`] is a third answer. A hard link is not a
+    /// link here and cannot be: it is a name for a file, indistinguishable from
+    /// the file's first name.
     fn link_target(&self, path: &Path) -> Result<Option<PathBuf>, HostError>;
 
-    /// Removes a link without touching what it points at.
-    ///
-    /// Its own operation because the platforms disagree about which call takes
-    /// one: a Windows junction is removed as a directory and a file symlink as
-    /// a file, and `remove_dir_all` on either would be a walk into somebody
-    /// else's directory.
+    /// Removes a link without touching what it points at. Its own operation
+    /// because the platforms disagree about which call takes one: a Windows
+    /// junction is removed as a directory and a file symlink as a file, and
+    /// `remove_dir_all` on either would be a walk into somebody else's
+    /// directory.
     fn remove_link(&self, path: &Path) -> Result<(), HostError>;
 }
 
-/// The filesystem and the links into it, together.
-///
-/// The one narrowing of this port that anything takes: `tests/conformance.rs`
-/// drives both adapters through a scratch directory, and these two concerns are
-/// exactly what a scratch directory can drive — nineteen methods, against the
-/// clock, the keychain, the processes, the terminal and the network, which are
-/// either the machine's own state or the very things a fake exists to invent.
-/// That suite's table takes a `&dyn Filesystem` so its claim about its own
-/// reach is a signature rather than a paragraph, and a case there that reaches
-/// for [`Clock::now`] does not compile (ADR the-port-fits-the-machine).
+/// The filesystem and the links into it, together — the one narrowing of this
+/// port that anything takes. `tests/conformance.rs` drives both adapters through
+/// a scratch directory, which is exactly what these two concerns are, so its
+/// table takes a `&dyn Filesystem` and a case there reaching for
+/// [`Clock::now`] does not compile.
 pub trait Filesystem: Files + Links {}
 
 /// The Credential Store macOS keeps, as `/usr/bin/security` presents it — which
-/// is the binary Claude Code drives, and so the one Perch has to drive too
-/// (ADR claude-code-chooses-the-store).
+/// is the binary Claude Code drives, and so the one Perch has to drive too. It
+/// is also what decides where a Credential is written at all, and what a mode
+/// on a file holding one is for (ADR claude-code-chooses-the-store).
 pub trait Keys {
     fn keychain_get(&self, service: &str, account: &str) -> Result<String, KeychainError>;
     fn keychain_set(&self, service: &str, account: &str, secret: &str)
@@ -564,17 +469,10 @@ pub trait Processes {
     fn exec(&self, program: &str, args: &[&str]) -> Result<Execution, HostError>;
 
     /// Runs a program with the terminal attached and `env` added to its
-    /// environment, returning its exit status.
-    ///
-    /// The one execution Perch does not capture, because both callers are
-    /// somebody's session rather than something Perch reads: a login is a
-    /// browser round trip the user drives, and a Run is whatever they asked to
-    /// have launched as an Account.
-    ///
-    /// `args` reach the program as they were given, one word per element:
-    /// nothing here re-quotes them, splits them or reads them, because a Run
-    /// forwards what somebody typed after `--` and a wrapper that interpreted it
-    /// would be a second parser between them and their own command line.
+    /// environment. The one execution Perch does not capture, because both
+    /// callers are somebody's session rather than something Perch reads.
+    /// `args` reach the program one word per element and are neither re-quoted
+    /// nor split: a Run forwards what somebody typed after `--`.
     fn exec_interactive(
         &self,
         program: &str,
@@ -582,67 +480,47 @@ pub trait Processes {
         env: &[(&str, &str)],
     ) -> Result<i32, HostError>;
 
-    /// This process, as the operating system names it.
-    ///
-    /// What a Run marks its Profile Live with (ADR a-run-is-one-shot): Perch
-    /// waits for the program it launched, so its own pid is alive for exactly
-    /// as long as the Run and no longer — and it is knowable *before* the
-    /// launch, where the child's is not.
+    /// This process, as the operating system names it. What a Run marks its
+    /// Profile Live with (ADR a-run-is-one-shot): Perch waits for the program it
+    /// launched, so its own pid is alive for exactly as long as the Run and no
+    /// longer — and it is knowable *before* the launch, where the child's is
+    /// not.
     fn process_id(&self) -> u32;
 
     /// Whether a process is still running. A Live Profile's Credential is
     /// untouchable because something else is holding it.
     fn process_alive(&self, pid: u32) -> bool;
 
-    /// When a process began, by the operating system's own account — or `None`
-    /// when there is no saying, because the process is gone or the operating
-    /// system will not answer for it.
-    ///
-    /// What corroborates a session marker (ADR a-profile-is-live-by-evidence):
-    /// a marker is evidence of a client only when the process it names began no
-    /// later than the marker says the session did, because a recycled PID
-    /// necessarily belongs to a process that began after the marker was
-    /// written.
+    /// When a process began, or `None` where there is no saying. What
+    /// corroborates a session marker (ADR a-profile-is-live-by-evidence): a
+    /// marker is evidence only when the process it names began no later than the
+    /// marker says the session did, because a recycled PID necessarily belongs
+    /// to a process that began after the marker was written.
     fn process_started_at(&self, pid: u32) -> Option<DateTime<Utc>>;
 }
 
-/// Time passing, and being asked to stop waiting.
-///
-/// One trait rather than two, because [`Waited::Interrupted`] means nothing
-/// until [`Waiting::listen_for_interrupts`] has been called — so either the two
-/// sit together or the ordering between them is unsayable. `sleep` is filed
-/// here rather than among the processes it used to sit with: it is
-/// [`crate::lock`]'s contention wait and has nothing to do with a process
-/// (ADR the-port-fits-the-machine).
+/// Time passing, and being asked to stop waiting. One trait rather than two,
+/// because [`Waited::Interrupted`] means nothing until
+/// [`Waiting::listen_for_interrupts`] has been called. `sleep` is filed here
+/// rather than among the processes: it is [`crate::lock`]'s contention wait and
+/// has nothing to do with a process.
 pub trait Waiting {
     /// Waits. Contending for a lock is the only thing Perch waits on, and it is
     /// an effect like any other so that tests do not spend the time.
     fn sleep(&self, millis: u64);
 
-    /// Starts listening for a loop being asked to stop — by the person at the
-    /// terminal, or by the service manager running it.
-    ///
-    /// `perch watcher run` calls this and nothing else does: every other
-    /// command is over long before anybody could ask, and Ctrl-C during one of
-    /// them is a process killed where it stands
-    /// (ADR a-watcher-knob-is-arithmetic).
-    ///
-    /// Both askings are the same request and are answered in the same place.
-    /// Ctrl-C is the person's; `SIGTERM` is what systemd and launchd send to
-    /// stop a Service, and a loop that did not claim it would be killed mid
-    /// Switch (ADR the-machine-runs-the-watcher).
+    /// Starts listening for a loop being asked to stop. `perch watcher run`
+    /// calls this and nothing else does: every other command is over long
+    /// before anybody could ask (ADR a-watcher-knob-is-arithmetic). Ctrl-C is
+    /// the person's and `SIGTERM` is a service manager's, and both are the same
+    /// request answered in the same place.
     fn listen_for_interrupts(&self);
 
-    /// Waits up to `millis`, and stops waiting the moment that has been asked
-    /// for.
-    ///
-    /// Its own effect rather than a [`Waiting::sleep`] with a check around it,
-    /// because the whole of what makes a foreground watcher killable is that
-    /// the wait ends when Ctrl-C arrives rather than two and a half minutes
-    /// later. Nothing may be held across it: what the watcher does between
-    /// waits is a Switch under Claude Code's locks, and the wait is where it
-    /// holds nothing at all, so a process killed here leaves no marker, no lock
-    /// and no half-written Credential.
+    /// Waits up to `millis`, and stops the moment that has been asked for. Its
+    /// own effect rather than a [`Waiting::sleep`] with a check around it,
+    /// because what makes a foreground watcher killable is that the wait ends
+    /// when Ctrl-C arrives rather than two and a half minutes later. Nothing
+    /// may be held across it, so a process killed here leaves nothing behind.
     fn wait(&self, millis: u64) -> Waited;
 }
 
@@ -656,71 +534,43 @@ pub trait Terminal {
     /// One line of input, or `None` at end of input.
     fn read_line(&self) -> Result<Option<String>, HostError>;
 
-    /// One line of input that is never shown as it is typed, or `None` at end of
-    /// input.
-    ///
-    /// Its own effect rather than a flag on [`Terminal::read_line`], because
-    /// the caller who forgets the flag is the caller who writes somebody's
-    /// export passphrase into their scrollback — and because turning the
-    /// terminal's echo off and back on again is a platform primitive, which is
-    /// what this port is for. A platform with no way to hide what is typed
-    /// refuses rather than showing it (ADR the-holdings-go-out-sealed).
-    ///
-    /// `Zeroizing` in the signature rather than left to the caller, which is
-    /// where it used to be: `commands::ask_secret` wrapped the answer and its
-    /// comment claimed the wrapped buffer was the one the terminal was read
-    /// into. It was not, and nothing about the type said so. An adapter owes
-    /// this now, and the obligation is written where an adapter has to read it.
+    /// One line of input never shown as it is typed, or `None` at end of input.
+    /// Its own effect rather than a flag, because the caller who forgets the
+    /// flag writes an export passphrase into somebody's scrollback. A platform
+    /// with no way to hide what is typed refuses rather than showing it
+    /// (ADR the-holdings-go-out-sealed). `Zeroizing` is the adapter's to owe.
     fn read_secret(&self) -> Result<Option<Zeroizing<String>>, HostError>;
 
     /// Says something the user should know that is not the answer to what they
     /// asked: a Credential written to the store Perch would rather not have
-    /// used, a file found looser than it should be
-    /// (ADR claude-code-chooses-the-store).
-    ///
-    /// Said once. These are remarks about the state of the machine rather than
-    /// about the command, and the same remark repeated for each of five
-    /// Accounts teaches nobody anything the first one did not.
+    /// used, a file found looser than it should be. Said once — these are
+    /// remarks about the machine rather than about the command, and the same one
+    /// repeated for five Accounts teaches nobody anything.
     fn note(&self, line: &str);
 }
 
 /// The way out to Anthropic, and the only one.
 pub trait Network {
     /// Sends one request and reads the whole reply. The only way out to
-    /// Anthropic, and reached by nothing but `--refresh`
-    /// (ADR a-figure-carries-its-age).
+    /// Anthropic, and reached by nothing but `--refresh`.
     fn http(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, HostError>;
 }
 
-/// Every effect Perch has outside its own process.
-///
-/// The sum of the nine concerns above and nothing of its own. Commands and
-/// domain modules take a `&dyn Host`, which is the one port Perch has
+/// Every effect Perch has outside its own process: the sum of the nine concerns
+/// above and nothing of its own. Commands and domain modules take a
+/// `&dyn Host`, which is the one port Perch has
 /// (ADR a-crate-must-not-cost-a-seam) — the nine are names for its surfaces
-/// rather than nine ports, and a `&dyn Host` still reaches every one of them.
-/// ADR the-port-fits-the-machine has the reasoning, including why no consumer
-/// of this port names fewer than three of the nine.
+/// rather than nine ports, and a `&dyn Host` reaches every one of them.
 pub trait Host:
     Clock + Environment + Filesystem + Keys + Processes + Waiting + Terminal + Network
 {
 }
 
-/// Everything that has to be in scope to reach this port's methods on a
-/// **concrete** adapter.
-///
-/// A `&dyn Host` needs none of it. A trait object finds its supertraits' methods
-/// without them being imported, which is why nine traits cost the 233 places
-/// that hold a `&dyn Host` exactly nothing. Holding a `FakeHost` or a
-/// `RealHost` is the other case: `host.now()` on a concrete type is
-/// [`Clock::now`], and `Clock` has to be in scope to be found. That is every
-/// test in the tree and nothing else, since production builds a `RealHost` once
-/// and passes a `&dyn Host` from there on.
-///
-/// A glob rather than nine imports per file, because the list a file would
-/// write out is not a fact about the file — a test that arranges a world and
-/// reads back what happened to it touches most of the machine by definition,
-/// and spelling out which nine-tenths would be noise a reader has to check
-/// against the body (ADR the-port-fits-the-machine).
+/// Everything that has to be in scope to reach this port on a **concrete**
+/// adapter, which is every test and nothing else: a trait object finds its
+/// supertraits' methods unimported, and `host.now()` on a `FakeHost` is
+/// [`Clock::now`]. A glob, because which nine-tenths a test touches is not a
+/// fact about the test.
 pub mod prelude {
     pub use super::{
         Clock, Environment, Files, Filesystem, Host, Keys, Links, Network, Processes, Terminal,
@@ -728,38 +578,22 @@ pub mod prelude {
     };
 }
 
-/// Where the replacement for a file is written before it is moved over it.
-///
-/// Named after the process that is writing it. A single fixed name is one two
-/// Perches writing the same file would collide on, and one anybody who can
-/// write the directory can pre-plant something at — `CLAUDE_CONFIG_DIR` is
-/// taken verbatim and can name a shared location. The pid is what randomness
-/// buys here; a crate that generates a better one would want a real filesystem,
-/// and this sits behind the Host port where there is not always one
-/// (ADR a-crate-must-not-cost-a-seam).
-///
+/// Where the replacement for a file is written before it is moved over it,
+/// named after the process writing it: a fixed name is one two Perches collide
+/// on, and one anybody who can write the directory can pre-plant something at.
 /// The pid comes through the port rather than from `std::process::id`, because
-/// the one thing this name has to be is *this process's*, and behind a fake
-/// there is a different answer to who that is. Taken from the process directly,
-/// a fake whose Runs write session markers naming pid 700 wrote its temp files
-/// under the pid of the test binary — so the collision this name exists to
-/// prevent was the one thing it could not model, and no two runs of the suite
-/// produced the same paths.
+/// behind a fake there is a different answer to who this process is.
 pub fn temp_beside(host: &dyn Host, path: &Path) -> PathBuf {
     let mut beside = path.as_os_str().to_os_string();
     beside.push(format!(".perch-tmp.{}", host.process_id()));
     PathBuf::from(beside)
 }
 
-/// The mode a replacement for this file should be created with: the one the
-/// file already has, and the Credential mode for one that is not there yet.
-///
-/// A rename puts a *new* file at the path, so the mode of the old one is not
-/// inherited — it has to be carried across deliberately. `.claude.json` holds
-/// MCP configuration, and an MCP server entry routinely carries an API key in
-/// its `env` block, so a file the user had narrowed must not come back at the
-/// process umask; and a file Perch is the first to create is created closed
-/// rather than open (ADR claude-code-chooses-the-store).
+/// The mode a replacement for this file should be created with: the one the file
+/// already has, and the Credential mode for one that is not there yet. A rename
+/// puts a *new* file at the path, so the old mode has to be carried across
+/// deliberately — an MCP server entry in `.claude.json` routinely carries an API
+/// key, so a file the user had narrowed must not come back at the umask.
 fn mode_to_carry_across(host: &dyn Host, path: &Path) -> u32 {
     host.file_mode(path)
         .ok()
@@ -767,39 +601,23 @@ fn mode_to_carry_across(host: &dyn Host, path: &Path) -> u32 {
         .unwrap_or(PRIVATE_FILE_MODE)
 }
 
-/// Replaces a file's contents in one step, or not at all.
-///
-/// Used for the files Perch does not own. `.claude.json` holds project history,
-/// MCP configuration and settings — everything that belongs to the person
-/// rather than the Account — and a Switch that died half way through writing it
-/// would cost them all of that. Writing beside it and moving it into place
-/// means the file is either the old one or the new one.
+/// Replaces a file's contents in one step, or not at all. Used for the files
+/// Perch does not own: `.claude.json` holds everything that belongs to the
+/// person rather than the Account, and a Switch that died half way through
+/// writing it would cost them all of it.
 pub fn write_atomically(host: &dyn Host, path: &Path, contents: &str) -> Result<(), HostError> {
     let path = &through_any_link(host, path);
     // The temp file carries the target's mode from the moment it exists: it
-    // holds the whole of the target's contents, so a temp file at the umask
-    // would leak everything the mode on the target is protecting.
+    // holds the whole of the target's contents, so one at the umask would leak
+    // everything the mode on the target is protecting.
     replace_via_tmp(host, path, contents, mode_to_carry_across(host, path))
 }
 
 /// What a path names, following one symbolic link if the last component is one.
-///
-/// `rename` replaces the **link**, not what it points at, so without this the
-/// first `perch switch` on a machine where `~/.claude.json` is managed by stow,
-/// chezmoi or yadm silently turned that link into an ordinary file: the copy in
-/// the user's dotfiles repository stops being the live one, and every edit they
-/// make there afterwards does nothing. Nothing says so, and the repair is to
-/// notice.
-///
-/// One hop rather than a full canonicalization, because one hop is what a
-/// dotfile manager makes and a walk would need a loop guard for no case anybody
-/// has. A relative target is resolved against the directory the link sits in,
-/// which is what the operating system does with it.
-///
-/// Deliberately not in [`replace_via_tmp`]: that is shared with the write that
-/// stores a Credential, and following a link to decide where a *secret* lands
-/// is how a planted link redirects one. `.claude.json` is the user's own
-/// configuration and the link is theirs.
+/// `rename` replaces the **link**, so a `~/.claude.json` managed by stow or
+/// chezmoi would silently stop being the live copy. One hop, which is what a
+/// dotfile manager makes. Deliberately not in [`replace_via_tmp`]: following a
+/// link to decide where a *secret* lands is how a planted link redirects one.
 pub(crate) fn through_any_link(host: &dyn Host, path: &Path) -> PathBuf {
     let Ok(Some(target)) = host.link_target(path) else {
         return path.to_path_buf();
@@ -810,20 +628,11 @@ pub(crate) fn through_any_link(host: &dyn Host, path: &Path) -> PathBuf {
     }
 }
 
-/// The same, following every link on the path rather than only one at the end.
-///
-/// [`through_any_link`] answers about the last component, which is the question
-/// a Reconcile asks — it holds the entry it is about. "Is this path inside that
-/// directory?" is a different question, and a link *above* the last component
-/// defeats a components-wise `starts_with` just as thoroughly: `~/claude` linked
-/// at `~/.config/perch/profiles` makes `~/claude/work` and
-/// `~/.config/perch/profiles/work` one directory with two spellings.
-///
-/// Bounded rather than trusting the filesystem to be acyclic, the way
-/// `FakeHost::resolved` is: two links pointing at each other are a loop, and a
-/// path this cannot settle in eight passes is answered as far as it got. The
-/// caller is comparing rather than opening, so a partial answer is a comparison
-/// that fails closed.
+/// The same, following every link on the path — which is what *is this path
+/// inside that directory* needs: `~/claude` linked at
+/// `~/.config/perch/profiles` makes `~/claude/work` and
+/// `~/.config/perch/profiles/work` one directory with two spellings. Bounded,
+/// so a path that will not settle is a comparison that fails closed.
 pub(crate) fn through_every_link(host: &dyn Host, path: &Path) -> PathBuf {
     const FOLLOWED: usize = 8;
 
@@ -861,11 +670,9 @@ fn deepest_link_on(host: &dyn Host, path: &Path) -> Option<PathBuf> {
 }
 
 /// The whole of writing beside a file and moving the result over it, including
-/// what is done about a write that did not land.
-///
-/// Shared by the secret and non-secret writes. Two copies of this is how the
-/// failure cleanup comes to differ between the path that handles Credentials
-/// and the path that does not — which is the wrong pair to let drift.
+/// what is done about a write that did not land. Shared by the secret and
+/// non-secret writes: two copies is how the failure cleanup comes to differ
+/// between the path that handles Credentials and the path that does not.
 pub fn replace_via_tmp(
     host: &dyn Host,
     path: &Path,
@@ -873,19 +680,9 @@ pub fn replace_via_tmp(
     mode: u32,
 ) -> Result<(), HostError> {
     let beside = temp_beside(host, path);
-    // Nothing has replaced the original, so whatever is at `beside` is just
-    // litter — and litter beside a file Claude Code reads, or one holding a
-    // Credential, is worth clearing even on the way out.
-    //
-    // Both failures, not only the rename. A write is `create_new`, then
-    // `write_all`, then `sync_all`, and a disk that fills between the first and
-    // the last leaves a real, partially-written file at
-    // `<target>.perch-tmp.<pid>` that nothing removed: a truncated
-    // `.credentials.json` holding a fragment of a refresh token, a truncated
-    // `.claude.json`, or a truncated Export holding some of every Credential on
-    // the machine. None of them is ever mentioned, and nothing looks at that
-    // path again — `perch holdings export` refuses an occupied path by looking
-    // at the target alone.
+    // Cleared on both failures rather than on the rename alone: a disk that
+    // fills between `create_new` and `sync_all` leaves a partially-written file
+    // beside the target that nothing mentions and nothing looks at again.
     let written = host.create_file_with_mode(&beside, contents, mode);
     match written.and_then(|()| host.rename(&beside, path)) {
         Ok(()) => Ok(()),
@@ -1026,13 +823,6 @@ mod tests {
         assert_eq!(host.mode_of(PATH), Some(PRIVATE_FILE_MODE));
     }
 
-    /// A managed `.claude.json` is written *through*, not replaced.
-    ///
-    /// `rename` replaces the link rather than what it points at, so the first
-    /// `perch switch` on a machine using stow, chezmoi or yadm turned the link
-    /// into an ordinary file — the copy in the dotfiles repository stops being
-    /// the live one, silently, and every edit made there afterwards does
-    /// nothing.
     #[test]
     fn a_file_that_is_a_link_is_written_through_rather_than_replaced() {
         let real = "/Users/someone/dotfiles/claude.json";
@@ -1053,16 +843,8 @@ mod tests {
         );
     }
 
-    /// `remove_link` takes away a link and nothing else, and the "nothing else"
-    /// is the part that has to be checked.
-    ///
-    /// It was `remove_file` on a bare path, which deletes whatever is there —
-    /// so the one call whose whole contract is that it only ever takes away
-    /// Perch's own share would have taken away the person's file at the same
-    /// name. Its only caller asks `link_target` first, but that is a separate
-    /// syscall, and the fake answered `Ok` untouched for a plain file: a
-    /// regression that dropped the guard passed every behavior test and deleted
-    /// a file on the machine.
+    /// The caller asks `link_target` first, but that is a separate syscall from
+    /// this one, so the guard belongs at both ends.
     #[test]
     fn removing_a_link_refuses_anything_that_is_not_one() {
         let host = FakeHost::new().with_file(PATH, "{\"mine\":true}");
@@ -1098,17 +880,9 @@ mod tests {
         );
     }
 
-    /// A private write is the same choreography, and the fake performs it
-    /// rather than describing it.
-    ///
-    /// Worth asserting because the fake used to write straight to the path. The
-    /// real host's failure and the fake's landed in different places — a full
-    /// disk stops the real one at the copy *beside* the target, leaving the
-    /// target untouched, while the fake stopped at the target itself — so the
-    /// registry's "no half-written copy is left beside it" test was asserting
-    /// the absence of something the fake could not have created, and the whole
-    /// suite would have stayed green through a `RealHost::write_private_file`
-    /// rewritten as a plain truncate-and-write.
+    /// The fake performs the choreography rather than describing it, so a
+    /// `RealHost::write_private_file` rewritten as a plain truncate-and-write
+    /// fails here rather than passing.
     #[test]
     fn a_private_write_is_created_beside_the_file_and_moved_over_it() {
         let host = FakeHost::new().with_file(PATH, "{}");
@@ -1131,15 +905,9 @@ mod tests {
         assert_eq!(host.file(&beside), None, "and nothing is left beside it");
     }
 
-    /// The write dying partway, rather than never starting.
-    ///
-    /// The cleanup only ran on a failed *rename*, so a disk that filled between
-    /// the open and the `sync_all` left a real, partially-written file at
-    /// `<target>.perch-tmp.<pid>` that nothing removed and nothing mentions —
-    /// a fragment of a refresh token beside `.credentials.json`, or some of
-    /// every Credential on the machine beside the path an Export names. The
-    /// original is untouched either way, which is what makes the leftover
-    /// litter rather than a half-applied write.
+    /// The write dying partway, rather than never starting: the fixture is a
+    /// disk that fills between the open and the `sync_all`, which is the one
+    /// failure that leaves bytes behind.
     #[test]
     fn a_write_that_dies_partway_leaves_nothing_beside_the_file_either() {
         let host = FakeHost::new()
@@ -1180,14 +948,9 @@ mod tests {
         assert_eq!(host.file(real).as_deref(), Some("{\"a\":1}"));
     }
 
-    /// A child's output is the buffer it already is wherever it can be, and the
-    /// lossy read only where it has to be.
-    ///
-    /// `security find-generic-password` answers with a Credential on stdout, so
-    /// the copy this avoids was a second heap buffer holding a refresh token
-    /// that nothing wipes — and the fallback still has to hand back *something*
-    /// for a reply that is not UTF-8, because a caller that got no answer would
-    /// read it as a store holding nothing.
+    /// The fallback still hands back *something* for a reply that is not UTF-8,
+    /// because a caller that got no answer would read it as a store holding
+    /// nothing.
     #[test]
     fn the_output_of_a_child_is_taken_over_where_it_is_already_text() {
         assert_eq!(

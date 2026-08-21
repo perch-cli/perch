@@ -1,10 +1,13 @@
 //! A Host that keeps the world in memory and records what it was asked to do.
 //!
-//! Behavior tests drive real command code against this and assert on
-//! observable outcomes: what was printed, what ended up in the keychain, and
-//! what went out to the network. A machine with no arranged replies has no
-//! network at all, so a command that fetches when it should not fails here
-//! rather than quietly passing (ADR a-figure-carries-its-age).
+//! Behavior tests drive real command code against this and assert on observable
+//! outcomes: what was printed, what ended up in the keychain, and what went out
+//! to the network. A machine with no arranged replies has no network at all, so
+//! a command that fetches when it should not fails here rather than quietly
+//! passing (ADR a-figure-carries-its-age).
+//!
+//! The world is held in the port's own nine concerns, and the port is named
+//! `port::` here because all nine of its trait names are also the state's.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -12,23 +15,16 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, TimeZone, Utc};
 
-// The port under a name of its own, because all nine of its trait names are
-// also the names of the concerns whose state is held below — and the state is
-// what a reader of this file is usually looking at. `impl port::Files for
-// FakeHost` says *this is the surface*; the bare `Filesystem` says *this is the
-// world*. Naming the state anything else would mint a second vocabulary for the
-// nine things ADR the-port-fits-the-machine spent its effort naming once.
+// `impl port::Files for FakeHost` says *this is the surface*; the bare
+// `Filesystem` says *this is the world* (ADR the-port-fits-the-machine).
 use super as port;
 use super::{
     Execution, HostError, HttpRequest, HttpResponse, Link, PRIVATE_DIR_MODE, PRIVATE_FILE_MODE,
     Platform, Waited,
 };
-// The methods, without the names: every `self.platform()`, `self.process_id()`
-// and `self.path_exists()` below is a trait method, and a trait has to be in
-// scope to be found even where its name is not wanted (`host::prelude`'s
-// reason, ADR the-port-fits-the-machine). Through `port` rather than `super`,
-// because two of these three names are also the state's and only one spelling
-// of the port belongs in this file.
+// The methods, without the names: a trait has to be in scope to be found even
+// where its name is not wanted. Through `port` rather than `super`, because two
+// of these three names are also the state's.
 use crate::keychain::KeychainError;
 use port::{Environment as _, Files as _, Processes as _};
 use zeroize::Zeroizing;
@@ -64,8 +60,8 @@ pub enum Effect {
     },
     /// A wait a loop can be interrupted out of — the watcher's poll interval,
     /// and nothing else. Distinct from a sleep because they answer different
-    /// questions: how long Perch spent waiting for somebody else's lock, and
-    /// how many times round the loop went.
+    /// questions: how long Perch waited for somebody else's lock, and how many
+    /// times round the loop went.
     Waited {
         millis: u64,
     },
@@ -92,9 +88,7 @@ pub enum Effect {
         /// What was added to the launched program's environment. Kept whole
         /// rather than only as `config_dir`, because it is how an Upgrade tells
         /// the embedded installer which Release to fetch
-        /// (ADR an-upgrade-asks-its-channel) — and a tag that never reached the
-        /// script is an upgrade to the wrong thing, which nothing else here
-        /// would notice.
+        /// (ADR an-upgrade-asks-its-channel).
         env: Vec<(String, String)>,
     },
     /// A request that went out to the network.
@@ -120,9 +114,7 @@ pub struct Sent {
     pub body: Option<String>,
     /// The bound the caller put on it, if any. Kept because a request that was
     /// supposed to be abandoned quickly and was not is invisible in a test that
-    /// only looks at where it went — and the whole point of the check on
-    /// `perch --version` is that it costs nothing on a machine that cannot
-    /// answer (ADR an-upgrade-asks-its-channel).
+    /// only looks at where it went.
     pub within_millis: Option<u64>,
 }
 
@@ -141,8 +133,7 @@ impl Sent {
 }
 
 /// What an ordinary directory is created as — `mkdir` under the usual umask.
-/// A directory that will hold a Credential is not this
-/// (ADR claude-code-chooses-the-store).
+/// A directory that will hold a Credential is not this.
 const ORDINARY_DIR_MODE: u32 = 0o755;
 
 /// Why the keychain refuses everything, when a test asks it to.
@@ -157,44 +148,22 @@ pub struct KeychainLock {
 /// namespace stays in [`crate::probe`] and out of the fake.
 pub type Login = Box<dyn Fn(&FakeHost, &Path) -> i32>;
 
-/// Something that happens while Perch waits.
-///
-/// Perch waits in two places — contending for a lock, and putting a question to
-/// the person at the terminal — and the world does not stand still through
-/// either: a `claude` started during a lock wait is exactly what the questions
-/// asked *under* the locks are asked again for, and another `perch` claiming an
-/// abandoned lock while somebody stares at a `[y/N]` is what the hold is
-/// re-checked afterwards for. Without this the fake can only present a world
-/// that was already settled before the command began.
+/// Something that happens while Perch waits — contending for a lock, or putting
+/// a question to the person at the terminal. A `claude` started during a lock
+/// wait is what the questions asked *under* the locks are asked again for, and
+/// another `perch` claiming an abandoned lock while somebody stares at a `[y/N]`
+/// is what the hold is re-checked for.
 pub type WhileWaiting = Box<dyn Fn(&FakeHost)>;
 
 /// The replies an endpoint gives one asker, in the order it gives them: keyed
 /// the way a single reply is, by URL and by the access token that asked.
 type Traces = BTreeMap<(String, Option<String>), VecDeque<HttpResponse>>;
 
-/// The world, held in the pieces the port names it in.
-///
-/// Seven concern structs, the [`Stall`], and the recorder. They are *state and
-/// nothing else*: every method stays on `FakeHost`, so a `port::Files` method
-/// that has to touch the clock writes `self.stall.now` and `self.fs.modified`
-/// in the same breath, and the private helpers that straddle concerns —
-/// `record`, `mark_written`, `lock_error`, `while_they_answer`, `intended` —
-/// stay where they can reach everything. Even so, three of the nine `impl`
-/// blocks reach a struct that is not their own — `port::Keys` and
-/// `port::Waiting` both take the [`Stall`], and `port::Processes` reads
-/// `environment.home` — and the helpers carry the rest of the crossings that
-/// were ten before they had anywhere to live. That is
-/// ADR the-port-fits-the-machine's thesis arriving in the state: the machine's
-/// surfaces are entangled, and a copy of the world is entangled in the same
-/// places. Methods on these structs would turn every one of those crossings
-/// into real coupling — passing a clock into the filesystem — which
-/// ADR the-port-fits-the-machine already refused at the trait level
-/// (ADR the-port-fits-the-machine).
-///
-/// The `RefCell` stays on each field rather than moving out to wrap the struct.
-/// The fake is deliberately re-entered mid-call by a `somebody_else` closure,
-/// and eight struct-wide borrows where there were thirty-nine field-wide ones
-/// would turn that documented safety into `already borrowed` at runtime.
+/// The world, held in the pieces the port names it in. *State and nothing else*
+/// — every method stays on `FakeHost`, so one that has to touch the clock writes
+/// `self.stall.now` and `self.fs.modified` in the same breath. The `RefCell`
+/// stays per field, because the fake is deliberately re-entered mid-call by a
+/// `somebody_else` closure and eight struct-wide borrows would panic.
 pub struct FakeHost {
     environment: Environment,
     fs: Filesystem,
@@ -205,37 +174,33 @@ pub struct FakeHost {
     network: Network,
     stall: Stall,
     /// What the fake was asked to do, in order. Written from seven of the nine
-    /// concerns and read back whole through [`FakeHost::effects`], so it is
-    /// cross-cutting on purpose and stays one bare field.
+    /// concerns and read back whole, so it is cross-cutting on purpose and stays
+    /// one bare field.
     effects: RefCell<Vec<Effect>>,
 }
 
 /// The machine Perch was started on: where it runs, as whom, and as what.
 struct Environment {
     home: PathBuf,
-    /// The directory the command was typed in — the project a Run is about,
-    /// and the one entry of `projects` that crosses to a Profile
+    /// The directory the command was typed in — the project a Run is about, and
+    /// the one entry of `projects` that crosses to a Profile
     /// (ADR everything-but-the-account).
     current_dir: RefCell<PathBuf>,
     platform: RefCell<Platform>,
     vars: RefCell<BTreeMap<String, String>>,
     /// Where this Perch's own binary sits. Nowhere any Channel would have put
-    /// it, so a test about which Channel installed the machine has to say —
-    /// and one that is not about it reads as an Installation Perch did not
-    /// make, which is the answer that refuses rather than the one that acts.
+    /// it, so a test about which Channel installed the machine has to say — and
+    /// one that is not about it reads as an Installation Perch did not make.
     current_exe: RefCell<PathBuf>,
     /// Which user this Perch runs as. `Some(0)` is the one `watcher install`
     /// refuses; the default is an ordinary person's.
     user_id: RefCell<Option<u32>>,
 }
 
-/// What is on disk, links included.
-///
-/// Twelve fields and not split into `Files` and `Links`, because the traffic
-/// runs both ways: `files`, `modes`, `dirs`, `modified`, `unwritable` and
-/// `undeletable` are all read from the `port::Links` block, and `links` is read
-/// from the `port::Files` one. That is the whole reason `port::Filesystem`
-/// exists as a supertrait of both (ADR the-port-fits-the-machine).
+/// What is on disk, links included. Twelve fields and not split into `Files` and
+/// `Links`, because the traffic runs both ways: `files`, `modes`, `dirs`,
+/// `modified`, `unwritable` and `undeletable` are all read from the
+/// `port::Links` block, and `links` is read from the `port::Files` one.
 struct Filesystem {
     files: RefCell<BTreeMap<PathBuf, String>>,
     /// The permissions of everything that has any, so a test can say that a
@@ -252,16 +217,10 @@ struct Filesystem {
     /// still be cleared out of.
     undeletable: RefCell<BTreeMap<PathBuf, String>>,
     /// Directories that are there and will not be walked, while still answering
-    /// everything asked about them from the outside.
-    ///
-    /// Distinct from [`unreadable`], which stops `modified_at` too. A directory
-    /// whose own read bit is gone — one a `sudo claude` left root-owned inside a
-    /// Profile — is stat-ed from its parent perfectly well and fails `opendir`
-    /// with EACCES, and modeled as unreadable it could not be told apart from a
-    /// lock artifact whose time will not be read. `lock::clear_the_abandoned`
-    /// turns on exactly that difference.
-    ///
-    /// [`unreadable`]: World::unreadable
+    /// everything asked about them from the outside. Distinct from `unreadable`,
+    /// which stops `modified_at` too: a directory whose read bit is gone is
+    /// stat-ed from its parent perfectly well, and
+    /// `lock::clear_the_abandoned` turns on that difference.
     unlistable: RefCell<BTreeMap<PathBuf, String>>,
     /// Files that come back different from how they were written.
     corrupting: RefCell<BTreeSet<PathBuf>>,
@@ -269,12 +228,11 @@ struct Filesystem {
     filling: RefCell<BTreeSet<PathBuf>>,
     /// Every link that has been made, by the path that holds it. A hard link is
     /// in here *and* in `files`, because that is what a hard link is: another
-    /// name for the file, telling nothing about itself.
+    /// name for the same bytes, telling nothing about itself.
     links: RefCell<BTreeMap<PathBuf, (Link, PathBuf)>>,
     /// Whether this Windows can make a symbolic link. Off is the ordinary
-    /// machine: the privilege needs Developer Mode or elevation, which is the
-    /// whole reason a Run reaches for junctions and hard links
-    /// (ADR everything-but-the-account).
+    /// machine: the privilege needs Developer Mode or elevation, which is why a
+    /// Run reaches for junctions and hard links.
     developer_mode: RefCell<bool>,
 }
 
@@ -289,10 +247,9 @@ struct Keys {
     keychain_keeps: RefCell<Option<usize>>,
     /// How long a keychain write takes to come back — a permission dialog
     /// somebody has to answer, which is the one step in a Switch that can stall
-    /// for minutes without warning.
-    ///
-    /// Here rather than in [`Stall`] because it says how long *this* surface
-    /// stalls, and one concern writes it and reads it.
+    /// for minutes without warning. Here rather than in [`Stall`] because it
+    /// says how long *this* surface stalls, and one concern writes and reads
+    /// it.
     keychain_set_takes_millis: RefCell<u64>,
 }
 
@@ -343,16 +300,11 @@ struct Network {
     sent: RefCell<Vec<Sent>>,
 }
 
-/// Time, and what somebody else does while it passes.
-///
-/// One mechanism with two fields rather than a clock beside a hook. `now` is
-/// written at five sites: [`FakeHost::set_now`], and then `while_they_answer`,
-/// `keychain_set`, `sleep` and `wait` — and at all four of those the very next
-/// statement takes `somebody_else`. Time does not pass in this fake because a
-/// clock ticks; it passes because an effect took time, and while that effect
-/// was in flight somebody else touched the machine. That is why there is no
-/// `Clock` state struct: `impl port::Clock for FakeHost` reads `self.stall.now`
-/// (ADR the-port-fits-the-machine).
+/// Time, and what somebody else does while it passes: one mechanism with two
+/// fields rather than a clock beside a hook. Time does not pass in this fake
+/// because a clock ticks; it passes because an effect took time, and while that
+/// effect was in flight somebody else touched the machine. So there is no
+/// `Clock` struct — `impl port::Clock for FakeHost` reads `self.stall.now`.
 struct Stall {
     now: RefCell<DateTime<Utc>>,
     /// What the rest of the machine does the first time Perch waits, and then
@@ -375,38 +327,11 @@ impl Default for FakeHost {
     }
 }
 
-/// Arranging a world, and reading back what Perch did to it.
-///
-/// The fixture language, and the half of this file that grows fastest: a Host
-/// method arrives with the builders a test needs to set it up, so
-/// `process_started_at` cost ten lines of trait, thirty-six here, and four
-/// `with_*` methods for one concept.
-///
-/// Kept in the same file as the `impl` blocks below, deliberately. It looks
-/// like the obvious split for a file this size and it is not: over the last
-/// twenty-five commits that added or removed a function here, eleven touched
-/// both halves and eight touched one. Separating them would put the majority of
-/// changes across two files and say less about each, not more.
-///
-/// The same measurement is why the file did not follow the interface when the
-/// interface became nine traits (ADR the-port-fits-the-machine). There are nine
-/// `impl` blocks below, one per concern, and one file holding them — and the
-/// multiplier this comment measures is untouched by that, because it is per
-/// method rather than per trait.
-///
-/// What was done about it instead is above: the fields these builders arrange
-/// are seven concern structs, a [`Stall`] and the recorder rather than forty
-/// flat ones, so a builder is grouped against the world it sets up and a reader
-/// of terminal code has five fields in scope rather than thirty-nine
-/// (ADR the-port-fits-the-machine). The multiplier is the
-/// same — the 43rd method still costs what the 42nd did — because it was never
-/// the customer: three of the five fields added over the ten days before that
-/// work arrived with no new `Host` method at all. The fake grows from the
-/// arrangements tests need, and those arrive whether or not the port widens.
-///
-/// What does separate cleanly is the *port's* semantics from either — and that
-/// is `tests/conformance.rs`, which asks this fake and [`super::RealHost`] the
-/// same questions and is where a disagreement between them now shows up.
+/// Arranging a world, and reading back what Perch did to it. The half of this
+/// file that grows fastest: a Host method arrives with the builders a test needs
+/// to set it up, so `process_started_at` costs ten lines of trait, thirty-six
+/// here, and four `with_*` methods for one concept. One file with the `impl`
+/// blocks below, because eleven of the last twenty-five commits touched both.
 impl FakeHost {
     pub fn new() -> Self {
         let mut vars = BTreeMap::new();
@@ -414,11 +339,9 @@ impl FakeHost {
         FakeHost {
             environment: Environment {
                 home: PathBuf::from("/Users/someone"),
-                // Spelled out rather than joined onto `home`, because a test
-                // that writes this directory into a file writes it the way it
-                // is written here. `join` would answer with the separator of
-                // whatever platform the tests are running on, and the two
-                // spellings would stop matching on Windows.
+                // Spelled out rather than joined onto `home`: `join` answers
+                // with the separator of whatever platform the tests run on, and
+                // the two spellings would stop matching on Windows.
                 current_dir: RefCell::new(PathBuf::from("/Users/someone/work")),
                 // The platform Perch was written for first, so a test says
                 // which Credential Store it is about only when that is what it
@@ -455,9 +378,7 @@ impl FakeHost {
                 login: RefCell::new(None),
                 // This Perch, running since before any session a fixture
                 // records, so a marker a Run writes for itself corroborates the
-                // way a real one does. Nothing like the pids the fixtures
-                // arrange for other people's clients, so a test can tell whose
-                // marker it is looking at.
+                // way a real one does. Nothing like the fixtures' other pids.
                 live_processes: RefCell::new(BTreeMap::from([(
                     THIS_PROCESS,
                     Some(DateTime::<Utc>::MIN_UTC),
@@ -488,18 +409,13 @@ impl FakeHost {
         }
     }
 
-    // ---- arranging the world -------------------------------------------
-    //
-    // A builder sits with the struct it arranges, in the order those structs
-    // are declared. The names are untouched — `with_file` still says
-    // `with_file`, and all 695 call sites in `tests/` say what they always
-    // said. What moved is which of them a reader has to hold in their head at
-    // once (ADR the-port-fits-the-machine).
+    // A builder sits with the struct it arranges, in declaration order. The
+    // names say nothing about which: the grouping is for whoever edits here.
 
     // ---- environment: the machine it runs on ------------------------
 
     /// A machine that is not a Mac, where a Credential lives in a file rather
-    /// than in a keychain (ADR claude-code-chooses-the-store).
+    /// than in a keychain.
     pub fn with_platform(self, platform: Platform) -> Self {
         *self.environment.platform.borrow_mut() = platform;
         self
@@ -513,7 +429,7 @@ impl FakeHost {
     }
 
     /// Where this Perch's binary sits, which is the whole of what says which
-    /// Channel installed it (ADR an-upgrade-asks-its-channel).
+    /// Channel installed it.
     pub fn installed_at(self, path: impl AsRef<Path>) -> Self {
         *self.environment.current_exe.borrow_mut() = path.as_ref().to_path_buf();
         self
@@ -610,12 +526,10 @@ impl FakeHost {
     }
 
     /// A directory that is there and will not be walked, while still answering
-    /// when it was last written.
-    ///
-    /// The state a lock left root-owned inside a Profile is in, and the one
-    /// `lock::clear_the_abandoned` has to tell from a plain file wedging the
-    /// path: `remove_dir_all` and the listing both fail EACCES, and only one of
-    /// those is worth ending a command over.
+    /// when it was last written. The state a lock left root-owned inside a
+    /// Profile is in, and the one `lock::clear_the_abandoned` has to tell from a
+    /// plain file wedging the path: `remove_dir_all` and the listing both fail
+    /// EACCES, and only one of those is worth ending a command over.
     pub fn with_unlistable_dir(self, path: impl AsRef<Path>, detail: &str) -> Self {
         self.fs
             .unlistable
@@ -660,12 +574,9 @@ impl FakeHost {
 
     /// Whatever stopped a path being written to has been put right — the
     /// permission fixed, the disk freed — so a test can carry on from a failure
-    /// with the world it left rather than a fresh one.
-    ///
-    /// One name, because there were two with the same three-line body and no
-    /// difference between them but the spelling. A reader of a test had to go
-    /// and establish that `forget_unwritable` meant this and not something
-    /// narrower, which is a question a second name asks and never answers.
+    /// with the world it left rather than a fresh one. One name, because a
+    /// second one is a question a reader has to answer before writing the
+    /// fixture.
     pub fn writable_again(&self, path: impl AsRef<Path>) {
         self.fs.unwritable.borrow_mut().remove(path.as_ref());
     }
@@ -698,17 +609,10 @@ impl FakeHost {
     }
 
     /// A disk that fills partway through the write rather than before it: the
-    /// bytes that fitted are on disk, and the call fails.
-    ///
-    /// Distinct from [`with_unwritable_file`], which models the write never
-    /// starting. The real host opens the file, then `write_all`s, then
-    /// `sync_all`s, so an `ENOSPC` or an `EIO` between the first and the last
-    /// leaves a partially-written file behind — and a fake that could only fail
-    /// before creating anything let `replace_via_tmp` claim a cleanup it did not
-    /// have. Two tests asserted that nothing is left beside the target across a
-    /// failed write, and neither could reach the arrangement that leaves one.
-    ///
-    /// [`with_unwritable_file`]: Self::with_unwritable_file
+    /// bytes that fitted are on disk, and the call fails. Distinct from
+    /// [`with_unwritable_file`](Self::with_unwritable_file), which is the write
+    /// never starting — and it is what reaches `replace_via_tmp`'s cleanup,
+    /// which a fake that could only fail before creating anything cannot.
     pub fn with_a_disk_that_fills_writing(self, path: impl AsRef<Path>) -> Self {
         self.fs
             .filling
@@ -721,11 +625,9 @@ impl FakeHost {
     /// A lock artifact, in other words: the age is what decides whether the
     /// holder is taken to be alive or to have died holding it.
     pub fn with_dir_held_since(self, path: impl AsRef<Path>, since: DateTime<Utc>) -> Self {
-        // The directories above it too, as `with_link` and `with_file` do. A
+        // The directories above it too, as `with_link` and `with_file` do: a
         // lock inside a Profile that does not exist is a world no machine can
-        // produce — `create_dir_exclusive` is `mkdir`, and `take_all` makes the
-        // Profile before it ever asks for the lock — and a fixture that plants
-        // one is a test asserting against a state its subject will never meet.
+        // produce, since `create_dir_exclusive` is `mkdir`.
         self.note_directories_of(path.as_ref());
         self.fs
             .dirs
@@ -738,9 +640,9 @@ impl FakeHost {
         self
     }
 
-    /// A link that is already there — including one pointing at nothing, which
-    /// is what a Profile holds after the entry it shared was deleted and is the
-    /// state a Reconcile has to repair.
+    /// A link that is already there — including one pointing at nothing, which is
+    /// what a Profile holds after the entry it shared was deleted, and the state
+    /// a Reconcile has to repair.
     pub fn with_link(self, kind: Link, target: impl AsRef<Path>, at: impl AsRef<Path>) -> Self {
         self.note_directories_of(at.as_ref());
         self.fs.links.borrow_mut().insert(
@@ -781,15 +683,11 @@ impl FakeHost {
             .remove(&(service.to_string(), account.to_string()));
     }
 
-    /// A machine that has a keychain although it is not a Mac.
-    ///
-    /// The default off macOS is a keychain that answers the way a real one
-    /// would there: `/usr/bin/security` is not present on Linux or Windows, so
-    /// every call to it fails. A fake keychain that worked everywhere let a
-    /// test pass on a scenario that cannot happen on the platform it claims to
-    /// be about — so having one off macOS has to be asked for, and asking for
-    /// it is a statement that the test is about the composite reader rather
-    /// than about that platform.
+    /// A machine that has a keychain although it is not a Mac. Off macOS the
+    /// default is a keychain that fails the way a real one would, since
+    /// `/usr/bin/security` is not there — so asking for one is a statement that
+    /// the test is about the composite reader rather than about that
+    /// platform.
     pub fn with_keychain_off_macos(self) -> Self {
         *self.keys.keychain_everywhere.borrow_mut() = true;
         self
@@ -817,14 +715,10 @@ impl FakeHost {
         *self.keys.keychain_lock.borrow_mut() = None;
     }
 
-    /// A keychain that takes a write, reports success, and keeps only the
-    /// first `bytes` of what it was given.
-    ///
-    /// Exactly what `security -i` does when a command line overruns its 4096
-    /// byte stdin buffer: it truncates mid-argument and says nothing
-    /// (ADR claude-code-chooses-the-store). Perch reads every Credential back
-    /// before trusting it precisely because of this, and without a store that
-    /// can do it the read-back guard could be deleted with every test still
+    /// A keychain that takes a write, reports success, and keeps only the first
+    /// `bytes` of what it was given — what `security -i` does when a command line
+    /// overruns its stdin buffer. Without a store that can do it, the read-back
+    /// guard every Credential goes through could be deleted with every test still
     /// passing.
     pub fn with_keychain_truncating_after(self, bytes: usize) -> Self {
         *self.keys.keychain_keeps.borrow_mut() = Some(bytes);
@@ -832,11 +726,9 @@ impl FakeHost {
     }
 
     /// A keychain that stops to ask the user for permission, and how long they
-    /// take to answer it.
-    ///
-    /// The stall a Switch documents as unbounded: `store_credential` is one
-    /// keychain write, and on macOS it can put a dialog in front of somebody who
-    /// then walks away. Everything Perch is holding has to survive it.
+    /// take to answer it. The stall a Switch documents as unbounded: one
+    /// keychain write on macOS can put a dialog in front of somebody who then
+    /// walks away, and everything Perch is holding has to survive it.
     pub fn with_a_keychain_that_asks_first(self, takes_millis: u64) -> Self {
         *self.keys.keychain_set_takes_millis.borrow_mut() = takes_millis;
         self
@@ -850,12 +742,10 @@ impl FakeHost {
     }
 
     /// The same, for a world being arranged from inside a [`Login`], where the
-    /// fake is already borrowed and cannot be consumed.
-    ///
-    /// What a login *changes* is read back by a later command, so a fake where
-    /// the two could not disagree could not model a login at all: `perch relogin`
-    /// clears a Quarantine, and the `perch list --json` after it has to say
-    /// something the one before it did not.
+    /// fake is already borrowed and cannot be consumed. What a login *changes* is
+    /// read back by a later command: `perch relogin` clears a Quarantine, and the
+    /// `perch list --json` after it has to say something the one before it did
+    /// not.
     pub fn set_exec(&self, program: &str, args: &[&str], execution: Execution) {
         self.processes
             .executions
@@ -891,8 +781,7 @@ impl FakeHost {
     }
 
     /// A process that is running and began at `at` — a recycled PID is one
-    /// wearing a marker that was written before the process began
-    /// (ADR a-profile-is-live-by-evidence).
+    /// wearing a marker that was written before the process began.
     pub fn with_live_process_started_at(self, pid: u32, at: DateTime<Utc>) -> Self {
         self.processes
             .live_processes
@@ -932,12 +821,10 @@ impl FakeHost {
 
     // ---- waiting: a loop, and the person who stops it ---------------
 
-    /// A person who presses Ctrl-C after the loop has waited this many times,
-    /// which is how many times round it goes.
-    ///
-    /// Counted in waits rather than in rounds because that is what the loop
-    /// actually asks the machine: a test says "three polls and then stop", and
-    /// gets exactly the three the person watching would have seen.
+    /// A person who presses Ctrl-C after the loop has waited this many times.
+    /// Counted in waits rather than in rounds because that is what the loop asks
+    /// the machine: a test says "three polls and then stop", and gets exactly
+    /// the three the person watching would have seen.
     pub fn with_interrupt_after(self, waits: u32) -> Self {
         *self.waiting.interrupt_after.borrow_mut() = Some(waits);
         self
@@ -965,12 +852,10 @@ impl FakeHost {
         self
     }
 
-    /// How long the person at the terminal takes to answer each question.
-    ///
-    /// Instant by default, which no real terminal is. A question put to a human
-    /// is the one wait in Perch with no bound on it — somebody may answer in a
-    /// second or come back after lunch — and it is the only place a command
-    /// behaving perfectly well can outlast a lock it is holding.
+    /// How long the person at the terminal takes to answer each question, which
+    /// is instantly by default and never is on a real one. A question put to a
+    /// human is the one wait in Perch with no bound on it, and the only place a
+    /// command behaving perfectly well can outlast a lock it is holding.
     pub fn with_a_terminal_that_takes(self, millis: u64) -> Self {
         *self.terminal.answering_takes_millis.borrow_mut() = millis;
         self
@@ -995,12 +880,9 @@ impl FakeHost {
     }
 
     /// What an endpoint answers each time it is asked, in turn: the trace a
-    /// figure follows while something watches it.
-    ///
-    /// The last reply answers every call after it, so a trace says how the
-    /// figure moves and then how it stays — a test about a threshold being
-    /// crossed says the crossing, and does not have to keep saying it for
-    /// however many rounds the loop has left.
+    /// figure follows while something watches it. The last reply answers every
+    /// call after it, so a test about a threshold being crossed says the
+    /// crossing and not how many rounds the loop has left.
     pub fn with_replies_to(self, url: &str, bearer: &str, replies: &[(u16, &str)]) -> Self {
         self.network.traces.borrow_mut().insert(
             (url.to_string(), Some(bearer.to_string())),
@@ -1040,12 +922,10 @@ impl FakeHost {
         *self.stall.now.borrow_mut() = now;
     }
 
-    /// What the rest of the machine does the first time Perch waits — for a
-    /// lock, or for an answer.
-    ///
-    /// Once, because it stands for a thing that happens rather than for a
-    /// condition: a client starting, a lock being given back, another `perch`
-    /// arriving.
+    /// What the rest of the machine does the first time Perch waits — for a lock,
+    /// or for an answer. Once, because it stands for a thing that happens rather
+    /// than for a condition: a client starting, a lock being given back, another
+    /// `perch` arriving.
     pub fn once_while_waiting(self, happens: impl Fn(&FakeHost) + 'static) -> Self {
         *self.stall.somebody_else.borrow_mut() = Some(Box::new(happens));
         self
@@ -1154,28 +1034,10 @@ impl FakeHost {
     }
 
     /// Creates a directory and those above it, giving `mode` to the ones that
-    /// were not already there.
-    ///
-    /// `mkdir -p` leaves an existing directory's mode alone, and a fake that
-    /// stamped every parent instead would report a Profile as private however
-    /// it had been created — which is the one thing these modes are here to
-    /// tell apart (ADR claude-code-chooses-the-store).
-    /// A link counts as what it points at here too, which it did not.
-    ///
-    /// This consulted `fs.dirs` alone, so a `mkdir -p` at a path that is a link
-    /// inserted a *directory* shadowing it — and [`resolved`](FakeHost::resolved)
-    /// looks in `files` and `dirs` before `links`, so the link was unreachable
-    /// from then on. Real `create_dir_all` does neither: at a link to a
-    /// directory it succeeds and uses the target, and at a link to nothing it
-    /// fails, because `mkdir` answers `EEXIST` and the `is_dir` it falls back on
-    /// follows the link and finds nothing.
-    ///
-    /// What that hid is the state ADR everything-but-the-account is about. A
-    /// Profile whose `sessions` is a link into the Default Profile is exactly
-    /// what `reconcile::HELD_BACK` and `sweep` exist to repair, and
-    /// `probe::claim` does `create_dir_all` on that path — so a Marker written
-    /// through the link, into another directory, was a thing this fake could
-    /// not model.
+    /// were not already there — as `mkdir -p` does. A link counts as what it
+    /// points at, which is `create_dir_all`'s behavior: at a link to a directory
+    /// it succeeds and uses the target, and at a link to nothing it fails,
+    /// because `mkdir` answers `EEXIST` and the `is_dir` after it finds nothing.
     fn make_dirs(&self, path: &Path, mode: u32) -> Result<(), HostError> {
         // Already a directory, by whatever route — including through a link, in
         // which case the target is what was asked for and nothing is made.
@@ -1217,21 +1079,10 @@ impl FakeHost {
     }
 
     /// What a path names once its links are followed, or `None` when it names
-    /// nothing — a link whose target has gone, most of all.
-    ///
-    /// The directories above it are followed too, which they used to not be on
-    /// the reasoning that "a file inside a linked directory is not something
-    /// Perch ever asks this fake about". It is exactly what Perch asks about:
-    /// the hazard `reconcile::HELD_BACK` holds `sessions` back for is a Profile
-    /// whose `sessions` is a link into another one, and reading a marker there
-    /// is reading a file inside a linked directory. Without this the whole of
-    /// ADR everything-but-the-account's reason for existing was a state no test
-    /// could build.
-    ///
-    /// Bounded on both counts: the walk down a chain of links gives up rather
-    /// than hanging on two that point at each other, and the recursion up
-    /// through the parents is one level per component of a path that is already
-    /// finite.
+    /// nothing — a link whose target has gone, most of all. The directories above
+    /// it are followed too: reading a marker under a `sessions` that is a link
+    /// into another Profile is reading a file inside a linked directory. Bounded,
+    /// because two links pointing at each other are a loop.
     fn resolved(&self, path: &Path) -> Option<PathBuf> {
         const FOLLOWED: usize = 8;
 
@@ -1251,10 +1102,8 @@ impl FakeHost {
                 continue;
             }
             // Nothing of that name, which does not mean nothing is there: a
-            // directory *above* it may be a link, and the name has to be tried
-            // again under whatever that resolves to. A rejoin that changes
-            // nothing is a path that was never going to resolve, and stops the
-            // walk rather than spending the rest of its attempts on it.
+            // directory *above* it may be a link. A rejoin that changes nothing
+            // is a path that was never going to resolve.
             let rejoined = self.resolved(at.parent()?)?.join(at.file_name()?);
             if rejoined == at {
                 return None;
@@ -1264,19 +1113,10 @@ impl FakeHost {
         None
     }
 
-    /// The path a read lands on, or the refusal it meets on the way.
-    ///
-    /// `RealHost` follows a symbolic link on every read it makes —
-    /// `read_to_string`, `metadata`, `read_dir` all do — and this fake followed
-    /// one on none of them. It was not even consistent with itself:
-    /// `path_exists(link)` answered `true` through
-    /// [`resolved`](FakeHost::resolved) while `read_file(link)` answered
-    /// `NotFound`. So the machines a link makes could not be built here at all:
-    /// a `~/.claude.json` managed by stow or chezmoi, and the `sessions` linked
-    /// into another Profile that ADR everything-but-the-account names.
-    ///
-    /// A path arranged as unreadable refuses whether it is the link or what the
-    /// link points at, because on a real machine either one stops the read.
+    /// The path a read lands on, or the refusal it meets on the way. Every read
+    /// `RealHost` makes follows a symbolic link, so every read here does too —
+    /// and a path arranged as unreadable refuses whether it is the link or what
+    /// the link points at, because on a real machine either stops the read.
     fn through_links(&self, path: &Path) -> Result<PathBuf, HostError> {
         let at = self.resolved(path).unwrap_or_else(|| path.to_path_buf());
         for named in [path, at.as_path()] {
@@ -1292,14 +1132,10 @@ impl FakeHost {
     }
 
     /// Passes the time the person at the terminal takes over an answer, and lets
-    /// whatever the test said happens while Perch waits happen.
-    ///
-    /// Shared by both prompts, because a question is a wait whether or not the
-    /// terminal shows what is typed — and the passphrase prompts are the longest
-    /// wait in Perch, since there are two of them and both are somebody typing
-    /// carefully. A fake that passed time at one prompt and not the other would
-    /// present a world that stood still for exactly the command most able to
-    /// outlast the state it checked.
+    /// whatever the test said happens while Perch waits happen. Shared by both
+    /// prompts, because a question is a wait whether or not the terminal shows
+    /// what is typed — and the passphrase prompts are the longest wait in Perch,
+    /// since there are two and both are somebody typing carefully.
     fn while_they_answer(&self) {
         let taken = *self.terminal.answering_takes_millis.borrow();
         if taken == 0 {
@@ -1312,13 +1148,10 @@ impl FakeHost {
     }
 
     /// Lets whatever the test said happens while Perch waits happen, once.
-    ///
-    /// Called from all four sites that move the clock, which is the whole of
-    /// why `now` and `somebody_else` are one [`Stall`] rather than a clock
-    /// beside a hook (ADR the-port-fits-the-machine).
-    ///
-    /// Taken out before it runs, so it can reach back into the fake without
-    /// meeting a borrow the call it interrupts is still holding.
+    /// Called from all four sites that move the clock, which is why `now` and
+    /// `somebody_else` are one [`Stall`]. Taken out before it runs, so it can
+    /// reach back into the fake without meeting a borrow the call it interrupts
+    /// is still holding.
     fn somebody_else_arrives(&self) {
         let happens = self.stall.somebody_else.borrow_mut().take();
         if let Some(happens) = happens {
@@ -1335,17 +1168,9 @@ impl FakeHost {
 
     /// Where a write physically lands, which is not always where it was
     /// addressed: a directory *above* the file may be a link, and a real
-    /// filesystem follows it.
-    ///
-    /// [`resolved`](FakeHost::resolved) answers this for a path that already
-    /// exists, and a write is the one case where it does not — the file is
-    /// about to. So the parent is resolved and the name put back on the end.
-    ///
-    /// Without it the fake stored the file at the name it was given while
-    /// `resolved` read *through* the link, so the two disagreed about one path
-    /// and the state ADR everything-but-the-account is about could not be
-    /// built: a Profile whose `sessions` is a link into another configuration
-    /// directory, and a Marker written under it landing there rather than here.
+    /// filesystem follows it. [`resolved`](FakeHost::resolved) answers this for
+    /// a path that already exists, and a write is the one case where it does not
+    /// — so the parent is resolved and the name put back on the end.
     fn lands_at(&self, path: &Path) -> PathBuf {
         let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
             return path.to_path_buf();
@@ -1357,13 +1182,10 @@ impl FakeHost {
     }
 
     /// The file a write is *for*: the path itself, or — for the copy written
-    /// beside a target by [`super::replace_via_tmp`] — the target it is about
-    /// to be renamed over.
-    ///
-    /// Every arrangement a test makes is about a file it can name. It cannot
-    /// name the copy beside one, because that copy carries the pid of whoever
-    /// is writing it, and the arrangement is about the disk and the directory
-    /// rather than about a filename anyway.
+    /// beside a target by [`super::replace_via_tmp`] — the target it is about to
+    /// be renamed over. A test cannot name that copy, because it carries the pid
+    /// of whoever is writing it, and the arrangement is about the disk and the
+    /// directory rather than about a filename.
     fn intended(&self, path: &Path) -> PathBuf {
         let suffix = format!(".perch-tmp.{}", self.process_id());
         match path
@@ -1406,16 +1228,11 @@ impl FakeHost {
     }
 }
 
-/// As much of `text` as fits in `bytes`, cut at a character boundary.
-///
-/// One function, because the fake stands three different things in for by
-/// keeping a prefix — a store that corrupts what it holds, a disk that fills
-/// partway, and a keychain that will only take so much — and two of them were
-/// cutting with `String::truncate` at exactly half the byte length. That panics
-/// on any index that is not a character boundary, and what is being halved is
-/// registry JSON and `.claude.json`: an Alias, an email address or a project
-/// path with one accented letter in it is enough. The fake would then panic
-/// inside the arrangement rather than exercise the cleanup it was written for.
+/// As much of `text` as fits in `bytes`, cut at a character boundary. One
+/// function for the three things the fake stands in for by keeping a prefix — a
+/// store that corrupts, a disk that fills partway, a keychain that takes only so
+/// much — and a boundary, because `String::truncate` panics on an index that is
+/// not one and what is being cut is registry JSON and `.claude.json`.
 fn a_prefix_of(text: &str, bytes: usize) -> String {
     text.char_indices()
         .take_while(|(at, _)| *at < bytes)
@@ -1449,12 +1266,8 @@ impl port::Environment for FakeHost {
 
     fn env_var(&self, key: &str) -> Option<String> {
         // Empty filtered out, as the real Host filters it: `export
-        // CLAUDE_CONFIG_DIR=` is ordinary shell state, and it reads as unset
-        // there. Without this the fake answers `Some("")`, which derives a
-        // store whose config directory is `""` and whose plaintext store is
-        // `.credentials.json` relative to wherever the process happens to be —
-        // a state no real machine can produce, and one a test could be written
-        // against in either direction.
+        // CLAUDE_CONFIG_DIR=` is ordinary shell state and reads as unset there,
+        // and `Some("")` derives a store no real machine can produce.
         self.environment
             .vars
             .borrow()
@@ -1510,36 +1323,24 @@ impl port::Files for FakeHost {
     ) -> Result<(), HostError> {
         self.record(Effect::WroteFile(path.to_path_buf()));
         // Both questions are asked of the file this one is *for*, which is the
-        // same path unless it is the copy written beside a target. A test
-        // arranging a full disk or a truncating store names the file it cares
-        // about, and the real machine answers the same way for the copy beside
-        // it: they are the same directory, and it is the same disk.
+        // same path unless it is the copy beside a target — the same directory
+        // and the same disk, which is how the real machine answers too.
         let intended = self.intended(path);
         if let Some(detail) = self.fs.unwritable.borrow().get(&intended) {
             return Err(HostError::Other(detail.clone()));
         }
-        // Resolved *before* the parents are noted, and the noting is done at
-        // the resolved place. `note_directories_of` inserts every directory
-        // above the file into `fs.dirs`, and `resolved` looks in `dirs` before
-        // `links` — so noting the addressed path first would put a directory
-        // over the very link this is meant to follow, and the write would land
-        // back where it was addressed.
+        // Resolved *before* the parents are noted, and noted at the resolved
+        // place: `resolved` looks in `dirs` before `links`, so noting the
+        // addressed path first would put a directory over the link.
         let lands_at = self.lands_at(path);
         self.note_directories_of(&lands_at);
-        // Whatever was at the path is taken away first, a link included — the
-        // real one leads with `remove_file` and then `create_new`, and its own
-        // comment calls that the security property: "anything that can write the
-        // directory can unlink this file and leave a link at the same name".
-        //
-        // Left behind, the fake described one path as both a regular file and a
-        // symbolic link, with `read_file` answering the new contents while
-        // `link_target` went on naming somewhere else. `rename` already gets
-        // this right and says why; this is the same sentence at the other write.
+        // Whatever was at the path is taken away first, a link included, because
+        // the real one leads with `remove_file` and then `create_new`. Left
+        // behind, one path would be both a regular file and a symbolic link.
         self.fs.links.borrow_mut().remove(path);
         // A disk that fills partway leaves what fitted behind and then fails,
         // which is the order the real host does it in: open, `write_all`,
-        // `sync_all`. A fake that could only refuse before creating anything
-        // could not model it, so the cleanup on this path went untested.
+        // `sync_all`.
         if self.fs.filling.borrow().contains(&intended) {
             self.fs
                 .files
@@ -1560,24 +1361,11 @@ impl port::Files for FakeHost {
         Ok(())
     }
 
-    /// Written beside and moved into place, exactly as the real one is.
-    ///
-    /// Through [`super::replace_via_tmp`] rather than straight into the map,
-    /// because what this call promises is not only "the bytes and the mode" but
-    /// "and never a half-written file at the path". A fake that wrote directly
-    /// could not fail the way the real one fails — the real host's `ENOSPC`
-    /// lands on the copy *beside* the target and leaves the target untouched,
-    /// while this one used to fail at the target itself — so
-    /// `a_save_that_fails_leaves_the_registry_exactly_as_it_was` asserted the
-    /// absence of a temp file the fake could never have created, and rewriting
-    /// the real one as a plain truncate-and-write would have left the suite
-    /// green. For the file the registry module calls the whole of Perch's
-    /// state.
-    ///
-    /// The mode is still recorded, which is the other thing this call promises:
-    /// "created private" and "made private afterwards" are the distinction
-    /// ADR claude-code-chooses-the-store turns on, and `create_file_with_mode`
-    /// underneath keeps it.
+    /// Written beside and moved into place, exactly as the real one is: through
+    /// [`super::replace_via_tmp`] rather than straight into the map, because what
+    /// this call promises is not only the bytes and the mode but never a
+    /// half-written file at the path. A write that failed at the target rather
+    /// than beside it is a failure the real host cannot produce.
     fn write_private_file(&self, path: &Path, contents: &str) -> Result<(), HostError> {
         self.record(Effect::WrotePrivateFile(path.to_path_buf()));
         if let Some(parent) = path.parent() {
@@ -1605,13 +1393,9 @@ impl port::Files for FakeHost {
             });
         };
         let path = path.as_path();
-        // Windows has no mode and relies on the profile ACL
-        // (ADR claude-code-chooses-the-store), and the real Host answers `None`
-        // there. A fake that answered with a number would let a test drive
-        // `tighten_if_loose` — reading the mode, making the file private,
-        // remarking that others could read it — on a platform where none of
-        // that happens, which is a test asserting behavior the real Host cannot
-        // produce.
+        // Windows has no mode and relies on the profile ACL, and the real Host
+        // answers `None` there. A number here would let a test drive
+        // `tighten_if_loose` on a platform where none of it happens.
         if self.platform() == Platform::Windows {
             return Ok(None);
         }
@@ -1624,15 +1408,11 @@ impl port::Files for FakeHost {
         )))
     }
 
-    /// Refusing a link, as `RealHost` does: the narrowing is an `O_NOFOLLOW`
-    /// open followed by an `fchmod`, so a link at the last component fails
-    /// rather than sending the mode wherever it points. A directory *above* it
-    /// is still followed, which is what an open does.
-    ///
-    /// Where permission bits mean nothing there is no narrowing and so nothing
-    /// to redirect: `RealHost::make_private` is `#[cfg(unix)]` and a silent
-    /// no-op elsewhere, and this fake gates on the runtime Platform for it —
-    /// the same split [`file_mode`](FakeHost::file_mode) is written against.
+    /// Refusing a link, as `RealHost` does: the narrowing is an `O_NOFOLLOW` open
+    /// followed by an `fchmod`, so a link at the last component fails rather than
+    /// sending the mode wherever it points, while a directory *above* it is
+    /// followed. Where permission bits mean nothing there is nothing to redirect,
+    /// so this gates on the runtime Platform as `file_mode` does.
     fn make_private(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::MadePrivate(path.to_path_buf()));
         if self.platform() != Platform::Windows && self.fs.links.borrow().contains_key(path) {
@@ -1648,12 +1428,9 @@ impl port::Files for FakeHost {
             });
         };
         let path = path.as_path();
-        // A file whose *permissions* cannot be changed is the same arrangement
-        // as one whose contents cannot: a `chmod` on a file owned by somebody
-        // else fails with `EPERM` however readable it is. Without this the fake
-        // had no way to be a machine where tightening a loose Credential does
-        // not work, which is the branch that decides whether the user is ever
-        // told about a world-readable refresh token.
+        // A file whose *permissions* cannot be changed is the same arrangement as
+        // one whose contents cannot: a `chmod` on somebody else's file fails with
+        // `EPERM` however readable it is.
         if let Some(detail) = self.fs.unwritable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
@@ -1692,31 +1469,24 @@ impl port::Files for FakeHost {
         if let Some(detail) = self.fs.undeletable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
-        // A directory that will not be walked cannot be removed either, which
-        // `with_unlistable_dir`'s own doc says — "`remove_dir_all` and the
-        // listing both fail EACCES" — and only `list_dir` was reading it. There
-        // is no machine where a directory refuses `opendir` and then disappears
-        // under a recursive remove, because the remove has to `opendir` first;
-        // a recovery path proved green against that pair would not run on one.
+        // A directory that will not be walked cannot be removed either: the
+        // remove has to `opendir` first, so there is no machine where one
+        // refuses `opendir` and then disappears under a recursive remove.
         if let Some(detail) = self.fs.unlistable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
-        // A link at the path is taken away and what it points at is left
-        // alone: `remove_dir_all` does not follow the last component, so it
-        // unlinks the link itself and answers `Ok`. Measured, because the
-        // opposite belief made `lock::clear_the_abandoned` unreachable in every
-        // test — a dangling artifact was modeled as wedging Perch for ever
-        // where the machine recovers on the next command.
+        // A link at the path is taken away and what it points at is left alone:
+        // `remove_dir_all` does not follow the last component, so it unlinks the
+        // link itself and answers `Ok`. Measured rather than assumed.
         if self.fs.links.borrow_mut().remove(path).is_some() {
             self.fs.modified.borrow_mut().remove(path);
             self.fs.files.borrow_mut().remove(path);
             self.fs.modes.borrow_mut().remove(path);
             return Ok(());
         }
-        // A plain file is not a directory, and there the real call does say so
-        // rather than removing it. A fake that removed it anyway would recover
-        // from a state a real machine cannot: see the note on
-        // `create_dir_exclusive` below, which is what puts Perch there.
+        // A plain file is not a directory, and the real call says so rather than
+        // removing it — a fake that removed it anyway would recover from a state
+        // a real machine cannot.
         if self.fs.files.borrow().contains_key(path) {
             return Err(HostError::Other(format!(
                 "{}: Not a directory (os error 20)",
@@ -1748,36 +1518,23 @@ impl port::Files for FakeHost {
 
     fn create_dir_exclusive(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::Took(path.to_path_buf()));
-        // Told apart from the path being taken. `AlreadyExists` is contention
-        // and anything else is the filesystem refusing, and `lock::take` answers
-        // them differently — one is waited out and the other is reported — so a
-        // fake that could only produce the first left the second untested.
+        // Told apart from the path being taken: `AlreadyExists` is contention
+        // and anything else is the filesystem refusing, and `lock::take` waits
+        // the first out and reports the second.
         if let Some(detail) = self.fs.unwritable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
-        // A link in the way counts, whether or not it still resolves.
-        //
-        // `path_exists` follows a link and answers `false` for a broken one,
-        // which is right for the question a Reconcile asks and wrong for this
-        // one: `mkdir` does not follow the last component, so it fails
-        // `EEXIST` at a symlink whatever the symlink points at. A fake that
-        // created the directory *over* a dangling link could not represent the
-        // state where a Profile holds a link into a Default Profile that has
-        // gone — and in that state a real `lock::take` gets `AlreadyExists`,
-        // reads the lock as abandoned because the link will not say when it was
-        // written, tries `remove_dir_all` on a symlink and is ignored, and
-        // refuses every Switch and every Run against that Profile for ever.
+        // A link in the way counts, whether or not it still resolves: `mkdir`
+        // does not follow the last component, so it fails `EEXIST` at a symlink
+        // whatever it points at. `path_exists` answers the Reconcile's question.
         if self.fs.links.borrow().contains_key(path) || self.path_exists(path) {
             return Err(HostError::AlreadyExists {
                 path: path.to_path_buf(),
             });
         }
-        // `mkdir` and not `mkdir -p`, which this used to be by omission: the
-        // path went into `fs.dirs` whatever was above it, so a lock could be
-        // taken at `<profile>/.oauth_refresh.lock` for a Profile that does not
-        // exist. `std::fs::create_dir` answers `ENOENT` for that, so a behavior
-        // test could show a Switch proceeding under a lock the machine would
-        // have refused to give it.
+        // `mkdir` and not `mkdir -p`: `std::fs::create_dir` answers `ENOENT` for
+        // a missing parent, so a lock cannot be taken inside a Profile that does
+        // not exist.
         let parent = path.parent().filter(|at| !at.as_os_str().is_empty());
         if let Some(parent) = parent
             && self
@@ -1800,10 +1557,9 @@ impl port::Files for FakeHost {
         if let Some(detail) = self.fs.unreadable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
-        // Not through a link. `metadata` follows one, but a dangling link is
-        // exactly the state `lock::abandoned` has to be able to meet: the real
-        // call answers `NotFound` there, and so does this — which is the arm
-        // that reads a lock as free. A link that does resolve is followed.
+        // Not through a link, because a dangling one is the state
+        // `lock::abandoned` has to meet: the real call answers `NotFound`
+        // there, which is the arm that reads a lock as free.
         let at = self.resolved(path).unwrap_or_else(|| path.to_path_buf());
         self.fs
             .modified
@@ -1841,25 +1597,14 @@ impl port::Files for FakeHost {
         if let Some(detail) = self.fs.unwritable.borrow().get(to) {
             return Err(HostError::Other(detail.clone()));
         }
-        // Both ends through any link *above* them, as every write here is, and
-        // for the reason `lands_at` gives: a real `rename(2)` resolves the
-        // directories on the way to each name. It does not resolve the last
-        // component — a link sitting at the target is unlinked rather than
-        // written through, which the arm below is about — and `lands_at` does
-        // not touch the last component either.
-        //
-        // Without this the two sides of one atomic write disagreed: the copy
-        // beside the target landed through the link and the rename looked for
-        // it where it had been addressed, so `write_atomically` under a linked
-        // directory failed with "entity not found".
+        // Both ends through any link *above* them, because a real `rename(2)`
+        // resolves the directories on the way to each name and not the last
+        // component — which the arm below is about.
         let from = &self.lands_at(from);
         let to = &self.lands_at(to);
-        // `Io`, which is what the real host answers: `rename_replacing`
-        // propagates the `ENOENT` rather than naming it, and `NotFound` is
-        // load-bearing elsewhere — `CredentialStore::read` reads it as "this
-        // store holds nothing" and `clients_in` as "nothing is running". A fake
-        // that answers it here is the answer the next caller to match on a
-        // failed rename would be written against.
+        // `Io`, which is what the real host answers: `NotFound` is load-bearing
+        // elsewhere — `CredentialStore::read` reads it as "this store holds
+        // nothing" and `clients_in` as "nothing is running".
         let moved = self
             .fs
             .files
@@ -1874,19 +1619,12 @@ impl port::Files for FakeHost {
             Some(mode) => self.fs.modes.borrow_mut().insert(to.to_path_buf(), mode),
             None => self.fs.modes.borrow_mut().remove(to),
         };
-        // And it replaces whatever was at the target, a link included:
-        // `rename(2)` does not follow the last component, so a symlink there is
-        // unlinked rather than written through. Left behind, the fake reported
-        // one path as both a regular file and a link — `read_file` answering
-        // with the new contents while `link_target` went on naming somewhere
-        // else — and that is precisely the state `replace_via_tmp` exists to
-        // produce: a private write onto a planted link is the *security*
-        // property, and a test asserting it would have asserted the opposite of
-        // what the machine does and still passed.
+        // And it replaces whatever was at the target, a link included, because
+        // `rename(2)` does not follow the last component. That is the security
+        // property `replace_via_tmp` exists to produce.
         self.fs.links.borrow_mut().remove(to);
         // The directories a rename's target sits in are there by the time it
-        // lands, because the write that made the temporary file beside it made
-        // them. Recorded here too, so a `rename` reached any other way leaves
+        // lands. Recorded here too, so a `rename` reached any other way leaves
         // the fake describing a filesystem that could exist.
         self.note_directories_of(to);
         self.mark_written(to);
@@ -1908,22 +1646,16 @@ impl port::Files for FakeHost {
     /// Through a link, as `read_dir` reads through one — but reporting what was
     /// found under the name that was asked about, which is what `read_dir` does
     /// with the path it was given. A `sessions` linked into another Profile
-    /// therefore answers with that Profile's markers, which is the whole of the
-    /// hazard ADR everything-but-the-account names.
+    /// therefore answers with that Profile's markers.
     fn list_dir(&self, asked: &Path) -> Result<Vec<PathBuf>, HostError> {
         let resolved = self.resolved(asked);
         let Some(path) = resolved
             .clone()
             .filter(|at| self.fs.dirs.borrow().contains(at))
         else {
-            // Something of that name that is not a directory is `ENOTDIR`, not
-            // `ENOENT`, and the two are opposite answers to the caller that
-            // matters: `probe::clients_in` reads `NotFound` as "no client has
-            // ever run here, so nothing is running" and lets a Switch replace
-            // the live Credential, and anything else as doubt it refuses on. So
-            // a `<profile>/sessions` that is a regular file — a botched restore,
-            // a name crossed by a hard link — read as idle in every behavior
-            // test and as a refusal on the machine.
+            // `ENOTDIR` and not `ENOENT`, which are opposite answers to
+            // `probe::clients_in`: one is "nothing is running" and the other is
+            // doubt it refuses on.
             if resolved.is_some() {
                 return Err(HostError::Other(format!(
                     "{} is not a directory",
@@ -1981,12 +1713,10 @@ impl port::Files for FakeHost {
 }
 
 impl port::Links for FakeHost {
-    /// Makes a link, refusing the kinds this machine could not make.
-    ///
-    /// The refusals are the point of having this behind the port at all: a
-    /// symbolic link on a Windows without Developer Mode, and a junction
-    /// anywhere else, fail here exactly as they would there — so the fallbacks
-    /// ADR everything-but-the-account turns on are exercised from whatever
+    /// Makes a link, refusing the kinds this machine could not make — which is
+    /// the point of having this behind the port at all: a symbolic link on a
+    /// Windows without Developer Mode, and a junction anywhere else, fail here
+    /// exactly as they would there, so the fallbacks are exercised from whatever
     /// machine the tests run on.
     fn link(&self, kind: Link, target: &Path, at: &Path) -> Result<(), HostError> {
         self.record(Effect::Linked {
@@ -2037,12 +1767,9 @@ impl port::Links for FakeHost {
             self.set_file(at, &contents);
         }
         self.note_directories_of(at);
-        // Only a hard link, which is a real second name for the file and shares
-        // its modification time. A symbolic link has none of its own: the real
-        // `modified_at` goes through `metadata`, which follows the link — so a
-        // dangling one is `NotFound`, and that is the arm `lock::abandoned`
-        // reads as a lock nobody holds. Marking the link path here gave it a
-        // time of its own and answered `Ok`, which is the opposite arm.
+        // Only a hard link, which is a second name for the file and shares its
+        // modification time. A symbolic link has none of its own, so a dangling
+        // one is the `NotFound` that reads as a lock nobody holds.
         if kind == Link::Hard {
             self.mark_written(at);
         }
@@ -2080,11 +1807,9 @@ impl port::Links for FakeHost {
             self.fs.modified.borrow_mut().remove(path);
             return Ok(());
         }
-        // Something that is not a link is refused rather than passed over, which
-        // is what the real call does now. Answered `Ok` untouched, the fake
-        // could not tell a caller that dropped its `link_target` guard from one
-        // that kept it — while the real `remove_file` underneath deleted the
-        // person's file.
+        // Something that is not a link is refused rather than passed over, as
+        // the real call refuses it: answered `Ok`, this could not tell a caller
+        // that dropped its `link_target` guard from one that kept it.
         if self.fs.files.borrow().contains_key(path) || self.fs.dirs.borrow().contains(path) {
             return Err(HostError::Other(format!(
                 "{} is not a link, so it is not Perch's to remove",
@@ -2187,18 +1912,10 @@ impl port::Processes for FakeHost {
     }
 
     /// Stands in for whatever took the terminal — the login the user drives, or
-    /// the program a Run launched: it writes whatever the configured [`Login`]
-    /// leaves in the directory it was pointed at, and exits as that says.
-    ///
-    /// A program [`FakeHost::set_exec`] has been given an answer for exits with
-    /// that answer's status, ahead of the [`Login`]. Without it there was no way
-    /// to say "the program took the terminal and refused" at all: every
-    /// interactive program exited 0 unless a whole [`Login`] was written for it,
-    /// and the ones that are not logins — `brew upgrade perch`, `npm install -g`,
-    /// the installer script — have no directory to write into and no business
-    /// with one. So `perch upgrade`'s entire failure arm was unreachable from a
-    /// test, which is how it came to refresh the Service after a `brew` that had
-    /// refused.
+    /// the program a Run launched. A program [`FakeHost::set_exec`] has an answer
+    /// for exits with that answer's status, ahead of the [`Login`], because *the
+    /// program took the terminal and refused* is what `brew upgrade perch` and an
+    /// installer script do and neither has a directory to write into.
     fn exec_interactive(
         &self,
         program: &str,
@@ -2242,13 +1959,9 @@ impl port::Processes for FakeHost {
     }
 
     fn process_alive(&self, pid: u32) -> bool {
-        // The identifiers the real host refuses before it asks, refused here
-        // too. `kill` reads `0` as the caller's whole process group and `-1` as
-        // every process it may signal, so neither is a question about one
-        // process — and `clients_in` parses a pid out of any filename in a
-        // sessions directory, which is not a name Perch wrote. A fake that
-        // answered "alive" where the real one says "dead" is a fake a test
-        // could prove the wrong behavior against.
+        // The identifiers the real host refuses before it asks, refused here too:
+        // `kill` reads `0` and `-1` as a process *group*, and `clients_in` parses
+        // a pid out of any filename in a sessions directory.
         if pid == 0 || pid == u32::MAX {
             return false;
         }
@@ -2285,17 +1998,9 @@ impl port::Waiting for FakeHost {
     fn wait(&self, millis: u64) -> Waited {
         self.record(Effect::Waited { millis });
 
-        // Decided before the clock moves, because the real one decides before
-        // it sleeps: `RealHost::wait` asks `interrupted()` ahead of the first
-        // slice and returns having spent nothing. Advancing first meant the
-        // wait that *ends* an interrupted `perch watcher run` spent its whole
-        // interval — 2.5 minutes, or 20 under back-off — that a real Ctrl-C
-        // never spends, so every "as of 4m ago" measured after one was
-        // measuring a duration production does not have.
-        //
-        // Nothing is interrupted where nothing is listening, for the same
-        // reason as on a real machine: Ctrl-C ends the process instead, and a
-        // process that has ended waits no more.
+        // Decided before the clock moves, because the real one decides before it
+        // sleeps and returns having spent nothing. Nothing is interrupted where
+        // nothing is listening: Ctrl-C ends the process instead.
         let interrupted = {
             let mut waits = self.waiting.waits.borrow_mut();
             *waits += 1;
@@ -2310,11 +2015,9 @@ impl port::Waiting for FakeHost {
             *self.stall.now.borrow_mut() = waited;
         }
 
-        // Run either way, and this is the one site where that is a decision: it
-        // is the test's scripted event, and what it stands for — another `perch`
-        // arriving — does not stop happening because this one was interrupted.
-        // So an interrupted wait is the one place the clock stands still and
-        // somebody else arrives anyway.
+        // Run either way, which is the one site where that is a decision: what
+        // the closure stands for does not stop happening because this Perch was
+        // interrupted, so this is where the clock stands still and it runs.
         self.somebody_else_arrives();
 
         match interrupted {
@@ -2355,12 +2058,9 @@ impl port::Terminal for FakeHost {
 }
 
 impl port::Network for FakeHost {
-    /// Answers with whatever the test arranged for this endpoint, and with
-    /// nothing at all otherwise.
-    ///
-    /// A machine with no arranged replies has no network, so a command that
-    /// fetches when it should not fails rather than quietly succeeding — and
-    /// every request is recorded either way, for `http_calls` to report.
+    /// Answers with whatever the test arranged for this endpoint, and nothing at
+    /// all otherwise — so a command that fetches when it should not fails rather
+    /// than quietly succeeding. Every request is recorded either way.
     fn http(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, HostError> {
         let sent = Sent {
             url: request.url.to_string(),
@@ -2416,19 +2116,11 @@ mod tests {
     // The one concern these tests reach that the file's own body does not.
     use super::port::Links as _;
 
-    /// `mkdir` does not follow the last component of the path it is given, so
-    /// it fails `EEXIST` at a symlink whatever that symlink points at. The fake
-    /// answered this through `path_exists`, which *does* follow — and answers
-    /// `false` for a broken link — so it created the directory straight over
-    /// one.
-    ///
-    /// The state that reaches is a Profile holding a link into a Default
-    /// Profile that has gone, which `reconcile::sweep` exists to prevent and
-    /// which a machine can still arrive at. There, `lock::take` gets
-    /// `AlreadyExists`, reads the lock as abandoned because a dangling link
-    /// will not say when it was written, calls `remove_dir_all` on a symlink
-    /// and has the failure ignored — and then refuses every Switch and every
-    /// Run against that Profile for ever. No behavior test could reach it.
+    /// The fixture is a Profile holding a link into a Default Profile that has
+    /// gone, which `reconcile::sweep` exists to prevent and a machine can still
+    /// arrive at. There a real `lock::take` gets `AlreadyExists`, reads the lock
+    /// as abandoned because a dangling link will not say when it was written, and
+    /// refuses every Switch against that Profile for ever.
     #[test]
     fn a_directory_is_not_taken_over_a_link_that_points_at_nothing() {
         let host = FakeHost::new().with_link(
@@ -2450,17 +2142,10 @@ mod tests {
         );
     }
 
-    /// `rename(2)` does not follow the last component either: a symlink at the
-    /// target is unlinked and replaced, not written through. That is the whole
-    /// of why `replace_via_tmp` is the write a Credential goes through — a link
+    /// `rename(2)` does not follow the last component either, which is the whole
+    /// of why `replace_via_tmp` is the write a Credential goes through: a link
     /// planted at `.credentials.json` is *replaced* rather than followed to
     /// wherever whoever planted it wanted the secret to land.
-    ///
-    /// The fake moved the file and left the link entry behind, so afterwards it
-    /// answered as both: `read_file` with the new contents, `link_target` with
-    /// somewhere else entirely. A test asserting the security property would
-    /// have read the link that is not there any more and concluded the opposite
-    /// of what the machine does — and passed.
     #[test]
     fn a_private_write_over_a_planted_link_replaces_it_rather_than_following_it() {
         let planted = Path::new("/Users/someone/.config/perch/profiles/a/.credentials.json");
@@ -2486,13 +2171,9 @@ mod tests {
         );
     }
     /// The mirror of `real.rs`'s
-    /// `a_process_id_that_is_not_one_is_dead_rather_than_a_process_group`.
-    ///
-    /// `clients_in` parses a pid out of any filename it finds in a sessions
-    /// directory, and those are not names Perch wrote — so `0.json` is
-    /// reachable. Unguarded, the fake called that process alive where the real
-    /// host calls it dead, which is a fake a test could prove the wrong
-    /// behavior against.
+    /// `a_process_id_that_is_not_one_is_dead_rather_than_a_process_group`:
+    /// `clients_in` parses a pid out of any filename in a sessions directory, and
+    /// those are not names Perch wrote, so `0.json` is reachable.
     #[test]
     fn the_process_ids_that_are_not_one_are_dead_here_too() {
         let host = FakeHost::new()
