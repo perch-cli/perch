@@ -4,12 +4,11 @@
 #   curl -fsSL https://perch-cli.github.io/perch/install.sh | sh
 #
 # Environment:
-#   PERCH_VERSION      a tag to install, such as v0.1.0. Default: the latest release.
-#   PERCH_INSTALL_DIR  where to put the binary. Default: ~/.local/bin.
+#   PERCH_VERSION      a tag, such as v0.1.0. Default: the newest Release.
+#   PERCH_INSTALL_DIR  where the binary goes. Default: ~/.local/bin.
 #
-# POSIX sh, because the shell people pipe this into is not always bash — and
-# `set -eu` from the first line, because the failure mode of an installer that
-# keeps going after a failed download is a half-written binary on the PATH.
+# POSIX sh, because the shell this is piped into is not always bash. `set -eu`
+# from the first line: carrying on after a failed download leaves a binary.
 
 set -eu
 
@@ -82,12 +81,8 @@ say "installing $version for $target"
 
 tmp=$(mktemp -d)
 # `staged` is the half-installed binary below, named here so the trap can reach
-# it. It is inside $INSTALL_DIR rather than $tmp — that is what makes replacing a
-# running perch atomic — so removing $tmp alone leaves it behind: a mode-600
-# dotfile in the install directory that nothing cleans up and `ls` does not show.
-# Reachable whenever the chmod or the second mv fails, which is a read-only
-# $INSTALL_DIR, a `perch` that is a directory, or an interrupt landing between
-# the two moves.
+# it: it sits inside $INSTALL_DIR rather than $tmp — which is what makes replacing
+# a running perch atomic — so removing $tmp alone would leave it behind.
 staged=""
 trap 'rm -rf "$tmp" ${staged:+"$staged"}' EXIT INT TERM
 
@@ -114,24 +109,9 @@ if [ "$actual" != "$expected" ]; then
 fi
 say "checksum ok"
 
-# Perch is built by a public workflow and its provenance is signed, so anyone
-# holding `gh` can confirm which workflow, in which repository, at which commit
-# produced this exact file. That is a stronger claim than the checksum, which
-# was fetched from the same place as the archive and so proves only that the
-# two agree.
-#
-# Attempted only when `gh` is both installed and logged in, and then it is
-# binding rather than advisory. The download above already succeeded, so the
-# network is up and the token works — a verification that fails from here is
-# saying something about the file, and an installer that shrugs at that is
-# doing the check for decoration.
-#
-# And said either way. On most machines `gh` is absent, so the strongest check
-# available is the one that does not happen — and a check that is skipped in
-# silence reads exactly like a check that passed.
-# ADR an-upgrade-asks-its-channel: "A silently skipped provenance check is the
-# single thing a tool built around being careful with Credentials should not do
-# quietly."
+# A stronger claim than the checksum, which came from the same place as the
+# archive. Attempted only where `gh` is installed and logged in, binding when it
+# is attempted, and said either way (ADR an-upgrade-asks-its-channel).
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
     if gh attestation verify "$tmp/$archive" --repo "$REPO" >/dev/null 2>&1; then
         say "provenance ok — built by $REPO"
@@ -161,11 +141,9 @@ say "installed to $INSTALL_DIR/perch"
 
 # ----------------------------------------------------------------------- path
 
-# Nothing below writes to any file. An rc file is a document its owner edits by
-# hand, and a line appended among their own lines could never be told back out
-# again at removal time — so the installer advises here and writes only on
-# Windows, where a PATH entry is a registry value that can be removed exactly
-# (ADR perch-takes-back-what-it-wrote).
+# Nothing below writes to any file: a line appended among the owner's own lines
+# is not one Perch could identify as its own afterwards, so this advises and only
+# Windows writes (ADR perch-takes-back-what-it-wrote).
 
 # The shells that read ~/.profile at login. zsh reads ~/.zprofile and fish
 # reads neither, so the Debian guard can only be the answer for these.
@@ -178,10 +156,9 @@ reads_profile() {
 
 # Whether ~/.profile already carries a line naming the install directory.
 #
-# Debian and Ubuntu write their guard as `if [ -d "$HOME/.local/bin" ]`, with
-# $HOME unexpanded — so a grep for the expanded path finds nothing on the very
-# machines this is about. Both forms are looked for, and the tilde form too,
-# for the people who wrote their own.
+# Debian and Ubuntu write their guard with $HOME unexpanded, so a grep for the
+# expanded path finds nothing on the machines this is about. Both forms are
+# looked for, and the tilde form for a hand-written one.
 profile_names_install_dir() {
     # An install directory can be named outright, and then nothing else has
     # needed $HOME — so it is not certain to be set by the time we get here.

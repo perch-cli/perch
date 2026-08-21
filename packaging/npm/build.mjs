@@ -1,17 +1,13 @@
-// Assembles the six npm packages a release publishes: one `perch-cli` wrapper,
-// and one platform package per target holding a single executable.
+// Assembles the six npm packages a Release publishes: one `perch-cli` wrapper,
+// and one platform package per Target holding a single executable.
 //
 //   node packaging/npm/build.mjs <version> <binaries-dir> <out-dir>
 //
 // <binaries-dir> holds one directory per Rust target, each containing the
-// executable extracted from that target's release archive.
+// executable extracted from that target's Release archive.
 //
-// The versions in packaging/npm/perch-cli/package.json are all `0.0.0`. They
-// are written here rather than kept in the file because they have to agree
-// exactly — the wrapper depends on its platform packages by exact version, so
-// a mismatch is an install that resolves to a binary from a different release.
-// A number that has to be right in six places is a number no one should be
-// typing.
+// The versions in packaging/npm/perch-cli/package.json are all `0.0.0` and are
+// written here: a number that has to be right in six places is not one to type.
 
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -20,12 +16,9 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // `os` and `cpu` are what npm resolves against: it installs the one optional
-// dependency whose pair matches the machine, and quietly skips the rest.
-//
-// No `libc` field on the Linux packages, deliberately. They are built against
-// musl and linked statically, which means they run on glibc systems too —
-// declaring `libc: ["musl"]` would be npm refusing to install a binary that
-// works perfectly well.
+// dependency whose pair matches the machine and skips the rest. No `libc`
+// field on the Linux packages, which are static (ADR a-linux-build-is-static):
+// `libc: ["musl"]` would have npm refuse a binary that runs anywhere.
 const TARGETS = [
   { target: "aarch64-apple-darwin", pkg: "@perch-cli/darwin-arm64", os: "darwin", cpu: "arm64" },
   { target: "x86_64-apple-darwin", pkg: "@perch-cli/darwin-x64", os: "darwin", cpu: "x64" },
@@ -81,10 +74,9 @@ for (const { target, pkg, os, cpu } of TARGETS) {
 const dir = join(outDir, "perch-cli");
 mkdirSync(join(dir, "bin"), { recursive: true });
 copyFileSync(join(HERE, "perch-cli", "bin", "perch.js"), join(dir, "bin", "perch.js"));
-// The same reasoning as the platform binaries above, and the one file it was
-// not applied to: `copyFileSync` preserves the 644 this file has in git, so the
-// wrapper's own `bin` entry went into the tarball non-executable. npm's
-// `bin-links` chmods it on install today, which is the only reason it works.
+// The same as the platform binaries above: `copyFileSync` preserves the 644
+// this file has in git, and npm's `bin-links` chmod on install is not something
+// to depend on.
 chmodSync(join(dir, "bin", "perch.js"), 0o755);
 // npm renders this on the package page, and a page with nothing on it is a
 // poor advertisement for a tool asking to hold your credentials.

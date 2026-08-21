@@ -116,9 +116,9 @@ Then a repository secret `HOMEBREW_TAP_TOKEN`: a **fine-grained PAT scoped to
 `GITHUB_TOKEN` is scoped to this repository and cannot reach another one, so
 this is the one place a stored credential is unavoidable.
 
-It is not behind the `release` environment. A tap is opt-in, nobody adds one by
-accident, and the formula can only point at assets whose checksums this release
-published — the blast radius is a formula file, not a public registry.
+It is not behind the `release` environment: the formula can only point at assets
+whose checksums this release published, so the blast radius is a formula file
+rather than a public registry.
 
 Installing, once it exists:
 
@@ -127,20 +127,21 @@ brew tap perch-cli/perch
 brew install perch
 ```
 
-## Channels, and which of them are opt-in
+## Channels, and what each of them serves
 
-Perch is pre-1.0. Where a Channel has a way of saying so, it says so; where it
-does not, the version number does the work:
+No Channel is distorted to say Perch is unfinished: each serves the newest
+release the way that Channel serves anything
+(ADR this-repo-assembles-a-release). What a 0.x release may break, and how,
+is `CHANGELOG.md`'s job.
 
-| Channel | During 0.x | At 1.0 |
-| ------- | ---------- | ------ |
+| Channel | What it serves | At 1.0 |
+| ------- | -------------- | ------ |
 | GitHub Releases | published normally — it genuinely is the latest release, and marking it a prerelease would empty the `releases/latest` endpoint the installers ask | unchanged |
-| npm | published normally, `latest` following the newest release — npm does not permit a package without a `latest` (ADR this-repo-assembles-a-release) | unchanged |
-| Homebrew | a tap, which nobody adds by accident | consider homebrew-core |
+| npm | `latest` follows the newest release, and `release.yml` reads it back to check that it did — npm does not permit a package without a `latest` | unchanged |
+| Homebrew | a tap, which is its own opt-in | consider homebrew-core |
 
-Only one of the three is actually opt-in, which is worth being clear-eyed about:
-the one-liner on GitHub Pages hands a pre-1.0 binary to anyone who pastes it,
-and always did.
+Only the tap is opt-in, which is worth being clear-eyed about: the one-liner on
+GitHub Pages hands the newest release to anyone who pastes it, and always did.
 
 ## Cutting 1.0
 

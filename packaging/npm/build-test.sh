@@ -5,13 +5,9 @@
 #   sh packaging/npm/build-test.sh
 #
 # build.mjs copies the binaries it is handed without looking inside them, so a
-# text file is a binary as far as it is concerned — a temporary directory
-# holding one per target is a release's worth of build output, with nothing
-# cross-compiled and no tag pushed.
-#
-# What is asserted is the tree the script wrote, because that is what a release
-# publishes and the command line is the only interface the script has. Nothing
-# here reads build.mjs, and nothing here depends on what it prints.
+# directory of text files is a Release's worth of build output. What is asserted
+# is the tree it wrote, because that is what a Release publishes and the command
+# line is the only interface the script has.
 
 set -eu
 
@@ -91,14 +87,10 @@ same() {
     fi
 }
 
-# Reads one field out of a package.json, so what is asserted is what the field
-# says and not how the file happens to be formatted. node is what this test
-# runs in the first place, so leaning on it here costs nothing.
-#
-# A manifest that is not there reads as a missing field rather than as a stack
-# trace, because a package the build never wrote is a result this test has an
-# assertion for. A manifest that is there and is not JSON is neither, and is
-# left to throw.
+# Reads one field out of a package.json, so what is asserted is the field rather
+# than the formatting. A manifest that is not there reads as a missing field,
+# because a package the build never wrote is a result this test asserts on; one
+# that is there and is not JSON is left to throw.
 field() {
     node -e '
         const { existsSync, readFileSync } = require("node:fs");
@@ -159,17 +151,15 @@ EOF
 
 # -------------------------------------------------------------- the wrapper
 
-# One package per target and the wrapper, and nothing beside them: a release
-# publishes what it finds in this directory, so both a missing package and a
-# surplus one are its problem. Everything is counted rather than directories
-# alone, because a stray file here is published too.
+# One package per Target and the wrapper, and nothing beside them: a Release
+# publishes what it finds here, and everything is counted rather than directories
+# alone, because a stray file is published too.
 equals "the build wrote six packages" "$(count "$out")" 6
 
 equals "the wrapper carries the version" "$(field "$wrapper" version)" "$version"
 
 same "the wrapper holds the launcher" "$out/perch-cli/bin/perch.js" "$here/perch-cli/bin/perch.js"
-# Set by the script rather than left to npm's bin-links to do at install time,
-# which is the only reason a 644 in git has worked so far.
+# Set by the script rather than left to npm's bin-links at install time.
 executable "the launcher is executable" "$out/perch-cli/bin/perch.js"
 
 # Matched on content rather than on existence, because an empty file passes the

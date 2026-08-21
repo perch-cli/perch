@@ -86,12 +86,8 @@ try {
     }
     Say "checksum ok"
 
-    # The same bargain as install.sh: attempted only when `gh` is installed and
-    # logged in, and then binding rather than advisory. The download already
-    # succeeded, so a failure from here is saying something about the file.
-    # Said either way, for the reason install.sh gives at the same place: a
-    # check skipped in silence reads like a check that passed, and on most
-    # machines this is the one that is skipped
+    # The same bargain as install.sh: attempted only where `gh` is installed and
+    # logged in, binding when it is attempted, and said either way
     # (ADR an-upgrade-asks-its-channel).
     $checked = $false
     $gh = Get-Command gh -ErrorAction SilentlyContinue
@@ -120,16 +116,9 @@ try {
     $destination = Join-Path $InstallDir "perch.exe"
     $superseded = "$destination.old"
 
-    # Windows holds a running executable open, so `perch.exe` cannot be
-    # written over while it is running — which is exactly the state `perch
-    # upgrade` runs this in, since the Perch being replaced is the one that
-    # started this script (ADR an-upgrade-asks-its-channel). What Windows *does*
-    # allow is renaming a running executable, so the old one is moved aside and
-    # the new one takes its name.
-    #
-    # Cleared first because a rename onto an occupied name fails, and the
-    # previous upgrade will have left one: the binary was still running when it
-    # got here, so nothing could delete it at the time.
+    # Windows holds a running executable open — the state `perch upgrade` runs
+    # this in — but does allow renaming one, so the old binary is moved aside and
+    # the stray from the previous upgrade cleared, since a rename onto it fails.
     Remove-Item -Force $superseded -ErrorAction SilentlyContinue
     $movedAside = $false
     if (Test-Path $destination) {
@@ -153,11 +142,9 @@ try {
         Die "could not write $destination — $_"
     }
 
-    # Best effort: it is still running if this was an upgrade, in which case
-    # this fails and the next upgrade clears it above. `perch.exe.old` sitting
-    # beside the binary is the Installation's litter rather than something Perch
-    # holds, which is the side of the line ADR perch-takes-back-what-it-wrote
-    # drew that it belongs on.
+    # Best effort: it is still running if this was an upgrade, in which case this
+    # fails and the next upgrade clears it above. `perch.exe.old` beside the
+    # binary is the Installation's litter rather than something Perch holds.
     if ($movedAside) {
         Remove-Item -Force $superseded -ErrorAction SilentlyContinue
     }
@@ -168,18 +155,11 @@ finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
 
-# A user PATH entry is a registry value, so the exact segment that was added
-# can be taken back out again later — which is what makes writing one here
-# defensible where appending to an rc file on Unix is not
-# (ADR perch-takes-back-what-it-wrote).
-#
-# Both the user and the machine PATH are consulted, and each is matched a
-# segment at a time rather than as a substring: a machine-wide entry is still
-# on the PATH, and an existing `C:\foo\binary` is not a `C:\foo\bin`. Getting
-# that right is what makes a re-install neither ask again nor add the directory
-# twice — and a re-install is exactly what `perch upgrade` performs on an
-# installer Installation, by running this script
-# (ADR an-upgrade-asks-its-channel).
+# A user PATH entry is a registry value, so the exact segment added can be taken
+# back out again, which is what makes writing one here defensible
+# (ADR perch-takes-back-what-it-wrote). Both the user and the machine PATH are
+# consulted, a segment at a time rather than as a substring — a `C:\foo\binary`
+# is not a `C:\foo\bin` — so a re-install neither asks again nor adds twice.
 function Test-OnPath($directory) {
     $wanted = $directory.TrimEnd('\')
     foreach ($scope in "User", "Machine") {
@@ -202,10 +182,9 @@ if (-not (Test-OnPath $InstallDir)) {
     if ([Environment]::UserInteractive) {
         Say ""
         $typed = Read-Host "perch: $InstallDir is not on your PATH. Add it for future sessions? [Y/n]"
-        # Everything but a plain no is a yes, including a bare Return, which
-        # is how `perch holdings purge` asks about an Export. End of input is a
-        # no there too, and Read-Host answers $null for it — nobody was there to
-        # be asked, and this is the branch that writes.
+        # Everything but a plain no is a yes, including a bare Return, the way
+        # `perch holdings purge` asks about an Export. End of input is a no, and
+        # Read-Host answers $null for it: nobody was there to be asked.
         $answered = if ($null -eq $typed) { "n" } else { $typed.Trim().ToLower() }
         if ($answered -eq "n" -or $answered -eq "no") {
             Say "left your PATH alone. Add it later with:"

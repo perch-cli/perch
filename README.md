@@ -25,8 +25,8 @@ Utilization   5-hour    12%  (as of 4m ago)
 ## Install
 
 Perch is pre-1.0. Every release is real and works, but the command line may
-still change between them, so no channel hands it to you by default — you ask
-for it by name. macOS, Linux and Windows. Claude Code has to be installed
+still change between them, and the changelog marks every change that breaks
+something. macOS, Linux and Windows. Claude Code has to be installed
 already, for Perch to have anything to switch between.
 
 ```sh

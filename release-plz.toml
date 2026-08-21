@@ -1,57 +1,29 @@
 [workspace]
-# release-plz decides *what version, and why*. It does not decide what a release
-# is made of. `release.yml` owns every file — the binaries, the checksums, the
-# Release page itself — and it cannot upload one until it has built it, which
-# takes minutes. Letting release-plz create the Release too would publish a page
-# with nothing on it and fill it in afterwards, and somebody would download from
-# it in the gap.
+# release-plz decides what version and why; `release.yml` owns every file a
+# Release is made of (ADR this-repo-assembles-a-release), and cannot upload one
+# until it has built it.
 git_release_enable = false
 
-# So the tag is release-plz's last act, and the only thing it hands over. It has
-# to be pushed with a token that is not GITHUB_TOKEN: GitHub refuses to start a
-# workflow from a push its own token made, so a tag pushed with it would sit on
-# main and `release.yml` would never fire. See the comment in release-plz.yml.
+# So the tag is release-plz's last act, and the only thing it hands over. It is
+# pushed with RELEASE_PLZ_TOKEN rather than GITHUB_TOKEN — see release-plz.yml.
 git_tag_enable = true
 git_tag_name = "v{{ version }}"
 
-# What keeps Perch off crates.io (ADR this-repo-assembles-a-release). It has to
-# live here rather than in Cargo.toml, and the difference is not cosmetic:
-# `publish = false` in Cargo.toml reads to release-plz as "this package is not
-# one of mine", so it skips the package outright — no version decision, no
-# changelog, no release pull request, and no error saying so. The job goes green
-# and nothing happens.
-#
-# Here it means what it says. release-plz still decides the version, writes the
-# changelog and pushes the tag; it just does not run `cargo publish`.
+# What keeps Perch off crates.io, and it has to live here rather than in
+# Cargo.toml: release-plz reads that field in a manifest as "not one of mine" and
+# skips the package outright, silently.
 publish = false
 
-# And this is the half of that decision `publish = false` does not make. On its
-# own it stops the upload and nothing else: release-plz still asks crates.io
-# what the last released version of a crate named `perch` was, because that is
-# how it decides which commits are new.
-#
-# There is a crate named `perch` on crates.io. It is a Bluesky and Mastodon
-# client, it is at 0.3.4, and it has nothing to do with this repository. Without
-# this line release-plz downloads it on every push to main and diffs Perch
-# against it — which means, concretely, that at v0.1.1 with nothing merged since,
-# it proposes 0.1.2 with a changelog entry reading "update Cargo.toml
-# dependencies". Their dependencies differ from ours, so of course they do.
-# (`dependencies_update = false` below does not stop that: it governs whether
-# release-plz *updates* Cargo.lock, not whether it counts the difference.)
-#
-# `git_only` says the previous version is the newest `git_tag_name` tag, which
-# for a project that is never published is the only place it was ever recorded.
-# It costs a `cargo package` against a worktree at that tag — around twenty
-# seconds — and it does not touch the network.
+# The half `publish = false` does not make. Left to ask, release-plz looks up the
+# last released version of the unrelated `perch` crate; `git_only` says the
+# previous version is the newest tag, which is the only place it was recorded.
 git_only = true
 
-# Perch has a `[lib]` so the binary and the tests can share code, not because
-# anything downstream links against it. Checking its public API for semver
-# breakage is minutes spent every release on a promise nobody is relying on.
+# The `[lib]` exists so the binary and the tests can share code, and promises no
+# public API.
 semver_check = false
 
-# A release should contain the commits that were reviewed, and nothing else. A
-# dependency bump that arrives in the release pull request is a change to the
-# built artifact that no one asked for at the moment they are least likely to
-# read it.
+# A Release contains the commits that were reviewed and nothing else. A
+# dependency bump arriving in the release pull request is a change to the built
+# artifact at the moment nobody is reading for one.
 dependencies_update = false

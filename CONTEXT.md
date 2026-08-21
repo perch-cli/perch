@@ -430,8 +430,8 @@ _Avoid_: asset, file, package, download
 **Channel**:
 One route by which somebody installs Perch — Homebrew, npm, an installer
 script, or the Release page itself. Each has its own idea of what "the default"
-means, and only some of them can be asked to withhold it: Homebrew's is a Tap
-nobody adds by accident, npm's cannot be withheld at all
+means and none of them is distorted to say Perch is unfinished: every Channel
+serves the newest Release the way that Channel serves anything
 (ADR this-repo-assembles-a-release). A Channel distributes a Release; it never
 builds one.
 _Avoid_: registry, source, distribution, repo
@@ -440,8 +440,8 @@ _Avoid_: registry, source, distribution, repo
 The repository Homebrew installs Perch from, and Perch's Channel for anyone on
 Homebrew. Separate from Perch's own repository because Homebrew requires it to
 be, and named `homebrew-perch` because Homebrew requires that too — what a
-person types is neither. Adding one is a deliberate act, which is what makes it
-the right place for a Perch that is not finished.
+person types is neither. Adding one is a deliberate act, so the Channel is its
+own opt-in and no second formula is needed.
 _Avoid_: formula, bottle, brew repo
 
 **Installation**:

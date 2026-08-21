@@ -2,18 +2,12 @@
 //! (ADR an-upgrade-asks-its-channel).
 //!
 //! **It routes rather than overwrites.** Three of the four Channels manage the
-//! binary themselves, and writing over one of theirs is not a shortcut but a
-//! corruption: a Homebrew Cellar whose receipt no longer describes what is in
-//! it reverts at the next `brew upgrade`, and an npm platform package
-//! overwritten in place leaves the wrapper depending on a version that is no
-//! longer there. So Perch works out which Channel left this Installation and
-//! hands the work back to it, and replaces the binary itself only for the one
-//! Channel that leaves nothing else in charge.
+//! binary themselves, and writing over one of theirs is a corruption rather than
+//! a shortcut, so Perch hands the work back to the Channel that left this
+//! Installation and replaces the binary itself only for the one Channel that
+//! leaves nothing else in charge.
 //!
-//! **It touches nothing Perch holds.** No registry, no lock, no Credential —
-//! an Installation is the counterpart to what Perch holds, not part of it, so
-//! this command runs the same on a machine with four Accounts and on one with
-//! none.
+//! It touches nothing Perch holds: no registry, no lock, no Credential.
 
 use std::io::Write;
 
@@ -37,22 +31,13 @@ pub struct UpgradeArgs {
 }
 
 pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i32> {
-    // A check is asked before the Channel is insisted on, because a check makes
-    // no use of one it cannot answer without. `chosen_channel` refuses a binary
-    // nothing placed — the right answer for an Upgrade, which is about to write
-    // over that binary, and the wrong one for a question that writes nothing: a
-    // hand-unpacked Perch got "Perch will not write over a file it did not put
-    // there" from `--check --json`, a sentence about an act it had not asked
-    // for, and no `installed` or `newest` at all. Answering it is success
-    // whichever way the answer went (ADR an-upgrade-asks-its-channel).
+    // Before the Channel is insisted on: `chosen_channel` refuses a binary
+    // nothing placed, which is the right answer for a command about to write over
+    // it and the wrong one for a question that writes nothing.
     if args.check {
         // Only the *path's* answer is allowed to be missing. A word somebody
-        // typed is a word, and `homebre` is a typo rather than a machine
-        // nothing placed — swallowed with the rest, `--check --channel homebre`
-        // dropped the refusal naming the three Channels and answered "channel
-        // unknown (nothing about this binary's path says)" with advice to pass
-        // the flag that had just been passed, on a machine whose path may say
-        // perfectly well which Channel it is.
+        // typed is a word, and `homebre` is a typo rather than a machine nothing
+        // placed.
         let named = args.channel.as_deref().map(named_channel).transpose()?;
         let channel = match named {
             Some(channel) => Some(channel),
@@ -64,13 +49,8 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
     let channel = chosen_channel(host, args.channel.as_deref())?;
 
     // Before anything is resolved and before anybody is asked to agree to
-    // anything. A Release Homebrew cannot be pointed at is refused whatever the
-    // Release turns out to be, so asking first put the question the wrong way
-    // round: `--release 0.0.1` on a newer build showed "Install the older
-    // Release? [y/N]", waited for a `y`, and only then said Homebrew could not
-    // take one — and with no terminal it advised `--yes`, which reaches the same
-    // refusal. A `brew` that is not on PATH answered earlier still, naming the
-    // wrong problem entirely.
+    // anything: this refusal holds whatever the Release turns out to be, and
+    // nobody should agree to something that is refused either way.
     if matches!(channel, Channel::Homebrew { .. }) {
         refuse_a_release_homebrew_cannot_take(&args.release)?;
     }
@@ -100,23 +80,16 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
             hand_it_over(host, &brew, &brew_args, out)
         }
         Channel::Npm => {
-            // The version as Perch reads it rather than as it was typed: npm
-            // has never had the leading `v`, so `--release v0.2.0` reaching it
-            // verbatim is a package nobody published.
+            // The version as Perch reads it rather than as typed: npm has never
+            // had the leading `v`, so `v0.2.0` is a package nobody published.
             let named = args.release.as_ref().map(|_| wanted.as_str());
             let (npm, npm_args) = upgrade::npm_command(host, named)?;
             // npm would be replacing `perch.exe` while it is the running
-            // process, and Windows holds a running executable open. So the
-            // command is printed rather than run: it works perfectly well from
-            // a shell where Perch is not running, and not at all from here.
+            // process, and Windows holds that file open — so the command is
+            // printed, which works from a shell where Perch is not running.
             if host.platform() == Platform::Windows {
-                // Said as nothing done rather than as done, because nothing was:
-                // reported as success, `perch upgrade && restart-my-thing`
-                // restarted the old binary and `perch --version` was unchanged
-                // afterwards. `NothingToDo` is already the code for "the request
-                // was understood and the machine is as it was", and it is what
-                // the arm above uses when the wanted Release is already
-                // installed.
+                // Nothing done rather than done: `NothingToDo` is already the
+                // code for a request understood and a machine left as it was.
                 return Err(PerchError::NothingToDo(format!(
                     "This Installation came from npm, and npm cannot replace \
                      `perch.exe` while it is running. Nothing was upgraded.\n\
@@ -130,25 +103,9 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
         Channel::Installer => replace_it_ourselves(host, &wanted, out),
     }?;
 
-    // The Channel has moved the binary, and neither `brew` nor `npm` has ever
-    // heard of a unit file (ADR an-upgrade-asks-its-channel,
-    // ADR the-machine-runs-the-watcher). On Unix the Service is still running
-    // the *old* binary out of an inode nothing can see any more, and the path
-    // its unit names may not exist at all — so the unit is written again
-    // against the binary that is there now, and restarted onto it.
-    //
-    // Said rather than raised however it goes. The Upgrade itself succeeded: the
-    // binary really is newer, and a Service that could not be refreshed is a
-    // warning with a one-command repair rather than a reason to report an
-    // Upgrade that did not happen.
-    //
-    // Only where the Channel's command succeeded, which is what `replaced`
-    // carries: `hand_it_over` and `replace_it_ourselves` report a `brew` or
-    // `npm` or installer that refused as an exit code rather than as an error,
-    // so this ran unconditionally. A `brew upgrade` that failed on a checksum
-    // then bounced the watcher onto the binary it was already running and
-    // printed "The Service was restarted, and now runs …" — a sentence about
-    // an Upgrade that had not happened, beside the non-zero code saying so.
+    // The Channel moved the binary and neither `brew` nor `npm` has heard of a
+    // unit file (ADR the-machine-runs-the-watcher), so it is written again — said
+    // rather than raised, and only where the Channel's own command succeeded.
     if replaced == crate::error::EXIT_OK
         && let Some(said) = crate::commands::service::refreshed_after_an_upgrade(host)
     {
@@ -160,8 +117,7 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
 /// The Channel a word names, or a refusal naming the three there are.
 ///
 /// Apart from [`chosen_channel`] because a check needs this half without the
-/// other: what a check may go without is the answer read off the *path*, and a
-/// word somebody typed wrongly is not that.
+/// other: what it may go without is the answer read off the *path*.
 fn named_channel(word: &str) -> Result<Channel> {
     Channel::spelled(word).ok_or_else(|| {
         PerchError::Invalid(format!(
@@ -173,10 +129,8 @@ fn named_channel(word: &str) -> Result<Channel> {
 
 /// The Channel a person named, or the one the path says, or a refusal.
 ///
-/// A named Channel is taken as given and not checked against the path: the
-/// whole of what `--channel` is for is the machine where the path is wrong —
-/// somebody who symlinked the binary, or relocated it, or is running one out of
-/// a directory Perch has never heard of.
+/// A named Channel is taken as given rather than checked against the path: what
+/// `--channel` is for is the machine where the path is wrong.
 fn chosen_channel(host: &dyn Host, named: Option<&str>) -> Result<Channel> {
     if let Some(word) = named {
         return named_channel(word);
@@ -187,10 +141,8 @@ fn chosen_channel(host: &dyn Host, named: Option<&str>) -> Result<Channel> {
         .map_err(|err| PerchError::Other(format!("could not find Perch's own binary: {err}")))?;
 
     upgrade::channel(host)?.ok_or_else(|| {
-        // The installer's directory as *this* machine would have it, rather
-        // than the Unix default written out: on Windows that is somewhere else
-        // entirely, and naming a path the reader does not have is how a refusal
-        // stops being actionable.
+        // The installer's directory as *this* machine would have it: naming a
+        // path the reader does not have is how a refusal stops being actionable.
         let expected = upgrade::installer_dir(host)
             .map(|dir| dir.display().to_string())
             .unwrap_or_else(|_| "its own directory".to_string());
@@ -213,15 +165,9 @@ fn chosen_channel(host: &dyn Host, named: Option<&str>) -> Result<Channel> {
 
 /// What is installed, what is newest, and where this one came from.
 ///
-/// Exits nought either way. A check is a question, and answering it is success
-/// whichever way the answer went — every other non-zero code Perch has is a
-/// refusal, and "there is news" is not one (ADR an-upgrade-asks-its-channel).
-///
-/// The Channel is optional here alone. An Upgrade cannot proceed without one,
-/// because it is about to write over a binary and has to know whose it is; a
-/// check only reports it, and the two facts a script came for — what is
-/// installed and what is newest — are knowable whether or not the path says who
-/// put it there. `null` is the honest answer for that rather than a refusal.
+/// Exits nought either way: every other non-zero code Perch has is a refusal,
+/// and "there is news" is not one. The Channel is optional here alone, and
+/// `null` is the honest answer where the path does not say.
 fn check(
     host: &dyn Host,
     channel: Option<&Channel>,
@@ -259,10 +205,8 @@ fn check(
     say(
         out,
         match (behind, channel.is_some()) {
-            // Said only where it is true. On a binary nothing placed, `perch
-            // upgrade` refuses rather than taking anything, and a check that
-            // pointed at it would be sending somebody to the refusal it was
-            // just careful not to give them.
+            // Said only where it is true: on a binary nothing placed, `perch
+            // upgrade` refuses, and pointing at it sends somebody to a refusal.
             (true, true) => "\nA newer Release is available. `perch upgrade` takes it.",
             (true, false) => {
                 "\nA newer Release is available. This Perch was placed by hand, so \
@@ -276,10 +220,9 @@ fn check(
 
 /// Agreement to install a Release older than the one running.
 ///
-/// Named as a downgrade and told what it costs, rather than asked as a bare
-/// "are you sure" — because the cost is specific and is not obvious: Perch
-/// refuses a registry written by a newer Perch, so going back far enough leaves
-/// a working machine with a binary that will not read its own state.
+/// Named as a downgrade and told what it costs rather than asked "are you sure":
+/// a Perch refuses a registry a newer one wrote, so going back far enough leaves
+/// a binary that cannot read its own state.
 fn agree_to_going_back(
     host: &dyn Host,
     wanted: &str,
@@ -316,12 +259,11 @@ fn agree_to_going_back(
     }
 }
 
-/// Homebrew installs what the formula says and has no way to be pointed at an
-/// older Release, so `--release` there is a request that cannot be honored.
+/// Homebrew installs what the formula says, so `--release` there is a request
+/// that cannot be honored.
 ///
-/// Refused rather than quietly ignored: silently installing the newest when
-/// somebody named an older one is the failure mode where they find out by
-/// reading `perch --version` afterwards, if they think to.
+/// Refused rather than quietly ignored: installing the newest instead is the
+/// failure somebody finds out about by reading `perch --version` afterwards.
 fn refuse_a_release_homebrew_cannot_take(release: &Option<String>) -> Result<()> {
     match release {
         None => Ok(()),
@@ -337,14 +279,9 @@ fn refuse_a_release_homebrew_cannot_take(release: &Option<String>) -> Result<()>
 
 /// Runs the Channel's own command, having said what it is.
 ///
-/// Said first, because a command that hands the terminal to `brew` for two
-/// minutes without saying so reads as a hang — and because somebody who would
-/// rather run it themselves can stop here and do that. The terminal goes with
-/// it: what `brew` and `npm` print is progress, not something Perch reads.
-///
-/// Their exit status is Perch's. A failed `brew upgrade` is a failed upgrade,
-/// and translating it into a code of Perch's own would lose which of `brew`'s
-/// many failures it was.
+/// Said first, because handing the terminal to `brew` for two minutes without
+/// saying so reads as a hang. The terminal goes with it — what `brew` and `npm`
+/// print is progress — and their exit status is Perch's.
 fn hand_it_over(
     host: &dyn Host,
     program: &std::path::Path,
@@ -363,16 +300,10 @@ fn hand_it_over(
 }
 
 /// The one Channel Perch replaces itself for, done by the installer that made
-/// the Installation in the first place.
+/// the Installation.
 ///
-/// The script is embedded rather than fetched (ADR an-upgrade-asks-its-channel)
-/// and written where Perch keeps its own things, closed to everyone but its
-/// owner: it is a program about to be run, and one a second user on the machine
-/// could edit between the write and the run is a program somebody else chose.
-///
-/// No execute bit, because it is never executed by name — `sh` and `powershell`
-/// are handed it as a file to read, which is also what keeps this working on a
-/// `noexec` mount.
+/// No execute bit, because the script is never run by name: `sh` and
+/// `powershell` are handed it as a file, which also works on a `noexec` mount.
 fn replace_it_ourselves(host: &dyn Host, wanted: &str, out: &mut dyn Write) -> Result<i32> {
     let (name, script) = upgrade::installer_for(host.platform());
     // Spelled with `/` for the reason `upgrade::beneath` is written down at:
@@ -391,10 +322,8 @@ fn replace_it_ourselves(host: &dyn Host, wanted: &str, out: &mut dyn Write) -> R
 
     let ran = run_the_installer(host, &at, &tag);
 
-    // Cleared whichever way it went. What is left behind otherwise is an
-    // executable script in Perch's own directory that nothing will ever run
-    // again, and that a later Perch would have no way to tell from one it was
-    // about to use.
+    // Cleared whichever way it went: what is left behind otherwise is a script
+    // a later Perch cannot tell from one it is about to use.
     let _ = host.remove_file(&at);
 
     ran
@@ -424,23 +353,11 @@ fn run_the_installer(host: &dyn Host, at: &std::path::Path, tag: &str) -> Result
         .map_err(|err| PerchError::Other(format!("could not run the installer: {err}")))
 }
 
-/// Where Windows keeps PowerShell, from the environment rather than from
-/// `PATH`.
-///
-/// ADR a-crate-must-not-cost-a-seam's rule, and the one program Perch runs that
-/// was outside it: every other one goes by an absolute path — `curl`,
-/// `security`, `<prefix>/bin/brew`, the `npm` `probe::on_path` resolved —
-/// "because that path is a security property rather than a convenience". A bare
-/// name handed to Windows is searched for in the application directory and *the
-/// current working directory* before `PATH`, so `perch upgrade` typed in a
-/// downloads folder holding a `powershell.exe` ran that, with
-/// `-ExecutionPolicy Bypass`, and handed it a script whose whole job is to
-/// overwrite the Perch binary.
-///
-/// `%SystemRoot%` rather than `C:\\Windows`, and a refusal rather than a walk
-/// of `PATH` where it is unset, both for the reason `curl_bin` gives: Windows
-/// need not be installed where it usually is, and a machine that will not say
-/// where it is has told Perch nothing it can safely guess from.
+/// Where Windows keeps PowerShell: `%SystemRoot%` rather than a literal path or
+/// a `PATH` walk, for the reason `curl_bin` gives. A bare name is searched for
+/// in the working directory before `PATH` (ADR a-crate-must-not-cost-a-seam),
+/// and this one is handed `-ExecutionPolicy Bypass` and a script whose whole job
+/// is to overwrite the Perch binary.
 fn powershell(host: &dyn Host) -> Result<String> {
     let root = host
         .env_var("SystemRoot")

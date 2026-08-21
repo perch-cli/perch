@@ -42,12 +42,9 @@ jobs:
           fi
           echo "both say $manifest"
 
-      # A release builds rather than tests, because CI already tested this exact
-      # commit on all three platforms — but only if it finished, and only if it
-      # passed. release-plz tags the moment the release pull request merges,
-      # which is usually before CI on main has finished, so this waits rather
-      # than assuming. `success` is the aggregate job CI already exposes for
-      # branch protection, so this asks the same question the same way.
+      # A Release builds rather than tests, so it waits for the CI run on this
+      # commit rather than assuming it finished (ADR this-repo-assembles-a-release).
+      # `success` is the aggregate job branch protection already asks about.
       - name: CI passed on this commit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -126,9 +123,8 @@ jobs:
         run: cargo build --locked --release --target ${{ matrix.target }}
 
       # Flat archives — the binary and both licenses, no wrapping directory —
-      # because everything that reads them extracts into a directory of its own
-      # first. `.zip` on Windows because a Windows without tar in the shell is
-      # still a machine people have.
+      # because everything that reads them extracts into a directory of its own.
+      # `.zip` on Windows, where tar in the shell is not a given.
       - name: Archive
         if: runner.os != 'Windows'
         run: |
@@ -168,9 +164,8 @@ jobs:
     permissions:
       contents: write
       # What signs the provenance. Sigstore's certificate is issued against this
-      # workflow's OIDC identity, which is what makes `gh attestation verify`
-      # able to say which workflow, in which repository, at which commit, built
-      # the binary somebody is holding.
+      # workflow's OIDC identity, which is what lets `gh attestation verify` say
+      # which workflow at which commit built the binary somebody is holding.
       id-token: write
       attestations: write
     steps:
@@ -197,11 +192,10 @@ jobs:
         with:
           subject-path: dist/perch-*
 
-      # release-plz already wrote the notes for this version into CHANGELOG.md
-      # when it opened the release pull request, and those are the notes that
-      # were reviewed. Falling back to GitHub's generated list rather than
-      # failing, because an empty release body is worse than a machine-written
-      # one and neither is worth stopping a release over.
+      # The notes release-plz wrote into CHANGELOG.md are the ones that were
+      # reviewed. Falling back to GitHub's generated list rather than failing:
+      # neither an empty body nor a machine-written one is worth stopping a
+      # Release over.
       - name: Release notes
         run: |
           version="${GITHUB_REF_NAME#v}"
@@ -216,10 +210,9 @@ jobs:
             echo "::warning::no CHANGELOG.md section for $version; GitHub will generate the notes instead"
           fi
 
-      # Not marked as a prerelease, even during 0.x. It genuinely is the latest
-      # release, and marking it otherwise would empty the `releases/latest`
-      # endpoint that the installers ask. Being pre-1.0 is said in the README
-      # and in `perch --version`, not carried by making a Channel awkward.
+      # Not marked as a prerelease, even during 0.x: it genuinely is the latest
+      # Release, and marking it otherwise would empty the `releases/latest`
+      # endpoint the installers ask.
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -297,21 +290,10 @@ jobs:
       - name: Assemble the packages
         run: node packaging/npm/build.mjs "${GITHUB_REF_NAME#v}" bins npm-dist
 
-      # Platform packages first: the wrapper depends on each of them by exact
-      # version, so publishing it first would leave a window where installing it
-      # resolves to nothing that can run.
-      #
-      # Published to `latest`, the default tag, during 0.x as well. npm does not
-      # allow a published package to have no `latest` — the registry refuses to
-      # delete it — so the alternative was never "npm install perch-cli fails",
-      # it was "npm install perch-cli quietly installs whichever version latest
-      # was stuck on". ADR this-repo-assembles-a-release.
-      #
-      # Every path here is written `./…`, and that is load-bearing rather than
-      # tidy. npm reads a bare `npm-dist/perch-cli` as GitHub shorthand for the
-      # repository `npm-dist/perch-cli` and goes looking for it over ssh, which
-      # fails with "Repository not found" rather than with anything mentioning
-      # directories. A leading `./` is what makes it a path.
+      # Platform packages first: the wrapper depends on each by exact version, so
+      # publishing it first leaves a window where installing it resolves to
+      # nothing that can run. To `latest`, the default tag, during 0.x as well.
+      # Every path is written `./…` — a bare one is GitHub shorthand to npm.
       - name: Publish
         run: |
           for package in ./npm-dist/@perch-cli-*; do
@@ -319,22 +301,10 @@ jobs:
           done
           npm publish ./npm-dist/perch-cli --access public --provenance
 
-      # What the previous step promised, read back from the registry. `npm
-      # publish` reporting success and `latest` pointing at what it published
-      # are two different claims, and only the second is the one anybody
-      # installs.
-      #
-      # Polled rather than read once, because the write and the read do not go
-      # to the same place. `npm publish` returns as soon as the registry has
-      # accepted it; `npm view` is served from a CDN that can be minutes behind
-      # — new packages published here took several minutes to become readable
-      # at all. Asking immediately is asking the wrong replica, and the answer
-      # it gives is the previous release, which reads exactly like a release
-      # that failed to move the tag.
-      #
-      # --prefer-online because npm would otherwise happily answer from the
-      # cache it filled on the first attempt, and the loop would ask the same
-      # stale copy fifteen times.
+      # What the previous step promised, read back: `npm publish` succeeding and
+      # `latest` pointing at it are two claims, and the second is the one anybody
+      # installs. Polled, because the write and the read do not reach the same
+      # place, and `--prefer-online` so the loop does not re-ask its own cache.
       - name: latest points at this release
         run: |
           version="${GITHUB_REF_NAME#v}"
@@ -357,10 +327,9 @@ jobs:
             sleep 15
           done
 
-  # Regenerates the tap's formula and pushes it. Not behind the `release`
-  # environment that gates npm: a tap is opt-in, nobody adds one by accident,
-  # and the formula can only point at assets whose checksums this release
-  # published. The blast radius is a formula file, not a public registry.
+  # Regenerates the Tap's formula and pushes it. Not behind the `release`
+  # environment that gates npm: the formula can only point at assets whose
+  # checksums this Release published, so the blast radius is a formula file.
   homebrew:
     needs: release
     runs-on: ubuntu-latest
@@ -384,13 +353,11 @@ jobs:
           packaging/homebrew/formula.sh "${GITHUB_REF_NAME#v}" SHA256SUMS > perch.rb
           cat perch.rb
 
-      # GITHUB_TOKEN is scoped to this repository and cannot reach the tap, so
-      # this is the one place a stored credential is unavoidable:
-      # HOMEBREW_TAP_TOKEN is a fine-grained PAT with Contents: read and write
-      # on perch-cli/homebrew-perch and nothing else.
-      #
-      # Cloned anonymously — the tap is public — and the token is given only to
-      # the push, so it never lands in .git/config on the runner.
+      # GITHUB_TOKEN cannot reach the Tap, so this is the one place a stored
+      # credential is unavoidable: HOMEBREW_TAP_TOKEN is a fine-grained PAT with
+      # Contents: read and write on perch-cli/homebrew-perch and nothing else.
+      # Cloned anonymously, and the token is given only to the push, so it never
+      # lands in .git/config on the runner.
       - name: Push to the tap
         env:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -414,19 +381,13 @@ jobs:
           git commit -m "perch ${GITHUB_REF_NAME#v}"
           git push "https://x-access-token:${TAP_TOKEN}@github.com/perch-cli/homebrew-perch.git" HEAD:main
 
-  # The site, once the Release exists and everything it holds can be downloaded.
-  # The guide describes a Perch somebody can install
-  # (ADR one-thing-renders-the-site), so a release is what publishes it — and
-  # this is the release doing that, rather than an event this workflow cannot
-  # raise: a Release created with GITHUB_TOKEN starts no workflow of its own.
-  #
-  # `pages.yml` deploys the guide from the newest release that carries a site and
-  # the installers from main, so it does not need to be told which tag this is. It
-  # is safe on a re-run: the same tag produces the same site.
+  # The site, once the Release exists and everything it holds can be downloaded
+  # (ADR one-thing-renders-the-site). Called rather than left to an event this
+  # workflow cannot raise: a Release created with GITHUB_TOKEN starts none.
+  # `pages.yml` needs no tag, so this is safe on a re-run.
   site:
     needs: release
-    # A called workflow gets no more than the caller grants it, and the deploy job
-    # inside asks for exactly these three.
+    # A called workflow gets no more than the caller grants it.
     permissions:
       contents: read
       pages: write
