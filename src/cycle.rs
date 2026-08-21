@@ -1,34 +1,13 @@
 //! The Cycle: which Account a Switch lands on when nobody named one.
 //!
-//! Two rules, and everything here follows from them.
+//! An Account's Headroom is its worst Quota Window and the Account whose worst
+//! is best wins; a Strategy reorders what the measurement leaves standing rather
+//! than getting round it (ADR headroom-is-the-worst-window). A Cycle never
+//! leaves the Scope it started in — a Group, or the ungrouped Accounts once
+//! somebody declares them interchangeable (ADR a-group-is-a-declaration).
 //!
-//! An Account's headroom is its **worst** Quota Window, and the Account whose
-//! worst is best wins (ADR headroom-is-the-worst-window). Being blocked by any
-//! window blocks you completely, so this is the only ranking that measures what
-//! actually stops work: when Perch says 40% headroom, that is true of every
-//! window and nothing surprising blocks you five minutes later.
-//!
-//! How headroom is *measured* is fixed. Which Account to prefer is the Group's
-//! to say, and is a separate axis on top of it: the most headroom, or the
-//! soonest-resetting window so perishable quota is spent rather than wasted
-//! (ADR a-group-is-a-declaration). A Strategy reorders the candidates and
-//! cannot promote one that the measurement rules out, so an exhausted Account
-//! is never chosen however soon it comes back.
-//!
-//! A Cycle never leaves the Scope it started in (ADR a-group-is-a-declaration).
-//! A work subscription running dry must not land on a personal Account, so the
-//! Scope is a Group — the declaration that a set of Accounts is interchangeable
-//! — or the ungrouped Accounts, which are a Scope only when they have been
-//! declared interchangeable (ADR a-group-is-a-declaration).
-//!
-//! The three honest non-outcomes matter as much as the choice. Every Account
-//! exhausted, already on the best one, and nobody having declared these
-//! Accounts interchangeable each perform no Switch, explain themselves, and
-//! exit with a code of their own rather than pretending to have worked.
-//!
-//! Nothing here reaches the network or the filesystem: ranking is on the cached
-//! figures and their ages (ADR a-figure-carries-its-age), which is what makes
-//! it a pure decision that can be argued with in a unit test.
+//! Nothing here reaches the network or the filesystem: ranking is on cached
+//! figures and their ages (ADR a-figure-carries-its-age).
 
 use chrono::{DateTime, Utc};
 
@@ -41,10 +20,8 @@ use crate::utilization;
 /// Which Account a Scope prefers when more than one would serve.
 ///
 /// Read from the Settings the Scope itself holds — there is nothing above it to
-/// fall back to (ADR a-setting-names-its-scope). The Accounts in no Group are
-/// still not a Group, but they are a Scope, so what they Cycle by is something
-/// a person can say rather than a constant compiled into Perch
-/// (ADR a-group-is-a-declaration, amended).
+/// fall back to (ADR a-setting-names-its-scope). The ungrouped Accounts are not
+/// a Group but are a Scope, so what they Cycle by is something a person says.
 fn strategy(registry: &Registry, scope: &Scope) -> Strategy {
     registry.settings(scope).strategy
 }
@@ -70,8 +47,7 @@ pub fn scope_for(registry: &Registry, leaving: &Account) -> Result<Scope> {
     }
 }
 
-/// How full an Account is, measured its only honest way: by the Quota Window
-/// that is fullest (ADR headroom-is-the-worst-window).
+/// How full an Account is: by the Quota Window that is fullest.
 #[derive(Debug, Clone, PartialEq)]
 enum Headroom {
     /// Every Quota Window has at least this much room left.
@@ -79,39 +55,22 @@ enum Headroom {
         percent: f64,
         fullest_window: String,
         /// When the fullest window comes back, if the observation carried it.
-        /// The window that decides the headroom is the window whose reset
-        /// decides how perishable that headroom is, so one Quota Window
-        /// answers both questions and the two Strategies cannot end up reading
-        /// different windows.
         resets_at: Option<DateTime<Utc>>,
         observed_at: DateTime<Utc>,
     },
     /// A Quota Window is full, so the Account is blocked whatever its others
-    /// say. It frees up when the last of its full windows resets — not the
-    /// first, which would still leave it blocked by the others.
+    /// say. It frees up when the last of its full windows resets.
     Exhausted { frees_at: Option<DateTime<Utc>> },
-    /// No figure has ever been observed. Never read as room: "no figure" and
-    /// "plenty of room" are opposite pieces of advice.
+    /// No figure has ever been observed.
     Unobserved,
 }
 
 impl Headroom {
-    /// What ranking sorts on, higher being better. Known room beats an
-    /// unknown, and an unknown beats a window that is full — treating "never
-    /// observed" as good news is exactly the mistake the ordering exists to
-    /// prevent.
+    /// What ranking sorts on, higher being better.
     ///
-    /// The Strategy reorders Accounts that have room and does nothing else. It
-    /// cannot promote one over an Account with more evidence behind it, which
-    /// is what keeps it an axis on top of ADR headroom-is-the-worst-window's
-    /// measurement rather than a way round it. Hence four tiers rather than
-    /// three: soonest-reset ranks on a reset time where Perch has one and falls
-    /// back to the room it can see where it has not, because the Strategy says
-    /// which figure to prefer and not which figures to invent.
-    ///
-    /// Nothing compares a reset time against a percentage. They only ever meet
-    /// as tiers, and a tie inside one is broken by the order the Accounts were
-    /// added.
+    /// Four tiers, because `soonest-reset` adds one on top of the three
+    /// `by_room` holds and falls back to them where nothing has a reset. A reset
+    /// time and a percentage meet only as tiers, never compared.
     fn ranking(&self, strategy: Strategy, now: DateTime<Utc>) -> (u8, f64) {
         match self.ranked_on_reset(strategy, now) {
             // Sooner is better, so the figure sorted on is the reset time
@@ -121,16 +80,11 @@ impl Headroom {
         }
     }
 
-    /// The same ordering with the Strategy left out of it: how much is left, and
+    /// The same ordering with the Strategy left out: how much is left, and
     /// nothing about when it comes back.
     ///
-    /// The bottom three tiers of [`ranking`], which is what they always were —
-    /// `soonest-reset` only ever added a tier on top. Named on its own because
-    /// one question genuinely wants it: whether moving would gain any room. A
-    /// Strategy says which of the places worth going is preferred, and that is a
-    /// different question from whether it is worth going anywhere.
-    ///
-    /// [`ranking`]: Headroom::ranking
+    /// Named on its own because one question wants it — whether moving would
+    /// gain any room, which is not the question of which place is preferred.
     fn by_room(&self) -> (u8, f64) {
         match self {
             Headroom::Room { percent, .. } => (2, *percent),
@@ -140,27 +94,9 @@ impl Headroom {
     }
 
     /// Whether this Account's fullest window has a reset that has not happened
-    /// yet.
-    ///
-    /// A cached figure outlives the window it describes
-    /// (ADR a-figure-carries-its-age), so a `resets_at` in the past is ordinary
-    /// rather than strange — it means the window has already come back and the
-    /// percentage beside it is stale. What made that a bug is the direction it
-    /// sorted: the key is the reset time negated, so an earlier time ranks
-    /// higher, and among Accounts whose reset had already passed the *stalest*
-    /// figure won. A six-hour-old reading of an Account at 10% headroom beat a
-    /// one-minute-old reading of one at 90%, and the sentence beside the choice
-    /// announced it as resetting "any moment now" about a window that came back
-    /// hours ago.
-    ///
-    /// An elapsed reset is no longer a fact about when this Account comes back,
-    /// so it does not rank as one, and the Account falls to the headroom key
-    /// beside every other Account the Strategy could not get a reset for.
-    /// One answer, because everything that has to agree about it asks here:
-    /// the key that sorts the Accounts, the sentence that says why one won, and
-    /// the sentence that says why staying put is already the best there is.
-    /// Three questions phrased three ways is how the ranking came to be fixed
-    /// and the sentence beside it did not.
+    /// yet. One answer, because everything that has to agree about it asks here:
+    /// the key that sorts the Accounts, the sentence saying why one won, and the
+    /// sentence saying why staying put is already the best there is.
     fn ranked_on_reset(&self, strategy: Strategy, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
         match (self, strategy) {
             (
@@ -178,13 +114,11 @@ impl Headroom {
         matches!(self, Headroom::Exhausted { .. })
     }
 
-    /// The figure as a clause, for the sentences that quote it — the one that
-    /// says why an Account won, and the one that says why staying put is
-    /// already the best you can do. Both make the same promise about the same
-    /// number, so they make it in the same words.
+    /// The figure as a clause, for the two sentences that quote it: why an
+    /// Account won, and why staying put is already the best you can do.
     ///
-    /// The clause is the one the Strategy judged on, because a number quoted
-    /// as the reason has to be the number that decided it.
+    /// Both make the same promise about the same number, so they make it in the
+    /// same words, and the clause is the one the Strategy judged on.
     fn as_a_clause(&self, strategy: Strategy, now: DateTime<Utc>) -> Option<String> {
         let Headroom::Room {
             percent,
@@ -197,11 +131,8 @@ impl Headroom {
         };
         let age = utilization::age_phrase(*observed_at, now);
         let percent = utilization::percentage(*percent);
-        // Asked of the same predicate the ranking asked, because a number
-        // quoted as the reason has to be the number that decided it. Reading
-        // `resets_at` directly here is what let this quote a reset time as
-        // "any moment now" about a window that came back hours ago — in the
-        // same sentence as the clause explaining there was no reset to rank on.
+        // The same predicate the ranking asked, so the number quoted as the
+        // reason is the number that decided it.
         Some(match (strategy, self.ranked_on_reset(strategy, now)) {
             (Strategy::MostHeadroom, _) => format!(
                 "{percent}% headroom, which is true of every one of its Quota \
@@ -212,17 +143,12 @@ impl Headroom {
                  {fullest_window} — resets at {}, as of {age}",
                 utilization::reset_phrase(at, now),
             ),
-            // Ranked on its room, because that is what there was to rank it on.
-            // A reset that has already elapsed is said as one: the figure is
-            // stale rather than absent, and "no cached figure says when it
-            // comes back" would be untrue of an Account whose cache says
-            // exactly that about a time now past.
+            // Ranked on its room, because that is what there was to rank it
+            // on. An elapsed reset is said as stale rather than as absent.
             (Strategy::SoonestReset, None) => match resets_at {
-                // The clock time alone, because the clause says which side of
-                // now it falls on itself. `reset_phrase` renders a time already
-                // gone as "any moment now" — which is the right thing to say
-                // about a window somebody is waiting for, and reads as a
-                // contradiction two words before "which has passed".
+                // The clock time alone: `reset_phrase` renders a time already
+                // gone as "any moment now", which is a contradiction two words
+                // before "which has passed".
                 Some(at) => format!(
                     "{percent}% headroom, and the window that leaves it least — \
                      {fullest_window} — was due back at {}, which has passed, so \
@@ -239,13 +165,9 @@ impl Headroom {
     }
 }
 
-/// What reads a figure Perch has not got, said the same way wherever the
-/// absence of one is the reason for the answer.
-///
-/// Named against the Scope the Cycle was looking in, because that is where the
-/// missing figures are: a refresh reads the Accounts it is about to show and no
-/// others (ADR the-listing-owns-the-set), so the listing narrowed to this Scope
-/// is the one that reads exactly the Accounts this sentence is about.
+/// What reads a figure Perch has not got, said the same way wherever the absence
+/// of one is the reason for the answer. Named against the Scope the Cycle looked
+/// in, because a refresh reads the Accounts it is about to show and no others.
 fn how_to_get_figures(scope: &Scope) -> String {
     format!(
         "`perch list {} --refresh` reads current figures.",
@@ -253,15 +175,11 @@ fn how_to_get_figures(scope: &Scope) -> String {
     )
 }
 
-/// The Quota Window that decides how full an Account is: its fullest
-/// (ADR headroom-is-the-worst-window), or `None` for one nothing has ever been
-/// observed of.
+/// The Quota Window that decides how full an Account is: its fullest, or `None`
+/// for one nothing has ever been observed of.
 ///
-/// Public because the watcher compares the Account it is on against a
-/// threshold, and that comparison has to be against the same figure the ranking
-/// below is made on. Two measures of fullness would be a watcher that acts on
-/// one number and chooses on another, and the day they disagreed would be the
-/// day it switched off an Account that was fine onto one that was not.
+/// Public because the Watcher compares the Account it is on against a Threshold,
+/// and two measures of fullness would act on one number and choose on another.
 pub fn fullest_window_of(account: &Account) -> Option<&WindowUtilization> {
     account.observed_utilization().and_then(fullest_window)
 }
@@ -284,22 +202,8 @@ fn headroom_of(account: &Account) -> Headroom {
     }
 }
 
-/// The fullest window, and on a tie the one that bites first.
-///
-/// Ties are ordinary rather than exotic: Anthropic answers in whole
-/// percentages, and an Account nothing has been spent on is at nought in every
-/// window. `max_by` hands back the *last* of several equal maxima, and
-/// `windows_in` sorts `5-hour`, then `7-day`, then a window per model — so a tie
-/// always resolved to the longest-period window, which is the one least likely
-/// to say when it resets.
-///
-/// That fed the wrong `resets_at` into [`Headroom::Room`], whose doc says the
-/// window deciding the headroom is the window whose reset decides how
-/// perishable that headroom is. An Account whose `5-hour` quota is thrown away
-/// in an hour, tied with a `7-day-sonnet` carrying no reset, ranked under
-/// `soonest-reset` as an Account with no reset at all — behind one that resets
-/// in three hours. So the tie is broken on perishability: the soonest reset
-/// first, and a window that says when it comes back ahead of one that does not.
+/// The fullest window, and on a tie the most perishable of the equally full
+/// ones.
 fn fullest_window(cached: &CachedUtilization) -> Option<&WindowUtilization> {
     /// Most perishable first. `is_none` leads so that a window saying nothing
     /// about its reset sorts behind every window that does, rather than ahead
@@ -317,8 +221,7 @@ fn fullest_window(cached: &CachedUtilization) -> Option<&WindowUtilization> {
 }
 
 /// When an exhausted Account can be used again: the last of its full windows to
-/// reset. `None` when any of them does not say, because the wait is then at
-/// least that long and Perch will not guess at it.
+/// reset, or `None` where any of them does not say.
 fn frees_at(cached: &CachedUtilization) -> Option<DateTime<Utc>> {
     let mut last = None;
     for window in cached
@@ -339,18 +242,10 @@ struct Ranked<'a> {
 }
 
 /// Accounts this Cycle may not land on, whatever the ranking makes of them, and
-/// the one sentence that says why.
-///
-/// The Cycle has no opinion about them. The watcher's margin
-/// (ADR a-watcher-knob-is-arithmetic) is policy about *when* a move is worth
-/// making, which is a different question from which Account is best, and
-/// answering both here would put a watcher's clock inside the ranking that
-/// every `perch switch` uses. They arrive as a list so that the ranking never
-/// lands on one, and with a sentence so that the refusal — when they turn out
-/// to be all of them — says what set them aside rather than claiming the Group
-/// is empty.
-///
-/// A `perch switch` the user typed sets nothing aside: [`SetAside::nothing`].
+/// the one sentence that says why. The Cycle holds no opinion about them: the
+/// Watcher's Margin is policy about *when* a move is worth making
+/// (ADR a-watcher-knob-is-arithmetic), and answering that here would put a
+/// Watcher's clock inside every `perch switch`.
 #[derive(Debug, Clone, Default)]
 pub struct SetAside {
     /// The Accounts, by email.
@@ -367,12 +262,10 @@ impl SetAside {
         SetAside::default()
     }
 
-    /// `same_name`, like every other way this module asks about an address —
-    /// see the paragraphs `choose`'s `is_leaving` and `ranked`'s `here` each
-    /// carry. `upsert` matches an Account with `same_name` and stores the
-    /// incoming spelling, so an Identity re-read under another capitalization
-    /// leaves the two lists spelling one Account two ways, and a set-aside
-    /// Account compared by bytes quietly stops being set aside.
+    /// `same_name`, and so is every other address comparison in this module:
+    /// `upsert` matches an Account that way and stores the incoming spelling, so
+    /// an Identity re-read under another capitalization otherwise leaves a
+    /// set-aside Account quietly no longer set aside.
     fn holds(&self, email: &str) -> bool {
         self.emails
             .iter()
@@ -381,44 +274,30 @@ impl SetAside {
 }
 
 /// What the ranking rested on, which is the whole of what a Switch says about
-/// having chosen for you (ADR perch-says-what-it-did).
-///
-/// The basis and not the argument for it: which Account won and on what footing
-/// is what happened, and the figure it beat the others by is Perch defending a
-/// ranking nobody questioned. The figures are still shown — underneath, as the
-/// Utilization the Switch bought — so the number is a line away rather than a
-/// clause away.
-///
-/// A value rather than a sentence, because the two surfaces that say it put it
-/// in different places: the landing line says it beside the Scope the Cycle
-/// stayed inside, and the Watcher's round says it beside the Account it moved
-/// to. One decision, two spellings, so the basis cannot come to differ between
-/// them.
+/// having chosen for you (ADR perch-says-what-it-did) — the basis and not the
+/// argument for it. A value rather than a sentence, because the landing line and
+/// the Watcher's round put it in different places, and one decision must not
+/// come to have two spellings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Basis {
-    /// The measurement ADR headroom-is-the-worst-window fixes: the worst Quota
-    /// Window, and the Account whose worst is best. What a Cycle ranks on
-    /// unless the Group says otherwise — and what `soonest-reset` falls back to
-    /// when nothing it could move to has a reset still to come.
+    /// The worst Quota Window, and the Account whose worst is best. What a Cycle
+    /// ranks on unless the Scope says otherwise, and what `soonest-reset` falls
+    /// back to where nothing it could move to has a reset still to come.
     MostRoom,
-    /// The Strategy's own axis (ADR a-group-is-a-declaration): of the Accounts
-    /// with room, the one whose fullest window comes back soonest, so
-    /// perishable quota is spent rather than wasted.
+    /// Of the Accounts with room, the one whose fullest window comes back
+    /// soonest, so perishable quota is spent rather than wasted.
     SoonestReset,
-    /// No figure to rank on at all: nothing has ever been observed of this
-    /// Account, so it was compared with nothing — which the `never observed`
-    /// in the Utilization under it says again, in figures.
+    /// Nothing has ever been observed of this Account, so it was compared with
+    /// nothing.
     Unranked,
 }
 
 impl Basis {
     /// The clause a landing line carries after the Account it landed on:
-    /// "Switched to overflow@example.com, {}."
-    ///
-    /// It names the Scope because that is the claim worth making beside where a
-    /// Cycle landed — that it stayed inside the Group — and a Scope announced
-    /// before the choice was made is announced to somebody who does not yet
-    /// know where they are going (ADR perch-says-what-it-did).
+    /// "Switched to overflow@example.com, {}." It names the Scope, because
+    /// staying inside the Group is the claim worth making beside where a Cycle
+    /// landed — and a Scope announced beforehand is announced to somebody who
+    /// does not yet know where they are going.
     pub fn in_the(&self, scope: &Scope) -> String {
         let basis = match self {
             Basis::MostRoom => "the most room",
@@ -436,23 +315,14 @@ pub struct Choice {
     pub account: Account,
     /// What this Account won on, for the landing line that names where it
     /// landed.
-    ///
-    /// The one place a Cycle's ranking is said. It used to be said twice — this
-    /// value for `perch switch`, and a sentence of its own for the Watcher's
-    /// round — and ADR perch-says-what-it-did took the second away: a
-    /// `switched` line names where it went and argues nothing about why, so
-    /// there was nothing left reading the sentence.
     pub basis: Basis,
 }
 
 /// Picks the Account to Switch to, or explains why none is worth switching to.
 ///
-/// `leaving` is the Account Perch is on, when it is one of the candidates. It
-/// is ranked like any other and never chosen: landing where you already are
-/// would rewrite Credentials for nothing.
-///
-/// `set_aside` is the caller's own reasons for not landing somewhere, which the
-/// ranking obeys without holding an opinion about (see [`SetAside`]).
+/// `leaving` is ranked like any other Account and never chosen: landing where
+/// you already are rewrites Credentials for nothing. `set_aside` is the caller's
+/// own reasons for not landing somewhere, obeyed without opinion ([`SetAside`]).
 pub fn choose(
     registry: &Registry,
     scope: &Scope,
@@ -498,13 +368,6 @@ pub fn choose(
         )));
     }
 
-    // `same_name` rather than `==`, for the reason `Registry::is_active` gives:
-    // an address is compared case-folded everywhere the registry answers a
-    // question about one, and this is the comparison that decides whether the
-    // Account being left is still in `landable`. Spelled differently, `here` is
-    // `None`, the Account stays a candidate, and `choose` can hand back the
-    // Account Perch is already on — the one thing its doc forbids, because
-    // landing where you already are rewrites Credentials for nothing.
     let is_leaving = |ranked: &Ranked| {
         leaving.is_some_and(|email| registry::same_name(ranked.account.email(), email))
     };
@@ -519,38 +382,16 @@ pub fn choose(
         .filter(|ranked| !set_aside.holds(ranked.account.email()))
         .collect();
 
-    // There was somewhere to go and the caller's own policy is the only thing
-    // in the way, so its sentence is the answer. Saying "already the best
-    // Account in the Group" instead would be a claim about a comparison that
-    // was never made, and the reasons below belong to Accounts nobody set
-    // aside.
+    // The caller's policy is the only thing in the way, so its sentence is the
+    // answer: "already the best Account in the Group" would be a claim about a
+    // comparison nobody made.
     if elsewhere.is_empty() && !landable.is_empty() {
         return Err(PerchError::NoCandidate(set_aside.because.clone()));
     }
 
-    // Which Accounts moving to would actually gain something, against the one
-    // being left.
-    //
-    // Both orderings, and the second is the one that matters. A Strategy says
-    // which of the places worth going is preferred; it does not get to say that
-    // nowhere is worth going. Asked on the Strategy's ranking alone, a
-    // `soonest-reset` Group whose active Account resets in an hour stayed on it
-    // at 95% full while an empty Account sat behind it resetting in four —
-    // because tier three sorts on the reset time and nothing else, and the
-    // Account you are on was being ranked in it. That is the failure
-    // ADR a-watcher-knob-is-arithmetic sets candidates aside to prevent,
-    // reached through the staying-put check instead of through a post-hoc veto.
-    //
-    // Applied to the *choice* and not only to the veto, which is the half that
-    // was missing. Whether to move and where to move were asked of two
-    // different sets: one Account breaking the veto let the Strategy then pick
-    // any other, including one the Account being left beat on both counts. A
-    // `soonest-reset` Group active on 60% headroom resetting in an hour, beside
-    // a 5% Account resetting in two and an unresetting 95% one, moved to the 5%
-    // Account — the 95% one broke the veto, and the Strategy's top was
-    // somewhere else entirely. One rule asked once: the Accounts worth going to
-    // are the ones the veto counts, and the winner is the Strategy's pick from
-    // among those.
+    // Which Accounts moving to would gain something, against the one being left.
+    // The winner is the Strategy's pick from among those, rather than from among
+    // every candidate.
     let worth_going: Vec<&Ranked> = match measured_against(here.map(|here| &here.headroom)) {
         Some(here) => elsewhere
             .iter()
@@ -592,29 +433,17 @@ pub fn choose(
 /// The Headroom a move is judged against, when there is one worth judging
 /// against at all.
 ///
-/// Staying put is the right answer only when Perch can see that it is: an
-/// Account it has never observed is not evidence that moving would gain nothing,
-/// and out of the box no Account has been observed at all. So a `here` with no
-/// figure rules nothing out.
+/// Staying put is right only where Perch can see that it is: an Account it has
+/// never observed rules nothing out, and out of the box none has been observed.
 fn measured_against(here: Option<&Headroom>) -> Option<&Headroom> {
     here.filter(|here| matches!(here, Headroom::Room { .. }))
 }
 
-/// Whether moving from `here` to `other` would gain anything.
+/// Whether moving from `here` to `other` would gain anything, on the Strategy's
+/// ordering or on the room alone.
 ///
-/// Both orderings, and the second is the one that matters. A Strategy says
-/// which of the places worth going is preferred; it does not get to say that
-/// nowhere is worth going. Asked on the Strategy's ranking alone, a
-/// `soonest-reset` Group whose active Account resets in an hour stayed on it at
-/// 95% full while an empty Account sat behind it resetting in four — because
-/// tier three sorts on the reset time and nothing else, and the Account you are
-/// on was being ranked in it. That is the failure
-/// ADR a-watcher-knob-is-arithmetic sets candidates aside to prevent, reached
-/// through the staying-put check instead of through a post-hoc veto.
-///
-/// One predicate, because [`choose`] and [`ranked`] both need it and two
-/// spellings of it are two orders — the listing that puts one Account at the top
-/// and the `perch switch` that lands on another.
+/// One predicate, because [`choose`] and [`ranked`] both need it, and two
+/// spellings of it are two orders over one Scope.
 fn worth_leaving_for(
     other: &Headroom,
     here: &Headroom,
@@ -624,40 +453,16 @@ fn worth_leaving_for(
     other.ranking(strategy, now) > here.ranking(strategy, now) || other.by_room() > here.by_room()
 }
 
-/// Every Account in a scope, in the order a Cycle ranks them: the ones it could
+/// Every Account in a Scope, in the order a Cycle ranks them: the ones it could
 /// land on first, best first, and the ones it would never choose after them.
-///
-/// [`choose`] needs only the winner and refuses where there is none. A listing
-/// needs the whole order, and needs it over Accounts a Cycle would not touch —
-/// a Disabled Account is still shown, and where it sits is what says it is out
-/// of the running. So the two share the measurement and the Strategy rather
-/// than each sorting on its own idea of which Account is better, because two
-/// orders would be a listing that put one Account at the top and a `perch
-/// switch` that landed on another (ADR the-listing-owns-the-set).
-///
-/// A Cycle never leaves the scope it started in (ADR a-group-is-a-declaration),
-/// so there is no ranking over every Account Perch holds: this is per scope,
-/// and a listing spanning several is those rankings one after another.
+/// [`choose`] needs only the winner and a listing needs the whole order, so the
+/// two share this measurement rather than each sorting on its own idea of which
+/// Account is better (ADR the-listing-owns-the-set).
 pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> Vec<&'a Account> {
     let strategy = strategy(registry, scope);
     let accounts = scope.accounts(registry);
-    // The Account a Cycle would be leaving, measured exactly as [`choose`]
-    // measures it — the same `leaving` every caller passes it, and only when it
-    // is a candidate carrying a figure.
-    //
-    // Without it, the two orders disagreed. `choose` gained the staying-put veto
-    // and this did not, so under `soonest-reset` the top row of the listing was
-    // an Account a bare `perch switch` would not land on, and the one it does
-    // land on could be the bottom row. The listing exists to make the ranking
-    // visible; showing a different one is worse than showing none.
-    // `same_name` rather than `==`, for the reason [`choose`] gives at its own
-    // reading of this value: `upsert` matches an Account with `same_name` but
-    // stores the incoming spelling, so an Identity re-read under another
-    // capitalization leaves `active` naming the entry the old way. Compared by
-    // bytes, `here` came back `None` on exactly those machines — and a `None`
-    // here is the staying-put veto silently dropped from the listing while
-    // `choose` keeps it, which is the disagreement this whole function exists to
-    // prevent.
+    // The Account a Cycle would be leaving, measured exactly as `choose`
+    // measures it, and only where it is a candidate carrying a figure.
     let leaving = registry.active().whose();
     let here = leaving
         .and_then(|active| {
@@ -668,13 +473,9 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
         .filter(|account| is_a_candidate(account))
         .map(|account| headroom_of(account));
     let here = measured_against(here.as_ref());
-    // Measured once each rather than inside the comparator, which is the shape
-    // [`choose`] already uses. `place` computes two `Headroom`s — each of which
-    // clones the fullest window's name — and asks `is_a_candidate` and
-    // `worth_leaving_for`, and a comparator runs O(n log n) times.
-    //
-    // Stable, so Accounts that rank identically stay in the order they were
-    // added — the same tie-break the choice itself has.
+    // Measured once each rather than inside a comparator that runs O(n log n)
+    // times, since `place` clones a window name per `Headroom` it computes.
+    // Stable, so Accounts that rank identically keep the order they were added.
     let mut placed: Vec<(&Account, Place)> = accounts
         .into_iter()
         .map(|account| (account, place(account, leaving, here, strategy, now)))
@@ -685,28 +486,10 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
 }
 
 /// Where one Account sorts, higher being better: whether a Cycle could land on
-/// it at all, and then how it ranks among the ones it could.
-///
-/// Candidacy comes first and outranks every figure. An exhausted Account is
-/// still one a Cycle would consider tomorrow; a Disabled or Quarantined one is
-/// not one it would consider at all, and sorting it by its headroom would put a
-/// full-looking Account nobody can use above one they can.
-///
-/// Then whether moving there would gain anything at all, which outranks the
-/// figures for the same reason candidacy does: an Account the Cycle has ruled out
-/// is not one to show at the top however good its number looks. It is what makes
-/// the highest row a Cycle would land on the highest row full stop — the Account
-/// being left included, since moving to where you already are gains nothing.
-///
-/// `leaving` is named rather than inferred from `here`, and that is the half
-/// that was missing. `here` is a *measured* Headroom, so it is `None` for an
-/// Account nobody has observed — which out of the box is every Account — and a
-/// `None` there let the staying-put rule fall away entirely, the Account being
-/// left included. [`choose`] excludes it unconditionally whatever it has been
-/// observed to hold, so the listing put an Account at the top that a bare
-/// `perch switch` would never land on: the disagreement between the two orders
-/// this function exists to prevent (ADR the-listing-owns-the-set), surviving in
-/// the one state a fresh machine is always in.
+/// it at all, then whether moving there gains anything, then how it ranks. An
+/// Account a Cycle has ruled out is not one to show at the top however good its
+/// number looks. `leaving` is named rather than inferred from `here`, which is
+/// `None` for an unobserved Account and would drop the rule for all of them.
 type Place = ((u8, u8, u8), f64);
 
 fn place(
@@ -718,24 +501,13 @@ fn place(
 ) -> Place {
     let candidate = is_a_candidate(account);
     let headroom = headroom_of(account);
-    // Asked only of an Account a Cycle would consider, because that is the only
-    // set [`choose`] asks it of: it drops the non-candidates before it looks for
-    // the one being left. Asked of all of them, the Account you are sitting on
-    // sorted below the other Accounts nobody can use — an order about a
-    // comparison the choice never makes.
+    // Asked only of a candidate, which is the only set `choose` asks it of: it
+    // drops the non-candidates before looking for the one being left.
     let staying =
         candidate && leaving.is_some_and(|email| registry::same_name(account.email(), email));
-    // Exhausted asked outright, and not left to `worth_leaving_for`. That
-    // comparison is against `here`, and `here` is `None` for an active Account
-    // nobody has observed *and* for one that is itself Exhausted
-    // ([`measured_against`]) — so `is_none_or` handed every exhausted candidate
-    // a `true`, and the listing put an Account with nothing left above the
-    // Account being left. [`choose`] drops them from `landable`
-    // unconditionally, so `perch switch` answered "the only Account here that
-    // is not exhausted is the one you are on" while `perch list` showed one of
-    // the exhausted ones on the top row: the disagreement between the two
-    // orders this function exists to prevent (ADR the-listing-owns-the-set), in
-    // the state a fresh machine is always in.
+    // Exhausted asked outright rather than left to `worth_leaving_for`, whose
+    // `here` is `None` both for an unobserved active Account and for an
+    // exhausted one — so `is_none_or` would pass every exhausted candidate.
     let worth = u8::from(
         !staying
             && !headroom.is_exhausted()
@@ -745,26 +517,19 @@ fn place(
     ((u8::from(candidate), worth, tier), figure)
 }
 
-/// Whether a Cycle could land on this Account at all — which is a different
-/// question from whether it has room, and is asked first everywhere.
+/// Whether a Cycle could land on this Account at all — a different question from
+/// whether it has room, and asked first everywhere.
 ///
-/// One predicate rather than the same pair of conditions written wherever the
-/// question comes up: what a Cycle may choose and what a Scope has left to draw
-/// on ([`crate::reserve`]) must be the same set of Accounts, or the figure on
-/// screen describes a set the Switch does not use.
+/// One predicate, because what a Cycle may choose and what a Scope has left to
+/// draw on ([`crate::reserve`]) are one set of Accounts.
 pub fn is_a_candidate(account: &Account) -> bool {
     !account.disabled && !account.quarantined()
 }
 
 /// Whether anything has declared the Accounts in this Scope interchangeable.
-///
-/// Always true of a Group, which is that declaration
-/// (ADR a-group-is-a-declaration). The Accounts in no Group are a Scope only
-/// because somebody declared them interchangeable
-/// (ADR a-group-is-a-declaration), and until they do, every surface has to
-/// decline the same things about them — ranking them, and saying what they have
-/// left between them. Asked in one place so the listing and the figures above
-/// it cannot end up disagreeing about whether they are a set.
+/// Always true of a Group, which is that declaration. Asked in one place, so the
+/// listing and the figures above it cannot end up disagreeing about whether the
+/// ungrouped Accounts are a set.
 pub fn may_cycle_within(registry: &Registry, scope: &Scope) -> bool {
     match scope {
         Scope::Group(_) => true,
@@ -772,17 +537,11 @@ pub fn may_cycle_within(registry: &Registry, scope: &Scope) -> bool {
     }
 }
 
-/// The Accounts a Cycle may not choose, counted once each.
+/// The Accounts a Cycle may not choose, counted once each, or empty where every
+/// Account is a candidate.
 ///
-/// One that is both Disabled and Quarantined is still one Account, and a tally
-/// that put it in both buckets could add up to more Accounts than the scope
-/// holds — a reason that does not survive being checked teaches the reader to
-/// stop checking. Empty where every Account is a candidate.
-///
-/// Shared because the refusal that nobody can be Cycled to and the Reserve that
-/// says what is out of the running are the same count of the same Accounts, and
-/// two copies of it is how one comes to say "2 disabled" where the other says
-/// "1".
+/// Shared, because the refusal that nobody can be Cycled to and the Reserve that
+/// says what is out of the running count the same Accounts.
 pub fn out_of_the_running(accounts: &[&Account]) -> String {
     let quarantined = accounts.iter().filter(|a| a.quarantined()).count();
     let disabled = accounts
@@ -802,8 +561,8 @@ pub fn out_of_the_running(accounts: &[&Account]) -> String {
 /// How much of an Account is left to spend, in a column's worth of words.
 ///
 /// The figure the ranking is made on, said so the order can be checked against
-/// it rather than taken on trust. Never observed is said as itself and never as
-/// a number: "no figure" and "plenty of room" are opposite pieces of advice.
+/// it. Never observed is said as itself and never as a number: "no figure" and
+/// "plenty of room" are opposite pieces of advice.
 pub fn headroom_phrase(account: &Account) -> String {
     match headroom_of(account) {
         Headroom::Room { percent, .. } => format!("{}%", utilization::percentage(percent)),
@@ -815,10 +574,8 @@ pub fn headroom_phrase(account: &Account) -> String {
 /// The three answers there are to "how much has this Account left", for the
 /// callers that have to tell them apart rather than print them.
 ///
-/// One value rather than a number and a second question beside it. A caller that
-/// asked "has it room?" and then "was it ever read?" would be holding two
-/// predicates that have to stay in agreement, and the day they disagreed would
-/// be a tally that did not add up to the Accounts on screen.
+/// One value rather than a number and a second question beside it: two
+/// predicates that have to stay in agreement are a tally that stops adding up.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HowMuchIsLeft {
     /// Every Quota Window has at least this much room left.
@@ -826,13 +583,11 @@ pub enum HowMuchIsLeft {
     /// A Quota Window is full, so the Account is blocked whatever its others
     /// say.
     Exhausted,
-    /// No figure has ever been read. Never room: "no figure" and "plenty of
-    /// room" are opposite pieces of advice.
+    /// No figure has ever been read.
     NeverObserved,
 }
 
-/// Which of those three an Account is, measured the one honest way
-/// (ADR headroom-is-the-worst-window).
+/// Which of those three an Account is.
 pub fn how_much_is_left(account: &Account) -> HowMuchIsLeft {
     match headroom_of(account) {
         Headroom::Room { percent, .. } => HowMuchIsLeft::Room(percent),
@@ -844,14 +599,8 @@ pub fn how_much_is_left(account: &Account) -> HowMuchIsLeft {
 /// The same three answers as a script reads them.
 ///
 /// Two keys rather than a bare number, because only one of the three answers is
-/// a number and the other two are not nought. A `percent` of `null` under a
-/// `state` naming which absence it is keeps "no figure" and "plenty of room"
-/// from arriving as the same value — the mistake [`headroom_phrase`] refuses in
-/// the same words on the surface a person reads.
-///
-/// Unrounded, like every other percentage in a document (`utilization::document`
-/// emits `used_percent` as it was read): rounding is what a column does to fit,
-/// and a script that wants two decimal places should not have to ask twice.
+/// a number and the other two are not nought. Unrounded, like every percentage
+/// in a document: rounding is what a column does to fit.
 pub fn headroom_document(account: &Account) -> serde_json::Value {
     let (state, percent) = match how_much_is_left(account) {
         HowMuchIsLeft::Room(percent) => ("room", Some(percent)),
@@ -861,14 +610,11 @@ pub fn headroom_document(account: &Account) -> serde_json::Value {
     serde_json::json!({ "state": state, "percent": percent })
 }
 
-/// How much of an Account is left to spend, with the Quota Window the figure
-/// was taken from and the age of the observation it came from
-/// (ADR a-figure-carries-its-age).
+/// How much of an Account is left to spend, with the Quota Window the figure was
+/// taken from and the age of the observation it came from.
 ///
-/// The long form of [`headroom_phrase`], for the surface that gives an Account a
-/// block of its own rather than a column: naming the fullest window is what
-/// makes "taken from its most constrained window" checkable against the rows
-/// underneath rather than a claim in a doc comment.
+/// The long form of [`headroom_phrase`]: naming the fullest window makes the
+/// claim checkable against the rows underneath.
 pub fn headroom_in_full(account: &Account, now: DateTime<Utc>) -> String {
     match headroom_of(account) {
         Headroom::Room {
@@ -894,30 +640,22 @@ pub fn headroom_in_full(account: &Account, now: DateTime<Utc>) -> String {
     }
 }
 
-/// What the winner won on, in the terms it was actually judged on — which is
-/// not always the terms the Strategy asked for.
-///
-/// A choice Perch could not rank the way it was told to is said as the choice
-/// it could make rather than dressed up as one it could not: a Group set to
-/// `soonest-reset` with no reset in sight lands on the most room and says so.
-/// Why the Strategy could not be followed is the argument, and the argument is
-/// what ADR perch-says-what-it-did cuts — the person is told what the ranking
-/// rested on, which is the part they could not have predicted.
+/// What the winner won on, in the terms it was actually judged on, which are not
+/// always the terms the Strategy asked for: a Scope set to `soonest-reset` with
+/// no reset in sight lands on the most room and says so. Why the Strategy could
+/// not be followed is the argument, and the argument is what is cut.
 fn chosen_basis(best: &Ranked, strategy: Strategy, now: DateTime<Utc>) -> Basis {
-    // Asked of the same predicate the ranking asked, because a basis given as
-    // the reason has to be the one that decided it.
     match (&best.headroom, best.headroom.ranked_on_reset(strategy, now)) {
         (Headroom::Room { .. }, Some(_)) => Basis::SoonestReset,
         (Headroom::Room { .. }, None) => Basis::MostRoom,
-        // Never observed. An exhausted Account cannot get here — everything
-        // exhausted is answered above, and an unobserved Account outranks a
-        // full one — and it would be unranked in the same way if it did.
+        // Never observed. An exhausted Account cannot get here: everything
+        // exhausted is answered above, and an unknown outranks a full window.
         _ => Basis::Unranked,
     }
 }
 
-/// The scope holds Accounts, but none of them is a candidate. Which way each
-/// one left the running is [`out_of_the_running`]'s to count.
+/// The Scope holds Accounts and none of them is a candidate. Which way each one
+/// left the running is [`out_of_the_running`]'s to count.
 fn nobody_is_a_candidate(scope: &Scope, accounts: &[&Account]) -> String {
     format!(
         "No Account in {} is a Cycle candidate ({}), so there is nowhere to \
@@ -937,19 +675,9 @@ fn everyone_is_exhausted(
     ranked: &[Ranked],
     now: DateTime<Utc>,
 ) -> String {
-    // `> now` for the reason `ranked_on_reset` gives for the half of this that
-    // has Room: a cached figure outlives the window it describes
-    // (ADR a-figure-carries-its-age), so an elapsed `resets_at` is not a fact
-    // about when this Account comes back — it is a window that already came
-    // back, under a percentage that is stale.
-    //
-    // Taken as one, it sorted the wrong way twice over. `min_by_key` picked the
-    // *earliest* reset, so among Accounts whose windows had all come back the
-    // stalest reading won; and `reset_phrase` renders a past instant as "(any
-    // moment now)". A six-hour-old figure would announce that an Account frees
-    // up "soonest, at 07:00 (any moment now)" about a window that came back
-    // five hours ago, while a fresh figure twenty minutes from resetting went
-    // unmentioned.
+    // `> now` for the reason `ranked_on_reset` gives: an elapsed reset is not a
+    // fact about when this Account comes back, and `min_by_key` over one crowns
+    // the stalest reading.
     let soonest = ranked
         .iter()
         .filter_map(|ranked| match ranked.headroom {
@@ -979,17 +707,15 @@ fn everyone_is_exhausted(
             registry.named_for_the_user(account.email()),
             utilization::reset_phrase(at, now),
         ),
-        // Every figure predates the recording of reset times, or none of them
-        // carried one. Saying nothing would read as "never".
+        // None of them carried a reset. Saying nothing would read as "never".
         None => format!(
             "No cached figure says when any of them frees up — {}",
             how_to_get_figures(scope)
         ),
     };
-    // An Account whose full window carries no reset time cannot be ranked for
-    // how soon it comes back, and could well come back first. Leaving it out
-    // silently would turn "the soonest Perch can vouch for" into advice to wait
-    // longer than you have to.
+    // An Account whose full window carries no reset could come back first, so
+    // leaving it out silently turns "the soonest Perch can vouch for" into
+    // advice to wait longer than you have to.
     if unsaid > 0 && soonest.is_some() {
         waiting.push_str(&format!(
             " {unsaid} of them cache no reset time, so the wait could be \
@@ -999,11 +725,8 @@ fn everyone_is_exhausted(
     }
 
     // What the filter took out before any of this was measured. Without it the
-    // refusal says "every Account in Group `work` is exhausted" about a Group
-    // holding two Accounts with full headroom that happen to be disabled, and
-    // sends the user off to wait for a quota reset when the fix is `perch
-    // enable`. Its sibling refusal counts them, and so does the Reserve; this
-    // was the one that dropped them.
+    // refusal sends somebody off to wait for a quota reset about a Group whose
+    // two Accounts with full Headroom are merely disabled.
     let set_aside = out_of_the_running(accounts);
     let (every, also) = match set_aside.is_empty() {
         true => (String::new(), String::new()),
@@ -1032,10 +755,8 @@ fn already_the_best(
     let named = registry.named_for_the_user(here.account.email());
     let how_to_get_figures = how_to_get_figures(scope);
     let scope = scope.place();
-    // Said of the comparison Perch actually made. Under soonest-reset it has
-    // only compared the Accounts whose figures carry a reset time, so claiming
-    // it beat the ones that do not would be claiming a comparison it could not
-    // make.
+    // Said of the comparison Perch actually made: under `soonest-reset` it has
+    // only compared Accounts whose figures carry a reset time.
     let standing = if here.headroom.ranked_on_reset(strategy, now).is_some() {
         format!(
             "{named} already comes back soonest of the Accounts in {scope} whose figures say when they do"
@@ -1062,9 +783,6 @@ pub(crate) mod tests {
         Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap()
     }
 
-    /// A reason that does not survive being checked teaches the reader to stop
-    /// checking, and "2 disabled, 2 Quarantined" out of two Accounts is exactly
-    /// that.
     #[test]
     fn an_account_that_is_both_disabled_and_quarantined_is_counted_once() {
         let mut broken = account("broken@example.com", vec![]);
@@ -1147,16 +865,6 @@ pub(crate) mod tests {
             .collect()
     }
 
-    /// The listing and the choice are one order, in the state a fresh machine
-    /// is always in: no Account observed at all.
-    ///
-    /// `here` is a *measured* Headroom, so it is `None` until something has
-    /// been read — and a `None` there used to let the staying-put rule fall
-    /// away for every Account, the one being left included. `choose` excludes
-    /// that Account whatever has been observed of it, so the top row of the
-    /// listing was an Account a bare `perch switch` would never land on, which
-    /// is the disagreement `ranked` exists to prevent
-    /// (ADR the-listing-owns-the-set).
     #[test]
     fn the_account_being_left_is_never_the_top_row_even_where_nothing_has_been_observed() {
         let registry = holding(vec![
@@ -1179,16 +887,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// The other half of the same state, from the listing's side.
-    ///
-    /// An exhausted Account is a candidate — a Cycle would consider it tomorrow
-    /// — so `place` scored it on `worth_leaving_for` against `here`. But `here`
-    /// is `None` for an active Account nobody has observed, and `is_none_or`
-    /// answers `true` for a `None`, so every exhausted candidate outranked the
-    /// Account being left. `choose` drops them from `landable` unconditionally:
-    /// `perch switch` said "the only Account here that is not exhausted is the
-    /// one you are on" while `perch list` put one of the exhausted ones on the
-    /// top row — two orders over one Scope (ADR the-listing-owns-the-set).
     #[test]
     fn an_exhausted_account_never_outranks_the_one_being_left() {
         let registry = holding(vec![
@@ -1210,20 +908,10 @@ pub(crate) mod tests {
         );
     }
 
-    /// The Account you are on is the only one left, and Perch has never read a
-    /// figure for it.
-    ///
-    /// Not a Cycle with nowhere to land, which is what "everything is
-    /// exhausted" says, and not one that stayed put because it compared well —
-    /// nothing was compared. Perch cannot see that staying is right, so it says
-    /// which Account and how to get a figure rather than switching onto an
-    /// exhausted one to look busy.
-    ///
-    /// Worth pinning by example, because this is the branch carrying
-    /// `expect("something unexhausted is here or elsewhere")`, and what makes
-    /// that safe is spread over three earlier checks: everything-exhausted is
-    /// caught above, so something is not exhausted; and if it is not `here` it
-    /// is in `elsewhere`, which was just found empty.
+    /// The branch carrying `expect("something unexhausted is here or
+    /// elsewhere")`, whose safety is spread over three earlier checks:
+    /// everything-exhausted is caught above, and what is not `here` is in
+    /// `elsewhere`, which was just found empty.
     #[test]
     fn the_only_account_left_being_one_nothing_was_read_for_is_said_rather_than_switched_off() {
         let registry = holding(vec![
@@ -1247,8 +935,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// The order the listing shows is the order the choice makes, so the
-    /// Account at the top is the one a bare `perch switch` would land on.
     #[test]
     fn the_order_is_the_one_the_choice_would_make() {
         let registry = holding(vec![
@@ -1272,9 +958,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// The Strategy is the Group's, and the listing obeys it: two surfaces
-    /// disagreeing about which Account is better would be a listing that put
-    /// one at the top and a Switch that landed on another.
     #[test]
     fn the_order_follows_the_groups_strategy() {
         let registry = holding(vec![
@@ -1293,9 +976,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// An Account a Cycle would never choose sorts below every one it would,
-    /// however full its window says it is: sorting it on its headroom would put
-    /// an Account nobody can use above one they can.
     #[test]
     fn an_account_no_cycle_would_choose_sorts_below_every_one_it_would() {
         let mut spared = account("spared@example.com", vec![window("5-hour", 0.0)]);
@@ -1320,8 +1000,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// The figure the order was made on, said so the order can be checked
-    /// against it rather than taken on trust.
     #[test]
     fn the_headroom_shown_is_the_room_in_the_fullest_window() {
         assert_eq!(
@@ -1342,10 +1020,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// The long form names the window the figure came from, so "taken from its
-    /// most constrained window" can be checked against the rows underneath it
-    /// rather than taken on trust — and every one of the three answers carries
-    /// the age of what it was read from, or says it was never read at all.
     #[test]
     fn the_headroom_said_in_full_names_its_window_and_its_age() {
         let roomy = account(
@@ -1369,9 +1043,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// The three answers are one value rather than a number and a second
-    /// question beside it, so a caller counting them cannot hold two predicates
-    /// that disagree.
     #[test]
     fn how_much_is_left_tells_the_three_answers_apart_in_one_pass() {
         assert_eq!(
@@ -1418,16 +1089,10 @@ pub(crate) mod tests {
         );
     }
 
-    /// An observation carrying no windows is not an observation, and the one
-    /// thing that says so is `Account::observed_utilization`'s filter.
-    ///
-    /// Behind it, `headroom_of` calls `fullest_window(cached).expect("an
-    /// observation carries at least one window")` — reached by every Switch,
-    /// every Cycle and every watch round. `anthropic::windows_in` answers
-    /// `Ok(empty)` for a `{}` usage body and `observe::keep` stores what it is
-    /// given, so the value the `expect` forbids is one Perch can write; nothing
-    /// in `validate` refuses it either. The filter is the whole guard and no
-    /// test was holding it, so removing it read as a tidy-up.
+    /// `Account::observed_utilization`'s filter is the whole guard on
+    /// `headroom_of`'s `expect("an observation carries at least one window")`,
+    /// and `observe::keep` stores what it is given — so the value that `expect`
+    /// forbids is one Perch can write.
     #[test]
     fn an_observation_carrying_no_windows_reads_as_never_observed_rather_than_panicking() {
         let mut held = account("a@example.com", vec![window("5-hour", 4.0)]);
@@ -1594,17 +1259,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// A Strategy says which of the places worth going is preferred. It does
-    /// not get to say that nowhere is worth going — and asked on the Strategy's
-    /// ranking alone it did, because the Account you are on is ranked in tier
-    /// three beside the candidates and tier three sorts on the reset time and
-    /// nothing else. So the Account that resets soonest was the Account you
-    /// stayed on, however full it was and however empty the alternative.
-    ///
-    /// This is the failure ADR a-watcher-knob-is-arithmetic sets candidates
-    /// aside to prevent, reached from the other end: the watcher wants off a
-    /// 95%-full Account, the margin sets nothing aside, and the Cycle then
-    /// reports there is nowhere to go.
     #[test]
     fn soonest_reset_never_pins_you_to_a_full_account_because_it_comes_back_first() {
         let registry = preferring(
@@ -1625,9 +1279,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// The other side of the same rule, which is what keeps the Strategy worth
-    /// setting: where the room is the same, the Group that prefers perishable
-    /// quota still moves onto the Account that resets first.
     #[test]
     fn soonest_reset_still_moves_off_an_account_that_holds_its_quota_longer() {
         let registry = preferring(
@@ -1648,31 +1299,14 @@ pub(crate) mod tests {
         );
     }
 
-    /// A cached figure outlives the window it describes
-    /// (ADR a-figure-carries-its-age), so a `resets_at` in the past is ordinary
-    /// — it means the window has already come back and the percentage beside it
-    /// is stale.
-    ///
-    /// The key is the reset time negated, so an earlier time ranked higher, and
-    /// among Accounts whose reset had already passed the *stalest* figure won.
-    /// The sentence beside the choice then announced it as resetting "any
-    /// moment now" about a window that came back hours ago.
-    /// Two windows equally full is the ordinary case, not the exotic one:
-    /// Anthropic answers in whole percentages, and an Account nothing has been
-    /// spent on is at nought everywhere. `max_by` hands back the last of several
-    /// equal maxima and the windows arrive longest-period last, so the tie went
-    /// to the window least likely to say when it resets — and `Headroom::Room`
-    /// took its `resets_at` from there. An Account whose `5-hour` quota is
-    /// thrown away in an hour then ranked as an Account with no reset at all.
     #[test]
     fn windows_equally_full_are_broken_by_which_one_bites_first() {
         let registry = preferring(
             holding(vec![
                 account("active@example.com", vec![resetting("5-hour", 40.0, 3)]),
-                // Its `5-hour` and its `7-day-sonnet` are both at 40%, and only
-                // the first of them says when it comes back — in one hour. That
-                // is the window this Account is constrained by, so it is the one
-                // it should be ranked on.
+                // Both at 40%, and only the `5-hour` says when it comes back —
+                // in one hour, so it is the window this Account is constrained
+                // by and the one to rank it on.
                 account(
                     "soonest@example.com",
                     vec![resetting("5-hour", 40.0, 1), window("7-day-sonnet", 40.0)],
@@ -1696,10 +1330,8 @@ pub(crate) mod tests {
             "soonest@example.com",
             "so it is ranked on that window's reset rather than on no reset at all"
         );
-        // The window it was ranked on is the one asserted above, and this is
-        // the claim that it was ranked on a reset at all: a `5-hour` read as
-        // carrying no reset would have fallen back to the room it could see,
-        // which is what this basis says it did not do.
+        // A `5-hour` read as carrying no reset would have fallen back to the
+        // room it could see, which is what this basis says it did not do.
         assert_eq!(
             choice.basis,
             Basis::SoonestReset,
@@ -1762,16 +1394,9 @@ pub(crate) mod tests {
             "nothing may claim a reset it has not got",
         );
 
-        // The half that was missed when the ranking was fixed: the clause
-        // beside the reason read `resets_at` for itself, so it announced a
-        // window as coming back "any moment now" an hour after it had, in the
-        // same sentence as the explanation that there was no reset to rank on.
-        //
-        // A Switch no longer quotes that clause — it says the basis and leaves
-        // the figures to the lines under it (ADR perch-says-what-it-did). The
-        // refusal that says staying put is already the best still quotes it and
-        // is exempt, so the wording is asserted where it is still said: the
-        // same two figures, with the emptier Account the one being stayed on.
+        // A Switch says the basis and leaves the figures to the lines under it,
+        // so the clause is quoted only by the refusal that says staying put is
+        // best — asserted here, over the same two figures.
         let staying = preferring(
             holding(vec![
                 account("emptier@example.com", vec![resetting("5-hour", 20.0, -1)]),
@@ -1791,23 +1416,19 @@ pub(crate) mod tests {
             refusal.contains("has passed"),
             "it says the reading is stale rather than absent: {refusal}"
         );
-        // The parenthetical `reset_phrase` puts on a time already gone. Two
-        // words from "which has passed", it is the same contradiction one
-        // bracket further along, and the assertion above walks straight past it.
+        // The parenthetical `reset_phrase` puts on a time already gone, which
+        // the assertion above walks straight past.
         assert!(
             !refusal.contains("any moment now"),
             "a window that came back is not one coming back: {refusal}"
         );
-        // And the sentence that follows the clause may not call the figure
-        // absent when the clause it follows has just quoted it.
+        // Nor may the sentence after the clause call the figure absent.
         assert!(
             !refusal.contains("No cached figure says when any"),
             "the cache said exactly when it came back: {refusal}"
         );
     }
 
-    /// The same disagreement on the staying-put path, which quotes the same
-    /// clause about the Account you are already on.
     #[test]
     fn staying_put_on_an_elapsed_reset_does_not_quote_it_as_still_to_come() {
         let registry = preferring(
@@ -1834,15 +1455,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// One Account being worth moving to does not make every Account worth
-    /// moving to.
-    ///
-    /// Whether to move and where to move were asked of two different sets. The
-    /// veto compared each candidate against the Account being left on both
-    /// orderings; the choice that followed took the Strategy's top of *all* the
-    /// candidates. So a single Account breaking the veto — here the roomy one
-    /// with no reset time — let the Strategy hand back one the Account being
-    /// left beat on both counts.
     #[test]
     fn one_candidate_worth_moving_to_does_not_let_the_strategy_pick_a_worse_one() {
         let registry = preferring(
@@ -1870,15 +1482,9 @@ pub(crate) mod tests {
         );
     }
 
-    /// And the listing says the same thing, over the fixture that pulls the two
-    /// apart.
-    ///
-    /// `the_order_is_the_one_the_choice_would_make` cannot see this: it uses
-    /// `most-headroom` with no reset times, where the Strategy's ranking and the
-    /// room ranking are the same ordering and the veto collapses to the identity.
-    /// Under `soonest-reset` they differ, and the veto only lived in `choose` —
-    /// so the listing showed `worse@` at the top of the Accounts to land on
-    /// while a bare `perch switch` landed on `roomiest@`, the bottom row.
+    /// `the_order_is_the_one_the_choice_would_make` cannot see this: under
+    /// `most-headroom` with no reset times the Strategy's ranking and the room
+    /// ranking are one ordering, and the veto collapses to the identity.
     #[test]
     fn the_top_of_the_listing_is_where_the_cycle_goes_under_either_strategy() {
         let accounts = || {
@@ -1910,17 +1516,10 @@ pub(crate) mod tests {
         }
     }
 
-    /// The same agreement, on a machine where `active` and the Account it names
-    /// are capitalized differently.
-    ///
-    /// `Registry::upsert` matches with `same_name` but stores the *incoming*
+    /// `Registry::upsert` matches with `same_name` and stores the *incoming*
     /// spelling, so an Identity Claude Code re-writes under another
-    /// capitalization leaves `active` naming the entry the old way — a state
-    /// `Registry::is_active`'s doc describes and every other reader of an address
-    /// compares for. `ranked` compared by bytes, found no `here`, and dropped the
-    /// staying-put veto from the listing alone: `choose` still refused to move,
-    /// and the listing showed the Account it would not have moved to at the
-    /// top.
+    /// capitalization leaves `active` naming the entry the old way — the state
+    /// this fixture puts the registry in.
     #[test]
     fn the_listing_agrees_with_the_cycle_however_the_active_address_is_capitalized() {
         let registry = preferring(
@@ -1948,10 +1547,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// The Account being left sits above every Account a Cycle has ruled out, and
-    /// below every Account worth moving to. It is not "the best Account" that
-    /// puts it there — it is that moving to where you already are gains nothing,
-    /// which is the same rule applied to itself.
     #[test]
     fn the_account_being_left_sorts_below_the_ones_worth_moving_to() {
         let registry = preferring(
@@ -2041,11 +1636,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// A Strategy is entitled to rank whatever the caller left it. Setting an
-    /// Account aside has to take it out of the ranking rather than veto the
-    /// winner afterwards — under `soonest-reset` the fullest Account can be the
-    /// one that wins, and vetoing it would report nowhere to go while a
-    /// perfectly empty Account sat behind it.
     #[test]
     fn setting_an_account_aside_leaves_the_ranking_to_choose_from_what_is_left() {
         let registry = preferring(
@@ -2077,9 +1667,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// The caller's reason is the answer when the caller's reason is the whole
-    /// of it. Anything the Cycle said instead would be a claim about a
-    /// comparison it was never allowed to make.
     #[test]
     fn setting_every_landing_place_aside_answers_with_the_reason_it_was_given() {
         let registry = holding(vec![
@@ -2106,9 +1693,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// A caller that sets aside an Account the ranking could not have chosen
-    /// anyway has told the Cycle nothing, and must not take the Cycle's own
-    /// answer away from it.
     #[test]
     fn setting_aside_an_exhausted_account_leaves_the_cycles_own_answer_intact() {
         let registry = holding(vec![
@@ -2150,20 +1734,11 @@ pub(crate) mod tests {
     }
 }
 
-/// Properties the ranking has to hold for every arrangement of Accounts, not
-/// only for the ones somebody thought to write a fixture for.
-///
-/// The example-based tests above say what happens in the situations the design
-/// is *about*. These say what must never happen in any situation at all — a
-/// comparator sign flipped inside one Strategy would pass every example that
-/// does not use that Strategy, and these would catch it wherever it was.
-///
-/// The cases come from a small congruential generator rather than a property
-/// crate: a fixed seed, printed in every failure, so a failing case is one that
-/// can be reproduced by running the same test rather than one that has to be
-/// caught again (ADR a-crate-must-not-cost-a-seam — a crate where it does not
-/// cost a seam, and a dev-dependency for twenty lines of arithmetic is not
-/// that).
+/// Properties the ranking holds for every arrangement of Accounts, not only the
+/// ones somebody wrote a fixture for: a comparator sign flipped inside one
+/// Strategy passes every example that does not use that Strategy. A fixed seed
+/// printed in every failure, from a congruential generator rather than a crate
+/// (ADR a-crate-must-not-cost-a-seam).
 #[cfg(test)]
 mod properties {
     use super::tests::*;
@@ -2177,14 +1752,13 @@ mod properties {
         described: String,
     }
 
-    /// A deterministic stream of numbers. Not random — reproducible, which is
-    /// the property that matters when a case fails.
+    /// A deterministic stream of numbers: reproducible rather than random, which
+    /// is the property that matters when a case fails.
     struct Cases(u64);
 
     impl Cases {
         fn next(&mut self, below: u64) -> u64 {
-            // Numerical Recipes' constants: any full-period generator will do
-            // here, and this one needs no dependency and no explanation.
+            // Numerical Recipes' constants. Any full-period generator will do.
             self.0 = self
                 .0
                 .wrapping_mul(6_364_136_223_846_793_005)
@@ -2204,9 +1778,7 @@ mod properties {
             let mut accounts = Vec::new();
             for at in 0..count {
                 let email = format!("a{at}@example.com");
-                // Every shape the ranking distinguishes: no observation, an
-                // observation with a reset time, one without, and a window
-                // that is full.
+                // Every shape the ranking distinguishes.
                 let used = self.next(101) as f64;
                 let windows = match self.next(4) {
                     0 => vec![],
@@ -2251,9 +1823,6 @@ mod properties {
         .map(|choice| choice.account)
     }
 
-    /// Never being chosen for you is the whole of what disabled means, and a
-    /// Quarantined Account's Credential does not work. Neither can be the
-    /// answer however the figures fall.
     #[test]
     fn nothing_disabled_exhausted_or_quarantined_is_ever_chosen() {
         for arrangement in cases() {
@@ -2270,8 +1839,6 @@ mod properties {
         }
     }
 
-    /// The winner is a winner: no candidate the Cycle was allowed to choose
-    /// ranks above it.
     #[test]
     fn the_winner_ranks_at_least_as_high_as_every_candidate() {
         for arrangement in cases() {
@@ -2294,7 +1861,6 @@ mod properties {
         }
     }
 
-    /// Landing where you already are would rewrite Credentials for nothing.
     #[test]
     fn the_account_being_left_is_never_the_one_chosen() {
         for arrangement in cases() {
@@ -2315,26 +1881,18 @@ mod properties {
         }
     }
 
-    /// Moving is supposed to gain something. An Account the one being left
-    /// beats on the Strategy's ranking *and* on the room it can see is a move
-    /// that made things worse, whatever the Strategy prefers.
-    ///
-    /// Asked with `leaving` set, which is what the two properties above do not
-    /// do: both ask with no Account being left, so the whole comparison against
-    /// `here` — the veto and the choice it gates — went unexercised. This is the
-    /// arrangement that found it: a `soonest-reset` Group active on 60% headroom
-    /// resetting in an hour, beside a 5% Account resetting in two and an
-    /// unresetting 95% one, moved onto the 5%.
+    /// Asked with `leaving` set, which the two properties above do not do:
+    /// without it the whole comparison against `here` — the veto and the choice
+    /// it gates — goes unexercised.
     #[test]
     fn the_account_chosen_is_never_one_the_account_being_left_beats_outright() {
         for arrangement in cases() {
             let Some(leaving) = arrangement.registry.accounts.first() else {
                 continue;
             };
-            // Only where the Account being left is one the Cycle would have
-            // considered. Leaving a Disabled or Quarantined Account is the case
-            // for moving somewhere worse rather than against it: the figure
-            // beside a broken Credential is not a standard anything has to beat.
+            // Only where the Account being left is one a Cycle would consider:
+            // the figure beside a broken Credential is not a standard anything
+            // has to beat.
             if !is_a_candidate(leaving) {
                 continue;
             }
@@ -2363,8 +1921,6 @@ mod properties {
         }
     }
 
-    /// The same question asked twice gets the same answer, or nothing anybody
-    /// reads is stable enough to act on.
     #[test]
     fn the_same_arrangement_always_chooses_the_same_account() {
         for arrangement in cases() {

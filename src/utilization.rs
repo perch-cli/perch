@@ -1,12 +1,10 @@
 //! How a cached Utilization figure is said — in prose and in JSON.
 //!
-//! Every surface that shows Utilization renders it from cache, and shows each
-//! figure with its age so a stale number is visibly stale rather than quietly
-//! wrong (ADR a-figure-carries-its-age). Only a `--refresh` fetches — on either
-//! surface — and it fetches before rendering rather than while: nothing here
-//! reaches the network. `status` and `list` both have to say the same thing
-//! about the same figure, so how a figure reads lives here rather than being
-//! spelled out again by each of them.
+//! Every surface renders Utilization from cache and shows each figure with its
+//! age (ADR a-figure-carries-its-age). Nothing here reaches the network: a
+//! `--refresh` fetches before rendering rather than while. `status` and `list`
+//! say the same thing about the same figure, so how a figure reads lives here
+//! rather than being spelled out again by each of them.
 
 use std::io::Write;
 
@@ -18,26 +16,11 @@ use crate::commands::write_failed;
 use crate::error::Result;
 use crate::registry::{Account, CachedUtilization};
 
-/// How many terminal cells a string is drawn in.
-///
-/// Not its bytes, and not its characters either. A CJK Group name is drawn two
-/// columns per character and a combining mark is drawn in none, so a count of
-/// characters pads to the wrong width — and because a width is shared down a
-/// column, one such name puts everything after it out of line for the whole
-/// block. What a column is measured in has to be what a terminal draws in.
-///
-/// The one measure, here because this is the module every surface that lines
-/// figures up already imports. There were three — cells for the listing's
-/// table, characters for the labeled rows, and bytes for the Quota Window names
-/// — and no input has yet reached the two that are wrong. That is what makes it
-/// worth collapsing rather than what makes it urgent: an Account whose
-/// organization name is not Latin script is an ordinary thing to hold, and it
-/// would have arrived at whichever of the three was nearest.
-///
-/// `unicode-width` sits on no seam — the width of a string is a pure function
-/// of it — which is the test ADR a-crate-must-not-cost-a-seam actually sets,
-/// and a hand-rolled table of East Asian widths would be the same data kept by
-/// hand, going wrong quietly.
+/// How many terminal cells a string is drawn in. Not its bytes and not its
+/// characters: a CJK Group name is drawn two columns per character and a
+/// combining mark in none, and because a width is shared down a column, one such
+/// name puts a whole block out of line. `unicode-width` carries the East Asian
+/// width table nobody should keep by hand (ADR a-crate-must-not-cost-a-seam).
 pub fn cells(text: &str) -> usize {
     UnicodeWidthStr::width(text)
 }
@@ -57,40 +40,24 @@ pub fn padded(text: &str, width: usize) -> String {
 pub const LABEL_WIDTH: usize = 14;
 
 /// How wide the Quota Window name column has to be for these windows, and never
-/// narrower than the two every Account has.
-///
-/// Measured rather than fixed, because a Quota Window's name is Anthropic's:
-/// `window_name` turns `seven_day_sonnet` into `7-day-sonnet`, and there is a
-/// window per model with more of them to come. A fixed eight pushed the
-/// percentage right on the per-model rows alone, so they stepped out of line
-/// with the `5-hour` and `7-day` above them — in the one place the eye is
-/// running down a column. A fixed twelve would line them up by making every
-/// block four columns wider whether or not anything needed it, and the
-/// Utilization rows already run close to eighty.
-///
-/// The floor is the width of `5-hour`, which keeps a block that happens to hold
-/// only short names in the column every other block puts them in.
+/// narrower than the two every Account has. Measured rather than fixed, because
+/// a window's name is Anthropic's and there is one per model: a fixed width
+/// either steps the per-model rows out of line or widens every block whether it
+/// needs it or not. The floor keeps a block of short names in the usual column.
 pub fn window_width<'a>(windows: impl Iterator<Item = &'a str>) -> usize {
     windows
         .map(cells)
         .chain(std::iter::once(cells("5-hour")))
         .max()
-        // The floor is chained on, so there is always one. `unwrap_or_default`
-        // here answered nought — a width the doc above rules out — for a case
-        // that cannot arise, which is worse than saying so.
+        // The floor is chained on, so there is always one.
         .expect("the floor is always among them")
 }
 
 /// The width to lay Quota Window names out in, measured across every Account
-/// whose figures are going to be shown together.
-///
-/// Across the set rather than per Account, because the point of the width is that
-/// the figures line up down a column — and a surface that stacks one Account's
-/// rows under the next one's has one column, not one per Account. Measured per
-/// Account, an Opus-eligible Account carrying `7-day-opus` beside a `pro` Account
-/// that does not put the two percentages five columns apart under one
-/// `Utilization` heading: the exact failure this width exists to prevent,
-/// arriving between Accounts instead of between windows.
+/// whose figures are shown together, because a surface that stacks one Account's
+/// rows under the next one's has one column and not one per Account — measured
+/// per Account, an Opus-eligible Account beside a `pro` one puts two percentages
+/// five columns apart under one `Utilization` heading.
 pub fn window_width_across<'a>(accounts: impl IntoIterator<Item = &'a Account>) -> usize {
     window_width(
         accounts
@@ -135,16 +102,10 @@ pub fn lines(account: &Account, now: DateTime<Utc>, width: usize) -> Vec<String>
 }
 
 /// The same rows with when each Quota Window comes back, for the surfaces that
-/// give an Account a block of its own rather than a row in a table.
-///
-/// The fill says how much is gone and the reset says how long that lasts, and
-/// deciding where to work needs both: a five-hour window at 90% that comes back
-/// in twenty minutes and one at 90% that comes back in four hours are the same
-/// number and opposite advice. It is a second rendering rather than a longer
-/// [`lines`] because `perch list` puts these in a column beside four others, and
-/// a clock time there would push the table past the width of a terminal — the
-/// two surfaces differ in the room they have, which is exactly what this splits
-/// on.
+/// give an Account a block of its own. The fill says how much is gone and the
+/// reset how long that lasts, and where to work needs both. A second rendering
+/// rather than a longer [`lines`], because a clock time in the listing's column
+/// would push the table past the width of a terminal.
 pub fn lines_with_resets(account: &Account, now: DateTime<Utc>, width: usize) -> Vec<String> {
     rows(account, now, width, |window, width| {
         format!(
@@ -165,9 +126,8 @@ pub fn lines_with_resets(account: &Account, now: DateTime<Utc>, width: usize) ->
 }
 
 /// One row per Quota Window, however each surface says the window itself, with
-/// the age of the observation on every one of them
-/// (ADR a-figure-carries-its-age) — or the single line that says nothing has
-/// ever been observed.
+/// the age of the observation on every one — or the single line that says
+/// nothing has ever been observed.
 fn rows(
     account: &Account,
     now: DateTime<Utc>,
@@ -189,8 +149,7 @@ fn rows(
 }
 
 /// The cached Utilization as a script reads it: every figure carries its own
-/// observation time, so the script can decide for itself whether the number is
-/// fresh enough (ADR a-figure-carries-its-age).
+/// observation time, so the script can judge freshness for itself.
 pub fn document(account: &Account, now: DateTime<Utc>) -> serde_json::Value {
     match account.observed_utilization() {
         Some(cached) => json!({
@@ -216,33 +175,20 @@ fn windows_json(cached: &CachedUtilization, now: DateTime<Utc>) -> Vec<serde_jso
                 "used_percent": window.used_percent,
                 "resets_at": window.resets_at.map(|at| at.to_rfc3339()),
                 "observed_at": cached.observed_at.to_rfc3339(),
-                // Not clamped at nought. A figure stamped in the future is a
-                // clock that ran backwards, and clamping reports it to a script
-                // as maximally fresh — the one reading that gets a stale figure
-                // trusted rather than doubted. `age_phrase` refuses to make
-                // that claim in prose and says "in the future"; the two
-                // surfaces answer for the same cache and must not disagree
-                // about whether it can be believed.
+                // Not clamped at nought: clamping reports a figure stamped in
+                // the future as maximally fresh, which is what `age_phrase`
+                // refuses to claim in prose about the same cache.
                 "observed_seconds_ago": (now - cached.observed_at).num_seconds(),
             })
         })
         .collect()
 }
 
-/// A percentage as every surface prints one, without the two roundings that
-/// say the opposite of what is true.
-///
-/// `{:.0}` rounds to nearest, so 0.4 renders as `0` and 99.6 as `100`. Both
-/// ends of that are read as a state rather than as a number: an Account with
-/// 0.4% headroom is not exhausted and is perfectly choosable, but "0% headroom"
-/// in the sentence explaining why Perch just switched to it reads as a mistake.
-/// The mirror is worse — 99.6% *used* printed as "100% used" reads as an
-/// Account that is finished when it is one the watcher is still deciding about.
-///
-/// So the two edges say which side of the boundary they are on and leave the
-/// exact figure, which nobody is acting on at that precision, unsaid. Only the
-/// open interval is bent: a real 0 and a real 100 are states, and they still
-/// print as themselves.
+/// A percentage as every surface prints one, without the two roundings that say
+/// the opposite of what is true. `{:.0}` renders 0.4 as `0` and 99.6 as `100`,
+/// and both ends are read as a state rather than a number, so the two edges say
+/// which side of the boundary they are on. Only the open interval is bent: a real
+/// nought and a real hundred still print as themselves.
 pub fn percentage(value: f64) -> String {
     if value > 0.0 && value < 1.0 {
         return "<1".to_string();
@@ -254,29 +200,18 @@ pub fn percentage(value: f64) -> String {
 }
 
 /// A percentage printed beside the figure it is being judged against, at a
-/// precision that cannot contradict the judgment.
-///
-/// [`percentage`] rounds to whole numbers and the comparison is made on what
-/// Anthropic sent, so the two disagreed either side of a threshold: 79.6 is
-/// under 80 and printed as `80`, and the watcher's line read "80% used …
-/// threshold 80% — under it, so nothing was wanted". That line is the whole of
-/// the evidence the policy works, read out of a cron mailbox by somebody
-/// deciding whether the watcher is broken, and a flat self-contradiction on it
-/// is worse than a decimal place.
-///
-/// The same shape as the `<1` and `>99` forms above: a figure is never rounded
-/// into a claim about a boundary it has not reached.
+/// precision that cannot contradict the judgment. [`percentage`] rounds to whole
+/// numbers and the comparison is made on what Anthropic sent, so a rounded 79.6
+/// reads "80% used … threshold 80% — under it": a figure is never rounded into a
+/// claim about a boundary it has not reached.
 pub fn percentage_against(value: f64, boundary: u8) -> String {
     let rounded = percentage(value);
     if rounded != boundary.to_string() || value == f64::from(boundary) {
         return rounded;
     }
 
-    // Widened until the figure actually differs from the boundary, rather than
-    // one place and a hope. One decimal is not a guarantee — it is a second
-    // chance to round onto the same number — and 79.96 came back as "80.0"
-    // beside "threshold 80% — under it", which is the flat self-contradiction
-    // this function exists to prevent, one decimal place further along.
+    // Widened until the figure differs from the boundary. One decimal place is
+    // not a guarantee, only a second chance to round onto the same number.
     for places in 1..=3 {
         let said = format!("{value:.places$}");
         if said.parse::<f64>() != Ok(f64::from(boundary)) {
@@ -284,8 +219,7 @@ pub fn percentage_against(value: f64, boundary: u8) -> String {
         }
     }
 
-    // Three places and it still reads as the boundary, so no figure will say
-    // which side of it this is. The words do, which is all the line needed.
+    // No figure will say which side of the boundary this is. The words do.
     format!(
         "just {} {boundary}",
         if value < f64::from(boundary) {
@@ -307,23 +241,10 @@ pub fn age_phrase(observed_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
 }
 
 /// How long a span is, in the largest unit that does not round it away: `3m`,
-/// `2h`, `4d`.
-///
-/// One table, because there were two — [`age_phrase`] and [`wait_phrase`] each
-/// carried their own copy of the same boundaries. They have already drifted
-/// apart once over exactly that: the handover to the hour form was moved in one
-/// and left in the other, so an age that grew by a second fell by half an hour,
-/// on the line ADR a-figure-carries-its-age has a reader judging a figure's
-/// trustworthiness by.
-///
-/// Minutes as far as two hours, which is where the minute form and the hour
-/// form first agree; anywhere earlier they disagree across the boundary. The
-/// hour form hands over to the day form where those two agree already.
-///
-/// `minutes` is the only thing the two callers differ on, and it is the minute
-/// form alone: an hour or a day is a unit coarse enough that always rounding up
-/// would overstate a wait by more than the understatement it is guarding
-/// against.
+/// `2h`, `4d`. One table for [`age_phrase`] and [`wait_phrase`] both, or the
+/// handover moves in one and not the other and an age that grew by a second
+/// falls by half an hour. Minutes as far as two hours, where the two forms first
+/// agree; `minutes` rounds up for a wait and to nearest for an age.
 fn spans(seconds: i64, minutes: fn(f64) -> f64) -> String {
     match seconds {
         ..7200 => format!("{}m", minutes(seconds as f64 / 60.0) as i64),
@@ -332,12 +253,11 @@ fn spans(seconds: i64, minutes: fn(f64) -> f64) -> String {
     }
 }
 
-/// When a Quota Window comes back, said both ways: the clock time to plan
-/// around, and how long that is from now so it can be judged without arithmetic.
-///
-/// "2026-08-04 15:00 UTC (in 3h)". A time already past reads as "any moment
-/// now" rather than as a negative wait — a cached figure can outlive the window
-/// it describes, and a reset that has already happened is good news.
+/// When a Quota Window comes back, said both ways: the clock time to plan around
+/// and how long that is from now, so it can be judged without arithmetic —
+/// "2026-08-04 15:00 UTC (in 3h)". A time already past reads as "any moment now"
+/// rather than as a negative wait, because a cached figure can outlive the window
+/// it describes and a reset that has already happened is good news.
 pub fn reset_phrase(resets_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
     format!(
         "{} ({})",
@@ -347,22 +267,16 @@ pub fn reset_phrase(resets_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
 }
 
 /// The clock time alone, for the sentences that have already said which side of
-/// now it falls on.
-///
-/// [`reset_phrase`] is the one to reach for wherever the wait is the point. This
-/// one exists because an elapsed reset is quoted by a clause that goes on to say
-/// "which has passed", and `reset_phrase` renders a time already gone as "any
-/// moment now" — good news where a Cycle is waiting for a window, and a flat
-/// contradiction beside the words "has passed". Written once so the two forms
-/// cannot drift into printing the same instant two ways.
+/// now it falls on. [`reset_phrase`] is the one to reach for wherever the wait is
+/// the point: it renders a time already gone as "any moment now", which
+/// contradicts a clause going on to say "which has passed".
 pub fn clock_time(at: DateTime<Utc>) -> String {
     at.format("%Y-%m-%d %H:%M UTC").to_string()
 }
 
 /// A wait's minutes round *up* where an age's round to nearest, which is the
-/// whole of what this adds to [`spans`]: whether to wait for perishable quota
-/// is the decision the line is read for, and a wait that reads shorter than it
-/// is is the one direction that costs somebody something.
+/// whole of what this adds to [`spans`]: a wait that reads shorter than it is is
+/// the one direction that costs somebody something.
 fn wait_phrase(resets_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
     let seconds = (resets_at - now).num_seconds();
     if seconds <= 0 {
@@ -380,12 +294,6 @@ mod tests {
         Utc.with_ymd_and_hms(2026, 8, 4, hour, minute, 0).unwrap()
     }
 
-    /// A width is what a terminal draws, and not in characters either — which
-    /// is the same mistake one step later.
-    ///
-    /// A CJK name is drawn two columns per character. Measured by character it
-    /// takes half the room it needs, and because one width lays out every row
-    /// beneath it, everything after it steps out of line for the whole block.
     #[test]
     fn a_width_is_measured_in_the_cells_a_terminal_draws_it_in() {
         assert_eq!(cells("作業"), 4, "two characters, four columns");
@@ -397,8 +305,6 @@ mod tests {
         );
     }
 
-    /// Padding fills the width the same way it was measured, or the right
-    /// answer is arrived at and then spent wrongly.
     #[test]
     fn padding_fills_a_width_in_cells_rather_than_in_characters() {
         assert_eq!(padded("作業", 6), "作業  ", "four cells, two to fill");
@@ -410,11 +316,8 @@ mod tests {
         );
     }
 
-    /// The labeled surfaces line up on the same measure the table does.
-    ///
     /// `status` is where an organization name lands, and an organization name is
-    /// whatever Anthropic holds. A label wider in cells than in characters used
-    /// to be padded to the character count and put its value one column short.
+    /// whatever Anthropic holds.
     #[test]
     fn a_labeled_row_is_padded_in_cells_like_every_other_column() {
         let mut written = Vec::new();
@@ -439,10 +342,6 @@ mod tests {
         assert_eq!(age_phrase(at(13, 0), at(12, 0)), "in the future");
     }
 
-    /// And the script reading the same cache is told the same thing. Clamping
-    /// the age at nought reported a figure stamped in the future as maximally
-    /// fresh — the one reading that gets a stale figure trusted rather than
-    /// doubted, and the opposite of what the prose beside it says.
     #[test]
     fn the_document_does_not_claim_freshness_the_prose_refuses_to() {
         let mut account = observed_at_the_edges();
@@ -459,11 +358,6 @@ mod tests {
         );
     }
 
-    /// A Quota Window's name is Anthropic's, and there is one per model:
-    /// `seven_day_sonnet` becomes `7-day-sonnet`, which is twelve characters
-    /// against `5-hour`'s six. A fixed column narrower than that does not
-    /// truncate — it shoves the percentage right on the long rows alone, so
-    /// they step out of line with the two above them.
     #[test]
     fn the_window_column_is_as_wide_as_the_widest_window_that_is_in_it() {
         let mut account = observed_at_the_edges();
@@ -512,12 +406,6 @@ mod tests {
         );
     }
 
-    /// A wait that never grows as it shortens. The minute form and the hour
-    /// form disagreed across the boundary they were handed over at: ninety
-    /// minutes less a second read "in 90m" and ninety minutes read "in 2h", so
-    /// a window a second closer to coming back was advertised as half an hour
-    /// further away. Whether to wait for perishable quota is what this line is
-    /// read for.
     #[test]
     fn the_wait_never_grows_as_the_reset_gets_closer() {
         let now = at(12, 0);
@@ -533,9 +421,6 @@ mod tests {
         );
     }
 
-    /// A figure and the verdict beside it must not disagree. The comparison is
-    /// made on what Anthropic sent and the rendering rounded, so 79.6 against a
-    /// threshold of 80 printed "80% used … threshold 80% — under it".
     #[test]
     fn a_percentage_is_never_rounded_into_a_boundary_it_has_not_reached() {
         assert_eq!(percentage_against(79.6, 80), "79.6");
@@ -556,9 +441,8 @@ mod tests {
             "the ceiling a candidate is set aside by is the same rule"
         );
 
-        // Two decimal places, where one was not enough: both of these came back
-        // as "80.0", which reads as the boundary beside a line saying it has not
-        // been reached — the contradiction one place further along.
+        // Two decimal places, where one is not enough: both of these read as
+        // "80.0" at one place.
         assert_eq!(percentage_against(79.96, 80), "79.96");
         assert_eq!(percentage_against(80.04, 80), "80.04");
         assert_eq!(
@@ -569,12 +453,6 @@ mod tests {
         assert_eq!(percentage_against(80.000_001, 80), "just over 80");
     }
 
-    /// The same rule for the other direction: an age that never falls as the
-    /// figure gets older. `wait_phrase` was moved off the ninety-minute
-    /// handover and this was left on it, so a figure read at 89m59s said "90m
-    /// ago" and the same figure a second later said "2h ago" — half an hour
-    /// fresher, on the line ADR a-figure-carries-its-age has a reader judging
-    /// the number by.
     #[test]
     fn an_age_never_falls_as_the_figure_gets_older() {
         let now = at(12, 0);
@@ -599,9 +477,6 @@ mod tests {
         );
     }
 
-    /// `{:.0}` rounds to nearest, and both ends of that round into a word
-    /// rather than a number: "0% headroom" reads as exhausted and "100% used"
-    /// reads as finished, about Accounts that are neither.
     #[test]
     fn a_percentage_never_rounds_into_a_state_the_account_is_not_in() {
         assert_eq!(percentage(0.4), "<1", "0.4% headroom is not none");
@@ -622,14 +497,8 @@ mod tests {
         assert_eq!(percentage(99.0), "99");
     }
 
-    /// And the surfaces that print one go through it.
-    ///
     /// These two rows are the only place in Perch that prints the words
-    /// "% used" about a raw window figure, which is the rounding the doc above
-    /// calls the worse of the two: they formatted `used_percent` themselves, so
-    /// an Account at 99.6% used rendered as `100% used` directly beneath a
-    /// Headroom figure saying it had room, and `perch switch` would land on it
-    /// happily. A helper nothing calls is a rule nothing follows.
+    /// "% used" about a raw window figure.
     #[test]
     fn the_rows_that_print_a_percentage_print_it_the_way_every_surface_does() {
         let account = observed_at_the_edges();
@@ -643,8 +512,6 @@ mod tests {
         assert!(rows[1].starts_with("7-day   <1% used"), "{rows:?}");
     }
 
-    /// An ordinary figure keeps the column it always had: the two edges are the
-    /// only rows whose width this could have moved.
     #[test]
     fn an_ordinary_figure_lands_in_the_same_column_it_always_did() {
         let mut account = observed_at_the_edges();
