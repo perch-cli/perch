@@ -1,231 +1,213 @@
 # The Listing owns the set
 
-ADR perch-does-not-draw cut the Config tab and left the picker standing, saying
-in as many words that whether `perch tui` should exist at all was not decidable
-from the source: "whether a person wants to choose an account by eye is not
-legible anywhere in this repository."
+**`perch status` is the Account you are on. `perch list` is the Listing, at every
+breadth.** Two shapes answering two questions — one Account in detail, and a set
+as a table — and one shape per command.
 
-That was true of the *want*. It was not true of the *reason*, and the reason is
-what this document finds missing. `perch tui` is removed entire — all 8,418
-lines of it — and the one thing it uniquely rendered moves to `perch list`.
+`perch status` bare is not the Listing narrowed. Against a row it adds
+`Organization` and `Plan`, and it has room to put the Quarantine sentence *above*
+the figures, because the state is the news and the numbers are the detail — a
+shape a table cannot hold. Its document is one object where the Listing's is an
+array of sections. Two names each with one shape is fewer ideas than one name with
+two renderings.
 
-## ADR perch-does-not-draw argued the picker's moment away
+## The ranking belongs to the Listing
 
-ADR perch-does-not-draw considered making bare `perch switch` open the picker
-and refused it:
+`perch switch` ranks the Accounts in a Scope by Headroom and lands on the best of
+them. That ranking is visible rather than hidden, so the two surfaces cannot come
+to disagree about which Account is better — and `perch list` is where it is
+visible. Three pieces, always and not behind a flag:
 
-> It shows the evidence before spending quota, but it **costs an interaction at
-> exactly the moment the user wants none**, and anyone rotating between
-> subscriptions would type the unattended form every time.
+- **The Cycle's order.** Each Scope ranks its own Accounts by its own Strategy,
+  and the Scope the active Account is in comes first, because it is where you are
+  and, wherever a Cycle happens at all, the one a bare `perch switch` looks in.
+- **A Headroom column**, distinct from the Utilization printed beside it.
+  Utilization is every Quota Window, one line each; Headroom is the *worst* of
+  them (ADR headroom-is-the-worst-window), said as the single number the ranking
+  sorted on. Without it the order is a claim the table gives no way of checking.
+- **Held rather than ranked** for the Accounts in no Group until `interchangeable`
+  is declared. This carries the most weight of the three: a ranking of Accounts
+  Perch would refuse to choose between is the hidden claim this Listing exists to
+  prevent, and it is just as false in a plain-text table as in a drawn one
+  (ADR a-group-is-a-declaration).
 
-Three lines earlier, the same document gives the picker a command of its own,
-"for when the choice wants making by eye rather than by rule."
+The argument was never that the ranking should be *available*; it was that the two
+surfaces must not disagree, and an optional agreement is not one.
 
-That moment is never named. Every moment ADR perch-does-not-draw *does* name —
-quota running out, mid-task, under mild frustration — is the one it has just
-ruled the picker out of. The Considered Options establish that the switching
-moment wants no interaction; the decision then provides an interactive surface
-for it anyway, on the strength of a use the document declines to describe.
+## A breadth is an argument, not a flag
 
-This is not the argument being re-litigated with new information. It is the
-argument reaching two conclusions that cannot both hold, and only one of them
-was carried into the code.
+> **`perch list [<scope>]`** — a Group by name, or `ungrouped`.
 
-## The picker is the only subsystem that widened the `Host` port
+The domain is Scopes rather than Groups, since an ungrouped Account narrows to the
+Ungrouped, and Perch already addresses a Scope positionally: `perch config` names
+one that way, and `validate_name` refuses `ungrouped` as a Group name *and* as an
+Alias so the Scope can answer to it. A flag would be the only place in Perch a
+Scope is named by flag, and a flag may mark an argument's absence but not carry
+what an argument carries (ADR a-command-names-its-noun).
 
-```
-src/host/mod.rs:548   fn print_remarks(&self, aloud: bool);
-src/host/mod.rs:552   fn remarks(&self) -> Vec<String>;
-```
+An argument-less flag is worse than merely inconsistent. **`perch list` must keep
+working when Perch holds no active Account** — precisely the state `perch status`
+refuses in and sends somebody to `perch switch` to leave — and a narrowing that
+read the active Account to know what it meant would couple the Listing to a fact
+it does not need.
 
-Both exist for `perch tui`. Nothing else calls either, and `mod.rs` says so
-itself: "`perch tui` turns it off while it owns the screen and back on when it
-gives it back, and nothing else calls it." They sit on the port rather than on
-`RealHost` for a stated reason — "it is the picker that has to say it, and the
-picker holds a `&dyn Host`" — and they cost a `Cell<bool>` on `RealHost`, a
-second constructor in `keeping_its_remarks`, a branch inside `note`, and two
-stub implementations on `FakeHost` that every non-drawing test carries.
+An Alias or an email address is not a Scope and is not accepted as one. A Listing
+of one row is what `perch status` answers better, so a name that is somebody's
+Alias is answered as the Group it is not.
 
-ADR a-crate-must-not-cost-a-seam was careful about exactly this. It put the
-terminal behind `tui::Screen` rather than on the port, because "a `Host` that
-knew about frames would be one every non-TUI test carried and every fake had to
-answer for." The reasoning was right and the line still moved:
-`Host::print_remarks` is described in that same ADR as "the one thing about
-frames the port does know."
+**`--refresh` follows the breadth**, because it always has: it reads exactly the
+Accounts about to be shown and no others. Two commands reach a refresh and that is
+not two capabilities — each refreshes what it shows, which is one rule applied to
+two shows. Reading a set spends breadth-many independent budgets rather than
+exhausting one (ADR a-figure-carries-its-age), so breadth is not what the network
+has to be kept away from.
 
-The port is what this repository has been least willing to disturb, and the
-picker is the only subsystem that has made it wider. That is not a bug — the
-remarks really would have landed in the middle of a frame — but it is a cost,
-and it is charged to the one seam nothing else was allowed to charge.
+## What the Scope has left
 
-## Why removal is clean rather than merely large
+**The Reserve is said under a narrowed Listing and nowhere else on the human
+surface** — how many of a Scope's Accounts still have Headroom, and how much the
+best of them has.
 
-Three measurements, taken because a subsystem this size usually leaves a hole.
+It attaches where a heading has already named the Scope the sentence is about. A
+bare `perch list` has no heading: it is **one flat table** across every Scope with
+the Group as a column, because a table that broke for a heading every few rows
+would put a blank line between Accounts the eye is running down a column of. A
+Reserve line there would have to name its own Scope, once per Scope, in a footer —
+a heading smuggled into a sentence already as wide as a terminal, which is the
+worse half of the shape the table declined. Narrowed, the heading is there and has
+said it, and the footer already holds the Listing's other Scope-level sentence.
 
-**Nothing has to migrate.** `perch tui` takes no arguments at all: a Target,
-`--json`, `--refresh` and `--group` are each refused, and `main.rs` explains why
-— "a `--json` here would be `perch list --json`, which is the command
-ADR perch-does-not-draw requires to exist anyway." The constraint
-ADR perch-does-not-draw imposed, that every interactive capability exist
-non-interactively too, means the picker was never allowed to become the only
-route to anything. It was held to that, and the receipt is that removing it
-removes a name and no surface.
+The Ungrouped stay silent until `interchangeable` is declared, off the same answer
+that declines ranking them: a Reserve is what a set of Accounts has *between
+them*, which is the claim nobody has made about them yet. Ranking them and saying
+what they have left are declined together rather than separately.
 
-**`CONTEXT.md` does not move.** The picker has never had a glossary entry, and
-searching 497 lines for *tui*, *interactive*, *picker* or *arrow key* finds one
-match: the word "interactive" in the **Attended** entry's `_Avoid_` list, which
-is Dogfood vocabulary ADR using-it-is-the-proof is deleting anyway. An
-8,418-line subsystem whose removal changes not one word of the vocabulary is the
-clearest evidence available that it carried no idea a person had to hold.
+A Scope holding nobody keeps the sentence it already has — "The Group `spare` holds
+no Accounts yet." — which names the Group and says the one thing true of it. A
+Reserve branch for that case would describe a Scope somebody has only just declared
+as full of Accounts nothing may reach.
 
-**The figures.** `src/tui/` is 5,604 lines, `src/commands/tui.rs` 95, and
-`tests/browsing.rs` 2,719 — **8,418 in all, 11.6% of this repository**.
-ADR perch-does-not-draw's figure of 8,323 missed the command module. Of that,
-3,292 is the Config tab #150 was already going to take, so the increment this
-decision adds is **5,126 lines**, and #150 stops being work anybody has to do.
+**Per-window rows are not part of it.** Saying the emptiest Account per Quota
+Window answers "fine on the weekly window, empty on the five-hour one", and on this
+surface each such row would summarize numbers already on screen a few lines above
+it, because `perch list` prints every Account's per-window figures. That is an
+argument about this surface rather than about the idea.
 
-## Why there is no middle
+## A document says what its order is, or it does not have one
 
-The Status tab has three sidebar rows and only one of them is the picker.
-`render_overview` is roughly 116 lines of view and `render_governing` 70,
-against `render_accounts`' 57 — and by ADR perch-does-not-draw's own test, those
-two are `perch status` and `perch config` drawn with box-drawing characters.
-ADR perch-does-not-draw refused a read-only Config tab because "the reading it
-offers already exists twice over," and cited `StatusRow::Config` on the Status
-tab as one of the two places it already existed. That test, turned around,
-indicts the row doing the citing.
+The Accounts arrive in `sections` rather than in one flat `accounts` array. The
+order is load-bearing — `accounts[0]` of the first section is the Account a bare
+`perch switch` would land on — and a flat array states that nowhere, so a script
+reading it would rely on a ranking the document never claimed to be making. Worse,
+the held-versus-ranked distinction would be invisible entirely, and a `--json`
+showing a ranking of Accounts Perch would refuse to choose between is the
+two-surfaces-disagreeing failure reached through a different renderer.
 
-So a smaller picker is available: delete both rows, keep the table, and
-`perch tui` becomes one listing with a cursor and two keys.
+One `accounts` array beside the sections is the same mistake twice: a shape that
+makes no claim, kept for scripts, next to the shape that makes it.
 
-It is refused, because the rows were never the cost. `terminal.rs` (466),
-`refresh.rs` (332), `mod.rs` (530), `act.rs` (213) and `fake.rs` (227) survive a
-row deletion untouched, and so do both crates and the pinning note that keeps
-one `crossterm` in the tree. The middle saves about 190 lines of view and keeps
-roughly 1,800 lines of frame loop, a thread, a second seam and a process-global
-raw-mode flag. That is ADR perch-does-not-draw's refused read-only tab in
-different clothes, and it is refused for the same reason: if the machinery is
-what costs, the machinery is what the decision is about.
+**`--json` carries the Reserve at every breadth**, and that is not a disagreement
+with the table's silence. A section names its own Scope in a key, which is the
+whole of what the table lacks. The table's silence is a rendering constraint rather
+than a domain one — the same document already spells out `order`, which the table
+expresses only by not sorting. What must not happen is the two surfaces disagreeing
+about a *judgment*: a ranking on one that the other would not make. Here neither
+claims anything the other denies; one of them declines to say a true thing for want
+of somewhere to put it.
 
-What the seam does establish is that the picker was already less than it looked.
-Two of its three rows were duplicating commands before anything was decided
-here.
+Three shapes follow from the same reasoning:
 
-## The ranking belongs to the listing
+- **Fields, not the sentence.** The Listing's document is structured throughout,
+  and a prose sentence in a document is a thing scripts end up regexing.
+- **`null` where no Cycle could happen in the Scope**, saying in the document the
+  same "there is no answer here" the human surface says by silence.
+- **`null` for a Scope holding nobody.** Not ambiguous against the first, because
+  `accounts` sits beside it: an empty array distinguishes "nobody is here" from
+  "nobody has declared these a set".
 
-ADR perch-does-not-draw's stated justification — "a read-only picker is
-`perch list` with box-drawing characters, so the whole justification for it is
-making a choice" — is false today, and in the picker's favor. `perch list`
-prints four columns in registry order. The picker's Accounts view prints the
-same listing **ordered as a Cycle ranks it, with the Headroom that order was
-made on beside it**, and renders Ungrouped Accounts as *held* rather than ranked
-(ADR a-group-is-a-declaration). `list.rs` knows this: `widths` is generalized
-over N columns rather than written over its own four, "because the TUI's
-Accounts view shows the same listing with the figure its order was made on
-beside it."
+**One Account has one shape wherever it is read.** `perch status --json` describes
+its Account with the same object a section's `accounts` array uses, so a script
+asking which Group the active Account is in does not need a second command, and one
+written against either can be pointed at the other. What each *document* answers
+still differs, and that is the part that should — `active` against `sections` is
+what says which was asked.
 
-So there is one thing in Perch that only the picker does, and
-ADR perch-does-not-draw named the job correctly: the ranking `perch switch`
-makes should be visible rather than hidden, "so the two surfaces cannot come to
-disagree about which account is better."
+The Utilization sits under `active` and nowhere else. A copy at the top level would
+be insurance against reaching into the wrong shape, and this document answers about
+exactly one Account and cannot be anything else, so there is nothing left to insure
+against.
 
-That job survives its surface. `perch list` gains all three pieces —
-the Cycle ordering, a **Headroom** column distinct from the Utilization it
-already prints, and the held-rather-than-ranked rendering for the Ungrouped.
+## The names stay
 
-**Always, and not behind a flag.** The argument was never that the ranking
-should be *available*; it was that the two surfaces must not disagree, and an
-optional agreement is not one. The held-versus-ranked distinction carries the
-most weight of the three: a ranking of Accounts Perch would refuse to choose
-between is the hidden claim ADR perch-does-not-draw built this listing to
-prevent, and it is just as false in a plain-text table as in a drawn one.
+`status` is the only noun among the top-level Account commands, and that is not a
+defect: it names the thing asked for, and it is asked for at two levels.
+ADR a-command-names-its-noun defends `perch status` against `perch watcher status`
+as the rule working — same verb, different noun, and the elided noun is what tells
+them apart — and that defense needs the word to be the same at both levels.
+Renaming the Account's one would orphan the Watcher's as a lone noun. `status` is
+also the most conventional name any CLI has, and a convention every user already
+holds is conceptual surface bought for nothing.
 
-**It lands with the removal, in one change.** Separated, there is a window in
-which nothing in Perch shows the Cycle's judgment — which is the disagreement
-this whole thread exists to prevent, arrived at by scheduling.
+## The glossary
 
-## What ADR a-refusal-is-a-promise keeps, and what ADR perch-does-not-draw leaves behind
+**Listing** and **Section** are entries, and **Section** is the one carrying the
+weight: it is where ranked-versus-held lives, and `--json` states it as
+`"order": "ranked" | "held"` in a contract scripts branch on
+(ADR code-lives-where-it-reaches). An idea a script branches on is an idea a
+person holds.
 
-ADR a-refusal-is-a-promise is three decisions in one file and only two of them
-are the picker's. Its ratatui-over-crossterm choice and its second Amended
-section — `tui::Screen`, the Refresh thread's own Host, `Host::print_remarks` —
-are superseded here. **Its color-eyre repeal and the two-error-idiom rule
-stand**: expected failures are `PerchError` carrying an exit code a script
-reads, unexpected ones are panics through the twelve-line hook in `report.rs`,
-and anything that starts as a panic and turns out to be an outcome moves across.
-None of that was ever about drawing, and superseding the file whole would have
-taken `report.rs`'s charter with it.
+Neither entry names a *rendering*, which is the distinction that makes them
+sayable at all. **Listing**'s `_Avoid_` line rules out `table`, `view`, `report`
+and `output` for exactly that reason: the Listing is every Account Perch holds in
+the Scopes they sit in and in each Scope's own order — a thing, described — and a
+table is one way of drawing it. On the same ground the register this document
+writes in gets no noun of its own (ADR perch-says-what-it-did).
 
-ADR perch-does-not-draw is superseded in full — both halves of its decision are
-void, since the tab it removed goes with the view it preserved — but one
-sentence is carried forward rather than buried, because it generalized past the
-thing it was written about:
-
-> a surface which writes at all pulls in locking, deferral, refusal and
-> rollback, and a surface that only reads and acts does not.
-
-That rule outlives the panel. ADR perch-does-not-draw stays superseded by 0042;
-a chain is fine, and the route is worth as much as the destination.
-
-**ADR a-crate-must-not-cost-a-seam is not amended.** Its "Reopened by
-`perch tui`" section asked whether crossterm's arrival should take over the
-export passphrase read or terminal detection, and answered no to both. Crossterm
-leaving closes the reopening without moving a line, because the answer was
-already that both stay where they are. The section becomes history rather than a
-live tension.
-
-**`unicode-width` stays declared**, with its justification rewritten. It is
-there today on the strength of being free — "already in the build transitively —
-ratatui measures every frame with it — so declaring it adds no crate" — and that
-sentence stops being true. The decision survives anyway on
-ADR a-crate-must-not-cost-a-seam's actual test, which is whether a crate costs a
-seam: the width of a string is a pure function and sits on nothing. The
-comment's next sentence was always the real argument and is untouched — "a
-hand-rolled table of East Asian widths would be the same data, kept by hand,
-going wrong quietly" — and `perch list` is about to grow a column, so it needs
-the measuring more rather than less.
+**Reserve** says Scope rather than Group, matching how `Reserve::of` is typed and
+the case the gate admits.
 
 ## Considered Options
 
-**Keeping it, deliberately.** The map this decision belongs to holds that "keep
-exactly as is" is a valid resolution and that a re-affirmed choice is worth more
-than a churned one. It is refused here not because the picker is large but
-because nothing was found that wanted it: the ADR that built it disqualified its
-own moment, the glossary never learned its name, and its only unique output
-moves for the price of a sort and a column.
+**One command, with a flag deciding the breadth.** The strongest rival, and it
+turns entirely on whether the labeled block survives. If `perch status` were
+`perch list` filtered to one row, the two shapes would be identical and the count
+would follow. It is refused because a table of one row is a worse answer to "which
+Account am I on" than a block is, and because the block is the only shape with room
+to put the Quarantine above the figures. **If the block goes, this decision is
+wrong.**
 
-**Waiting for real use.** This was the plan of record — the question was tracked
-as the one purely empirical item on the map, blocked on a ticket that has not
-been worked. It is decided ahead of that deliberately, on grounds that do not
-need a machine. See the limit below.
+**A breadth flag on `status`.** Refused: it renders the other command's output, and
+after sectioning it renders that command's *first section*.
 
-**A picker that is only a picker.** Refused above: the frame loop is the cost.
+**A Reserve line per Scope under the bare Listing.** Refused above. It is also the
+option that cannot be walked back once scripts and screenshots have seen it —
+narrowed-only is the subset of it, and can be widened later.
+
+**Breaking the bare Listing into per-section tables with headings.** The honest way
+to have Reserve lines everywhere, and a much larger change: it spends the column of
+Accounts the eye runs down.
+
+**Leaving the Reserve unsaid.** The per-Account State and Headroom columns do say
+enough for one person on one machine. Refused because the count is the one thing
+they cannot say: "two of these three are worth switching to" is a fact about the
+set, and reading it off the column is arithmetic the reader does rather than a
+sentence Perch says.
 
 ## Consequences
 
-`perch switch` and `perch switch <target>` are the whole of choosing, and
-`perch list` is the whole of looking. **Perch has no interactive surface left**
-— every command reads its arguments, does its work and exits, which is a
-property worth stating once rather than rediscovering.
+`perch list` is the whole of looking and `perch switch` the whole of choosing.
+Every Account Perch holds appears in exactly one Section, because the Scopes
+partition the registry — every declared Group, then the Accounts in none — and what
+holds that partition up is `load` declaring any Group an Account claims. An Account
+that fell between them would simply not be printed, with nothing anywhere to say
+so.
 
-The `Host` port narrows. `print_remarks`, `remarks`, `RealHost::keeping_its_remarks`,
-the `aloud` cell and the branch in `note` all go; the deduplication `note`
-performs is not the picker's and stays. This is the port getting *smaller*,
-which is the only direction the map allowed it to move.
+The Listing's footer is collected before it is written, so the blank line that
+separates it from the table is decided by whether there is anything down there at
+all rather than by a condition each new sentence has to remember to join.
 
-`ratatui` and `crossterm` leave the dependency set, and with them the note
-explaining why crossterm is named directly — raw mode is process-global state
-and two of them would each think they owned it. Nothing in Perch touches raw
-mode afterwards.
+`out_of_the_running` is shared rather than private: the refusal that nobody can be
+Cycled to and the Reserve that says what is out of the running are the same count
+of the same Accounts.
 
-The command surface loses a name. ADR a-command-names-its-noun is **not**
-amended: one command leaving says nothing about how the remaining ones are
-placed, and its finding stands unchanged. Its arithmetic does move — the sweep
-it describes becomes **18 names to 15**, and its forms 26 to 27.
-
-`docs/guide/tui.md` goes, with its row in the guide's table of contents and its
-entry in the reference. ADR a-suite-is-named-and-gated counted eighteen guide
-rows against nineteen commands; that pairing is unaffected, since the page
-removed here is the one command that had a page to itself.
-
-`CONTEXT.md` is unchanged.
+No exit code changes and no new one is added.

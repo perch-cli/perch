@@ -71,10 +71,9 @@ enum Command {
 
     /// Read and change how Cycling behaves, one Scope at a time.
     ///
-    /// Every setting is reachable from a script, because Perch has to be
-    /// complete over SSH and in CI (ADR perch-does-not-draw). A Setting is said
-    /// about the Scope it governs and there is nothing above them
-    /// (ADR a-setting-names-its-scope), so a `set` is always
+    /// Every Setting is reachable from a script, because Perch has to be
+    /// complete over SSH and in CI. A Setting is said about the Scope it
+    /// governs and there is nothing above them, so a `set` is always
     /// `<scope> <key> <value>` — where a Scope is a Group by name, or
     /// `ungrouped` for the Accounts in no Group.
     ///
@@ -122,7 +121,7 @@ enum Command {
     /// Every Profile, every Credential Perch holds, the registry naming them
     /// and what each Group carries — the counterpart to an Installation, which
     /// is what a Channel left. None of the three takes a Target, because none
-    /// of them is about one Account (ADR the-holdings-go-out-sealed).
+    /// of them is about one Account.
     Holdings {
         #[command(subcommand)]
         action: HoldingsCommand,
@@ -175,11 +174,10 @@ enum Command {
 
     /// Show every Account with its Alias, Group, state and cached Utilization.
     ///
-    /// The one place that answers "what do I have", at every breadth
-    /// (ADR the-listing-owns-the-set): bare it is every Account Perch holds,
-    /// and a Scope narrows it to the Accounts you could Cycle between — where
-    /// you would land before you switch. Renders from cache unless you ask it
-    /// to fetch.
+    /// The one place that answers "what do I have", at every breadth: bare it
+    /// is every Account Perch holds, and a Scope narrows it to the Accounts you
+    /// could Cycle between — where you would land before you switch. Renders
+    /// from cache unless you ask it to fetch.
     List {
         /// Which Accounts to show: a Group by name, or `ungrouped` for the
         /// Accounts in no Group. Without one, every Account Perch holds.
@@ -219,10 +217,9 @@ enum Command {
 
     /// Show the active Account and its cached Utilization.
     ///
-    /// The Account you are on and nothing else (ADR the-listing-owns-the-set) —
-    /// a set of Accounts is `perch list`, at whatever breadth. Renders from
-    /// cache unless you ask it to fetch, so it is cheap enough for a shell
-    /// prompt.
+    /// The Account you are on and nothing else — a set of Accounts is
+    /// `perch list`, at whatever breadth. Renders from cache unless you ask it
+    /// to fetch, so it is cheap enough for a shell prompt.
     Status {
         /// Read current Utilization from Anthropic first.
         ///
@@ -242,8 +239,8 @@ enum Command {
 
     /// Replace this Perch with a newer Release.
     ///
-    /// Through whatever Channel installed it (ADR an-upgrade-asks-its-channel):
-    /// a Homebrew Installation is handed to `brew upgrade perch` and an npm one
+    /// Through whatever Channel installed it: a Homebrew Installation is
+    /// handed to `brew upgrade perch` and an npm one
     /// to `npm update -g perch-cli`, because their binaries are theirs to
     /// replace and writing over one is reverted or thrown away at the next
     /// thing they do. Only a binary the installer script put where it puts them
@@ -291,28 +288,26 @@ enum Command {
 
     /// Cycle on your behalf when the Account you are on runs low.
     ///
-    /// Three arrangements and one behavior (ADR the-machine-runs-the-watcher):
-    /// `run` is a loop you can see and kill, `install` hands that same loop to
-    /// the machine's own service manager, and `check` is one round for a
-    /// scheduler to fire. One of them at a time, and the policy is the same in
-    /// all three.
+    /// Three arrangements and one behavior: `run` is a loop you can see and
+    /// kill, `install` hands that same loop to the machine's own service
+    /// manager, and `check` is one round for a scheduler to fire. One of them
+    /// at a time, and the policy is the same in all three.
     ///
     /// Only the active Account is read, and only within a Scope that has been
     /// told the watcher may act on it — `perch config set <group>
     /// watcher-may-act true` for a Group, or the same for `ungrouped` where
     /// `interchangeable` is on as well, because being interchangeable at all is
-    /// its own yes (ADR a-group-is-a-declaration).
+    /// its own yes.
     Watcher {
         #[command(subcommand)]
         action: WatcherCommand,
     },
 }
 
-/// The exit code a command that either did what it was asked or failed earns.
+/// Nought for having worked, and otherwise whatever the failure earned.
 ///
-/// Every command but `run` is one of those: it worked, or it reported why not
-/// and the failure decides the code. A Run is the exception because it is a way
-/// of launching a program, and what that program said is what Perch says.
+/// A Run is the one command this is wrong for: it launches a program, and what
+/// that program said is what Perch says.
 fn ok(outcome: perch::Result<()>) -> perch::Result<i32> {
     outcome.map(|()| EXIT_OK)
 }
@@ -333,11 +328,9 @@ fn ended_as(outcome: perch::Result<i32>, out: &mut dyn Write) -> i32 {
 
 /// Whether this command line is the bare question "what is installed?".
 ///
-/// Only the bare form, and deliberately: `perch --version` is what a person
-/// types, what a bug report carries and what a formula asserts on. Anything
-/// with a subcommand in it — `perch add --version` — is still clap's to answer
-/// in clap's words, and taking those over here would mean owning a parser
-/// beside the one Perch already has.
+/// Only the bare form. Anything with a subcommand in it stays clap's to answer
+/// in clap's words, because taking those over means owning a second parser
+/// beside the one Perch has.
 fn version_asked_for(typed: &[String]) -> bool {
     matches!(typed, [only] if only == "--version" || only == "-V")
 }
@@ -348,10 +341,9 @@ fn main() {
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
 
-    // Before the parser rather than after it, for the reason
-    // `refuse_a_flag_without_the_separator` is written down at. Lossily, because
-    // it only reads the shape of the words: one that is not text is clap's to
-    // complain about, in clap's words.
+    // Before the parser, for the reason `refuse_a_flag_without_the_separator`
+    // is written down at. Lossily: a word that is not text is clap's to
+    // complain about rather than this line's.
     let typed: Vec<String> = std::env::args_os()
         .skip(1)
         .map(|word| word.to_string_lossy().into_owned())
@@ -364,9 +356,7 @@ fn main() {
 
     // Before the parser, because clap answers `--version` by printing and
     // exiting, and the line underneath it has to come from somewhere with a
-    // Host to ask (ADR an-upgrade-asks-its-channel). What it says is
-    // `upgrade::version_report`'s, so that the shape the Homebrew formula
-    // asserts on is held still somewhere a test can reach.
+    // Host to ask (ADR an-upgrade-asks-its-channel).
     if version_asked_for(&typed) {
         let _ = write!(out, "{}", perch::upgrade::version_report(&host));
         let _ = out.flush();
@@ -390,8 +380,8 @@ fn main() {
             &mut out,
         )),
         // `--unset` needs no reading of its own: clap requires a name unless
-        // `--unset` was passed, and refuses both together, so the name's
-        // absence is exactly the flag.
+        // it was passed and refuses both together, so the name's absence is
+        // exactly the flag.
         Command::Alias {
             target,
             name,
@@ -441,10 +431,8 @@ fn main() {
             ok(status::run(&host, StatusArgs { refresh, json }, &mut out))
         }
         Command::Switch { target } => ok(switch::run(&host, SwitchArgs { target }, &mut out)),
-        // The other whose exit code is not simply Perch's own: what `brew` or
-        // `npm` exited with is what a script reads, because a failed `brew
-        // upgrade` is a failed upgrade and a code of Perch's own would lose
-        // which of `brew`'s failures it was.
+        // What `brew` or `npm` exited with, because a code of Perch's own
+        // would lose which of their failures it was.
         Command::Upgrade {
             release,
             check,
@@ -462,11 +450,9 @@ fn main() {
             },
             &mut out,
         ),
-        // And the fourth, whose code is not simply "it worked" on two of its
-        // five arms: a `check` reports what it decided, so a scheduler can tell
-        // a Switch from a figure that could not be read without parsing the
-        // line (ADR a-watcher-knob-is-arithmetic), and `uninstall` reports 15
-        // for a machine that already had no Service.
+        // A `check` reports what it decided, so a scheduler tells a Switch
+        // from a figure it could not read without parsing the line
+        // (ADR a-watcher-knob-is-arithmetic).
         Command::Watcher { action } => watcher::run(&host, action, &mut out),
     };
 
@@ -480,9 +466,6 @@ fn main() {
 mod tests {
     use super::*;
 
-    /// A Run is the exception every other command is measured against: what the
-    /// client said is what a script reads. Everything else earns nought for
-    /// having worked, and the failure decides the code when it did not.
     #[test]
     fn a_command_that_worked_is_nought_and_one_that_failed_is_its_own_code() {
         assert_eq!(ok(Ok(())).expect("it worked"), EXIT_OK);
@@ -492,9 +475,6 @@ mod tests {
         assert_eq!(refused.exit_code(), perch::error::EXIT_NOT_FOUND);
     }
 
-    /// What Perch exits with, and where a failure is said. Standard output is
-    /// flushed first: a refusal on stderr that overtook the lines the command
-    /// had already printed would read as being about the wrong thing.
     #[test]
     fn what_a_command_ended_as_is_its_code_and_a_failure_says_why_on_the_way_out() {
         let mut out = Vec::new();
@@ -530,9 +510,8 @@ mod tests {
         assert!(command_of(&["perch", "run", "dev", "--"]).is_empty());
     }
 
-    /// The parser stops reading at `--` and hands the rest over whole: flags it
-    /// has of its own, a word with a space in it, and a second `--` that belongs
-    /// to the program's own argument parser rather than to Perch.
+    /// The fixtures are the three shapes that could be read as Perch's: a flag
+    /// it has of its own, a word with a space in it, and a second `--`.
     #[test]
     fn everything_after_the_separator_arrives_as_it_was_typed() {
         assert_eq!(
@@ -545,9 +524,8 @@ mod tests {
         );
     }
 
-    /// The separator is mandatory, and the parser holds that line too: the
-    /// refusal Perch writes itself is a better message for the same rule rather
-    /// than the only thing enforcing it.
+    /// The parser holds this line too, so the refusal Perch writes itself is a
+    /// better message for the same rule rather than the only thing enforcing it.
     #[test]
     fn a_command_without_the_separator_is_not_a_command_line() {
         assert!(Cli::try_parse_from(["perch", "run", "dev", "--resume"]).is_err());
@@ -555,10 +533,9 @@ mod tests {
     }
 
     /// An Import is the exact inverse, so its surface is the same one: a path,
-    /// and nothing that would narrow the restore or answer the passphrase ahead
-    /// of time. There is no `--force` either — a machine that already holds an
-    /// Account is refused rather than merged, and a flag would be the merge
-    /// wearing a shortcut's clothes (ADR the-holdings-go-out-sealed).
+    /// and nothing that would narrow the restore, answer the passphrase ahead of
+    /// time, or turn the refusal to merge into a flag
+    /// (ADR the-holdings-go-out-sealed).
     #[test]
     fn an_import_takes_a_path_and_nothing_else() {
         assert!(Cli::try_parse_from(["perch", "holdings", "import", "/tmp/perch.age"]).is_ok());
@@ -607,11 +584,9 @@ mod tests {
         }
     }
 
-    /// A Purge is never about one Account — that is `perch remove`, which is
-    /// deliberately narrow, and two verbs for one act is exactly the ambiguity
-    /// the shared Alias and Group namespace exists to prevent. So it takes no
-    /// Target, in any of the shapes one could arrive in. `--yes` is the whole of
-    /// the surface, because it is the only question a script can answer.
+    /// The fixtures are the four shapes a Target could arrive in. `--yes` is the
+    /// whole of the surface, because it is the only question a script can
+    /// answer.
     #[test]
     fn a_purge_takes_no_target() {
         assert!(Cli::try_parse_from(["perch", "holdings", "purge"]).is_ok());
@@ -631,11 +606,9 @@ mod tests {
         }
     }
 
-    /// An Upgrade is about the Installation and never about an Account, so
-    /// nothing that would narrow it to one parses. `--json` says what a check
-    /// found, so it does not appear without one — clap enforces that rather
-    /// than the command, because a flag that parses and is then refused is a
-    /// flag the `--help` still advertises as free-standing.
+    /// `--json` says what a check found, so clap refuses it without one rather
+    /// than the command doing so: a flag that parses and is then refused is a
+    /// flag `--help` still advertises as free-standing.
     #[test]
     fn an_upgrade_takes_a_release_and_never_a_target() {
         for line in [
@@ -667,10 +640,6 @@ mod tests {
         }
     }
 
-    /// The bare question and nothing else. `perch --version` is what a person
-    /// types, what a bug report carries and what the Homebrew formula asserts
-    /// on; anything with a subcommand in it stays clap's to answer, because the
-    /// alternative is owning a second parser beside the one Perch has.
     #[test]
     fn only_the_bare_version_question_is_answered_here() {
         for typed in [vec!["--version"], vec!["-V"]] {
@@ -689,12 +658,8 @@ mod tests {
         }
     }
 
-    /// An Export takes everything and has no target: a selective one is a
-    /// partial restore, which is the failure the file exists to prevent wearing
-    /// a feature's clothes. So a path is the whole of the surface — and there
-    /// is no flag carrying a passphrase either, because an argument sits in the
-    /// process table for anything on the machine to read
-    /// (ADR the-holdings-go-out-sealed).
+    /// The fixtures are a Target and the three flags that would narrow an
+    /// Export or answer for it.
     #[test]
     fn an_export_takes_a_path_and_nothing_else() {
         assert!(Cli::try_parse_from(["perch", "holdings", "export", "/tmp/perch.age"]).is_ok());
@@ -741,15 +706,9 @@ mod tests {
         }
     }
 
-    /// The Watcher's five verbs, and the bare names its noun and Holdings took
-    /// over.
-    ///
-    /// The three Holdings forms are claimed by the three tests above, which
-    /// already say what each of them takes. What is left to claim is the tree
-    /// that did not exist before — one noun over three arrangements — and the
-    /// half of `one capability, one name, one place` that no other test can
-    /// make: that the old spelling is *gone*. Nothing is aliased, so every
-    /// command's placement is a decision that can be got wrong.
+    /// The half of *one capability, one name, one place* no other test can
+    /// make: that the spelling a name moved off is **gone**
+    /// (ADR a-command-names-its-noun). Nothing is aliased.
     #[test]
     fn the_watcher_is_five_verbs_and_the_names_they_moved_off_are_not_commands() {
         for line in [
@@ -773,9 +732,8 @@ mod tests {
             &["perch", "purge"],
             &["perch", "watch"],
             &["perch", "service", "install"],
-            // The flag `check` was promoted from, which is the one thing this
-            // move spends: it changes the meaning of the exit code and the
-            // lifetime of the command, so it is a verb and no longer a flag.
+            // A Check changes both the exit code's meaning and the command's
+            // lifetime, so it is a verb rather than a flag on the loop.
             &["perch", "watcher", "run", "--once"],
             // A noun on its own is not a command, and neither is a verb under
             // the wrong one.
