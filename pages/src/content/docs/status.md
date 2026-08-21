@@ -24,15 +24,14 @@ Quarantine said above the figures when there is one, because a broken Credential
 is the news and the numbers are the detail.
 
 Utilization is served from cache with its age shown, so `perch status` is cheap
-enough to put in a shell prompt (ADR 0015). That cheapness is a property of not
-asking for a refresh rather than of this command: `perch list` is exactly as
-cheap.
+enough to put in a shell prompt. That cheapness is a property of not asking for
+a refresh rather than of this command: `perch list` is exactly as cheap.
 
 ## Every Account
 
-`perch list` is the one place that answers it, at every breadth (ADR 0053): every
-Account with its Alias, its Group, whether it is a Cycle candidate, how much
-Headroom it has left and how full each of its Quota Windows is.
+`perch list` is the one place that answers it, at every breadth: every Account
+with its Alias, its Group, whether it is a Cycle candidate, how much Headroom it
+has left and how full each of its Quota Windows is.
 
 ```
 $ perch list
@@ -55,25 +54,23 @@ stopped working — so an Account in both says both.
 
 **Headroom** is what is left in the Account's *worst* Quota Window, which is the
 one honest measure of how much of it you can still spend: being blocked by any
-window blocks you completely (ADR 0012). It is a different figure from the
-Utilization beside it — Utilization is every window, one line each, and Headroom
-is the single number a Cycle sorts on. The Account above has 42% of its 5-hour
-window and 18% of its 7-day one spent, so 58% is left in every one of them.
+window blocks you completely. It is a different figure from the Utilization
+beside it — Utilization is every window, one line each, and Headroom is the
+single number a Cycle sorts on. The Account above has 42% of its 5-hour window
+and 18% of its 7-day one spent, so 58% is left in every one of them.
 
 **The rows come out in the order a Cycle ranks them**, Group by Group, with the
 Group you are standing in first — so the top row of your Group is where a bare
 `perch switch` would land, and the listing and the Switch cannot come to
-disagree about which Account is better (ADR 0049). An Account a Cycle would
-never choose — Disabled, or Quarantined — sorts below every one it would,
-whatever its Headroom says, because where it sits is what says it is out of the
-running.
+disagree about which Account is better. An Account a Cycle would never choose —
+Disabled, or Quarantined — sorts below every one it would, whatever its Headroom
+says, because where it sits is what says it is out of the running.
 
 The Accounts in no Group are the exception: they are listed in the order they
-were added rather than ranked, because nothing has declared them
-interchangeable and a bare `perch switch` refuses among them (ADR 0017). Their
-Headroom is still shown as the figure it is. `perch config set ungrouped
-interchangeable true` is the declaration, and once it is made they are ranked
-like any Group.
+were added rather than ranked, because nothing has declared them interchangeable
+and a bare `perch switch` refuses among them. Their Headroom is still shown as
+the figure it is. `perch config set ungrouped interchangeable true` is the
+declaration, and once it is made they are ranked like any Group.
 
 An Account nobody has ever read a figure for says `never observed` rather than
 `0%` — no figure and plenty of room are opposite pieces of advice. A
@@ -84,9 +81,9 @@ would not repair it.
 
 The reason it broke is written out under the table rather than squeezed into a
 column — one line per broken Account, since the reason is what differs between
-two of them — and `perch relogin` closes the block once, however many are broken
-(ADR 0061): the repair is the same command whatever broke it. Had all three
-Accounts above been Quarantined, the lines under that table would read:
+two of them — and `perch relogin` closes the block once, however many are
+broken: the repair is the same command whatever broke it. Had all three Accounts
+above been Quarantined, the lines under that table would read:
 
 ```
 * is the active Account.
@@ -120,7 +117,7 @@ overflow@example.com (as `overflow`): Anthropic would not renew its Credential.
 
 The Group column goes, because the heading has already answered it. Narrowed to
 the ungrouped, the table says what Cycling will and will not do with them
-unasked (ADR 0017).
+unasked.
 
 **The Reserve is what this Scope has left to draw on**: how many of the Accounts
 a Cycle may choose still have Headroom, and how much the best of them has, with
@@ -138,16 +135,16 @@ or out of the running. And where the count rests on a reading older than the one
 it quotes, a `Read 8h ago at the oldest.` line says so, because a count of
 Accounts rests on all of their readings rather than on the freshest.
 
-Among the ungrouped, the Reserve appears only once you have run `perch config set
-ungrouped interchangeable true`. Until then nothing has declared those Accounts a
-set, and what they have left *between them* is precisely the claim nobody has
-made (ADR 0017) — the same reason they are held rather than ranked.
+Among the ungrouped, the Reserve appears only once you have run `perch config
+set ungrouped interchangeable true`. Until then nothing has declared those
+Accounts a set, and what they have left *between them* is precisely the claim
+nobody has made — the same reason they are held rather than ranked.
 
-**A bare `perch list` says no Reserve** (ADR 0058). It is one table across every
-Scope at once with the Group as a column and no heading to name which Scope a
-sentence would be about, so each line would have to name its own — a heading
-smuggled into a sentence already as wide as a terminal. `--json` is the exception
-and carries one per section, because a section names its Scope in a key.
+**A bare `perch list` says no Reserve**. It is one table across every Scope at
+once with the Group as a column and no heading to name which Scope a sentence
+would be about, so each line would have to name its own — a heading smuggled
+into a sentence already as wide as a terminal. `--json` is the exception and
+carries one per section, because a section names its Scope in a key.
 
 The Scope is named rather than implied, so `perch list` keeps working when Perch
 holds no active Account — which is precisely the state `perch status` sends you
@@ -173,19 +170,19 @@ seven-day one, and one per model — each with how full it is and when it next
 resets.
 
 **A refresh reads the Accounts it is about to show you and no others.** So
-`perch status --refresh` reads the one you are on, `perch list <scope> --refresh`
-reads that Scope's, and `perch list --refresh` reads every Account Perch holds.
-Anthropic allows roughly 28-30 reads an hour per Account and the allowance does
-not refill early (ADR 0015), so nothing spends one on an Account you did not ask
-about.
+`perch status --refresh` reads the one you are on, `perch list <scope>
+--refresh` reads that Scope's, and `perch list --refresh` reads every Account
+Perch holds. Anthropic allows roughly 28-30 reads an hour per Account and the
+allowance does not refill early, so nothing spends one on an Account you did not
+ask about.
 
 Reading an Account's Utilization needs a valid access token for it, so an
 Account whose token has expired has its Credential renewed first — but only when
-no client is running against that Profile (ADR 0005). Anthropic retires a
-refresh token when it issues a new one, so renewing a Credential a running
-Claude Code is holding in memory would log that session out silently, mid-task.
-The Rotated Credential is written back into its own Profile under the same locks
-a Switch takes.
+no client is running against that Profile. Anthropic retires a refresh token
+when it issues a new one, so renewing a Credential a running Claude Code is
+holding in memory would log that session out silently, mid-task. The Rotated
+Credential is written back into its own Profile under the same locks a Switch
+takes.
 
 Nothing about a refresh turns either command into a failure. A throttled read, an
 Account whose Credential Anthropic will not accept, one whose Profile is in use
@@ -256,16 +253,16 @@ and a section whose `order` is `held` is saying that its Accounts are in no
 meaningful order at all — a flat array would have let a script read a ranking out
 of that, which is the one claim this listing exists not to make.
 
-**Every section carries its Scope's `reserve`, at every breadth** — including the
-bare listing, where the table says none (ADR 0058). The table's silence is about
-having nowhere to put the sentence; a section has somewhere, because it names its
-own Scope in a key. As fields rather than the rendered sentence, because a prose
-sentence in a document is a thing scripts end up regexing. The counts are
-over the Accounts a Cycle may choose, so `with_headroom`, `exhausted` and
+**Every section carries its Scope's `reserve`, at every breadth** — including
+the bare listing, where the table says none. The table's silence is about having
+nowhere to put the sentence; a section has somewhere, because it names its own
+Scope in a key. As fields rather than the rendered sentence, because a prose
+sentence in a document is a thing scripts end up regexing. The counts are over
+the Accounts a Cycle may choose, so `with_headroom`, `exhausted` and
 `never_observed` add up to `candidates`, and those plus `out_of_the_running` add
-up to the section's own `accounts`. `best` is one Account's own figure, unrounded
-and named, and `null` where nothing here has Headroom. `oldest_observed_at` is
-the weakest reading the counts rest on.
+up to the section's own `accounts`. `best` is one Account's own figure,
+unrounded and named, and `null` where nothing here has Headroom.
+`oldest_observed_at` is the weakest reading the counts rest on.
 
 `reserve` is `null` where nothing has declared the Scope's Accounts
 interchangeable, saying the same "there is no answer here" the table says by

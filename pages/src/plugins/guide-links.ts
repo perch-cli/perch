@@ -6,18 +6,10 @@ type HastPlugin = NonNullable<SatteriProcessorOptions["hastPlugins"]>[number];
 /**
  * Rewrites the guide's relative markdown links into the paths the site serves.
  *
- * A guide page cross-references its neighbors as `switching.md#cycling`,
- * because the guide is read on GitHub as well as rendered here — one copy of
- * the markdown is what ADR one-thing-renders-the-site promised and
- * ADR one-thing-renders-the-site carried forward, and GitHub resolves that path
- * against the directory the file is in. A browser cannot: the site serves
- * `/perch/switching/`, and nothing on it has an extension.
- *
- * So the two spellings are reconciled here rather than written twice.
- * `tests/publication.rs` asserts the markdown side — that every one of these
- * names a file that exists, and that none of them leaves the guide — and this
- * refuses to guess at anything of another shape, because a link quietly rewritten
- * to somewhere that is not there is what neither side would catch.
+ * A page cross-references its neighbors as `switching.md#cycling`, which GitHub
+ * resolves and a browser cannot (ADR one-thing-renders-the-site). Anything of
+ * another shape is refused rather than guessed at: neither this nor
+ * `tests/publication.rs` would catch a link rewritten to somewhere not there.
  */
 export function rewriteGuideLinks({ base }: { base: string }): HastPlugin {
   const page = /^([a-z0-9-]+)\.md(#.+)?$/;
@@ -30,8 +22,8 @@ export function rewriteGuideLinks({ base }: { base: string }): HastPlugin {
       visit(node, ctx) {
         const href = node.properties?.["href"];
         if (typeof href !== "string" || !href.includes(".md")) return;
-        // A URL is somebody else's to resolve, and several of these pages link to
-        // markdown on GitHub by one — `CONTEXT.md`, the ADRs, the README.
+        // A URL is somebody else's to resolve, and the splash page links to
+        // `CONTEXT.md` on GitHub by one.
         if (href.startsWith("/") || /^[a-z][a-z0-9+.-]*:/i.test(href)) return;
 
         const named = page.exec(href);

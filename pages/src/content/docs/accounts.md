@@ -25,16 +25,14 @@ Utilization   never observed
 
 Adoption leaves that first Account ungrouped, which matters for
 [Cycling](switching.md#cycling): being ungrouped is the *absence* of a
-declaration that Accounts are interchangeable rather than a weaker form of one
-(ADR 0017).
+declaration that Accounts are interchangeable rather than a weaker form of one.
 
 ## Adding an Account
 
 `perch add` gains an Account by running a login in a Profile of its own, so the
-Account you are using stays active and its session is untouched (ADR 0009). It
-says so before the browser opens, which is where that promise is load-bearing,
-and does not say it again afterwards — every Add leaves the active Account
-where it was.
+Account you are using stays active and its session is untouched. It says so
+before the browser opens, which is where that promise is load-bearing, and does
+not say it again afterwards — every Add leaves the active Account where it was.
 
 ```
 $ perch add --group work --alias overflow
@@ -134,8 +132,7 @@ Utilization   never observed
 
 `perch status` is about one Account, so it says both halves on the one line it
 has: what happened, and the command that repairs it. A listing shows a set, so
-there the reason is per Account and the repair is said once beneath all of them
-(ADR 0061).
+there the reason is per Account and the repair is said once beneath all of them.
 
 Cycling never chooses a Quarantined Account, and naming one on `perch switch` is
 refused with exit code 19 rather than making a Credential live that does not
@@ -173,9 +170,9 @@ Cycling still will not choose it — it is disabled, which a repair does not und
 ```
 
 Relogging in the Account you are **on** also makes its fresh Credential the live
-one, because a repair only its own Profile can see would leave the Account broken
-everywhere it is actually used (ADR 0023). A healthy Account may be relogged in
-too — nothing about the command depends on the Quarantine.
+one, because a repair only its own Profile can see would leave the Account
+broken everywhere it is actually used. A healthy Account may be relogged in too
+— nothing about the command depends on the Quarantine.
 
 ## Giving up an Account
 
@@ -196,9 +193,9 @@ else happened do speak: an Account whose Credential Stores held nothing to
 delete, and one whose Credential is shared with another Account and was left
 where it is.
 
-Removing the Account you are **on** is the case that needs care, because the live
-Credential belongs to it. Perch names the Account it will leave active, lands on
-it first, and asks before any of it happens (ADR 0024).
+Removing the Account you are **on** is the case that needs care, because the
+live Credential belongs to it. Perch names the Account it will leave active,
+lands on it first, and asks before any of it happens.
 
 ```
 $ perch remove work

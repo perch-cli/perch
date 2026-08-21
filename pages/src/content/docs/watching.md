@@ -65,12 +65,12 @@ lock back, writes no file of the watcher's own, and leaves you on the Account it
 last Switched to — every time, which is why the line on the way out is one
 word.
 
-**Only the Account you are on is read.** Anthropic allows roughly 28-30 reads
-an hour per Account, and one Account read every two and a half minutes fits
-inside that with room left for the `perch status --refresh` you type while it
-runs. The Accounts it could move to are read at the moment a decision needs
-them and not before — they are idle then by definition, so renewing them costs
-nobody a session (ADR 0005).
+**Only the Account you are on is read.** Anthropic allows roughly 28-30 reads an
+hour per Account, and one Account read every two and a half minutes fits inside
+that with room left for the `perch status --refresh` you type while it runs. The
+Accounts it could move to are read at the moment a decision needs them and not
+before — they are idle then by definition, so renewing them costs nobody a
+session.
 
 **It never acts on a figure it did not just read.** A read that fails holds the
 decision rather than falling back on the cached figure, because a Switch made
@@ -104,9 +104,9 @@ about Anthropic's allowance rather than anybody's preference.
 are on and stands still on the ones you are not, so two Accounts either side of
 the threshold do not trade places — they walk upward together, and every Switch
 costs a Capture and a Credential write to land you somewhere with almost nothing
-left. **The margin is what stops it** (ADR 0046); the cooldown paces what the
-margin has already allowed. Both are fixed, and each is printed when it is what
-decided a round:
+left. **The margin is what stops it**; the cooldown paces what the margin has
+already allowed. Both are fixed, and each is printed when it is what decided a
+round:
 
 - a **margin** of 10 points under the threshold, which nothing is moved to
   unless it clears. At an 80% threshold that means nothing above 70%. A round
@@ -135,13 +135,13 @@ nowhere else — stopping `perch watcher run` and starting it again is you sayin
 one exception, and [it says why below](#watching-on-a-schedule).
 
 What it does when it acts is a Switch and nothing else: the outgoing Credential
-is Captured into its own Profile first (ADR 0006), Claude Code's locks are
-taken, and a Live Profile's token is never Renewed (ADR 0005). Running while
-Claude Code is working is the normal case, not the exception.
+is Captured into its own Profile first, Claude Code's locks are taken, and a
+Live Profile's token is never Renewed. Running while Claude Code is working is
+the normal case, not the exception.
 
 Two things leave it with nothing to do, at the first round or at any round
 after. It **holds** on either rather than exiting — it says what is missing,
-waits, and takes over the moment that changes (ADR 0040):
+waits, and takes over the moment that changes:
 
 ```
 $ perch watcher run
@@ -161,22 +161,21 @@ Accounts substitutable and letting something move between them **while nobody is
 looking** are different things, and among the Accounts in no Group both have to
 be said. A Group needs only the second, because a Group *is* the first.
 
-A `watcher-may-act` is said about the Scope it grants and reaches no other
-(ADR 0051), so letting the watcher into your work Group authorizes that Group and
-nothing else — not the Accounts in no Group, and not a Group you declare
-tomorrow. The price is that there is no one command that withdraws the watcher
-everywhere: it is one per Scope. A brake that worked by blanket inheritance would
-be the wrong brake for consent.
+A `watcher-may-act` is said about the Scope it grants and reaches no other, so
+letting the watcher into your work Group authorizes that Group and nothing else
+— not the Accounts in no Group, and not a Group you declare tomorrow. The price
+is that there is no one command that withdraws the watcher everywhere: it is one
+per Scope. A brake that worked by blanket inheritance would be the wrong brake
+for consent.
 
 Both permissions are read every round rather than only at the first, because
 either can be taken back while the watcher is sleeping. A `perch switch` in
-another terminal that leaves an ungrouped Account active, or a
-`perch config set work watcher-may-act false`, **holds** a watcher that is
-already running: it says what is missing and goes on asking, and starts deciding
-again the moment the grant comes back (ADR 0040). It reads nothing and moves
-nothing while it holds — a grant withdrawn is a watcher that stops *acting*,
-which is what the grant is about, rather than one that stops existing and has to
-be remembered about later.
+another terminal that leaves an ungrouped Account active, or a `perch config set
+work watcher-may-act false`, **holds** a watcher that is already running: it
+says what is missing and goes on asking, and starts deciding again the moment
+the grant comes back. It reads nothing and moves nothing while it holds — a
+grant withdrawn is a watcher that stops *acting*, which is what the grant is
+about, rather than one that stops existing and has to be remembered about later.
 
 `perch watcher check` still exits on it, with the codes below, because a Check
 is one process reporting to a scheduler and the scheduler has to be told.
@@ -185,8 +184,8 @@ is one process reporting to a scheduler and the scheduler has to be told.
 
 `perch watcher install` has your machine run the loop for you, starting when you
 log in — a LaunchAgent on macOS, a `systemd --user` unit on Linux, a Scheduled
-Task on Windows (ADR 0040). It is the *same loop*, supervised: same interval,
-same policy, same decision log. Perch writes the unit and hands the job over.
+Task on Windows. It is the *same loop*, supervised: same interval, same policy,
+same decision log. Perch writes the unit and hands the job over.
 
 ```
 $ perch watcher install
@@ -236,9 +235,9 @@ Service at the new binary by itself, and says so if it could not.
 
 `perch watcher check` takes one round and exits, saying what it decided in its
 exit code. That is the whole of what an unattended watcher needs, because
-scheduling is the operating system's job (ADR 0013): cron and systemd timers
-already run things at an interval, keep them from overlapping, and capture what
-they printed.
+scheduling is the operating system's job: cron and systemd timers already run
+things at an interval, keep them from overlapping, and capture what they
+printed.
 
 Pick this *or* a Service, not both: a Check that finds a Watcher running exits
 `20` and does nothing, so a machine with both gets a cron mailbox full of them.

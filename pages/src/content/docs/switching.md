@@ -20,15 +20,15 @@ Switched to overflow@example.com (as `overflow`).
 Utilization   5-hour    12%  (as of 4m ago)
 ```
 
-It is three steps in one order and never another (ADR 0006). The Credential you
-are leaving is **Captured** back into its own Profile first, because Anthropic
-retires a refresh token whenever it issues a new one — so the copy in an
-Account's Profile is several Rotations behind by the time you switch away, and
-skipping the Capture would quietly poison the Account you are leaving. Then the
-incoming Credential is written to the Default Profile. Then the `oauthAccount`
-block of `.claude.json` is patched to match, and only that block: your project
-history, MCP configuration and settings live in the same file and belong to you
-rather than to the Account (ADR 0001).
+It is three steps in one order and never another. The Credential you are leaving
+is **Captured** back into its own Profile first, because Anthropic retires a
+refresh token whenever it issues a new one — so the copy in an Account's Profile
+is several Rotations behind by the time you switch away, and skipping the
+Capture would quietly poison the Account you are leaving. Then the incoming
+Credential is written to the Default Profile. Then the `oauthAccount` block of
+`.claude.json` is patched to match, and only that block: your project history,
+MCP configuration and settings live in the same file and belong to you rather
+than to the Account.
 
 The Capture happens on every Switch, without exception, which is why no Switch
 says that it did. What a Switch says is what you could not have predicted:
@@ -57,7 +57,7 @@ running it again finishes the job.
 
 `perch switch` with no target picks the Account for you. It is the command you
 type mid-task when quota just ran out, so it asks nothing, under any
-circumstances (ADR 0011).
+circumstances.
 
 ```
 $ perch switch
@@ -71,12 +71,12 @@ subscription running dry does not land you on your personal Account. `perch
 switch <group>` Cycles within a Group you name instead.
 
 Each Account is ranked by its **worst** Quota Window, and the Account whose
-worst is best wins (ADR 0012). Being blocked by any window blocks you
-completely, so that is the only ranking that measures what actually stops you
-working: the headroom Perch reports is true of every one of that Account's
-windows. Exhausted, disabled and Quarantined Accounts are never chosen, and an
-Account nobody has ever read a figure for is ranked below every Account that
-has one — no figure and plenty of room are opposite pieces of advice.
+worst is best wins. Being blocked by any window blocks you completely, so that
+is the only ranking that measures what actually stops you working: the headroom
+Perch reports is true of every one of that Account's windows. Exhausted,
+disabled and Quarantined Accounts are never chosen, and an Account nobody has
+ever read a figure for is ranked below every Account that has one — no figure
+and plenty of room are opposite pieces of advice.
 
 How headroom is measured is fixed; which Account to prefer is the Group's to
 say. `perch config set <group> strategy soonest-reset` makes a Cycle take the
@@ -90,14 +90,12 @@ old. Landing on an Account that turns out fuller than they implied is the cache
 being stale rather than the Switch going wrong — which is what the age beside
 every figure is for, and `perch status --refresh` reads a current one. The
 landing line says which Account was chosen and what it was chosen on; the
-argument for why it beat the others is not something a Switch owes you (ADR
-0061).
+argument for why it beat the others is not something a Switch owes you.
 
 Three outcomes are honest non-outcomes. They perform no Switch, explain
 themselves, and exit with a code of their own rather than pretending to have
 worked. They are also the one place a Cycle is wordy on purpose: nothing
-happened, you cannot see why from the outside, and the next step is not obvious
-(ADR 0061).
+happened, you cannot see why from the outside, and the next step is not obvious.
 
 ```
 $ perch switch
@@ -112,7 +110,7 @@ you@example.com is in no Group, so nothing has declared which Accounts it is int
 Either put it in a Group with `perch group move you@example.com <group>`, or declare that every ungrouped Account is interchangeable with `perch config set ungrouped interchangeable true`.   # exit 18
 ```
 
-That last one is ADR 0017. An Account need not be in a Group — adoption leaves
+That last one is not a gap. An Account need not be in a Group — adoption leaves
 the first one ungrouped — but being ungrouped is the *absence* of a declaration
 that Accounts are interchangeable, not a weaker form of one. So bare `perch
 switch` Cycles among ungrouped Accounts only once that Scope has been declared

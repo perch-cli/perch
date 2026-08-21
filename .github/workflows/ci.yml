@@ -228,9 +228,9 @@ jobs:
 
   # Built on every pull request, for the same reason the installers are checked
   # on one, and what it proves is the *next* release's site rather than the one
-  # being served (ADR one-thing-renders-the-site). What gives it teeth is what
-  # Starlight refuses: a page with no `title`, and a relative link naming a page
-  # that is not there. The rest of it is `tests/publication.rs`.
+  # being served (ADR one-thing-renders-the-site). What the build refuses is a
+  # page with no `title` and a markdown link of a shape the site cannot serve;
+  # whether a link lands is `tests/publication.rs`.
   site:
     runs-on: ubuntu-latest
     timeout-minutes: 10

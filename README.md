@@ -132,29 +132,24 @@ from them:
 
 - **Utilization is served from cache**, with the age of every figure shown.
   `--refresh` is the one thing that fetches, so both `perch status` and
-  `perch list` are cheap enough to sit in a shell prompt
-  (ADR a-figure-carries-its-age).
+  `perch list` are cheap enough to sit in a shell prompt.
 - **A Group is a declaration that Accounts are interchangeable.** Cycling never
   leaves the Group it started in, so a work subscription running dry does not
-  land you on your personal Account (ADR a-group-is-a-declaration).
+  land you on your personal Account.
 - **An Account is ranked by its worst Quota Window.** Being blocked by any
   window blocks you completely, so that is the only ranking that measures what
-  actually stops you working — and there is no pooled total, anywhere
-  (ADR headroom-is-the-worst-window).
+  actually stops you working — and there is no pooled total, anywhere.
 - **The Credential you leave is Captured first.** Anthropic retires a refresh
   token whenever it issues a new one, so a Switch that skipped this would
-  quietly poison the Account you were leaving
-  (ADR a-switch-is-written-down-first).
+  quietly poison the Account you were leaving.
 - **Nothing is written into a Profile a client is running against.** Renewing a
   Credential Claude Code is holding in memory would log that session out
-  mid-task (ADR a-profile-is-live-by-evidence).
+  mid-task.
 - **An Account that breaks is Quarantined, never dropped.** It stays listed and
-  named with the reason, and `perch relogin` repairs it in place
-  (ADR a-broken-account-is-repaired).
+  named with the reason, and `perch relogin` repairs it in place.
 - **Nothing is interactive.** Every command reads its arguments, does its work
   and exits, so Perch is complete over SSH, in scripts and in CI — and the
-  ranking a Cycle makes is shown by `perch list` rather than drawn
-  (ADR perch-does-not-draw).
+  ranking a Cycle makes is shown by `perch list` rather than drawn.
 
 ## Guides
 

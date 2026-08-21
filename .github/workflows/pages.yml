@@ -1,44 +1,23 @@
 name: Pages
 
 # Builds and serves https://perch-cli.github.io/perch/ — the front page, the
-# guide, and the installers (ADR one-thing-renders-the-site).
+# guide, and the installers.
 #
-# `pages/` is an Astro and Starlight project that renders the splash page and the
-# guide together, and `pages/public/` is copied to the root of the output verbatim.
-#
-# Two things are published here and they do not answer to the same clock, which
-# is the whole shape of this file (ADR one-thing-renders-the-site). The guide
-# describes a Perch somebody can install, so it comes from the newest release
-# and moves when `release.yml` calls this workflow. The installers are pasted
-# into terminals from a URL with no version in it, so they come from `main` and
-# move when a merge fixes one — an installer that had to wait for a release
-# would stay broken until then.
-#
-# So a run checks out the release, then puts `main`'s `pages/public/` back on top,
-# and what it deploys is the release's site carrying the current installers. Every
-# way in produces that same whole site: the push trigger exists so an installer fix
-# reaches the URL it is pasted from without waiting, and it is the assembly rather
-# than the trigger that decides what goes out.
+# The two halves keep different time, which is the whole shape of this file
+# (ADR one-thing-renders-the-site): the guide comes from the newest release, the
+# installers from `main`. So a run checks out the release, puts `main`'s
+# `pages/public/` back on top, and deploys the release's site carrying the
+# current installers. Every way in produces that same whole site — it is the
+# assembly rather than the trigger that decides what goes out.
 on:
-  # A release publishes the guide, and it does so by `release.yml` calling this
-  # workflow rather than by an event of its own. That is not a stylistic choice:
-  # `release.yml` creates the Release with GITHUB_TOKEN, and GitHub will not start
-  # a workflow from an event that token made — the same rule release-plz.yml
-  # documents about pushes, and the reason the tag it pushes needs a real token. A
-  # `release: [published]` trigger here would have sat there looking correct and
-  # never once fired.
-  #
-  # Being called rather than triggered also puts this after the Release's
-  # artifacts are uploaded, so the guide never describes a Perch that cannot yet
-  # be downloaded — which is the whole claim of ADR one-thing-renders-the-site.
+  # Called by `release.yml` rather than triggered by the Release it creates:
+  # GitHub will not start a workflow from an event GITHUB_TOKEN made, so a
+  # `release: [published]` trigger here would look correct and never fire. Being
+  # called also puts this after the artifacts are uploaded.
   workflow_call:
   # The installers, and nothing else. This file is deliberately not among the
-  # paths: what a run publishes is the release's site carrying `main`'s two
-  # installers, so a change to how that is assembled changes neither, and a run
-  # that republishes an identical artifact spends a live deployment on the thing
-  # that serves those installers. Applying a fix to the assembly is what
-  # `workflow_dispatch` is for, and a fix worth applying is one somebody is
-  # watching.
+  # paths: a change to how the two halves are assembled changes neither of them,
+  # so the run would spend a live deployment republishing an identical artifact.
   push:
     branches: [main]
     paths:
@@ -84,11 +63,9 @@ jobs:
         id: main
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      # The newest release that carries a site, which is not always the newest
-      # release: the site moved into `pages/` after v0.2.0 was cut, so until the
-      # first release containing it, the answer is `main` and this says so out
-      # loud. It is a rule rather than a stopgap — a repository whose tags have all
-      # been deleted gets the same sensible answer.
+      # The newest release that *carries a site*, which is not always the newest
+      # release. Where no tag does, the answer is `main` and this says so out loud
+      # rather than failing — a rule, not a stopgap.
       - name: Which Perch the guide describes
         id: source
         run: |
@@ -141,13 +118,9 @@ jobs:
         working-directory: pages
         run: pnpm build
 
-      # What the deployment is for, asserted before it becomes the live one. The
-      # installers first, because they are the promise that predates the guide:
-      # `public/` lands at the root, and nothing about how the pages are rendered
-      # is allowed to move them.
-      #
-      # The last two are what says the guide was rendered at all, so a release
-      # whose `pages/` is somehow empty fails here rather than replacing the site
+      # The installers first, because they are the promise that predates the
+      # guide. The last two say the guide was rendered at all, so a release whose
+      # `pages/` is somehow empty fails here rather than replacing the live site
       # with two shell scripts.
       - name: The installers are where they are pasted from
         working-directory: pages

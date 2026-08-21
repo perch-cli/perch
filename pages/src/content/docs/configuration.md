@@ -6,7 +6,7 @@ sidebar:
 
 `perch config` changes the rules Perch chooses Accounts by, and asks nothing:
 every capability Perch has is reachable from a script, because it has to be
-complete over SSH and in CI (ADR 0011).
+complete over SSH and in CI.
 
 ## The Settings
 
@@ -20,11 +20,11 @@ complete over SSH and in CI (ADR 0011).
 ## A Setting is said about the Scope it governs
 
 A **Scope** — each Group, and the Accounts in no Group taken together — holds
-its own full Settings, and there is nothing above it (ADR 0051). A Setting
-nobody has said anything about is the compiled-in default rather than somebody
-else's value, and an Account carries nothing at all: every Setting there is
-describes how Perch chooses *between* Accounts, and a rule for choosing has
-nothing to say to a set of one.
+its own full Settings, and there is nothing above it. A Setting nobody has said
+anything about is the compiled-in default rather than somebody else's value, and
+an Account carries nothing at all: every Setting there is describes how Perch
+chooses *between* Accounts, and a rule for choosing has nothing to say to a set
+of one.
 
 So every `set` names its subject: `perch config set <scope> <key> <value>`. One
 that names no Scope is refused, because a rule with no subject is a rule about
@@ -65,9 +65,8 @@ clear — a value is simply set to what it should be. (`perch alias <target>
 
 A Scope is a Group by name, or `ungrouped` for the Accounts in no Group — which
 are a Scope so that there is somewhere to say how they are Cycled, and never a
-Group: a Group is a declaration somebody made, and this is the absence of one
-(ADR 0017). No Group can be called `ungrouped`, or the Scope would answer to the
-name first.
+Group: a Group is a declaration somebody made, and this is the absence of one.
+No Group can be called `ungrouped`, or the Scope would answer to the name first.
 
 `global` is refused as a Group name and as an Alias too, for a different reason:
 it is the word people reach for when they mean *everywhere*, and there is no
@@ -91,8 +90,8 @@ The **strategy** is which Account a Cycle prefers when more than one would
 serve. `most-headroom` takes the one with the most room left; `soonest-reset`
 takes the one whose fullest Quota Window comes back soonest, so quota that was
 about to be thrown away is spent rather than wasted. How headroom is *measured*
-is not configurable — it is always the worst window (ADR 0012) — so a strategy
-reorders the Accounts that have room and can never promote an exhausted one.
+is not configurable — it is always the worst window — so a strategy reorders the
+Accounts that have room and can never promote an exhausted one.
 
 A strategy says which figure to prefer, not which figures to invent. Cached
 figures do not always carry a reset time, and `soonest-reset` ranks an Account
@@ -108,18 +107,19 @@ is off by default because a Scope only ever changes underneath you because you
 said it could. It is said about the Scope it grants and reaches no other, so a
 Group declared afterwards is a Group nobody has said anything about — and there
 is no one command that withdraws the watcher everywhere, which is the price of
-consent that cannot arrive by inheritance (ADR 0051). `watcher-threshold-percent` is how much of the fullest Quota
-Window of the Account you are on has to be used before it moves you. Neither of
-them starts a Watcher: they take effect while one is running — the loop in a
-terminal, a Service, or a scheduled Check — and not otherwise.
+consent that cannot arrive by inheritance. `watcher-threshold-percent` is how
+much of the fullest Quota Window of the Account you are on has to be used before
+it moves you. Neither of them starts a Watcher: they take effect while one is
+running — the loop in a terminal, a Service, or a scheduled Check — and not
+otherwise.
 
 Taking `watcher-may-act` back does not stop a Watcher that is already running.
 It **holds** it: it reads nothing and moves nothing, says what is missing, and
-starts deciding again the moment the grant comes back (ADR 0040). The grant is
-about whether it may *act*, and a held Watcher is not acting.
+starts deciding again the moment the grant comes back. The grant is about
+whether it may *act*, and a held Watcher is not acting.
 
-**How full is too full is the only preference in the loop** (ADR 0046). The
-three numbers beside it are arithmetic, so they are fixed rather than offered:
+**How full is too full is the only preference in the loop**. The three numbers
+beside it are arithmetic, so they are fixed rather than offered:
 
 - How often it **reads** — two and a half minutes, derived from Anthropic's
   allowance of ~28-30 reads an hour rather than from anyone's taste. A Group
