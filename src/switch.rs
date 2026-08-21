@@ -652,9 +652,7 @@ pub fn already_landed(host: &dyn Host, installed: &Installed, account: &Account)
 /// one Account while Claude Code displays the other. `perch remove` does not
 /// ask, because it is the way out.
 pub fn refuse_a_shared_profile(account: &Account, registry: &Registry) -> Result<()> {
-    let Some(sharer) = registry.accounts.iter().find(|held| {
-        held.email() != account.email() && registry::same_profile(held.email(), account.email())
-    }) else {
+    let Some(sharer) = registry::sharing_a_profile_with(registry, account) else {
         return Ok(());
     };
     Err(PerchError::Conflict(format!(

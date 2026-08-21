@@ -423,12 +423,7 @@ struct Asked {
 /// with the Account being **left** — off which figures land under the wrong address.
 fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<Asked> {
     let its_own_profile = account.profile_dir(host)?;
-    let shares_its_profile_with = registry
-        .accounts
-        .iter()
-        .find(|held| {
-            held.email() != account.email() && registry::same_profile(held.email(), account.email())
-        })
+    let shares_its_profile_with = registry::sharing_a_profile_with(registry, account)
         .map(|held| held.email().to_string());
     let settled_on_it = matches!(
         registry.active(),

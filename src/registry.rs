@@ -1328,6 +1328,17 @@ pub fn same_profile(one: &str, other: &str) -> bool {
     slug(one) == slug(other)
 }
 
+/// The other Account a Profile belongs to as well, where there is one.
+///
+/// Three commands ask it — a Switch, a Renewal and a Remove — and each spelled
+/// its own scan, two of them comparing addresses by bytes where the third folded
+/// case. Beside [`same_profile`], for the reason that already lives there.
+pub fn sharing_a_profile_with<'a>(registry: &'a Registry, account: &Account) -> Option<&'a Account> {
+    registry.accounts.iter().find(|held| {
+        !same_name(held.email(), account.email()) && same_profile(held.email(), account.email())
+    })
+}
+
 pub fn slug(email: &str) -> String {
     let slugged: String = email
         .to_lowercase()

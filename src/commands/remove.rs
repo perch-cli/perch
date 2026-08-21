@@ -353,10 +353,7 @@ fn delete_the_credential_and_its_profile(
     // Two Accounts whose addresses slug to one directory share a Credential
     // Store, so deleting it would take the Credential of an Account nobody asked
     // to give up. The Account is still forgotten; the outcome says which.
-    if let Some(sharer) = registry.accounts.iter().find(|held| {
-        !registry::same_name(held.email(), account.email())
-            && registry::same_profile(held.email(), account.email())
-    }) {
+    if let Some(sharer) = registry::sharing_a_profile_with(registry, account) {
         return Ok(Deleted::NothingSharedWith(
             registry.named_for_the_user(sharer.email()),
         ));
