@@ -21,12 +21,10 @@ fn repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// Where a number is a record rather than a citation, and where one is a
-/// citation nothing has converted yet.
-///
-/// `CHANGELOG.md` and the ADR inventory both say what was true on a date, so a
-/// number in either may name a document that is gone. The guide loses its `ADR`
-/// mentions outright rather than gaining slugs.
+/// Where a number is a record rather than a citation. `CHANGELOG.md` and the
+/// ADR inventory both say what was true on a date, so a number in either may
+/// name a document that is gone; the guide loses its `ADR` mentions outright
+/// rather than gaining slugs.
 fn exempt(path: &Path) -> bool {
     let relative = path.strip_prefix(repo()).unwrap_or(path);
     relative == Path::new("CHANGELOG.md")

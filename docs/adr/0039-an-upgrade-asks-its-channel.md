@@ -178,8 +178,8 @@ has to be true, explained and bounded, and it buys a line of text.
 So the request happens when a human types the command, or not at all:
 
 - suppressed when stdout is not a terminal, so scripts, CI, the Homebrew
-  formula's test block and a Dogfood phase launching `perch --version` as an
-  inner client are all untouched;
+  formula's test block and a `perch run` launching an inner client are all
+  untouched;
 - capped at two seconds and abandoned in silence on any failure, so a machine
   with no network, no `curl` or a slow one loses a line and nothing else;
 - switched off entirely by `PERCH_NO_UPGRADE_CHECK`, checked before the request

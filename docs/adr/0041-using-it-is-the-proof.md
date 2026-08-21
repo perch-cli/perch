@@ -1,155 +1,114 @@
 # Using it is the proof
 
-> **Carried out in #148.** This ADR is the artifact of a planning effort rather
-> than of a change, so it landed ahead of the work it describes instead of
-> beside it — a departure from this repo's habit of shipping an ADR with its
-> implementation. The tree now matches it: the subsystem repealed below is gone.
+There is no suite standing in for somebody living with Perch. What such a suite
+would have proved, use proves better and sooner, and what use does not reach is
+smaller than it looks and named here rather than covered.
 
-ADR the-binary-proves-its-surface built a suite that runs on real machines and
-proves only what each one holds. ADR using-it-is-the-proof changed what a Phase
-is, so a person could be asked to walk a login while Perch kept the judging to
-itself. Both are repealed here, and the subsystem they describe —
-`src/dogfood.rs`, `src/dogfood/phases.rs`, `src/bin/dogfood-setup.rs`,
-`tests/dogfood.rs`, the `dogfood` feature and the CI job that exercises it — is
-to be removed entire.
+## What use closes, and what it does not
 
-Nothing about the reasoning in either ADR turned out to be wrong. What changed
-is that the thing the suite was a model of became available.
+Four things no fake-driven suite reaches, taken one at a time against somebody
+actually living with the tool:
 
-## What Dogfood was for, and what arrived instead
-
-ADR the-binary-proves-its-surface named four things nothing proved: argv and the
-exit codes and every rendered line; `add` then `switch` then `run` then `status`
-in sequence over real bytes; a real token renewed by Anthropic; a real client
-launched against a Profile. The suite existed because a person using Perch was
-hypothetical, and the only way to get at those four was to write down what such
-a person would do.
-
-A person using Perch is no longer hypothetical. Taken one at a time against
-somebody actually living with the tool:
-
-- **The sequence over real bytes** closes completely. That is not a simulation of
-  daily use; it *is* daily use.
-- **A real client accepting what Reconcile built** closes completely, and faster.
-  Claude Code either starts against the Profile or it does not, and the person
-  finds out inside a second.
+- **`add`, then `switch`, then `run`, then `status` in sequence over real
+  bytes** closes completely. That is not a simulation of daily use; it *is*
+  daily use.
+- **A real client accepting what Reconcile built** closes completely, and
+  faster. Claude Code either starts against the Profile or it does not, and the
+  person finds out inside a second.
 - **argv, exit codes and rendered lines** do not close at all — nobody notices a
-  broken `conflicts_with` or an unmapped exit code by using a tool correctly. But
-  these were never Dogfood's to hold: they need a suite that drives the binary,
-  and they are decided elsewhere.
-- **A Renewal filed** closes halfway, and the half that is left is small enough
-  to state exactly. It is stated below.
+  broken `conflicts_with` or an unmapped exit code by using a tool correctly.
+  They need a suite that drives the binary, which is
+  ADR the-binary-proves-its-surface's.
+- **A Renewal filed** closes halfway, and the half that is left is stated
+  exactly below.
 
-So the suite is not being traded for nothing. It is being traded for the thing it
-was built to stand in for, and a stand-in loses to what it stands in for.
+**This is paid for by the commitment to actually use Perch**, and that is the
+honest dependency rather than a hedge on it. If nobody lives with the tool, the
+first two are covered by neither use nor a suite, and this is a straight loss
+rather than a trade.
 
 ## Why there is no reduced core
 
-The tempting middle is to keep the one or two phases that reach furthest and drop
-the rest. It is refused, because it buys almost nothing and costs almost
-everything.
+The tempting middle is a harness keeping the one or two phases that reach
+furthest. It is refused, because the cost of such a subsystem is the machinery
+rather than the phases: a Preflight, a Marker and the wizard that writes it,
+`Needs`, `Halt`, `Setback`, `Attempt`, `Outcome`, `Run`, a report writer and an
+attendance opt-in — most of the lines, and every one of the glossary entries.
 
-Of roughly 4,290 lines of production code, the ten phases are 1,466. The other
-2,800 are the Preflight, the Marker and the wizard that writes it, `Needs`,
-`Halt`, `Setback`, `Attempt`, `Outcome`, `Run`, the report writer and the
-attendance opt-in. Every one of the seven `CONTEXT.md` entries and both of the
-superseded ADRs describe *that* machinery, not the phases. A Renewal-only core
-would shed nine phases, save under a third of the lines, and keep the entire
-vocabulary — a person would still have to hold Preflight, Phase, Phase zero,
-Attended, Attestation and Marker in their head to read the repo.
-
-Judged by conceptual surface, which is the yardstick, the reduced core is the
-worst of the three options rather than the moderate one. A subsystem's cost here
-is what it makes a reader learn, and that cost is the same at one phase as at
-ten. So the choice is binary, and it goes the whole way.
+Judged by conceptual surface, which is the yardstick, a reduced core is the
+worst of the options rather than the moderate one. A subsystem's cost here is
+what it makes a reader learn, and that cost is the same at one phase as at ten.
+So the choice is binary, and it goes the whole way.
 
 ## What is actually lost
 
-One thing, and it is worth being exact rather than reassuring.
+One thing, and it is worth being exact rather than reassuring: nothing in the
+repository watches a real refresh token go to Anthropic and then reads what
+Perch did with the answer. Real use provokes Renewals constantly and inspects
+none of them.
 
-The phase `a Renewal is asked of Anthropic and what comes back is filed` is the
-only assertion in the repo that watches a real refresh token go to Anthropic and
-then reads what Perch did with the answer. Real use provokes Renewals constantly
-but inspects none of them.
+Three things make the loss affordable.
 
-Three things make the loss affordable:
+Such an assertion is **opportunistic by construction**. A Renewal only reaches
+Anthropic once the access token has actually run out, so it proves something
+only on a machine whose token has already gone stale — one sample, taken when
+somebody had an evening free.
 
-It was always opportunistic. The phase returns `Halt::not_here` wherever
-`credential.usable_at(now)` — a Renewal only reaches Anthropic once the access
-token has actually run out, so the phase proved something only on a machine
-whose token had already gone stale. ADR using-it-is-the-proof accepted this and
-turned the Preflight's figure into a ceiling because of it. A suite run is one
-sample, taken when somebody had an evening free.
+**Real use takes far more samples.** Every stale token in a working week is a
+real Renewal against real Anthropic, and there are more of them in a month of
+use than in every suite run that would realistically ever be performed.
 
-Real use takes far more samples. Every stale token in a working week is a real
-Renewal against real Anthropic, and there are more of them in a month of use than
-in every Dogfood run that would realistically ever be performed.
-
-And its failures are loud. A Renewal filed wrongly is not a quiet wrong answer —
+**Its failures are loud.** A Renewal filed wrongly is not a quiet wrong answer;
 it is the next command failing. A renewed credential that never lands leaves a
-stale token that simply renews again, which is harmless. A `RotationLost` reaches
-the person as a Quarantine with `relogin` printed beside it. There is no silent
-corruption here for a phase to be the only witness to.
+stale token that simply renews again, which is harmless. A `RotationLost`
+reaches the person as a Quarantine with `relogin` printed beside it. There is
+no silent corruption here for an assertion to be the only witness to.
 
-## Two ideas released on purpose
+## Two problems a harness that asks a person will meet again
 
-The Preflight's figure and the Attested/asserted distinction are the best things
-in the two superseded ADRs, and they are released rather than migrated. They are
-written down here because releasing an idea and forgetting one should not leave
-the same trace.
+Both are answers to questions only a suite creates, so neither has a subject
+now. They are written down because a future harness that asks a person to do
+anything meets both, and neither should have to be rediscovered.
 
-**The figure** answers: *how does a suite that can only run part of itself avoid a
-green run that quietly proved a third of what it was asked to?* By counting what
-this machine can prove and saying the number out loud before anything acts, so a
-skip is a number rather than a line somebody scrolls past.
+**How does a suite that can only run part of itself avoid a green run that
+quietly proved a third of what it was asked to?** By counting what this machine
+can prove and saying the number out loud before anything acts, so a skip is a
+number rather than a line somebody scrolls past. The general form of that rule
+survives without the suite, in ADR a-suite-is-named-and-gated.
 
-**Attested versus asserted** answers: *how do you ask a person to perform a step
-without letting the verdict become a keystroke?* By letting a Phase ask a human to
-*do* things and never to *decide* whether it passed — and where Perch structurally
-cannot see, by recording the answer as attested, so a line somebody vouched for
-and a line Perch established never read alike a week later.
+**How do you ask a person to perform a step without letting the verdict become
+a keystroke?** By letting them *do* things and never *decide* whether it
+passed. A verdict that is a keystroke cannot be told apart from a `y` typed to
+get out of the way, on the fourth browser round trip, at eleven at night — and
+it is precisely the fourth round trip at eleven at night that such a suite gets
+run on. Where the answer genuinely cannot be read off disk, it is recorded as
+*attested* rather than asserted, so a line somebody vouched for and a line
+Perch established never read alike a week later.
 
-Both questions are created by the suite. With no suite there is no partial run to
-be honest about and no human-performed step to keep honest, so neither answer has
-a subject any more. Nor can a binary-driving suite inherit the figure: it has no
-machine-dependent capability, so there would be nothing for the Preflight to
-count. If a future harness recreates either problem, the answer is here already
-and should not be rediscovered.
+That second answer has a corollary about attendance which outlives it too:
+**detection alone is not enough, because a terminal is not a person.**
+`Host::is_interactive` asks whether this process's two ends are ttys, and that
+has a yes on plenty of machines nobody is sitting at — a scheduler under a pty,
+an SSH session somebody walked away from, a `tmux` pane left open upstairs.
+Being there is a claim only a person can make, so it is opted into and then
+checked: the flag is what says somebody is present, and the tty check is what
+refuses an opt-in nothing could answer, turning a stall in the middle of a run
+into a refusal at the top of it.
 
-## Marker is freed
+## Marker names the session marker
 
-The glossary currently gives **Marker** to the receipt `dogfood-setup` writes.
-Meanwhile the concept that matters to the product — the session marker naming
-the process that wrote it, which ADR a-profile-is-live-by-evidence corroborates
-a Live Profile with, and which `probe.rs` calls `Marker` in code — has to go
-around the glossary in lowercase. The good noun is held by the throwaway and the
-load-bearing idea is unnamed.
-
-Removing the suite frees the word, and **Marker** becomes the session marker. This
-is a conceptual-surface gain independent of the line count, and it is the reason
-the removal makes the vocabulary better rather than merely smaller.
+The word belongs to the session marker naming the process that wrote it — the
+thing ADR a-profile-is-live-by-evidence corroborates a Live Profile with, and
+what `probe.rs` calls `Marker` in code. A harness receipt holding the good noun
+while the load-bearing idea goes around the glossary in lowercase is the wrong
+way round, and this is a conceptual-surface gain independent of any line count.
 
 ## Consequences
 
-Seven `CONTEXT.md` entries go — Dogfood, Preflight, Phase zero, Marker, Phase,
-Attended, Attestation — and **Marker** is rewritten for the session marker.
-The **Repair** entry loses its Phase-zero clause; Repair itself is untouched,
-because `perch relogin` was always the product feature and phase zero only ever
-borrowed it.
+`Host::is_interactive` stays. It is used by `add`, `remove`, `purge` and
+`upgrade`, and the reasoning above about attendance is what a harness would
+need rather than what those commands need.
 
-`Host::is_interactive` stays. ADR using-it-is-the-proof's reasoning about
-attendance was Dogfood-specific, but the primitive is used by `add`, `remove`,
-`purge`, `tui` and `upgrade`, and none of that changes.
-
-The repo is left with no test that drives `perch` as a process. That was already
-true in every way that counts — the suite was feature-gated, attended and never
-run unattended — but it is now true without qualification, and it makes the
-argv-and-exit-codes question sharper rather than softer for whoever answers it
-next. This ADR deliberately does not answer it.
-
-**This decision is paid for by the commitment to actually use Perch.** That is
-the honest dependency. If nobody lives with the tool, the four gaps of
-ADR the-binary-proves-its-surface are not covered by real use *or* by a suite,
-and this ADR is a straight loss rather than a trade. The removal should not be
-read as a claim that the four gaps stopped mattering — only that a better
-instrument for three of them became available.
+`CONTEXT.md` holds no entry for a harness, a Preflight, a Phase, an Attendance
+or an Attestation. **Repair** is a product feature — `perch relogin` — rather
+than a step in a suite that borrowed it.

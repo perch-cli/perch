@@ -1,210 +1,202 @@
 # A suite is named and gated
 
-> **Carried out in #158.** Like ADR using-it-is-the-proof,
-> ADR perch-does-not-draw and ADR the-binary-proves-its-surface, this is the
-> artifact of a planning effort rather than of a change, so it landed ahead of
-> the work it describes instead of beside it. The tree now matches it: the three
-> files carry the names below, and the rule about where a test lives is in
-> `tests/common/mod.rs`'s header.
+`tests/` slightly outweighs what it tests, and reads as far worse than that
+because the count everybody reaches for is the wrong one. Once that is fixed
+there is no size question left — only a shape one, and three rules answer it:
+what a suite asserts, what its file is called, and whether it may run without
+being asked.
 
-The question arrived as a size question: `tests/` is 24,565 lines against 47,980
-of `src`, a ratio of one to two, and is that too much harness for a tool one
-person runs on one machine.
+## The count that indicts is the wrong count
 
-The ratio is not one to two, and it does not point the way the question assumed.
-Once that is fixed there is no size question left — only a shape one, which turns
-out to have a good answer that has never been written down anywhere a person
-could find it.
+Counting `tests/` against `src` puts the tests at half the repository. It is
+not the honest split: a quarter or so of every test line in this tree lives in
+`src`'s own `#[cfg(test)] mod tests` — `registry.rs`, `probe.rs`, `watch.rs`,
+`lock.rs` and thirty more — so the file a line sits in is not what makes it a
+test. Read by what a line *is*, the tests outweigh production rather than
+taking half the repository.
 
-## What the count actually is
+That is a different fact, and not by itself a defect. It is the arithmetic of a
+tool with fifteen command names in twenty-six forms, a `Host` port with two
+adapters that must agree, and a stated policy of breaking anything at will — a
+repository that breaks freely is one that leans on its suite to notice.
 
-`47,980` is `src` including `src`'s own tests. Thirty-eight files there carry a
-`mod tests`, and those modules are **14,227 lines** — `registry.rs` 1,469,
-`tui/model.rs` 1,197, `probe.rs` 812, `watch.rs` 788, `lock.rs` 703, and on down.
-
-So the honest split is **38,792 lines of test against 33,753 of production**, a
-ratio of **1.15 to 1**. Tests do not take up half the repository. They slightly
-outweigh everything they test.
-
-That is a different fact, and it is not by itself a defect. It is the arithmetic
-of a tool with twenty-four commands, a `Host` port with two adapters that must
-agree, and a stated policy of breaking anything at will — a repository that
-breaks freely is one that leans on its suite to notice.
-
-Nor is the figure stable enough to indict. Three decisions already taken remove
-**9,896 lines** before this one touches anything: ADR using-it-is-the-proof
-deletes 6,604 with Dogfood, roughly 2,400 of it unit tests, and
-ADR perch-does-not-draw deletes 3,292 with the Config tab.
-ADR the-binary-proves-its-surface adds `tests/invoking.rs` back. The ratio moves
-by a point.
-
-**So size is not what is wrong here, and no suite is removed by this ADR.** The
-two subsystems this sweep has deleted were indicted by conceptual arguments —
-seven glossary entries for a harness nobody ran, a write path duplicating four
-commands — and neither was found by counting. There is no third such subsystem in
-`tests/`: it is thin files averaging seven hundred lines, not one of which
-introduces an idea.
+**So no suite is removed for its size.** What indicts a suite is a conceptual
+argument — a vocabulary nobody needs to hold, a path that duplicates another —
+and neither of those is found by counting. What is here is thin files, not one
+of which introduces an idea.
 
 ## Three kinds of suite
 
-The premise also said thirty gerund binaries. There are thirty-three binaries,
-twenty-seven of them gerunds, and sorting them by *what they assert* rather than
-by how they are named produces three kinds — not one rule with a ragged edge.
+Sorting the binaries by *what they assert* rather than by how they are named
+produces three kinds, not one rule with a ragged edge.
 
 **Behavior.** What a command does, driving real command code against
-`FakeHost`. Twenty-six of them. Named for the behavior, which is not the same as
+`FakeHost`. Most of them. Named for the behavior, which is not the same as
 named for the command: `exporting` happens to be one command, but `carrying`
-(ADR everything-but-the-account), `storing` (ADR claude-code-chooses-the-store),
-`reconciling` (ADR everything-but-the-account) and `naming` are mechanics no
-single command owns, and no per-command rule could have produced them. The
-clearest evidence the rule is behavior and not command is `perch status`, which
-is asserted across three files — `status.rs` for what it shows, `listing.rs` for
-`list` and `--group`, `refreshing.rs` for `--refresh`. Under a per-command rule
-that is a defect. Under this one it is three behaviors that share a verb, which
-is what they are.
+(ADR everything-but-the-account), `storing`, `reconciling` and `naming` are
+mechanics no single command owns, and no per-command rule could have produced
+them. The clearest evidence the rule is behavior and not command is `perch
+status`, asserted across three files — `reporting.rs` for what it shows,
+`listing.rs` for `list` and `--group`, `refreshing.rs` for `--refresh`. Under a
+per-command rule that is a defect. Under this one it is three behaviors that
+share a verb, which is what they are.
 
-**Correspondence.** That two artifacts which must agree, do. Six of them:
-`conformance` asks the two `Host` adapters the same questions; the four
-`contract_*` suites ask whether the probe's beliefs still match the installed
-Claude Code (ADR an-assumption-is-probed); `publishing` asks whether the site
-still matches the repository that publishes it (ADR one-thing-renders-the-site).
-These assert a relationship, not a behavior, and none of them drives a command
-against a fake.
+**Correspondence.** That two artifacts which must agree, do. `conformance` asks
+the two `Host` adapters the same questions; `corroboration` asks whether the
+operating system still answers about a process the way the Marker's evidence
+needs; `publication` asks whether the site still matches the repository that
+publishes it (ADR one-thing-renders-the-site); `citation` asks whether every
+citation in the tree still names a document in `docs/adr/`; `your_machine` asks
+whether the probe's beliefs still match the installed Claude Code
+(ADR an-assumption-is-probed). These assert a relationship, not a behavior, and
+none of them drives a command against a fake.
 
-The gating axis cuts across this and does not define it. `contract_*` is held
+The gating axis cuts across this and does not define it. `your_machine` is held
 back by a feature and its failures are news about upstream; `conformance` is
-ungated and its failures are ordinary faults in the change that caused them —
-`conformance.rs`'s own header draws that line and draws it correctly. Two suites
-can assert the same *kind* of thing and mean different things by failing.
+ungated and its failures are ordinary faults in the change that caused them.
+Two suites can assert the same *kind* of thing and mean different things by
+failing.
 
-**Surface.** What the binary accepts and returns. One of them,
-`tests/invoking.rs` from ADR the-binary-proves-its-surface, which is on the
-record as explicitly not a behavior suite: *the surface, never the behavior
-behind it.*
+**Surface.** What the binary accepts and returns. `tests/invoking.rs`, which is
+on the record as explicitly not a behavior suite: *the surface, never the
+behavior behind it* (ADR the-binary-proves-its-surface).
 
 The naming signal is **a gerund for what Perch does, a noun for a
 correspondence**. Behavior and Surface are both Perch doing something, so
-`invoking.rs` keeps the name ADR the-binary-proves-its-surface gave it. That
-leaves three files misnamed against a rule the other thirty already follow, and
-they are renamed rather than excused:
+`invoking.rs` keeps its name; a correspondence wearing a gerund is renamed
+rather than excused, which is why the site's suite is `publication.rs` and the
+citation suite is `citation.rs`. A test binary's name is its filename, so a
+rename is a `git mv` and nothing else moves.
 
-| now              | becomes           | why                                    |
-| ---------------- | ----------------- | -------------------------------------- |
-| `adoption.rs`    | `adopting.rs`     | a behavior wearing a noun              |
-| `status.rs`      | `reporting.rs`    | a behavior wearing a command's name    |
-| `publishing.rs`  | `publication.rs`  | a correspondence wearing a gerund      |
-
-Three `git mv`s. A test binary's name is its filename, so nothing else moves.
-
-**Correspondence** is a coinage and the one term here at risk. The industry word
-is *contract test*, which this repository has already spent on a subset — the
-four `contract_*` suites are three-quarters of the category but not the category.
-Anyone reaching for the obvious word will name the part after the whole. The term
-is written down here for that reason. *Avoid*: contract test, compatibility test,
-integration test.
+**Correspondence** is a coinage and the one term here at risk. The industry
+word is *contract test*, and this repository has spent it on a subset — the
+suite asking about the installed Claude Code is one correspondence, not the
+category. Anyone reaching for the obvious word will name the part after the
+whole. *Avoid*: contract test, compatibility test, integration test.
 
 ## Where a test lives
 
-The line between a `mod tests` in `src` and a binary in `tests/` is followed
-consistently and stated nowhere.
+The line between a `mod tests` in `src` and a binary in `tests/` is **what the
+test names**. A `mod tests` asserts a module's own vocabulary through the
+module's own API. A binary in `tests/` asserts what a *command* does.
 
-The obvious guess is wrong. It is not that unit tests are pure and behavior
-tests use the fake: `src/lock.rs` and `src/registry.rs` both drive `FakeHost`
-from inside their own `mod tests`. The fake is not the discriminator, and anybody
-who assumed it was would draw the line in the wrong place on their first try.
-
-The line actually being drawn is **what the test names**. A `mod tests` asserts a
-module's own vocabulary through the module's own API. A binary in `tests/`
-asserts what a *command* does.
+The obvious guess is wrong, and anybody who assumed it would draw the line in
+the wrong place on their first try: it is not that unit tests are pure and
+behavior tests use the fake. `src/lock.rs` and `src/registry.rs` both drive
+`FakeHost` from inside their own `mod tests`. The fake is not the
+discriminator.
 
 `watch` is the demonstration, because it has both and they do not overlap.
-`src/watch.rs` holds thirty-eight tests on the pacing arithmetic and the decision
-log — `the_wait_doubles_with_every_failure_and_stops_at_the_longest`,
-`a_hold_that_has_not_changed_is_said_once_rather_than_every_round`. Those reach
+`src/watch.rs` holds its tests on the pacing arithmetic and the decision log —
+`the_wait_doubles_with_every_failure_and_stops_at_the_longest` — which reach
 `round()` and `after_failing()` directly, and no command has an opinion about
-either. `tests/watching.rs` holds fifty driving the real loop —
-`a_refresh_that_fails_across_a_threshold_crossing_never_switches`. Neither could
-be moved to the other side without loss: pushing `lock.rs`'s renewal cases into a
-behavior binary would mean reaching them through whichever command happens to
-take a lock, and pulling command behavior into a `mod tests` would abandon the
-what-does-a-person-get framing every file in `tests/` opens with.
+either. `tests/watching.rs` drives the real loop —
+`a_refresh_that_fails_across_a_threshold_crossing_never_switches`. Neither
+could be moved to the other side without loss: pushing `lock.rs`'s renewal
+cases into a behavior binary would mean reaching them through whichever command
+happens to take a lock, and pulling command behavior into a `mod tests` would
+abandon the what-does-a-person-get framing every file in `tests/` opens with.
 
-That rule is added to `tests/common/mod.rs`'s header, which is the file every
-behavior binary already declares and already carries the harness's other
-standing rule. A `tests/README.md` was declined: a second venue is a second thing
-to disagree with this ADR.
+The rule lives in `tests/common/mod.rs`'s header, which every behavior binary
+already declares. A `tests/README.md` is declined: a second venue is a second
+thing to disagree with this document.
 
 ## The fixtures stay shared, and the allow stays
 
-`tests/common/mod.rs` is 763 lines of fixtures, command drivers and readers,
-recompiled into twenty-five of the thirty-three binaries under a blanket
-`#![allow(dead_code)]`.
+`tests/common/mod.rs` is fixtures, command drivers and readers, recompiled into
+most of the binaries under a blanket `#![allow(dead_code)]`. The allow is the
+correct cost of Cargo's one-module-per-binary model. The two ways out are both
+worse: extracting a `perch-test-support` dev-dependency crate would make
+`dead_code` honest by putting everything behind a crate boundary, buying a
+suppressed lint with an extra crate in the tree — conceptual surface paid for
+with maintenance surface, backwards. Splitting into submodules changes nothing,
+because Rust compiles the module per binary either way.
 
-The allow is the correct cost of Cargo's one-module-per-binary model, and the
-file's own header already says so. The two ways out are both worse. Extracting a
-`perch-test-support` dev-dependency crate would make `dead_code` honest by
-putting everything behind a crate boundary — buying a suppressed lint with an
-extra crate in the tree, which is conceptual surface paid for with maintenance
-surface, backwards. Splitting into submodules changes nothing: Rust compiles the
-module per binary either way, and per-binary imports would move the noise rather
-than remove it.
+What the allow genuinely costs is that it would cover real rot as willingly as
+it covers the normal case. That is a habit to keep rather than a decision to
+take.
 
-What the allow genuinely costs is that it would cover real rot as willingly as it
-covers the normal case. That is a habit to keep rather than a decision to take.
+## The gate is consent
 
-## What this does not decide
+A feature holds a suite back, and the criterion is:
 
-**Whether gating the `contract_*` suites is the right way to hold beliefs about
-upstream.** This ADR places them — a correspondence, four binaries, correctly
-distinguished from `conformance` — and says nothing about the gate. That the gate
-makes 895 lines invisible to the coverage job, and that it fires when Perch
-changes rather than when Claude Code does, are live and are #156's. Placing a
-suite in a taxonomy is not the same as approving how it runs.
+> **This test touches state the developer owns and did not offer.**
 
-**Whether `browsing.rs` survives.** It is a behavior suite under this ADR and
-will be a smaller one once ADR perch-does-not-draw's Config tab goes, but
-whether the picker exists at all is #151's, blocked on #147. If the picker goes,
-so does the file, and nothing here objects.
+The reason to hold a test back is not that it might damage something. It is
+that **its outcome is not the repository's to determine**. A suite that reports
+green on Tuesday and skipped on Wednesday, on the same machine at the same
+commit, according to whether a client happened to be open, is the one thing a
+default-on suite must never be.
 
-**What the commands are.** #145 may redraw the command surface entirely. That is
-the strongest argument for naming binaries after behaviors rather than commands:
-a rename of `perch status` does not invalidate `reporting.rs`, because the file
-was never named for the command.
+So a **read** of the developer's real state counts as much as a write. A test
+that reads the live `~/.claude/sessions` asserts, or skips, or finds nothing,
+according to the developer's unrelated afternoon. Writing into their login
+keychain is worse in consequence and identical in kind. One line covers both.
+
+The feature is **`your-machine`**, because the name is the criterion made
+visible. Naming it for what a test asserts *about* — `contract` — is the
+tempting alternative and the one that rots: a binary gathers tests by file and
+a file gathers them by subject, so such a name comes to describe a minority of
+what it holds and gates the rest by association. `real-machine` fails on its
+own terms, since every ungated test uses the real machine too, `temp_dir` and
+all. The discriminator is *ownership*, not reality.
+
+**One binary carries everything gated**, so there is one place to look for
+*what needs my machine*, and it keeps its platform-specific cases behind
+per-test `#[cfg]` rather than a file-level one. A file-level `cfg` is what
+narrows a cross-platform claim to one platform without anybody choosing it.
+
+**Slowness is not a criterion.** A second feature named for a *cost* is
+refused: `slow` names a price rather than a claim, so nothing ever tells you
+when a test has stopped qualifying, and a second flag is a second idea held.
+Where a test is genuinely slow the price is measured rather than asserted, and
+weighed against what is under there — a flag over a claim nothing else executes
+buys seconds at the cost of the claim.
+
+## What ungating buys, and what it costs
+
+A case that moves out of the gated binary and into `conformance.rs`'s table
+does not relocate a claim, it strengthens one: from *the platform behaves as
+Perch assumes* to *…and the fake agrees*, which is what every behavior test
+leaning on that platform property actually depends on. The platform is not
+going to stop sharing bytes across a hard link; the hand-maintained fake might
+stop modeling it, and asserting against `RealHost` alone asks nothing of the
+half that can be wrong.
+
+The cost is named rather than hidden: some carried-over properties are ones the
+fake can only agree about by construction rather than by observation. That is
+still strictly more than a table the fake is asked nothing by.
+
+## A skip is loud or it is a lie
+
+The failure every gate and every capability check here exists to prevent is a
+green run that quietly proved a third of what it was asked to. So a suite that
+skipped itself and a suite that asserted must never look identical: a skip says
+which case it was and why, out loud, in a reason somebody can act on —
+*nothing was stale here, come back in the morning*. CI runs the gated binary
+with `--nocapture` for exactly this, and `conformance.rs` refuses outright a
+run in which every link case skipped itself.
+
+The quiet kind wears the same colors: a test that runs, finds the state it
+needs absent, asserts nothing and reports green. Counting what a machine can
+prove and saying the number before anything acts is one way to keep that
+honest; naming and counting each skip as it happens is the other, and it is the
+one a suite of independent tests can do.
 
 ## Consequences
 
-Three renames, and no change to any assertion.
+`CONTEXT.md`'s **Proving it works** section holds **Behavior**, with
+Correspondence and Surface named inside that entry rather than given ones of
+their own. The glossary is for what somebody using Perch has to hold, and these
+are terms a contributor holds — but a term defined in a decision record and
+nowhere else is a term the next agent writes an issue without.
 
-`tests/common/mod.rs`'s header gains the rule about where a test lives.
+This governs where a test lives, what its file is called, and whether it may
+run without being asked. ADR perch-says-what-it-did governs what an assertion
+must claim and ADR the-binary-proves-its-surface the level a claim is made at.
+Three axes, no overlap.
 
-`CONTEXT.md` loses its **Proving it works** heading. ADR using-it-is-the-proof
-empties it of all seven entries, and this ADR declines to refill it — the same
-call ADR perch-does-not-draw, ADR perch-says-what-it-did and
-ADR the-binary-proves-its-surface each made in turn, on the same grounds.
-Behavior, Correspondence and Surface are terms a contributor holds, not terms
-somebody using Perch holds, and the glossary is for the second kind. They live
-in this ADR and in the header, which are the places a person writing a test is
-already looking. An empty heading would be worse than a deleted one.
-
-> **Reversed in part by #204.** The heading is back, holding **Behavior** alone,
-> with Correspondence and Surface named inside that entry rather than given ones
-> of their own. The argument above still holds for who the glossary is for; what
-> it did not weigh is that a term defined in an ADR and nowhere else is a term
-> the next agent writes an issue without. Nothing about the taxonomy changes.
-
-The `Host` port seam survives, and the map's watch on it can close. The seam
-exists so command code can be driven with no machine, and the map named exactly
-two things that could threaten it: #142, which passed by refusing to move
-behavior off the fakes, and this ticket. Behavior stays where it is, `host::fake`
-remains the only way it is driven, and there is nothing left watching.
-
-This ADR supersedes nothing. ADR perch-says-what-it-did governs what an
-assertion must claim, ADR the-binary-proves-its-surface governs the level a
-claim is made at, and this governs where a test lives and what its file is
-called. Three axes, no overlap.
-
-The shape is re-affirmed rather than left alone, which is the point. A reader who
-counts 24,565 lines and thirty-three binaries and finds no reasoning is entitled
-to assume nobody chose it. The reasoning is here now, along with the corrected
-number, so the next person to propose collapsing the harness finds an argument to
-answer.
+A reader who counts the lines and the binaries and finds no reasoning is
+entitled to assume nobody chose it. The reasoning is here, along with the
+correct way to take the count, so the next person to propose collapsing the
+harness finds an argument to answer.

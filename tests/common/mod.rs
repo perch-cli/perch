@@ -1,15 +1,14 @@
 //! Fixtures for the behavior tests: a machine with a Claude Code login on it.
+//!
+//! Where a test lives is decided by what it names
+//! (ADR a-suite-is-named-and-gated): a `mod tests` in `src` asserts a module's
+//! own vocabulary through the module's own API, a binary in `tests/` asserts
+//! what a *command* does. The fake is not the discriminator — `src/lock.rs`
+//! and `src/registry.rs` both drive `FakeHost` from inside their own
+//! `mod tests`.
 
-// Where a test lives is decided by what it names
-// (ADR a-suite-is-named-and-gated). A `mod tests` in `src` asserts a module's
-// own vocabulary through the module's own API. A binary in `tests/` asserts
-// what a *command* does. The fake is not the discriminator, and anybody who
-// assumes it is draws the line in the wrong place on their first try:
-// `src/lock.rs` and `src/registry.rs` both drive `FakeHost` from inside their
-// own `mod tests`.
-
-// Each test binary gets its own copy of this module and uses the part of it
-// that it needs, so unused fixtures here are the normal case rather than rot.
+// Each binary gets its own copy of this module and uses the part it needs, so
+// an unused fixture here is the normal case rather than rot.
 #![allow(dead_code)]
 
 use std::path::Path;
@@ -118,8 +117,7 @@ pub fn logged_in_machine() -> FakeHost {
 }
 
 /// A machine that is not a Mac: Claude Code installed and logged in, keeping
-/// its Credential in the file that is the store there
-/// (ADR claude-code-chooses-the-store).
+/// its Credential in the file that is the store there.
 pub fn logged_in_machine_off_macos() -> FakeHost {
     machine_with_claude_code()
         .with_platform(Platform::Other)
@@ -162,11 +160,9 @@ pub fn client_exiting(status: i32) -> impl Fn(&FakeHost, &Path) -> i32 {
 }
 
 /// A `perch run` against an Account, as far as the rest of Perch can see one:
-/// the session marker that Run wrote into the Profile, naming the Perch that is
-/// waiting for the client (ADR a-run-is-one-shot).
-///
-/// `began` is when that Run started. Now is a Run still going; an hour ago and a
-/// process that has since been replaced is the marker a killed Run left behind.
+/// the marker Run wrote into the Profile (ADR a-run-is-one-shot). `began` now
+/// is a Run still going; an hour ago, against a process since replaced, is the
+/// marker a killed Run left behind.
 pub fn a_run_against(host: &FakeHost, email: &str, began: DateTime<Utc>) {
     let profile = perch::registry::profile_dir_for(host, email).expect("home is known");
     host.set_file(
@@ -175,20 +171,11 @@ pub fn a_run_against(host: &FakeHost, email: &str, began: DateTime<Utc>) {
     );
 }
 
-/// The marker a Claude Code client writes for a session that began at `began`.
-///
-/// Deliberately not [`probe::session_marker`], which is the one a *Run* writes:
-/// that carries `writtenBy` and no `cwd`, because inventing fields Claude Code
-/// has and Perch does not would be a file claiming to be something it is not.
-/// This is the other writer, and the difference is what
-/// ADR a-profile-is-live-by-evidence turns on — the probe reads `startedAt` and
-/// ignores the rest, whoever left it. A fixture that wrote Perch's marker for a
-/// client would stop testing that.
-///
-/// The path is `probe`'s, though. Where a marker lives — `sessions/<pid>.json`
-/// — is Claude Code's convention rather than this fixture's, and it is the one
-/// thing `tests/your_machine.rs` checks against a real client. Five test
-/// files spelled it out by hand.
+/// The marker a Claude Code *client* writes, deliberately not
+/// [`probe::session_marker`], which is a Run's. The probe reads `startedAt` and
+/// ignores the rest whoever left it (ADR a-profile-is-live-by-evidence), so a
+/// fixture writing Perch's marker for a client stops testing that. The path is
+/// `probe`'s: where a marker lives is Claude Code's convention, not this file's.
 pub fn a_client_marker(pid: u32, began: DateTime<Utc>) -> String {
     format!(
         r#"{{"pid":{pid},"cwd":"/Users/someone/work","startedAt":{}}}"#,
@@ -231,8 +218,6 @@ pub fn run_run_with(
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
-/// Runs `perch status` against a fake machine, returning what it printed
-/// alongside how it ended.
 pub fn run_status(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
     run_status_with(
         host,
@@ -255,14 +240,12 @@ pub fn run_status_refresh(host: &FakeHost, json: bool) -> (perch::Result<()>, St
     )
 }
 
-/// `perch status` with whatever combination of flags the test is about.
 pub fn run_status_with(host: &FakeHost, args: StatusArgs) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
     let result = perch::commands::status::run(host, args, &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
-/// Runs `perch list`, returning what it printed alongside how it ended.
 pub fn run_list(host: &FakeHost, json: bool) -> (perch::Result<()>, String) {
     run_list_with(
         host,
@@ -314,7 +297,6 @@ pub fn run_list_in_refresh(
     )
 }
 
-/// `perch list` with whatever breadth and flags the test is about.
 pub fn run_list_with(host: &FakeHost, args: ListArgs) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
     let result = perch::commands::list::run(host, args, &mut written);
@@ -370,7 +352,6 @@ pub fn three_accounts_in_one_group() -> FakeHost {
     host
 }
 
-/// Runs `perch add`, returning what it printed alongside how it ended.
 pub fn run_add(host: &FakeHost, args: AddArgs) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
     let result = perch::commands::add::run(host, args, &mut written);
@@ -410,12 +391,9 @@ pub fn save_registry(host: &FakeHost, registry: &perch::registry::Registry) {
 
 /// What a Perch killed mid-Switch leaves on the registry: a Landing naming the
 /// Account it was leaving and the one it was switching to
-/// (ADR a-switch-is-written-down-first).
-///
-/// The registry half only. What the *machine* holds — which Credential is live,
-/// and who `.claude.json` names — is the other half of the state, and it is the
-/// half each test arranges for itself, because that is what the Landing is
-/// settled against.
+/// (ADR a-switch-is-written-down-first). The registry half only — what the
+/// machine holds is what a Landing is settled against, so each test arranges
+/// that half itself.
 pub fn a_switch_died_mid_flight(host: &FakeHost, leaving: Option<&str>, arriving: &str) {
     let mut registry = registry_of(host);
     registry.begin_landing(leaving.map(str::to_string), arriving);
@@ -434,7 +412,6 @@ pub fn declare_group(host: &FakeHost, name: &str) {
     .unwrap_or_else(|err| panic!("could not declare `{name}`: {err}"));
 }
 
-/// `perch group move <target> <group>`.
 pub fn move_to_group(host: &FakeHost, target: &str, group: &str) -> (perch::Result<()>, String) {
     run_group(
         host,
@@ -445,15 +422,12 @@ pub fn move_to_group(host: &FakeHost, target: &str, group: &str) -> (perch::Resu
     )
 }
 
-/// Runs `perch group`, returning what it printed alongside how it ended.
 pub fn run_group(host: &FakeHost, command: GroupCommand) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
     let result = perch::commands::group::run(host, command, &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
-/// Runs `perch switch <target>`, returning what it printed alongside how it
-/// ended.
 pub fn run_switch(host: &FakeHost, target: &str) -> (perch::Result<()>, String) {
     run_switch_with(
         host,
@@ -474,26 +448,22 @@ fn run_switch_with(host: &FakeHost, args: SwitchArgs) -> (perch::Result<()>, Str
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
-/// Runs `perch watcher run`, returning everything it printed alongside how it
-/// ended.
-///
-/// It only ends because somebody stopped it, so a fake Host that nobody
-/// interrupts would leave this spinning: `with_interrupt_after` is what says
-/// how many rounds the test is about.
+/// It only ends because somebody stopped it, so a fake nobody interrupts leaves
+/// this spinning: `with_interrupt_after` says how many rounds the test is
+/// about.
 pub fn run_watch(host: &FakeHost) -> (perch::Result<()>, String) {
     let (result, printed) = run_watcher(host, WatcherCommand::Run);
     (result.map(|_| ()), printed)
 }
 
-/// Runs `perch watcher check`: one round, and the exit code it reports to
-/// whatever scheduled it.
+/// One round, and the exit code it reports to whatever scheduled it.
 pub fn run_watch_once(host: &FakeHost) -> (perch::Result<i32>, String) {
     run_watcher(host, WatcherCommand::Check)
 }
 
-/// Through the dispatch rather than into the loop directly, which is how
-/// `servicing.rs` drives the Watcher's other three verbs: an arm wired to the
-/// wrong half is exactly the mistake one noun over five verbs makes possible.
+/// Through the dispatch rather than into the loop, which is how `servicing.rs`
+/// drives the Watcher's other three verbs: an arm wired to the wrong half is
+/// the mistake one noun over five verbs makes possible.
 fn run_watcher(host: &FakeHost, command: WatcherCommand) -> (perch::Result<i32>, String) {
     let mut written = Vec::new();
     let result = perch::commands::watcher::run(host, command, &mut written);
@@ -542,14 +512,10 @@ pub fn watched() -> FakeHost {
     host
 }
 
-/// What the usage endpoint answers: the two Quota Windows every Account has,
-/// with the five-hour one as full as the trace says at that point.
-///
-/// Both, because a reply leaving one out is one Perch refuses — it cannot tell
-/// that from the fullest window going missing, which is the
-/// ADR headroom-is-the-worst-window loss. The seven-day window sits at nought
-/// so the five-hour one is always the fullest and every figure the traces
-/// assert on is still the one they set.
+/// What the usage endpoint answers: both Quota Windows, because a reply leaving
+/// one out is one Perch refuses (ADR headroom-is-the-worst-window). The
+/// seven-day window sits at nought so the five-hour one is always the fullest,
+/// and every figure a trace asserts on is still the one it set.
 pub fn usage(used_percent: f64) -> String {
     format!(
         r#"{{"five_hour": {{"utilization": {used_percent}, "resets_at": "2026-08-04T14:30:00Z"}},
@@ -571,14 +537,11 @@ pub fn answering(host: FakeHost, token: &str, email: &str, trace: &[f64]) -> Fak
         .with_replies_to(USAGE_URL, token, &replies)
 }
 
-/// The decision lines, which is everything printed but the line that says what
-/// is being watched and the line that says it stopped.
-///
-/// Found by the shape a round's line opens with — the stamp, the word it is
-/// read by, and then the figure it decided on. It used to be found by the word
-/// `threshold`, which ADR perch-says-what-it-did took off the round line
-/// altogether: left as it was, this would have found no decisions at all, and
-/// every assertion about one would have passed vacuously over an empty list.
+/// The decision lines: everything printed but what is being watched and that it
+/// stopped. Found by the shape a round's line opens with — the stamp, the word
+/// it is read by, then the figure. Matching a word the line argues with instead
+/// finds nothing and passes every assertion vacuously over an empty list
+/// (ADR perch-says-what-it-did).
 pub fn decisions(printed: &str) -> Vec<String> {
     printed
         .lines()
@@ -598,7 +561,6 @@ fn is_a_decision(line: &str) -> bool {
     rest.contains("% used") || rest.split_whitespace().nth(1) == Some("unread")
 }
 
-/// Runs `perch alias`, returning what it printed alongside how it ended.
 pub fn run_alias(host: &FakeHost, command: AliasCommand) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
     let result = perch::commands::alias::run(host, command, &mut written);
@@ -619,7 +581,6 @@ pub fn set_alias(host: &FakeHost, name: &str, target: &str) -> (perch::Result<()
     )
 }
 
-/// `perch alias <target> --unset`.
 pub fn unset_alias(host: &FakeHost, target: &str) -> (perch::Result<()>, String) {
     run_alias(
         host,
@@ -637,15 +598,12 @@ pub fn add_to_group(group: &str) -> AddArgs {
     }
 }
 
-/// Runs `perch enable` or `perch disable`, returning what it printed alongside
-/// how it ended.
 pub fn run_enable(host: &FakeHost, command: EnableCommand) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
     let result = perch::commands::enable::run(host, command, &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
-/// `perch disable <target>`.
 pub fn disable_account(host: &FakeHost, target: &str) -> (perch::Result<()>, String) {
     run_enable(
         host,
@@ -655,7 +613,6 @@ pub fn disable_account(host: &FakeHost, target: &str) -> (perch::Result<()>, Str
     )
 }
 
-/// `perch enable <target>`.
 pub fn enable_account(host: &FakeHost, target: &str) -> (perch::Result<()>, String) {
     run_enable(
         host,
@@ -665,7 +622,6 @@ pub fn enable_account(host: &FakeHost, target: &str) -> (perch::Result<()>, Stri
     )
 }
 
-/// Runs `perch config`, returning what it printed alongside how it ended.
 pub fn run_config(host: &FakeHost, command: ConfigCommand) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
     let result = perch::commands::config::run(host, command, &mut written);
@@ -683,7 +639,6 @@ pub fn config_set(host: &FakeHost, words: &[&str]) -> (perch::Result<()>, String
     )
 }
 
-/// `perch config get [<words...>]`.
 pub fn config_get(host: &FakeHost, words: &[&str]) -> (perch::Result<()>, String) {
     run_config(
         host,
@@ -747,24 +702,18 @@ pub fn quarantine_for(host: &FakeHost, email: &str, why: Quarantine) {
     save_registry(host, &registry);
 }
 
-/// Runs `perch holdings export <path>`, returning what it printed alongside how
-/// it ended.
 pub fn run_export(host: &FakeHost, path: &str) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
     let result = perch::commands::export::run(host, &std::path::PathBuf::from(path), &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
-/// Runs `perch holdings import <path>`, returning what it printed alongside how
-/// it ended.
 pub fn run_import(host: &FakeHost, path: &str) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
     let result = perch::commands::import::run(host, &std::path::PathBuf::from(path), &mut written);
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
-/// Runs `perch holdings purge`, returning what it printed alongside how it
-/// ended.
 pub fn run_purge(host: &FakeHost) -> (perch::Result<()>, String) {
     run_purge_with(host, false)
 }
@@ -776,8 +725,6 @@ pub fn run_purge_with(host: &FakeHost, yes: bool) -> (perch::Result<()>, String)
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
-/// Runs `perch relogin <target>`, returning what it printed alongside how it
-/// ended.
 pub fn run_relogin(host: &FakeHost, target: &str) -> (perch::Result<()>, String) {
     let mut written = Vec::new();
     let result = perch::commands::relogin::run(
@@ -790,8 +737,6 @@ pub fn run_relogin(host: &FakeHost, target: &str) -> (perch::Result<()>, String)
     (result, String::from_utf8(written).expect("output is UTF-8"))
 }
 
-/// Runs `perch remove <target>`, returning what it printed alongside how it
-/// ended.
 pub fn run_remove(host: &FakeHost, target: &str) -> (perch::Result<()>, String) {
     run_remove_with(
         host,
