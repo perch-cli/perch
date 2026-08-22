@@ -6,7 +6,7 @@
 //!
 //! [`Host`] declares nothing itself: it is the sum of nine traits, one per kind
 //! of effect. No consumer narrows to one of them, because anything that touches
-//! the machine touches several of its surfaces at once — the port is 42 methods
+//! the machine touches several of its surfaces at once — the port is 43 methods
 //! wide because the machine is (ADR the-port-fits-the-machine).
 
 use std::path::{Path, PathBuf};
