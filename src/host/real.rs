@@ -404,6 +404,28 @@ fn or_not_found<T>(result: std::io::Result<T>, path: &Path) -> Result<T, HostErr
     }
 }
 
+/// A `SystemTime` as the pair `DateTime::from_timestamp` takes, on either side
+/// of the epoch. `None` where the offset does not fit an `i64` of seconds.
+///
+/// Every filesystem holding an `i64` of them takes a stamp no clock wrote, so
+/// an age is a question with an answer rather than one that ends the process.
+fn seconds_and_nanos_since_epoch(time: std::time::SystemTime) -> Option<(i64, u32)> {
+    match time.duration_since(std::time::UNIX_EPOCH) {
+        Ok(since) => Some((i64::try_from(since.as_secs()).ok()?, since.subsec_nanos())),
+        // Before the epoch, where `duration_since` reports the distance back to
+        // it. The nanoseconds are borrowed from the second below, which is what
+        // makes the pair one instant rather than two.
+        Err(before) => {
+            let back = before.duration();
+            let seconds = i64::try_from(back.as_secs()).ok()?.checked_neg()?;
+            match back.subsec_nanos() {
+                0 => Some((seconds, 0)),
+                nanos => Some((seconds.checked_sub(1)?, 1_000_000_000 - nanos)),
+            }
+        }
+    }
+}
+
 /// The same, for the answer a lock turns on: something is already at this name.
 /// `HostError::AlreadyExists` is what makes a lock a lock, so a `?` that
 /// flattened `EEXIST` into `HostError::Io` here would answer differently from
@@ -514,7 +536,17 @@ impl Files for RealHost {
             std::fs::metadata(path).and_then(|metadata| metadata.modified()),
             path,
         )?;
-        Ok(DateTime::<Utc>::from(modified))
+        // Not `DateTime::<Utc>::from`, which panics on a stamp outside chrono's
+        // range where this port answers with a `Result`.
+        seconds_and_nanos_since_epoch(modified)
+            .and_then(|(seconds, nanos)| DateTime::from_timestamp(seconds, nanos))
+            .ok_or_else(|| {
+                HostError::Other(format!(
+                    "{} was last modified at a time outside the range Perch can \
+                     represent, so its age cannot be read",
+                    path.display()
+                ))
+            })
     }
 
     fn touch(&self, path: &Path) -> Result<(), HostError> {
@@ -1973,6 +2005,114 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
 
         assert!(touched > created, "touched {touched}, created {created}");
+    }
+
+    /// Both sides of the epoch, and the borrow that makes the pair one instant:
+    /// a stamp a quarter-second before 1970 is `-1` second plus 750 million
+    /// nanoseconds, never `0` seconds minus a quarter. A lock artifact's age is
+    /// read off this, and one measured from the wrong second is a lock taken
+    /// over early or held for ever.
+    #[test]
+    fn a_stamp_either_side_of_the_epoch_is_one_instant_rather_than_two() {
+        use std::time::{Duration, UNIX_EPOCH};
+
+        let pair = |time| seconds_and_nanos_since_epoch(time).expect("a stamp in range");
+
+        assert_eq!(pair(UNIX_EPOCH), (0, 0));
+        assert_eq!(
+            pair(UNIX_EPOCH + Duration::new(90, 250_000_000)),
+            (90, 250_000_000)
+        );
+        assert_eq!(pair(UNIX_EPOCH - Duration::from_secs(90)), (-90, 0));
+        assert_eq!(
+            pair(UNIX_EPOCH - Duration::new(0, 250_000_000)),
+            (-1, 750_000_000),
+            "a quarter-second before the epoch is the second below it, most of \
+             the way through"
+        );
+        assert_eq!(
+            pair(UNIX_EPOCH - Duration::new(90, 250_000_000)),
+            (-91, 750_000_000)
+        );
+
+        // Round-tripped: the pair is only right if chrono reads it back as the
+        // instant it was built from. Quarter-seconds because a Windows
+        // `SystemTime` is a FILETIME, which rounds anything under 100ns away.
+        for offset in [
+            Duration::new(0, 250_000_000),
+            Duration::new(90, 250_000_000),
+        ] {
+            let (seconds, nanos) = pair(UNIX_EPOCH - offset);
+            let read = DateTime::from_timestamp(seconds, nanos).expect("in range");
+            assert_eq!(
+                read.timestamp_nanos_opt(),
+                Some(-(offset.as_nanos() as i64)),
+                "{offset:?} before the epoch"
+            );
+        }
+    }
+
+    /// The port hands back a `Result`, and every caller of this one — `carry`'s
+    /// ranking of Profiles by age, each of `lock`'s reads — treats a failure as
+    /// an answer, where a stamp chrono cannot represent used to end the process.
+    ///
+    /// Unix, because `utimes` sets one and an `i64` of seconds holds it.
+    #[cfg(unix)]
+    #[test]
+    fn a_modification_time_out_of_range_is_refused_rather_than_panicked_on() {
+        let host = RealHost::new();
+        let dir = std::env::temp_dir().join(format!("perch-mtime-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("stamped");
+        std::fs::write(&file, "x").unwrap();
+
+        // Roughly a quarter of a million years past chrono's ceiling, and a
+        // value every filesystem holding an `i64` of seconds accepts.
+        let far = std::time::UNIX_EPOCH + std::time::Duration::from_secs(9_000_000_000_000);
+        let set = set_modification_time(&file, far);
+        let read = host.modified_at(&file);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // A filesystem that clamped the stamp instead has nothing to say here.
+        if set.is_ok() && read.is_ok() {
+            return;
+        }
+        assert!(
+            matches!(read, Err(HostError::Other(_))),
+            "an unrepresentable stamp is an error, got {read:?}"
+        );
+    }
+
+    /// Sets a file's modification time, which no standard-library call reaches.
+    /// Test-only: the primitives Perch links are `touch_now`'s, and this is the
+    /// inverse nothing in `src` has a use for.
+    #[cfg(unix)]
+    fn set_modification_time(path: &Path, at: std::time::SystemTime) -> std::io::Result<()> {
+        let seconds = at
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("a stamp after the epoch")
+            .as_secs() as libc::time_t;
+        let times = [
+            libc::timeval {
+                tv_sec: seconds,
+                tv_usec: 0,
+            },
+            libc::timeval {
+                tv_sec: seconds,
+                tv_usec: 0,
+            },
+        ];
+        let raw = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
+            .expect("a path with no interior nul");
+        // SAFETY: `raw` and `times` both outlive the call, and `utimes` reads
+        // two `timeval`s from the array it is handed.
+        let told = unsafe { libc::utimes(raw.as_ptr(), times.as_ptr()) };
+        if told == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
     }
 
     /// `security` reports a failed sub-command of `-i` on stderr while still

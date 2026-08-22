@@ -127,6 +127,34 @@ enum Command {
         action: HoldingsCommand,
     },
 
+    /// Show every Account with its Alias, Group, state and cached Utilization.
+    ///
+    /// The one place that answers "what do I have", at every breadth: bare it
+    /// is every Account Perch holds, and a Scope narrows it to the Accounts you
+    /// could Cycle between — where you would land before you switch. Renders
+    /// from cache unless you ask it to fetch.
+    List {
+        /// Which Accounts to show: a Group by name, or `ungrouped` for the
+        /// Accounts in no Group. Without one, every Account Perch holds.
+        #[arg(value_name = "SCOPE")]
+        scope: Option<String>,
+
+        /// Read current Utilization from Anthropic first.
+        ///
+        /// Exactly the Accounts about to be shown and no others, so narrowing
+        /// the listing narrows the reads with it. Roughly 28-30 reads an hour
+        /// are allowed per Account and the allowance does not refill early, so
+        /// a figure that cannot be read falls back to the cached one rather
+        /// than failing.
+        #[arg(long)]
+        refresh: bool,
+
+        /// Emit machine-readable output, with an observation time on every
+        /// Utilization figure.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Log an Account in again, in place.
     ///
     /// The way back from a Quarantine: the Account keeps its Alias, its Group,
@@ -172,25 +200,19 @@ enum Command {
         command: Vec<String>,
     },
 
-    /// Show every Account with its Alias, Group, state and cached Utilization.
+    /// Show the active Account and its cached Utilization.
     ///
-    /// The one place that answers "what do I have", at every breadth: bare it
-    /// is every Account Perch holds, and a Scope narrows it to the Accounts you
-    /// could Cycle between — where you would land before you switch. Renders
-    /// from cache unless you ask it to fetch.
-    List {
-        /// Which Accounts to show: a Group by name, or `ungrouped` for the
-        /// Accounts in no Group. Without one, every Account Perch holds.
-        #[arg(value_name = "SCOPE")]
-        scope: Option<String>,
-
+    /// The Account you are on and nothing else — a set of Accounts is
+    /// `perch list`, at whatever breadth. Renders from cache unless you ask it
+    /// to fetch, so it is cheap enough for a shell prompt.
+    Status {
         /// Read current Utilization from Anthropic first.
         ///
-        /// Exactly the Accounts about to be shown and no others, so narrowing
-        /// the listing narrows the reads with it. Roughly 28-30 reads an hour
-        /// are allowed per Account and the allowance does not refill early, so
-        /// a figure that cannot be read falls back to the cached one rather
-        /// than failing.
+        /// The one Account this command is about, and no others. Asking for a
+        /// refresh is the only thing in Perch that touches the network, here or
+        /// on a listing. Roughly 28-30 reads an hour are allowed per Account
+        /// and the allowance does not refill early, so a figure that cannot be
+        /// read falls back to the cached one rather than failing.
         #[arg(long)]
         refresh: bool,
 
@@ -213,28 +235,6 @@ enum Command {
         /// The Account to switch to — its Alias or its email address — or a
         /// Group to Cycle within.
         target: Option<String>,
-    },
-
-    /// Show the active Account and its cached Utilization.
-    ///
-    /// The Account you are on and nothing else — a set of Accounts is
-    /// `perch list`, at whatever breadth. Renders from cache unless you ask it
-    /// to fetch, so it is cheap enough for a shell prompt.
-    Status {
-        /// Read current Utilization from Anthropic first.
-        ///
-        /// The one Account this command is about, and no others. Asking for a
-        /// refresh is the only thing in Perch that touches the network, here or
-        /// on a listing. Roughly 28-30 reads an hour are allowed per Account
-        /// and the allowance does not refill early, so a figure that cannot be
-        /// read falls back to the cached one rather than failing.
-        #[arg(long)]
-        refresh: bool,
-
-        /// Emit machine-readable output, with an observation time on every
-        /// Utilization figure.
-        #[arg(long)]
-        json: bool,
     },
 
     /// Replace this Perch with a newer Release.

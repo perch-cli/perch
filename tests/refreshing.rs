@@ -902,3 +902,33 @@ fn a_keychain_dialog_somebody_walked_away_from_does_not_cost_perch_the_locks_a_r
         effects
     );
 }
+
+/// A Rotation retires the refresh token for an *Account* rather than for a file,
+/// and a Landing names the two Accounts the live Credential could belong to. So
+/// for either of them the Default Profile is somewhere a client could be holding
+/// this Account's Credential, and renewing the copy in its own Profile would log
+/// that session out.
+#[test]
+fn a_renewal_mid_landing_is_refused_for_a_client_running_against_the_default_profile() {
+    for (whose, email) in [
+        ("the Account being left", EMAIL),
+        ("the Account arriving", SECOND_EMAIL),
+    ] {
+        let host = machine_with_two_accounts();
+        a_switch_died_mid_flight(&host, Some(EMAIL), SECOND_EMAIL);
+        // Spent in its own Profile, so a reading of it wants a Renewal.
+        host.set_keychain_item(&store_of(&host, email).keychain_service, LOGIN_NAME, SPENT);
+        let host = client_running_against(host, "/Users/someone/.claude", 4242)
+            .with_reply(TOKEN_URL, 200, RENEWED);
+        host.forget_effects();
+
+        let (result, printed) = run_status_refresh(&host, false);
+
+        result.expect("an Account Perch may not renew is not a failed command");
+        assert!(
+            host.sent_to(TOKEN_URL).is_empty(),
+            "{whose}: a Rotation here retires the refresh token that client is \
+             holding: {printed}"
+        );
+    }
+}

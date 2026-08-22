@@ -101,30 +101,6 @@ pub fn lines(account: &Account, now: DateTime<Utc>, width: usize) -> Vec<String>
     })
 }
 
-/// The same rows with when each Quota Window comes back, for the surfaces that
-/// give an Account a block of its own. The fill says how much is gone and the
-/// reset how long that lasts, and where to work needs both. A second rendering
-/// rather than a longer [`lines`], because a clock time in the listing's column
-/// would push the table past the width of a terminal.
-pub fn lines_with_resets(account: &Account, now: DateTime<Utc>, width: usize) -> Vec<String> {
-    rows(account, now, width, |window, width| {
-        format!(
-            // "used", because this row sits under a Headroom figure saying how
-            // much is *left*: two percentages of the same window an inch apart,
-            // and the reader is not asked to tell them apart by context.
-            "{} {:>3}% used  {}",
-            padded(&window.window, width),
-            percentage(window.used_percent),
-            // Said as its absence rather than left out, because a row with no
-            // reset clause reads as a window that does not reset.
-            match window.resets_at {
-                Some(at) => format!("resets {}", reset_phrase(at, now)),
-                None => "no reset time cached".to_string(),
-            }
-        )
-    })
-}
-
 /// One row per Quota Window, however each surface says the window itself, with
 /// the age of the observation on every one — or the single line that says
 /// nothing has ever been observed.
@@ -512,8 +488,6 @@ mod tests {
         assert_eq!(percentage(99.0), "99");
     }
 
-    /// These two rows are the only place in Perch that prints the words
-    /// "% used" about a raw window figure.
     #[test]
     fn the_rows_that_print_a_percentage_print_it_the_way_every_surface_does() {
         let account = observed_at_the_edges();
@@ -521,28 +495,6 @@ mod tests {
         let rows = lines(&account, at(12, 0), window_width_across([&account]));
         assert!(rows[0].starts_with("5-hour >99%"), "{rows:?}");
         assert!(rows[1].starts_with("7-day   <1%"), "{rows:?}");
-
-        let rows = lines_with_resets(&account, at(12, 0), window_width_across([&account]));
-        assert!(rows[0].starts_with("5-hour >99% used"), "{rows:?}");
-        assert!(rows[1].starts_with("7-day   <1% used"), "{rows:?}");
-    }
-
-    #[test]
-    fn an_ordinary_figure_lands_in_the_same_column_it_always_did() {
-        let mut account = observed_at_the_edges();
-        account.utilization.as_mut().expect("observed").windows =
-            vec![crate::registry::WindowUtilization {
-                window: "5-hour".to_string(),
-                used_percent: 7.0,
-                resets_at: None,
-            }];
-
-        assert!(
-            lines_with_resets(&account, at(12, 0), window_width_across([&account]))[0]
-                .starts_with("5-hour   7% used"),
-            "{:?}",
-            lines_with_resets(&account, at(12, 0), window_width_across([&account]))
-        );
     }
 
     fn observed_at_the_edges() -> Account {

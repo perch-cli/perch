@@ -865,3 +865,43 @@ fn renaming_a_group_to_the_name_it_has_says_so_rather_than_reporting_a_rename() 
     );
     assert_eq!(registry_of(&host).accounts_in("work").len(), 3);
 }
+
+/// Shape 1 saves and then reports, so a stdout that will not take the report is
+/// a change that landed under a non-zero exit. The exit code is a script's only
+/// reading of what happened, and unnoted it sends one back to make a change it
+/// has already made — which the second time is a refusal.
+#[test]
+fn a_change_that_landed_says_so_when_only_the_report_could_not_be_written() {
+    /// Every write refused, as a closed pipe or a full disk refuses one.
+    struct NowhereToWrite;
+
+    impl std::io::Write for NowhereToWrite {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("No space left on device"))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let host = logged_in_machine();
+    run_list(&host, false).0.expect("adoption holds the login");
+
+    let refused = perch::commands::group::run(
+        &host,
+        GroupCommand::Add {
+            name: "spare".to_string(),
+        },
+        &mut NowhereToWrite,
+    )
+    .expect_err("the report could not be written");
+
+    assert!(
+        refused.to_string().contains("The change was saved"),
+        "the failure says which half of the command it was: {refused}"
+    );
+    assert!(
+        registry_of(&host).declared_group("spare").is_some(),
+        "and it was the reporting half, so the Group is declared"
+    );
+}

@@ -1278,3 +1278,32 @@ fn narrowing_a_listing_on_an_empty_machine_does_not_change_the_diagnosis() {
         "there is no Account to be in a Group: {ungrouped}"
     );
 }
+
+/// The Switch-in-flight line is said whether or not the `*` is in this listing,
+/// because a Landing is a fact about the machine rather than about the rows. A
+/// Scope holding nobody is still on that machine, and `--json` carries `landing`
+/// at every breadth — so leaving it out here made two renderings of one registry
+/// disagree.
+#[test]
+fn a_narrowed_scope_holding_no_accounts_still_says_a_switch_was_in_flight() {
+    let mut registry = Registry::default();
+    registry.upsert(account(EMAIL, "Acme"));
+    registry.upsert(account(SECOND_EMAIL, "Acme"));
+    registry.begin_landing(Some(EMAIL.to_string()), SECOND_EMAIL);
+    registry
+        .groups
+        .insert("spare".to_string(), Settings::default());
+    let host = machine_holding(&registry);
+
+    let (result, printed) = run_list_in(&host, "spare", false);
+
+    result.unwrap();
+    assert!(
+        printed.contains("The Group `spare` holds no Accounts yet."),
+        "the empty Scope still says it is empty:\n{printed}"
+    );
+    assert!(
+        printed.contains("which Credential is live is not settled"),
+        "and the machine still says the question is open:\n{printed}"
+    );
+}

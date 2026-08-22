@@ -154,7 +154,11 @@ pub fn only_the_registry(
     let said = change(&mut registry)?;
     crate::registry::save(host, &mut perch, &mut registry)?;
     for line in said {
-        say(out, &line)?;
+        // On disk by here, so an unnoted failure sends a script back to make a
+        // change it has already made (ADR perch-says-what-it-did).
+        say(out, &line).map_err(|error| {
+            error.with_note("The change was saved. Only the report could not be printed.")
+        })?;
     }
     Ok(())
 }

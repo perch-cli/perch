@@ -144,8 +144,8 @@ impl Drop for Scratch {
 /// elide the Account, `upgrade`, and the four nouns that are written
 /// (ADR a-command-names-its-noun).
 const COMMANDS: [&str; 15] = [
-    "add", "alias", "config", "disable", "enable", "group", "holdings", "relogin", "remove", "run",
-    "list", "switch", "status", "upgrade", "watcher",
+    "add", "alias", "config", "disable", "enable", "group", "holdings", "list", "relogin",
+    "remove", "run", "status", "switch", "upgrade", "watcher",
 ];
 
 /// Answered before the parser, and exactly as the Homebrew formula's test block
@@ -166,6 +166,42 @@ fn the_version_question_is_answered_by_the_process_in_one_line() {
             "`perch <version>` and nothing underneath it"
         );
     }
+}
+
+/// `--help` lists the commands in the order the enum declares them, and somebody
+/// scanning that list is scanning alphabetically. Two had drifted out of it —
+/// `run` above `list`, `switch` above `status` — so `list` was to be found
+/// between `remove` and `switch`, which is nowhere anyone would look.
+#[test]
+fn the_commands_are_listed_in_the_order_somebody_scans_them_in() {
+    let machine = Scratch::holding_an_account("order");
+
+    let ran = perch(&machine, &["--help"]);
+
+    assert_eq!(ran.code, EXIT_OK, "{}", ran.err);
+    // Read off the rendering rather than off `COMMANDS`, which is a copy of the
+    // enum kept by hand: what clap prints is what somebody scans.
+    let listed: Vec<&str> = ran
+        .out
+        .lines()
+        .skip_while(|line| !line.starts_with("Commands:"))
+        .filter_map(|line| line.split_whitespace().next())
+        .filter(|word| COMMANDS.contains(word))
+        .collect();
+
+    let mut alphabetical = listed.clone();
+    alphabetical.sort_unstable();
+    assert_eq!(
+        listed, alphabetical,
+        "the enum declares the order clap renders, and it is the one a reader \
+         looks a command up in:\n{}",
+        ran.out
+    );
+    assert_eq!(
+        listed.len(),
+        COMMANDS.len(),
+        "and every command is in it: {listed:?}"
+    );
 }
 
 /// A command missing from `--help` is one nobody finds.

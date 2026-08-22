@@ -227,9 +227,11 @@ fn renames_in(held: &Map<String, Value>) -> Vec<Renamed> {
 /// `None` leaves the name as it is, for the refusal at `load` to describe: a
 /// name no published Perch accepted either is a hand edit.
 fn acceptable(kind: NameKind, name: &str, taken: &[String]) -> Option<String> {
-    // A leading `-` is the one rule a name can be brought inside by editing the
-    // name; `global` and `ungrouped` are whole words, so those take the suffix.
-    let trimmed = name.trim_start_matches('-').trim();
+    // A leading `-` and a control character are the two rules no suffix
+    // rescues, so a name breaking either loses the character rather than
+    // gaining a number; `global` and `ungrouped` are whole words and take one.
+    let without_controls: String = name.chars().filter(|c| !c.is_control()).collect();
+    let trimmed = without_controls.trim_start_matches('-').trim();
     let base = match trimmed.is_empty() {
         true => match kind {
             NameKind::Group => "group",
@@ -539,6 +541,34 @@ mod tests {
             moved["aliases"].get("w").is_some(),
             "an Alias is the same namespace and the same rules"
         );
+    }
+
+    /// An escape is no `char::is_whitespace`, so every published Perch accepted
+    /// a name holding one. A suffix rescues it no more than it rescues a leading
+    /// `-`: the character has to go, or the machine has no working command.
+    #[test]
+    fn a_name_carrying_a_control_character_loses_it_rather_than_the_machine() {
+        let renamed = renames(
+            &serde_json::json!({
+                "version": 1,
+                "groups": { "\u{1b}[31mred": {}, "one\ttwo": {} },
+                "aliases": { "\u{7}w": "work@example.com" },
+            })
+            .to_string(),
+        );
+
+        let now: Vec<&str> = renamed.iter().map(|it| it.is_now.as_str()).collect();
+        assert_eq!(
+            now,
+            ["[31mred", "onetwo", "w"],
+            "the character goes and what a person meant by the name stays"
+        );
+        for name in now {
+            assert!(
+                crate::registry::validate_name(NameKind::Group, name).is_ok(),
+                "`{name}` is a name this build accepts"
+            );
+        }
     }
 
     /// Renaming into a name something already answers to would be no rename at

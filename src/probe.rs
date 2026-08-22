@@ -710,6 +710,23 @@ pub fn read_identity(
         ));
     }
 
+    // The address is guarded against this in `registry::validate`, and the
+    // organization is drawn into the same labeled block by the same writer.
+    // Here rather than there because nobody chose it: this file can be edited.
+    if let Some(said) =
+        crate::host::control_character_in(account.organization_name.as_deref().unwrap_or_default())
+    {
+        return Err(refusal(
+            assumption::IDENTITY_BLOCK,
+            &format!(
+                "{} names an organization carrying {said}, which no line of \
+                 Perch's output could show as part of one",
+                store.identity_file.display()
+            ),
+            installed.version(),
+        ));
+    }
+
     Ok(Some(Identity {
         email,
         account_uuid: account.account_uuid,
@@ -2123,6 +2140,30 @@ mod tests {
         let said = refused.to_string();
         assert!(said.contains("is not JSON Perch understands"), "{said}");
         assert!(!said.contains(KEY), "the refusal carries the key: {said}");
+    }
+
+    /// `perch status` writes the organization into the same labeled block as the
+    /// address beside it, and the address is guarded against exactly this. A
+    /// `\r` there overwrites the line from column nought, taking the label and
+    /// half the name with it; a `\n` splits the block so the rows below stop
+    /// lining up under it.
+    #[test]
+    fn an_organization_name_a_terminal_would_obey_is_refused_like_the_address() {
+        let host = FakeHost::new()
+            .with_env("HOME", "/Users/someone")
+            .with_env("USER", "someone")
+            .with_file(
+                "/Users/someone/.claude.json",
+                r#"{"oauthAccount":{"emailAddress":"someone@example.com","organizationName":"Acme\u001b[31m Ltd"}}"#,
+            );
+        let store = default_store(&host).expect("the store is derivable");
+
+        let refused = read_identity(&host, &store, &version_under_test())
+            .expect_err("an escape is not something Perch can render");
+
+        let said = refused.to_string();
+        assert!(said.contains("control character (U+001B)"), "{said}");
+        assert!(said.contains("names an organization"), "{said}");
     }
 
     #[test]
