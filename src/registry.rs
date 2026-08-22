@@ -1818,6 +1818,25 @@ fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
             }
         }
     }
+    with_every_check_under_the_declared_spelling(registry)
+}
+
+/// The same for what `checks` is keyed on. `checked` and `validate` fold the
+/// key and the two mutators remove it exactly, so a key differing only in case
+/// outlives its Group and leaves `validate` refusing what `save` just built.
+fn with_every_check_under_the_declared_spelling(mut registry: Registry) -> Registry {
+    let keyed: Vec<String> = registry.checks.keys().cloned().collect();
+    for name in keyed {
+        let Some(declared) = registry.declared_group(&name).map(str::to_string) else {
+            continue;
+        };
+        if declared == name {
+            continue;
+        }
+        if let Some(checked) = registry.checks.remove(&name) {
+            registry.checks.insert(declared, checked);
+        }
+    }
     registry
 }
 
@@ -2429,6 +2448,34 @@ mod tests {
             said.contains("Work") && said.contains("work"),
             "it names both spellings: {said}"
         );
+    }
+
+    /// `checked` and `validate` fold the key and the two mutators remove it
+    /// exactly, so a `checks` key that outlives its Group leaves `validate`
+    /// refusing what `save` has just built — under a sentence saying the fault
+    /// is Perch's, on a registry no command can then read.
+    #[test]
+    fn a_check_keyed_in_another_case_than_its_group_is_brought_to_one_on_the_way_in() {
+        let at = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
+        let mut registry = Registry::default();
+        registry
+            .groups
+            .insert("work".to_string(), Settings::default());
+        registry
+            .checks
+            .insert("Work".to_string(), Checked { switched_at: at });
+
+        let mut registry = with_every_claimed_group_declared(registry);
+        validate(&registry).expect("one Group, one Check");
+        assert_eq!(
+            registry.checks.keys().collect::<Vec<_>>(),
+            vec!["work"],
+            "the Check is filed under the spelling the Group was declared under"
+        );
+
+        registry.forget_group("work");
+        validate(&registry).expect("and it goes when the Group it paces goes");
+        assert!(registry.checks.is_empty(), "{:?}", registry.checks);
     }
 
     #[test]
