@@ -184,11 +184,11 @@ fn handed_over(out: &mut dyn Write) -> Result<()> {
     )
 }
 
-/// Becomes the only Watcher on this machine, holding and coming back for as long
+/// Becomes the only Watcher on this machine, holding until whoever has the watch gives
+/// it back — `None` where it was asked to stop while it was waiting.
 ///
-/// `None` where the person, or the service manager, asked it to stop while it was
-/// waiting. Holding rather than exiting is what lets the watcher lock have a staleness
-/// window measured in tens of minutes.
+/// Holding rather than exiting is what lets the watcher lock have a staleness window
+/// measured in tens of minutes.
 fn take_the_watch<'a>(
     host: &'a dyn Host,
     out: &mut dyn Write,
@@ -658,11 +658,11 @@ impl Refusal {
     }
 }
 
-/// The Account is full enough to move off. This is the whole of what the watcher
+/// The Account is full enough to move off, so this is the whole of what the watcher
+/// does about it: read the candidates, choose, and Switch.
 ///
-/// The candidates are read here rather than kept warm: this is the only moment their
-/// figures are worth anything, and the moment they are cheapest to get (ADR a-profile-
-/// is-live-by-evidence).
+/// Read here rather than kept warm — the only moment their figures are worth
+/// anything, and the moment they are cheapest to get.
 // Eight, and the eighth is the point: `probed` is what the round already asked the
 // machine and must not ask again.
 #[allow(clippy::too_many_arguments)]
