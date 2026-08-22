@@ -858,6 +858,38 @@ fn a_quarantine_the_watcher_reports_names_the_account_the_way_the_user_does() {
     );
 }
 
+/// An Account already Quarantined is not asked again — `observe` returns before
+/// the first request — so the round spent nothing, and a Back-off paces questions
+/// nobody is answering. Charged, the loop is asking once every twenty minutes
+/// within eight minutes of the Quarantine, and a `perch relogin` that clears it
+/// waits out the rest of that.
+#[test]
+fn a_round_that_asked_nobody_anything_does_not_pace_the_loop_down() {
+    let host = watching(&[86.0, 88.0, 90.0, 92.0], 5.0);
+    quarantine_for(&host, EMAIL, perch::registry::Quarantine::RenewalRejected);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a Quarantined Account is held on rather than exited on");
+    assert!(
+        host.sent_to(USAGE_URL).is_empty(),
+        "nothing was asked of Anthropic at all:\n{printed}"
+    );
+    let waits: Vec<u64> = host
+        .effects()
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Waited { millis } => Some(*millis),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        waits,
+        vec![150_000, 150_000, 150_000, 150_000],
+        "so nothing earned a longer wait:\n{printed}"
+    );
+}
+
 #[test]
 fn stopping_leaves_no_lock_no_marker_and_no_half_written_state() {
     let host = watching(&[40.0, 45.0], 5.0);
