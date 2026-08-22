@@ -1648,6 +1648,17 @@ pub fn validate(registry: &Registry) -> Result<()> {
         )));
     }
 
+    // `checked` answers with the first match in `BTreeMap` order and
+    // `record_check` writes under the declared spelling, so two keys that fold
+    // to one pace the next Check off a record nothing is keeping.
+    if let Some((already, name)) = first_collision(registry.checks.keys().map(String::as_str)) {
+        return Err(PerchError::Invalid(format!(
+            "The registry records a Check against `{already}` and one against \
+             `{name}`, which are one Group — so which Cooldown paces the next \
+             one is not decided by anything."
+        )));
+    }
+
     refuse_two_names_that_differ_only_in_case(NameKind::Group, registry.groups.keys())?;
     refuse_two_names_that_differ_only_in_case(NameKind::Alias, registry.aliases.keys())?;
 
@@ -2342,6 +2353,31 @@ mod tests {
             },
         );
         validate(&registry).expect("the Accounts in no Group Cycle too");
+    }
+
+    /// `checked` answers with the first in `BTreeMap` order and `record_check`
+    /// writes under the declared spelling, so the record read is not the record
+    /// kept — and a Cooldown read off a stale one Switches sooner than 15
+    /// minutes.
+    #[test]
+    fn two_checks_against_one_group_are_not_a_registry() {
+        let at = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
+        let mut registry = Registry::default();
+        registry
+            .groups
+            .insert("work".to_string(), Settings::default());
+        for spelling in ["Work", "work"] {
+            registry
+                .checks
+                .insert(spelling.to_string(), Checked { switched_at: at });
+        }
+
+        let refused = validate(&registry).expect_err("one of the two paces nothing");
+        let said = refused.to_string();
+        assert!(
+            said.contains("Work") && said.contains("work"),
+            "it names both spellings: {said}"
+        );
     }
 
     #[test]
