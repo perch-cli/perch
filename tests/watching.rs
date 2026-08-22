@@ -1743,4 +1743,9 @@ fn a_watcher_asked_to_stop_while_the_candidates_were_read_switches_nothing() {
         printed.contains("asked to stop"),
         "and the round says why it decided nothing: {printed}"
     );
+    assert!(
+        printed.contains("stopped") && !printed.contains("replaced"),
+        "under the word for what happened: nothing replaced this Watcher, and a \
+         day of these is skimmed by that column: {printed}"
+    );
 }

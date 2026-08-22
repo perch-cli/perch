@@ -759,7 +759,7 @@ fn act(
     // The same guard for the other way a round stops being the one to act: the
     // wait at the bottom of the loop is too late, thirty seconds after a stop.
     if host.asked_to_stop() {
-        return Ok(Outcome::HandedOver {
+        return Ok(Outcome::Stopped {
             why: "this Watcher was asked to stop while the round was reading \
                   the candidates, so nothing was switched."
                 .to_string(),
