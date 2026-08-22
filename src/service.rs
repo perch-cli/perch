@@ -419,10 +419,10 @@ pub fn stopping(platform: Platform, user_id: Option<u32>) -> Vec<Driven> {
                 &format!("gui/{}/{LABEL}", user_id.unwrap_or_default()),
             ],
         )],
-        Platform::Other => vec![
-            Driven::may_fail("systemctl", &["--user", "disable", "--now", UNIT_NAME]),
-            Driven::may_fail("systemctl", &["--user", "daemon-reload"]),
-        ],
+        Platform::Other => vec![Driven::may_fail(
+            "systemctl",
+            &["--user", "disable", "--now", UNIT_NAME],
+        )],
         // `/End` before `/Delete`, which unregisters the task without terminating the
         // instance the scheduler started — and makes `schtasks /Query` answer "no such
         // task", which is how the callers ask whether it worked.
@@ -430,6 +430,17 @@ pub fn stopping(platform: Platform, user_id: Option<u32>) -> Vec<Driven> {
             Driven::may_fail("schtasks", &["/End", "/TN", TASK_NAME]),
             Driven::may_fail("schtasks", &["/Delete", "/TN", TASK_NAME, "/F"]),
         ],
+    }
+}
+
+/// What has to be run once the unit file is gone, so the service manager stops
+/// holding a unit that no longer exists. Apart from [`stopping`] because of
+/// where it sits: a `daemon-reload` driven before the file is deleted re-reads
+/// the unit still on disk, and `systemctl --user list-units` goes on showing it.
+pub fn forgetting(platform: Platform) -> Vec<Driven> {
+    match platform {
+        Platform::Other => vec![Driven::may_fail("systemctl", &["--user", "daemon-reload"])],
+        Platform::MacOs | Platform::Windows => Vec::new(),
     }
 }
 
