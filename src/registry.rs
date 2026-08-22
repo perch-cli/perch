@@ -987,16 +987,21 @@ impl Registry {
     /// the Settings, the Accounts that claim it, and what the last scheduled
     /// Check left — dropping that would let the watcher Switch again at once.
     pub fn rename_group(&mut self, held: &str, to: &str) -> Result<()> {
-        self.refuse_a_name_nothing_may_answer_to(NameKind::Group, to, Some(held))?;
-
-        // Through `declared_group`, which is how every other question about a
-        // Group name is answered here.
+        // Resolved before the new name is judged, or
+        // `perch group rename nosuchgroup work` exits as a name collision. And
+        // through `declared_group`, as every question about a Group name is.
         let Some(declared) = self.declared_group(held).map(str::to_string) else {
             return Err(PerchError::NotFound(format!(
                 "no Group is called `{held}`."
             )));
         };
-        let settings = self.groups.remove(&declared).unwrap_or_default();
+        self.refuse_a_name_nothing_may_answer_to(NameKind::Group, to, Some(held))?;
+
+        let Some(settings) = self.groups.remove(&declared) else {
+            return Err(PerchError::NotFound(format!(
+                "no Group is called `{held}`."
+            )));
+        };
         self.groups.insert(to.to_string(), settings);
         for account in &mut self.accounts {
             if account
