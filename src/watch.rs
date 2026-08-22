@@ -1153,6 +1153,27 @@ mod tests {
         ]
     }
 
+    /// A check exits rather than asking again, so its `nowhere` round promises
+    /// no interval — and the wait is read off the round, so the arm answering
+    /// for that one has to be the loop's own constant.
+    #[test]
+    fn a_nowhere_round_that_promised_no_interval_still_waits_the_loops_own() {
+        let promised = Outcome::Nowhere {
+            why: String::new(),
+            looking_again: Some(1_234),
+        };
+        let silent = Outcome::Nowhere {
+            why: String::new(),
+            looking_again: None,
+        };
+
+        assert_eq!(round(at(86.0), promised).waiting_for(), 1_234);
+        assert_eq!(
+            round(at(86.0), silent).waiting_for(),
+            NOWHERE_INTERVAL_MILLIS
+        );
+    }
+
     /// The column a day of these is skimmed by. Every word is one lowercase token
     /// in eight cells; two of them push the figure three columns right of every
     /// other round's, and a space in the word breaks anything reading the second.

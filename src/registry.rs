@@ -2305,6 +2305,20 @@ mod tests {
                 None,
                 Some("a formatting character (U+200B)"),
             ),
+            // The word joiner and the bidi isolates, which are the same harm
+            // under two more blocks of the table.
+            (
+                NameKind::Group,
+                "wo\u{2060}rk",
+                None,
+                Some("a formatting character (U+2060)"),
+            ),
+            (
+                NameKind::Group,
+                "\u{2066}gpj.exe",
+                None,
+                Some("a formatting character (U+2066)"),
+            ),
         ];
 
         for (kind, name, instead_of, refusal) in cases {

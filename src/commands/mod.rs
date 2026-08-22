@@ -296,3 +296,30 @@ pub fn cycling_among_ungrouped(registry: &crate::registry::Registry) -> String {
         registry.ungrouped.interchangeable
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry::Registry;
+
+    /// The way out turns on what is held, and both commands that meet this state
+    /// read the same sentence: a login is the answer only where there is nothing
+    /// to switch to.
+    #[test]
+    fn what_to_do_about_no_active_account_depends_on_what_perch_holds() {
+        let empty = Registry::default();
+        let said = no_active_account(&empty, "").to_string();
+        assert!(said.contains("no Accounts"), "{said}");
+        assert!(said.contains("`claude`"), "{said}");
+
+        let mut held = Registry::default();
+        held.upsert(crate::cycle::tests::account("someone@example.com", vec![]));
+        let said = no_active_account(&held, ", so there is no Group to Cycle within").to_string();
+        assert!(said.contains("no Group to Cycle within"), "{said}");
+        assert!(said.contains("the one it holds"), "{said}");
+        assert!(
+            !said.contains("`claude`"),
+            "a login repairs nothing here: {said}"
+        );
+    }
+}

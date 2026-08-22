@@ -216,6 +216,21 @@ fn an_installer_installation_runs_the_embedded_installer_at_the_tag() {
     assert!(said.contains(&format!("v{NEWER}")), "{said}");
 }
 
+/// The half the Channel that resolves its own does not have: nothing here works
+/// out which Release to fetch but Perch, so an API that will not answer is a
+/// refusal rather than a note and a hand-over.
+#[test]
+fn an_installer_upgrade_refuses_where_github_will_not_answer() {
+    let host = machine_with_claude_code()
+        .with_reply(LATEST_URL, 403, "{}")
+        .installed_at("/Users/someone/.local/bin/perch");
+
+    let (outcome, said) = upgrading(&host, UpgradeArgs::default());
+
+    outcome.expect_err("there is no newest Release to install");
+    assert!(ran(&host).is_empty(), "and nothing was run: {said}");
+}
+
 /// The Windows installer's default is `%LOCALAPPDATA%\Perch\bin`, which is not
 /// the Unix one.
 #[test]
