@@ -781,6 +781,10 @@ impl Terminal for RealHost {
 impl Network for RealHost {
     fn http(&self, request: &HttpRequest<'_>) -> Result<HttpResponse, HostError> {
         let mut execution = curl(&curl_config(request)?)?;
+        // Taken out before the status is read, because curl can write the
+        // rotated refresh token this body carries and *then* trip its own
+        // `max-time`, and an `Execution` drops it to the allocator whole.
+        let stdout = Zeroizing::new(std::mem::take(&mut execution.stdout));
         if !execution.succeeded() {
             return Err(HostError::Other(format!(
                 "curl exited {}: {}",
@@ -788,14 +792,7 @@ impl Network for RealHost {
                 execution.stderr.trim()
             )));
         }
-
-        // Taken out of the `Execution` and wiped there, exactly as `keychain_get`
-        // does: the token endpoint answers a renewal with the rotated refresh
-        // token in this body, and an `Execution` drops it to the allocator whole.
-        let mut stdout = std::mem::take(&mut execution.stdout);
-        let reply = split_reply(&stdout);
-        stdout.zeroize();
-        reply
+        split_reply(&stdout)
     }
 }
 
