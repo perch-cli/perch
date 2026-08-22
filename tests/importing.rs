@@ -536,6 +536,47 @@ fn a_rollback_leaves_a_profile_that_was_already_on_the_machine_where_it_is() {
     );
 }
 
+/// A Profile is made for the `.claude.json` alone where the Export carries no
+/// Credential, so a rollback that forgets that store destroys a refresh token
+/// this Import never wrote and nothing can recover.
+#[test]
+fn a_rollback_leaves_a_credential_this_import_never_wrote() {
+    // An Export where the third Account is Quarantined and its store was already
+    // empty when it was written, so it travels with a `.claude.json` and nothing
+    // else.
+    let source = machine_with_three_accounts();
+    quarantine_for(&source, THIRD_EMAIL, Quarantine::RenewalRejected);
+    let store = store_of(&source, THIRD_EMAIL);
+    source.forget_keychain_item(&store.keychain_service, &store.keychain_account);
+    let source = source.with_secrets(&[PASSPHRASE, PASSPHRASE]);
+    run_export(&source, AT).0.expect("the export is written");
+    let sealed = source.file(AT).expect("a file was written");
+
+    let host = machine_with_claude_code()
+        .with_platform(Platform::Other)
+        .with_file(AT, &sealed)
+        .with_secrets(&[PASSPHRASE])
+        .with_unwritable_file(REGISTRY_PATH, "No space left on device");
+    // A directory the registry never named, holding somebody's live Credential —
+    // the leftover a `perch add` that died at the browser step leaves.
+    let landing = store_of(&host, THIRD_EMAIL);
+    let host = host.with_file(&landing.credentials_file, THIRD_CREDENTIAL);
+
+    let (outcome, _printed) = run_import(&host, AT);
+
+    outcome.expect_err("the registry cannot be written");
+    assert_eq!(
+        host.file(&landing.credentials_file).as_deref(),
+        Some(THIRD_CREDENTIAL),
+        "the Export carried no Credential for this Account, so the one in its \
+         store is not this Import's to take back"
+    );
+    assert!(
+        !host.path_exists(&landing.identity_file),
+        "and the `.claude.json` this Import did write came back out"
+    );
+}
+
 /// Every Credential is already in a store by the time the registry is written,
 /// so a registry that will not go down leaves Profiles no command could name.
 #[test]
