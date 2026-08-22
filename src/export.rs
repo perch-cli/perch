@@ -54,8 +54,7 @@ where
 ///
 /// Fixed rather than measured, so whether an Export opens is not a question about
 /// the pair of machines it traveled between. One above what Perch writes: the
-/// factor sizes a buffer before the passphrase can be doubted, and a machine
-/// without that much aborts rather than refusing.
+/// factor sizes a buffer before the passphrase can be doubted.
 const MAX_WORK_FACTOR: u8 = 20;
 
 /// The scrypt work [`seal`] spends writing one file, as `log2(N)`.

@@ -322,6 +322,40 @@ fn a_windows_tilde_means_home_too_because_windows_writes_the_other_separator() {
     );
 }
 
+/// The only thing that makes a Purge survivable must not be written where the
+/// Purge is about to delete it — and `starts_with` matches components, so a
+/// linked spelling of the same directory is a different string.
+#[test]
+fn an_export_path_that_reaches_perchs_home_through_a_link_is_refused_too() {
+    for typed in [
+        "/Users/someone/.config/perch/backup.age",
+        // The same directory, reached by a name that shares no component with it.
+        "/Users/someone/backups/backup.age",
+    ] {
+        let host = a_machine_to_give_back()
+            .with_link(
+                perch::host::Link::Symbolic,
+                PERCH_HOME,
+                "/Users/someone/backups",
+            )
+            .with_answers(&["y", typed, "purge"])
+            .with_secrets(&[PASSPHRASE, PASSPHRASE]);
+
+        let (outcome, printed) = run_purge(&host);
+
+        let refused = outcome.expect_err("the Export would go with the home");
+        assert!(
+            refused.to_string().contains("Nothing was purged"),
+            "{typed}: the Purge is off, and says so: {refused}"
+        );
+        assert_eq!(
+            registry_on(&host).map(|registry| registry.accounts.len()),
+            Some(3),
+            "{typed}: and every Account is still here: {printed}"
+        );
+    }
+}
+
 /// Every guard downstream lets a verbatim `~` through: its parent is the current
 /// directory, which exists; nothing is at that path; and it is not under Perch's
 /// home, so the Purge would not take it. The Export lands at `./~`.
