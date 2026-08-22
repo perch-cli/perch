@@ -205,11 +205,14 @@ fn the_live_store(
     }
     let live = registry::the_default_profile(host)?;
     // An Identity that is absent, or that will not be read, is not evidence
-    // against — only one naming somebody else is. Nor is a Claude Code that will
-    // not say its version: an Export is what a decommissioned machine runs.
+    // against — only one naming somebody else is. A Claude Code that will not
+    // say its version is neither, and is tolerated rather than allowed to skip
+    // the read: an Export is what a decommissioned machine runs, and the
+    // version is only what a refusal would have quoted.
+    let installed = crate::probe::Installed::probed(host)
+        .unwrap_or_else(|_| crate::probe::Installed::unknown("(not installed)"));
     let somebody_else = matches!(
-        crate::probe::Installed::probed(host)
-            .and_then(|installed| crate::probe::read_identity(host, &live, &installed)),
+        crate::probe::read_identity(host, &live, &installed),
         Ok(Some(identity)) if !registry::same_name(&identity.email, account.email())
     );
     Ok((!somebody_else).then_some(live))
