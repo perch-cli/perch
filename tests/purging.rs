@@ -1116,7 +1116,7 @@ fn a_directory_perch_cannot_list_stops_the_purge_rather_than_reading_as_empty() 
     assert_eq!(credential_of(&host, EMAIL).as_deref(), Some(CREDENTIAL));
 }
 
-/// A registry a hand-edit or a half-written save left unparseable is the one
+/// A registry a hand-edit or a half-written save left unparsable is the one
 /// state with no way off the machine: `perch holdings import` refuses it too,
 /// and on macOS a Credential Store is named after the Profile a `rm -rf` would
 /// take away, so deleting the home by hand orphans every keychain item.
