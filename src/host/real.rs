@@ -1219,9 +1219,7 @@ fn make_link(kind: Link, target: &Path, at: &Path) -> Result<(), HostError> {
     match kind {
         Link::Symbolic => or_already_exists(std::os::unix::fs::symlink(target, at), at),
         Link::Hard => or_already_exists(std::fs::hard_link(target, at), at),
-        Link::Junction => Err(HostError::Other(
-            "a directory junction is a Windows link, and this is not Windows".to_string(),
-        )),
+        Link::Junction => Err(super::junctions_are_windows_only()),
     }
 }
 
@@ -1255,10 +1253,7 @@ fn remove_link(path: &Path) -> Result<(), HostError> {
         return Ok(());
     };
     if !metadata.file_type().is_symlink() {
-        return Err(HostError::Other(format!(
-            "{} is not a link, so it is not Perch's to remove",
-            path.display()
-        )));
+        return Err(super::not_a_link(path));
     }
     if_it_is_there(std::fs::remove_file(path)).map(|_| ())
 }
@@ -1281,10 +1276,7 @@ fn remove_link(path: &Path) -> Result<(), HostError> {
     };
 
     if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0 {
-        return Err(HostError::Other(format!(
-            "{} is not a link, so it is not Perch's to remove",
-            path.display()
-        )));
+        return Err(super::not_a_link(path));
     }
 
     let removed = if metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0 {

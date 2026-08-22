@@ -214,6 +214,22 @@ impl Link {
     }
 }
 
+/// What `remove_link` says about a path that is not one. Both adapters spelled
+/// it, twice each, and `tests/conformance.rs` asserts a substring of it — so
+/// four copies had to stay in step by hand or a case quietly stopped proving
+/// anything about the one somebody edited.
+pub fn not_a_link(path: &Path) -> HostError {
+    HostError::Other(format!(
+        "{} is not a link, so it is not Perch's to remove",
+        path.display()
+    ))
+}
+
+/// The same for the link kind only one platform makes.
+pub fn junctions_are_windows_only() -> HostError {
+    HostError::Other("a directory junction is a Windows link, and this is not Windows".to_string())
+}
+
 /// How a wait ended: on its own, or because the loop was asked to stop. Its own
 /// type rather than a `bool`, which two callers would read in opposite
 /// directions — a wait that "returned true" is either one that completed or one

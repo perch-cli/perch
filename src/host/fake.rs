@@ -1812,9 +1812,7 @@ impl port::Links for FakeHost {
                 ));
             }
             Link::Junction if !windows => {
-                return Err(HostError::Other(
-                    "a directory junction is a Windows link, and this is not Windows".to_string(),
-                ));
+                return Err(port::junctions_are_windows_only());
             }
             // A hard link is a second name for a *file*: there is no such thing
             // as one for a directory, and nothing to name where nothing is.
@@ -1874,10 +1872,7 @@ impl port::Links for FakeHost {
         // itself, so neither real adapter can recognize one: unix asks
         // `is_symlink` and Windows asks for a reparse point, and both refuse.
         if matches!(self.fs.links.borrow().get(path), Some((Link::Hard, _))) {
-            return Err(HostError::Other(format!(
-                "{} is not a link, so it is not Perch's to remove",
-                path.display()
-            )));
+            return Err(port::not_a_link(path));
         }
         if self.fs.links.borrow_mut().remove(path).is_some() {
             self.fs.files.borrow_mut().remove(path);
@@ -1889,10 +1884,7 @@ impl port::Links for FakeHost {
         // the real call refuses it: answered `Ok`, this could not tell a caller
         // that dropped its `link_target` guard from one that kept it.
         if self.fs.files.borrow().contains_key(path) || self.fs.dirs.borrow().contains(path) {
-            return Err(HostError::Other(format!(
-                "{} is not a link, so it is not Perch's to remove",
-                path.display()
-            )));
+            return Err(port::not_a_link(path));
         }
         self.fs.modified.borrow_mut().remove(path);
         Ok(())
