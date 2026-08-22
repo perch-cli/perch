@@ -990,7 +990,12 @@ fn clients_in(host: &dyn Host, config_dir: &Path) -> std::result::Result<Vec<u32
 
         match host.process_started_at(pid) {
             Some(process_began) => {
-                if process_began.timestamp_millis() <= session_began + CLOCK_STEP_MARGIN_MILLIS {
+                // Saturating, for the reason `usable` is: `startedAt` comes out
+                // of a file Perch does not own, and an `i64::MAX` in it would
+                // wrap a Live Profile into "nothing running" in a release build.
+                if process_began.timestamp_millis()
+                    <= session_began.saturating_add(CLOCK_STEP_MARGIN_MILLIS)
+                {
                     running.push(pid);
                 }
             }
@@ -1689,6 +1694,27 @@ mod tests {
             PathBuf::from("/tmp/profile/sessions/4242.json"),
             "the marker is named after the process, where the corroboration \
              reads the pid back out of the name"
+        );
+    }
+
+    /// `startedAt` is a number out of a file Perch does not own, so the margin
+    /// added to it is arithmetic on a stranger's input.
+    #[test]
+    fn a_marker_claiming_the_end_of_time_still_reads_as_a_live_client() {
+        let host = FakeHost::new()
+            .with_file(
+                "/tmp/profile/sessions/4242.json",
+                &format!(r#"{{"startedAt":{}}}"#, i64::MAX),
+            )
+            .with_live_process_started_at(
+                4242,
+                DateTime::from_timestamp_millis(NOON).expect("a time"),
+            );
+
+        assert_eq!(
+            clients_in(&host, Path::new("/tmp/profile")).ok(),
+            Some(vec![4242]),
+            "a process that began long before the marker claims is running              against the Profile, whatever the claim adds up to"
         );
     }
 
