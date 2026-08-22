@@ -69,6 +69,15 @@ const WORK_FACTOR: u8 = 19;
 /// there is no run in which it is worth discovering.
 const _: () = assert!(WORK_FACTOR < MAX_WORK_FACTOR);
 
+/// The oldest envelope shape any Perch has stamped; below it names no shape.
+///
+/// The Export's own rather than the registry's, which it equals by coincidence:
+/// the day that floor moves, every Export ever written claims a version the
+/// registry's number says nothing wrote.
+const EARLIEST_VERSION: u32 = 1;
+
+const _: () = assert!(EARLIEST_VERSION <= CURRENT_VERSION);
+
 /// An Export, unsealed: what one `age` file holds before it is encrypted and
 /// after it is decrypted again.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -451,7 +460,7 @@ fn refuse_a_newer_perch(plain: &[u8]) -> Result<()> {
     }
     // The floor the registry inside holds. An Export can be written by hand with
     // `age -a -p`, and a version below the earliest one names no shape.
-    if outer.is_some_and(|claimed| claimed < u64::from(crate::migration::EARLIEST_VERSION)) {
+    if outer.is_some_and(|claimed| claimed < u64::from(EARLIEST_VERSION)) {
         return Err(no_perch_wrote(outer));
     }
 
@@ -480,7 +489,7 @@ fn no_perch_wrote(claimed: Option<u64>) -> PerchError {
              written — the earliest is {}. Nothing was imported: reading it as \
              version {} would be a guess at a shape nothing describes.",
             claimed.unwrap_or_default(),
-            crate::migration::EARLIEST_VERSION,
+            EARLIEST_VERSION,
             CURRENT_VERSION,
         ),
     }
