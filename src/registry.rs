@@ -542,6 +542,17 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
             kind.names()
         )));
     }
+    // Whitespace is not the whole of what a terminal will not echo back: an
+    // escape is no `char::is_whitespace`, and a name holding one is written raw
+    // into every later listing, where it moves the column and colors the row.
+    if let Some(said) = crate::host::control_character_in(name) {
+        return Err(PerchError::Invalid(format!(
+            "{} carries {said}, which no line of Perch's output could show as \
+             part of a name — `perch list` writes what it holds, so a name a \
+             terminal reads as an instruction is one every later listing obeys.",
+            kind.names()
+        )));
+    }
     // Both words that already address something are refused for either half of
     // the namespace, and both say which half they were asked about.
     if means_no_group(name) {
@@ -1645,6 +1656,15 @@ pub fn validate(registry: &Registry) -> Result<()> {
                 account.email(),
             )));
         }
+        // `validate_name`'s other rule, on the member of the namespace that
+        // does not go through it: an address arrives from an Import or a hand
+        // edit, and is rendered into a table cell exactly as it is held.
+        if let Some(said) = crate::host::control_character_in(account.email()) {
+            return Err(PerchError::Invalid(format!(
+                "The registry holds an Account whose address carries {said}, \
+                 which no line of Perch's output could show as part of one."
+            )));
+        }
     }
 
     // One entry per Account. `upsert` replaces the matching entry, so two for
@@ -2240,6 +2260,20 @@ mod tests {
                 Some("has a space in it"),
             ),
             (NameKind::Group, "none", None, Some("means no Group at all")),
+            // Not whitespace, and so not caught by the clause above — and the
+            // one a terminal reads as an instruction rather than as a name.
+            (
+                NameKind::Group,
+                "\u{1b}[31mred",
+                None,
+                Some("a control character (U+001B)"),
+            ),
+            (
+                NameKind::Alias,
+                "bell\u{7}",
+                None,
+                Some("a control character (U+0007)"),
+            ),
         ];
 
         for (kind, name, instead_of, refusal) in cases {
@@ -3268,6 +3302,10 @@ mod tests {
                 r#""groups":{"work":{}},"aliases":{"work":"someone@example.com"}"#,
                 "share one namespace",
             ),
+            (
+                r#""groups":{"\u001b[31mred":{}}"#,
+                "a control character (U+001B)",
+            ),
         ];
 
         for (held, expected) in holdings {
@@ -3459,6 +3497,27 @@ mod tests {
             said.contains("could be told from"),
             "it says what is wrong with it: {said}"
         );
+        assert!(
+            said.contains("registry.json"),
+            "and the file to edit: {said}"
+        );
+    }
+
+    /// The other half of `validate_name`'s rule, on the member of the namespace
+    /// nothing validates on the way in: an address arrives from an Import or a
+    /// hand edit and is written into a table cell exactly as it is held.
+    #[test]
+    fn an_account_address_a_terminal_would_read_as_an_instruction_is_refused() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let path = registry_path(&host).unwrap();
+        host.set_file(
+            &path,
+            r#"{"version":2,"accounts":[{"identity":{"email":"bad\u001brow@example.com"}}]}"#,
+        );
+
+        let refused = load(&host).expect_err("that is not an address a table can hold");
+        let said = refused.to_string();
+        assert!(said.contains("a control character (U+001B)"), "{said}");
         assert!(
             said.contains("registry.json"),
             "and the file to edit: {said}"
