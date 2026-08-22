@@ -93,7 +93,13 @@ impl Channel {
 /// Three answers rather than one: the installers take `PERCH_INSTALL_DIR` above
 /// everything, and their own defaults do not agree across platforms.
 pub fn installer_dir(host: &dyn Host) -> Result<PathBuf> {
-    if let Some(chosen) = host.env_var("PERCH_INSTALL_DIR") {
+    // Filtered for the reason `LOCALAPPDATA` is below: set-but-empty is the
+    // machine not saying, and taken at face value it makes `channel_at` compare
+    // against `[]` and the refusal quote a path that is not there.
+    if let Some(chosen) = host
+        .env_var("PERCH_INSTALL_DIR")
+        .filter(|chosen| !chosen.is_empty())
+    {
         return Ok(PathBuf::from(chosen));
     }
 
@@ -572,6 +578,17 @@ mod tests {
                 installer_dir(&chosen).expect("a home"),
                 PathBuf::from("/opt/mine"),
                 "{platform:?} — the installers take it above their own default"
+            );
+
+            // Set to nothing is the machine not saying, the same as `LOCALAPPDATA`
+            // above: taken at face value the comparison is against `[]`.
+            let quiet = FakeHost::new()
+                .with_platform(platform)
+                .with_env("PERCH_INSTALL_DIR", "");
+            assert_ne!(
+                installer_dir(&quiet).expect("a home"),
+                PathBuf::new(),
+                "{platform:?} — an empty override is no override"
             );
         }
     }

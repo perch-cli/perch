@@ -1250,7 +1250,13 @@ impl Registry {
 /// The same path on every platform rather than `%APPDATA%`, because one rule is
 /// easier to keep in a Host port exposing only a home directory. A preference.
 pub fn perch_home(host: &dyn Host) -> Result<PathBuf> {
-    if let Some(overridden) = host.env_var("PERCH_HOME") {
+    // Set-but-empty is the machine not saying: taken at face value it makes the
+    // registry a relative path, so Perch would read and write the Holdings
+    // wherever it happened to be invoked from.
+    if let Some(overridden) = host
+        .env_var("PERCH_HOME")
+        .filter(|overridden| !overridden.is_empty())
+    {
         return Ok(PathBuf::from(overridden));
     }
     Ok(home_dir(host)?.join(".config").join("perch"))
@@ -3002,6 +3008,21 @@ mod tests {
     #[test]
     fn without_the_override_perch_keeps_its_registry_under_the_config_directory() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+
+        assert_eq!(
+            perch_home(&host).unwrap(),
+            std::path::PathBuf::from("/Users/someone/.config/perch")
+        );
+    }
+
+    /// `export PERCH_HOME=$SOMETHING_UNSET` is the ordinary way to arrive here,
+    /// and a relative registry path is the Holdings following the working
+    /// directory around.
+    #[test]
+    fn a_perch_home_set_to_nothing_is_the_machine_not_saying_rather_than_the_working_directory() {
+        let host = crate::host::FakeHost::new()
+            .with_env("HOME", "/Users/someone")
+            .with_env("PERCH_HOME", "");
 
         assert_eq!(
             perch_home(&host).unwrap(),
