@@ -629,17 +629,21 @@ fn list_in_a_group_shows_every_account_in_it() {
 fn list_narrows_to_the_scope_named_rather_than_to_the_active_accounts_own() {
     let host = machine_holding_three_accounts();
 
-    let (result, printed) = run_list_in(&host, "ungrouped", false);
+    // Either word: both are refused as a Group name everywhere, so both address
+    // the Accounts in no Group everywhere.
+    for word in ["ungrouped", "none"] {
+        let (result, printed) = run_list_in(&host, word, false);
 
-    result.unwrap();
-    assert!(
-        printed.contains(THIRD_EMAIL),
-        "the Scope asked for is the Scope shown:\n{printed}"
-    );
-    assert!(
-        !printed.contains(SECOND_EMAIL),
-        "and the Group the active Account is in is not:\n{printed}"
-    );
+        result.unwrap_or_else(|err| panic!("`{word}` names the Scope: {err}"));
+        assert!(
+            printed.contains(THIRD_EMAIL),
+            "the Scope asked for is the Scope shown:\n{printed}"
+        );
+        assert!(
+            !printed.contains(SECOND_EMAIL),
+            "and the Group the active Account is in is not:\n{printed}"
+        );
+    }
 }
 
 /// Being in no Group is not a Group, so it is

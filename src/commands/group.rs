@@ -151,7 +151,7 @@ fn rename(registry: &mut Registry, from: &str, to: &str) -> Result<String> {
 /// re-adding a bad way to do this.
 fn move_account(registry: &mut Registry, target: &AccountTarget, group: &str) -> Result<String> {
     let email = target.email.clone();
-    let destination = if registry::means_no_group(group) {
+    let destination = if registry::means_the_ungrouped_scope(group) {
         None
     } else if let Some(declared) = registry.declared_group(group) {
         Some(declared.to_string())

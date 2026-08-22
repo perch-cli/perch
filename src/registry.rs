@@ -456,6 +456,15 @@ pub fn means_no_group(name: &str) -> bool {
     same_name(name, NO_GROUP)
 }
 
+/// Whether a name is either of the two words for the Accounts in no Group.
+///
+/// One predicate because they were reserved as two: every command refuses both
+/// as a name, so a command that took only one refused the other with a sentence
+/// naming the command that takes it, and never the spelling it takes itself.
+pub fn means_the_ungrouped_scope(name: &str) -> bool {
+    means_ungrouped(name) || means_no_group(name)
+}
+
 /// Which of the two things sharing the namespace is being named. A refusal
 /// says which: being told `none` cannot be a name is less use than being told
 /// what Perch was asked to call `none`.
@@ -557,8 +566,8 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
     // the namespace, and both say which half they were asked about.
     if means_no_group(name) {
         return Err(PerchError::Invalid(format!(
-            "`{name}` means no Group at all on `perch group move`, so it cannot \
-             also be {}.",
+            "`{name}` addresses the Accounts in no Group, so it cannot also be \
+             {}.",
             kind.article()
         )));
     }
@@ -567,8 +576,8 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
     // Ungrouped Scope answers to the name first; an Alias is the same collision.
     if means_ungrouped(name) {
         return Err(PerchError::Invalid(format!(
-            "`{name}` addresses the Accounts in no Group on `perch config`, so \
-             it cannot also be {}.",
+            "`{name}` addresses the Accounts in no Group, so it cannot also be \
+             {}.",
             kind.article()
         )));
     }
@@ -2259,7 +2268,12 @@ mod tests {
                 None,
                 Some("has a space in it"),
             ),
-            (NameKind::Group, "none", None, Some("means no Group at all")),
+            (
+                NameKind::Group,
+                "none",
+                None,
+                Some("addresses the Accounts in no Group"),
+            ),
             // Not whitespace, and so not caught by the clause above — and the
             // one a terminal reads as an instruction rather than as a name.
             (
@@ -3255,7 +3269,7 @@ mod tests {
     #[test]
     fn a_claim_declare_group_would_have_refused_is_named_rather_than_declared() {
         let claims = [
-            (r#""none""#, "{}", "means no Group"),
+            (r#""none""#, "{}", "addresses the Accounts in no Group"),
             (r#""my work""#, "{}", "has a space in it"),
             (r#""overflow""#, r#"{}"#, "already an Alias"),
         ];
@@ -3293,7 +3307,10 @@ mod tests {
     fn a_declared_group_or_an_alias_nothing_would_have_accepted_is_named_too() {
         let holdings = [
             (r#""groups":{"my work":{}}"#, "has a space in it"),
-            (r#""groups":{"none":{}}"#, "means no Group"),
+            (
+                r#""groups":{"none":{}}"#,
+                "addresses the Accounts in no Group",
+            ),
             (
                 r#""aliases":{"someone@example.com":"other@example.com"}"#,
                 "looks like an email address",
