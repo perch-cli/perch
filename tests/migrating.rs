@@ -383,3 +383,104 @@ fn a_command_run_against_an_old_registry_leaves_a_current_one_behind() {
         "{written}"
     );
 }
+
+/// The rename pass decides which names collide with `same_name` and then matched
+/// the claim byte-exactly, so a claim spelled in another case kept naming a Group
+/// the rename had just taken away.
+#[test]
+fn an_account_claiming_its_group_in_another_case_is_renamed_with_it() {
+    let held: serde_json::Value = serde_json::from_str(V0_2_0).expect("a document");
+    let mut held = held.as_object().cloned().expect("an object");
+    held.insert(
+        "groups".to_string(),
+        serde_json::json!({ "-dev": { "watcher_threshold_percent": 70 } }),
+    );
+    held.insert("checks".to_string(), serde_json::json!({}));
+    for account in held
+        .get_mut("accounts")
+        .and_then(serde_json::Value::as_array_mut)
+        .expect("the fixture lists Accounts")
+    {
+        if account.get("group").is_some() {
+            account["group"] = serde_json::json!("-DEV");
+        }
+    }
+    let host = machine_holding(&serde_json::Value::Object(held).to_string());
+
+    perch::migration::bring_forward(&host).expect("it comes forward");
+
+    let registry = registry::load(&host)
+        .expect("and every command can read it afterwards")
+        .expect("a registry is there");
+    assert!(
+        registry.group("dev").is_some(),
+        "the Group came forward under the accepted name: {:?}",
+        registry.groups.keys().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        registry.groups.len(),
+        1,
+        "and the claim did not declare a second one: {:?}",
+        registry.groups.keys().collect::<Vec<_>>()
+    );
+}
+
+/// `ungrouped` is a legitimate `checks` key and is not a Group, so the Ungrouped
+/// Scope's Cooldown must not be re-keyed onto a Group the pass renamed.
+#[test]
+fn the_ungrouped_scopes_cooldown_is_not_moved_onto_a_group_called_ungrouped() {
+    let held: serde_json::Value = serde_json::from_str(V0_2_0).expect("a document");
+    let mut held = held.as_object().cloned().expect("an object");
+    held.insert(
+        "groups".to_string(),
+        serde_json::json!({ "ungrouped": { "watcher_threshold_percent": 70 } }),
+    );
+    held.insert(
+        "checks".to_string(),
+        serde_json::json!({ "ungrouped": { "switched_at": "2026-08-14T10:00:00Z" } }),
+    );
+    for account in held
+        .get_mut("accounts")
+        .and_then(serde_json::Value::as_array_mut)
+        .expect("the fixture lists Accounts")
+    {
+        if account.get("group").is_some() {
+            account["group"] = serde_json::json!("ungrouped");
+        }
+    }
+    let host = machine_holding(&serde_json::Value::Object(held).to_string());
+
+    perch::migration::bring_forward(&host).expect("it comes forward");
+
+    let written: serde_json::Value =
+        serde_json::from_str(&on_disk(&host)).expect("a document came back");
+    assert!(
+        written["checks"].get("ungrouped").is_some(),
+        "the Ungrouped Scope keeps the Cooldown it recorded: {written}"
+    );
+    assert!(
+        written["checks"].get("ungrouped-1").is_none(),
+        "and the renamed Group is paced by a Switch it never made: {written}"
+    );
+}
+
+/// `enabled` inverted into `disabled`, and a value that is no boolean read as
+/// "not false" — so an Account somebody took out of Cycling came back into it,
+/// which is the one loss this step refuses everywhere else.
+#[test]
+fn an_enabled_flag_that_is_not_a_boolean_is_refused_rather_than_read_as_true() {
+    let held: serde_json::Value = serde_json::from_str(V0_2_0).expect("a document");
+    let mut held = held.as_object().cloned().expect("an object");
+    held.get_mut("accounts")
+        .and_then(serde_json::Value::as_array_mut)
+        .expect("the fixture lists Accounts")[0]["enabled"] = serde_json::json!("false");
+    let host = machine_holding(&serde_json::Value::Object(held).to_string());
+
+    let refused =
+        registry::load(&host).expect_err("Perch will not guess which shape the rest is in");
+
+    assert!(
+        refused.to_string().contains("accounts[].enabled"),
+        "the field is named: {refused}"
+    );
+}
