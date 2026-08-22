@@ -1869,7 +1869,14 @@ fn with_every_check_under_the_declared_spelling(mut registry: Registry) -> Regis
             continue;
         }
         if let Some(checked) = registry.checks.remove(&name) {
-            registry.checks.insert(declared, checked);
+            // The later of the two, where both spellings carry a record: byte
+            // order would otherwise decide, and the older one winning is a
+            // Check free to Switch inside a Cooldown still running.
+            let later = match registry.checks.get(&declared) {
+                Some(held) if held.switched_at > checked.switched_at => held.clone(),
+                _ => checked,
+            };
+            registry.checks.insert(declared, later);
         }
     }
     registry
@@ -2546,6 +2553,36 @@ mod tests {
         registry.forget_group("work");
         validate(&registry).expect("and it goes when the Group it paces goes");
         assert!(registry.checks.is_empty(), "{:?}", registry.checks);
+    }
+
+    /// The fold happens before `validate`, so the collision it refuses is one
+    /// `load` never reaches — it merges instead, and merging by insertion order
+    /// lets `"Work"` (0x57) write over `"work"` whichever is fresher.
+    #[test]
+    fn two_checks_folding_to_one_group_keep_the_later_switch() {
+        let noon = Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap();
+        let january = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let mut registry = Registry::default();
+        registry
+            .groups
+            .insert("work".to_string(), Settings::default());
+        registry
+            .checks
+            .insert("Work".to_string(), Checked { switched_at: noon });
+        registry.checks.insert(
+            "work".to_string(),
+            Checked {
+                switched_at: january,
+            },
+        );
+
+        let registry = with_every_claimed_group_declared(registry);
+
+        assert_eq!(
+            registry.checked("work").map(|it| it.switched_at),
+            Some(noon),
+            "the older record winning is a Check free to Switch at once"
+        );
     }
 
     #[test]
