@@ -161,10 +161,13 @@ pub fn document(
         "active": registry.is_active(account.email()),
         "organization": account.identity.organization_name,
         "plan": account.plan,
-        // `ok()` rather than `?`: an address no directory can be named after is
-        // a state Perch has to be able to describe, and the renderers a person
-        // reads describe it because none of them asks where the Profile is.
-        "profile_dir": account.profile_dir(host).ok(),
+        // `ok()` rather than `?`, because an address no directory can be named
+        // after is a state Perch describes; lossy, because `json!` unwraps a
+        // `Path` that is not UTF-8.
+        "profile_dir": account
+            .profile_dir(host)
+            .ok()
+            .map(|at| at.to_string_lossy().into_owned()),
         // The figure the section's order was made on. A section saying it is
         // `ranked` without it would be a claim with no way of checking it.
         "headroom": cycle::headroom_document(account),
@@ -175,6 +178,30 @@ pub fn document(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Why `document` spells a Profile path lossily. `json!` expands a
+    /// non-literal to `to_value(&expr).unwrap()`, and a `Path` holding bytes
+    /// that are not UTF-8 serializes to an error — so the `--json` surfaces
+    /// would abort on a `HOME` the real Host takes as an `OsString` and passes
+    /// through where `env_var` would have refused it.
+    #[test]
+    #[cfg(unix)]
+    fn a_path_that_is_not_text_is_spelled_rather_than_serialized() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let at = std::path::PathBuf::from(std::ffi::OsStr::from_bytes(
+            b"/Users/\xffsomeone/.config/perch",
+        ));
+
+        assert!(
+            serde_json::to_value(&at).is_err(),
+            "the raw path is what `json!` would have unwrapped"
+        );
+        assert!(
+            serde_json::to_value(at.to_string_lossy()).is_ok(),
+            "and the spelling is what it is handed instead"
+        );
+    }
 
     /// A registry holding four Accounts across two Groups and none, active on
     /// the ungrouped one.
