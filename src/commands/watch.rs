@@ -626,7 +626,13 @@ fn refused_the_reading(attempts: &[Attempt]) -> Option<Refusal> {
              nothing current could be read."
                 .to_string(),
         )),
-        observe::Outcome::Failed(why) => Some(Refusal::paced(why.clone())),
+        // Paced only where the round asked Anthropic something: a Renewal refused
+        // because a client is holding the Profile, or an Account sharing one, sent
+        // nothing, and a Back-off paces questions nobody is answering.
+        observe::Outcome::Failed { why, spent } => Some(match spent {
+            true => Refusal::paced(why.clone()),
+            false => Refusal::unpaced(why.clone()),
+        }),
         // An Account already Quarantined is not asked at all (`observe` returns
         // before the first request), so this round spent nothing and a Back-off
         // paces questions nobody is answering.

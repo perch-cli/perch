@@ -524,6 +524,32 @@ fn a_live_profiles_token_is_never_renewed_to_get_a_figure() {
     assert_eq!(active(&host).as_deref(), Some(EMAIL));
 }
 
+/// A Back-off paces questions nobody is answering. A Renewal refused because a
+/// client is holding the Profile asks nobody anything, so the loop that finds
+/// the session gone must be able to read at once rather than in twenty minutes.
+#[test]
+fn a_hold_that_asked_anthropic_nothing_does_not_pace_the_loop_down() {
+    let host = answering(watched(), SPARE_TOKEN, SECOND_EMAIL, &[5.0])
+        .with_reply_to(PROFILE_URL, ACTIVE_TOKEN, 200, &profile_of(EMAIL))
+        .with_interrupt_after(4);
+    host.set_keychain_item(DEFAULT_SERVICE, LOGIN_NAME, SPENT);
+    let host = client_running_against(host, DEFAULT_CONFIG_DIR, 4242);
+    observed(&host, EMAIL, vec![window("5-hour", 95.0)]);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a held decision is not a failure");
+    assert!(
+        host.sent_to(TOKEN_URL).is_empty(),
+        "nothing was renewed under a running session: {printed}"
+    );
+    assert_eq!(
+        waits(&host),
+        vec![150_000; 4],
+        "so every round comes back on the ordinary beat: {printed}"
+    );
+}
+
 #[test]
 fn nowhere_to_go_is_a_decision_and_the_loop_goes_on_watching() {
     let host = watching(&[100.0, 100.0], 100.0);
