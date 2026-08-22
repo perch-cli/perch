@@ -240,6 +240,28 @@ pub fn a_store_that_held_nothing(host: &dyn Host) -> &'static str {
     }
 }
 
+/// Why there is no active Account, in the terms the way out depends on: holding
+/// nothing, a login is the way in; holding Accounts, Perch has merely been left
+/// on nobody and naming one is what `perch switch` is for. `because` is what the
+/// command wanted an active Account for. One function, because two commands meet
+/// this state and only one of them told the difference.
+pub fn no_active_account(registry: &crate::registry::Registry, because: &str) -> PerchError {
+    if registry.accounts.is_empty() {
+        return PerchError::NotFound(format!(
+            "Perch holds no Accounts{because}. Run `claude` and log in, then run \
+             Perch again."
+        ));
+    }
+    PerchError::NotFound(format!(
+        "Perch holds no active Account{because}. `perch switch <target>` makes \
+         {} active.",
+        match registry.accounts.len() {
+            1 => "the one it holds".to_string(),
+            held => format!("one of the {held} it holds"),
+        }
+    ))
+}
+
 /// Refuses to act on an Account whose Credential no longer works, in the words of
 /// whichever command was asked; `consequence` is what did not happen and why it
 /// would have been worse than nothing. One function rather than one per command:

@@ -601,9 +601,8 @@ fn a_cycle_away_from_a_live_profile_is_refused() {
 
 /// A bare Cycle asks the Group of the Account it is leaving where it may look,
 /// so a Perch that records nobody as active has no question to answer rather
-/// than an empty one. The refusal names the way out, which is not a Perch
-/// command: nothing here is repaired by adding an Account, only by there being
-/// a login to adopt in the first place.
+/// than an empty one. The way out turns on what is held: with three Accounts
+/// nothing here is repaired by logging in, only by naming one of them.
 #[test]
 fn a_bare_switch_with_nobody_active_says_there_is_no_group_to_cycle_within() {
     let host = three_accounts_in_one_group();
@@ -622,8 +621,12 @@ fn a_bare_switch_with_nobody_active_says_there_is_no_group_to_cycle_within() {
         "{refused}"
     );
     assert!(
-        refused.to_string().contains("log in"),
-        "and it names the way out: {refused}"
+        refused.to_string().contains("perch switch <target>"),
+        "and the way out is naming one of the three, not a login: {refused}"
+    );
+    assert!(
+        !refused.to_string().contains("`claude`"),
+        "which is the answer only on a machine holding nothing: {refused}"
     );
     assert_eq!(
         credentials_written(&host),

@@ -16,7 +16,7 @@ use serde_json::json;
 
 use crate::adopt;
 use crate::commands::say_json;
-use crate::error::{PerchError, Result};
+use crate::error::Result;
 use crate::host::Host;
 use crate::listing;
 use crate::observe::{self, Report};
@@ -87,27 +87,14 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
     }
 }
 
-/// The Account being reported on, or why there is not one.
-///
-/// The remedy depends on what Perch holds: with nothing held a login is the way
-/// in, and with Accounts held it is not the answer at all — Perch has been left
-/// on nobody, which is what `perch switch` is for.
+/// The Account being reported on, or why there is not one — which is
+/// [`crate::commands::no_active_account`]'s to say, `perch switch` meeting the
+/// same state.
 fn active_email(registry: &Registry) -> Result<String> {
-    if let Some(account) = registry.active_account() {
-        return Ok(account.email().to_string());
+    match registry.active_account() {
+        Some(account) => Ok(account.email().to_string()),
+        None => Err(crate::commands::no_active_account(registry, "")),
     }
-    Err(PerchError::NotFound(if registry.accounts.is_empty() {
-        "Perch holds no Accounts. Run `claude` and log in, then run Perch again.".to_string()
-    } else {
-        format!(
-            "Perch holds no active Account. `perch switch <target>` makes {} active.",
-            if registry.accounts.len() == 1 {
-                "the one it holds".to_string()
-            } else {
-                format!("one of the {} it holds", registry.accounts.len())
-            }
-        )
-    }))
 }
 
 fn render_human(
