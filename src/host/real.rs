@@ -1394,17 +1394,17 @@ fn mode_of(_metadata: &std::fs::Metadata) -> Option<u32> {
     None
 }
 
-/// The one `chmod` Perch performs. `O_NOFOLLOW` is what makes it a handle rather
-/// than a name: a symlink at the last component fails with `ELOOP`, so the answer
-/// becomes the remark `tighten_if_loose` already makes about a file it could not
-/// narrow. Read-only, because opening for writing would truncate the Credential
-/// this is protecting.
+/// The one `chmod` Perch performs, on a handle rather than a name. `O_NOFOLLOW`
+/// fails a symlink at the last component with `ELOOP`, and `O_NONBLOCK` a FIFO
+/// that would otherwise wait for a writer for ever — both become the remark
+/// `tighten_if_loose` already makes about a file it could not narrow. Read-only,
+/// or opening it would truncate the Credential.
 #[cfg(unix)]
 fn set_private_mode(path: &Path) -> Result<(), HostError> {
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let file = std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(path)?;
     file.set_permissions(std::fs::Permissions::from_mode(PRIVATE_FILE_MODE))?;
     Ok(())
@@ -1622,6 +1622,9 @@ fn touch_now(path: &Path) -> Result<(), HostError> {
     use std::os::unix::ffi::OsStrExt;
     let raw = std::ffi::CString::new(path.as_os_str().as_bytes())
         .map_err(|err| HostError::Other(format!("{} is not a path: {err}", path.display())))?;
+    // SAFETY: `raw` outlives the call and holds a nul-terminated path, which is
+    // what `CString::new` promises; a null `times` is `utimes`'s documented
+    // "now" and reads no second buffer.
     let outcome = unsafe { libc::utimes(raw.as_ptr(), std::ptr::null()) };
     if outcome == 0 {
         Ok(())
@@ -1648,6 +1651,9 @@ fn touch_now(path: &Path) -> Result<(), HostError> {
     use windows_sys::Win32::System::SystemInformation::GetSystemTimeAsFileTime;
 
     let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    // SAFETY: `wide` outlives the block and is nul-terminated by the `chain`
+    // above; the handle it opens is closed on every path out, and the error is
+    // read before `CloseHandle` can replace it.
     unsafe {
         let handle = CreateFileW(
             wide.as_ptr(),
