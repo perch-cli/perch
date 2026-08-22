@@ -298,6 +298,10 @@ struct Network {
     /// watcher watches it.
     traces: RefCell<Traces>,
     sent: RefCell<Vec<Sent>>,
+    /// How long one request takes to answer. A burst of reads is bounded by
+    /// nothing but the network, so a round can outlast a hold renewed either
+    /// side of it.
+    takes_millis: RefCell<u64>,
 }
 
 /// Time, and what somebody else does while it passes: one mechanism with two
@@ -400,6 +404,7 @@ impl FakeHost {
                 replies: RefCell::new(BTreeMap::new()),
                 traces: RefCell::new(BTreeMap::new()),
                 sent: RefCell::new(Vec::new()),
+                takes_millis: RefCell::new(0),
             },
             stall: Stall {
                 now: RefCell::new(Utc.with_ymd_and_hms(2026, 8, 4, 12, 0, 0).unwrap()),
@@ -907,6 +912,13 @@ impl FakeHost {
                 body: body.to_string(),
             },
         );
+    }
+
+    /// A network that answers slowly, and how slowly. The stall a round has no
+    /// bound on: one read per candidate, each waited thirty seconds for.
+    pub fn with_a_network_that_answers_slowly(self, takes_millis: u64) -> Self {
+        *self.network.takes_millis.borrow_mut() = takes_millis;
+        self
     }
 
     // ---- stall: time, and what somebody else does while it passes ---
@@ -2094,6 +2106,13 @@ impl port::Network for FakeHost {
         let asked = sent.url.clone();
         let bearer = sent.bearer().map(str::to_string);
         self.network.sent.borrow_mut().push(sent);
+
+        let takes = *self.network.takes_millis.borrow();
+        if takes > 0 {
+            let answered = *self.stall.now.borrow() + chrono::Duration::milliseconds(takes as i64);
+            *self.stall.now.borrow_mut() = answered;
+            self.somebody_else_arrives();
+        }
 
         // A trace answers before a fixed reply does, and its last entry stays
         // put: a figure that moves is what the test is about, and one that has

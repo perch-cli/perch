@@ -1424,6 +1424,39 @@ fn a_loop_whose_watch_was_taken_over_stops_rather_than_deciding_beside_it() {
     );
 }
 
+/// The burst is renewed either side of it and bounded by nothing in between, so it can
+/// outlast the watch — and a Switch made after that is the second Watcher deciding
+/// beside the first, which is the whole of what the lock is for.
+#[test]
+fn a_watch_taken_over_while_the_candidates_were_read_switches_nothing() {
+    let lock = "/Users/someone/.config/perch/.watch.lock";
+    // Long enough to carry the round past the staleness window, which is what lets
+    // another Watcher judge this hold abandoned and clear it.
+    let host = watching(&[86.0], 5.0)
+        .with_a_network_that_answers_slowly(
+            perch::watch::LONGEST_WAIT_MILLIS + perch::watch::REFRESH_INTERVAL_MILLIS + 1_000,
+        )
+        .once_while_waiting(move |host| {
+            let _ = host.remove_dir_all(std::path::Path::new(lock));
+        });
+    host.forget_effects();
+
+    let (result, printed) = run_watch_once(&host);
+
+    result.expect("a watch taken over is not this Watcher's failure");
+    assert!(
+        !host
+            .effects()
+            .iter()
+            .any(|effect| matches!(effect, Effect::KeychainSet { .. })),
+        "nothing was switched, so no Credential moved: {printed}"
+    );
+    assert!(
+        printed.contains("taken over"),
+        "and the round says why it decided nothing: {printed}"
+    );
+}
+
 #[test]
 fn a_check_renews_the_watch_across_the_round_rather_than_only_holding_it() {
     let lock = "/Users/someone/.config/perch/.watch.lock";
