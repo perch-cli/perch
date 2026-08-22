@@ -590,6 +590,40 @@ fn a_destination_nearly_as_full_as_the_account_being_left_is_refused() {
     );
 }
 
+/// Nowhere to go is the one steady state a Threshold crossing can sit in for hours,
+/// and the round that reaches it read every candidate. At the ordinary interval that is
+/// twenty-four reads an hour *per candidate*, against the 28-30 Anthropic allows — so
+/// the loop spends the allowance that `perch status --refresh` needs, on Accounts it
+/// has already refused.
+#[test]
+fn a_dead_end_is_looked_at_again_at_the_cooldown_rather_than_at_the_interval() {
+    // Every round over the Threshold, and the only candidate barely emptier — so
+    // every one of them crosses, reads, and finds nowhere worth going.
+    let host = watching_both(&[82.0, 83.0, 81.0, 84.0, 85.0, 86.0], &[78.0], 6);
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("it was stopped");
+    let waits: Vec<u64> = host
+        .effects()
+        .into_iter()
+        .filter_map(|effect| match effect {
+            Effect::Waited { millis } => Some(millis),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        waits
+            .iter()
+            .all(|millis| *millis == perch::watch::NOWHERE_INTERVAL_MILLIS),
+        "every round found nowhere to go, so every wait is the Cooldown: {waits:?}"
+    );
+    assert!(
+        printed.contains("Looking again in 15m"),
+        "and the line says the loop is resting longer than an interval: {printed}"
+    );
+}
+
 /// A machine where the Account being watched fills up, the watcher moves off it, and
 /// the Account it moved to fills up in turn — the trace that would move every round if
 /// nothing paced it. The Account left behind is roomy again by then, so only the

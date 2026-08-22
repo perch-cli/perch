@@ -27,6 +27,13 @@ pub const REFRESH_INTERVAL_MILLIS: u64 = 150_000;
 /// because the endpoint coming back does not announce itself.
 pub const LONGEST_WAIT_MILLIS: u64 = REFRESH_INTERVAL_MILLIS * 8;
 
+/// How long the loop rests after a round that found nowhere to go.
+///
+/// The ordinary interval Refreshes one Account and such a round read every
+/// candidate, so that cadence spends each of their allowances on Accounts it
+/// just refused. The Cooldown: none of them becomes a candidate in 150 seconds.
+pub const NOWHERE_INTERVAL_MILLIS: u64 = COOLDOWN_MINUTES as u64 * 60_000;
+
 /// How often that is, for the line that says what the loop is about to do.
 ///
 /// Derived rather than written out, so the sentence and the constant cannot come to
@@ -653,6 +660,7 @@ impl Round {
                 retrying_in: Some(millis),
                 ..
             } => *millis,
+            Outcome::Nowhere { .. } => NOWHERE_INTERVAL_MILLIS,
             // Named one by one rather than caught by a wildcard, so an outcome added
             // later has to say what the loop does after it. A hold carrying no wait is
             // a check's, and a check exits rather than asking.
@@ -662,7 +670,6 @@ impl Round {
             | Outcome::Waiting
             | Outcome::Cooling { .. }
             | Outcome::Switched { .. }
-            | Outcome::Nowhere { .. }
             | Outcome::Refused { .. } => REFRESH_INTERVAL_MILLIS,
         }
     }
@@ -720,7 +727,12 @@ impl Round {
                 false => format!(" → {to}{}", explaining(&unread.join(" "))),
             },
             Outcome::Cooling { why } => explaining(why),
-            Outcome::Nowhere { why } => explaining(&format!("nowhere to go: {why}")),
+            // The wait is said, as a hold says its own: this is the one decision
+            // the loop rests longer than an interval after.
+            Outcome::Nowhere { why } => explaining(&format!(
+                "nowhere to go: {why} Looking again in {}.",
+                how_long(NOWHERE_INTERVAL_MILLIS),
+            )),
             Outcome::Held {
                 why,
                 retrying_in: Some(millis),
@@ -1209,7 +1221,6 @@ mod tests {
                 to: String::new(),
                 unread: Vec::new(),
             },
-            Outcome::Nowhere { why: String::new() },
             Outcome::Refused { why: String::new() },
         ] {
             let round = round(at(86.0), outcome);
@@ -1221,6 +1232,14 @@ mod tests {
                 round.outcome,
             );
         }
+
+        // The one decision that read *every* candidate, so keeping the ordinary
+        // cadence spends each of their allowances on Accounts it just refused.
+        assert_eq!(
+            round(at(86.0), Outcome::Nowhere { why: String::new() }).waiting_for(),
+            NOWHERE_INTERVAL_MILLIS,
+            "nowhere to go rests for the Cooldown rather than an interval"
+        );
 
         assert_eq!(
             round(
