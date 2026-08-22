@@ -52,10 +52,11 @@ where
 
 /// The most scrypt work [`unseal`] will spend opening one file, as `log2(N)`.
 ///
-/// Fixed rather than measured here, so whether an Export opens is not a question
-/// about the pair of machines it traveled between. 22 is where `age`'s own
-/// guidance tops out, and 2^22 rounds want four gigabytes to themselves.
-const MAX_WORK_FACTOR: u8 = 22;
+/// Fixed rather than measured, so whether an Export opens is not a question about
+/// the pair of machines it traveled between. One above what Perch writes: the
+/// factor sizes a buffer before the passphrase can be doubted, and a machine
+/// without that much aborts rather than refusing.
+const MAX_WORK_FACTOR: u8 = 20;
 
 /// The scrypt work [`seal`] spends writing one file, as `log2(N)`.
 ///
