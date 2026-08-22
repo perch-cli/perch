@@ -1116,6 +1116,33 @@ const CASES: &[Case] = &[
             );
         },
     },
+    Case {
+        named: "a file made under a linked directory can be removed again",
+        asserts: |host, root, adapter, _now| {
+            // What Reconcile makes, and what `replace_via_tmp` then writes its
+            // copy beside and clears on a failure: a write that resolved a link
+            // and a remove that did not would leave the temp file behind.
+            let real = root.join("real");
+            let linked = root.join("linked");
+            host.create_private_dir_all(&real).expect("the directory");
+            if !can_link(host, Link::Symbolic, root, adapter) {
+                return;
+            }
+            host.link(Link::Symbolic, &real, &linked)
+                .expect("the link is made");
+
+            let beside = linked.join("settings.json.new");
+            host.create_file_with_mode(&beside, "half", PRIVATE_FILE_MODE)
+                .expect("written through the link");
+            host.remove_file(&beside).expect("and removed through it");
+
+            assert!(
+                !host.path_exists(&real.join("settings.json.new")),
+                "{adapter}: the write and the remove resolve the same path, or a \
+                 failed replacement leaves its copy where nothing names it"
+            );
+        },
+    },
 ];
 
 /// One sentence on the port that no `&dyn Filesystem` can be asked: [`Case`]

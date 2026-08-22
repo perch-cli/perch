@@ -1524,6 +1524,9 @@ impl port::Files for FakeHost {
         if let Some(detail) = self.fs.unlistable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
+        // The directories on the way resolve and the last component does not,
+        // as [`Self::remove_file`]'s do.
+        let path = &self.lands_at(path);
         // A link at the path is taken away and what it points at is left alone:
         // `remove_dir_all` does not follow the last component, so it unlinks the
         // link itself and answers `Ok`. Measured rather than assumed.
@@ -1684,15 +1687,21 @@ impl port::Files for FakeHost {
         Ok(())
     }
 
+    /// Through the link a write went through, and never through the last
+    /// component: `unlink` resolves the directories on the way and then takes
+    /// away the name it was given, link or file. Without the first half a file
+    /// created under a linked parent could not be removed — which is
+    /// `replace_via_tmp`'s cleanup on any Profile Reconcile has been over.
     fn remove_file(&self, path: &Path) -> Result<(), HostError> {
         self.record(Effect::RemovedFile(path.to_path_buf()));
         if let Some(detail) = self.fs.undeletable.borrow().get(path) {
             return Err(HostError::Other(detail.clone()));
         }
-        self.fs.files.borrow_mut().remove(path);
-        self.fs.links.borrow_mut().remove(path);
-        self.fs.modified.borrow_mut().remove(path);
-        self.fs.modes.borrow_mut().remove(path);
+        let at = self.lands_at(path);
+        self.fs.files.borrow_mut().remove(&at);
+        self.fs.links.borrow_mut().remove(&at);
+        self.fs.modified.borrow_mut().remove(&at);
+        self.fs.modes.borrow_mut().remove(&at);
         Ok(())
     }
 
