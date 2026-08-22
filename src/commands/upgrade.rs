@@ -2,12 +2,12 @@
 //! (ADR an-upgrade-asks-its-channel).
 //!
 //! **It routes rather than overwrites.** Three of the four Channels manage the
-//! binary themselves, and writing over one of theirs is a corruption rather than
-//! a shortcut, so Perch hands the work back to the Channel that left this
-//! Installation and replaces the binary itself only for the one Channel that
-//! leaves nothing else in charge.
+//! binary themselves, so writing over one is a corruption rather than a
+//! shortcut: Perch hands the work back to the Channel that left this
+//! Installation, and replaces the binary only for the one that leaves nobody.
 //!
-//! It touches nothing Perch holds: no registry, no lock, no Credential.
+//! It writes no registry, no lock and no Credential — only, on the installer
+//! Channel, a script under Perch's home, which on a fresh machine makes it.
 
 use std::io::Write;
 
