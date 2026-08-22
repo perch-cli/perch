@@ -1885,9 +1885,9 @@ fn with_every_check_under_the_declared_spelling(mut registry: Registry) -> Regis
 /// Writes the registry, under the hold the caller took to read it.
 ///
 /// The hold is a parameter because a registry is only ever written by the Perch
-/// that read it. It is also where the hold is renewed and [`validate`] is asked
-/// on the way out, so what this writes and what [`load`] accepts cannot differ.
-pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -> Result<()> {
+/// that read it, and is where [`validate`] is asked on the way out, so what this
+/// writes and what [`load`] accepts cannot differ.
+pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &mut Registry) -> Result<()> {
     perch.renew();
     if !perch.still_held() {
         // A general failure rather than `Busy`, deliberately
@@ -1914,13 +1914,12 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) ->
     })?;
 
     let path = registry_path(host)?;
-    // Stamped rather than carried through: the field is the version *this build*
-    // writes, and a guard describing the last writer is a guard about nothing.
-    let body = serde_json::to_string_pretty(&Registry {
-        version: CURRENT_VERSION,
-        ..registry.clone()
-    })
-    .map_err(|err| PerchError::Other(format!("could not serialize the registry: {err}")))?;
+    // In place, so the caller's field cannot disagree with the file — and because
+    // cloning the Holdings to set one `u32` is a deep copy of every Account and
+    // its figures per write, which a Watcher pays every round.
+    registry.version = CURRENT_VERSION;
+    let body = serde_json::to_string_pretty(&*registry)
+        .map_err(|err| PerchError::Other(format!("could not serialize the registry: {err}")))?;
     write(host, &path, &format!("{body}\n"))
 }
 
@@ -2338,7 +2337,7 @@ mod tests {
         let host = crate::host::FakeHost::new();
         let mut perch = lock(&host).expect("the registry lock is free");
         let path = registry_path(&host).unwrap();
-        save(&host, &mut perch, &Registry::default()).expect("an empty one is fine");
+        save(&host, &mut perch, &mut Registry::default()).expect("an empty one is fine");
         let before = host.file(&path).expect("it was written");
 
         // A dangling Alias is not a refusal downstream — it is the `expect` in
@@ -2348,7 +2347,7 @@ mod tests {
             .aliases
             .insert("work".to_string(), "nobody@example.com".to_string());
 
-        let refused = save(&host, &mut perch, &broken).expect_err("load would not read it");
+        let refused = save(&host, &mut perch, &mut broken).expect_err("load would not read it");
 
         let said = refused.to_string();
         assert!(said.contains("nobody@example.com"), "the rule: {said}");
@@ -2378,7 +2377,8 @@ mod tests {
         // `perch remove` waiting on somebody who walked away.
         for _ in 0..4 {
             host.sleep(REGISTRY_STALE_MILLIS as u64 - 10_000);
-            save(&host, &mut perch, &Registry::default()).expect("it is still Perch's to write");
+            save(&host, &mut perch, &mut Registry::default())
+                .expect("it is still Perch's to write");
         }
 
         assert!(perch.still_held());
@@ -2396,14 +2396,15 @@ mod tests {
         // The stall, and another Perch finding the lock abandoned and taking it.
         host.sleep(REGISTRY_STALE_MILLIS as u64 + 1_000);
         let theirs = lock(&host).expect("an abandoned lock is taken over");
-        save(&host, &mut { theirs }, &Registry::default()).expect("theirs is the live hold");
+        save(&host, &mut { theirs }, &mut Registry::default()).expect("theirs is the live hold");
         let before = load(&host).expect("it reads").expect("they wrote one");
 
-        let stale = Registry {
+        let mut stale = Registry {
             active: Active::Settled("someone@example.com".into()),
             ..Registry::default()
         };
-        let refused = save(&host, &mut perch, &stale).expect_err("this one may no longer write");
+        let refused =
+            save(&host, &mut perch, &mut stale).expect_err("this one may no longer write");
 
         assert!(
             refused.to_string().contains("Run this command again"),
@@ -2618,12 +2619,20 @@ mod tests {
             .with_file(path, &before)
             .with_unwritable_file(path, "No space left on device (os error 28)");
 
-        let registry = Registry {
+        // Holding the Account its `active` names, so `validate` passes and the
+        // unwritable file is what fails the save: refused at the first step, the
+        // two assertions below are true of a write that was never attempted.
+        let mut registry = Registry {
             active: Active::Settled("someone@example.com".into()),
             ..Registry::default()
         };
+        registry.upsert(crate::cycle::tests::account("someone@example.com", vec![]));
         let mut perch = lock(&host).expect("the registry lock is free");
-        save(&host, &mut perch, &registry).expect_err("the write cannot land");
+        let refused = save(&host, &mut perch, &mut registry).expect_err("the write cannot land");
+        assert!(
+            refused.to_string().contains("No space left on device"),
+            "the file is what refused it, rather than the shape: {refused}"
+        );
 
         assert_eq!(
             host.file(path).as_deref(),
@@ -2642,7 +2651,7 @@ mod tests {
         let host = crate::host::FakeHost::new();
 
         let mut perch = lock(&host).expect("the registry lock is free");
-        save(&host, &mut perch, &Registry::default()).expect("it is written");
+        save(&host, &mut perch, &mut Registry::default()).expect("it is written");
 
         let path = registry_path(&host).unwrap();
         assert_eq!(host.mode_of(&path), Some(crate::host::PRIVATE_FILE_MODE));
@@ -3606,12 +3615,12 @@ mod tests {
     fn a_registry_this_build_writes_says_so() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
         let mut perch = lock(&host).expect("the registry lock is free");
-        let stale = Registry {
+        let mut stale = Registry {
             version: 0,
             ..Registry::default()
         };
 
-        save(&host, &mut perch, &stale).expect("it writes");
+        save(&host, &mut perch, &mut stale).expect("it writes");
 
         assert_eq!(
             load(&host).expect("it reads").expect("it is there").version,

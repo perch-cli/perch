@@ -118,7 +118,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     let named = registry.named_for_the_user(account.email());
     let alias = registry.alias_of(account.email()).map(str::to_string);
     registry.forget(account.email());
-    registry::save(host, &mut perch, &registry).map_err(|error| {
+    registry::save(host, &mut perch, &mut registry).map_err(|error| {
         error.with_note(&format!(
             "The Credential Perch held for {} is already deleted, so the Account \
              it still records is one it can no longer switch to.",

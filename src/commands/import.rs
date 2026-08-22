@@ -34,14 +34,14 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
 
     let passphrase = the_passphrase(host, out)?;
     let export = export::unseal(&sealed, &passphrase)?;
-    let restored = import::restored(&export, &registry::registry_path(host)?)?;
+    let mut restored = import::restored(&export, &registry::registry_path(host)?)?;
 
     // Nothing above this line has written anything, and the passphrase prompt is
     // the one wait here with no bound on it — so the hold taken before it may be
     // one another `perch` has since claimed and put an Account down under.
     still_ours(&mut perch, "imported")?;
     let placed = import::place(host, &export)?;
-    registry::save(host, &mut perch, &restored).map_err(|error| {
+    registry::save(host, &mut perch, &mut restored).map_err(|error| {
         placed.undo(host);
         error.with_note(
             "Nothing was imported. The Credentials this had already restored \

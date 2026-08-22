@@ -101,7 +101,7 @@ pub fn run(host: &dyn Host, args: ReloginArgs, out: &mut dyn Write) -> Result<()
     // by now whatever happens next: the Account has a working Credential in its
     // own Profile, which is the whole of what a Quarantine said it did not have.
     let was_quarantined = record(&mut registry, &account, produced)?;
-    registry::save(host, &mut perch, &registry)
+    registry::save(host, &mut perch, &mut registry)
         .map_err(|error| unrecorded(&account, landing_in_the_default_profile, error))?;
 
     // Announced before the landing line, but its failure is *held*: a closed

@@ -152,7 +152,7 @@ pub fn only_the_registry(
 ) -> Result<()> {
     let (mut perch, mut registry) = crate::adopt::ensure_adopted_exclusively(host)?;
     let said = change(&mut registry)?;
-    crate::registry::save(host, &mut perch, &registry)?;
+    crate::registry::save(host, &mut perch, &mut registry)?;
     for line in said {
         say(out, &line)?;
     }

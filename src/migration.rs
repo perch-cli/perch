@@ -277,13 +277,13 @@ pub fn bring_forward(host: &dyn Host) -> Result<()> {
         .read_file(&path)
         .map(|held| renames(&held))
         .unwrap_or_default();
-    let Some(registry) = crate::registry::load(host)? else {
+    let Some(mut registry) = crate::registry::load(host)? else {
         return Ok(());
     };
     // Through `save` rather than by writing what `forward` returned: it stamps
     // the version, refuses what a later `load` could not read, and replaces the
     // file in one step, so a migration that fails leaves the old shape intact.
-    crate::registry::save(host, &mut perch, &registry)?;
+    crate::registry::save(host, &mut perch, &mut registry)?;
 
     // The three retired Watcher Settings are named, because they are the one
     // thing the step does not carry.
