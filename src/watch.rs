@@ -422,10 +422,13 @@ impl Recently {
     }
 
     /// What a scheduled check inherits from the one before it: when its Group last
-    /// Switched, or nothing where it never has.
-    pub fn recorded(checked: Option<&Checked>) -> Recently {
+    /// Switched, or nothing where it never has. Brought back to `now` where it is
+    /// later, because the hold runs a Cooldown from the stamp: a clock reading 2035
+    /// for the round that Switched would cool that Group until 2035, and only
+    /// `perch group remove` — which destroys its Settings — clears a record.
+    pub fn recorded(checked: Option<&Checked>, now: DateTime<Utc>) -> Recently {
         Recently {
-            switched: checked.map(|checked| checked.switched_at),
+            switched: checked.map(|checked| checked.switched_at.min(now)),
         }
     }
 
@@ -1196,7 +1199,7 @@ mod tests {
 
     #[test]
     fn a_check_is_paced_by_what_the_one_before_it_recorded() {
-        let recorded = Recently::recorded(Some(&Checked { switched_at: now() }));
+        let recorded = Recently::recorded(Some(&Checked { switched_at: now() }), now());
 
         assert!(recorded.resting(now() + Duration::minutes(4)).is_some());
         assert_eq!(
@@ -1206,9 +1209,31 @@ mod tests {
              than from the process that read it"
         );
         assert_eq!(
-            Recently::recorded(None),
+            Recently::recorded(None, now()),
             Recently::nothing(),
             "a Group nothing has Switched within owes nobody a wait"
+        );
+    }
+
+    /// The record is written from whatever clock the machine had at the time, and
+    /// nothing but `perch group remove` — which destroys the Group's Settings —
+    /// clears one.
+    #[test]
+    fn a_check_recorded_under_a_clock_years_fast_cools_its_group_for_a_cooldown() {
+        let skewed = Checked {
+            switched_at: now() + Duration::days(3650),
+        };
+
+        let recorded = Recently::recorded(Some(&skewed), now());
+
+        assert!(
+            recorded.resting(now() + Duration::minutes(4)).is_some(),
+            "it still paces the next Check"
+        );
+        assert_eq!(
+            recorded.resting(now() + Duration::minutes(15)),
+            None,
+            "but a Cooldown from now rather than from 2035"
         );
     }
 

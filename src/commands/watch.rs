@@ -353,10 +353,18 @@ impl Watcher {
     /// A check takes the Group's record, read under the lock so the cooldown a round is
     /// held by is the one that was on record when it decided. The loop's is already in
     /// the caller's hands.
-    fn pacing(self, carried: &mut Recently, registry: &Registry, scope: &Scope) {
+    fn pacing(
+        self,
+        carried: &mut Recently,
+        registry: &Registry,
+        scope: &Scope,
+        now: DateTime<Utc>,
+    ) {
         match self {
             Watcher::Loop => {}
-            Watcher::Check => *carried = Recently::recorded(registry.checked(scope.word())),
+            Watcher::Check => {
+                *carried = Recently::recorded(registry.checked(scope.word()), now);
+            }
         }
     }
 
@@ -486,7 +494,7 @@ fn one_round(
     };
     let email = watching.account.email().to_string();
 
-    watcher.pacing(recently, &registry, &watching.scope);
+    watcher.pacing(recently, &registry, &watching.scope, host.now());
 
     // Once per round, and handed to everything in it that wants one: probed where it is
     // wanted, an acting round walks `PATH` and spawns `claude --version` three times.
