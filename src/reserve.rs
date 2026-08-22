@@ -74,7 +74,7 @@ impl<'a> Reserve<'a> {
             exhausted,
             unobserved,
             not_candidates: accounts.len() - candidates.len(),
-            out_of_the_running: cycle::out_of_the_running(&accounts),
+            out_of_the_running: cycle::out_of_the_running(registry, &accounts),
             candidates,
             with_headroom,
         }
