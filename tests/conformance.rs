@@ -1117,6 +1117,28 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "a write over a directory is refused rather than performed",
+        asserts: |host, root, adapter, _now| {
+            // The mirror of "writing under a file is ENOTDIR": `create_new`
+            // meets what `remove_file` would not take away, and a fake that
+            // wrote anyway leaves one path a file and a directory at once.
+            let at = root.join("a-directory");
+            host.create_private_dir_all(&at)
+                .expect("the directory is made");
+
+            let written = host.create_file_with_mode(&at, "{}", PRIVATE_FILE_MODE);
+
+            assert!(
+                written.is_err(),
+                "{adapter}: a directory is not a file to write over"
+            );
+            assert!(
+                host.read_file(&at).is_err(),
+                "{adapter}: and it is still a directory afterwards"
+            );
+        },
+    },
+    Case {
         named: "a file made under a linked directory can be removed again",
         asserts: |host, root, adapter, _now| {
             // What Reconcile makes, and what `replace_via_tmp` then writes its

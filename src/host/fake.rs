@@ -1383,9 +1383,18 @@ impl port::Files for FakeHost {
         if let Some(parent) = lands_at.parent() {
             self.make_dirs(parent, ORDINARY_DIR_MODE)?;
         }
-        // Whatever was at the path is taken away first, a link included, because
-        // the real one leads with `remove_file` and then `create_new`. Left
-        // behind, one path would be both a regular file and a symbolic link.
+        // A directory is not something `remove_file` takes away, so `create_new`
+        // meets it and answers `EEXIST`. Refused rather than written over, or
+        // one path would be a regular file and a directory at once.
+        if self.fs.dirs.borrow().contains(&lands_at) {
+            return Err(HostError::Other(format!(
+                "{}: Is a directory (os error 21)",
+                lands_at.display()
+            )));
+        }
+        // Whatever else was at the path is taken away first, a link included,
+        // because the real one leads with `remove_file` and then `create_new`.
+        // Left behind, one path would be both a regular file and a symbolic link.
         self.fs.links.borrow_mut().remove(path);
         // A disk that fills partway leaves what fitted behind and then fails,
         // which is the order the real host does it in: open, `write_all`,
