@@ -76,8 +76,7 @@ pub fn add_command_line(
     account: &str,
     secret: &str,
 ) -> Result<Zeroizing<String>, KeychainError> {
-    inert("the keychain service name", service)?;
-    inert("the keychain account name", account)?;
+    storable(service, account)?;
     // `Zeroizing`, because this line holds the Credential. Hex is an encoding
     // and not a protection, and every other buffer on this path is wiped.
     Ok(Zeroizing::new(format!(
@@ -86,6 +85,16 @@ pub fn add_command_line(
         double_quoted(account),
         hex_encode(secret.as_bytes()).as_str(),
     )))
+}
+
+/// What no adapter may store, whichever one is answering.
+///
+/// `security -i` reads one sub-command per line, so a name carrying a control
+/// character would end the `add-generic-password` line and begin whatever the
+/// rest of it spelled. Beside [`add_command_line`] so the fake asks it too.
+pub fn storable(service: &str, account: &str) -> Result<(), KeychainError> {
+    inert("the keychain service name", service)?;
+    inert("the keychain account name", account)
 }
 
 /// Refuses a value that would be punctuation rather than a value.

@@ -477,6 +477,10 @@ impl FakeHost {
             .files
             .borrow_mut()
             .insert(path.as_ref().to_path_buf(), contents.to_string());
+        // A file on a real filesystem has an age. Without this `modified_at`
+        // answers `NotFound` where `path_exists` says there is a file, and
+        // `carry`'s ranking by age sees every candidate as never used.
+        self.mark_written(path.as_ref());
     }
 
     /// A file exists in the directories above it, so they exist too. Without
@@ -1110,7 +1114,13 @@ impl FakeHost {
                 .get(&at)
                 .map(|(_, target)| target.clone())
             {
-                at = target;
+                // Resolved against where the link sits where it is relative, as
+                // `host::through_every_link` does: `ln -s`, stow and chezmoi all
+                // record a relative target unless given an absolute path.
+                at = match target.is_absolute() {
+                    true => target,
+                    false => at.parent().unwrap_or(Path::new("")).join(target),
+                };
                 continue;
             }
             // Nothing of that name, which does not mean nothing is there: a
@@ -1887,6 +1897,10 @@ impl port::Keys for FakeHost {
             service: service.to_string(),
             account: account.to_string(),
         });
+        // What `security -i` will not take, asked here as the real adapter asks
+        // it through `add_command_line`: the account name is `$USER` verbatim,
+        // so a fake accepting one no machine would proves nothing.
+        crate::keychain::storable(service, account)?;
         self.while_the_keychain_asks();
         if let Some(error) = self.lock_error() {
             return Err(error);
