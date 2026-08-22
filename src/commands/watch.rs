@@ -136,7 +136,7 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
             }
             // Held like any other round that could not read. Ending the watcher over a
             // contended registry would let a `perch status --refresh` stop it silently.
-            Err(PerchError::Busy(why)) => held_before_a_round(&mut backoff, &why, host.now()),
+            Err(PerchError::Busy(why)) => held_before_a_round(&why, host.now()),
             Err(other) => return Err(other),
         };
 
@@ -194,14 +194,11 @@ fn take_the_watch<'a>(
     out: &mut dyn Write,
     holding: &mut Holding,
 ) -> Result<Option<crate::lock::Held<'a>>> {
-    // Its own rather than the loop's, because nothing here is a wait for a Refresh:
-    // shared, waiting out a stale lock would announce a cadence nothing had earned.
-    let mut backoff = Backoff::none();
     loop {
         match crate::lock::take_all(host, vec![registry::watcher_lock_spec(host)?]) {
             Ok(held) => return Ok(Some(held)),
             Err(PerchError::Busy(why)) => {
-                let (waiting_for, spoken) = held_before_a_round(&mut backoff, &why, host.now());
+                let (waiting_for, spoken) = held_before_a_round(&why, host.now());
                 say_it(out, holding, spoken, host.now())?;
                 if host.wait(waiting_for) == Waited::Interrupted {
                     return Ok(None);
@@ -212,12 +209,13 @@ fn take_the_watch<'a>(
     }
 }
 
-/// A hold that happened before there was a [`Round`] to hold: the Back-off is
+/// A hold that happened before there was a [`Round`] to hold, and so one with no
+/// Account to name; [`one_round`]'s `held` is the other shape.
 ///
-/// One of the two shapes a hold is said in, because a round that never learned which
-/// Account it was watching has none to name; [`one_round`]'s `held` is the other.
-fn held_before_a_round(backoff: &mut Backoff, why: &str, now: DateTime<Utc>) -> (u64, Spoken) {
-    let waiting_for = backoff.could_not_read();
+/// At the ordinary interval, because nothing here spent a request: a contended
+/// registry and a lock inside its staleness window are each an answer.
+fn held_before_a_round(why: &str, now: DateTime<Utc>) -> (u64, Spoken) {
+    let waiting_for = watch::REFRESH_INTERVAL_MILLIS;
     let line = watch::held_line(why, Some(waiting_for), now);
     (waiting_for, Spoken::held(why, Some(waiting_for), line))
 }

@@ -1389,6 +1389,39 @@ fn a_loop_that_finds_the_watch_held_says_so_and_comes_back_rather_than_exiting()
     );
 }
 
+/// The lock only becomes takeable once it is stale, and `lock::abandoned` is
+/// consulted on an attempt alone — so how long a killed Watcher leaves this
+/// machine unwatched is how often this asks. A doubling wait spends the staleness
+/// window and then three more of them.
+#[test]
+fn a_loop_waiting_out_the_watch_asks_at_one_interval_rather_than_a_doubling_one() {
+    let host = watching(&[40.0], 5.0).with_interrupt_after(4);
+    let _watching_alone = perch::lock::take_all(
+        &host,
+        vec![perch::registry::watcher_lock_spec(&host).expect("home is known")],
+    )
+    .expect("nobody holds it yet");
+
+    let (result, printed) = run_watch(&host);
+
+    result.expect("a Watcher that cannot take the watch holds rather than failing");
+    // The waits themselves, because the log coalesces an unchanged hold into one
+    // line and the doubling would be invisible there for the first hour.
+    let waits: Vec<u64> = host
+        .effects()
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Waited { millis } => Some(*millis),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        waits,
+        vec![150_000, 150_000, 150_000, 150_000],
+        "nothing here spent a request, so nothing earned a longer wait:\n{printed}"
+    );
+}
+
 #[test]
 fn a_loop_says_the_watch_is_still_held_on_every_round_it_takes() {
     let host = watching(&[40.0, 41.0, 42.0], 5.0);
