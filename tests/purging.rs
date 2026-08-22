@@ -945,6 +945,29 @@ fn a_purge_takes_the_credential_an_abandoned_login_left_as_well() {
     assert!(!host.path_exists(Path::new(PERCH_HOME)));
 }
 
+/// What a Purge that stopped in its last step leaves for the next one: a home
+/// holding a registry and nothing else. Holding no Accounts is a real state here
+/// rather than a machine Perch never ran on, so it is said as what happened.
+#[test]
+fn a_home_holding_a_registry_and_nothing_else_is_taken_and_said_as_that() {
+    let host = machine_with_claude_code().with_answers(&["purge"]);
+    host.set_file(REGISTRY_PATH, r#"{"version":2,"accounts":[]}"#);
+
+    let (outcome, printed) = run_purge(&host);
+
+    outcome.expect("the word was typed");
+    assert!(!host.path_exists(Path::new(PERCH_HOME)), "{printed}");
+    // Both halves of it: the question and the report. No Profiles either, so
+    // neither says a count.
+    assert_eq!(
+        printed.matches("no Accounts").count(),
+        2,
+        "asked and answered as what happened rather than as a count of \
+         nothing:\n{printed}"
+    );
+    assert!(!printed.contains("Profile"), "{printed}");
+}
+
 /// The same from the other side: a `perch add` whose registry write failed
 /// leaves a Profile holding a live Credential no Account names.
 #[test]
@@ -958,14 +981,19 @@ fn a_purge_takes_the_credential_of_a_profile_the_registry_never_recorded() {
     host.set_keychain_item(&store.keychain_service, LOGIN_NAME, SECOND_CREDENTIAL);
     host.set_file(&store.credentials_file, SECOND_CREDENTIAL);
 
-    run_purge_with(&host, true)
-        .0
-        .expect("the machine is given back");
+    let (outcome, printed) = run_purge_with(&host, true);
+    outcome.expect("the machine is given back");
 
     assert_eq!(
         host.keychain_item(&store.keychain_service, LOGIN_NAME),
         None,
         "a Profile nothing records is still a Profile Perch made"
+    );
+    // And said, because the count of Accounts does not include it: a Credential
+    // this deleted and never mentioned is one the report understates.
+    assert!(
+        printed.contains("1 Profile under it named no Account, and 1 Credential"),
+        "the report says what it took beyond the Accounts:\n{printed}"
     );
     assert_eq!(
         host.keychain_services(),
