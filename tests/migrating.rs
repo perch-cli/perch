@@ -531,4 +531,9 @@ fn an_enabled_flag_that_is_not_a_boolean_is_refused_rather_than_read_as_true() {
         refused.to_string().contains("accounts[].enabled"),
         "the field is named: {refused}"
     );
+    assert!(
+        refused.to_string().contains("registry.json"),
+        "and so is the file it is in, as every other refusal `load` makes names \
+         one — a field with no file is a repair nobody can start: {refused}"
+    );
 }

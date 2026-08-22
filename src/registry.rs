@@ -1488,8 +1488,10 @@ pub fn load(host: &dyn Host) -> Result<Option<Registry>> {
     }
 
     // In memory here and written back by `migration::bring_forward`, because
-    // every path that writes holds the lock before it reads.
-    let forwarded = crate::migration::forward(&contents)?;
+    // every path that writes holds the lock before it reads. Decorated as every
+    // other refusal here is: a step that names a field names no file otherwise.
+    let forwarded = crate::migration::forward(&contents)
+        .map_err(|refused| refused.with_note(&the_file_to_edit(path)))?;
 
     // Strictly, so a key nobody recognizes is a refusal naming it rather than a
     // value that quietly did nothing. Every type here is Perch's own — Claude
