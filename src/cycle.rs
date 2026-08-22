@@ -342,7 +342,7 @@ pub fn choose(
 
     let mut ranked: Vec<Ranked> = accounts
         .iter()
-        .filter(|account| is_a_candidate(account))
+        .filter(|account| is_a_candidate(registry, account))
         .map(|account| Ranked {
             account,
             headroom: headroom_of(account),
@@ -470,7 +470,7 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
                 .iter()
                 .find(|account| registry::same_name(account.email(), active))
         })
-        .filter(|account| is_a_candidate(account))
+        .filter(|account| is_a_candidate(registry, account))
         .map(|account| headroom_of(account));
     let here = measured_against(here.as_ref());
     // Measured once each rather than inside a comparator that runs O(n log n)
@@ -478,7 +478,12 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
     // Stable, so Accounts that rank identically keep the order they were added.
     let mut placed: Vec<(&Account, Place)> = accounts
         .into_iter()
-        .map(|account| (account, place(account, leaving, here, strategy, now)))
+        .map(|account| {
+            (
+                account,
+                place(registry, account, leaving, here, strategy, now),
+            )
+        })
         .collect();
     placed
         .sort_by(|(_, (theirs, them)), (_, (ours, us))| ours.cmp(theirs).then(us.total_cmp(them)));
@@ -493,13 +498,14 @@ pub fn ranked<'a>(registry: &'a Registry, scope: &Scope, now: DateTime<Utc>) -> 
 type Place = ((u8, u8, u8), f64);
 
 fn place(
+    registry: &Registry,
     account: &Account,
     leaving: Option<&str>,
     here: Option<&Headroom>,
     strategy: Strategy,
     now: DateTime<Utc>,
 ) -> Place {
-    let candidate = is_a_candidate(account);
+    let candidate = is_a_candidate(registry, account);
     let headroom = headroom_of(account);
     // Asked only of a candidate, which is the only set `choose` asks it of: it
     // drops the non-candidates before looking for the one being left.
@@ -517,13 +523,15 @@ fn place(
     ((u8::from(candidate), worth, tier), figure)
 }
 
-/// Whether a Cycle could land on this Account at all — a different question from
-/// whether it has room, and asked first everywhere.
+/// Whether a Cycle could land on this Account at all — never a Disabled or
+/// Quarantined one, nor a sharer, whom every Switch refuses.
 ///
-/// One predicate, because what a Cycle may choose and what a Scope has left to
-/// draw on ([`crate::reserve`]) are one set of Accounts.
-pub fn is_a_candidate(account: &Account) -> bool {
-    !account.disabled && !account.quarantined()
+/// One predicate, because what a Cycle may choose, what a Scope has left to draw
+/// on ([`crate::reserve`]) and what a Remove lands on are one set of Accounts.
+pub fn is_a_candidate(registry: &Registry, account: &Account) -> bool {
+    !account.disabled
+        && !account.quarantined()
+        && registry::sharing_a_profile_with(registry, account).is_none()
 }
 
 /// Whether anything has declared the Accounts in this Scope interchangeable.
@@ -1926,7 +1934,7 @@ mod properties {
             // Only where the Account being left is one a Cycle would consider:
             // the figure beside a broken Credential is not a standard anything
             // has to beat.
-            if !is_a_candidate(leaving) {
+            if !is_a_candidate(&arrangement.registry, leaving) {
                 continue;
             }
             let here = headroom_of(leaving);

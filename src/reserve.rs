@@ -52,7 +52,7 @@ impl<'a> Reserve<'a> {
         let candidates: Vec<&Account> = accounts
             .iter()
             .copied()
-            .filter(|account| cycle::is_a_candidate(account))
+            .filter(|account| cycle::is_a_candidate(registry, account))
             .collect();
 
         let mut with_headroom = Vec::new();

@@ -174,10 +174,9 @@ fn successor<'a>(registry: &'a Registry, leaving: &Account) -> Option<&'a Accoun
     let candidates = || {
         registry.accounts.iter().filter(|held| {
             !registry::same_name(held.email(), leaving.email())
-                && cycle::is_a_candidate(held)
-                // A sharer is one `make_live` refuses, and landing nowhere is
-                // the better half of that: the removal still goes through.
-                && registry::sharing_a_profile_with(registry, held).is_none()
+                // A sharer is not a candidate, so landing nowhere is what a
+                // Remove does with one: the removal still goes through.
+                && cycle::is_a_candidate(registry, held)
         })
     };
     let in_its_group = leaving

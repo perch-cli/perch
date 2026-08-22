@@ -9,7 +9,7 @@ mod common;
 use chrono::Duration;
 use common::*;
 use perch::error::{
-    EXIT_NO_CANDIDATE, EXIT_NOT_FOUND, EXIT_NOT_INTERCHANGEABLE, EXIT_NOTHING_TO_DO,
+    EXIT_CONFLICT, EXIT_NO_CANDIDATE, EXIT_NOT_FOUND, EXIT_NOT_INTERCHANGEABLE, EXIT_NOTHING_TO_DO,
     EXIT_PROFILE_LIVE,
 };
 use perch::host::FakeHost;
@@ -685,5 +685,56 @@ fn cycling_among_ungrouped_accounts_reads_the_strategy_that_scope_holds() {
         active(&host).as_deref(),
         Some(SECOND_EMAIL),
         "and the Scope Cycles by what it was told: {printed}"
+    );
+}
+
+/// A Cycle only ever chooses an Account a Switch would accept. A sharer is one
+/// every Switch refuses — `switch::perform` raises a Conflict before it Captures
+/// — so choosing one raises that refusal where nobody named the Account, and the
+/// Watcher's loop is not among the failures that clear themselves.
+#[test]
+fn a_cycle_never_chooses_an_account_whose_profile_another_shares() {
+    let host = logged_in_machine();
+    run_list(&host, false).0.expect("adoption holds the login");
+    let mut registry = registry_of(&host);
+    // Two spellings of one Profile directory, both with more room than the
+    // Account being left, so ranking would reach for them first.
+    for email in ["some-one@example.com", "some.one@example.com"] {
+        registry.upsert(perch::registry::Account {
+            identity: perch::probe::Identity {
+                email: email.to_string(),
+                account_uuid: None,
+                organization_name: None,
+                organization_uuid: None,
+            },
+            plan: None,
+            disabled: false,
+            quarantine: None,
+            group: None,
+            utilization: None,
+        });
+    }
+    save_registry(&host, &registry);
+    ungrouped_declared_interchangeable(&host);
+    observed(&host, EMAIL, vec![window("5-hour", 90.0)]);
+    for email in ["some-one@example.com", "some.one@example.com"] {
+        observed(&host, email, vec![window("5-hour", 1.0)]);
+    }
+
+    let (result, printed) = run_cycle(&host);
+
+    let refused = result.expect_err("the only Accounts with room are ones Perch cannot act as");
+    assert_ne!(
+        refused.exit_code(),
+        EXIT_CONFLICT,
+        "a sharer leaves the running like a Disabled or Quarantined Account, \
+         rather than being chosen and refused after the fact — which is the one \
+         refusal a Watcher's loop does not survive: {printed}"
+    );
+    assert_eq!(
+        refused.exit_code(),
+        EXIT_NOTHING_TO_DO,
+        "with the sharers out, the Account being left is the only candidate \
+         there is: {printed}"
     );
 }

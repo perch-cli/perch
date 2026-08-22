@@ -829,7 +829,7 @@ fn considered(
             // Through the registry's own answer rather than `!=`, which would be
             // correct only by two facts that are true two modules away.
             !registry::same_name(account.email(), watching.account.email())
-                && cycle::is_a_candidate(account)
+                && cycle::is_a_candidate(registry, account)
         })
         .map(|account| Considered {
             email: account.email().to_string(),
