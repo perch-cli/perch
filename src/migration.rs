@@ -128,7 +128,10 @@ pub fn forward(document: &str) -> Result<Option<String>> {
         // registry that declared a Group by that name must not have the
         // Ungrouped Scope's Cooldown re-keyed onto the renamed Group.
         let under = match crate::registry::means_ungrouped(&group) {
-            true => group.clone(),
+            // The constant rather than the spelling found: `record_check` only
+            // ever writes that one, so a key that folds to it under any other
+            // capitalization becomes a second key `validate` refuses.
+            true => crate::registry::UNGROUPED.to_string(),
             false => now_called(NameKind::Group, &group, &renamed),
         };
         checks.insert(under, Value::Object(kept));

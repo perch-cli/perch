@@ -1833,7 +1833,14 @@ fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
 fn with_every_check_under_the_declared_spelling(mut registry: Registry) -> Registry {
     let keyed: Vec<String> = registry.checks.keys().cloned().collect();
     for name in keyed {
-        let Some(declared) = registry.declared_group(&name).map(str::to_string) else {
+        // The Ungrouped Scope has no declaration to be brought to, so it is
+        // brought to the constant `record_check` writes. Without this the key is
+        // the only one in the map that can outlive its own spelling.
+        let declared = match means_ungrouped(&name) {
+            true => Some(UNGROUPED.to_string()),
+            false => registry.declared_group(&name).map(str::to_string),
+        };
+        let Some(declared) = declared else {
             continue;
         };
         if declared == name {

@@ -464,6 +464,54 @@ fn the_ungrouped_scopes_cooldown_is_not_moved_onto_a_group_called_ungrouped() {
     );
 }
 
+/// The other half of it: `record_check` writes one spelling of that key, so a
+/// Cooldown that came forward under any other one is a second key `validate`
+/// refuses the moment the next Check tries to record its own.
+#[test]
+fn an_ungrouped_cooldown_comes_forward_under_the_spelling_a_check_writes() {
+    let held: serde_json::Value = serde_json::from_str(V0_2_0).expect("a document");
+    let mut held = held.as_object().cloned().expect("an object");
+    held.insert(
+        "groups".to_string(),
+        serde_json::json!({ "Ungrouped": { "watcher_threshold_percent": 70 } }),
+    );
+    held.insert(
+        "checks".to_string(),
+        serde_json::json!({ "Ungrouped": { "switched_at": "2026-08-14T10:00:00Z" } }),
+    );
+    for account in held
+        .get_mut("accounts")
+        .and_then(serde_json::Value::as_array_mut)
+        .expect("the fixture lists Accounts")
+    {
+        if account.get("group").is_some() {
+            account["group"] = serde_json::json!("Ungrouped");
+        }
+    }
+    let host = machine_holding(&serde_json::Value::Object(held).to_string());
+
+    perch::migration::bring_forward(&host).expect("it comes forward");
+
+    let written: serde_json::Value =
+        serde_json::from_str(&on_disk(&host)).expect("a document came back");
+    assert_eq!(
+        written["checks"].as_object().map(serde_json::Map::len),
+        Some(1),
+        "one key, and it is the one a Check writes: {written}"
+    );
+    assert!(written["checks"].get("ungrouped").is_some(), "{written}");
+    // And the next Check really does record against it rather than building a
+    // registry `save` refuses.
+    let registry = registry::load(&host)
+        .expect("the migrated registry loads")
+        .expect("and there is one there");
+    assert!(
+        registry.checks.contains_key("ungrouped"),
+        "{:?}",
+        registry.checks
+    );
+}
+
 /// `enabled` inverted into `disabled`, and a value that is no boolean read as
 /// "not false" — so an Account somebody took out of Cycling came back into it,
 /// which is the one loss this step refuses everywhere else.
