@@ -463,6 +463,34 @@ fn an_account_that_shares_a_profile_keeps_the_credential_and_the_outcome_says_so
     );
 }
 
+#[test]
+fn the_active_account_never_lands_on_one_whose_credential_is_not_its_own() {
+    let host = machine_holding_the_two_that_share_a_profile();
+    let shared = credential_of(&host, "some-one@example.com");
+
+    let (result, printed) = run_remove_with(
+        &host,
+        RemoveArgs {
+            target: EMAIL.to_string(),
+            yes: true,
+        },
+    );
+
+    result.expect("the Account is still given up");
+    assert!(!holds(&host, EMAIL), "{printed}");
+    let registry = registry_of(&host);
+    assert_eq!(
+        registry.active().whose(),
+        None,
+        "neither sharer is a successor, so the machine lands nowhere:\n{printed}"
+    );
+    assert_eq!(
+        credential_of(&host, "some-one@example.com"),
+        shared,
+        "and the Profile they share was not read to make one of them live"
+    );
+}
+
 /// A machine holding an ordinary active Account and two whose email addresses
 /// derive one Profile between them.
 fn machine_holding_the_two_that_share_a_profile() -> FakeHost {

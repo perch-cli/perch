@@ -406,10 +406,17 @@ pub fn make_live(
     whose: &str,
     installed: &Installed,
 ) -> std::result::Result<(), NotLanded> {
-    let store = registry::the_default_profile(host).map_err(|error| NotLanded {
+    let nothing_moved = |error| NotLanded {
         error,
         is_live: false,
-    })?;
+    };
+
+    // [`perform`]'s guard, on the other door into the same sequence: a Profile
+    // two Accounts share holds one Credential, so the one read out of it here
+    // need not be this Account's and nothing afterwards could tell.
+    refuse_a_shared_profile(account, registry).map_err(nothing_moved)?;
+
+    let store = registry::the_default_profile(host).map_err(nothing_moved)?;
     let leaving = registry.active().whose().map(str::to_string);
 
     let mut is_live = false;
