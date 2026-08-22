@@ -556,12 +556,15 @@ pub fn credential_after_rotation(
             )
         })?;
 
-    block.insert("accessToken".into(), access_token.into());
+    // Each `insert` hands back the token it displaced, which is the retired
+    // generation: dropped as it comes, it would be freed untouched, which is
+    // what the tree is emptied by hand below to prevent.
+    wipe(block.insert("accessToken".into(), access_token.into()));
     // A refresh that hands back no new refresh token has not Rotated: the one
     // already stored is still the live one, and replacing it with nothing would
     // throw away the only way back.
     if let Some(token) = refresh_token {
-        block.insert("refreshToken".into(), token.into());
+        wipe(block.insert("refreshToken".into(), token.into()));
     }
     // Taken out rather than left alone where the renewal gave no lifetime: a
     // Credential is renewed *because* its `expiresAt` had passed, so leaving
@@ -590,6 +593,17 @@ pub fn credential_after_rotation(
     }
 
     written
+}
+
+/// Wipes a token a `serde_json::Map` handed back, if it handed one back.
+///
+/// Taking a `Value` rather than a `String` because that is what `insert` and
+/// `remove` return, and a caller that has to match before it can wipe is a
+/// caller that will one day forget to.
+fn wipe(displaced: Option<serde_json::Value>) {
+    if let Some(serde_json::Value::String(mut held)) = displaced {
+        held.zeroize();
+    }
 }
 
 /// Reads the Identity out of a store's `.claude.json`.
