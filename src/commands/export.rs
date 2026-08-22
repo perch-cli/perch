@@ -30,15 +30,11 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
     refuse_an_occupied_path(host, path)?;
 
     let (mut perch, mut registry) = adopt::ensure_adopted_exclusively(host)?;
-    // Before anything is read out of a Credential Store, as every command that
-    // reads through the live one settles first
-    // (ADR a-switch-is-written-down-first): during a Landing it may be either's.
-    crate::switch::resolve_a_landing(host, &mut perch, &mut registry)?;
 
     // Nothing to hand back to: this command's own failure says where the file
     // is, because the path is the argument the person typed.
     let mut landed = None;
-    write_the_export(host, &mut perch, &registry, path, &mut landed, out)
+    write_the_export(host, &mut perch, &mut registry, path, &mut landed, out)
 }
 
 /// Everything an Export is, given a registry somebody else has read: the path
@@ -49,13 +45,19 @@ pub fn run(host: &dyn Host, path: &Path, out: &mut dyn Write) -> Result<()> {
 pub fn write_the_export(
     host: &dyn Host,
     perch: &mut crate::lock::Held<'_>,
-    registry: &Registry,
+    registry: &mut Registry,
     path: &Path,
     landed: &mut Option<PathBuf>,
     out: &mut dyn Write,
 ) -> Result<()> {
     refuse_a_directory_that_is_not_there(host, path)?;
     refuse_an_occupied_path(host, path)?;
+
+    // Before a Credential Store is read: during a Landing the live one may be
+    // either Account's, so each Credential would be gathered out of its own
+    // Profile — where the outgoing Account's is the copy a Rotation retired.
+    crate::switch::resolve_a_landing(host, perch, registry)?;
+
     if registry.accounts.is_empty() {
         return Err(PerchError::NotFound(
             "Perch holds no Accounts, so there is nothing to export.\n\

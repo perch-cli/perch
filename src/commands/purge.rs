@@ -41,7 +41,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
     }
 
     let mut perch = registry::lock(host)?;
-    let registry = whatever_can_be_read_of_the_registry(host, &home);
+    let mut registry = whatever_can_be_read_of_the_registry(host, &home);
 
     purge::refuse_while_anything_is_running(host, &registry)?;
 
@@ -62,7 +62,7 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
         // The offer's *own* failure carries the note as well, because the bytes
         // land before the report. Taken as a value first, so the borrow of
         // `exported` the call holds is over before the note reads it.
-        let offered = offer_an_export(host, &mut perch, &registry, &home, &mut exported, out);
+        let offered = offer_an_export(host, &mut perch, &mut registry, &home, &mut exported, out);
         offered.map_err(|error| still_standing(error, exported.as_deref()))?;
         // The note again, because the question *between* the offer and the
         // decision is a failure path of its own: `agreed` writes a prompt and
@@ -234,7 +234,7 @@ fn what_will_go(registry: &Registry, home: &Path, profiles: usize, service: bool
 fn offer_an_export(
     host: &dyn Host,
     perch: &mut crate::lock::Held<'_>,
-    registry: &Registry,
+    registry: &mut Registry,
     home: &Path,
     landed: &mut Option<PathBuf>,
     out: &mut dyn Write,
