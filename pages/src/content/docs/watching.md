@@ -281,8 +281,8 @@ loop keeps the same fact in memory instead — two loops would be two people
 watching, and one pacing the other's decisions is not what either of them asked
 for.
 
-The exit codes are [the full table](reference.md#exit-codes), and a check reaches
-five of them:
+The exit codes are [the full table](reference.md#exit-codes). Five of them are a
+check saying what it decided:
 
 | Code | What a check decided |
 | ---- | -------------------- |
@@ -291,6 +291,15 @@ five of them:
 | 17 | a Switch was wanted and every candidate was exhausted |
 | 18 | the Account it is on is in no Group, so nothing carries permission |
 | 20 | held: the figures were stale and the Refresh that would have replaced them failed |
+
+Three more are the machine not being arranged for a check at all, and a cron
+wrapper meets the first of them before anything else:
+
+| Code | What is in the way |
+| ---- | ------------------ |
+| 14 | nothing has said the watcher may act — `perch config set <scope> watcher-may-act true` is the grant, and it is off until somebody makes it |
+| 12 | no Account is active, so there is nothing to watch |
+| 11 | the keychain would not answer, so the Credential could not be read |
 
 `20` is the one code the watcher added, and it exists because a scheduler
 retrying in five minutes has to tell a figure it could not read from a Group
