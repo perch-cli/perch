@@ -1831,7 +1831,7 @@ fn refuse_a_name_nothing_would_have_accepted(
 /// One nothing declares falls out of `perch list`, which walks the declared
 /// Groups and then the Accounts in none (ADR the-listing-owns-the-set). A claim
 /// differing only in case joins rather than becoming a second key.
-fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
+pub(crate) fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
     let claimed: Vec<String> = registry
         .accounts
         .iter()

@@ -7,6 +7,7 @@
 
 mod common;
 
+use chrono::Utc;
 use common::*;
 use perch::error::{EXIT_CONFLICT, EXIT_HELD, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROFILE_LIVE};
 use perch::host::prelude::*;
@@ -815,5 +816,33 @@ fn an_import_into_a_profile_a_client_is_holding_writes_nothing() {
         credential_of(&host, EMAIL),
         None,
         "the Credential that session is using was not written over"
+    );
+}
+
+/// `load` normalizes before it validates, "so `load` and `save` judge one
+/// shape". An Import writes a registry without reading one, so it has to judge
+/// that same shape — and it validated what arrived instead, over two fields it
+/// clears on the way in. A file every command on the machine would go on to read
+/// was refused, and the refusal named a Check the Import was never going to keep.
+#[test]
+fn an_export_is_judged_by_the_shape_that_will_be_written_rather_than_the_one_that_arrived() {
+    let mut export =
+        perch::export::unseal(&an_export_of_a_whole_machine(), PASSPHRASE).expect("it opens");
+    // A Check against a Group nothing declares, which is what a hand-edited
+    // registry — or one whose Group was removed beside it — carries.
+    export
+        .registry
+        .record_check("nobody-declared-this", Utc::now());
+    let sealed = perch::export::seal(&export, PASSPHRASE).expect("it seals");
+    let host = a_new_machine_holding(&sealed);
+
+    let (outcome, said) = run_import(&host, AT);
+
+    outcome.unwrap_or_else(|refused| {
+        panic!("a Check the Import discards is no reason to refuse the file: {refused}")
+    });
+    assert!(
+        registry_on(&host).is_some_and(|registry| registry.checks.is_empty()),
+        "and nothing arrives having just been checked: {said}"
     );
 }

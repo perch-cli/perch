@@ -54,18 +54,18 @@ pub fn restored(export: &Export, path: &std::path::Path) -> Result<Registry> {
     // versions and before the document is read as an Export — so nothing reaches
     // here unchecked, and a second spelling is two guards to keep in step.
 
-    // The same check `load` makes off disk, because an Import writes a registry
-    // without reading one: anything this accepts and `load` refuses is a machine
-    // with no working command left, including the Purge that would make room.
-    registry::validate(&export.registry)
-        .map_err(|refusal| refusal.with_note(&registry::the_file_to_edit(path)))?;
-
     // Named one at a time rather than as a struct update, because who is active
     // is not a field anybody may set: an Import lands on nobody, which is a
     // transition of its own (ADR a-switch-is-written-down-first).
-    let mut restored = export.registry.clone();
+    let mut restored = registry::with_every_claimed_group_declared(export.registry.clone());
     restored.settle(None);
     restored.checks = BTreeMap::new();
+
+    // `load`'s own check in `load`'s own order, of what will be written rather
+    // than of what arrived: otherwise an Import refuses a machine every command
+    // would go on to read, over a field cleared three lines up.
+    registry::validate(&restored)
+        .map_err(|refusal| refusal.with_note(&registry::the_file_to_edit(path)))?;
     Ok(restored)
 }
 
