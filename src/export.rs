@@ -423,12 +423,12 @@ fn would_not_open(err: age::DecryptError) -> PerchError {
 fn refuse_a_newer_perch(plain: &[u8]) -> Result<()> {
     #[derive(Deserialize)]
     struct JustTheVersion {
-        version: Option<u32>,
+        version: Option<serde_json::Value>,
     }
 
     #[derive(Deserialize)]
     struct Versioned {
-        version: Option<u32>,
+        version: Option<serde_json::Value>,
         registry: Option<JustTheVersion>,
     }
 
@@ -436,31 +436,54 @@ fn refuse_a_newer_perch(plain: &[u8]) -> Result<()> {
         return Ok(());
     };
 
-    if versioned
-        .version
-        .is_some_and(|claimed| claimed > CURRENT_VERSION)
-    {
+    // A `u64` for `error::claimed_version`'s reason: typed as `u32`, the one
+    // number this guard is for fails to deserialize and the guard passes.
+    let claimed = |version: Option<serde_json::Value>| version.and_then(|it| it.as_u64());
+
+    let outer = claimed(versioned.version);
+    if outer.is_some_and(|claimed| claimed > u64::from(CURRENT_VERSION)) {
         return Err(crate::error::written_by_a_newer_perch(
             "This Export",
             "export",
-            u64::from(versioned.version.unwrap_or_default()),
+            outer.unwrap_or_default(),
             CURRENT_VERSION,
         ));
+    }
+    // The floor the registry inside holds. An Export can be written by hand with
+    // `age -a -p`, and a version below the earliest one names no shape.
+    if outer.is_some_and(|claimed| claimed < u64::from(crate::migration::EARLIEST_VERSION)) {
+        return Err(no_perch_wrote(outer));
     }
 
     // The registry travels inside carrying its own version, and it is the half
     // that holds the enums — so it is the likelier of the two to be what this
     // build cannot read.
-    let inside = versioned.registry.and_then(|registry| registry.version);
-    if inside.is_some_and(|claimed| claimed > crate::registry::CURRENT_VERSION) {
+    let inside = claimed(versioned.registry.and_then(|registry| registry.version));
+    if inside.is_some_and(|claimed| claimed > u64::from(crate::registry::CURRENT_VERSION)) {
         return Err(crate::error::written_by_a_newer_perch(
             "The registry inside this Export",
             "registry",
-            u64::from(inside.unwrap_or_default()),
+            inside.unwrap_or_default(),
             crate::registry::CURRENT_VERSION,
         ));
     }
     Ok(())
+}
+
+/// The refusal for an Export claiming a version below the earliest any Perch
+/// stamped, which is the registry's own sentence said about the file around it.
+fn no_perch_wrote(claimed: Option<u64>) -> PerchError {
+    PerchError::Malformed {
+        path: "the Export".to_string(),
+        detail: format!(
+            "it says it is export version {}, which is a version no Perch has \
+             written — the earliest is {}. Nothing was imported: reading it as \
+             version {} would be a guess at a shape nothing describes.",
+            claimed.unwrap_or_default(),
+            crate::migration::EARLIEST_VERSION,
+            CURRENT_VERSION,
+        ),
+    }
 }
 
 fn recipient(passphrase: &str) -> age::scrypt::Recipient {
@@ -861,6 +884,43 @@ mod tests {
                 "{refused}"
             );
         }
+    }
+
+    /// The one number this guard exists to name. Typed as a `u32` the envelope
+    /// failed to deserialize at all, the guard returned `Ok`, and the reader was
+    /// handed serde's words about an integer that will not fit.
+    #[test]
+    fn an_export_claiming_a_version_above_this_builds_ceiling_still_reads_as_a_newer_perch() {
+        for claimed in [u64::from(u32::MAX) + 1, u64::MAX] {
+            let ahead = format!(
+                r#"{{"version":{claimed},"registry":{{"version":1,"accounts":[]}},"credentials":{{}}}}"#
+            );
+            let sealed = age::encrypt_and_armor(&recipient(PASSPHRASE), ahead.as_bytes())
+                .expect("the fixture seals");
+
+            let refused = unseal(&sealed, PASSPHRASE).expect_err("nothing here wrote that");
+            assert!(refused.to_string().contains("Upgrade Perch"), "{refused}");
+            assert!(
+                !refused.to_string().contains("expected u32"),
+                "and not as arithmetic about the number: {refused}"
+            );
+        }
+    }
+
+    /// The envelope had a ceiling and no floor, though `age -a -p` is a
+    /// documented way to write one of these by hand and the registry inside
+    /// holds both.
+    #[test]
+    fn an_export_claiming_a_version_no_perch_wrote_is_refused_like_the_registry_inside_it() {
+        let bare = r#"{"version":0,"registry":{"version":1,"accounts":[]},"credentials":{}}"#;
+        let sealed =
+            age::encrypt_and_armor(&recipient(PASSPHRASE), bare.as_bytes()).expect("it seals");
+
+        let refused = unseal(&sealed, PASSPHRASE).expect_err("no Perch wrote that");
+        assert!(
+            refused.to_string().contains("no Perch has written"),
+            "{refused}"
+        );
     }
 
     /// The registry inside carries its own version, and it is the half holding
