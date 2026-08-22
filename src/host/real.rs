@@ -2007,6 +2007,47 @@ mod tests {
         assert!(touched > created, "touched {touched}, created {created}");
     }
 
+    /// Both sides of the epoch, and the borrow that makes the pair one instant:
+    /// a stamp a quarter-second before 1970 is `-1` second plus 750 million
+    /// nanoseconds, never `0` seconds minus a quarter. A lock artifact's age is
+    /// read off this, and one measured from the wrong second is a lock taken
+    /// over early or held for ever.
+    #[test]
+    fn a_stamp_either_side_of_the_epoch_is_one_instant_rather_than_two() {
+        use std::time::{Duration, UNIX_EPOCH};
+
+        let pair = |time| seconds_and_nanos_since_epoch(time).expect("a stamp in range");
+
+        assert_eq!(pair(UNIX_EPOCH), (0, 0));
+        assert_eq!(
+            pair(UNIX_EPOCH + Duration::new(90, 250_000_000)),
+            (90, 250_000_000)
+        );
+        assert_eq!(pair(UNIX_EPOCH - Duration::from_secs(90)), (-90, 0));
+        assert_eq!(
+            pair(UNIX_EPOCH - Duration::new(0, 250_000_000)),
+            (-1, 750_000_000),
+            "a quarter-second before the epoch is the second below it, most of \
+             the way through"
+        );
+        assert_eq!(
+            pair(UNIX_EPOCH - Duration::new(90, 250_000_000)),
+            (-91, 750_000_000)
+        );
+
+        // Round-tripped, because the pair is only right if chrono reads it back
+        // as the instant it was built from.
+        for offset in [Duration::new(0, 1), Duration::new(90, 250_000_000)] {
+            let (seconds, nanos) = pair(UNIX_EPOCH - offset);
+            let read = DateTime::from_timestamp(seconds, nanos).expect("in range");
+            assert_eq!(
+                read.timestamp_nanos_opt(),
+                Some(-(offset.as_nanos() as i64)),
+                "{offset:?} before the epoch"
+            );
+        }
+    }
+
     /// The port hands back a `Result`, and every caller of this one — `carry`'s
     /// ranking of Profiles by age, each of `lock`'s reads — treats a failure as
     /// an answer, where a stamp chrono cannot represent used to end the process.
