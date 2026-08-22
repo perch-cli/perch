@@ -244,12 +244,13 @@ pub fn age_phrase(observed_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
 /// `2h`, `4d`. One table for [`age_phrase`] and [`wait_phrase`] both, or the
 /// handover moves in one and not the other and an age that grew by a second
 /// falls by half an hour. Minutes as far as two hours, where the two forms first
-/// agree; `minutes` rounds up for a wait and to nearest for an age.
-fn spans(seconds: i64, minutes: fn(f64) -> f64) -> String {
+/// agree; `rounding` is up for a wait and to nearest for an age, in every unit.
+fn spans(seconds: i64, rounding: fn(f64) -> f64) -> String {
+    let of = |unit: f64| rounding(seconds as f64 / unit) as i64;
     match seconds {
-        ..7200 => format!("{}m", minutes(seconds as f64 / 60.0) as i64),
-        7200..86_400 => format!("{}h", (seconds as f64 / 3600.0).round() as i64),
-        _ => format!("{}d", (seconds as f64 / 86_400.0).round() as i64),
+        ..7200 => format!("{}m", of(60.0)),
+        7200..86_400 => format!("{}h", of(3600.0)),
+        _ => format!("{}d", of(86_400.0)),
     }
 }
 
@@ -419,6 +420,20 @@ mod tests {
             "in 2h",
             "and it hands over where the two forms agree"
         );
+    }
+
+    /// The one direction a wait must never read: shorter than it is. Rounding to
+    /// nearest above the two-hour handover put a 2h29m reset at `in 2h`, which
+    /// is somebody coming back half an hour early to a window still full.
+    #[test]
+    fn a_wait_rounds_up_in_every_unit_rather_than_only_in_minutes() {
+        let now = at(12, 0);
+        let said = |minutes: i64| wait_phrase(now + chrono::Duration::minutes(minutes), now);
+
+        assert_eq!(said(149), "in 3h", "2h29m is not two hours away");
+        assert_eq!(said(180), "in 3h", "and an exact one is itself");
+        assert_eq!(said(60 * 24 + 1), "in 2d", "the same at the day handover");
+        assert_eq!(said(60 * 48), "in 2d");
     }
 
     #[test]
