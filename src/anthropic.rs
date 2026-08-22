@@ -800,11 +800,11 @@ mod tests {
     fn the_statuses_that_matter_are_told_apart() {
         let reply = |status: u16| HttpResponse {
             status,
-            body: "{}".to_string(),
+            body: Zeroizing::new("{}".to_string()),
         };
         let said = |body: &str| HttpResponse {
             status: 400,
-            body: body.to_string(),
+            body: Zeroizing::new(body.to_string()),
         };
 
         assert_eq!(understand(reply(429), &[]), Err(Refused::Throttled));
@@ -827,7 +827,7 @@ mod tests {
             understand(
                 HttpResponse {
                     status: 400,
-                    body: body.to_string(),
+                    body: Zeroizing::new(body.to_string()),
                 },
                 &[400],
             )
@@ -854,7 +854,7 @@ mod tests {
             understand(
                 HttpResponse {
                     status,
-                    body: body.to_string(),
+                    body: Zeroizing::new(body.to_string()),
                 },
                 REFUSALS,
             )
@@ -879,7 +879,7 @@ mod tests {
     fn a_read_endpoint_still_rejects_on_the_status_alone() {
         let reply = |status: u16| HttpResponse {
             status,
-            body: String::new(),
+            body: Zeroizing::new(String::new()),
         };
 
         assert_eq!(understand(reply(401), &[]), Err(Refused::Rejected));

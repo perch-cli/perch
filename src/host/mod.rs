@@ -149,7 +149,10 @@ impl<'a> HttpRequest<'a> {
 #[derive(Clone, PartialEq, Eq)]
 pub struct HttpResponse {
     pub status: u16,
-    pub body: String,
+    /// Wiped when it is freed, for the reason [`HttpResponse`]'s `Debug` is
+    /// redacted: the token endpoint answers a Renewal with the rotated refresh
+    /// token in here, and every other buffer on that path is already covered.
+    pub body: Zeroizing<String>,
 }
 
 impl std::fmt::Debug for HttpResponse {
@@ -862,7 +865,7 @@ mod tests {
         );
         let rotated = HttpResponse {
             status: 200,
-            body: format!("{{\"refresh_token\":\"{SECRET}\"}}"),
+            body: Zeroizing::new(format!("{{\"refresh_token\":\"{SECRET}\"}}")),
         };
 
         for printed in [

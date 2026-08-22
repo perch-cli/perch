@@ -899,7 +899,7 @@ impl FakeHost {
                 .iter()
                 .map(|(status, body)| HttpResponse {
                     status: *status,
-                    body: (*body).to_string(),
+                    body: Zeroizing::new((*body).to_string()),
                 })
                 .collect(),
         );
@@ -913,7 +913,7 @@ impl FakeHost {
             (url.to_string(), bearer.map(str::to_string)),
             HttpResponse {
                 status,
-                body: body.to_string(),
+                body: Zeroizing::new(body.to_string()),
             },
         );
     }

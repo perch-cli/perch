@@ -851,7 +851,7 @@ fn split_reply(stdout: &str) -> Result<HttpResponse, HostError> {
     })?;
     Ok(HttpResponse {
         status,
-        body: body.to_string(),
+        body: Zeroizing::new(body.to_string()),
     })
 }
 
@@ -1875,13 +1875,13 @@ mod tests {
     fn a_reply_is_split_into_a_body_and_a_status_and_says_so_when_it_cannot_be() {
         let reply = split_reply("{\"five_hour\":{}}\n200").expect("that is a reply");
         assert_eq!(reply.status, 200);
-        assert_eq!(reply.body, "{\"five_hour\":{}}");
+        assert_eq!(*reply.body, "{\"five_hour\":{}}");
 
         // A body with newlines in it: the split is the *last* one, because the
         // status is what curl appends.
         let reply = split_reply("first\nsecond\n429").expect("that is a reply too");
         assert_eq!(reply.status, 429);
-        assert_eq!(reply.body, "first\nsecond");
+        assert_eq!(*reply.body, "first\nsecond");
 
         // An empty body still carries a status, which is what a 204 looks like.
         assert_eq!(split_reply("\n204").expect("a bodyless reply").status, 204);
