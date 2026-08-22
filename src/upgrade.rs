@@ -638,7 +638,9 @@ mod tests {
             "0.2.0;rm",
             "0.2.0 ",
         ] {
-            let refused = version_typed(typed).expect_err("{typed} is not a Release");
+            let refused = version_typed(typed)
+                .err()
+                .unwrap_or_else(|| panic!("{typed} is not a Release"));
             assert!(
                 matches!(refused, PerchError::Invalid(_)),
                 "{typed}: {refused}"

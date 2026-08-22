@@ -766,7 +766,9 @@ mod tests {
                 r#"{"version":1,"accounts":["a"]}"#,
             ),
         ] {
-            let refused = forward(document).expect_err("the case this is about: {document}");
+            let refused = forward(document)
+                .err()
+                .unwrap_or_else(|| panic!("the case this is about: {document}"));
             let said = refused.to_string();
             assert!(said.contains(field), "{field} is the one to name: {said}");
         }

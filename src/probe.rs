@@ -2089,7 +2089,8 @@ mod tests {
                 "the keychain",
                 &Installed::unknown("2.1.221"),
             )
-            .expect_err("the case this is about: {held}");
+            .err()
+            .unwrap_or_else(|| panic!("the case this is about: {held}"));
 
             let said = refused.to_string();
             assert!(said.contains("is not JSON Perch understands"), "{said}");
