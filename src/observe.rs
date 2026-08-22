@@ -182,7 +182,14 @@ impl Report {
             return serde_json::Value::Null;
         }
         let accounts: Vec<_> = self.attempts.iter().map(Attempt::document).collect();
-        json!({"accounts": accounts, "kept": self.not_kept.is_none()})
+        // Both, as an `Attempt` carries both its `outcome` and its `detail`: the
+        // human path names the write error, and a log built from this one would
+        // otherwise record that the figures were lost with no way to learn why.
+        json!({
+            "accounts": accounts,
+            "kept": self.not_kept.is_none(),
+            "not_kept": self.not_kept,
+        })
     }
 }
 
@@ -855,8 +862,29 @@ mod tests {
         assert!(asked.asked);
         assert_eq!(
             asked.document(),
-            json!({"accounts": [], "kept": true}),
+            json!({"accounts": [], "kept": true, "not_kept": null}),
             "asked, read nothing, kept nothing to fail at keeping"
+        );
+    }
+
+    /// The human path names the write error; `--json` said only `false`. A log
+    /// built from it recorded that the figures were lost with no way to learn why,
+    /// and the two surfaces disagreed about how much they say about one event.
+    #[test]
+    fn a_refresh_that_could_not_be_kept_says_why_on_both_surfaces() {
+        let report = Report {
+            attempts: vec![attempt("someone@example.com", Outcome::Observed)],
+            not_kept: Some("the registry is read-only".to_string()),
+            asked: true,
+        };
+
+        let document = report.document();
+        assert_eq!(document["kept"], false);
+        assert_eq!(document["not_kept"], "the registry is read-only");
+        assert_eq!(
+            report.notes(),
+            vec!["the registry is read-only".to_string()],
+            "the same sentence the human path prints"
         );
     }
 
