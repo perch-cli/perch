@@ -2114,7 +2114,7 @@ mod tests {
         assert!(sub_second.contains("max-time = 1"), "{sub_second}");
     }
 
-    /// The invariant `double_quoted` documents and only `security` was keeping:
+    /// The invariant `write_double_quoted` documents and only `security` was keeping:
     /// a configuration file is read a line at a time, so a value that could end
     /// its line is refused rather than quoted. An access token comes out of a
     /// JSON file Perch does not own, where `\n` is an ordinary escape.

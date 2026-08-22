@@ -232,21 +232,11 @@ pub const PRIVATE_FILE_MODE: u32 = 0o600;
 /// directory whose contents others may open.
 pub const PRIVATE_DIR_MODE: u32 = 0o700;
 
-/// A value as a double-quoted token, for the two line-oriented protocols Perch
-/// writes: `curl`'s configuration file and `security -i`'s command lines. One
-/// copy, because two is how one of them gets fixed and the other does not. It
-/// makes a value a *token* and not inert — neither protocol has an escape for a
-/// newline, so a value that could carry one is refused where it enters.
-pub fn double_quoted(value: &str) -> String {
-    let mut quoted = String::with_capacity(value.len() + 2);
-    write_double_quoted(&mut quoted, value);
-    quoted
-}
-
-/// The same, written into a buffer the caller already owns. What to reach for
-/// where the value is a secret: [`double_quoted`] allocates on the way to its
-/// answer and drops what it allocated un-wiped, so a token quoted through it
-/// goes back to the allocator in copies no `Zeroizing` destination covers.
+/// A value as a double-quoted token, written into a buffer the caller owns, for
+/// the two line-oriented protocols Perch writes: `curl`'s configuration file and
+/// `security -i`'s command lines. One copy, because two is how one of them gets
+/// fixed and the other does not. It makes a value a *token* and not inert —
+/// neither protocol escapes a newline, so one is refused where it enters.
 pub fn write_double_quoted(out: &mut String, value: &str) {
     out.push('"');
     write_escaped(out, value);
@@ -265,7 +255,7 @@ pub fn write_escaped(out: &mut String, value: &str) {
     }
 }
 
-/// The refusal [`double_quoted`] says has to happen somewhere else. A newline in
+/// The refusal [`write_double_quoted`] says has to happen somewhere else. A newline in
 /// a `curl` configuration ends the option it was in and begins another, and
 /// `output =` writes a file while a second `url =` fetches one. Perch does not
 /// author most of what goes through here: an access token is read out of a JSON
@@ -308,7 +298,7 @@ pub fn sendable(request: &HttpRequest<'_>) -> Result<(), HostError> {
 }
 
 /// The first control character in a value, named the way a refusal names one.
-/// Shared with [`crate::keychain`]'s refusal, for the reason [`double_quoted`]
+/// Shared with [`crate::keychain`]'s refusal, for the reason [`write_double_quoted`]
 /// is one copy. What each caller *says* about it stays theirs: the two protocols
 /// break differently, and that sentence is worth having twice.
 pub fn control_character_in(value: &str) -> Option<String> {
