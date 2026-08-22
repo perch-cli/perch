@@ -284,7 +284,7 @@ fn the_export_it_offers_settles_a_landing_first() {
     assert_eq!(
         exported.registry.active().whose(),
         Some(SECOND_EMAIL),
-        "and the Landing is settled in the file rather than travelling in it"
+        "and the Landing is settled in the file rather than traveling in it"
     );
 }
 
