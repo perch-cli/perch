@@ -1370,9 +1370,14 @@ pub fn sharing_a_profile_with<'a>(
     registry: &'a Registry,
     account: &Account,
 ) -> Option<&'a Account> {
-    registry.accounts.iter().find(|held| {
-        !same_name(held.email(), account.email()) && same_profile(held.email(), account.email())
-    })
+    // Slugged once rather than once per comparison. `is_a_candidate` asks this
+    // of every Account, and every Account asks `is_a_candidate`, so a `perch
+    // list` over n Accounts pays for it n² times.
+    let mine = slug(account.email());
+    registry
+        .accounts
+        .iter()
+        .find(|held| !same_name(held.email(), account.email()) && slug(held.email()) == mine)
 }
 
 pub fn slug(email: &str) -> String {
