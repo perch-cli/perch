@@ -454,8 +454,17 @@ fn holding(host: &dyn Host, registry: &Registry, account: &Account) -> Result<As
             shares_its_profile_with,
         })
     } else {
+        // A Landing names the two Accounts the live Credential could belong to,
+        // so for either of them the Default Profile is a place a client could be
+        // holding this Account's from.
+        let named_in_a_landing = matches!(registry.active(), registry::Active::Landing { .. })
+            && registry.active().names(account.email());
+        let mut in_use_from = vec![its_own_profile];
+        if named_in_a_landing {
+            in_use_from.push(registry::the_default_profile(host)?.config_dir);
+        }
         Ok(Asked {
-            in_use_from: vec![its_own_profile],
+            in_use_from,
             store: account.store(host)?,
             its_own_profile: true,
             arriving_in_a_landing: matches!(
