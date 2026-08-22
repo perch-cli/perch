@@ -52,10 +52,11 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
             )));
         }
         if let Some(at) = &at {
-            let _ = host.remove_file(at);
-            // `enable --now` makes the wants-symlink and *then* starts, so a
-            // failure in the second half leaves a dangling link enabled.
+            // In `uninstall`'s order, for the reason `service::forgetting` gives:
+            // `enable --now` makes the wants-symlink and *then* starts, so the
+            // disable has to reach a unit systemd can still resolve.
             let _ = drive(host, service::stopping(host.platform(), host.user_id()));
+            let _ = host.remove_file(at);
             let _ = drive(host, service::forgetting(host.platform()));
         }
         return Err(failed.with_note(&format!(

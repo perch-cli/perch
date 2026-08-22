@@ -17,6 +17,7 @@ use perch::error::{EXIT_HELD, EXIT_INVALID, EXIT_NOTHING_TO_DO, EXIT_OK};
 use perch::host::fake::Effect;
 use perch::host::prelude::*;
 use perch::host::{Execution, FakeHost, Platform};
+use std::path::PathBuf;
 
 /// Where a `systemd --user` unit goes on the fixture's machine.
 const UNIT: &str = "/Users/someone/.config/systemd/user/perch-watch.service";
@@ -185,6 +186,26 @@ fn an_install_the_service_manager_refuses_leaves_no_unit_behind() {
     assert!(
         refusal.to_string().contains("Nothing was installed"),
         "{refusal}"
+    );
+    // `enable --now` makes the wants-symlink and then starts, so a failure in the
+    // second half leaves a link enabled — and the disable that clears it has to
+    // reach a unit systemd can still resolve.
+    let effects = host.effects();
+    let disabled = effects
+        .iter()
+        .position(|effect| match effect {
+            Effect::Exec { args, .. } => args.iter().any(|arg| arg == "disable"),
+            _ => false,
+        })
+        .expect("the rollback disables what `enable --now` enabled");
+    let removed = effects
+        .iter()
+        .position(|effect| effect == &Effect::RemovedFile(PathBuf::from(UNIT)))
+        .expect("and takes the unit file back");
+    assert!(
+        disabled < removed,
+        "in that order, so the disable reaches a unit systemd can still \
+         resolve: {effects:?}"
     );
 }
 
