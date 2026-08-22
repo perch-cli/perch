@@ -491,7 +491,12 @@ impl NameKind {
 /// months ago — and over the whole of Unicode, because ASCII alone would fold
 /// `work` and `Work` but not `café` and `CAFÉ`.
 pub fn same_name(one: &str, other: &str) -> bool {
-    one.to_lowercase() == other.to_lowercase()
+    // A character at a time rather than through `to_lowercase`, which allocates
+    // two `String`s per comparison — and `validate`'s quadratic collision check
+    // asks this on every read and every write.
+    one.chars()
+        .flat_map(char::to_lowercase)
+        .eq(other.chars().flat_map(char::to_lowercase))
 }
 
 /// A Group name offered as a default, made from something that was never chosen
@@ -1906,6 +1911,31 @@ mod tests {
 
         drop(held);
         lock(&host).expect("a lock given back can be taken again");
+    }
+
+    /// The fold is the whole of the identity a name has, so it is stated here
+    /// rather than only through the callers that ask it. Character by character
+    /// rather than over two allocated `String`s, and the two must not differ:
+    /// `İ` lowercases to two characters, which is where a naive pairwise fold
+    /// would part company with `to_lowercase`.
+    #[test]
+    fn two_names_are_one_name_whenever_lowercasing_makes_them_one() {
+        for (one, other) in [
+            ("work", "Work"),
+            ("café", "CAFÉ"),
+            ("İ", "İ"),
+            ("straße", "STRAßE"),
+        ] {
+            assert!(same_name(one, other), "{one} and {other} are one name");
+            assert_eq!(
+                same_name(one, other),
+                one.to_lowercase() == other.to_lowercase(),
+                "and the fold is the one `to_lowercase` makes: {one}, {other}"
+            );
+        }
+        for (one, other) in [("work", "works"), ("café", "cafe"), ("", "a")] {
+            assert!(!same_name(one, other), "{one} and {other} are two names");
+        }
     }
 
     #[test]
