@@ -1570,3 +1570,27 @@ fn a_check_held_settling_a_landing_says_so_on_standard_output() {
         "the line goes to standard output, and says what was holding it: {printed:?}"
     );
 }
+
+/// A round is bounded by the network rather than by the clock, so the wait at the
+/// bottom of the loop is far too late to answer a stop: a service manager allows
+/// thirty seconds and then sends a signal nothing can handle.
+#[test]
+fn a_watcher_asked_to_stop_while_the_candidates_were_read_switches_nothing() {
+    let host = watching(&[86.0], 5.0).with_interrupt_after(0);
+    host.forget_effects();
+
+    let (result, printed) = run_watch_once(&host);
+
+    result.expect("being asked to stop is not this Watcher's failure");
+    assert!(
+        !host
+            .effects()
+            .iter()
+            .any(|effect| matches!(effect, Effect::KeychainSet { .. })),
+        "nothing was switched, so no Credential moved: {printed}"
+    );
+    assert!(
+        printed.contains("asked to stop"),
+        "and the round says why it decided nothing: {printed}"
+    );
+}

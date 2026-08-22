@@ -715,6 +715,15 @@ fn act(
                 .to_string(),
         });
     }
+    // The same guard for the other way a round stops being the one to act: the
+    // wait at the bottom of the loop is too late, thirty seconds after a stop.
+    if host.asked_to_stop() {
+        return Ok(Outcome::Refused {
+            why: "this Watcher was asked to stop while the round was reading \
+                  the candidates, so nothing was switched."
+                .to_string(),
+        });
+    }
     // One instant for both arrangements, and the beginning rather than the end, because
     // that is the one already written down.
     let acted_at = host.now();

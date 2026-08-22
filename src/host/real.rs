@@ -687,6 +687,10 @@ impl Waiting for RealHost {
         std::thread::sleep(std::time::Duration::from_millis(millis));
     }
 
+    fn asked_to_stop(&self) -> bool {
+        interrupted()
+    }
+
     fn listen_for_interrupts(&self) {
         listen_for_interrupts();
     }

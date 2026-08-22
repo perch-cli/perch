@@ -2021,6 +2021,18 @@ impl port::Waiting for FakeHost {
         *self.waiting.listening.borrow_mut() = true;
     }
 
+    /// The same question [`FakeHost::wait`] answers, without the wait: asked
+    /// once the count the test set has been reached, and never where nothing is
+    /// listening.
+    fn asked_to_stop(&self) -> bool {
+        match *self.waiting.interrupt_after.borrow() {
+            Some(after) => {
+                *self.waiting.listening.borrow() && *self.waiting.waits.borrow() >= after
+            }
+            None => false,
+        }
+    }
+
     /// Passes the time the same way a sleep does, and ends the way the test
     /// said the person watching would end it.
     fn wait(&self, millis: u64) -> Waited {
