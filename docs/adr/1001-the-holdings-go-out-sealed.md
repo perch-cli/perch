@@ -66,12 +66,19 @@ runs and the file is sealed at 1024 rounds, which is a GPU-hours problem for a
 passphrase a person chose. Nothing in the file, in the report or in the read back
 would say so.
 
-So Perch pins both: 19 doublings to seal, and a ceiling of 22 to open. 19 is
+So Perch pins both: 19 doublings to seal, and a ceiling of 20 to open. 19 is
 above `age`'s own guess at a second of work, because the cost is paid once per
-Export and once per Import on a file that is kept; 22 is where `age`'s own
-guidance tops out. Slow hardware pays seconds for it, which is the right way
-round — the alternative is the hardware deciding how well the backup is
-encrypted.
+Export and once per Import on a file that is kept. Slow hardware pays seconds for
+it, which is the right way round — the alternative is the hardware deciding how
+well the backup is encrypted.
+
+The ceiling is one doubling above what Perch writes rather than the 22 `age`'s
+own guidance tops out at, because the factor is read out of the file's header and
+sizes a buffer *before* the passphrase can be doubted: a header claiming 22 has
+an Import asking the allocator for four gigabytes on the strength of a number a
+stranger wrote. The cost is that an `age -a -p` file sealed above 2^20 — which a
+fast machine's calibration can reach — is refused rather than opened, and the
+refusal names `age -d`, which will open it.
 
 ## It takes everything and has no target
 
