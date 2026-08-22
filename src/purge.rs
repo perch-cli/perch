@@ -27,6 +27,18 @@ pub struct Purged {
     /// Accounts is ordinary for a Quarantined one and news for any other, which
     /// is why the caller says it rather than this deciding.
     pub credentials: usize,
+    /// Profiles emptied and deleted that no Account named. Counted rather than
+    /// reported as nothing, because on a registry that will not parse this is
+    /// *every* Profile on the machine, and a Purge is what nothing undoes.
+    pub unnamed: Unnamed,
+}
+
+/// The Profiles under Perch's home that the registry does not name, and how many
+/// of them had a Credential to delete.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Unnamed {
+    pub profiles: usize,
+    pub credentials: usize,
 }
 
 /// Refuses while a client is running against a Profile a Purge would delete.
@@ -125,7 +137,7 @@ pub fn erase(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -
         }
     }
     perch.renew();
-    forget_what_the_registry_does_not_name(host, registry)?;
+    let unnamed = forget_what_the_registry_does_not_name(host, registry)?;
 
     // The last thing asked before the one deletion running this again cannot
     // finish, and not through `still_ours`: its sentence is that nothing was
@@ -156,14 +168,17 @@ pub fn erase(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -
     Ok(Purged {
         accounts: registry.accounts.len(),
         credentials,
+        unnamed,
     })
 }
 
 /// Empties the Credential Store of every directory under Perch's home that has
 /// one, whether or not the registry names it: a Store is derived from its
 /// directory, so a home taken whole destroys the only name reaching a keychain
-/// item outside it. Reported as nothing — these are Accounts nobody believes in.
-fn forget_what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) -> Result<()> {
+/// item outside it. Counted apart from the Accounts — nobody believes in these —
+/// and never as nothing, because a registry that will not parse names none of them.
+fn forget_what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) -> Result<Unnamed> {
+    let mut counted = Unnamed::default();
     for dir in what_the_registry_does_not_name(host, registry)? {
         // The same answer `forget_the_credential` gives, and for its reason: a
         // store that cannot even be named is one whose Credential cannot be
@@ -177,9 +192,21 @@ fn forget_what_the_registry_does_not_name(host: &dyn Host, registry: &Registry) 
                 dir.display(),
             ))
         })?;
-        empty_the_stores(host, &store)?;
+        counted.profiles += 1;
+        if empty_the_stores(host, &store)? {
+            counted.credentials += 1;
+        }
     }
-    Ok(())
+    Ok(counted)
+}
+
+/// How many Profiles are under Perch's home, whatever the registry says of them.
+///
+/// For the one question the registry cannot answer: what a Purge is about to take
+/// on a machine whose registry will not parse. `Err` where the home cannot be
+/// listed, which is a refusal the Purge itself raises a moment later.
+pub fn profiles_held(host: &dyn Host) -> Result<usize> {
+    Ok(everything_perch_holds(host)?.len())
 }
 
 /// Every directory Perch holds that no Account of its names.
@@ -293,7 +320,8 @@ mod tests {
                 purged,
                 Purged {
                     accounts: 2,
-                    credentials: 2
+                    credentials: 2,
+                    unnamed: Unnamed::default()
                 },
                 "{platform:?}"
             );
@@ -337,7 +365,8 @@ mod tests {
             purged,
             Purged {
                 accounts: 2,
-                credentials: 1
+                credentials: 1,
+                unnamed: Unnamed::default()
             }
         );
     }

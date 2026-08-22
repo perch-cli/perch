@@ -194,9 +194,22 @@ pub fn refuse_without_a_terminal(host: &dyn Host, command: &str) -> Result<()> {
 /// "1 Accounts" is the kind of thing that ships and stays shipped, and seven call
 /// sites spelling their own is seven chances at it.
 pub fn accounts(count: usize) -> String {
+    counted(count, "Account")
+}
+
+/// The same for the two nouns a Purge counts where the registry named no Account.
+pub fn profiles(count: usize) -> String {
+    counted(count, "Profile")
+}
+
+pub fn credentials(count: usize) -> String {
+    counted(count, "Credential")
+}
+
+fn counted(count: usize, noun: &str) -> String {
     match count {
-        1 => "1 Account".to_string(),
-        _ => format!("{count} Accounts"),
+        1 => format!("1 {noun}"),
+        _ => format!("{count} {noun}s"),
     }
 }
 

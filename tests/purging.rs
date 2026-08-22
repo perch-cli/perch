@@ -728,8 +728,10 @@ fn a_home_left_behind_with_no_registry_is_taken_by_the_next_purge() {
     outcome.expect("the word was typed");
 
     assert!(!host.path_exists(Path::new(PERCH_HOME)), "{printed}");
+    // The Profiles, because with no registry there are no Accounts to name — and
+    // three working keychain items were deleted, so "no Accounts" understates it.
     assert!(
-        printed.contains("no Accounts") && !printed.contains("Purged 0"),
+        printed.contains("3 Profiles Perch could not name") && !printed.contains("Purged 0"),
         "and what happened is said as what happened rather than as a count \
          of nothing:\n{printed}"
     );
@@ -1139,4 +1141,19 @@ fn a_registry_that_will_not_parse_does_not_stop_the_purge_that_does_not_read_one
             "and no Credential is left in a store nothing can name any more"
         );
     }
+    // What it took, both before the question and after it. The registry names
+    // nothing, so the Profiles are the only count there is — and "no Accounts"
+    // is what three working logins must not be agreed to as.
+    assert!(
+        !printed.contains("no Accounts here"),
+        "the question did not offer an empty machine:\n{printed}"
+    );
+    assert!(
+        printed.contains("3 Profiles"),
+        "it counted what it was about to take:\n{printed}"
+    );
+    assert!(
+        printed.contains("Purged 3 Profiles Perch could not name, 3 Credentials"),
+        "and the report counted what it took:\n{printed}"
+    );
 }

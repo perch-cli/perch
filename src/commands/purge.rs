@@ -47,7 +47,12 @@ pub fn run(host: &dyn Host, yes: bool, out: &mut dyn Write) -> Result<()> {
 
     say(
         out,
-        &what_will_go(&registry, &home, crate::commands::service::is_there(host)),
+        &what_will_go(
+            &registry,
+            &home,
+            purge::profiles_held(host).unwrap_or(0),
+            crate::commands::service::is_there(host),
+        ),
     )?;
     // Filled by the Export the instant its bytes land rather than by the call
     // returning: `write_the_export` reports after the write, and a terminal that
@@ -171,7 +176,7 @@ fn whatever_can_be_read_of_the_registry(host: &dyn Host, home: &Path) -> Registr
 ///
 /// By address rather than by Alias, although every other command names an Account
 /// the way the user named it: what is being agreed to is the loss of the login.
-fn what_will_go(registry: &Registry, home: &Path, service: bool) -> String {
+fn what_will_go(registry: &Registry, home: &Path, profiles: usize, service: bool) -> String {
     // Said in the same breath as the Profiles rather than left for the report,
     // because it is the one thing a Purge takes that lives *outside* Perch's home
     // (ADR the-machine-runs-the-watcher).
@@ -186,10 +191,26 @@ fn what_will_go(registry: &Registry, home: &Path, service: bool) -> String {
 
     let accounts: Vec<&str> = registry.accounts.iter().map(Account::email).collect();
     if accounts.is_empty() {
-        return format!(
-            "Perch holds no Accounts here, so {} is all there is left to take.{and_the_service}",
-            home.display(),
-        );
+        // The Profiles rather than the Accounts, because a registry naming none of
+        // them is the state where that count is the only one there is — and an
+        // unparsable one must not be agreed to as an empty machine.
+        return match profiles {
+            0 => format!(
+                "Perch holds no Accounts here, so {} is all there is left to \
+                 take.{and_the_service}",
+                home.display(),
+            ),
+            profiles => format!(
+                "Perch holds {} under {} that it cannot name — its registry says \
+                 nothing this Perch can read. A Purge empties every one of their \
+                 Credential Stores and deletes {} itself. Nothing undoes it: only \
+                 a fresh login brings an Account back, and it comes back as a new \
+                 one.{and_the_service}",
+                crate::commands::profiles(profiles),
+                home.display(),
+                home.display(),
+            ),
+        };
     }
 
     format!(
@@ -334,19 +355,40 @@ fn report(host: &dyn Host, out: &mut dyn Write, home: &Path, purged: &Purged) ->
     // Purge that stopped in its last step leaves for the next one to finish.
     say(
         out,
-        &match purged.accounts {
-            0 => format!(
+        &match (purged.accounts, purged.unnamed.profiles) {
+            (0, 0) => format!(
                 "Perch was holding no Accounts here, so {} was all there was left \
                  to take, and it is gone.",
                 home.display(),
             ),
-            accounts => format!(
+            // The Profiles, because the registry named no Account and they are
+            // the only count there is. Never "no Accounts": a machine whose
+            // registry would not parse still held every one of these.
+            (0, profiles) => format!(
+                "Purged {} Perch could not name, {} among them, and {} is gone.",
+                crate::commands::profiles(profiles),
+                crate::commands::credentials(purged.unnamed.credentials),
+                home.display(),
+            ),
+            (accounts, _) => format!(
                 "Purged {}, and {} is gone.",
                 crate::commands::accounts(accounts),
                 home.display(),
             ),
         },
     )?;
+
+    // Beside a count of Accounts, because that count does not include them.
+    if purged.accounts > 0 && purged.unnamed.profiles > 0 {
+        say(
+            out,
+            &format!(
+                "{} under it named no Account, and {} deleted with them.",
+                crate::commands::profiles(purged.unnamed.profiles),
+                crate::commands::credentials(purged.unnamed.credentials),
+            ),
+        )?;
+    }
 
     // The one thing here that is not what a Purge always does. What Claude Code
     // is still logged in as is said in the question this run was agreed to, which
