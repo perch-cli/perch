@@ -2035,9 +2035,13 @@ mod tests {
             (-91, 750_000_000)
         );
 
-        // Round-tripped, because the pair is only right if chrono reads it back
-        // as the instant it was built from.
-        for offset in [Duration::new(0, 1), Duration::new(90, 250_000_000)] {
+        // Round-tripped: the pair is only right if chrono reads it back as the
+        // instant it was built from. Quarter-seconds because a Windows
+        // `SystemTime` is a FILETIME, which rounds anything under 100ns away.
+        for offset in [
+            Duration::new(0, 250_000_000),
+            Duration::new(90, 250_000_000),
+        ] {
             let (seconds, nanos) = pair(UNIX_EPOCH - offset);
             let read = DateTime::from_timestamp(seconds, nanos).expect("in range");
             assert_eq!(
