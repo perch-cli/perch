@@ -676,7 +676,16 @@ impl Round {
                 retrying_in: Some(millis),
                 ..
             } => *millis,
-            Outcome::Nowhere { .. } => NOWHERE_INTERVAL_MILLIS,
+            // Read off the round, as the hold's is: they agree today only
+            // because `act` passes this same constant.
+            Outcome::Nowhere {
+                looking_again: Some(millis),
+                ..
+            } => *millis,
+            Outcome::Nowhere {
+                looking_again: None,
+                ..
+            } => NOWHERE_INTERVAL_MILLIS,
             // Named one by one rather than caught by a wildcard, so an outcome added
             // later has to say what the loop does after it. A hold carrying no wait is
             // a check's, and a check exits rather than asking.
