@@ -562,8 +562,12 @@ pub enum Outcome {
     Switched { to: String, unread: Vec<String> },
     /// It was, and there was nowhere worth going — every candidate exhausted, or none
     /// of them a candidate at all. Nothing to fix and nothing to retry: the answer is
-    /// to wait, so the loop does.
-    Nowhere { why: String },
+    /// to wait, so the loop does — and `looking_again` is absent for a check, which
+    /// exits, exactly as [`Outcome::Held`]'s `retrying_in` is.
+    Nowhere {
+        why: String,
+        looking_again: Option<u64>,
+    },
     /// The figures could not be read, so nothing was decided on the ones Perch already
     /// had. The only outcome carrying how long the loop then waits.
     ///
@@ -616,7 +620,9 @@ impl Outcome {
             Outcome::Nowhere { .. } => "nowhere",
             Outcome::Held { .. } => "held",
             Outcome::Refused { .. } => "refused",
-            Outcome::HandedOver { .. } => "handed over",
+            // One lowercase token, as every other word is: two of them are eleven
+            // cells in a field of eight, and a space where a reader counts columns.
+            Outcome::HandedOver { .. } => "replaced",
         }
     }
 }
@@ -743,10 +749,17 @@ impl Round {
             Outcome::Cooling { why } => explaining(why),
             // The wait is said, as a hold says its own: this is the one decision
             // the loop rests longer than an interval after.
-            Outcome::Nowhere { why } => explaining(&format!(
+            Outcome::Nowhere {
+                why,
+                looking_again: Some(millis),
+            } => explaining(&format!(
                 "nowhere to go: {why} Looking again in {}.",
-                how_long(NOWHERE_INTERVAL_MILLIS),
+                how_long(*millis),
             )),
+            Outcome::Nowhere {
+                why,
+                looking_again: None,
+            } => explaining(&format!("nowhere to go: {why}")),
             Outcome::Held {
                 why,
                 retrying_in: Some(millis),
@@ -1051,6 +1064,7 @@ mod tests {
             at(86.0),
             Outcome::Nowhere {
                 why: "every Account in Group `work` is exhausted.".to_string(),
+                looking_again: Some(NOWHERE_INTERVAL_MILLIS),
             },
         )
         .line(now());
@@ -1089,6 +1103,7 @@ mod tests {
                 at(86.0),
                 Outcome::Nowhere {
                     why: "every Account in Group `work` is exhausted.".to_string(),
+                    looking_again: Some(NOWHERE_INTERVAL_MILLIS),
                 },
             ),
             round(
@@ -1104,7 +1119,27 @@ mod tests {
                     why: "a client is running against that Profile.".to_string(),
                 },
             ),
+            round(
+                at(86.0),
+                Outcome::HandedOver {
+                    why: "another Watcher has taken the watch over.".to_string(),
+                },
+            ),
         ]
+    }
+
+    /// The column a day of these is skimmed by. Every word is one lowercase token
+    /// in eight cells; two of them push the figure three columns right of every
+    /// other round's, and a space in the word breaks anything reading the second.
+    #[test]
+    fn every_status_word_is_one_token_that_fits_its_column() {
+        for decision in one_of_each_outcome() {
+            let word = decision.outcome.word();
+            assert!(
+                !word.contains(char::is_whitespace) && word.len() <= 8,
+                "`{word}` does not fit the column every other word does"
+            );
+        }
     }
 
     #[test]
@@ -1139,6 +1174,26 @@ mod tests {
         assert!(line.contains("10m00s"), "and when it comes back: {line}");
     }
 
+    /// The same rule on the other outcome that names a cadence: a Check exits
+    /// after printing, so its scheduler's interval decides when anything looks
+    /// again — and a line saying otherwise is the one untrue thing on it.
+    #[test]
+    fn a_check_that_found_nowhere_to_go_promises_nothing_about_looking_again() {
+        let line = round(
+            at(100.0),
+            Outcome::Nowhere {
+                why: "Every Account in Group `work` is exhausted.".to_string(),
+                looking_again: None,
+            },
+        )
+        .line(now());
+
+        assert!(line.contains("nowhere to go"), "{line}");
+        assert!(line.contains("is exhausted"), "{line}");
+        assert!(!line.contains("Looking again"), "{line}");
+        assert!(!line.contains("m00s"), "no interval at all: {line}");
+    }
+
     #[test]
     fn a_held_check_says_what_held_it_and_promises_nothing_about_coming_back() {
         let line = round(
@@ -1165,12 +1220,16 @@ mod tests {
                 to: String::new(),
                 unread: Vec::new(),
             },
-            Outcome::Nowhere { why: String::new() },
+            Outcome::Nowhere {
+                why: String::new(),
+                looking_again: None,
+            },
             Outcome::Held {
                 why: String::new(),
                 retrying_in: None,
             },
             Outcome::Refused { why: String::new() },
+            Outcome::HandedOver { why: String::new() },
         ];
 
         for outcome in &outcomes {
@@ -1273,7 +1332,14 @@ mod tests {
         // The one decision that read *every* candidate, so keeping the ordinary
         // cadence spends each of their allowances on Accounts it just refused.
         assert_eq!(
-            round(at(86.0), Outcome::Nowhere { why: String::new() }).waiting_for(),
+            round(
+                at(86.0),
+                Outcome::Nowhere {
+                    why: String::new(),
+                    looking_again: Some(NOWHERE_INTERVAL_MILLIS),
+                }
+            )
+            .waiting_for(),
             NOWHERE_INTERVAL_MILLIS,
             "nowhere to go rests for the Cooldown rather than an interval"
         );
@@ -1356,6 +1422,7 @@ mod tests {
                       nowhere useful to Switch. Nothing was changed.\n\
                       overflow@example.com frees up soonest, at 15:00."
                     .to_string(),
+                looking_again: Some(NOWHERE_INTERVAL_MILLIS),
             },
         )
         .line(now());

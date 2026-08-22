@@ -730,6 +730,7 @@ fn act(
         Err(error @ (PerchError::NoCandidate(_) | PerchError::NothingToDo(_))) => {
             return Ok(Outcome::Nowhere {
                 why: also(error.to_string(), &unread),
+                looking_again: watcher.asking_again(watch::NOWHERE_INTERVAL_MILLIS),
             });
         }
         Err(error) => return Err(error),
