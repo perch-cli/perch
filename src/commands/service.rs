@@ -28,7 +28,8 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
 
     let unit = describe(host)?;
     // Before the machine is asked anything and before anything is written: a value no
-    // format can hold is a refusal about the Unit rather than a half-finished install.
+    // format can hold is a refusal about the Unit rather than a half-finished install,
+    // and `is_installed` below runs `schtasks` on Windows.
     unit.refuse_what_the_format_cannot_hold(host.platform())?;
     let at = service::unit_path(host)?;
     // Asked the way `status` asks it rather than of the file alone, because Windows
@@ -36,8 +37,6 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     // made something.
     let replaced = is_installed(host, at.as_deref())?;
 
-    // Asked the way `status` asks it rather than of the file alone, because Windows
-    // keeps no unit file and a re-install over a working task made nothing.
     if let Err(failed) = write_and_start(host, &unit, at.as_deref()) {
         // Named for what this platform keeps, because Windows keeps no file. What is
         // true on all three is that something is registered and was not started.
