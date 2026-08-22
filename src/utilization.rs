@@ -212,21 +212,57 @@ pub fn age_phrase(observed_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
     match seconds {
         ..0 => "in the future".to_string(),
         0..=44 => "just now".to_string(),
-        _ => format!("{} ago", spans(seconds, f64::round)),
+        _ => format!("{} ago", spans(seconds)),
     }
 }
 
-/// How long a span is, in the largest unit that does not round it away: `3m`,
-/// `2h`, `4d`. One table for [`age_phrase`] and [`wait_phrase`] both, or the
-/// handover moves in one and not the other and an age that grew by a second
-/// falls by half an hour. Minutes as far as two hours, where the two forms first
-/// agree; `rounding` is up for a wait and to nearest for an age, in every unit.
-fn spans(seconds: i64, rounding: fn(f64) -> f64) -> String {
-    let of = |unit: f64| rounding(seconds as f64 / unit) as i64;
+/// Which unit a span is said in, and what one of them is worth. One table for
+/// [`age_phrase`] and [`how_long`] both, or the handover moves in one and not
+/// the other and an age that grew by a second falls by half an hour. Minutes as
+/// far as two hours, where the two forms first agree.
+fn unit_of(seconds: i64) -> (&'static str, i64) {
     match seconds {
-        ..7200 => format!("{}m", of(60.0)),
-        7200..86_400 => format!("{}h", of(3600.0)),
-        _ => format!("{}d", of(86_400.0)),
+        ..7200 => ("m", 60),
+        7200..86_400 => ("h", 3600),
+        _ => ("d", 86_400),
+    }
+}
+
+/// How long ago something was, in the largest unit that does not round it away:
+/// `3m`, `2h`, `4d`. To nearest, which is an age's rounding — a wait's is
+/// [`how_long`]'s, and says more.
+fn spans(seconds: i64) -> String {
+    let (name, unit) = unit_of(seconds);
+    format!("{}{name}", (seconds as f64 / unit as f64).round() as i64)
+}
+
+/// How long a wait is: the largest unit, and what is left in the one below it,
+/// both rounded up. Up, because a wait that reads shorter than it is is the one
+/// direction that costs somebody something. The remainder, because a whole unit
+/// rounded up is printed beside the clock time it counts to — `14:29 UTC (in 3h)`
+/// disagrees with itself, and 1d0h1m read `in 2d`.
+fn how_long(seconds: i64) -> String {
+    // `i64::div_ceil` is unstable, and both operands here are positive: a wait
+    // of nought or less is answered before this is reached.
+    let up = |what: i64, per: i64| (what + per - 1) / per;
+
+    let (name, unit) = unit_of(seconds);
+    if unit == 60 {
+        return format!("{}m", up(seconds, 60));
+    }
+
+    let (below, worth) = unit_of(unit - 1);
+    let mut whole = seconds / unit;
+    let mut rest = up(seconds % unit, worth);
+    // The remainder's own round-up can fill the unit above it: 2h59m30s is `3h`
+    // rather than `2h60m`.
+    if rest * worth >= unit {
+        whole += 1;
+        rest = 0;
+    }
+    match rest {
+        0 => format!("{whole}{name}"),
+        _ => format!("{whole}{name}{rest}{below}"),
     }
 }
 
@@ -251,15 +287,14 @@ pub fn clock_time(at: DateTime<Utc>) -> String {
     at.format("%Y-%m-%d %H:%M UTC").to_string()
 }
 
-/// A wait's minutes round *up* where an age's round to nearest, which is the
-/// whole of what this adds to [`spans`]: a wait that reads shorter than it is is
-/// the one direction that costs somebody something.
+/// A wait until a reset, or "any moment now" for one already gone. How the
+/// number is arrived at is [`how_long`]'s.
 fn wait_phrase(resets_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
     let seconds = (resets_at - now).num_seconds();
     if seconds <= 0 {
         return "any moment now".to_string();
     }
-    format!("in {}", spans(seconds, f64::ceil))
+    format!("in {}", how_long(seconds))
 }
 
 #[cfg(test)]
@@ -406,10 +441,28 @@ mod tests {
         let now = at(12, 0);
         let said = |minutes: i64| wait_phrase(now + chrono::Duration::minutes(minutes), now);
 
-        assert_eq!(said(149), "in 3h", "2h29m is not two hours away");
+        assert_eq!(said(149), "in 2h29m", "2h29m is not two hours away");
         assert_eq!(said(180), "in 3h", "and an exact one is itself");
-        assert_eq!(said(60 * 24 + 1), "in 2d", "the same at the day handover");
+        assert_eq!(said(60 * 24 + 1), "in 1d1h", "the same at the day handover");
         assert_eq!(said(60 * 48), "in 2d");
+    }
+
+    /// A wait is printed beside the clock time it counts to, so a whole unit
+    /// rounded up is a phrase that disagrees with itself: `14:29 UTC (in 3h)`
+    /// by half an hour, and a reset one minute past a day by almost a day.
+    #[test]
+    fn a_wait_says_what_is_left_over_rather_than_rounding_a_whole_unit_up() {
+        let now = at(12, 0);
+        let said = |seconds: i64| wait_phrase(now + chrono::Duration::seconds(seconds), now);
+
+        assert_eq!(said(7201), "in 2h1m", "one second past the handover");
+        assert_eq!(
+            said(10_770),
+            "in 3h",
+            "and the remainder's own round-up carries rather than reading `2h60m`"
+        );
+        assert_eq!(said(86_401), "in 1d1h");
+        assert_eq!(said(172_770), "in 2d", "the same carry a day up");
     }
 
     #[test]
