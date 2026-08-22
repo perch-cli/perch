@@ -264,6 +264,10 @@ pub fn inert(what: &str, value: &str) -> Result<(), HostError> {
 pub fn sendable(request: &HttpRequest<'_>) -> Result<(), HostError> {
     inert("the URL", request.url)?;
     for (name, value) in request.headers {
+        // The name as well as the value: `curl_config` writes the pair onto one
+        // line, so a newline in either ends the `header` option and starts a
+        // second one of the adapter's choosing.
+        inert(&format!("the header name `{name}`"), name)?;
         inert(&format!("the {name} header"), value)?;
     }
     if let Some(body) = request.body {
@@ -746,6 +750,31 @@ mod tests {
             through_every_link(&host, Path::new("neither/is/this")),
             Path::new("neither/is/this"),
         );
+    }
+
+    /// The pair goes onto one `curl` configuration line, so a newline in the
+    /// *name* ends the `header` option exactly as one in the value does. Every
+    /// name Perch sends today is a literal, so this holds the rule rather than
+    /// catching a caller — and `HttpRequest` is public.
+    #[test]
+    fn a_header_name_may_no_more_carry_a_newline_than_its_value_may() {
+        for (name, value) in [
+            ("anthropic-beta\noutput", "oauth-2025-04-20"),
+            ("anthropic-beta", "oauth\noutput"),
+        ] {
+            let refused = sendable(&HttpRequest {
+                url: "https://api.anthropic.com/v1/me",
+                headers: &[(name, value)],
+                body: None,
+                within_millis: None,
+            })
+            .expect_err("that would write a second option");
+
+            assert!(
+                refused.to_string().contains("anthropic-beta"),
+                "it names the header: {refused}"
+            );
+        }
     }
 
     /// A link's target may be written relative to where the link sits, which is
