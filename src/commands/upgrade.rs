@@ -56,22 +56,26 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
     }
 
     let wanted = match &args.release {
-        Some(typed) => upgrade::version_typed(typed)?,
-        None => upgrade::newest(host, None)?,
+        Some(typed) => Some(upgrade::version_typed(typed)?),
+        None => newest_or_let_the_channel_say(host, &channel)?,
     };
     let installed = upgrade::installed();
 
-    match upgrade::compare(&wanted, installed) {
-        std::cmp::Ordering::Equal => {
-            return Err(PerchError::NothingToDo(format!(
-                "{installed} is already what is installed, and it came from \
-                 {}.\n\
-                 `perch upgrade --check` says what the newest Release is.",
-                channel.name()
-            )));
+    if let Some(wanted) = &wanted {
+        match upgrade::compare(wanted, installed) {
+            std::cmp::Ordering::Equal => {
+                return Err(PerchError::NothingToDo(format!(
+                    "{installed} is already what is installed, and it came from \
+                     {}.\n\
+                     `perch upgrade --check` says what the newest Release is.",
+                    channel.name()
+                )));
+            }
+            std::cmp::Ordering::Less => {
+                agree_to_going_back(host, wanted, installed, args.yes, out)?;
+            }
+            std::cmp::Ordering::Greater => {}
         }
-        std::cmp::Ordering::Less => agree_to_going_back(host, &wanted, installed, args.yes, out)?,
-        std::cmp::Ordering::Greater => {}
     }
 
     let replaced = match &channel {
@@ -82,7 +86,7 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
         Channel::Npm => {
             // The version as Perch reads it rather than as typed: npm has never
             // had the leading `v`, so `v0.2.0` is a package nobody published.
-            let named = args.release.as_ref().map(|_| wanted.as_str());
+            let named = args.release.as_ref().and(wanted.as_deref());
             let (npm, npm_args) = upgrade::npm_command(host, named)?;
             // npm would be replacing `perch.exe` while it is the running
             // process, and Windows holds that file open — so the command is
@@ -100,7 +104,11 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
             }
             hand_it_over(host, &npm, &npm_args, out)
         }
-        Channel::Installer => replace_it_ourselves(host, &wanted, out),
+        // The one Channel with nothing to hand the work to, so its Release is
+        // the answer `newest_or_let_the_channel_say` never goes without.
+        Channel::Installer => {
+            replace_it_ourselves(host, wanted.as_deref().unwrap_or_default(), out)
+        }
     }?;
 
     // The Channel moved the binary and neither `brew` nor `npm` has heard of a
@@ -112,6 +120,26 @@ pub fn run(host: &dyn Host, args: UpgradeArgs, out: &mut dyn Write) -> Result<i3
         say(out, &said)?;
     }
     Ok(replaced)
+}
+
+/// Which Release to install, or `None` where the Channel works that out itself
+/// and could not be told. On those two the answer decides nothing but whether
+/// Perch says "already the newest", and unauthenticated `api.github.com` allows
+/// 60 requests an hour per address — which a shared one reaches.
+fn newest_or_let_the_channel_say(host: &dyn Host, channel: &Channel) -> Result<Option<String>> {
+    match upgrade::newest(host, None) {
+        Ok(newest) => Ok(Some(newest)),
+        Err(unreachable) if channel.resolves_its_own() => {
+            host.note(&format!(
+                "{unreachable}\n\nSo Perch cannot say whether there is anything \
+                 newer. Handing the work to {} regardless, which works it out \
+                 for itself.",
+                channel.name(),
+            ));
+            Ok(None)
+        }
+        Err(unreachable) => Err(unreachable),
+    }
 }
 
 /// The Channel a word names, or a refusal naming the three there are.

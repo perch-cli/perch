@@ -62,6 +62,13 @@ impl Channel {
         }
     }
 
+    /// Whether the Channel works out which Release to install for itself. Two of
+    /// the three do, so asking GitHub is only how Perch answers "there is
+    /// nothing to do" — worth losing rather than the whole Upgrade.
+    pub fn resolves_its_own(&self) -> bool {
+        !matches!(self, Channel::Installer)
+    }
+
     /// The word `--channel` takes for it.
     pub fn word(&self) -> &'static str {
         match self {
