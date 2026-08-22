@@ -53,7 +53,14 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
         (Err(_), Some(said)) => {
             return the_switch_alone(out, &registry, args.json, args.refresh, &said);
         }
-        (Err(nobody), None) => return Err(nobody),
+        // The other absence, and a script reads it off the same document: no
+        // Account, and the refusal on stderr with its own exit code as ever.
+        (Err(nobody), None) => {
+            if args.json {
+                nobody_at_all(out, &registry, args.refresh)?;
+            }
+            return Err(nobody);
+        }
     };
 
     // This command shows one Account, so it reads one Account: a refresh reads
@@ -164,11 +171,31 @@ fn render_json(
     say_json(out, &document)
 }
 
+/// The document for either way Perch can be on no Account: a Landing that left
+/// nobody behind, and a registry settled on nobody. One function, so the two
+/// cannot differ in shape — and every key the ordinary one has, with what it
+/// cannot answer left `null`, where a missing key is a script's `jq` failing
+/// for what reads like a different reason.
+fn nobody_at_all(out: &mut dyn Write, registry: &Registry, refresh: bool) -> Result<()> {
+    say_json(
+        out,
+        &json!({
+            "active": serde_json::Value::Null,
+            "landing": registry.active().document(),
+            // Whether one was asked for, not whether one happened: with no
+            // Account there is nothing to read, and a caller who passed
+            // `--refresh` is not one who asked for nothing.
+            "refresh": match refresh {
+                true => Report::asked_for().document(),
+                false => Report::default().document(),
+            },
+        }),
+    )
+}
+
 /// The whole of the report where a Landing left nobody behind: the Switch that
-/// was in flight, and no Account section to put under it. The document keeps
-/// every key the ordinary one has, with what it cannot answer left `null` —
-/// where a missing key is a script's `jq` failing for what reads like a
-/// different reason.
+/// was in flight, and no Account section to put under it. Exits 0, so this is
+/// the document on its own rather than one beside a refusal.
 fn the_switch_alone(
     out: &mut dyn Write,
     registry: &Registry,
@@ -176,21 +203,8 @@ fn the_switch_alone(
     refresh: bool,
     said: &str,
 ) -> Result<()> {
-    if !json {
-        return crate::commands::say(out, said);
+    match json {
+        true => nobody_at_all(out, registry, refresh),
+        false => crate::commands::say(out, said),
     }
-    say_json(
-        out,
-        &json!({
-            "active": serde_json::Value::Null,
-            "landing": registry.active().document(),
-            // Whether one was asked for, not whether one happened: a Landing
-            // that left nobody behind has no Account to read, and a caller who
-            // passed `--refresh` is not one who asked for nothing.
-            "refresh": match refresh {
-                true => Report::asked_for().document(),
-                false => Report::default().document(),
-            },
-        }),
-    )
 }

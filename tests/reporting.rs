@@ -4,6 +4,7 @@ mod common;
 
 use chrono::{TimeZone, Utc};
 use common::*;
+use perch::error::EXIT_NOT_FOUND;
 use perch::host::FakeHost;
 use perch::registry::{Active, CURRENT_VERSION};
 
@@ -188,6 +189,31 @@ fn a_switch_in_flight_from_nobody_is_still_reported_and_still_exits_zero() {
     assert!(
         document["active"].is_null(),
         "there is no Account established to describe: {as_json}"
+    );
+}
+
+/// The other way Perch is on nobody: no Landing to explain it, so it refuses —
+/// and `perch list --json` on the same machine renders a whole document with a
+/// null `active_account`, so two shapes for one absence is two shapes a prompt
+/// script has to know about.
+#[test]
+fn a_registry_on_nobody_still_answers_json_with_the_shape_a_script_reads() {
+    let host = machine_with_two_accounts();
+    let mut registry = registry_of(&host);
+    registry.settle(None);
+    save_registry(&host, &registry);
+
+    let (result, as_json) = run_status(&host, true);
+
+    let refused = result.expect_err("there is no Account to report on");
+    assert_eq!(refused.exit_code(), EXIT_NOT_FOUND, "{refused}");
+    let document: serde_json::Value =
+        serde_json::from_str(&as_json).expect("a document, not an empty stdout");
+    assert!(document["active"].is_null(), "{as_json}");
+    assert!(document["landing"].is_null(), "{as_json}");
+    assert!(
+        document.get("refresh").is_some(),
+        "every key the ordinary document has: {as_json}"
     );
 }
 
