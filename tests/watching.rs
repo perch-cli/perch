@@ -1477,7 +1477,14 @@ fn a_watch_taken_over_while_the_candidates_were_read_switches_nothing() {
 
     let (result, printed) = run_watch_once(&host);
 
-    result.expect("a watch taken over is not this Watcher's failure");
+    let code = result.expect("a watch taken over is not this Watcher's failure");
+    assert_eq!(
+        code,
+        perch::error::EXIT_HELD,
+        "a round another Watcher displaced is a contended lock rather than \
+         nothing to do — a scheduler branching on 15 would record it as a \
+         round that found no work: {printed}"
+    );
     assert!(
         !host
             .effects()

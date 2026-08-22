@@ -578,6 +578,10 @@ pub enum Outcome {
     /// (ADR a-profile-is-live-by-evidence). Only where waiting is an answer: a failure
     /// that does not clear itself is reported as itself instead.
     Refused { why: String },
+    /// The watch was taken over, or given up, between the reading and the Switch. Its
+    /// own outcome rather than a [`Outcome::Refused`], because a scheduler branching on
+    /// "nothing to do" would record a round that was in fact displaced.
+    HandedOver { why: String },
 }
 
 impl Outcome {
@@ -596,7 +600,9 @@ impl Outcome {
                 EXIT_NOTHING_TO_DO
             }
             Outcome::Nowhere { .. } => EXIT_NO_CANDIDATE,
-            Outcome::Held { .. } => EXIT_HELD,
+            // Both are the code for a contended lock: nothing was changed, and
+            // asking again is what resolves it.
+            Outcome::Held { .. } | Outcome::HandedOver { .. } => EXIT_HELD,
         }
     }
 
@@ -610,6 +616,7 @@ impl Outcome {
             Outcome::Nowhere { .. } => "nowhere",
             Outcome::Held { .. } => "held",
             Outcome::Refused { .. } => "refused",
+            Outcome::HandedOver { .. } => "handed over",
         }
     }
 }
@@ -673,7 +680,10 @@ impl Round {
             | Outcome::Waiting
             | Outcome::Cooling { .. }
             | Outcome::Switched { .. }
-            | Outcome::Refused { .. } => REFRESH_INTERVAL_MILLIS,
+            | Outcome::Refused { .. }
+            // The loop leaves at the top of the next round rather than waiting this
+            // out, so the number is only what the line would have promised.
+            | Outcome::HandedOver { .. } => REFRESH_INTERVAL_MILLIS,
         }
     }
 
@@ -689,7 +699,8 @@ impl Round {
             | Outcome::Cooling { .. }
             | Outcome::Switched { .. }
             | Outcome::Nowhere { .. }
-            | Outcome::Refused { .. } => None,
+            | Outcome::Refused { .. }
+            | Outcome::HandedOver { .. } => None,
         }
     }
 
@@ -751,6 +762,7 @@ impl Round {
                 "nothing current to decide on, so nothing was decided: {why}"
             )),
             Outcome::Refused { why } => explaining(&format!("the Switch was turned away: {why}")),
+            Outcome::HandedOver { why } => explaining(why),
         }
     }
 }
