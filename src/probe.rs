@@ -264,7 +264,10 @@ pub fn on_path(host: &dyn Host, name: &str) -> Option<PathBuf> {
         vec![String::new()]
     };
 
-    for dir in path.split(separator).filter(|dir| !dir.is_empty()) {
+    // Rooted directories only, as `curl_at` takes them: an empty element and a
+    // `.` both mean the working directory, and `perch upgrade` runs what it
+    // finds here.
+    for dir in path.split(separator).filter(|dir| rooted(dir, on_windows)) {
         for extension in &extensions {
             // Joined with '/' rather than `Path::join`, which picks the
             // separator of whatever platform this build runs on: Windows
@@ -276,6 +279,26 @@ pub fn on_path(host: &dyn Host, name: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Whether a `PATH` element names a directory from the root rather than from
+/// wherever Perch was run. Asked of the platform the host reports rather than
+/// through `Path::is_absolute`, which reads the separator of the platform this
+/// build runs on — the reason the search above joins with `/` by hand.
+fn rooted(dir: &str, on_windows: bool) -> bool {
+    if dir.starts_with('/') {
+        return true;
+    }
+    // A root of the current drive, and a drive named outright. `C:name` with no
+    // separator is relative to that drive's own working directory, which is what
+    // is being refused rather than a spelling of the root.
+    on_windows
+        && (dir.starts_with('\\')
+            || matches!(
+                dir.as_bytes(),
+                [drive, b':', separator, ..]
+                    if drive.is_ascii_alphabetic() && matches!(separator, b'\\' | b'/')
+            ))
 }
 
 /// Reads the installed version, refusing when there is nothing to read.
@@ -1294,6 +1317,36 @@ mod tests {
             claude_bin(&host).unwrap(),
             PathBuf::from("C:/npm/claude.cmd")
         );
+    }
+
+    /// `perch upgrade` runs what this finds, so a `PATH` element that resolves
+    /// against the working directory hands the machine to whatever `npm` or
+    /// `brew` the shell happened to be sitting in.
+    #[test]
+    fn a_path_element_that_means_the_working_directory_is_not_searched() {
+        for (platform, path, relative) in [
+            (Platform::Other, ".:/usr/bin", "./claude"),
+            (Platform::Other, ":/usr/bin", "claude"),
+            (Platform::Other, "tools:/usr/bin", "tools/claude"),
+            (Platform::Windows, ".;C:/bin", "./claude.exe"),
+            (Platform::Windows, "C:tools;C:/bin", "C:tools/claude.exe"),
+        ] {
+            let wanted = match platform {
+                Platform::Windows => "C:/bin/claude.exe",
+                _ => "/usr/bin/claude",
+            };
+            let host = FakeHost::new()
+                .with_platform(platform)
+                .with_env("PATH", path)
+                .with_file(relative, "")
+                .with_file(wanted, "");
+
+            assert_eq!(
+                claude_bin(&host).unwrap(),
+                PathBuf::from(wanted),
+                "the case this is about: {path}"
+            );
+        }
     }
 
     #[test]
