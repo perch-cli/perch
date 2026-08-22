@@ -356,6 +356,31 @@ fn an_export_path_that_reaches_perchs_home_through_a_link_is_refused_too() {
     }
 }
 
+/// The relative half of the same rule. A bare filename is read as a file beside
+/// the current directory, and where that directory is inside Perch's home the
+/// Export lands in what the Purge deletes moments later — with the report saying
+/// the Holdings are gone and nothing saying the backup went with them.
+#[test]
+fn an_export_named_relative_to_a_cwd_inside_perchs_home_is_refused_too() {
+    let host = a_machine_to_give_back()
+        .in_directory(PERCH_HOME)
+        .with_answers(&["y", "backup.age", "purge"])
+        .with_secrets(&[PASSPHRASE, PASSPHRASE]);
+
+    let (outcome, printed) = run_purge(&host);
+
+    let refused = outcome.expect_err("the Export would go with the home");
+    assert!(
+        refused.to_string().contains("Nothing was purged"),
+        "the Purge is off, and says so: {refused}"
+    );
+    assert_eq!(
+        registry_on(&host).map(|registry| registry.accounts.len()),
+        Some(3),
+        "and every Account is still here: {printed}"
+    );
+}
+
 /// Every guard downstream lets a verbatim `~` through: its parent is the current
 /// directory, which exists; nothing is at that path; and it is not under Perch's
 /// home, so the Purge would not take it. The Export lands at `./~`.

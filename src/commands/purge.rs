@@ -289,7 +289,19 @@ fn offer_an_export(
 /// other one is refused rather than read as a file beside the current directory.
 fn expanded(host: &dyn Host, typed: &str) -> Result<PathBuf> {
     let Some(rest) = typed.strip_prefix('~') else {
-        return Ok(PathBuf::from(typed));
+        let typed = PathBuf::from(typed);
+        // Resolved here rather than left for whoever writes it, because the
+        // guard below matches components: a bare `backup.age` typed from inside
+        // the directory this Purge is about to delete shares none with it.
+        if typed.is_absolute() || typed.as_os_str().is_empty() {
+            return Ok(typed);
+        }
+        // A machine that cannot say where it is says so through the guard
+        // refusing nothing, which is where it stood before this line.
+        return Ok(match host.current_dir() {
+            Ok(here) => here.join(typed),
+            Err(_) => typed,
+        });
     };
     // Either separator, because Windows reads both and somebody typing here is
     // typing at Perch rather than at a shell — as `upgrade::beneath` and
