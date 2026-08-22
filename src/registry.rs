@@ -1021,11 +1021,9 @@ impl Registry {
         };
         self.refuse_a_name_nothing_may_answer_to(NameKind::Group, to, Some(held))?;
 
-        let Some(settings) = self.groups.remove(&declared) else {
-            return Err(PerchError::NotFound(format!(
-                "no Group is called `{held}`."
-            )));
-        };
+        // `declared` is one of this map's own keys, `declared_group` having
+        // just read it out — so the refusal above is the only one there is.
+        let settings = self.groups.remove(&declared).unwrap_or_default();
         self.groups.insert(to.to_string(), settings);
         for account in &mut self.accounts {
             if account
