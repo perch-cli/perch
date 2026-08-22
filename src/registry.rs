@@ -562,19 +562,10 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
             kind.names()
         )));
     }
-    // Both words that already address something are refused for either half of
-    // the namespace, and both say which half they were asked about.
-    if means_no_group(name) {
-        return Err(PerchError::Invalid(format!(
-            "`{name}` addresses the Accounts in no Group, so it cannot also be \
-             {}.",
-            kind.article()
-        )));
-    }
-    // The other word that already addresses something. A Group called
-    // `ungrouped` would be one no `perch config set` could reach, since the
-    // Ungrouped Scope answers to the name first; an Alias is the same collision.
-    if means_ungrouped(name) {
+    // One block for both spellings, through the predicate that exists because
+    // they were reserved as two: a Group called `ungrouped` or `none` is one no
+    // `perch config set` could reach, and an Alias is the same collision.
+    if means_the_ungrouped_scope(name) {
         return Err(PerchError::Invalid(format!(
             "`{name}` addresses the Accounts in no Group, so it cannot also be \
              {}.",

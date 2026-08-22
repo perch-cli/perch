@@ -355,14 +355,17 @@ fn only_off_a_credential_that_is_theirs(
     let Outcome::Quarantined { why, detail } = &outcome else {
         return outcome;
     };
+    // What the failure underneath said, where it said anything. Both sentences below
+    // carry it in the same place, so they read it from the same line.
+    let how = match detail {
+        Some(detail) => format!(" ({detail})"),
+        None => String::new(),
+    };
+
     // A Switch written down and never recorded: a Claude Code Renewal may have retired
     // the copy this reading asked with, so the refusal is evidence about a superseded
     // Credential rather than a broken Account.
     if asked.arriving_in_a_landing {
-        let how = match detail {
-            Some(detail) => format!(" ({detail})"),
-            None => String::new(),
-        };
         return Outcome::Failed(format!(
             "the Credential in this Account's own Profile could not be used — \
              {}{how} — but a Switch onto it is in flight and was never \
@@ -378,10 +381,6 @@ fn only_off_a_credential_that_is_theirs(
         return outcome;
     }
 
-    let how = match detail {
-        Some(detail) => format!(" ({detail})"),
-        None => String::new(),
-    };
     Outcome::Failed(format!(
         "the live Credential could not be used — {}{how} — but {} does not \
          name {}, so it may belong to a login made outside Perch and nothing \
