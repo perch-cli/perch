@@ -626,14 +626,16 @@ pub fn read_identity(
         Ok(contents) => contents,
     };
 
-    // The identity file is Claude Code's, not Perch's: one it writes in a shape
-    // Perch cannot parse is an assumption failing, not a corrupt file.
+    // Claude Code's file, not Perch's: a shape Perch cannot parse is an
+    // assumption failing rather than a corrupt file. Through `where_it_is_wrong`
+    // for the reason the Credential is — serde quotes the value it tripped on.
     let parsed: IdentityFile = serde_json::from_str(&contents).map_err(|err| {
         refusal(
             assumption::IDENTITY_BLOCK,
             &format!(
-                "{} is not JSON Perch understands: {err}",
-                store.identity_file.display()
+                "{} is not JSON Perch understands: {}",
+                store.identity_file.display(),
+                where_it_is_wrong(&err)
             ),
             installed.version(),
         )
@@ -2043,6 +2045,30 @@ mod tests {
                 "the refusal carries the token: {said}"
             );
         }
+    }
+
+    /// The same rule for the file beside the Credential. `.claude.json` is not a
+    /// secret in the way a Credential is, but it routinely carries an API key in
+    /// an MCP server's `env` block — and serde quotes the value it tripped on.
+    #[test]
+    fn an_identity_file_of_the_wrong_shape_is_refused_without_quoting_what_was_in_it() {
+        const KEY: &str = "sk-ant-api03-must-not-be-said";
+
+        let host = FakeHost::new()
+            .with_env("HOME", "/Users/someone")
+            .with_env("USER", "someone")
+            .with_file(
+                "/Users/someone/.claude.json",
+                &format!(r#"{{"oauthAccount":{{"emailAddress":{{"held":"{KEY}"}}}}}}"#),
+            );
+        let store = default_store(&host).expect("the store is derivable");
+
+        let refused = read_identity(&host, &store, &version_under_test())
+            .expect_err("an address is not an object");
+
+        let said = refused.to_string();
+        assert!(said.contains("is not JSON Perch understands"), "{said}");
+        assert!(!said.contains(KEY), "the refusal carries the key: {said}");
     }
 
     #[test]
