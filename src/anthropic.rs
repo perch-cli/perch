@@ -11,7 +11,7 @@
 
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::host::{Host, HttpRequest, HttpResponse};
 use crate::registry::WindowUtilization;
@@ -172,10 +172,13 @@ pub fn renew(host: &dyn Host, refresh_token: &str) -> Result<Fresh, Refused> {
     // A refresh token Anthropic has retired comes back as a bad request rather
     // than an unauthorized one, and it means the same thing here only where the
     // body agrees — see [`REVOKED`] and [`REFUSALS`].
-    let document = understand(response, REFUSALS)?;
+    let mut document = understand(response, REFUSALS)?;
     let now = host.now();
 
-    Ok(Fresh {
+    // Read out before the tree is wiped, because dropping a `serde_json::Value`
+    // frees its strings untouched and this reply holds the rotated refresh
+    // token — the only copy of it there is.
+    let fresh = Fresh {
         access_token: Zeroizing::new(
             document
                 .get("access_token")
@@ -203,7 +206,22 @@ pub fn renew(host: &dyn Host, refresh_token: &str) -> Result<Fresh, Refused> {
             .filter(|seconds| *seconds > 0)
             .and_then(|seconds| seconds.checked_mul(1_000))
             .and_then(|millis| now.timestamp_millis().checked_add(millis)),
-    })
+    };
+    wipe_the_tokens_in(&mut document);
+    Ok(fresh)
+}
+
+/// Wipes the two token strings out of a token-endpoint reply.
+///
+/// `Fresh` has copied what it needs into `Zeroizing` by the time this runs, and
+/// what is left is the tree serde built — whose strings a plain drop frees
+/// untouched. `probe::credential_after_rotation` takes the same care.
+fn wipe_the_tokens_in(document: &mut Value) {
+    for field in ["access_token", "refresh_token"] {
+        if let Some(Value::String(held)) = document.get_mut(field) {
+            held.zeroize();
+        }
+    }
 }
 
 fn missing(field: &str) -> Refused {
@@ -213,7 +231,9 @@ fn missing(field: &str) -> Refused {
 /// A read as this Account: a Bearer token, and the beta the OAuth endpoints are
 /// behind.
 fn read(host: &dyn Host, url: &str, access_token: &str) -> Result<Value, Refused> {
-    let authorization = format!("Bearer {access_token}");
+    // Wiped on drop for the reason `renew`'s body is: this is a Credential in a
+    // buffer, built twice per Account per Refresh.
+    let authorization = Zeroizing::new(format!("Bearer {access_token}"));
     let headers = [
         ("Authorization", authorization.as_str()),
         ("anthropic-beta", BETA),
