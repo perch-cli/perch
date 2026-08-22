@@ -168,12 +168,16 @@ pub fn renew(host: &dyn Host, refresh_token: &str) -> Result<Fresh, Refused> {
     );
     let headers = [("Content-Type", "application/json")];
 
+    // Before the request: `expires_in` is measured from when the server issued
+    // the token, so a clock read on receipt makes the lifetime longer than it is
+    // by the whole round trip — up to `MAX_TIME_SECONDS`.
+    let now = host.now();
+
     let response = send(host, &HttpRequest::post(TOKEN_URL, &headers, &body))?;
     // A refresh token Anthropic has retired comes back as a bad request rather
     // than an unauthorized one, and it means the same thing here only where the
     // body agrees — see [`REVOKED`] and [`REFUSALS`].
     let mut document = understand(response, REFUSALS)?;
-    let now = host.now();
 
     // Read out before the tree is wiped, because dropping a `serde_json::Value`
     // frees its strings untouched and this reply holds the rotated refresh
