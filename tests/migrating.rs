@@ -183,6 +183,69 @@ fn the_registry_is_written_back_in_the_shape_this_build_reads() {
 
 /// Said because a file the user did not ask to have rewritten was rewritten, and
 /// on stderr because a `--json` document is what stdout is for.
+/// Every command goes through `load`, so a name this build refuses is a machine
+/// with no working `perch` on it until the step forward moves the name. Driven
+/// end to end, because the rename has to reach the file as well as the read.
+#[test]
+fn a_name_this_build_refuses_is_renamed_on_disk_and_the_note_says_which() {
+    let held: serde_json::Value = serde_json::from_str(V0_2_0).expect("a document");
+    let mut held = held.as_object().cloned().expect("an object");
+    held.insert(
+        "groups".to_string(),
+        serde_json::json!({ "global": { "watcher_threshold_percent": 70 } }),
+    );
+    held.insert(
+        "aliases".to_string(),
+        serde_json::json!({ "-w": "work@example.com" }),
+    );
+    held.insert(
+        "checks".to_string(),
+        serde_json::json!({ "global": { "switched_at": "2026-08-14T10:00:00Z" } }),
+    );
+    for account in held
+        .get_mut("accounts")
+        .and_then(serde_json::Value::as_array_mut)
+        .expect("the fixture lists Accounts")
+    {
+        if account.get("group").is_some() {
+            account["group"] = serde_json::json!("global");
+        }
+    }
+    let host = machine_holding(&serde_json::Value::Object(held).to_string());
+
+    perch::migration::bring_forward(&host).expect("it comes forward");
+
+    let said = host.notes().join("\n");
+    assert!(
+        said.contains("a Group `global` is now `global-1`"),
+        "the note says what it renamed and to what: {said:?}"
+    );
+    assert!(
+        said.contains("an Alias `-w` is now `w`"),
+        "both halves of the namespace: {said:?}"
+    );
+
+    let written: serde_json::Value =
+        serde_json::from_str(&on_disk(&host)).expect("a document came back");
+    assert!(
+        written["groups"].get("global-1").is_some(),
+        "and the file holds the new name: {written}"
+    );
+    assert!(
+        written["checks"].get("global-1").is_some(),
+        "with the Check keyed on it, or the Cooldown paces nothing: {written}"
+    );
+    assert!(
+        written["aliases"].get("w").is_some(),
+        "and the Alias with them: {written}"
+    );
+
+    // The whole point: every command works afterwards.
+    let (outcome, printed) = run_list(&host, false);
+    outcome.expect("a name the step forward moved is one `load` accepts");
+    assert!(printed.contains("global-1"), "{printed}");
+}
+
 #[test]
 fn the_migration_says_so_once() {
     let host = machine_holding(V0_2_0);

@@ -143,15 +143,14 @@ fn now_called(kind: NameKind, name: &str, renamed: &[Renamed]) -> String {
 }
 
 /// One Account with the Group it claims brought through the rename pass.
-fn claiming(account: Value, renamed: &[Renamed]) -> Value {
-    let Value::Object(mut held) = account else {
-        return account;
-    };
-    if let Some(Value::String(claimed)) = held.get("group") {
+fn claiming(mut account: Value, renamed: &[Renamed]) -> Value {
+    if let Some(held) = account.as_object_mut()
+        && let Some(Value::String(claimed)) = held.get("group")
+    {
         let now = now_called(NameKind::Group, claimed, renamed);
         held.insert("group".to_string(), Value::String(now));
     }
-    Value::Object(held)
+    account
 }
 
 /// A name a published Perch accepted that this build's rules refuse, said as it
@@ -541,6 +540,51 @@ mod tests {
                 is_now: "dev-2".to_string(),
             }]
         );
+    }
+
+    /// A name that is nothing but the rule it breaks leaves no base to suffix,
+    /// so the kind supplies one. `perch alias someone --` was a name v0.2.0
+    /// accepted.
+    #[test]
+    fn a_name_with_nothing_left_after_the_rule_is_named_for_its_kind() {
+        assert_eq!(
+            renames(
+                &serde_json::json!({
+                    "version": 1,
+                    "groups": { "--": {} },
+                    "aliases": { "-": "work@example.com" },
+                })
+                .to_string()
+            ),
+            vec![
+                Renamed {
+                    kind: NameKind::Group,
+                    was: "--".to_string(),
+                    is_now: "group".to_string(),
+                },
+                Renamed {
+                    kind: NameKind::Alias,
+                    was: "-".to_string(),
+                    is_now: "alias".to_string(),
+                },
+            ]
+        );
+    }
+
+    /// The rename walks `accounts` to move the Group each one claims, and one
+    /// that claims none comes through untouched rather than gaining a `group`.
+    #[test]
+    fn an_account_in_no_group_comes_through_claiming_none() {
+        let moved = forwarded(
+            &serde_json::json!({
+                "version": 1,
+                "groups": { "-dev": {} },
+                "accounts": [{ "identity": { "email": "a@b.com" } }],
+            })
+            .to_string(),
+        );
+        assert_eq!(moved["accounts"].as_array().map(Vec::len), Some(1));
+        assert!(moved["accounts"][0].get("group").is_none());
     }
 
     /// A name outside every rule — an `@`, which no published Perch accepted

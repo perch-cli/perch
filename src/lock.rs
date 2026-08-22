@@ -935,6 +935,14 @@ mod tests {
             host.path_exists(&lock.dir),
             "without clearing it: a takeover is asked for by asking to hold it"
         );
+
+        let host = FakeHost::new().with_unreadable_file(&lock.dir, "Permission denied");
+        assert_eq!(
+            is_held(&host, &lock),
+            None,
+            "and a lock that cannot be asked about is neither held nor free — \
+             which is not contention, so the caller decides what to make of it"
+        );
     }
 
     /// The behavior every rule below is a qualification of.
