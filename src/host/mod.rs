@@ -238,7 +238,31 @@ pub const PRIVATE_DIR_MODE: u32 = 0o700;
 /// makes a value a *token* and not inert — neither protocol has an escape for a
 /// newline, so a value that could carry one is refused where it enters.
 pub fn double_quoted(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    let mut quoted = String::with_capacity(value.len() + 2);
+    write_double_quoted(&mut quoted, value);
+    quoted
+}
+
+/// The same, written into a buffer the caller already owns. What to reach for
+/// where the value is a secret: [`double_quoted`] allocates on the way to its
+/// answer and drops what it allocated un-wiped, so a token quoted through it
+/// goes back to the allocator in copies no `Zeroizing` destination covers.
+pub fn write_double_quoted(out: &mut String, value: &str) {
+    out.push('"');
+    write_escaped(out, value);
+    out.push('"');
+}
+
+/// The escaping alone, for a token assembled out of more than one piece: a
+/// `curl` `header` line is one quoted value holding a name, `: ` and a value,
+/// and quoting the three separately would put quotes inside the token.
+pub fn write_escaped(out: &mut String, value: &str) {
+    for c in value.chars() {
+        if c == '\\' || c == '"' {
+            out.push('\\');
+        }
+        out.push(c);
+    }
 }
 
 /// The refusal [`double_quoted`] says has to happen somewhere else. A newline in

@@ -118,7 +118,7 @@ const MAX_REPLY_BYTES: u64 = 8 * 1024 * 1024;
 /// is ever an argument: an `Authorization` header holds an access token, and
 /// argv is readable by every process on the machine.
 fn curl_config(request: &HttpRequest<'_>) -> Result<Zeroizing<String>, HostError> {
-    let quoted = super::double_quoted;
+    let quoted = super::write_double_quoted;
 
     // A configuration file is read a line at a time and has no escape a newline
     // could be quoted into, so a token carrying one would end the `header` line
@@ -134,23 +134,32 @@ fn curl_config(request: &HttpRequest<'_>) -> Result<Zeroizing<String>, HostError
         }
         None => (CONNECT_TIMEOUT_SECONDS, MAX_TIME_SECONDS),
     };
-    // Wiped on drop, and reserved at full width so no growth abandons a copy:
-    // an `Authorization` header is an access token, and a renewal's
-    // `data-binary` line is the refresh token outright.
+    // Wiped on drop, reserved at full width so no growth abandons a copy, and
+    // every secret escaped straight in: a `String` of its own is a copy this
+    // buffer's wipe does not reach.
     let mut config = Zeroizing::new(String::with_capacity(width_of(request)));
-    config.push_str(&format!(
+    let out = &mut *config;
+    // The only line holding no secret, so the one that may go through `format!`.
+    out.push_str(&format!(
         "connect-timeout = {connect}\nmax-time = {whole}\nmax-filesize = {MAX_REPLY_BYTES}\n"
     ));
-    config.push_str(&format!("url = {}\n", quoted(request.url)));
+    out.push_str("url = ");
+    quoted(out, request.url);
+    out.push('\n');
     for (name, value) in request.headers {
-        config.push_str(&format!(
-            "header = {}\n",
-            quoted(&format!("{name}: {value}"))
-        ));
+        // One quoted token spanning both, because that is what `curl` reads a
+        // `header` line as: the pair is escaped into it and never joined first.
+        out.push_str("header = \"");
+        super::write_escaped(out, name);
+        out.push_str(": ");
+        super::write_escaped(out, value);
+        out.push_str("\"\n");
     }
     // Giving `curl` data is what makes the request a POST; there is no verb.
     if let Some(body) = request.body {
-        config.push_str(&format!("data-binary = {}\n", quoted(body)));
+        out.push_str("data-binary = ");
+        quoted(out, body);
+        out.push('\n');
     }
     Ok(config)
 }
@@ -160,12 +169,18 @@ fn curl_config(request: &HttpRequest<'_>) -> Result<Zeroizing<String>, HostError
 /// half-built request holding a token in freed heap.
 fn width_of(request: &HttpRequest<'_>) -> usize {
     const PER_LINE: usize = 32;
+    /// Escaping doubles `\` and `"`, so a value made of nothing else is twice
+    /// its own length once quoted. Counted at the worst case rather than
+    /// measured, since measuring is the work the reservation exists to skip.
+    fn quoted(value: &str) -> usize {
+        2 * value.len() + 2
+    }
     let headers: usize = request
         .headers
         .iter()
-        .map(|(name, value)| name.len() + value.len() + PER_LINE)
+        .map(|(name, value)| quoted(name) + quoted(value) + PER_LINE)
         .sum();
-    request.url.len() + headers + request.body.map_or(0, str::len) + 4 * PER_LINE
+    quoted(request.url) + headers + request.body.map_or(0, quoted) + 4 * PER_LINE
 }
 
 /// Runs a program, optionally with something on its stdin, and reads the whole
@@ -2044,6 +2059,24 @@ mod tests {
         // body carrying quotes and backslashes still occupying exactly one of
         // them.
         assert_eq!(config.lines().count(), 5, "one option per line: {config}");
+    }
+
+    /// The reservation `curl_config` writes into may not come up short, because
+    /// growing it abandons a half-built request holding a token in freed heap.
+    #[test]
+    fn the_reservation_covers_a_request_that_is_nothing_but_escaping() {
+        // Every character doubles, in all three places a value is quoted: the
+        // worst case the count has to hold.
+        let worst = r#"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\""#;
+        let headers = [("Authorization", worst), (worst, worst)];
+        let request = HttpRequest::post(worst, &headers, worst);
+        let config = curl_config(&request).unwrap();
+        assert!(
+            config.len() <= width_of(&request),
+            "{} written into {} reserved",
+            config.len(),
+            width_of(&request)
+        );
     }
 
     /// A request that says how long it may take gets that, and one that does not
