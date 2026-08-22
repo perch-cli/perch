@@ -49,12 +49,15 @@ pub fn below_the_earliest(text: &str) -> bool {
 /// the caller, which knows what file it is holding. Idempotent, because it is
 /// reached twice — in memory on a read, and again on the run that writes it back.
 pub fn forward(document: &str) -> Result<Option<String>> {
+    // The version off a shape that is only the version, before the whole tree is
+    // built: every command reaches this against a registry already current, and
+    // a `Value` of every cached Utilization is a costly way to say "nothing".
+    if crate::error::claimed_version(document) != Some(u64::from(EARLIEST_VERSION)) {
+        return Ok(None);
+    }
     let Ok(Value::Object(held)) = serde_json::from_str::<Value>(document) else {
         return Ok(None);
     };
-    if held.get("version").and_then(Value::as_u64) != Some(u64::from(EARLIEST_VERSION)) {
-        return Ok(None);
-    }
 
     let mut moved = held.clone();
     moved.insert("version".to_string(), Value::from(CARRIED_TO));
