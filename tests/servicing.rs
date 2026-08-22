@@ -747,6 +747,71 @@ fn a_purge_refuses_rather_than_deleting_under_a_service_that_will_not_stop() {
     );
 }
 
+/// On Windows the registration *is* the install — there is no unit file whose
+/// absence says the take-back worked — so a `schtasks /Delete` that was refused
+/// is a task still running at every logon.
+#[test]
+fn a_purge_refuses_where_the_scheduled_task_would_not_unregister() {
+    let host = watched()
+        .with_platform(Platform::Windows)
+        .with_env("SystemRoot", r"C:\Windows")
+        .with_answers(&["n", "purge"]);
+    // `/Query` answering is how the machine says the task is registered, and it goes
+    // on answering because `/Delete` was refused.
+    let host = host
+        .with_exec(
+            "C:\\Windows\\System32\\schtasks.exe",
+            &["/Delete", "/TN", "Perch\\Watch", "/F"],
+            failed("ERROR: Access is denied."),
+        )
+        .with_exec(
+            "C:\\Windows\\System32\\schtasks.exe",
+            &["/Query", "/TN", "Perch\\Watch"],
+            worked(),
+        );
+
+    let (result, _) = run_purge(&host);
+
+    let refusal = result.expect_err("nothing may be deleted underneath it");
+    assert_eq!(refusal.exit_code(), EXIT_HELD, "{refusal}");
+    assert!(
+        !registry_of(&host).accounts.is_empty(),
+        "and every Account is still there"
+    );
+}
+
+/// The same query, on the command whose whole job is the take-back: reporting
+/// `EXIT_OK` off a check made *before* the delete says a task is gone that runs
+/// at the next logon.
+#[test]
+fn an_uninstall_that_could_not_unregister_the_task_says_so_rather_than_ok() {
+    let host = watched()
+        .with_platform(Platform::Windows)
+        .with_env("SystemRoot", r"C:\Windows")
+        .with_exec(
+            "C:\\Windows\\System32\\schtasks.exe",
+            &["/Delete", "/TN", "Perch\\Watch", "/F"],
+            failed("ERROR: Access is denied."),
+        )
+        .with_exec(
+            "C:\\Windows\\System32\\schtasks.exe",
+            &["/Query", "/TN", "Perch\\Watch"],
+            worked(),
+        );
+
+    let (result, printed) = run_service(&host, WatcherCommand::Uninstall);
+
+    let refusal = result.expect_err("the task is still registered");
+    assert!(
+        !printed.contains("its unit is gone"),
+        "nothing claimed a take-back that did not happen: {printed}"
+    );
+    assert!(
+        refusal.to_string().contains("Scheduled Task"),
+        "and it says what is still there, in the machine's own word: {refusal}"
+    );
+}
+
 #[test]
 fn a_purge_refuses_while_a_watcher_still_holds_the_watch() {
     let host = mac().with_answers(&["n", "purge"]);
