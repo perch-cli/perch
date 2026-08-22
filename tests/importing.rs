@@ -8,7 +8,7 @@
 mod common;
 
 use common::*;
-use perch::error::{EXIT_CONFLICT, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROFILE_LIVE};
+use perch::error::{EXIT_CONFLICT, EXIT_HELD, EXIT_INVALID, EXIT_NOT_FOUND, EXIT_PROFILE_LIVE};
 use perch::host::prelude::*;
 use perch::host::{FakeHost, Platform};
 use perch::registry::{Active, Quarantine, Registry};
@@ -156,6 +156,11 @@ fn an_import_whose_registry_went_stale_while_the_passphrase_was_typed_writes_not
     let (outcome, _) = run_import(&host, AT);
 
     let refused = outcome.expect_err("this Perch may no longer speak for the registry");
+    assert_eq!(
+        refused.exit_code(),
+        EXIT_HELD,
+        "a registry another `perch` has moved on is a run to repeat, not a fault: {refused}"
+    );
     assert!(
         refused.to_string().contains("Nothing was imported"),
         "{refused}"
