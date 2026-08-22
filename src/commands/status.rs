@@ -72,6 +72,8 @@ pub fn run(host: &dyn Host, args: StatusArgs, out: &mut dyn Write) -> Result<()>
             &mut registry,
             std::slice::from_ref(&active),
             &crate::probe::Installed::probed(host),
+            // As `list`: the registry lock is the whole of what is held here.
+            &mut || {},
         ),
         None => Report::default(),
     };

@@ -508,6 +508,7 @@ fn one_round(
         &mut registry,
         std::slice::from_ref(&email),
         &installed,
+        &mut || watching_alone.renew(),
     );
     watching_alone.renew();
     // Worth saying and not worth holding a decision over: the figure this round decides
@@ -701,6 +702,7 @@ fn act(
         registry,
         &addresses_of(&considered(registry, watching, cooled, &idle)),
         probed,
+        &mut || watching_alone.renew(),
     );
     watching_alone.renew();
     // What could not be read, carried into the sentence that says where the watcher

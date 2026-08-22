@@ -149,6 +149,9 @@ pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
                 &mut registry,
                 &asking_about,
                 &crate::probe::Installed::probed(host),
+                // Nothing else is held across this: a listing takes the registry
+                // lock and nothing more.
+                &mut || {},
             )
         }
         // Nothing to report about a refresh nobody asked for: the empty report
