@@ -2008,9 +2008,11 @@ mod tests {
     }
 
     /// The port hands back a `Result`, and every caller of this one — `carry`'s
-    /// ranking of Profiles by age, and each of `lock`'s reads — treats a failure
-    /// as an answer. A stamp `filetime` will set and chrono will not represent
-    /// is the case that used to leave through a panic instead.
+    /// ranking of Profiles by age, each of `lock`'s reads — treats a failure as
+    /// an answer, where a stamp chrono cannot represent used to end the process.
+    ///
+    /// Unix, because `utimes` sets one and an `i64` of seconds holds it.
+    #[cfg(unix)]
     #[test]
     fn a_modification_time_out_of_range_is_refused_rather_than_panicked_on() {
         let host = RealHost::new();
@@ -2066,45 +2068,6 @@ mod tests {
         } else {
             Err(std::io::Error::last_os_error())
         }
-    }
-
-    #[cfg(windows)]
-    fn set_modification_time(path: &Path, at: std::time::SystemTime) -> std::io::Result<()> {
-        let seconds = at
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("a stamp after the epoch")
-            .as_secs();
-        let ticks = seconds
-            .checked_mul(10_000_000)
-            .and_then(|ticks| ticks.checked_add(EPOCH_MILLIS_AFTER_1601 as u64 * 10_000))
-            .ok_or_else(|| std::io::Error::other("a stamp beyond a FILETIME"))?;
-        let stamp = FILETIME {
-            dwLowDateTime: ticks as u32,
-            dwHighDateTime: (ticks >> 32) as u32,
-        };
-        let wide = wide(path.as_os_str());
-        // SAFETY: `wide` outlives the call and is nul-terminated by `wide`, and
-        // the handle is closed on every path out.
-        unsafe {
-            let handle = CreateFileW(
-                wide.as_ptr(),
-                FILE_WRITE_ATTRIBUTES,
-                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                std::ptr::null(),
-                OPEN_EXISTING,
-                FILE_FLAG_BACKUP_SEMANTICS,
-                std::ptr::null_mut(),
-            );
-            if handle == INVALID_HANDLE_VALUE {
-                return Err(std::io::Error::last_os_error());
-            }
-            let told = SetFileTime(handle, std::ptr::null(), std::ptr::null(), &stamp);
-            CloseHandle(handle);
-            if told == 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-        }
-        Ok(())
     }
 
     /// `security` reports a failed sub-command of `-i` on stderr while still
