@@ -494,9 +494,17 @@ pub fn same_name(one: &str, other: &str) -> bool {
     // A character at a time rather than through `to_lowercase`, which allocates
     // two `String`s per comparison — and `validate`'s quadratic collision check
     // asks this on every read and every write.
-    one.chars()
+    fold(one).eq(fold(other))
+}
+
+/// The fold `same_name` compares on: lowercase, with both spellings of a Greek
+/// sigma brought to one. `Σ` lowercases to `ς` ending a word and to `σ` inside
+/// one, which is an orthographic rule about rendering Greek text — and a Group
+/// is a name somebody typed rather than a word.
+fn fold(name: &str) -> impl Iterator<Item = char> + '_ {
+    name.chars()
         .flat_map(char::to_lowercase)
-        .eq(other.chars().flat_map(char::to_lowercase))
+        .map(|character| if character == 'ς' { 'σ' } else { character })
 }
 
 /// A Group name offered as a default, made from something that was never chosen
@@ -1914,28 +1922,36 @@ mod tests {
     }
 
     /// The fold is the whole of the identity a name has, so it is stated here
-    /// rather than only through the callers that ask it. Character by character
-    /// rather than over two allocated `String`s, and the two must not differ:
-    /// `İ` lowercases to two characters, which is where a naive pairwise fold
-    /// would part company with `to_lowercase`.
+    /// rather than only through the callers that ask it. `İ` lowercases to two
+    /// characters, which is where a naive pairwise fold parts company with
+    /// `to_lowercase`; `ΟΔΟΣ` is where `to_lowercase` parts company with a name.
     #[test]
-    fn two_names_are_one_name_whenever_lowercasing_makes_them_one() {
+    fn two_names_are_one_name_whenever_the_only_difference_is_case() {
         for (one, other) in [
             ("work", "Work"),
             ("café", "CAFÉ"),
             ("İ", "İ"),
             ("straße", "STRAßE"),
+            ("ΟΔΟΣ", "οδος"),
+            ("ΟΔΟΣ", "οδοσ"),
         ] {
             assert!(same_name(one, other), "{one} and {other} are one name");
-            assert_eq!(
-                same_name(one, other),
-                one.to_lowercase() == other.to_lowercase(),
-                "and the fold is the one `to_lowercase` makes: {one}, {other}"
-            );
         }
         for (one, other) in [("work", "works"), ("café", "cafe"), ("", "a")] {
             assert!(!same_name(one, other), "{one} and {other} are two names");
         }
+    }
+
+    /// The one place the fold is deliberately not `to_lowercase`'s, stated as a
+    /// case rather than left to the reader to derive from the sigma rule.
+    #[test]
+    fn a_greek_name_is_one_name_where_to_lowercase_makes_it_two() {
+        assert_ne!(
+            "ΟΔΟΣ".to_lowercase(),
+            "οδοσ".to_lowercase(),
+            "`to_lowercase` writes a final sigma as `ς`"
+        );
+        assert!(same_name("ΟΔΟΣ", "οδοσ"), "and a name is not a Greek word");
     }
 
     #[test]
