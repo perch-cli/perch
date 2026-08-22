@@ -529,7 +529,8 @@ pub trait Processes {
     fn process_id(&self) -> u32;
 
     /// Whether a process is still running. A Live Profile's Credential is
-    /// untouchable because something else is holding it.
+    /// untouchable because something else is holding it. Narrowed by
+    /// [`is_a_pid`] first, as [`Processes::process_started_at`] is.
     fn process_alive(&self, pid: u32) -> bool;
 
     /// When a process began, or `None` where there is no saying. What
@@ -538,6 +539,15 @@ pub trait Processes {
     /// marker says the session did, because a recycled PID necessarily belongs
     /// to a process that began after the marker was written.
     fn process_started_at(&self, pid: u32) -> Option<DateTime<Utc>>;
+}
+
+/// Whether a number names a process at all. `probe::clients_in` parses one out
+/// of any filename, so a stray `0.json` reaches the port — and `0` is a process
+/// group to `kill` and the kernel to macOS's `proc_pidinfo`, which answers it a
+/// start time at boot that is older than every session. Both questions ask it:
+/// a start time is believed without `process_alive` ever being consulted.
+pub fn is_a_pid(pid: u32) -> bool {
+    pid != 0 && pid != u32::MAX
 }
 
 /// Time passing, and being asked to stop waiting. One trait rather than two,

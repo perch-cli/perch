@@ -738,11 +738,13 @@ impl Processes for RealHost {
     }
 
     fn process_alive(&self, pid: u32) -> bool {
-        process_alive(pid)
+        super::is_a_pid(pid) && process_alive(pid)
     }
 
     fn process_started_at(&self, pid: u32) -> Option<DateTime<Utc>> {
-        process_started_at(pid)
+        super::is_a_pid(pid)
+            .then(|| process_started_at(pid))
+            .flatten()
     }
 }
 
@@ -1562,10 +1564,10 @@ fn home_from(variable: &str, value: Option<std::ffi::OsString>) -> Result<PathBu
 }
 
 /// Whether a process exists. Signal 0 performs the checks without delivering
-/// anything, and the identifier is narrowed rather than cast: `0` and `-1` are a
-/// process *group* to `kill`, and both are reachable since `probe::clients_in`
-/// parses a pid out of any filename. `EPERM` is alive and only `ESRCH` is dead,
-/// because a Profile that looks Live is one Perch leaves alone.
+/// anything, and the identifier is narrowed rather than cast: what `super::is_a_pid`
+/// lets through is still a `u32`, and every value above `i32::MAX` is a process
+/// *group* to `kill`. `EPERM` is alive and only `ESRCH` is dead, because a
+/// Profile that looks Live is one Perch leaves alone.
 #[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
     let Ok(pid) = i32::try_from(pid) else {

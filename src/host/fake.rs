@@ -2019,21 +2019,22 @@ impl port::Processes for FakeHost {
     }
 
     fn process_alive(&self, pid: u32) -> bool {
-        // The identifiers the real host refuses before it asks, refused here too:
-        // `kill` reads `0` and `-1` as a process *group*, and `clients_in` parses
-        // a pid out of any filename in a sessions directory.
-        if pid == 0 || pid == u32::MAX {
-            return false;
-        }
-        self.processes.live_processes.borrow().contains_key(&pid)
+        port::is_a_pid(pid) && self.processes.live_processes.borrow().contains_key(&pid)
     }
 
+    /// Guarded as [`Self::process_alive`] is, and for the same reason: a fake
+    /// that answers a start time for a number that names no process describes a
+    /// machine neither adapter runs on.
     fn process_started_at(&self, pid: u32) -> Option<DateTime<Utc>> {
-        self.processes
-            .live_processes
-            .borrow()
-            .get(&pid)
-            .copied()
+        port::is_a_pid(pid)
+            .then(|| {
+                self.processes
+                    .live_processes
+                    .borrow()
+                    .get(&pid)
+                    .copied()
+                    .flatten()
+            })
             .flatten()
     }
 }
