@@ -177,7 +177,7 @@ fn changed(subject: &str, was: &str, now: &str) -> String {
 /// The Scope a word addresses: the Accounts in no Group, or a Group as it was
 /// declared.
 fn addressed(registry: &Registry, name: &str) -> Result<Scope> {
-    if registry::means_ungrouped(name) {
+    if registry::means_the_ungrouped_scope(name) {
         return Ok(Scope::Ungrouped);
     }
     // Answered here rather than left to fall through, which would offer

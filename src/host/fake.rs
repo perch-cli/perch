@@ -1337,6 +1337,15 @@ impl port::Files for FakeHost {
                 "stream did not contain valid UTF-8",
             )));
         }
+        // A directory is not an empty file. `NotFound` is load-bearing — a
+        // `CredentialStore` reads it as "this store holds nothing" — and the real
+        // `read_to_string` answers `EISDIR` here rather than nothing.
+        if self.fs.dirs.borrow().contains(&at) {
+            return Err(HostError::Io(std::io::Error::new(
+                std::io::ErrorKind::IsADirectory,
+                "is a directory",
+            )));
+        }
         self.fs
             .files
             .borrow()
@@ -1364,11 +1373,16 @@ impl port::Files for FakeHost {
         if let Some(detail) = self.fs.unwritable.borrow().get(&intended) {
             return Err(HostError::Other(detail.clone()));
         }
-        // Resolved *before* the parents are noted, and noted at the resolved
-        // place: `resolved` looks in `dirs` before `links`, so noting the
-        // addressed path first would put a directory over the link.
+        // Resolved *before* the parents are made, and made at the resolved place:
+        // `resolved` looks in `dirs` before `links`, so making the addressed
+        // path's first would put a directory over the link.
         let lands_at = self.lands_at(path);
-        self.note_directories_of(&lands_at);
+        // Through `make_dirs`, as the real adapter's `create_dir_all` — which
+        // answers `ENOTDIR` where an ancestor is a regular file, and is the whole
+        // of what `write_atomically` meets on such a machine.
+        if let Some(parent) = lands_at.parent() {
+            self.make_dirs(parent, ORDINARY_DIR_MODE)?;
+        }
         // Whatever was at the path is taken away first, a link included, because
         // the real one leads with `remove_file` and then `create_new`. Left
         // behind, one path would be both a regular file and a symbolic link.

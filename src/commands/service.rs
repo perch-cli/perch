@@ -52,10 +52,11 @@ pub fn install(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
             )));
         }
         if let Some(at) = &at {
-            let _ = host.remove_file(at);
-            // `enable --now` makes the wants-symlink and *then* starts, so a
-            // failure in the second half leaves a dangling link enabled.
+            // In `uninstall`'s order, for the reason `service::forgetting` gives:
+            // `enable --now` makes the wants-symlink and *then* starts, so the
+            // disable has to reach a unit systemd can still resolve.
             let _ = drive(host, service::stopping(host.platform(), host.user_id()));
+            let _ = host.remove_file(at);
             let _ = drive(host, service::forgetting(host.platform()));
         }
         return Err(failed.with_note(&format!(
@@ -117,6 +118,17 @@ pub fn uninstall(host: &dyn Host, out: &mut dyn Write) -> Result<i32> {
     }
     // After the removal, which is the whole reason it is not part of `stopping`.
     let _ = drive(host, service::forgetting(host.platform()));
+
+    // Asked again rather than reported off the `installed` above: every step
+    // above may fail, and a refused `schtasks /Delete` leaves a task that runs
+    // at every logon while this says it is gone.
+    if is_installed(host, at.as_deref())? {
+        return Err(PerchError::Busy(format!(
+            "The Service is still installed, so it was not taken back.\n\
+             It is {} and something is refusing to unregister it.",
+            service::described(host.platform()),
+        )));
+    }
 
     match installed {
         true => {
@@ -276,7 +288,7 @@ pub fn take_back_before_a_purge(host: &dyn Host, out: &mut dyn Write) -> Result<
     // Asked rather than assumed, because every step of `stopping` may fail and this
     // caller judges by what is still running — the watcher lock first, because a unit
     // reads `inactive` while the process it started winds down mid-Switch.
-    if watcher_is_running(host) || (host.platform() != Platform::Windows && is_running(host)) {
+    if watcher_is_running(host) || is_running(host) {
         return Err(PerchError::Busy(format!(
             "The Service is still running, so nothing was purged.\n\
              It would go on Switching Credentials into Profiles this command is \

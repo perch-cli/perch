@@ -456,6 +456,15 @@ pub fn means_no_group(name: &str) -> bool {
     same_name(name, NO_GROUP)
 }
 
+/// Whether a name is either of the two words for the Accounts in no Group.
+///
+/// One predicate because they were reserved as two: every command refuses both
+/// as a name, so a command that took only one refused the other with a sentence
+/// naming the command that takes it, and never the spelling it takes itself.
+pub fn means_the_ungrouped_scope(name: &str) -> bool {
+    means_ungrouped(name) || means_no_group(name)
+}
+
 /// Which of the two things sharing the namespace is being named. A refusal
 /// says which: being told `none` cannot be a name is less use than being told
 /// what Perch was asked to call `none`.
@@ -542,12 +551,23 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
             kind.names()
         )));
     }
+    // Whitespace is not the whole of what a terminal will not echo back: an
+    // escape is no `char::is_whitespace`, and a name holding one is written raw
+    // into every later listing, where it moves the column and colors the row.
+    if let Some(said) = crate::host::control_character_in(name) {
+        return Err(PerchError::Invalid(format!(
+            "{} carries {said}, which no line of Perch's output could show as \
+             part of a name — `perch list` writes what it holds, so a name a \
+             terminal reads as an instruction is one every later listing obeys.",
+            kind.names()
+        )));
+    }
     // Both words that already address something are refused for either half of
     // the namespace, and both say which half they were asked about.
     if means_no_group(name) {
         return Err(PerchError::Invalid(format!(
-            "`{name}` means no Group at all on `perch group move`, so it cannot \
-             also be {}.",
+            "`{name}` addresses the Accounts in no Group, so it cannot also be \
+             {}.",
             kind.article()
         )));
     }
@@ -556,8 +576,8 @@ pub fn validate_name(kind: NameKind, name: &str) -> Result<()> {
     // Ungrouped Scope answers to the name first; an Alias is the same collision.
     if means_ungrouped(name) {
         return Err(PerchError::Invalid(format!(
-            "`{name}` addresses the Accounts in no Group on `perch config`, so \
-             it cannot also be {}.",
+            "`{name}` addresses the Accounts in no Group, so it cannot also be \
+             {}.",
             kind.article()
         )));
     }
@@ -1645,6 +1665,15 @@ pub fn validate(registry: &Registry) -> Result<()> {
                 account.email(),
             )));
         }
+        // `validate_name`'s other rule, on the member of the namespace that
+        // does not go through it: an address arrives from an Import or a hand
+        // edit, and is rendered into a table cell exactly as it is held.
+        if let Some(said) = crate::host::control_character_in(account.email()) {
+            return Err(PerchError::Invalid(format!(
+                "The registry holds an Account whose address carries {said}, \
+                 which no line of Perch's output could show as part of one."
+            )));
+        }
     }
 
     // One entry per Account. `upsert` replaces the matching entry, so two for
@@ -1833,7 +1862,14 @@ fn with_every_claimed_group_declared(mut registry: Registry) -> Registry {
 fn with_every_check_under_the_declared_spelling(mut registry: Registry) -> Registry {
     let keyed: Vec<String> = registry.checks.keys().cloned().collect();
     for name in keyed {
-        let Some(declared) = registry.declared_group(&name).map(str::to_string) else {
+        // The Ungrouped Scope has no declaration to be brought to, so it is
+        // brought to the constant `record_check` writes. Without this the key is
+        // the only one in the map that can outlive its own spelling.
+        let declared = match means_ungrouped(&name) {
+            true => Some(UNGROUPED.to_string()),
+            false => registry.declared_group(&name).map(str::to_string),
+        };
+        let Some(declared) = declared else {
             continue;
         };
         if declared == name {
@@ -1849,9 +1885,9 @@ fn with_every_check_under_the_declared_spelling(mut registry: Registry) -> Regis
 /// Writes the registry, under the hold the caller took to read it.
 ///
 /// The hold is a parameter because a registry is only ever written by the Perch
-/// that read it. It is also where the hold is renewed and [`validate`] is asked
-/// on the way out, so what this writes and what [`load`] accepts cannot differ.
-pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) -> Result<()> {
+/// that read it, and is where [`validate`] is asked on the way out, so what this
+/// writes and what [`load`] accepts cannot differ.
+pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &mut Registry) -> Result<()> {
     perch.renew();
     if !perch.still_held() {
         // A general failure rather than `Busy`, deliberately
@@ -1878,13 +1914,12 @@ pub fn save(host: &dyn Host, perch: &mut lock::Held<'_>, registry: &Registry) ->
     })?;
 
     let path = registry_path(host)?;
-    // Stamped rather than carried through: the field is the version *this build*
-    // writes, and a guard describing the last writer is a guard about nothing.
-    let body = serde_json::to_string_pretty(&Registry {
-        version: CURRENT_VERSION,
-        ..registry.clone()
-    })
-    .map_err(|err| PerchError::Other(format!("could not serialize the registry: {err}")))?;
+    // In place, so the caller's field cannot disagree with the file — and because
+    // cloning the Holdings to set one `u32` is a deep copy of every Account and
+    // its figures per write, which a Watcher pays every round.
+    registry.version = CURRENT_VERSION;
+    let body = serde_json::to_string_pretty(&*registry)
+        .map_err(|err| PerchError::Other(format!("could not serialize the registry: {err}")))?;
     write(host, &path, &format!("{body}\n"))
 }
 
@@ -2232,7 +2267,26 @@ mod tests {
                 None,
                 Some("has a space in it"),
             ),
-            (NameKind::Group, "none", None, Some("means no Group at all")),
+            (
+                NameKind::Group,
+                "none",
+                None,
+                Some("addresses the Accounts in no Group"),
+            ),
+            // Not whitespace, and so not caught by the clause above — and the
+            // one a terminal reads as an instruction rather than as a name.
+            (
+                NameKind::Group,
+                "\u{1b}[31mred",
+                None,
+                Some("a control character (U+001B)"),
+            ),
+            (
+                NameKind::Alias,
+                "bell\u{7}",
+                None,
+                Some("a control character (U+0007)"),
+            ),
         ];
 
         for (kind, name, instead_of, refusal) in cases {
@@ -2283,7 +2337,7 @@ mod tests {
         let host = crate::host::FakeHost::new();
         let mut perch = lock(&host).expect("the registry lock is free");
         let path = registry_path(&host).unwrap();
-        save(&host, &mut perch, &Registry::default()).expect("an empty one is fine");
+        save(&host, &mut perch, &mut Registry::default()).expect("an empty one is fine");
         let before = host.file(&path).expect("it was written");
 
         // A dangling Alias is not a refusal downstream — it is the `expect` in
@@ -2293,7 +2347,7 @@ mod tests {
             .aliases
             .insert("work".to_string(), "nobody@example.com".to_string());
 
-        let refused = save(&host, &mut perch, &broken).expect_err("load would not read it");
+        let refused = save(&host, &mut perch, &mut broken).expect_err("load would not read it");
 
         let said = refused.to_string();
         assert!(said.contains("nobody@example.com"), "the rule: {said}");
@@ -2323,7 +2377,8 @@ mod tests {
         // `perch remove` waiting on somebody who walked away.
         for _ in 0..4 {
             host.sleep(REGISTRY_STALE_MILLIS as u64 - 10_000);
-            save(&host, &mut perch, &Registry::default()).expect("it is still Perch's to write");
+            save(&host, &mut perch, &mut Registry::default())
+                .expect("it is still Perch's to write");
         }
 
         assert!(perch.still_held());
@@ -2341,14 +2396,15 @@ mod tests {
         // The stall, and another Perch finding the lock abandoned and taking it.
         host.sleep(REGISTRY_STALE_MILLIS as u64 + 1_000);
         let theirs = lock(&host).expect("an abandoned lock is taken over");
-        save(&host, &mut { theirs }, &Registry::default()).expect("theirs is the live hold");
+        save(&host, &mut { theirs }, &mut Registry::default()).expect("theirs is the live hold");
         let before = load(&host).expect("it reads").expect("they wrote one");
 
-        let stale = Registry {
+        let mut stale = Registry {
             active: Active::Settled("someone@example.com".into()),
             ..Registry::default()
         };
-        let refused = save(&host, &mut perch, &stale).expect_err("this one may no longer write");
+        let refused =
+            save(&host, &mut perch, &mut stale).expect_err("this one may no longer write");
 
         assert!(
             refused.to_string().contains("Run this command again"),
@@ -2563,12 +2619,20 @@ mod tests {
             .with_file(path, &before)
             .with_unwritable_file(path, "No space left on device (os error 28)");
 
-        let registry = Registry {
+        // Holding the Account its `active` names, so `validate` passes and the
+        // unwritable file is what fails the save: refused at the first step, the
+        // two assertions below are true of a write that was never attempted.
+        let mut registry = Registry {
             active: Active::Settled("someone@example.com".into()),
             ..Registry::default()
         };
+        registry.upsert(crate::cycle::tests::account("someone@example.com", vec![]));
         let mut perch = lock(&host).expect("the registry lock is free");
-        save(&host, &mut perch, &registry).expect_err("the write cannot land");
+        let refused = save(&host, &mut perch, &mut registry).expect_err("the write cannot land");
+        assert!(
+            refused.to_string().contains("No space left on device"),
+            "the file is what refused it, rather than the shape: {refused}"
+        );
 
         assert_eq!(
             host.file(path).as_deref(),
@@ -2587,7 +2651,7 @@ mod tests {
         let host = crate::host::FakeHost::new();
 
         let mut perch = lock(&host).expect("the registry lock is free");
-        save(&host, &mut perch, &Registry::default()).expect("it is written");
+        save(&host, &mut perch, &mut Registry::default()).expect("it is written");
 
         let path = registry_path(&host).unwrap();
         assert_eq!(host.mode_of(&path), Some(crate::host::PRIVATE_FILE_MODE));
@@ -3214,7 +3278,7 @@ mod tests {
     #[test]
     fn a_claim_declare_group_would_have_refused_is_named_rather_than_declared() {
         let claims = [
-            (r#""none""#, "{}", "means no Group"),
+            (r#""none""#, "{}", "addresses the Accounts in no Group"),
             (r#""my work""#, "{}", "has a space in it"),
             (r#""overflow""#, r#"{}"#, "already an Alias"),
         ];
@@ -3252,7 +3316,10 @@ mod tests {
     fn a_declared_group_or_an_alias_nothing_would_have_accepted_is_named_too() {
         let holdings = [
             (r#""groups":{"my work":{}}"#, "has a space in it"),
-            (r#""groups":{"none":{}}"#, "means no Group"),
+            (
+                r#""groups":{"none":{}}"#,
+                "addresses the Accounts in no Group",
+            ),
             (
                 r#""aliases":{"someone@example.com":"other@example.com"}"#,
                 "looks like an email address",
@@ -3260,6 +3327,10 @@ mod tests {
             (
                 r#""groups":{"work":{}},"aliases":{"work":"someone@example.com"}"#,
                 "share one namespace",
+            ),
+            (
+                r#""groups":{"\u001b[31mred":{}}"#,
+                "a control character (U+001B)",
             ),
         ];
 
@@ -3458,6 +3529,27 @@ mod tests {
         );
     }
 
+    /// The other half of `validate_name`'s rule, on the member of the namespace
+    /// nothing validates on the way in: an address arrives from an Import or a
+    /// hand edit and is written into a table cell exactly as it is held.
+    #[test]
+    fn an_account_address_a_terminal_would_read_as_an_instruction_is_refused() {
+        let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
+        let path = registry_path(&host).unwrap();
+        host.set_file(
+            &path,
+            r#"{"version":2,"accounts":[{"identity":{"email":"bad\u001brow@example.com"}}]}"#,
+        );
+
+        let refused = load(&host).expect_err("that is not an address a table can hold");
+        let said = refused.to_string();
+        assert!(said.contains("a control character (U+001B)"), "{said}");
+        assert!(
+            said.contains("registry.json"),
+            "and the file to edit: {said}"
+        );
+    }
+
     #[test]
     fn one_account_reached_twice_over_is_refused() {
         let cases = [
@@ -3523,12 +3615,12 @@ mod tests {
     fn a_registry_this_build_writes_says_so() {
         let host = crate::host::FakeHost::new().with_env("HOME", "/Users/someone");
         let mut perch = lock(&host).expect("the registry lock is free");
-        let stale = Registry {
+        let mut stale = Registry {
             version: 0,
             ..Registry::default()
         };
 
-        save(&host, &mut perch, &stale).expect("it writes");
+        save(&host, &mut perch, &mut stale).expect("it writes");
 
         assert_eq!(
             load(&host).expect("it reads").expect("it is there").version,

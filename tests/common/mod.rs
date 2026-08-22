@@ -386,7 +386,10 @@ pub fn registry_of(host: &FakeHost) -> perch::registry::Registry {
 /// one line rather than three.
 pub fn save_registry(host: &FakeHost, registry: &perch::registry::Registry) {
     let mut perch = perch::registry::lock(host).expect("the registry lock is free");
-    perch::registry::save(host, &mut perch, registry).expect("the registry is written");
+    // Cloned rather than taken by `&mut`: `save` stamps the version into what it
+    // is handed, and a fixture's caller keeps reading the copy it built.
+    let mut written = registry.clone();
+    perch::registry::save(host, &mut perch, &mut written).expect("the registry is written");
 }
 
 /// What a Perch killed mid-Switch leaves on the registry: a Landing naming the

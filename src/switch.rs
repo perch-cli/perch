@@ -406,10 +406,17 @@ pub fn make_live(
     whose: &str,
     installed: &Installed,
 ) -> std::result::Result<(), NotLanded> {
-    let store = registry::the_default_profile(host).map_err(|error| NotLanded {
+    let nothing_moved = |error| NotLanded {
         error,
         is_live: false,
-    })?;
+    };
+
+    // [`perform`]'s guard, on the other door into the same sequence: a Profile
+    // two Accounts share holds one Credential, so the one read out of it here
+    // need not be this Account's and nothing afterwards could tell.
+    refuse_a_shared_profile(account, registry).map_err(nothing_moved)?;
+
+    let store = registry::the_default_profile(host).map_err(nothing_moved)?;
     let leaving = registry.active().whose().map(str::to_string);
 
     let mut is_live = false;
@@ -1310,6 +1317,57 @@ mod tests {
             registry.checked("work"),
             None,
             "a Switch that changed nothing does not pace the next Check"
+        );
+    }
+
+    /// The guard is on the door rather than on the callers, so it holds for one
+    /// that forgets: `perch remove` chose its successor on `cycle::is_a_candidate`
+    /// alone and reached here with a sharer, and `perch relogin` asks separately.
+    #[test]
+    fn making_an_account_live_is_refused_where_its_profile_is_not_its_alone() {
+        let host = FakeHost::new().with_env("HOME", "/Users/someone");
+        let mut registry = Registry::default();
+        // Two addresses that slug to one directory, so they share one Credential
+        // Store and the Credential read out of it need not be either one's.
+        for email in ["some-one@example.com", "some.one@example.com"] {
+            registry.upsert(Account {
+                identity: Identity {
+                    email: email.to_string(),
+                    account_uuid: None,
+                    organization_name: None,
+                    organization_uuid: None,
+                },
+                plan: None,
+                disabled: false,
+                quarantine: None,
+                group: None,
+                utilization: None,
+            });
+        }
+        let sharer = registry
+            .account("some-one@example.com")
+            .expect("it was just added")
+            .clone();
+        let mut perch = crate::registry::lock(&host).expect("nobody holds it");
+
+        let stopped = make_live(
+            &host,
+            &mut perch,
+            &mut registry,
+            &sharer,
+            "the Default Profile",
+            &Installed::unknown("2.1.221"),
+        )
+        .expect_err("neither of them can be made live");
+
+        assert!(
+            stopped.error.to_string().contains("share one Profile"),
+            "{}",
+            stopped.error
+        );
+        assert!(
+            !stopped.is_live,
+            "and it is refused before anything is written"
         );
     }
 

@@ -311,8 +311,11 @@ impl Unit {
             Some(path) => format!(" >> \"{}\" 2>&1", path.display()),
             None => String::new(),
         };
+        // Quoted once more around the whole of it: `cmd /c` strips the first quote
+        // and the last, and bare it takes them off the binary and the log, leaving
+        // the `>>` inside a quoted run as text rather than as a redirection.
         format!(
-            "cmd /c {environment}\"{binary}\" watcher run{log}",
+            "cmd /c \"{environment}\"{binary}\" watcher run{log}\"",
             binary = self.binary.display(),
         )
     }
@@ -945,6 +948,42 @@ mod tests {
         assert!(
             command.contains(r#">> "C:\work\perch\watch.log" 2>&1"#),
             "appending rather than truncating, so a log survives a logout: {command}"
+        );
+    }
+
+    /// `cmd /c` removes the first quote and the last one whenever the line
+    /// carries more than two, so what it is handed has to be able to spare a
+    /// pair — including on the default install, where nothing sets the
+    /// environment and the line would otherwise begin at the binary's own quote.
+    #[test]
+    fn a_windows_task_survives_cmds_stripping_of_the_outer_quotes() {
+        let unit = Unit {
+            binary: PathBuf::from(r"C:\Users\someone\perch.exe"),
+            environment: Vec::new(),
+            log: Some(PathBuf::from(r"C:\work\perch\watch.log")),
+            user_id: None,
+            user_name: Some("someone".to_string()),
+        };
+
+        let command = unit.windows_command();
+        let after = command
+            .strip_prefix("cmd /c ")
+            .expect("the wrapper is what `schtasks` is handed");
+        // What cmd does to it: the leading quote off, and the last quote on the
+        // line off, whatever sits after that last quote left alone.
+        let stripped = after
+            .strip_prefix('"')
+            .expect("there is an outer quote to spare");
+        let (before, tail) = stripped
+            .rsplit_once('"')
+            .expect("and a closing one to spend");
+        let survives = format!("{before}{tail}");
+
+        assert_eq!(
+            survives,
+            r#""C:\Users\someone\perch.exe" watcher run >> "C:\work\perch\watch.log" 2>&1"#,
+            "the binary and the log keep their quotes and the `>>` is a \
+             redirection rather than text: {command}"
         );
     }
 

@@ -128,7 +128,10 @@ pub fn forward(document: &str) -> Result<Option<String>> {
         // registry that declared a Group by that name must not have the
         // Ungrouped Scope's Cooldown re-keyed onto the renamed Group.
         let under = match crate::registry::means_ungrouped(&group) {
-            true => group.clone(),
+            // The constant rather than the spelling found: `record_check` only
+            // ever writes that one, so a key that folds to it under any other
+            // capitalization becomes a second key `validate` refuses.
+            true => crate::registry::UNGROUPED.to_string(),
             false => now_called(NameKind::Group, &group, &renamed),
         };
         checks.insert(under, Value::Object(kept));
@@ -274,13 +277,13 @@ pub fn bring_forward(host: &dyn Host) -> Result<()> {
         .read_file(&path)
         .map(|held| renames(&held))
         .unwrap_or_default();
-    let Some(registry) = crate::registry::load(host)? else {
+    let Some(mut registry) = crate::registry::load(host)? else {
         return Ok(());
     };
     // Through `save` rather than by writing what `forward` returned: it stamps
     // the version, refuses what a later `load` could not read, and replaces the
     // file in one step, so a migration that fails leaves the old shape intact.
-    crate::registry::save(host, &mut perch, &registry)?;
+    crate::registry::save(host, &mut perch, &mut registry)?;
 
     // The three retired Watcher Settings are named, because they are the one
     // thing the step does not carry.
@@ -338,7 +341,12 @@ fn behind(host: &dyn Host, path: &std::path::Path) -> Option<u64> {
 /// The version [`forward`] leaves behind, which is the one this build reads. Its
 /// own name because the two numbers are one step rather than one field: a second
 /// step would read `CURRENT_VERSION` here and be wrong the day a third lands.
-const CARRIED_TO: u32 = crate::registry::CURRENT_VERSION;
+const CARRIED_TO: u32 = 2;
+
+// The step cannot carry a document past the shape this build reads, and reading
+// `CURRENT_VERSION` above would make that true by definition rather than by
+// checking — which is what the constant's own name is for.
+const _: () = assert!(CARRIED_TO <= crate::registry::CURRENT_VERSION);
 
 /// One Account, with the flag that inverted translated rather than dropped.
 ///

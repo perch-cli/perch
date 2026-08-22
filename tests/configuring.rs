@@ -866,6 +866,23 @@ fn the_ungrouped_accounts_are_a_scope_that_can_be_addressed() {
     assert_eq!(read_back.trim(), "ungrouped strategy soonest-reset");
 }
 
+/// Both words are refused as a name everywhere, so both address the Scope
+/// everywhere: a command that took one and refused the other answered with a
+/// sentence naming the command that takes it, never the spelling it takes itself.
+#[test]
+fn either_word_for_the_accounts_in_no_group_addresses_that_scope() {
+    let host = machine_with_two_accounts();
+
+    for word in ["ungrouped", "none"] {
+        let (result, _) = config_set(&host, &[word, "strategy", "soonest-reset"]);
+        result.unwrap_or_else(|err| panic!("`{word}` addresses the Scope: {err}"));
+
+        let (result, read_back) = config_get(&host, &[word, "strategy"]);
+        result.unwrap_or_else(|err| panic!("`{word}` reads it back: {err}"));
+        assert!(read_back.contains("soonest-reset"), "`{word}`: {read_back}");
+    }
+}
+
 #[test]
 fn a_group_cannot_take_the_name_that_addresses_the_ungrouped_scope() {
     let host = machine_with_two_accounts();
@@ -880,7 +897,7 @@ fn a_group_cannot_take_the_name_that_addresses_the_ungrouped_scope() {
     let refusal = result.expect_err("that name is taken by a Scope");
     assert_eq!(refusal.exit_code(), EXIT_INVALID);
     assert!(
-        refusal.to_string().contains("perch config"),
+        refusal.to_string().contains("the Accounts in no Group"),
         "and it says what already answers to it: {refusal}"
     );
 }

@@ -80,6 +80,11 @@ struct Touched {
     /// or a Purge that could not empty a store, leaves a directory the registry
     /// never named.
     was_already_there: bool,
+    /// Whether this Import wrote a Credential into that store. A Quarantined
+    /// Account travels with none, so the Profile is made for its `.claude.json`
+    /// alone — and forgetting a store this Import never wrote to would destroy a
+    /// refresh token nothing here put there and nothing can recover.
+    wrote_a_credential: bool,
 }
 
 /// The Profiles an Import has touched, so they can be taken back out if
@@ -101,18 +106,26 @@ impl Placed {
                 profile::discard(host, &touched.store);
                 continue;
             }
-            // The directory stays and neither thing written into it does: a
-            // `.claude.json` holds an API key in an MCP server's `env` block, so
-            // it is what `profile::discard` prevents as much as a Credential is.
-            for kept_in in credentials::stores_for(host, &touched.store) {
-                let _ = kept_in.forget(host);
+            // The directory stays and neither thing this Import wrote into it
+            // does: a `.claude.json` holds an API key in an MCP server's `env`
+            // block, so `profile::discard` prevents it as much as a Credential.
+            if touched.wrote_a_credential {
+                for kept_in in credentials::stores_for(host, &touched.store) {
+                    let _ = kept_in.forget(host);
+                }
             }
             let _ = host.remove_file(&touched.store.identity_file);
+            let taken_back = match touched.wrote_a_credential {
+                true => "the Credential and the `.claude.json`",
+                // This Account travels with no Credential, so whatever is in that
+                // store belongs to whoever left the directory behind.
+                false => "the `.claude.json`",
+            };
             host.note(&format!(
                 "{} was already on this machine, so it was left where it is \
                  rather than removed with the Profiles this Import made — but \
-                 the Credential and the `.claude.json` this Import wrote into it \
-                 have been taken back out. The Export still holds both.",
+                 {taken_back} this Import wrote into it has been taken back out. \
+                 The Export still holds it.",
                 touched.store.config_dir.display(),
             ));
         }
@@ -261,6 +274,7 @@ pub fn place(host: &dyn Host, export: &Export) -> Result<Placed> {
         // is the only moment the answer is still knowable.
         placed.touched.push(Touched {
             was_already_there: host.path_exists(&store.config_dir),
+            wrote_a_credential: credential.is_some(),
             store: store.clone(),
         });
         // A Quarantined Account travels with no Credential and with the

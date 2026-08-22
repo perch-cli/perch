@@ -216,6 +216,19 @@ fn an_account_can_be_moved_out_of_every_group() {
     declare_group(&host, "work");
     move_to_group(&host, SECOND_EMAIL, "work").0.unwrap();
 
+    for word in ["ungrouped", "none"] {
+        move_to_group(&host, SECOND_EMAIL, "work").0.unwrap();
+        // Either word: both are refused as a Group name everywhere, so both
+        // address the Accounts in no Group everywhere.
+        let (result, _) = move_to_group(&host, SECOND_EMAIL, word);
+        result.unwrap_or_else(|err| panic!("`{word}` takes it out: {err}"));
+        assert_eq!(
+            registry_of(&host).account(SECOND_EMAIL).unwrap().group,
+            None,
+            "`{word}`"
+        );
+    }
+
     let (result, _) = move_to_group(&host, SECOND_EMAIL, "none");
 
     assert!(result.is_ok(), "{:?}", result.err());

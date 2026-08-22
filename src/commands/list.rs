@@ -149,6 +149,9 @@ pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
                 &mut registry,
                 &asking_about,
                 &crate::probe::Installed::probed(host),
+                // Nothing else is held across this: a listing takes the registry
+                // lock and nothing more.
+                &mut || {},
             )
         }
         // Nothing to report about a refresh nobody asked for: the empty report
@@ -166,7 +169,7 @@ pub fn run(host: &dyn Host, args: ListArgs, out: &mut dyn Write) -> Result<()> {
 /// not — the same way `perch config` answers one. A Target names one Account,
 /// and a listing of one row is what `perch status` answers better.
 fn narrowed(registry: &Registry, name: &str) -> Result<Scope> {
-    if registry::means_ungrouped(name) {
+    if registry::means_the_ungrouped_scope(name) {
         return Ok(Scope::Ungrouped);
     }
     // Answered here rather than left to fall through, because fallen through it

@@ -136,7 +136,7 @@ pub fn keep_watching(host: &dyn Host, out: &mut dyn Write) -> Result<()> {
             }
             // Held like any other round that could not read. Ending the watcher over a
             // contended registry would let a `perch status --refresh` stop it silently.
-            Err(PerchError::Busy(why)) => held_before_a_round(&mut backoff, &why, host.now()),
+            Err(PerchError::Busy(why)) => held_before_a_round(&why, host.now()),
             Err(other) => return Err(other),
         };
 
@@ -194,14 +194,11 @@ fn take_the_watch<'a>(
     out: &mut dyn Write,
     holding: &mut Holding,
 ) -> Result<Option<crate::lock::Held<'a>>> {
-    // Its own rather than the loop's, because nothing here is a wait for a Refresh:
-    // shared, waiting out a stale lock would announce a cadence nothing had earned.
-    let mut backoff = Backoff::none();
     loop {
         match crate::lock::take_all(host, vec![registry::watcher_lock_spec(host)?]) {
             Ok(held) => return Ok(Some(held)),
             Err(PerchError::Busy(why)) => {
-                let (waiting_for, spoken) = held_before_a_round(&mut backoff, &why, host.now());
+                let (waiting_for, spoken) = held_before_a_round(&why, host.now());
                 say_it(out, holding, spoken, host.now())?;
                 if host.wait(waiting_for) == Waited::Interrupted {
                     return Ok(None);
@@ -212,12 +209,13 @@ fn take_the_watch<'a>(
     }
 }
 
-/// A hold that happened before there was a [`Round`] to hold: the Back-off is
+/// A hold that happened before there was a [`Round`] to hold, and so one with no
+/// Account to name; [`one_round`]'s `held` is the other shape.
 ///
-/// One of the two shapes a hold is said in, because a round that never learned which
-/// Account it was watching has none to name; [`one_round`]'s `held` is the other.
-fn held_before_a_round(backoff: &mut Backoff, why: &str, now: DateTime<Utc>) -> (u64, Spoken) {
-    let waiting_for = backoff.could_not_read();
+/// At the ordinary interval, because nothing here spent a request: a contended
+/// registry and a lock inside its staleness window are each an answer.
+fn held_before_a_round(why: &str, now: DateTime<Utc>) -> (u64, Spoken) {
+    let waiting_for = watch::REFRESH_INTERVAL_MILLIS;
     let line = watch::held_line(why, Some(waiting_for), now);
     (waiting_for, Spoken::held(why, Some(waiting_for), line))
 }
@@ -510,6 +508,7 @@ fn one_round(
         &mut registry,
         std::slice::from_ref(&email),
         &installed,
+        &mut || watching_alone.renew(),
     );
     watching_alone.renew();
     // Worth saying and not worth holding a decision over: the figure this round decides
@@ -518,11 +517,9 @@ fn one_round(
         host.note(not_kept);
     }
 
-    // A hold is also the loop deciding to ask less often, so the charge and the wait it
-    // costs are one call ([`Backoff::could_not_read`]) in the one place a round with an
-    // Account to name makes a hold.
-    let mut held = |why: String| {
-        let waiting_for = backoff.could_not_read();
+    // A hold said against the wait it earned. `waiting_for` is passed in rather than
+    // charged here, because not every hold is a question nobody answered.
+    let held = |why: String, waiting_for: u64| {
         Ok(Turn::Decided(Round {
             fullest: None,
             threshold: watching.policy.threshold,
@@ -535,7 +532,11 @@ fn one_round(
 
     // Never on a figure it did not just read.
     if let Some(refused) = refused_the_reading(&report.attempts) {
-        return held(refused);
+        let waiting_for = match refused.paced {
+            true => backoff.could_not_read(),
+            false => watch::REFRESH_INTERVAL_MILLIS,
+        };
+        return held(refused.why, waiting_for);
     }
     let account = registry
         .account(&email)
@@ -548,6 +549,7 @@ fn one_round(
             "Anthropic answered without a Quota Window Perch could read, so \
              there was no figure to decide on."
                 .to_string(),
+            backoff.could_not_read(),
         );
     };
     // A figure, so whatever was wrong is over. Said here rather than at the end of the
@@ -609,27 +611,50 @@ enum Turn {
 /// `None` is the one answer that lets a Switch happen, so an empty report is answered
 /// as a hold rather than as an absence of objections. None of the reasons names the
 /// Account: the decision line has.
-fn refused_the_reading(attempts: &[Attempt]) -> Option<String> {
+fn refused_the_reading(attempts: &[Attempt]) -> Option<Refusal> {
     let Some(attempt) = attempts.first() else {
-        return Some(
+        return Some(Refusal::paced(
             "nothing was read at all, so there was no current figure to decide \
              on."
             .to_string(),
-        );
+        ));
     };
     match &attempt.outcome {
         observe::Outcome::Observed => None,
-        observe::Outcome::Throttled => Some(
+        observe::Outcome::Throttled => Some(Refusal::paced(
             "Anthropic is rate-limiting reads of this Account's usage, so \
              nothing current could be read."
                 .to_string(),
-        ),
-        observe::Outcome::Failed(why) => Some(why.clone()),
-        observe::Outcome::Quarantined { why, .. } => Some(format!(
+        )),
+        observe::Outcome::Failed(why) => Some(Refusal::paced(why.clone())),
+        // An Account already Quarantined is not asked at all (`observe` returns
+        // before the first request), so this round spent nothing and a Back-off
+        // paces questions nobody is answering.
+        observe::Outcome::Quarantined { why, .. } => Some(Refusal::unpaced(format!(
             "{}. {}",
             why.because(),
             crate::registry::how_to_repair(&attempt.email),
-        )),
+        ))),
+    }
+}
+
+/// Why a round had no figure to decide on, and whether the Back-off paces it.
+///
+/// The two travel together because a hold reported against a wait it did not earn
+/// is the failure either half alone allows: a repair made a minute after the
+/// Quarantine would otherwise wait out a doubling nothing spent.
+struct Refusal {
+    why: String,
+    paced: bool,
+}
+
+impl Refusal {
+    fn paced(why: String) -> Refusal {
+        Refusal { why, paced: true }
+    }
+
+    fn unpaced(why: String) -> Refusal {
+        Refusal { why, paced: false }
     }
 }
 
@@ -677,6 +702,7 @@ fn act(
         registry,
         &addresses_of(&considered(registry, watching, cooled, &idle)),
         probed,
+        &mut || watching_alone.renew(),
     );
     watching_alone.renew();
     // What could not be read, carried into the sentence that says where the watcher
@@ -704,6 +730,7 @@ fn act(
         Err(error @ (PerchError::NoCandidate(_) | PerchError::NothingToDo(_))) => {
             return Ok(Outcome::Nowhere {
                 why: also(error.to_string(), &unread),
+                looking_again: watcher.asking_again(watch::NOWHERE_INTERVAL_MILLIS),
             });
         }
         Err(error) => return Err(error),

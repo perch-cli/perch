@@ -7,7 +7,7 @@
 //! ADR claude-code-chooses-the-store's, and this module is the only place they
 //! are spelled.
 
-use crate::host::{Execution, double_quoted};
+use crate::host::{Execution, write_double_quoted};
 use zeroize::Zeroizing;
 
 /// The `security` binary. Never a build of Perch, never a crate — see
@@ -77,15 +77,25 @@ pub fn add_command_line(
     secret: &str,
 ) -> Result<Zeroizing<String>, KeychainError> {
     storable(service, account)?;
-    // `Zeroizing`, because this line holds the Credential. Hex is an encoding
-    // and not a protection, and every other buffer on this path is wiped.
-    Ok(Zeroizing::new(format!(
-        "add-generic-password -U -s {} -a {} -X {}\n",
-        double_quoted(service),
-        double_quoted(account),
-        hex_encode(secret.as_bytes()).as_str(),
-    )))
+    // `Zeroizing` because this line holds the Credential, and pushed into rather
+    // than `format!`ed for `hex_encode`'s reason: `format!` reserves off the
+    // literals alone, so every doubling abandons a prefix of the hex un-wiped.
+    let mut line = Zeroizing::new(String::with_capacity(
+        FIXED_WIDTH + service.len() * 2 + account.len() * 2 + secret.len() * 2,
+    ));
+    line.push_str("add-generic-password -U -s ");
+    write_double_quoted(&mut line, service);
+    line.push_str(" -a ");
+    write_double_quoted(&mut line, account);
+    line.push_str(" -X ");
+    line.push_str(hex_encode(secret.as_bytes()).as_str());
+    line.push('\n');
+    Ok(line)
 }
+
+/// Room for everything in [`add_command_line`] that is not one of the three values,
+/// over-counted: the sub-command name, the two flags and the newline come to 36.
+const FIXED_WIDTH: usize = 48;
 
 /// What no adapter may store, whichever one is answering.
 ///
@@ -172,6 +182,27 @@ pub fn decode_password_output(stdout: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The reservation may not come up short, because growing it abandons a
+    /// prefix of the hex-encoded Credential in freed heap — and the largest
+    /// Credentials are exactly the ones this line is measured for.
+    #[test]
+    fn the_reservation_covers_a_write_of_every_shape() {
+        let secret = "x".repeat(STDIN_BUFFER_LIMIT);
+        for (service, account) in [
+            ("Claude Code-credentials", "someone"),
+            // Nothing but characters quoting doubles, in both names.
+            (r#"\"\"\"\""#, r#"\"\"\"\""#),
+        ] {
+            let line = add_command_line(service, account, &secret).expect("storable");
+            assert!(
+                line.len()
+                    <= FIXED_WIDTH + service.len() * 2 + account.len() * 2 + secret.len() * 2,
+                "{} written into the width reserved for it",
+                line.len()
+            );
+        }
+    }
 
     #[test]
     fn hex_round_trips() {

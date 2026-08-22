@@ -118,7 +118,7 @@ pub fn run(host: &dyn Host, args: RemoveArgs, out: &mut dyn Write) -> Result<()>
     let named = registry.named_for_the_user(account.email());
     let alias = registry.alias_of(account.email()).map(str::to_string);
     registry.forget(account.email());
-    registry::save(host, &mut perch, &registry).map_err(|error| {
+    registry::save(host, &mut perch, &mut registry).map_err(|error| {
         error.with_note(&format!(
             "The Credential Perch held for {} is already deleted, so the Account \
              it still records is one it can no longer switch to.",
@@ -173,7 +173,11 @@ fn consequence_of(registry: &Registry, account: &Account) -> Consequence {
 fn successor<'a>(registry: &'a Registry, leaving: &Account) -> Option<&'a Account> {
     let candidates = || {
         registry.accounts.iter().filter(|held| {
-            !registry::same_name(held.email(), leaving.email()) && cycle::is_a_candidate(held)
+            !registry::same_name(held.email(), leaving.email())
+                && cycle::is_a_candidate(held)
+                // A sharer is one `make_live` refuses, and landing nowhere is
+                // the better half of that: the removal still goes through.
+                && registry::sharing_a_profile_with(registry, held).is_none()
         })
     };
     let in_its_group = leaving

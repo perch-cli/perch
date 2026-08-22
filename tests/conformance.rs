@@ -129,6 +129,37 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        named: "reading a directory is an error that is not NotFound",
+        asserts: |host, root, adapter, _now| {
+            let at = root.join("a-directory");
+            host.create_private_dir_all(&at)
+                .expect("the directory is made");
+            // Not `NotFound`, because that answer is load-bearing: a
+            // `CredentialStore` reads it as "this store holds nothing".
+            match host.read_file(&at) {
+                Err(HostError::NotFound { .. }) => {
+                    panic!("{adapter}: a directory read as an empty store")
+                }
+                Err(_) => {}
+                Ok(held) => panic!("{adapter}: a directory read as {held:?}"),
+            }
+        },
+    },
+    Case {
+        named: "a write under a path a file occupies is refused",
+        asserts: |host, root, adapter, _now| {
+            let occupied = root.join("not-a-directory");
+            host.create_file_with_mode(&occupied, "a file", PRIVATE_FILE_MODE)
+                .expect("the file is written");
+            // Every private write goes through `replace_via_tmp`, which creates
+            // the parent — and a parent that is a regular file is `ENOTDIR`.
+            let under = occupied.join("child");
+            if let Ok(()) = host.create_file_with_mode(&under, "x", PRIVATE_FILE_MODE) {
+                panic!("{adapter}: a directory was invented over a file");
+            }
+        },
+    },
+    Case {
         named: "a read follows a symbolic link",
         asserts: |host, root, adapter, _now| {
             let real = root.join("behind-the-link");

@@ -322,6 +322,40 @@ fn a_windows_tilde_means_home_too_because_windows_writes_the_other_separator() {
     );
 }
 
+/// The only thing that makes a Purge survivable must not be written where the
+/// Purge is about to delete it — and `starts_with` matches components, so a
+/// linked spelling of the same directory is a different string.
+#[test]
+fn an_export_path_that_reaches_perchs_home_through_a_link_is_refused_too() {
+    for typed in [
+        "/Users/someone/.config/perch/backup.age",
+        // The same directory, reached by a name that shares no component with it.
+        "/Users/someone/backups/backup.age",
+    ] {
+        let host = a_machine_to_give_back()
+            .with_link(
+                perch::host::Link::Symbolic,
+                PERCH_HOME,
+                "/Users/someone/backups",
+            )
+            .with_answers(&["y", typed, "purge"])
+            .with_secrets(&[PASSPHRASE, PASSPHRASE]);
+
+        let (outcome, printed) = run_purge(&host);
+
+        let refused = outcome.expect_err("the Export would go with the home");
+        assert!(
+            refused.to_string().contains("Nothing was purged"),
+            "{typed}: the Purge is off, and says so: {refused}"
+        );
+        assert_eq!(
+            registry_on(&host).map(|registry| registry.accounts.len()),
+            Some(3),
+            "{typed}: and every Account is still here: {printed}"
+        );
+    }
+}
+
 /// Every guard downstream lets a verbatim `~` through: its parent is the current
 /// directory, which exists; nothing is at that path; and it is not under Perch's
 /// home, so the Purge would not take it. The Export lands at `./~`.
@@ -728,8 +762,10 @@ fn a_home_left_behind_with_no_registry_is_taken_by_the_next_purge() {
     outcome.expect("the word was typed");
 
     assert!(!host.path_exists(Path::new(PERCH_HOME)), "{printed}");
+    // The Profiles, because with no registry there are no Accounts to name — and
+    // three working keychain items were deleted, so "no Accounts" understates it.
     assert!(
-        printed.contains("no Accounts") && !printed.contains("Purged 0"),
+        printed.contains("3 Profiles Perch could not name") && !printed.contains("Purged 0"),
         "and what happened is said as what happened rather than as a count \
          of nothing:\n{printed}"
     );
@@ -909,6 +945,29 @@ fn a_purge_takes_the_credential_an_abandoned_login_left_as_well() {
     assert!(!host.path_exists(Path::new(PERCH_HOME)));
 }
 
+/// What a Purge that stopped in its last step leaves for the next one: a home
+/// holding a registry and nothing else. Holding no Accounts is a real state here
+/// rather than a machine Perch never ran on, so it is said as what happened.
+#[test]
+fn a_home_holding_a_registry_and_nothing_else_is_taken_and_said_as_that() {
+    let host = machine_with_claude_code().with_answers(&["purge"]);
+    host.set_file(REGISTRY_PATH, r#"{"version":2,"accounts":[]}"#);
+
+    let (outcome, printed) = run_purge(&host);
+
+    outcome.expect("the word was typed");
+    assert!(!host.path_exists(Path::new(PERCH_HOME)), "{printed}");
+    // Both halves of it: the question and the report. No Profiles either, so
+    // neither says a count.
+    assert_eq!(
+        printed.matches("no Accounts").count(),
+        2,
+        "asked and answered as what happened rather than as a count of \
+         nothing:\n{printed}"
+    );
+    assert!(!printed.contains("Profile"), "{printed}");
+}
+
 /// The same from the other side: a `perch add` whose registry write failed
 /// leaves a Profile holding a live Credential no Account names.
 #[test]
@@ -922,14 +981,19 @@ fn a_purge_takes_the_credential_of_a_profile_the_registry_never_recorded() {
     host.set_keychain_item(&store.keychain_service, LOGIN_NAME, SECOND_CREDENTIAL);
     host.set_file(&store.credentials_file, SECOND_CREDENTIAL);
 
-    run_purge_with(&host, true)
-        .0
-        .expect("the machine is given back");
+    let (outcome, printed) = run_purge_with(&host, true);
+    outcome.expect("the machine is given back");
 
     assert_eq!(
         host.keychain_item(&store.keychain_service, LOGIN_NAME),
         None,
         "a Profile nothing records is still a Profile Perch made"
+    );
+    // And said, because the count of Accounts does not include it: a Credential
+    // this deleted and never mentioned is one the report understates.
+    assert!(
+        printed.contains("1 Profile under it named no Account, and 1 Credential"),
+        "the report says what it took beyond the Accounts:\n{printed}"
     );
     assert_eq!(
         host.keychain_services(),
@@ -1139,4 +1203,19 @@ fn a_registry_that_will_not_parse_does_not_stop_the_purge_that_does_not_read_one
             "and no Credential is left in a store nothing can name any more"
         );
     }
+    // What it took, both before the question and after it. The registry names
+    // nothing, so the Profiles are the only count there is — and "no Accounts"
+    // is what three working logins must not be agreed to as.
+    assert!(
+        !printed.contains("no Accounts here"),
+        "the question did not offer an empty machine:\n{printed}"
+    );
+    assert!(
+        printed.contains("3 Profiles"),
+        "it counted what it was about to take:\n{printed}"
+    );
+    assert!(
+        printed.contains("Purged 3 Profiles Perch could not name, 3 Credentials"),
+        "and the report counted what it took:\n{printed}"
+    );
 }

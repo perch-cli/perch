@@ -92,7 +92,7 @@ fn store_as_first_profile(
         });
         registry.settle(Some(findings.identity.email.clone()));
 
-        registry::save(host, perch, &registry)?;
+        registry::save(host, perch, &mut registry)?;
         Ok(registry)
     })();
 
