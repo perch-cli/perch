@@ -101,17 +101,18 @@ impl Placed {
                 profile::discard(host, &touched.store);
                 continue;
             }
-            // The directory stays and the Credential does not: a Credential in a
-            // store the rolled-back registry will not name is the state
-            // `profile::discard` exists to prevent.
+            // The directory stays and neither thing written into it does: a
+            // `.claude.json` holds an API key in an MCP server's `env` block, so
+            // it is what `profile::discard` prevents as much as a Credential is.
             for kept_in in credentials::stores_for(host, &touched.store) {
                 let _ = kept_in.forget(host);
             }
+            let _ = host.remove_file(&touched.store.identity_file);
             host.note(&format!(
                 "{} was already on this machine, so it was left where it is \
                  rather than removed with the Profiles this Import made — but \
-                 the Credential this Import wrote into it has been taken back \
-                 out. The Export still holds every Credential in it.",
+                 the Credential and the `.claude.json` this Import wrote into it \
+                 have been taken back out. The Export still holds both.",
                 touched.store.config_dir.display(),
             ));
         }

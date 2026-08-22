@@ -523,6 +523,11 @@ fn a_rollback_leaves_a_profile_that_was_already_on_the_machine_where_it_is() {
          what discarding a Profile exists to prevent"
     );
     assert!(
+        !host.path_exists(&orphan.identity_file),
+        "and so did the `.claude.json`, which came out of the same Export and \
+         routinely carries an API key in an MCP server's `env` block"
+    );
+    assert!(
         host.notes()
             .iter()
             .any(|note| note.contains("already on this machine")),
