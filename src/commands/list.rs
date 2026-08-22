@@ -350,7 +350,15 @@ fn render_human(
     let accounts = &listing::flattened(sections);
     let rows = rows(registry, accounts, now);
     if rows.is_empty() {
-        return say(out, &nothing_here(registry, scope));
+        say(out, &nothing_here(registry, scope))?;
+        // The footer's one line that is about the machine rather than about the
+        // rows: a Scope holding nobody is as unsettled as any other, and this is
+        // the whole of what a listing of it has to say.
+        if let Some(line) = registry.active().a_switch_in_flight() {
+            say(out, "")?;
+            say(out, &line)?;
+        }
+        return Ok(());
     }
 
     // The Group is a column only when the listing spans Groups. Narrowed to
