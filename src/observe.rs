@@ -214,7 +214,13 @@ pub fn refresh(
     let mut report = Report::asked_for();
     let mut anything_to_keep = false;
 
-    for email in emails {
+    for (at, email) in emails.iter().enumerate() {
+        // Answerable between Accounts: five candidates is three hundred seconds
+        // against a thirty-second grace, and a `SIGKILL`ed Watcher leaves both
+        // locks behind. Never before the first, which would pace a Back-off.
+        if at > 0 && host.asked_to_stop() {
+            break;
+        }
         // A round trip to Anthropic each, so the hold is renewed between them and again
         // inside the turn: one Account's turn is up to six requests bounded at thirty
         // seconds, twice the ninety the registry hold goes stale in.
