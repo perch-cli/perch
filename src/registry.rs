@@ -2278,6 +2278,21 @@ mod tests {
                 None,
                 Some("a control character (U+0007)"),
             ),
+            // `char::is_control` is `Cc` alone, so neither of these was caught
+            // by the clause above: the first reverses the rest of the line it is
+            // drawn on, and the second is a name drawn identically to `work`.
+            (
+                NameKind::Group,
+                "\u{202e}gpj.exe",
+                None,
+                Some("a formatting character (U+202E)"),
+            ),
+            (
+                NameKind::Alias,
+                "wo\u{200b}rk",
+                None,
+                Some("a formatting character (U+200B)"),
+            ),
         ];
 
         for (kind, name, instead_of, refusal) in cases {

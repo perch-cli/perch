@@ -230,7 +230,10 @@ fn acceptable(kind: NameKind, name: &str, taken: &[String]) -> Option<String> {
     // A leading `-` and a control character are the two rules no suffix
     // rescues, so a name breaking either loses the character rather than
     // gaining a number; `global` and `ungrouped` are whole words and take one.
-    let without_controls: String = name.chars().filter(|c| !c.is_control()).collect();
+    let without_controls: String = name
+        .chars()
+        .filter(|c| !crate::host::is_unshowable(*c))
+        .collect();
     let trimmed = without_controls.trim_start_matches('-').trim();
     let base = match trimmed.is_empty() {
         true => match kind {
@@ -552,7 +555,7 @@ mod tests {
             &serde_json::json!({
                 "version": 1,
                 "groups": { "\u{1b}[31mred": {}, "one\ttwo": {} },
-                "aliases": { "\u{7}w": "work@example.com" },
+                "aliases": { "\u{7}w": "work@example.com", "wo\u{200b}rk": "spare@example.com" },
             })
             .to_string(),
         );
@@ -560,7 +563,7 @@ mod tests {
         let now: Vec<&str> = renamed.iter().map(|it| it.is_now.as_str()).collect();
         assert_eq!(
             now,
-            ["[31mred", "onetwo", "w"],
+            ["[31mred", "onetwo", "w", "work"],
             "the character goes and what a person meant by the name stays"
         );
         for name in now {

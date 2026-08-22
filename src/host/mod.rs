@@ -300,15 +300,32 @@ pub fn sendable(request: &HttpRequest<'_>) -> Result<(), HostError> {
     Ok(())
 }
 
-/// The first control character in a value, named the way a refusal names one.
+/// Whether a terminal acts on a character rather than drawing it. `is_control`
+/// is `Cc` alone, which leaves the formatting characters out: `U+202E` reverses
+/// the rest of the line it lands in, and a zero-width one hides the whole
+/// difference between two names.
+pub fn is_unshowable(c: char) -> bool {
+    c.is_control()
+        || matches!(c,
+            '\u{00AD}' | '\u{061C}' | '\u{FEFF}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}')
+}
+
+/// The first such character in a value, named the way a refusal names one.
 /// Shared with [`crate::keychain`]'s refusal, for the reason [`write_double_quoted`]
 /// is one copy. What each caller *says* about it stays theirs: the two protocols
 /// break differently, and that sentence is worth having twice.
 pub fn control_character_in(value: &str) -> Option<String> {
-    value
-        .chars()
-        .find(|c| c.is_control())
-        .map(|control| format!("a control character (U+{:04X})", control as u32))
+    value.chars().find(|c| is_unshowable(*c)).map(|found| {
+        let kind = match found.is_control() {
+            true => "a control character",
+            false => "a formatting character",
+        };
+        format!("{kind} (U+{:04X})", found as u32)
+    })
 }
 
 /// A command as somebody would have typed it, for the line printed before it is
