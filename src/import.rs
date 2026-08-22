@@ -12,6 +12,7 @@
 use std::collections::BTreeMap;
 use zeroize::Zeroizing;
 
+use crate::credentials;
 use crate::error::{PerchError, Result};
 use crate::export::Export;
 use crate::host::Host;
@@ -96,16 +97,23 @@ impl Placed {
     /// have named it — on macOS, the only name reaching a live Credential.
     pub fn undo(&self, host: &dyn Host) {
         for touched in &self.touched {
-            if touched.was_already_there {
-                host.note(&format!(
-                    "{} was already on this machine, so it was left where it is \
-                     rather than removed with the Profiles this Import made. \
-                     The Export still holds every Credential in it.",
-                    touched.store.config_dir.display(),
-                ));
+            if !touched.was_already_there {
+                profile::discard(host, &touched.store);
                 continue;
             }
-            profile::discard(host, &touched.store);
+            // The directory stays and the Credential does not: a Credential in a
+            // store the rolled-back registry will not name is the state
+            // `profile::discard` exists to prevent.
+            for kept_in in credentials::stores_for(host, &touched.store) {
+                let _ = kept_in.forget(host);
+            }
+            host.note(&format!(
+                "{} was already on this machine, so it was left where it is \
+                 rather than removed with the Profiles this Import made — but \
+                 the Credential this Import wrote into it has been taken back \
+                 out. The Export still holds every Credential in it.",
+                touched.store.config_dir.display(),
+            ));
         }
     }
 }

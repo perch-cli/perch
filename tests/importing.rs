@@ -512,6 +512,12 @@ fn a_rollback_leaves_a_profile_that_was_already_on_the_machine_where_it_is() {
         "while the one it did make went back out"
     );
     assert!(
+        !host.path_exists(&orphan.credentials_file),
+        "and the Credential this Import wrote into it came back out with the \
+         rest: a live Credential in a Profile the registry does not name is \
+         what discarding a Profile exists to prevent"
+    );
+    assert!(
         host.notes()
             .iter()
             .any(|note| note.contains("already on this machine")),
